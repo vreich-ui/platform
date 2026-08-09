@@ -44,6 +44,7 @@ import { avatarSrc } from '@core/lib/admin/users-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { listChats } from '@core/lib/admin/chat-client';
 import { getWorkSummary } from '@core/lib/admin/work-summary';
+import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
 
 async function shellToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -274,7 +275,12 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     <ToastProvider>
       <div className="adm-root flex min-h-screen bg-[var(--adm-surface-page)] text-[var(--adm-text)]">
         {/* Sidebar (desktop) */}
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-[var(--adm-border)] bg-[var(--adm-surface)] p-4 md:flex">
+        <aside
+          className={cn(
+            'sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-[var(--adm-border)] bg-[var(--adm-surface)] p-4',
+            ADMIN_EXPANDED_NAV_CLASS
+          )}
+        >
           <a href="/admin" className="adm-focusable mb-6 flex items-center gap-2 rounded px-1">
             <span className="grid h-7 w-7 place-items-center rounded-[var(--adm-radius-md)] bg-[var(--adm-accent)] text-[length:var(--adm-text-sm)] font-bold text-[var(--adm-text-on-accent)]">
               L
@@ -301,7 +307,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             <IconButton
               label="Open navigation"
               icon={<IconMenu size={20} />}
-              className="md:hidden"
+              className={ADMIN_COMPACT_NAV_CLASS}
               onClick={() => setMobileNav(true)}
             />
             <h1 className="flex-1 truncate text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]">
