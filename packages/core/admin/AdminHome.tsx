@@ -10,6 +10,8 @@ import { rowStatus, type LibraryRow } from '@core/lib/admin/library-logic';
 import { fetchReleaseOverview } from '@core/lib/admin/release-client';
 import { EDITORIAL_STATE_PRESENTATION, type EditorialObjectState } from '@core/lib/admin/editorial-state';
 import { chatWorkLabel } from '@core/lib/admin/work-summary';
+import { agentStarterHref } from '@core/lib/admin/agent-starters';
+import { governedMediaCountLabel } from '@core/lib/admin/media-counts';
 import type { ObjectType } from '@core/schema/object-record-v1';
 
 async function token(): Promise<string> {
@@ -84,12 +86,14 @@ function FamilySummary({
   rows,
   href: destination,
   icon,
+  countLabel,
 }: {
   label: string;
   types: ObjectType[];
   rows: LibraryRow[];
   href: string;
   icon: React.ReactNode;
+  countLabel?: (count: number) => string;
 }) {
   const count = rows.filter((row) => types.includes(row.object_type)).length;
   return (
@@ -103,7 +107,7 @@ function FamilySummary({
       <span className="min-w-0 flex-1">
         <span className="block font-medium text-[var(--adm-text-heading)]">{label}</span>
         <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-          {count} object{count === 1 ? '' : 's'}
+          {countLabel ? countLabel(count) : `${count} object${count === 1 ? '' : 's'}`}
         </span>
       </span>
       <IconExternalLink size={15} />
@@ -159,17 +163,27 @@ export default function AdminHome({ identity }: AdminHomeProps) {
   return (
     <AdminShell currentPath="/admin" title="Editorial" identity={identity}>
       <div className="flex flex-col gap-7">
-        <div>
-          <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
-            Publication map
-          </p>
-          <h2 className="mt-1 text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">
-            {identity.brandName}
-          </h2>
-          <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-            The governed foundation, structure, and editorial collections behind this publication.
-          </p>
-        </div>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
+              Publication map
+            </p>
+            <h2 className="mt-1 text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">
+              {identity.brandName}
+            </h2>
+            <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              The governed foundation, structure, and editorial collections behind this publication.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a href={agentStarterHref('article')} className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]">
+              New article
+            </a>
+            <a href={agentStarterHref('page')} className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)]">
+              New page
+            </a>
+          </div>
+        </header>
         {loading ? (
           <Skeleton variant="rect" height={420} />
         ) : error ? (
@@ -248,6 +262,7 @@ export default function AdminHome({ identity }: AdminHomeProps) {
                   rows={rows}
                   href="/admin/media"
                   icon={<IconLibrary size={18} />}
+                  countLabel={governedMediaCountLabel}
                 />
                 <FamilySummary
                   label="Content"

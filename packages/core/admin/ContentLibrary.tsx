@@ -16,7 +16,7 @@ import { Badge, StatusPill, Skeleton, EmptyState, Card } from './primitives';
 import { Input } from './forms';
 import { DataTable, type Column } from './data';
 import { relativeTimeFromNow } from './logic';
-import { IconLibrary, IconAlertTriangle } from './icons';
+import { IconLibrary, IconAlertTriangle, IconSparkles } from './icons';
 import {
   filterRows,
   rowStatus,
@@ -33,6 +33,7 @@ import type { ObjectType } from '@core/schema/object-record-v1';
 // deferring) — safe to import statically so the very first render can read
 // whatever was cached, instead of racing a dynamic import against paint.
 import { freshCachedInventoryRows } from '@core/lib/admin/library-client';
+import { agentStarterHref } from '@core/lib/admin/agent-starters';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -291,7 +292,25 @@ export interface ContentLibraryProps {
 export default function ContentLibrary({ identity }: ContentLibraryProps) {
   return (
     <AdminShell currentPath="/admin/content" title="Content library" identity={identity}>
-      <ContentLibraryBody />
+      <div className="flex flex-col gap-5">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Content</h1>
+            <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              Find governed objects or start a new draft with the CMS Agent.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a href={agentStarterHref('article')} className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]">
+              <IconSparkles size={16} /> New article
+            </a>
+            <a href={agentStarterHref('page')} className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)]">
+              New page
+            </a>
+          </div>
+        </header>
+        <ContentLibraryBody />
+      </div>
     </AdminShell>
   );
 }

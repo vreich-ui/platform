@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { EmptyState, Skeleton } from './primitives';
+import { Button, EmptyState, Skeleton } from './primitives';
 import { IconAlertTriangle, IconLibrary } from './icons';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
 
@@ -12,6 +12,7 @@ async function getToken(): Promise<string> {
 export function ArtifactStagePreview({ artifact }: { artifact: EditorialArtifact }) {
   const [source, setSource] = useState<string>();
   const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -33,18 +34,28 @@ export function ArtifactStagePreview({ artifact }: { artifact: EditorialArtifact
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifact.id, artifact.preview_url]);
+  }, [artifact.id, artifact.preview_url, attempt]);
 
   if (error) {
     return (
       <EmptyState
         icon={<IconAlertTriangle size={24} />}
         title="Preview unavailable"
-        message="The artifact is still indexed, but its preview bytes could not be loaded."
+        message="The artifact is still indexed, but its preview bytes could not be loaded. Try again without changing the asset."
+        action={<Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>Try preview again</Button>}
       />
     );
   }
-  if (!source) return <Skeleton variant="rect" height={artifact.kind === 'pdf' ? 620 : 420} />;
+  if (!source) {
+    return (
+      <div className="flex flex-col gap-3" role="status" aria-live="polite">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          Preparing {artifact.kind === 'pdf' ? 'document' : 'image'} preview…
+        </p>
+        <Skeleton variant="rect" height={artifact.kind === 'pdf' ? 620 : 420} />
+      </div>
+    );
+  }
   if (artifact.kind === 'pdf') {
     return (
       <iframe
