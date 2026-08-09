@@ -1,14 +1,18 @@
 {
   "__generated": {
-    "at": "2026-07-19T16:11:29.302Z",
+    "at": "2026-08-09T18:14:48.789Z",
     "from": "objects/content_item/by-id/req_agent_niacinamide_barrier_after40_20260719_01.json",
-    "record_version": 5
+    "record_version": 31
   },
   "deck": "An evidence-based look at what niacinamide does for barrier function after 40 — what the research supports, what it doesn't, and how to use it without irritation.",
   "description": "A plain-language, evidence-based explainer on niacinamide and the aging skin barrier: how it supports barrier function after 40, what studies actually show, and how to use it without irritation.",
   "editorial": {
     "framework": "hook → context → explanation → proof → myth → step → summary",
     "writer_notes": "Evidence-based barrier explainer for skin after 40. Distinct from the general 'Niacinamide, plainly' primer: barrier + aging focus, honest about limits. Draft only — do not publish. Concentration and study ranges kept qualitative/approximate; verify before any publish."
+  },
+  "image": {
+    "alt": "Mature woman applying a clear facial serum in soft natural light",
+    "src": "https://drluriescience.netlify.app/img/req_agent_niacinamide_barrier_after40_20260719_01/b0bada557488c1322b44d3d6b85f7acf6d9394a8e74899843b42898ec190f5b4.webp"
   },
   "nodes": [
     {
@@ -155,6 +159,23 @@
       "visibility": "public"
     },
     {
+      "id": "n_a71f2",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Hydrating serum and cream textures on a warm ivory surface",
+          "caption": "Barrier care works best when the routine stays simple and tolerable.",
+          "src": "https://drluriescience.netlify.app/img/req_agent_niacinamide_barrier_after40_20260719_01/4541659df5ac65fb8095fbcc67cf44239a8fe808684a94aed82891892fb2603f.webp",
+          "type": "image"
+        }
+      },
+      "visibility": "public"
+    },
+    {
       "id": "n_whatitdoes",
       "kind": "content",
       "private": {
@@ -247,6 +268,23 @@
           "nodeType": "document"
         },
         "title": "What niacinamide actually does at the barrier"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_b83d4",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Minimal serum bottle and cream still life in a premium skincare setting",
+          "caption": "Moderate-strength niacinamide fits best as a supporting step, not the whole routine.",
+          "src": "https://drluriescience.netlify.app/img/req_agent_niacinamide_barrier_after40_20260719_01/6f275f89c28b86cf0450dd1da81c5d5ede2a910d64201bb50a22c5da073f3620.webp",
+          "type": "image"
+        }
       },
       "visibility": "public"
     },
@@ -455,6 +493,23 @@
       "visibility": "public"
     },
     {
+      "id": "n_c94e6",
+      "kind": "content",
+      "private": {
+        "intent": "reassure",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Woman with mature skin applying facial serum",
+          "caption": "Consistency and comfort matter more than chasing the highest concentration.",
+          "src": "https://drluriescience.netlify.app/img/req_agent_niacinamide_barrier_after40_20260719_01/b0bada557488c1322b44d3d6b85f7acf6d9394a8e74899843b42898ec190f5b4.webp",
+          "type": "image"
+        }
+      },
+      "visibility": "public"
+    },
+    {
       "id": "n_howtouse",
       "kind": "content",
       "private": {
@@ -621,6 +676,53 @@
         "title": "The plain takeaway"
       },
       "visibility": "public"
+    },
+    {
+      "id": "n_d15f8",
+      "kind": "action",
+      "private": {
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Download the 5-page Dr. Lurié Skincare guide for a clean, offline version of the article.",
+        "ctaLink": "https://drluriescience.netlify.app/pdf/req_agent_niacinamide_barrier_after40_20260719_01/5990a75b2e4c6c86ff29981f4022a8427c3cb0b9848bef24bad3cf60c9d49a65.pdf",
+        "ctaText": "Download the PDF guide",
+        "eyebrow": "Free printable guide",
+        "media": {
+          "contentType": "application/pdf",
+          "src": "https://drluriescience.netlify.app/pdf/req_agent_niacinamide_barrier_after40_20260719_01/5990a75b2e4c6c86ff29981f4022a8427c3cb0b9848bef24bad3cf60c9d49a65.pdf",
+          "title": "Niacinamide for the aging skin barrier - PDF guide",
+          "type": "document"
+        },
+        "title": "Take this article with you"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "footer",
+        "presentation": "card"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_downloadguide",
+      "kind": "action",
+      "private": {
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "A printable, professionally formatted version of this article with the same evidence-first guidance and a Dr. Lurie Skincare premium editorial layout.",
+        "ctaLink": "https://drluriescience.netlify.app/pdf/req_agent_niacinamide_barrier_after40_20260719_01/09cdbcfc380ad2a0f01356c731c1c9cd7e57627f46f3a09f7401cb0f7e6b76d4.pdf",
+        "ctaText": "Download PDF",
+        "title": "Download the 6-page niacinamide guide"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "footer",
+        "presentation": "card"
+      },
+      "visibility": "public"
     }
   ],
   "seo": {
@@ -630,7 +732,12 @@
   "slug": "niacinamide-aging-skin-barrier",
   "taxonomy": {
     "category": "ingredients",
-    "tags": ["skin-barrier", "ingredients", "skin-after-40", "skin-science"]
+    "tags": [
+      "skin-barrier",
+      "ingredients",
+      "skin-after-40",
+      "skin-science"
+    ]
   },
   "title": "Niacinamide for the aging skin barrier"
 }
