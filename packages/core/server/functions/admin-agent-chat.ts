@@ -372,7 +372,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           },
           autonomy,
           learning_mode,
-          request.data.focus
+          request.data.focus,
+          roles.includes('owner')
         );
         if (result.resume) await triggerBackground(request.data.chat_id, result.resume.triggerToken);
         return jsonResponse(result.status, result.body);

@@ -30,7 +30,6 @@ import {
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import { groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
-import { isRunSafeApproval } from '@core/lib/admin/approval-mode';
 
 // ─── useChat: since_seq polling over get_chat ────────────────────────────────
 
@@ -441,16 +440,12 @@ export function ApprovalCard({
   onApprove,
   onDeny,
   showActions = true,
-  approvalMode = 'ask',
-  onApprovalModeChange,
 }: {
   pending: PendingView;
   busy: boolean;
   onApprove: (editedArgs?: Record<string, unknown>) => void;
   onDeny: (reason?: string) => void;
   showActions?: boolean;
-  approvalMode?: 'ask' | 'safe-run';
-  onApprovalModeChange?: (mode: 'ask' | 'safe-run') => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -484,7 +479,6 @@ export function ApprovalCard({
     }
   };
 
-  const runSafe = isRunSafeApproval(pending.tool);
   const title = String((pending as unknown as { summary?: string }).summary ?? `Run ${pending.tool}`);
 
   return (
@@ -528,38 +522,6 @@ export function ApprovalCard({
             {pending.dry_run ? <JsonDisclosure label="Dry-run details" value={pending.dry_run} /> : null}
           </div>
         </details>
-
-        {showActions && onApprovalModeChange ? (
-          <div className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] p-1">
-            <div className="grid grid-cols-2 gap-1" role="group" aria-label="Approval mode">
-              <button
-                type="button"
-                aria-pressed={approvalMode === 'ask'}
-                onClick={() => onApprovalModeChange('ask')}
-                className={`adm-focusable rounded px-2 py-1.5 text-[length:var(--adm-text-xs)] font-medium ${approvalMode === 'ask' ? 'bg-[var(--adm-surface-raised)] text-[var(--adm-text-heading)] shadow-[var(--adm-shadow-sm)]' : 'text-[var(--adm-text-muted)]'}`}
-              >
-                Ask each time
-              </button>
-              <button
-                type="button"
-                aria-pressed={approvalMode === 'safe-run'}
-                onClick={() => onApprovalModeChange('safe-run')}
-                disabled={!runSafe || busy}
-                title={
-                  runSafe
-                    ? 'Approve remaining safe actions in this run'
-                    : 'This action always needs a separate approval'
-                }
-                className={`adm-focusable rounded px-2 py-1.5 text-[length:var(--adm-text-xs)] font-medium disabled:cursor-not-allowed disabled:opacity-45 ${approvalMode === 'safe-run' ? 'bg-[var(--adm-accent-soft)] text-[var(--adm-accent)]' : 'text-[var(--adm-text-muted)]'}`}
-              >
-                Approve safe actions
-              </button>
-            </div>
-            <p className="px-2 pb-1 pt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              Applies to this run only. Publishing and high-impact actions still ask.
-            </p>
-          </div>
-        ) : null}
 
         {!showActions ? (
           <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]">
@@ -643,8 +605,6 @@ export function ChatThread({
   emptyHint,
   preferenceScope,
   approvalInStage = false,
-  approvalMode = 'ask',
-  onApprovalModeChange,
 }: {
   events: ChatEventView[];
   status: ChatStatus | undefined;
@@ -660,8 +620,6 @@ export function ChatThread({
   emptyHint?: React.ReactNode;
   preferenceScope?: string;
   approvalInStage?: boolean;
-  approvalMode?: 'ask' | 'safe-run';
-  onApprovalModeChange?: (mode: 'ask' | 'safe-run') => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -751,8 +709,6 @@ export function ChatThread({
           onApprove={onApprove}
           onDeny={onDeny}
           showActions={!approvalInStage}
-          approvalMode={approvalMode}
-          onApprovalModeChange={onApprovalModeChange}
         />
       ) : null}
       {status === 'queued' || status === 'running' ? (
