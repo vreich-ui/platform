@@ -14,6 +14,7 @@ import { cn } from './utils';
 import type { Tone } from './logic';
 import { statusTone } from './logic';
 import { IconChevronRight } from './icons';
+import { statusLabel } from '@core/lib/admin/display-name';
 
 // ─── tone maps (shared by Badge / StatusPill) ─────────────────────────────────
 
@@ -177,7 +178,7 @@ export function StatusPill({ status, tone, label, className, ...rest }: StatusPi
       {...rest}
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', TONE_DOT[resolved])} aria-hidden="true" />
-      {label ?? status.replace(/_/g, ' ')}
+      {label ?? statusLabel(status)}
     </span>
   );
 }

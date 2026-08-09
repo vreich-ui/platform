@@ -10,6 +10,8 @@ import {
   verbToPhrase,
   VERB_PHRASES,
   idTooltip,
+  navigationTargetLabel,
+  statusLabel,
 } from './display-name.js';
 import type { ObjectType } from '../../schema/object-record-v1.js';
 import { patchOpUnionSchema } from '../../schema/object-patch-ops.js';
@@ -221,6 +223,15 @@ describe('idTooltip', () => {
       'Internal id: req_agent_object_model_demo_20260713_01'
     );
     assert.strictEqual(idTooltip(undefined), 'No id assigned');
+  });
+});
+
+describe('admin UI labels', () => {
+  it('uses human labels for stored status and navigation target values', () => {
+    assert.strictEqual(statusLabel('changes_requested'), 'Changes requested');
+    assert.strictEqual(statusLabel('unknown_status'), 'Unknown Status');
+    assert.strictEqual(navigationTargetLabel('route'), 'Site route');
+    assert.strictEqual(navigationTargetLabel('external'), 'External link');
   });
 });
 

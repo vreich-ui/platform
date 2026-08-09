@@ -23,21 +23,33 @@ export function groupChatEvents(events: readonly ChatEventView[]): ChatTimelineI
 }
 
 export const TOOL_LABELS: Record<string, string> = {
-  object_get: 'Read object',
-  object_validate: 'Check readiness',
-  patch: 'Update object',
-  create_object: 'Create object',
-  create_variant: 'Create variant',
-  instantiate_template: 'Use template',
-  instantiate_section_template: 'Use section template',
+  get_object: 'Read an object',
+  get_contract: 'Check what an object allows',
+  list_objects: 'Browse objects',
+  inventory: 'Browse the publication',
+  validate: 'Check readiness',
+  search_artifacts: 'Find media',
+  checkout: 'Start editing',
+  patch: 'Update an object',
+  checkin: 'Finish editing',
+  refresh_lock: 'Keep editing access',
+  create_object: 'Create an object',
+  create_variant: 'Create a variant',
+  instantiate_template: 'Create a page from a template',
+  instantiate_section_template: 'Create a section from a template',
+  submit_review: 'Send for review',
   publish: 'Publish',
-  submit_review: 'Submit for review',
   discard: 'Discard changes',
-  apply_theme: 'Apply theme',
-  list_objects: 'Browse publication',
+  apply_theme: 'Apply a theme',
+  // Legacy event names remain readable in persisted chat history.
+  object_get: 'Read an object',
+  object_validate: 'Check readiness',
 };
+
+/** Shared human vocabulary for chat activity, guardrails, and tool controls. */
+export const toolLabelForName = (tool: string): string => TOOL_LABELS[tool] ?? 'Tool action';
 
 export function toolLabel(event: ChatEventView): string {
   const tool = String(event.detail?.tool ?? 'tool');
-  return String(event.detail?.summary ?? TOOL_LABELS[tool] ?? tool.replaceAll('_', ' '));
+  return String(event.detail?.summary ?? toolLabelForName(tool));
 }

@@ -18,7 +18,7 @@ import type { ReactNode } from 'react';
 
 import { EmptyState, Badge } from './primitives';
 import { IconInfo, IconExternalLink } from './icons';
-import { objectTypeLabel } from '@core/lib/admin/display-name';
+import { navigationTargetLabel, objectTypeLabel } from '@core/lib/admin/display-name';
 import {
   contentItemPreview,
   productPreview,
@@ -283,7 +283,9 @@ function NavItemTree({ items, depth = 0 }: { items: unknown[]; depth?: number })
           <li key={i} className="py-1">
             <span className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{label}</span>
             {kind ? (
-              <span className="ml-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">({kind})</span>
+              <span className="ml-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                ({navigationTargetLabel(kind)})
+              </span>
             ) : null}
             {children.length ? <NavItemTree items={children} depth={depth + 1} /> : null}
           </li>
