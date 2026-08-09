@@ -8,6 +8,7 @@ import '../../../../sites/drlurie/config/policy-bindings.js';
 import { getSiteIdentity } from '../site-identity.js';
 import {
   fetchInventoryRows,
+  freshCachedInventoryRows,
   invalidateInventoryCache,
   peekCachedInventoryRows,
   INVENTORY_CACHE_TTL_MS,
@@ -207,6 +208,18 @@ describe('sessionStorage persistence', () => {
 
     const cached = peekCachedInventoryRows();
     assert.deepEqual(cached?.rows, [row('persisted')]);
+  });
+
+  it('freshCachedInventoryRows accepts fresh persisted rows and rejects stale rows', () => {
+    const key = `${getSiteIdentity().siteSlug}-inventory-cache`;
+    const now = Date.parse('2026-08-09T12:00:00.000Z');
+    (globalThis as { sessionStorage: Storage }).sessionStorage.setItem(
+      key,
+      JSON.stringify({ rows: [row('persisted')], fetchedAt: now - 1_000 })
+    );
+
+    assert.deepEqual(freshCachedInventoryRows(now), [row('persisted')]);
+    assert.equal(freshCachedInventoryRows(now + 11 * 60_000), null);
   });
 
   it('degrades gracefully when sessionStorage throws (private browsing)', async () => {

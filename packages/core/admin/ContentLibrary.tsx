@@ -32,7 +32,7 @@ import type { ObjectType } from '@core/schema/object-record-v1';
 // A pure, side-effect-free sync accessor (no network, no bundling cost worth
 // deferring) — safe to import statically so the very first render can read
 // whatever was cached, instead of racing a dynamic import against paint.
-import { peekCachedInventoryRows, INVENTORY_PERSISTED_MAX_AGE_MS } from '@core/lib/admin/library-client';
+import { freshCachedInventoryRows } from '@core/lib/admin/library-client';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -127,27 +127,12 @@ function LibraryTable({
   return <DataTable columns={columns} rows={rows} getRowKey={(r) => r.object_id} />;
 }
 
-// Synchronous, no-network read of the last known rows — used as the initial
-// render state so a repeat visit paints immediately instead of the full
-// blocking skeleton. `undefined` window (SSR) or a genuinely stale/absent
-// cache both fall back to exactly the prior behavior (empty rows, loading).
-function initialCachedRows(): LibraryRow[] | null {
-  if (typeof window === 'undefined') return null;
-  const cached = peekCachedInventoryRows();
-  if (!cached) return null;
-  if (Date.now() - cached.fetchedAt > INVENTORY_PERSISTED_MAX_AGE_MS) return null;
-  return cached.rows;
-}
-
 function ContentLibraryBody() {
-  const [initialRows] = useState<LibraryRow[] | null>(initialCachedRows);
-  const [rows, setRows] = useState<LibraryRow[]>(initialRows ?? []);
-  // Only block on the full skeleton when there was nothing cached to show.
-  const [loading, setLoading] = useState(initialRows === null);
-  // A background refetch always runs, even when cached rows painted
-  // immediately — this just controls whether it shows the small inline
-  // indicator instead of the big blocking skeleton.
-  const [refreshing, setRefreshing] = useState(initialRows !== null);
+  // SSR and the browser must begin from the same tree. Browser storage is
+  // consulted only after hydration, then used as stale-while-revalidate data.
+  const [rows, setRows] = useState<LibraryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [type, setType] = useState<ObjectType | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -156,6 +141,12 @@ function ContentLibraryBody() {
 
   useEffect(() => {
     setNow(Date.now());
+    const cachedRows = freshCachedInventoryRows();
+    if (cachedRows) {
+      setRows(cachedRows);
+      setLoading(false);
+      setRefreshing(true);
+    }
     let alive = true;
     (async () => {
       try {
@@ -173,7 +164,7 @@ function ContentLibraryBody() {
         if (alive) {
           // If we already have cached rows on screen, a failed background
           // refresh shouldn't blow away a working view — just stop spinning.
-          if (initialRows !== null) {
+          if (cachedRows !== null) {
             setRefreshing(false);
           } else {
             setError(err instanceof Error ? err.message : 'Could not load the content library.');

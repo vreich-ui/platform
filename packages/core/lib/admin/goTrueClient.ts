@@ -183,8 +183,13 @@ export const refreshUser = async (): Promise<GoTrueUser | null> => {
   }
 };
 
-// Extract token from URL hash after Google OAuth redirect; returns user if found.
-export const handleOAuthCallback = async (): Promise<GoTrueUser | null> => {
+let oauthCallbackPromise: Promise<GoTrueUser | null> | null = null;
+
+// Extract token from URL hash after Google OAuth redirect. The callback is a
+// single-flight operation because the layout gate and React islands initialize
+// concurrently; the first caller clears the hash, so an uncoordinated second
+// caller could otherwise miss the token and issue an unauthenticated request.
+const processOAuthCallback = async (): Promise<GoTrueUser | null> => {
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
   if (!hash) return null;
   const params = new URLSearchParams(hash.slice(1));
@@ -214,9 +219,22 @@ export const handleOAuthCallback = async (): Promise<GoTrueUser | null> => {
   return user;
 };
 
+export const handleOAuthCallback = (): Promise<GoTrueUser | null> => {
+  oauthCallbackPromise ??= processOAuthCallback();
+  return oauthCallbackPromise;
+};
+
+/** Test seam for independent callback scenarios. */
+export const resetOAuthCallbackStateForTests = (): void => {
+  oauthCallbackPromise = null;
+};
+
 // Returns a valid access token, refreshing if expired. Returns null if not signed in.
 export const getAccessToken = async (): Promise<string | null> => {
-  let user = currentUser();
+  // Wait for the shared OAuth callback before consulting storage. This gates
+  // every admin island on the same readiness point as AdminLayout.
+  let user = await handleOAuthCallback();
+  if (!user) user = currentUser();
   if (!user) user = await refreshUser();
   return user?.token.access_token ?? null;
 };
