@@ -484,19 +484,19 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     return () => media.removeEventListener('change', sync);
   }, []);
 
-  const load = async () => {
+  const load = async (): Promise<Rec | undefined> => {
     const type = typeRef.current;
     if (!loc.id || !type) {
       setError('This object could not be identified. Open it from the content library.');
       setLoading(false);
-      return;
+      return undefined;
     }
     const { getObjectRecord, callObjectVerb } = await import('@core/lib/edit-mode/verbs-client');
     const { record } = await getObjectRecord(getToken, type, loc.id);
     if (!record) {
       setError(`${objectTypeLabel(type)} "${loc.id}" was not found.`);
       setLoading(false);
-      return;
+      return undefined;
     }
     setRecord(record as Rec);
     try {
@@ -513,6 +513,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     } catch {
       setReadiness(null);
     }
+    return record as Rec;
   };
 
   useEffect(() => {
@@ -529,10 +530,10 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
           return;
         }
       }
-      await load();
+      const loadedRecord = await load();
       // Chat-first (T9.14): the per-object conversation opens with the page.
       if (loc.id && typeRef.current) {
-        createObjectChat(getToken, typeRef.current, loc.id)
+        createObjectChat(getToken, typeRef.current, loc.id, loadedRecord ? objectDisplayName(loadedRecord) : undefined)
           .then(({ chat: created }) => setChatId(created.chat_id))
           .catch(() => setChatId(undefined));
       }

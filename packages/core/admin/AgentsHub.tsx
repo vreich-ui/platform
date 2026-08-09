@@ -29,6 +29,7 @@ import {
   type ChatSummaryView,
   type ProfileUpsertInput,
 } from '@core/lib/admin/chat-client';
+import { presentChatSession } from '@core/lib/admin/chat-session-presentation';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -406,7 +407,7 @@ function HubBody() {
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                        {item.title}
+                        {presentChatSession(item).title}
                       </span>
                       <StatusPill
                         status={item.status}
@@ -415,7 +416,9 @@ function HubBody() {
                       />
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      {item.kind === 'object' ? <Badge tone="info">object</Badge> : null}
+                      <Badge tone={item.kind === 'object' ? 'info' : 'neutral'}>
+                        {presentChatSession(item).kindLabel}
+                      </Badge>
                       {(item.last_outcome?.chips ?? []).map((chip) => (
                         <Badge key={chip} tone="neutral">
                           {chip}
