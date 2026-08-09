@@ -29,3 +29,8 @@ export function isRunSafeApproval(tool: string): boolean {
 export function shouldAutoApproveRunTool(mode: RunApprovalMode, tool: string, approvalInStage = false): boolean {
   return mode === 'safe-run' && !approvalInStage && isRunSafeApproval(tool);
 }
+
+/** A run preference never leaks into the next completed or cancelled chat. */
+export function shouldResetRunApprovalMode(status: string | undefined, hasPendingApproval: boolean): boolean {
+  return !hasPendingApproval && ['idle', 'error', 'cancelled'].includes(status ?? '');
+}

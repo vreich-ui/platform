@@ -14,6 +14,7 @@ import { Avatar, Badge, Button, Card, EmptyState, Skeleton, StatusPill } from '.
 import { Input, Select, Textarea } from './forms';
 import { Dialog, useToast } from './overlays';
 import { AgentChip, ChatComposer, ChatThread, useChat } from './chat';
+import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
 import {
@@ -350,6 +351,7 @@ function HubBody() {
   );
 
   const active = chats?.find((item) => item.chat_id === activeId);
+  const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope: activeId });
 
   return (
     <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -474,6 +476,9 @@ function HubBody() {
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
             ) : null}
             <div className="mt-3 border-t border-[var(--adm-border)] pt-3">
+              <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
+                <RunApprovalControls mode={approvalMode} onChange={setApprovalMode} />
+              </div>
               <ChatComposer
                 status={chat.status}
                 busy={chat.busy}
