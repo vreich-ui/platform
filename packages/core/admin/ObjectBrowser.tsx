@@ -73,6 +73,23 @@ export function buildObjectTree(
   }).filter((node) => node.children?.length);
 }
 
+export function expandedAncestorsForActiveId(nodes: readonly TreeNode[], activeId?: string): string[] | undefined {
+  if (!activeId) return undefined;
+
+  const visit = (candidates: readonly TreeNode[], ancestors: string[]): string[] | undefined => {
+    for (const node of candidates) {
+      if (node.id === activeId) return ancestors;
+      if (node.children?.length) {
+        const match = visit(node.children, [...ancestors, node.id]);
+        if (match) return match;
+      }
+    }
+    return undefined;
+  };
+
+  return visit(nodes, []);
+}
+
 export function ObjectBrowser({ activeId }: { activeId?: string }) {
   const [rows, setRows] = useState<LibraryRow[]>([]);
   const [query, setQuery] = useState('');
@@ -112,6 +129,8 @@ export function ObjectBrowser({ activeId }: { activeId?: string }) {
   }, []);
 
   const filtered = useMemo(() => filterRows(rows, { query }), [query, rows]);
+  const treeNodes = useMemo(() => buildObjectTree(filtered, states, workByObject), [filtered, states, workByObject]);
+  const defaultExpandedIds = useMemo(() => expandedAncestorsForActiveId(treeNodes, activeId), [activeId, treeNodes]);
   return (
     <aside
       className="flex min-h-0 flex-col border-r border-[var(--adm-border)] pr-3"
@@ -134,8 +153,9 @@ export function ObjectBrowser({ activeId }: { activeId?: string }) {
           <Skeleton variant="rect" height={240} />
         ) : (
           <Tree
-            nodes={buildObjectTree(filtered, states, workByObject)}
+            nodes={treeNodes}
             activeId={activeId}
+            defaultExpandedIds={defaultExpandedIds}
             ariaLabel="Publication objects"
             storageKey="object-browser-v2"
           />

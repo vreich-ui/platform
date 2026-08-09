@@ -13,16 +13,16 @@
  * requireTyped), matching the destructive-action convention the kit
  * documents (§3).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, Card, EmptyState, IconButton, Skeleton } from './primitives';
 import { Input, Select, Textarea } from './forms';
 import { ConfirmDialog, Drawer, useToast } from './overlays';
 import { DataTable, type Column } from './data';
-import { Tabs } from './menus';
-import { IconAlertTriangle, IconPlus, IconTrash, IconUser, IconWrench } from './icons';
+import { DropdownMenu, Tabs } from './menus';
+import { IconAlertTriangle, IconDots, IconPlus, IconTrash, IconUser, IconWrench } from './icons';
 import { fetchMe } from '@core/lib/admin/users-client';
 import {
   deleteBlob,
@@ -39,6 +39,7 @@ import {
   wipeStore,
   type BlobArtifactMetadata,
 } from '@core/lib/admin/maintenance-client';
+import { MAINTENANCE_PAGE_SIZES, paginateMaintenanceRows } from '@core/lib/admin/maintenance-pagination';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -52,6 +53,8 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 };
 
+const ARTIFACT_METADATA_CONCURRENCY = 6;
+
 interface BlobRow {
   key: string;
   metadata?: BlobArtifactMetadata;
@@ -60,9 +63,9 @@ interface BlobRow {
 type DrawerState = { mode: 'create' } | { mode: 'edit'; key: string } | null;
 
 function DiagnosticsCard() {
-  const [diagnostics, setDiagnostics] = useState<
-    Awaited<ReturnType<typeof fetchDiagnostics>>['diagnostics'] | null
-  >(null);
+  const [diagnostics, setDiagnostics] = useState<Awaited<ReturnType<typeof fetchDiagnostics>>['diagnostics'] | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -121,6 +124,10 @@ function MaintenanceBody() {
   const [store, setStore] = useState('');
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<BlobRow[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [truncated, setTruncated] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof MAINTENANCE_PAGE_SIZES)[number]>(50);
   const [listStatus, setListStatus] = useState('');
   const [loadingList, setLoadingList] = useState(false);
 
@@ -153,37 +160,36 @@ function MaintenanceBody() {
     };
   }, []);
 
-  const refreshBlobs = async (activeStore: string) => {
-    if (!activeStore) {
-      setRows([]);
-      setListStatus('No blob stores exist for this site yet.');
-      return;
-    }
-    setLoadingList(true);
-    try {
-      const result = await listBlobs(getToken, activeStore, search.trim());
-      const keys = result.keys;
-      setRows(keys.map((key) => ({ key })));
-      const truncatedNote = result.truncated ? ' (showing first 10,000)' : '';
-      setListStatus(`${result.count} object${result.count === 1 ? '' : 's'} in "${activeStore}"${truncatedNote}.`);
-
-      if (activeStore === 'artifacts') {
-        keys.forEach(async (key) => {
-          try {
-            const { artifact } = await getArtifactMetadata(getToken, key);
-            setRows((prev) => prev.map((row) => (row.key === key ? { ...row, metadata: artifact } : row)));
-          } catch {
-            // Metadata is a nice-to-have; the bare key still renders.
-          }
-        });
+  const refreshBlobs = useCallback(
+    async (activeStore: string) => {
+      setPage(1);
+      if (!activeStore) {
+        setRows([]);
+        setTotalCount(0);
+        setTruncated(false);
+        setListStatus('No blob stores exist for this site yet.');
+        return;
       }
-    } catch (err) {
-      setListStatus(err instanceof Error ? err.message : 'Objects could not be loaded.');
-      setRows([]);
-    } finally {
-      setLoadingList(false);
-    }
-  };
+      setLoadingList(true);
+      try {
+        const result = await listBlobs(getToken, activeStore, search.trim());
+        const keys = result.keys;
+        setRows(keys.map((key) => ({ key })));
+        setTotalCount(result.count);
+        setTruncated(result.truncated);
+        const truncatedNote = result.truncated ? ' This browser is limited to the first 10,000 matching objects.' : '';
+        setListStatus(`${result.count} object${result.count === 1 ? '' : 's'} in "${activeStore}".${truncatedNote}`);
+      } catch (err) {
+        setListStatus(err instanceof Error ? err.message : 'Objects could not be loaded.');
+        setRows([]);
+        setTotalCount(0);
+        setTruncated(false);
+      } finally {
+        setLoadingList(false);
+      }
+    },
+    [search]
+  );
 
   useEffect(() => {
     if (!owner) return;
@@ -193,7 +199,6 @@ function MaintenanceBody() {
         setStores(stores);
         const first = stores[0] ?? '';
         setStore(first);
-        await refreshBlobs(first);
       } catch (err) {
         setListStatus(err instanceof Error ? err.message : 'Blob stores could not be loaded.');
       }
@@ -204,7 +209,54 @@ function MaintenanceBody() {
     if (!owner || !store) return;
     const timer = window.setTimeout(() => void refreshBlobs(store), 250);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [owner, refreshBlobs, store]);
+
+  const pagination = useMemo(() => paginateMaintenanceRows(rows, page, pageSize), [page, pageSize, rows]);
+
+  useEffect(() => {
+    if (page !== pagination.page) setPage(pagination.page);
+  }, [page, pagination.page]);
+
+  useEffect(() => {
+    if (store !== 'artifacts') return;
+
+    const missingKeys = pagination.rows.filter((row) => !row.metadata).map((row) => row.key);
+    if (!missingKeys.length) return;
+
+    let active = true;
+    const hydrateVisibleMetadata = async () => {
+      for (let index = 0; index < missingKeys.length; index += ARTIFACT_METADATA_CONCURRENCY) {
+        const batch = missingKeys.slice(index, index + ARTIFACT_METADATA_CONCURRENCY);
+        const results = await Promise.all(
+          batch.map(async (key) => {
+            try {
+              const { artifact } = await getArtifactMetadata(getToken, key);
+              return { key, artifact };
+            } catch {
+              // Metadata is a nice-to-have; the bare key still renders.
+              return null;
+            }
+          })
+        );
+        if (!active) return;
+        const metadataByKey = new Map(
+          results
+            .filter((result): result is { key: string; artifact: BlobArtifactMetadata } => result !== null)
+            .map((result) => [result.key, result.artifact])
+        );
+        if (metadataByKey.size) {
+          setRows((previous) =>
+            previous.map((row) => (metadataByKey.has(row.key) ? { ...row, metadata: metadataByKey.get(row.key) } : row))
+          );
+        }
+      }
+    };
+
+    void hydrateVisibleMetadata();
+    return () => {
+      active = false;
+    };
+  }, [pagination.rows, store]);
 
   const openCreate = () => {
     setDrawerState({ mode: 'create' });
@@ -396,25 +448,36 @@ function MaintenanceBody() {
             <Button size="sm" variant="secondary" onClick={() => void openEdit(row.key)}>
               View
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => void onDuplicate(row.key)}>
-              Duplicate
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => void onRename(row.key)}>
-              Rename
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              leftIcon={<IconTrash size={14} />}
-              onClick={() => void onDelete(row.key)}
-            >
-              Delete
-            </Button>
+            <DropdownMenu
+              align="end"
+              trigger={({ ref, onToggle }) => (
+                <IconButton
+                  ref={ref}
+                  label={`Actions for ${row.metadata?.label ?? row.metadata?.originalFilename ?? row.key}`}
+                  icon={<IconDots size={18} />}
+                  size="sm"
+                  variant="secondary"
+                  onClick={onToggle}
+                />
+              )}
+              items={[
+                { id: 'duplicate', label: 'Duplicate', onSelect: () => void onDuplicate(row.key) },
+                { id: 'rename', label: 'Rename', onSelect: () => void onRename(row.key) },
+                {
+                  id: 'delete',
+                  label: 'Delete',
+                  icon: <IconTrash size={14} />,
+                  tone: 'danger',
+                  separatorBefore: true,
+                  onSelect: () => void onDelete(row.key),
+                },
+              ]}
+            />
           </div>
         ),
       },
     ],
-    [store]
+    [onDelete, onDuplicate, onRename, openEdit]
   );
 
   if (owner === null && !ownerCheckError) return <Skeleton variant="rect" height={280} />;
@@ -451,7 +514,7 @@ function MaintenanceBody() {
             onChange={(event) => {
               const next = event.target.value;
               setStore(next);
-              void refreshBlobs(next);
+              setPage(1);
             }}
             options={stores.map((name) => ({ value: name, label: name }))}
           />
@@ -459,7 +522,10 @@ function MaintenanceBody() {
             <Input
               label="Search keys"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
               placeholder="Filter by key substring…"
             />
           </div>
@@ -473,14 +539,57 @@ function MaintenanceBody() {
           </div>
         </div>
 
-        <p className="mb-3 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">{listStatus}</p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">{listStatus}</p>
+          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]" aria-live="polite">
+            {pagination.endIndex === 0
+              ? 'No objects to show'
+              : `Showing ${pagination.startIndex + 1}–${pagination.endIndex} of ${rows.length}${truncated ? ` loaded (${totalCount} total)` : ''}`}
+          </p>
+        </div>
 
         <DataTable
           columns={columns}
-          rows={rows}
+          rows={[...pagination.rows]}
           getRowKey={(row) => row.key}
           emptyState={<EmptyState title="No objects" message="No blobs match the current store and search." />}
         />
+
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+          <Select
+            className="w-36"
+            label="Rows per page"
+            value={String(pageSize)}
+            onChange={(event) => {
+              setPageSize(Number(event.target.value) as (typeof MAINTENANCE_PAGE_SIZES)[number]);
+              setPage(1);
+            }}
+            options={MAINTENANCE_PAGE_SIZES.map((size) => ({ value: String(size), label: String(size) }))}
+          />
+          <div className="flex items-center gap-2" aria-label="Blob list pagination">
+            <span className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              Page {pagination.page} of {Math.max(1, pagination.pageCount)}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setPage((current) => current - 1)}
+              disabled={pagination.page <= 1}
+              aria-label="Previous blob page"
+            >
+              Previous
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setPage((current) => current + 1)}
+              disabled={pagination.page >= pagination.pageCount}
+              aria-label="Next blob page"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       </Card>
 
       <Card

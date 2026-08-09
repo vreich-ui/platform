@@ -15,6 +15,8 @@ export interface TreeNode {
 export interface TreeProps {
   nodes: TreeNode[];
   activeId?: string;
+  /** Used only when no saved expansion preference exists. */
+  defaultExpandedIds?: string[];
   onSelect?: (id: string) => void;
   ariaLabel: string;
   storageKey?: string;
@@ -46,9 +48,9 @@ function expandableIds(nodes: TreeNode[]): string[] {
   return nodes.flatMap((node) => (node.children?.length ? [node.id, ...expandableIds(node.children)] : []));
 }
 
-export function Tree({ nodes, activeId, onSelect, ariaLabel, storageKey }: TreeProps) {
+export function Tree({ nodes, activeId, defaultExpandedIds, onSelect, ariaLabel, storageKey }: TreeProps) {
   const key = `platform:admin:tree:${storageKey ?? ariaLabel.toLowerCase().replace(/\W+/g, '-')}`;
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(expandableIds(nodes)));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(defaultExpandedIds ?? expandableIds(nodes)));
   const [focusedId, setFocusedId] = useState(activeId ?? nodes[0]?.id);
   const refs = useRef<Record<string, HTMLElement | null>>({});
 
