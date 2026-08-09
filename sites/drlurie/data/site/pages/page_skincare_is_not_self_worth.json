@@ -1,0 +1,109 @@
+{
+  "__generated": {
+    "at": "2026-08-09T18:15:12.119Z",
+    "from": "objects/page/by-id/page_skincare_is_not_self_worth.json",
+    "record_version": 8
+  },
+  "pageType": "standard",
+  "route": "/skincare-is-not-self-worth",
+  "sections": [
+    {
+      "data": {
+        "actions": [
+          {
+            "label": "Read the full piece",
+            "style": "primary",
+            "target": {
+              "href": "https://kugelmedia.netlify.app/drlurieblog/learn/library/skincare-is-not-self-worth",
+              "kind": "external"
+            }
+          },
+          {
+            "label": "Browse the library",
+            "style": "secondary",
+            "target": {
+              "kind": "listing",
+              "list": "content_index"
+            }
+          }
+        ],
+        "body": "<p>Somewhere along the way, clear skin became shorthand for discipline, health, even virtue. It is none of those. It is skin.</p><p>If you are tired of being sold your own insecurity, you are in the right place.</p>",
+        "heading": "Skincare is not self-worth",
+        "kicker": "No hype. No guilt.",
+        "variant": "center"
+      },
+      "id": "s_9e1e48220ad9",
+      "type": "hero"
+    },
+    {
+      "data": {
+        "body": "<p>Three things the industry would rather you forget.</p>",
+        "columns": 3,
+        "heading": "What skincare actually is — and isn't",
+        "kicker": "The honest version",
+        "limit": 3,
+        "source": {
+          "cards": [
+            {
+              "description": "The pressure is quiet but constant: a breakout reads as a failure, a wrinkle as neglect. That framing sells product, and it borrows your self-worth as collateral. You can decline the loan.",
+              "icon": "tabler:mood-neutral",
+              "title": "A breakout is not a failure"
+            },
+            {
+              "description": "Skin responds to genes, hormones, sleep, stress, and age — most of which you do not control. A good routine helps at the margins. It cannot measure whether you are trying hard enough as a person.",
+              "icon": "tabler:dna",
+              "title": "Skin reflects biology, not effort"
+            },
+            {
+              "description": "Care for your skin the way you would care for a houseplant: attentively, kindly, and without moral stakes. It will do better, and so will you.",
+              "icon": "tabler:plant",
+              "title": "Care without moral stakes"
+            }
+          ],
+          "kind": "cards"
+        }
+      },
+      "id": "s_0cb50eb186e9",
+      "type": "content_grid"
+    },
+    {
+      "data": {
+        "actions": [
+          {
+            "label": "Read: Skincare is not self-worth",
+            "style": "primary",
+            "target": {
+              "href": "https://kugelmedia.netlify.app/drlurieblog/learn/library/skincare-is-not-self-worth",
+              "kind": "external"
+            }
+          },
+          {
+            "label": "Explore the library",
+            "style": "secondary",
+            "target": {
+              "kind": "listing",
+              "list": "content_index"
+            }
+          }
+        ],
+        "body": "<p>Start with the essay this page is built on, then explore the rest of the library at your own pace.</p>",
+        "heading": "Want the calmer way of thinking about skin?"
+      },
+      "id": "s_7b9bf63de961",
+      "type": "cta_banner"
+    }
+  ],
+  "seo": {
+    "description": "Caring for your skin is fine. Tying your value to it is not the same thing. A calm, honest take for anyone tired of the skincare industry's guilt.",
+    "robots": {
+      "follow": true,
+      "index": true
+    },
+    "title": "Skincare Is Not Self-Worth"
+  },
+  "template": {
+    "instantiated_at": "2026-08-09T14:19:03.835Z",
+    "ref": "tpl_landing"
+  },
+  "title": "Skincare Is Not Self-Worth"
+}
