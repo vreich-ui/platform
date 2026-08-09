@@ -6,7 +6,7 @@
  * results landing as normal governed objects with a one-click route to the
  * new object's workspace.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
@@ -14,7 +14,9 @@ import { Avatar, Badge, Button, Card, EmptyState, Skeleton, StatusPill } from '.
 import { Input, Select, Textarea } from './forms';
 import { Dialog, useToast } from './overlays';
 import { AgentChip, ChatComposer, ChatThread, useChat } from './chat';
+import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
+import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
 import {
   assignProfile,
   createFreeChat,
@@ -27,56 +29,20 @@ import {
   type ChatSummaryView,
   type ProfileUpsertInput,
 } from '@core/lib/admin/chat-client';
+import { presentChatSession } from '@core/lib/admin/chat-session-presentation';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
   return (await m.getAccessToken()) ?? '';
 }
 
-interface Starter {
-  key: string;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  prompt: string;
-  ownerOnly?: boolean;
-}
-
-const STARTERS: Starter[] = [
-  {
-    key: 'article',
-    label: 'New article',
-    description: 'Draft a content item from an idea — outline, nodes, taxonomy from the registry.',
-    icon: <IconPencil size={18} />,
-    prompt:
-      'I want a new article. Ask me for the topic and angle, check the taxonomy registry for the right category and tags, then draft it as a content_item (create_object) with a clear node structure. Keep it as a draft — no publishing yet.',
-  },
-  {
-    key: 'page',
-    label: 'New page from template',
-    description: 'REUSE-FIRST: browse the template recipes, preview, then instantiate.',
-    icon: <IconFilePlus size={18} />,
-    prompt:
-      'I want a new page. First list the template recipes in the inventory (REUSE FIRST) and recommend one based on its description/whenToUse. Then propose instantiate_template — I will see the dry-run preview on the approval card before anything is created.',
-  },
-  {
-    key: 'section-template',
-    label: 'New section template',
-    description: 'Mint a reusable section recipe with the required metadata trio.',
-    icon: <IconPlus size={18} />,
-    prompt:
-      'I want a new section template (stpl_*). Check the existing recipes in the inventory first so we do not duplicate one. Then draft the blueprint and the REQUIRED description/whenToUse/scope metadata, and propose create_object.',
-  },
-  {
-    key: 'retheme',
-    label: 'Retheme',
-    description: 'Owner-only: preview a theme apply as an exact-token diff, then apply.',
-    icon: <IconPalette size={18} />,
-    prompt:
-      'I want to look at retheming the site. List the theme objects, then propose apply_theme with a dry run so I can see the exact brandTokens diff before deciding. Do not apply anything without my approval.',
-    ownerOnly: true,
-  },
-];
+const STARTER_ICONS: Record<AgentStarter['key'], React.ReactNode> = {
+  article: <IconPencil size={18} />,
+  page: <IconFilePlus size={18} />,
+  'section-template': <IconPlus size={18} />,
+  retheme: <IconPalette size={18} />,
+  media: <IconSparkles size={18} />,
+};
 
 const STATUS_TONE: Record<ChatStatus, 'success' | 'info' | 'warning' | 'neutral'> = {
   idle: 'neutral',
@@ -317,6 +283,7 @@ function HubBody() {
   });
   const [owner, setOwner] = useState(false);
   const [pendingStarter, setPendingStarter] = useState<string | undefined>(undefined);
+  const requestedStarterHandled = useRef(false);
   const chat = useChat(getToken, activeId);
 
   const reloadList = async (includeAll = owner) => {
@@ -348,7 +315,7 @@ function HubBody() {
     if (chat.status === 'idle' || chat.status === 'error' || chat.status === 'cancelled') void reloadList();
   }, [chat.status]);
 
-  const startConversation = async (starter: Starter) => {
+  const startConversation = async (starter: AgentStarter) => {
     setPendingStarter(starter.key);
     try {
       const { chat: created } = await createFreeChat(getToken, starter.label);
@@ -361,6 +328,16 @@ function HubBody() {
       setPendingStarter(undefined);
     }
   };
+
+  useEffect(() => {
+    if (requestedStarterHandled.current) return;
+    const requested = agentStarterByKey(new URLSearchParams(window.location.search).get('starter'));
+    if (requested && (!requested.ownerOnly || owner) && pendingStarter === undefined) {
+      requestedStarterHandled.current = true;
+      void startConversation(requested);
+      window.history.replaceState({}, '', '/admin/agents');
+    }
+  }, [owner]);
 
   /** Creation results carry object_id/object_type — route to the workspace. */
   const createdObjects = useMemo(
@@ -375,6 +352,7 @@ function HubBody() {
   );
 
   const active = chats?.find((item) => item.chat_id === activeId);
+  const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope: activeId });
 
   return (
     <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -382,7 +360,7 @@ function HubBody() {
       <div className="flex min-h-0 flex-col gap-4">
         <Card kicker="Start something" title="New conversation">
           <div className="grid gap-2">
-            {STARTERS.filter((starter) => !starter.ownerOnly || owner).map((starter) => (
+            {AGENT_STARTERS.filter((starter) => !starter.ownerOnly || owner).map((starter) => (
               <button
                 key={starter.key}
                 type="button"
@@ -390,7 +368,7 @@ function HubBody() {
                 disabled={pendingStarter !== undefined}
                 className="adm-focusable flex items-start gap-3 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2.5 text-left hover:border-[var(--adm-accent)]"
               >
-                <span className="mt-0.5 text-[var(--adm-accent)]">{starter.icon}</span>
+                <span className="mt-0.5 text-[var(--adm-accent)]">{STARTER_ICONS[starter.key]}</span>
                 <span className="min-w-0">
                   <span className="block text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
                     {starter.label}
@@ -429,7 +407,7 @@ function HubBody() {
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                        {item.title}
+                        {presentChatSession(item).title}
                       </span>
                       <StatusPill
                         status={item.status}
@@ -438,7 +416,9 @@ function HubBody() {
                       />
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      {item.kind === 'object' ? <Badge tone="info">object</Badge> : null}
+                      <Badge tone={item.kind === 'object' ? 'info' : 'neutral'}>
+                        {presentChatSession(item).kindLabel}
+                      </Badge>
                       {(item.last_outcome?.chips ?? []).map((chip) => (
                         <Badge key={chip} tone="neutral">
                           {chip}
@@ -499,6 +479,9 @@ function HubBody() {
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
             ) : null}
             <div className="mt-3 border-t border-[var(--adm-border)] pt-3">
+              <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
+                <RunApprovalControls mode={approvalMode} onChange={setApprovalMode} />
+              </div>
               <ChatComposer
                 status={chat.status}
                 busy={chat.busy}

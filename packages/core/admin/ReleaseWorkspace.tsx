@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Switch } from './forms';
 import { useToast } from './overlays';
 import { IconAlertTriangle, IconExternalLink, IconRocket } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
@@ -17,6 +18,13 @@ import {
 } from '@core/lib/admin/release-client';
 import { chatWorkLabel, getWorkSummary } from '@core/lib/admin/work-summary';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
+import {
+  groupReleaseReviewItems,
+  releaseQueueSignature,
+  releaseReviewSummary,
+  shortDiagnosticCommit,
+  type ReleaseReviewGroup,
+} from '@core/lib/admin/release-presentation';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -111,6 +119,22 @@ function WorkList({ chats, empty }: { chats: ChatSummaryView[]; empty: string })
   );
 }
 
+function ReleaseReviewGroupCard({ group }: { group: ReleaseReviewGroup<ReleaseObjectView> }) {
+  const tone = group.category === 'ready' ? 'success' : 'warning';
+  return (
+    <Card>
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-[var(--adm-text-heading)]">{group.label}</h2>
+          <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{group.description}</p>
+        </div>
+        <Badge tone={tone}>{group.items.length}</Badge>
+      </div>
+      <ObjectList items={group.items} />
+    </Card>
+  );
+}
+
 function ReleaseWorkspaceContent() {
   const { toast } = useToast();
   const [overview, setOverview] = useState<ReleaseOverview>();
@@ -119,6 +143,7 @@ function ReleaseWorkspaceContent() {
   const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string>();
   const [lastResult, setLastResult] = useState<ReleaseResultView>();
+  const [reviewedQueueSignature, setReviewedQueueSignature] = useState<string>();
 
   const refresh = useCallback(async () => {
     try {
@@ -151,11 +176,18 @@ function ReleaseWorkspaceContent() {
   }, [overview?.deploy.state, refresh]);
 
   const work = useMemo(() => getWorkSummary(rows, chats), [rows, chats]);
-  const waiting = overview?.objects.filter((object) => object.state === 'published') ?? [];
-  const approvals = overview?.objects.filter((object) => object.review_state === 'open') ?? [];
+  const waiting = useMemo(() => overview?.objects.filter((object) => object.state === 'published') ?? [], [overview]);
+  const approvals = useMemo(
+    () => overview?.objects.filter((object) => object.review_state === 'open') ?? [],
+    [overview]
+  );
+  const reviewGroups = useMemo(() => groupReleaseReviewItems(waiting), [waiting]);
+  const queueSignature = useMemo(() => releaseQueueSignature(waiting), [waiting]);
+  const reviewed = waiting.length > 0 && reviewedQueueSignature === queueSignature;
   const deploy = overview ? deployCopy[overview.deploy.state] : undefined;
 
   const release = async () => {
+    if (!reviewed || waiting.length === 0) return;
     setReleasing(true);
     try {
       const result = await triggerProductionRelease(getToken);
@@ -190,9 +222,9 @@ function ReleaseWorkspaceContent() {
           leftIcon={<IconRocket size={16} />}
           onClick={() => void release()}
           loading={releasing}
-          disabled={loading || waiting.length === 0}
+          disabled={loading || waiting.length === 0 || !reviewed}
         >
-          Release to production
+          Release after review
         </Button>
       </header>
 
@@ -229,14 +261,69 @@ function ReleaseWorkspaceContent() {
             </p>
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="font-semibold text-[var(--adm-text-heading)]">Published, waiting for release</h2>
-                <Badge tone={waiting.length ? 'warning' : 'success'}>{waiting.length}</Badge>
+          <Card>
+            <div className="flex flex-col gap-3">
+              <div>
+                <h2 className="font-semibold text-[var(--adm-text-heading)]">Review this release batch</h2>
+                <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+                  {releaseReviewSummary(reviewGroups)} Releasing sends every published change below in one production
+                  build.
+                </p>
+                <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                  One production build will be requested and may use one build credit. A completed build is not
+                  described as live until production confirms it.
+                </p>
               </div>
-              <ObjectList items={waiting} empty="Everything published is already live." />
-            </Card>
+              <Switch
+                checked={reviewed}
+                onCheckedChange={(checked) => setReviewedQueueSignature(checked ? queueSignature : undefined)}
+                disabled={waiting.length === 0 || releasing}
+                label="I reviewed this batch and understand it starts one production build."
+                hint="This confirmation applies only to the current published batch and resets if that batch changes."
+              />
+              <details className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
+                <summary className="adm-focusable cursor-pointer rounded text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)]">
+                  Technical release details
+                </summary>
+                <dl className="mt-2 grid gap-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] sm:grid-cols-2">
+                  <div>
+                    <dt>Confirmed live commit</dt>
+                    <dd>
+                      <code>{shortDiagnosticCommit(overview.deploy.live_commit) ?? 'Not confirmed'}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Latest production build commit</dt>
+                    <dd>
+                      <code>{shortDiagnosticCommit(overview.deploy.latest?.commit) ?? 'Not available'}</code>
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt>Current batch target</dt>
+                    <dd>
+                      The existing release endpoint resolves the accumulated published exports when the reviewed release
+                      starts.
+                    </dd>
+                  </div>
+                </dl>
+              </details>
+            </div>
+          </Card>
+
+          <section aria-label="Release review groups" className="grid gap-4 lg:grid-cols-2">
+            {reviewGroups.length ? (
+              reviewGroups.map((group) => <ReleaseReviewGroupCard key={group.category} group={group} />)
+            ) : (
+              <Card>
+                <h2 className="font-semibold text-[var(--adm-text-heading)]">Published changes ready to release</h2>
+                <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+                  Everything published is already live.
+                </p>
+              </Card>
+            )}
+          </section>
+
+          <div className="grid gap-4 lg:grid-cols-2">
             <Card>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <h2 className="font-semibold text-[var(--adm-text-heading)]">Pending approvals</h2>

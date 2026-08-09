@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import { ArtifactStagePreview } from './ArtifactStagePreview';
-import { Badge, EmptyState, Skeleton } from './primitives';
-import { IconAlertTriangle, IconLibrary } from './icons';
+import { Badge, Button, EmptyState, Skeleton } from './primitives';
+import { IconAlertTriangle, IconLibrary, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { artifactsByFamily, type EditorialArtifact, type MediaFamily } from '@core/lib/admin/editorial-assets';
 import { objectStageModeClass } from '@core/lib/admin/object-stage';
+import { agentStarterHref } from '@core/lib/admin/agent-starters';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -36,18 +37,26 @@ export default function MediaWorkspace({ identity }: { identity: SiteIdentity })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
-  useEffect(() => {
-    fetchEditorialAssets(getToken)
-      .then((data) => {
-        setArtifacts(data.artifacts);
-        const grouped = artifactsByFamily(data.artifacts);
-        const firstFamily = FAMILIES.find((item) => grouped[item.id].length)?.id ?? 'editorial';
-        setFamily(firstFamily);
-        setSelectedId(grouped[firstFamily][0]?.id);
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Media could not be loaded.'))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(undefined);
+    try {
+      const data = await fetchEditorialAssets(getToken);
+      setArtifacts(data.artifacts);
+      const grouped = artifactsByFamily(data.artifacts);
+      const firstFamily = FAMILIES.find((item) => grouped[item.id].length)?.id ?? 'editorial';
+      setFamily(firstFamily);
+      setSelectedId(grouped[firstFamily][0]?.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Media could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const grouped = useMemo(() => artifactsByFamily(artifacts), [artifacts]);
   const items = grouped[family];
@@ -58,24 +67,42 @@ export default function MediaWorkspace({ identity }: { identity: SiteIdentity })
     setSelectedId(grouped[next][0]?.id);
   };
 
+  /*
+   * The assets endpoint is deliberately list-only. Creation continues through
+   * the CMS Agent so artifact generation and approval remain server-governed.
+   */
   return (
     <AdminShell currentPath="/admin/media" title="Media" identity={identity} wide>
       <div className="flex flex-col gap-5">
-        <header>
-          <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Media</h1>
-          <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-            Uploaded and manufactured images and documents for this publication.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Media</h1>
+            <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              Approved images and documents available to this publication.
+            </p>
+          </div>
+          <a href={agentStarterHref('media')} className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]">
+            <IconSparkles size={16} /> Plan media with agent
+          </a>
         </header>
         {loading ? (
-          <Skeleton variant="rect" height={520} />
+          <div className="flex flex-col gap-3" role="status" aria-live="polite">
+            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">Loading media library…</p>
+            <Skeleton variant="rect" height={520} />
+          </div>
         ) : error ? (
-          <EmptyState icon={<IconAlertTriangle size={26} />} title="Media unavailable" message={error} />
+          <EmptyState
+            icon={<IconAlertTriangle size={26} />}
+            title="Media unavailable"
+            message={`${error} Your existing media has not been changed.`}
+            action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
+          />
         ) : !artifacts.length ? (
           <EmptyState
             icon={<IconLibrary size={26} />}
             title="No media yet"
-            message="Media created by the Publishing Agent will appear here."
+            message="Ask the CMS Agent to plan an approved image or document. It will show the governed proposal before it creates anything."
+            action={<a href={agentStarterHref('media')} className="adm-focusable text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent)] hover:underline">Plan media with agent</a>}
           />
         ) : (
           <>

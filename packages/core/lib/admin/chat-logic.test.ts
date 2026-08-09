@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { groupChatEvents, toolLabel } from './chat-logic.js';
+import { groupChatEvents, toolLabel, toolLabelForName } from './chat-logic.js';
 import type { ChatEventView } from './chat-client.js';
 
 const event = (seq: number, type: ChatEventView['type'], detail: Record<string, unknown> = {}): ChatEventView => ({
@@ -39,5 +39,30 @@ describe('quiet chat activity', () => {
 
   it('uses human labels for known tools', () => {
     assert.equal(toolLabel(event(1, 'tool_call', { tool: 'object_validate' })), 'Check readiness');
+  });
+
+  it('has a shared human label for every guardrails tool', () => {
+    for (const tool of [
+      'get_object',
+      'get_contract',
+      'list_objects',
+      'inventory',
+      'validate',
+      'search_artifacts',
+      'checkout',
+      'patch',
+      'checkin',
+      'refresh_lock',
+      'create_object',
+      'create_variant',
+      'instantiate_template',
+      'instantiate_section_template',
+      'submit_review',
+      'publish',
+      'discard',
+      'apply_theme',
+    ]) {
+      assert.doesNotMatch(toolLabelForName(tool), /_/);
+    }
   });
 });

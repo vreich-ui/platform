@@ -15,6 +15,22 @@ const RUN_SAFE_TOOLS = new Set([
   'get_agent_artifact_job_status',
 ]);
 
+export type RunApprovalMode = 'ask' | 'safe-run';
+
 export function isRunSafeApproval(tool: string): boolean {
   return RUN_SAFE_TOOLS.has(tool);
+}
+
+/**
+ * Browser convenience only: the server remains the authority for every
+ * approval. This deliberately fail-closes for a staged, dangerous, or unknown
+ * tool even when the editor selected "Approve safe actions" for this run.
+ */
+export function shouldAutoApproveRunTool(mode: RunApprovalMode, tool: string, approvalInStage = false): boolean {
+  return mode === 'safe-run' && !approvalInStage && isRunSafeApproval(tool);
+}
+
+/** A run preference never leaks into the next completed or cancelled chat. */
+export function shouldResetRunApprovalMode(status: string | undefined, hasPendingApproval: boolean): boolean {
+  return !hasPendingApproval && ['idle', 'error', 'cancelled'].includes(status ?? '');
 }

@@ -59,12 +59,18 @@ export function classifyMediaFamily(input: {
 const safeStatus = (value: unknown): PdfTemplateSummary['status'] =>
   value === 'active' || value === 'draft' || value === 'disabled' ? value : 'unknown';
 
-const humanize = (value: string): string =>
-  value
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const humanize = (value: string, fallback: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed || UUID_PATTERN.test(trimmed)) return fallback;
+  const result = trimmed
     .replace(/^tpl[_-]?/i, '')
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    .trim() || 'PDF template';
+    .trim();
+  return result || fallback;
+};
 
 export function projectPdfTemplate(value: unknown): PdfTemplateSummary | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -75,7 +81,10 @@ export function projectPdfTemplate(value: unknown): PdfTemplateSummary | undefin
   const activeVersion = Number(row.latestActiveVersion ?? row.activeVersion);
   return {
     id,
-    label: typeof row.label === 'string' && row.label.trim() ? row.label.trim() : humanize(id),
+    label:
+      typeof row.label === 'string' && row.label.trim() && !UUID_PATTERN.test(row.label.trim())
+        ? row.label.trim()
+        : humanize(id, 'PDF template'),
     status: safeStatus(row.status),
     renderer: typeof row.renderer === 'string' && row.renderer.trim() ? row.renderer.trim() : 'PDF',
     version: Number.isInteger(version) && version > 0 ? version : 1,
@@ -97,8 +106,13 @@ export function projectEditorialArtifact(reference: ArtifactReference): Editoria
   if (rawKind !== 'image' && rawKind !== 'pdf') return undefined;
   const kind = rawKind as Extract<ArtifactKind, 'image' | 'pdf'>;
   const metadata = reference.metadata ?? {};
-  const filename = reference.originalFilename?.trim() || `${kind}-${reference.sha256.slice(0, 8)}`;
-  const label = reference.label?.trim() || filename;
+  const originalFilename = reference.originalFilename?.trim();
+  const filename = originalFilename || (kind === 'pdf' ? 'PDF document' : 'Image asset');
+  const rawLabel = reference.label?.trim();
+  const label =
+    rawLabel && !UUID_PATTERN.test(rawLabel)
+      ? rawLabel
+      : originalFilename || (kind === 'pdf' ? 'Untitled PDF document' : 'Untitled image');
   const tags = (reference.tags ?? []).filter((tag) => typeof tag === 'string').slice(0, 12);
   const templateId = typeof metadata.templateId === 'string' ? metadata.templateId : undefined;
   const pageCount = Number(metadata.pageCount);

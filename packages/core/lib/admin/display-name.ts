@@ -33,6 +33,44 @@ export function objectTypeLabel(type: ObjectType): string {
   return OBJECT_TYPE_LABELS[type] ?? titleCase(String(type).replace(/_/g, ' '));
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Active',
+  approved: 'Approved',
+  archived: 'Archived',
+  cancelled: 'Cancelled',
+  changes_requested: 'Changes requested',
+  complete: 'Complete',
+  draft: 'Draft',
+  failed: 'Failed',
+  idle: 'Ready',
+  in_progress: 'In progress',
+  missing: 'Needs attention',
+  open: 'Open',
+  optional: 'Optional',
+  published: 'Published',
+  running: 'Working',
+  warning: 'Needs attention',
+};
+
+/** Human label for stored status values. Unknown values stay readable but never expose separators. */
+export function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? titleCase(status.replace(/[_-]+/g, ' '));
+}
+
+const NAV_TARGET_LABELS: Record<string, string> = {
+  page: 'Page in this publication',
+  taxonomy: 'Topic or category',
+  listing: 'Content list',
+  external: 'External link',
+  asset: 'File or feed',
+  route: 'Site route',
+};
+
+/** Human label for a navigation target kind; raw kinds belong only in technical views. */
+export function navigationTargetLabel(kind: string): string {
+  return NAV_TARGET_LABELS[kind] ?? 'Link destination';
+}
+
 // ─── generic helpers ─────────────────────────────────────────────────
 
 type Bag = Record<string, unknown>;

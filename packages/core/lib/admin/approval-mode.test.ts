@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isRunSafeApproval } from './approval-mode.js';
+import { isRunSafeApproval, shouldAutoApproveRunTool, shouldResetRunApprovalMode } from './approval-mode.js';
 
 describe('isRunSafeApproval', () => {
   it('allows ordinary content work for the current run', () => {
@@ -26,5 +26,23 @@ describe('isRunSafeApproval', () => {
 
   it('fails closed for an unknown tool', () => {
     assert.equal(isRunSafeApproval('future_unclassified_tool'), false);
+  });
+
+  it('only auto-approves allow-listed actions in the editor-selected run mode', () => {
+    assert.equal(shouldAutoApproveRunTool('ask', 'patch'), false);
+    assert.equal(shouldAutoApproveRunTool('safe-run', 'patch'), true);
+    assert.equal(shouldAutoApproveRunTool('safe-run', 'patch', true), false);
+
+    for (const tool of ['publish', 'release', 'apply_theme', 'delete_pdf_template', 'unknown_tool']) {
+      assert.equal(shouldAutoApproveRunTool('safe-run', tool), false);
+    }
+  });
+
+  it('resets the run choice once a run ends, but not while an approval is pending', () => {
+    assert.equal(shouldResetRunApprovalMode('idle', false), true);
+    assert.equal(shouldResetRunApprovalMode('error', false), true);
+    assert.equal(shouldResetRunApprovalMode('cancelled', false), true);
+    assert.equal(shouldResetRunApprovalMode('awaiting_approval', true), false);
+    assert.equal(shouldResetRunApprovalMode('running', false), false);
   });
 });

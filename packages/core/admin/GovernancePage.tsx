@@ -7,6 +7,7 @@
  * (T9.13).
  */
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
@@ -14,7 +15,8 @@ import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { Select, Switch } from './forms';
 import { useToast } from './overlays';
 import { IconAlertTriangle } from './icons';
-import { exportPreferences } from '@core/lib/admin/chat-client';
+import { exportPreferences, listProfiles, type AgentProfileView } from '@core/lib/admin/chat-client';
+import { toolLabelForName } from '@core/lib/admin/chat-logic';
 import { objectTypeLabel } from '@core/lib/admin/display-name';
 import { governedObjectTypes } from '@core/lib/approval-policy';
 import type { ObjectType } from '@core/schema/object-record-v1';
@@ -36,6 +38,12 @@ import {
   withTrackingPublishMode,
   type CreationPolicyLike,
 } from '@core/lib/admin/tracking-governance';
+import {
+  AUTONOMY_LABELS,
+  autonomyEffect,
+  governanceProvenanceLabel,
+  toolGroupLabel,
+} from '@core/lib/admin/governance-presentation';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -43,6 +51,15 @@ async function getToken(): Promise<string> {
 }
 
 const sameConfig = (a: ApprovalConfig, b: ApprovalConfig) => JSON.stringify(a) === JSON.stringify(b);
+
+function TechnicalDetails({ children }: { children: ReactNode }) {
+  return (
+    <details className="mt-3 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+      <summary className="cursor-pointer font-medium text-[var(--adm-text)]">Technical</summary>
+      <div className="mt-2">{children}</div>
+    </details>
+  );
+}
 
 function GovernanceBody({ identity }: { identity: SiteIdentity }) {
   const { toast } = useToast();
@@ -52,6 +69,8 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ApprovalConfig | null>(null);
   const [saving, setSaving] = useState(false);
+  const [profiles, setProfiles] = useState<AgentProfileView[]>([]);
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
 
   const refresh = async () => {
     const state = await fetchGovernance(getToken);
@@ -63,8 +82,13 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
     (async () => {
       try {
         const { fetchMe } = await import('@core/lib/admin/users-client');
-        const me = await fetchMe(getToken);
+        const [me, profileResult] = await Promise.all([
+          fetchMe(getToken),
+          listProfiles(getToken).catch(() => undefined),
+        ]);
         setOwner(me.roles.includes('owner'));
+        setProfiles(profileResult?.profiles ?? []);
+        setProfilesLoaded(Boolean(profileResult));
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not load guardrails.');
@@ -130,29 +154,40 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
     <div className="flex max-w-3xl flex-col gap-6">
       <TrackingGovernanceCard gov={gov} owner={owner} onSaved={refresh} identity={identity} />
 
+      <Card kicker="Effective policy" title="How these settings work together">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          A conversation first follows its assigned agent&rsquo;s setting, then a setting changed here, then the
+          standard setting. Changes apply to new runs; a run already in progress keeps the policy it started with.
+        </p>
+        <TechnicalDetails>
+          <p>Precedence: agent profile override → governance chat-tools override → class default.</p>
+        </TechnicalDetails>
+      </Card>
+
       <Card
         kicker="Approval policy"
         title="Who approves publishes"
         actions={
           <Badge tone={overridden ? 'accent' : 'neutral'}>
-            {overridden ? 'Runtime override' : 'Committed default'}
+            {governanceProvenanceLabel(gov.active.provenance.approval)}
           </Badge>
         }
       >
         <p className="mb-4 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-          Per object type: <strong>autonomous</strong> (agents publish directly) or <strong>require approval</strong> (a
-          human must approve first). The committed config is the default and the disaster fallback.
+          Decide whether agents can publish when work is ready or must ask a person first. This changes the default for
+          each type below unless that type has its own setting.
         </p>
 
         <div className="mb-4 max-w-xs">
           <Select
-            label="Master switch"
+            label="Default for everything"
+            hint="Changing this sets the publishing rule for types that do not have their own setting."
             value={draft.master}
             disabled={!owner}
             onChange={(e) => setDraft({ ...draft, master: e.target.value as ApprovalConfig['master'] })}
             options={[
-              { value: 'all-autonomous', label: 'All autonomous' },
-              { value: 'all-require-approval', label: 'All require approval' },
+              { value: 'all-autonomous', label: 'Let agents publish when ready' },
+              { value: 'all-require-approval', label: 'Ask before every publish' },
             ]}
           />
         </div>
@@ -166,13 +201,20 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
                 key={type}
                 className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--adm-border)] px-4 py-2.5 last:border-0"
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                    {objectTypeLabel(type)}
-                  </span>
-                  <Badge tone={effective === 'require-approval' ? 'warning' : 'success'}>
-                    {effective === 'require-approval' ? 'Requires approval' : 'Autonomous'}
-                  </Badge>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                      {objectTypeLabel(type)}
+                    </span>
+                    <Badge tone={effective === 'require-approval' ? 'warning' : 'success'}>
+                      {effective === 'require-approval' ? 'Ask before publishing' : 'Publish when ready'}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                    {effective === 'require-approval'
+                      ? 'A person reviews this before it can be published.'
+                      : 'The agent can publish this once the usual checks pass.'}
+                  </p>
                 </div>
                 <div className="w-52">
                   <Select
@@ -181,9 +223,9 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
                     disabled={!owner}
                     onChange={(e) => setTypeMode(type, e.target.value as 'default' | ApprovalMode)}
                     options={[
-                      { value: 'default', label: 'Master default' },
-                      { value: 'autonomous', label: 'Autonomous' },
-                      { value: 'require-approval', label: 'Require approval' },
+                      { value: 'default', label: 'Use default for everything' },
+                      { value: 'autonomous', label: 'Publish when ready' },
+                      { value: 'require-approval', label: 'Ask before publishing' },
                     ]}
                   />
                 </div>
@@ -192,13 +234,19 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
           })}
         </div>
 
+        <TechnicalDetails>
+          <p>
+            Policy key: approval. Stored values: all-autonomous, all-require-approval, autonomous, require-approval.
+          </p>
+        </TechnicalDetails>
+
         {owner ? (
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button onClick={onSave} loading={saving} disabled={!dirty || saving}>
               Save changes
             </Button>
             <Button variant="secondary" onClick={onRevert} disabled={saving || !overridden}>
-              Revert to committed default
+              Revert to site default
             </Button>
           </div>
         ) : (
@@ -213,19 +261,25 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
         title="Who can create each type"
         actions={
           <Badge tone={gov.active.provenance.creation === 'override' ? 'accent' : 'neutral'}>
-            {gov.active.provenance.creation === 'override' ? 'Runtime override' : 'Committed default'}
+            {governanceProvenanceLabel(gov.active.provenance.creation)}
           </Badge>
         }
       >
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-          Humans can always create. Agent creation is open or restricted to an allowlist per type. The creation matrix
-          editor lands alongside the studio; the committed policy is active today.
+          People can always create. The active site policy decides which agents may create each type. This screen shows
+          that policy read-only so the visible rule and server enforcement stay aligned.
         </p>
+        <TechnicalDetails>
+          <p>Policy key: creation.</p>
+          <pre className="mt-2 overflow-auto whitespace-pre-wrap">{JSON.stringify(gov.active.creation, null, 2)}</pre>
+        </TechnicalDetails>
       </Card>
 
       <ChatToolAutonomyCard
         catalog={gov.chat_tools_catalog ?? []}
         current={gov.doc?.chat_tools ?? {}}
+        profiles={profiles}
+        profilesLoaded={profilesLoaded}
         owner={owner}
         onSaved={refresh}
       />
@@ -270,7 +324,7 @@ function LearningModeCard({
     try {
       await revertGovernance(getToken, 'learning_mode');
       await onSaved();
-      toast({ title: 'Learning mode returned to the off default', tone: 'success' });
+      toast({ title: 'Learning mode restored to its site default', tone: 'success' });
     } catch (err) {
       toast({ title: 'Revert failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
     } finally {
@@ -312,7 +366,7 @@ function LearningModeCard({
         onCheckedChange={setDraft}
         disabled={!owner || saving}
         label="Offer 2–3 versions for substantive writing decisions"
-        hint="Choices and later corrections become Owner-readable preference evidence. Lookups and mechanical changes remain single-version. Candidate generation costs more, so this is off by default."
+        hint="Choices and later corrections become Owner-readable preference evidence. Lookups and mechanical changes remain single-version. Candidate generation costs more, so this is disabled by default."
       />
       {owner ? (
         <div className="mt-4 flex flex-wrap gap-2">
@@ -320,7 +374,7 @@ function LearningModeCard({
             Save setting
           </Button>
           <Button variant="secondary" onClick={revert} disabled={saving || !overridden}>
-            Revert to off
+            Restore disabled setting
           </Button>
           <Button variant="secondary" onClick={downloadPreferences} loading={exporting} disabled={saving || exporting}>
             Export preference pairs
@@ -365,7 +419,7 @@ function TrackingGovernanceCard({
       await setApprovalOverride(getToken, withTrackingPublishMode(gov.active.approval, mode));
       await onSaved();
       toast({
-        title: `Tracking publishes are now ${mode === 'autonomous' ? 'autonomous' : 'approval-gated'}`,
+        title: mode === 'autonomous' ? 'Tracker changes can publish when ready' : 'Tracker changes now ask first',
         tone: 'success',
       });
     } catch (err) {
@@ -381,14 +435,13 @@ function TrackingGovernanceCard({
       title="Who controls the tracker registry"
       actions={
         <Badge tone={view.approvalProvenance === 'override' ? 'accent' : 'neutral'}>
-          {view.approvalProvenance === 'override' ? 'Runtime override' : 'Committed default'}
+          {governanceProvenanceLabel(view.approvalProvenance)}
         </Badge>
       }
     >
       <p className="mb-4 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-        Publishing <code>{identity.trackingProjectId}</code> changes which third-party scripts run on every page. This
-        card answers &ldquo;who may publish it right now?&rdquo; and flips the posture; <strong>Product</strong> is
-        shown beside it as the other pinned type. The full per-type matrix sits below.
+        Publishing tracker changes affects which third-party scripts run on every page. This card shows who may publish
+        them now; the full publishing policy is below.
       </p>
 
       <div className="overflow-hidden rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)]">
@@ -400,9 +453,9 @@ function TrackingGovernanceCard({
             <div className="flex items-center gap-2">
               <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">{row.label}</span>
               <Badge tone={row.publish === 'require-approval' ? 'warning' : 'success'}>
-                {row.publish === 'require-approval' ? 'Publish requires approval' : 'Publishes autonomously'}
+                {row.publish === 'require-approval' ? 'Ask before publishing' : 'Publish when ready'}
               </Badge>
-              {row.pinned && <Badge tone="neutral">Pinned</Badge>}
+              {row.pinned && <Badge tone="neutral">Special rule</Badge>}
             </div>
             {row.type === 'tracking_config' && owner && (
               <Button
@@ -411,7 +464,7 @@ function TrackingGovernanceCard({
                 disabled={saving}
                 onClick={() => flipTo(row.publish === 'autonomous' ? 'require-approval' : 'autonomous')}
               >
-                {row.publish === 'autonomous' ? 'Require approval' : 'Make autonomous'}
+                {row.publish === 'autonomous' ? 'Ask before publishing' : 'Allow agent publishing'}
               </Button>
             )}
           </div>
@@ -419,15 +472,19 @@ function TrackingGovernanceCard({
       </div>
 
       <p className="mt-3 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-        Creation: humans always;{' '}
+        Creation: people can always create;{' '}
         {view.creation.agents === 'open'
-          ? 'agent creation is open'
+          ? 'agents may create this type'
           : view.creation.agents.length === 0
-            ? 'no agents may create it'
-            : `agent creation is limited to ${view.creation.agents.join(', ')} (the seed driver)`}{' '}
-        — {view.creation.creationProvenance === 'override' ? 'runtime override' : 'committed policy'}. Editing the
-        record itself happens in the normal object workspace.
+            ? 'agents may not create it'
+            : `only ${view.creation.agents.join(', ')} may create it`}
+        . Editing the record itself happens in the normal object workspace.
       </p>
+
+      <TechnicalDetails>
+        <p>Tracker registry project: {identity.trackingProjectId}</p>
+        <p>Creation policy source: {view.creation.creationProvenance}.</p>
+      </TechnicalDetails>
 
       {!owner && (
         <p className="mt-3 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
@@ -445,8 +502,6 @@ const AUTONOMY_TONE: Record<ToolAutonomy, 'success' | 'warning' | 'neutral'> = {
   ask: 'warning',
   off: 'neutral',
 };
-const AUTONOMY_LABEL: Record<ToolAutonomy, string> = { auto: 'Auto', ask: 'Ask', off: 'Off' };
-
 const TOOL_CLASS_ORDER: ChatToolCatalogEntry['tool_class'][] = [
   'read',
   'draft',
@@ -454,25 +509,21 @@ const TOOL_CLASS_ORDER: ChatToolCatalogEntry['tool_class'][] = [
   'publication',
   'privileged',
 ];
-const TOOL_CLASS_LABEL: Record<ChatToolCatalogEntry['tool_class'], string> = {
-  read: 'Read',
-  draft: 'Draft & edit',
-  creation: 'Creation',
-  publication: 'Publication',
-  privileged: 'Privileged',
-};
-
 const sameOverride = (a: Record<string, ToolAutonomy>, b: Record<string, ToolAutonomy>) =>
   JSON.stringify(a) === JSON.stringify(b);
 
 function ChatToolAutonomyCard({
   catalog,
   current,
+  profiles,
+  profilesLoaded,
   owner,
   onSaved,
 }: {
   catalog: ChatToolCatalogEntry[];
   current: Record<string, ToolAutonomy>;
+  profiles: AgentProfileView[];
+  profilesLoaded: boolean;
   owner: boolean;
   onSaved: () => Promise<void>;
 }) {
@@ -503,7 +554,7 @@ function ChatToolAutonomyCard({
     try {
       await setChatToolsOverride(getToken, draft);
       await onSaved();
-      toast({ title: 'Chat tool autonomy updated', tone: 'success' });
+      toast({ title: 'Agent tool settings updated', tone: 'success' });
     } catch (err) {
       toast({ title: 'Save failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
     } finally {
@@ -516,7 +567,7 @@ function ChatToolAutonomyCard({
     try {
       await revertGovernance(getToken, 'chat_tools');
       await onSaved();
-      toast({ title: 'Reverted to the class defaults', tone: 'success' });
+      toast({ title: 'Returned to the standard settings', tone: 'success' });
     } catch (err) {
       toast({ title: 'Revert failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
     } finally {
@@ -531,17 +582,29 @@ function ChatToolAutonomyCard({
 
   return (
     <Card
-      kicker="Chat tool autonomy"
-      title="Per-tool autonomy (auto / ask / off)"
+      kicker="Agent permissions"
+      title="How the agent uses tools"
       actions={
-        <Badge tone={overridden ? 'accent' : 'neutral'}>{overridden ? 'Runtime override' : 'Class defaults'}</Badge>
+        <Badge tone={overridden ? 'accent' : 'neutral'}>{overridden ? 'Changed here' : 'Standard settings'}</Badge>
       }
     >
       <p className="mb-4 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-        Each CMS Agents chat tool runs <strong>auto</strong> (no approval card), <strong>ask</strong> (pauses for a
-        human to approve), or <strong>off</strong> (hidden from the agent entirely). Reads default to auto; every write
-        defaults to ask. Autonomy is resolved at the start of each run, so a live run keeps the setting it started with.
+        Choose how much freedom the agent has in new conversations. Some agents may carry a more specific setting; when
+        they do, that setting takes priority and is called out below.
       </p>
+
+      {!profilesLoaded ? (
+        <p
+          role="alert"
+          className="mb-4 rounded-[var(--adm-radius-md)] border border-[var(--adm-warning)] bg-[var(--adm-warning-soft)] px-3 py-2 text-[length:var(--adm-text-sm)] text-[var(--adm-warning-text)]"
+        >
+          Agent-specific settings could not be loaded, so this page cannot confirm the final policy.{' '}
+          <a href="/admin/agents" className="adm-focusable font-medium underline">
+            Check agents
+          </a>
+          .
+        </p>
+      ) : null}
 
       {catalog.length === 0 ? (
         <EmptyState
@@ -554,36 +617,62 @@ function ChatToolAutonomyCard({
           {grouped.map((group) => (
             <div key={group.cls}>
               <p className="mb-1 px-1 text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
-                {TOOL_CLASS_LABEL[group.cls]}
+                {toolGroupLabel(group.cls)}
               </p>
               <div className="overflow-hidden rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)]">
                 {group.tools.map((tool) => {
                   const effective = draft[tool.name] ?? tool.default;
+                  const profileOverrides = profiles.filter(
+                    (profile) => profile.status === 'active' && profile.tool_autonomy_overrides?.[tool.name]
+                  );
                   return (
                     <div
                       key={tool.name}
                       className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--adm-border)] px-4 py-2.5 last:border-0"
                     >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <code
-                          title={tool.description}
-                          className="rounded bg-[var(--adm-surface-sunken)] px-1.5 py-0.5 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]"
-                        >
-                          {tool.name}
-                        </code>
-                        <Badge tone={AUTONOMY_TONE[effective]}>{AUTONOMY_LABEL[effective]}</Badge>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                            {toolLabelForName(tool.name)}
+                          </span>
+                          <Badge tone={AUTONOMY_TONE[effective]}>{AUTONOMY_LABELS[effective]}</Badge>
+                        </div>
+                        <p className="mt-0.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                          {autonomyEffect(effective)}
+                        </p>
+                        {profileOverrides.map((profile) => {
+                          const profileMode = profile.tool_autonomy_overrides![tool.name]!;
+                          return (
+                            <p
+                              key={profile.profile_id}
+                              role="alert"
+                              className="mt-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-warning)] bg-[var(--adm-warning-soft)] px-2 py-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-warning-text)]"
+                            >
+                              <strong>{profile.name}</strong> is set to {AUTONOMY_LABELS[profileMode]}. When this agent
+                              is selected, its setting takes priority over this page.{' '}
+                              <a href="/admin/agents" className="adm-focusable font-medium underline">
+                                View agents
+                              </a>
+                            </p>
+                          );
+                        })}
+                        <TechnicalDetails>
+                          <p>Tool name: {tool.name}</p>
+                          <p>Stored values: auto, ask, off.</p>
+                          <p>{tool.description}</p>
+                        </TechnicalDetails>
                       </div>
                       <div className="w-56">
                         <Select
-                          aria-label={`Autonomy for ${tool.name}`}
+                          aria-label={`Permission for ${toolLabelForName(tool.name)}`}
                           value={draft[tool.name] ?? 'default'}
                           disabled={!owner}
                           onChange={(e) => setToolMode(tool.name, e.target.value as 'default' | ToolAutonomy)}
                           options={[
-                            { value: 'default', label: `Default (${tool.default})` },
-                            { value: 'auto', label: 'Auto — run without asking' },
-                            { value: 'ask', label: 'Ask — approve first' },
-                            { value: 'off', label: 'Off — disable' },
+                            { value: 'default', label: `Use standard setting (${AUTONOMY_LABELS[tool.default]})` },
+                            { value: 'auto', label: 'Run automatically' },
+                            { value: 'ask', label: 'Ask me first' },
+                            { value: 'off', label: 'Not allowed' },
                           ]}
                         />
                       </div>
@@ -597,9 +686,12 @@ function ChatToolAutonomyCard({
       )}
 
       <p className="mt-3 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-        <code>apply_theme</code> also requires the Owner role at execution — that gate is independent of this setting,
-        so even <strong>auto</strong> cannot bypass it.
+        Site-wide changes still require an Owner when they run. This screen cannot remove that protection.
       </p>
+
+      <TechnicalDetails>
+        <p>Site-wide theme changes require the Owner role at execution, independent of the stored setting above.</p>
+      </TechnicalDetails>
 
       {owner ? (
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -607,12 +699,12 @@ function ChatToolAutonomyCard({
             Save changes
           </Button>
           <Button variant="secondary" onClick={onRevert} disabled={saving || !overridden}>
-            Revert to defaults
+            Return to standard settings
           </Button>
         </div>
       ) : (
         <p className="mt-4 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-          Only Owners can change chat tool autonomy.
+          Only Owners can change agent permissions.
         </p>
       )}
     </Card>

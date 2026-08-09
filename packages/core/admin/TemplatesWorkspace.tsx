@@ -13,6 +13,7 @@ import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import type { EditorialArtifact, EditorialAssetsPayload, PdfTemplateSummary } from '@core/lib/admin/editorial-assets';
 import { contextActionsFor } from '@core/lib/admin/object-context-actions';
 import { objectStageModeClass } from '@core/lib/admin/object-stage';
+import { agentStarterHref, type AgentStarterKey } from '@core/lib/admin/agent-starters';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -29,6 +30,14 @@ const FAMILIES: Array<{ id: FamilyId; label: string; description: string }> = [
   { id: 'pdfs', label: 'PDFs', description: 'Templates manufactured through PDF tools.' },
   { id: 'newsletters', label: 'Newsletters', description: 'Reusable email structures.' },
 ];
+
+const CREATION_STARTER: Partial<Record<FamilyId, AgentStarterKey>> = {
+  articles: 'article',
+  pages: 'page',
+  sections: 'section-template',
+  images: 'media',
+  pdfs: 'media',
+};
 
 const displayName = (record: StudioRecord): string =>
   typeof record.body?.name === 'string' ? record.body.name : 'Untitled template';
@@ -174,17 +183,25 @@ export default function TemplatesWorkspace({ identity }: { identity: SiteIdentit
     setAssets(next);
   }, []);
 
-  useEffect(() => {
-    Promise.all([fetchStudioData(getToken), fetchEditorialAssets(getToken)])
-      .then(([studio, editorial]) => {
-        setTemplates(studio.templates);
-        setSections(studio.sections);
-        setAssets(editorial);
-        setSelectedPdf(editorial.pdf_templates[0]?.id);
-      })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Templates could not be loaded.'))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(undefined);
+    try {
+      const [studio, editorial] = await Promise.all([fetchStudioData(getToken), fetchEditorialAssets(getToken)]);
+      setTemplates(studio.templates);
+      setSections(studio.sections);
+      setAssets(editorial);
+      setSelectedPdf(editorial.pdf_templates[0]?.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Templates could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const counts = useMemo<Record<FamilyId, number>>(
     () => ({
@@ -198,20 +215,37 @@ export default function TemplatesWorkspace({ identity }: { identity: SiteIdentit
     [assets, sections.length, templates.length]
   );
   const selected = assets?.pdf_templates.find((template) => template.id === selectedPdf);
+  const creationStarter = CREATION_STARTER[family];
 
   return (
     <AdminShell currentPath="/admin/templates" title="Templates" identity={identity} wide>
       <div className="flex flex-col gap-5">
-        <header>
-          <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Templates</h1>
-          <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-            Reusable standards, organized by what they create.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Templates</h1>
+            <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              Reusable standards, organized by what they create.
+            </p>
+          </div>
+          <a
+            href={creationStarter ? agentStarterHref(creationStarter) : '/admin/agents'}
+            className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]"
+          >
+            {creationStarter ? `Create ${FAMILIES.find((item) => item.id === family)?.label.toLowerCase()} with agent` : 'Ask CMS Agent'}
+          </a>
         </header>
         {loading ? (
-          <Skeleton variant="rect" height={360} />
+          <div className="flex flex-col gap-3" role="status" aria-live="polite">
+            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">Loading reusable templates and PDF samples…</p>
+            <Skeleton variant="rect" height={360} />
+          </div>
         ) : error ? (
-          <EmptyState icon={<IconAlertTriangle size={26} />} title="Templates unavailable" message={error} />
+          <EmptyState
+            icon={<IconAlertTriangle size={26} />}
+            title="Templates unavailable"
+            message={`${error} No template has been changed.`}
+            action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
+          />
         ) : (
           <>
             <nav className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6" aria-label="Template families">

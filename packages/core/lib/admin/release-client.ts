@@ -30,8 +30,8 @@ export interface ReleaseOverview {
     state: ReleaseDeployState;
     production_confirmed: boolean;
     live_commit: string | null;
-    latest: { id: string; status: string; production_url: string } | null;
-    published: { id: string; status: string; production_url: string } | null;
+    latest: { id: string; status: string; production_url: string; commit?: string } | null;
+    published: { id: string; status: string; production_url: string; commit?: string } | null;
   };
   objects: ReleaseObjectView[];
   waiting_count: number;

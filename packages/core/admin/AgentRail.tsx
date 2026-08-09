@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-
 import { EmptyState } from './primitives';
 import { ChatComposer, ChatThread, type UseChatState } from './chat';
-import { isRunSafeApproval } from '@core/lib/admin/approval-mode';
+import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
 
 export function AgentRail({
   chat,
@@ -25,41 +23,7 @@ export function AgentRail({
   draftSeed?: { key: string; text: string };
   approvalInStage?: boolean;
 }) {
-  const [approvalMode, setApprovalMode] = useState<'ask' | 'safe-run'>('ask');
-  const autoApproved = useRef(new Set<string>());
-
-  useEffect(() => {
-    setApprovalMode('ask');
-    autoApproved.current.clear();
-  }, [preferenceScope]);
-
-  useEffect(() => {
-    if (!chat.pending && ['idle', 'error', 'cancelled'].includes(chat.status ?? '')) {
-      setApprovalMode('ask');
-      autoApproved.current.clear();
-    }
-  }, [chat.pending, chat.status]);
-
-  useEffect(() => {
-    const pending = chat.pending;
-    if (
-      approvalMode !== 'safe-run' ||
-      approvalInStage ||
-      chat.busy ||
-      !pending ||
-      !isRunSafeApproval(pending.tool) ||
-      autoApproved.current.has(pending.call_id)
-    ) {
-      return;
-    }
-    autoApproved.current.add(pending.call_id);
-    void chat.approve(pending.call_id).then((result) => {
-      if (!result.approved) {
-        autoApproved.current.delete(pending.call_id);
-        setApprovalMode('ask');
-      }
-    });
-  }, [approvalInStage, approvalMode, chat.busy, chat.pending]);
+  const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope, approvalInStage });
 
   return (
     <section
@@ -88,8 +52,6 @@ export function AgentRail({
         onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
         preferenceScope={preferenceScope}
         approvalInStage={approvalInStage}
-        approvalMode={approvalMode}
-        onApprovalModeChange={setApprovalMode}
         emptyHint={
           <EmptyState
             title="Ready when you are"
@@ -101,6 +63,9 @@ export function AgentRail({
         <p className="shrink-0 py-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
       ) : null}
       <div className="shrink-0 border-t border-[var(--adm-border)] pt-3">
+        <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
+          <RunApprovalControls mode={approvalMode} onChange={setApprovalMode} />
+        </div>
         <ChatComposer
           status={chat.status}
           busy={chat.busy}

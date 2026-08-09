@@ -14,6 +14,7 @@ import { Dialog, ConfirmDialog, Drawer, useToast } from './overlays';
 import { DataTable, type Column } from './data';
 import { DropdownMenu } from './menus';
 import { relativeTimeFromNow } from './logic';
+import { canonicalMemberDisplayName, presentLastSeen } from '@core/lib/admin/admin-user-presentation';
 import { IconDots, IconPlus, IconAlertTriangle, IconUser } from './icons';
 import {
   fetchMe,
@@ -38,6 +39,7 @@ const roleLabel = (role: UserView['role']) => role.charAt(0).toUpperCase() + rol
 function AdminUsersBody() {
   const { toast } = useToast();
   const [meEmail, setMeEmail] = useState<string>('');
+  const [me, setMe] = useState<Pick<UserView, 'email' | 'display_name'> | null>(null);
   const [owner, setOwner] = useState<boolean | null>(null);
   const [users, setUsers] = useState<UserView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,6 +67,7 @@ function AdminUsersBody() {
         const me = await fetchMe(getToken);
         if (!alive) return;
         setMeEmail(me.user.email);
+        setMe(me.user);
         const isOwner = me.roles.includes('owner');
         setOwner(isOwner);
         if (isOwner) await refresh();
@@ -147,17 +150,18 @@ function AdminUsersBody() {
       sortable: true,
       accessor: (u) => u.display_name,
       render: (u) => {
+        const displayName = canonicalMemberDisplayName(u, me);
         const src = avatarSrc(u.avatar_artifact);
         return (
           <div className="flex items-center gap-2.5">
             {src ? (
               <img src={src} alt="" className="h-7 w-7 rounded-full object-cover" />
             ) : (
-              <Avatar name={u.display_name} size={28} />
+              <Avatar name={displayName} size={28} />
             )}
             <div className="min-w-0">
               <div className="truncate font-medium text-[var(--adm-text)]">
-                {u.display_name}
+                {displayName}
                 {u.email === meEmail ? (
                   <span className="ml-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">(you)</span>
                 ) : null}
@@ -186,11 +190,14 @@ function AdminUsersBody() {
       header: 'Last seen',
       sortable: true,
       accessor: (u) => u.last_seen_at ?? '',
-      render: (u) => (
-        <span className="text-[var(--adm-text-muted)]">
-          {u.last_seen_at ? relativeTimeFromNow(u.last_seen_at, now) : 'never'}
-        </span>
-      ),
+      render: (u) => {
+        const lastSeen = presentLastSeen(u);
+        return (
+          <span className="text-[var(--adm-text-muted)]">
+            {lastSeen.kind === 'relative' ? relativeTimeFromNow(u.last_seen_at, now) : lastSeen.label}
+          </span>
+        );
+      },
     },
     {
       key: 'actions',

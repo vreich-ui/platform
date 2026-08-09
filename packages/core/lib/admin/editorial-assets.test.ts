@@ -32,6 +32,14 @@ describe('editorial asset projection', () => {
     assert.doesNotMatch(JSON.stringify(projected), /never-expose|pdf-templates|templateJson/);
   });
 
+  it('never exposes a UUID as a PDF template label', () => {
+    const projected = projectPdfTemplate({
+      templateId: 'e43c0e58-f68b-4ff5-8e8b-9d3c6c5a1b90',
+      latestVersion: 2,
+    });
+    assert.equal(projected?.label, 'PDF template');
+  });
+
   it('projects an artifact to an authenticated preview without leaking raw metadata', () => {
     const sha = 'a'.repeat(64);
     const projected = projectEditorialArtifact({
@@ -55,6 +63,20 @@ describe('editorial asset projection', () => {
     assert.equal(projected?.page_count, 4);
     assert.match(projected?.preview_url ?? '', /admin-get-blob-pdf/);
     assert.doesNotMatch(JSON.stringify(projected), /pdf-render-data|secret-internal-ref/);
+  });
+
+  it('uses human media fallbacks instead of checksum-derived filenames', () => {
+    const sha = 'c'.repeat(64);
+    const artifact = projectEditorialArtifact({
+      blobKey: `pdf/request-1/${sha}.pdf`,
+      sha256: sha,
+      contentType: 'application/pdf',
+      sizeBytes: 10,
+      createdAtISO: '2026-08-09T00:00:00.000Z',
+      artifactKind: 'pdf',
+    });
+    assert.equal(artifact?.label, 'Untitled PDF document');
+    assert.equal(artifact?.filename, 'PDF document');
   });
 });
 

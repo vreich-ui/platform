@@ -93,12 +93,13 @@ async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promi
   return json as T;
 }
 
-export const createObjectChat = (getToken: GetToken, objectType: string, objectId: string) =>
+export const createObjectChat = (getToken: GetToken, objectType: string, objectId: string, title?: string) =>
   post<{ chat: ChatSummaryView; existed: boolean }>(getToken, {
     action: 'create_chat',
     kind: 'object',
     object_type: objectType,
     object_id: objectId,
+    ...(title ? { title } : {}),
   });
 
 export const createFreeChat = (getToken: GetToken, title?: string) =>

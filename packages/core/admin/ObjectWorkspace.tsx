@@ -23,11 +23,22 @@ import { ObjectLens, objectLensMode } from './ObjectLensRegistry';
 import { ObjectBrowser } from './ObjectBrowser';
 import { AgentRail } from './AgentRail';
 import { CandidateStage } from './CandidateStage';
+import { cn } from './utils';
 import { useChat } from './chat';
 import { createObjectChat } from '@core/lib/admin/chat-client';
 import { candidateAtShortcut, currentCandidateText } from '@core/lib/admin/candidate-choice';
 import { MarginaliaThreadList } from './MarginaliaThreadList';
-import { IconAlertTriangle, IconDots, IconExternalLink, IconLock, IconPlus, IconRocket, IconWrench } from './icons';
+import {
+  IconAlertTriangle,
+  IconDots,
+  IconExternalLink,
+  IconLibrary,
+  IconLock,
+  IconPlus,
+  IconRocket,
+  IconSparkles,
+  IconWrench,
+} from './icons';
 import { objectDisplayName, objectTypeLabel, idTooltip } from '@core/lib/admin/display-name';
 import { resolveWorkspaceObjectType } from '@core/lib/admin/object-type-resolve';
 import type { ObjectType, ObjectRecord, HistoryEntry } from '@core/schema/object-record-v1';
@@ -37,6 +48,12 @@ import { objectStageModeClass } from '@core/lib/admin/object-stage';
 import { EDITORIAL_STATE_PRESENTATION, getEditorialObjectState } from '@core/lib/admin/editorial-state';
 import { fetchReleaseOverview, type ReleaseObjectView } from '@core/lib/admin/release-client';
 import { pageSectionLabel } from '@core/lib/admin/preview-logic';
+import {
+  WORKSPACE_COMPACT_PANEL_CLASS,
+  WORKSPACE_EXPANDED_GRID_CLASS,
+  WORKSPACE_EXPANDED_MIN_WIDTH,
+  WORKSPACE_EXPANDED_PANEL_CLASS,
+} from '@core/lib/admin/responsive-workspace';
 import {
   NEW_NAV_ITEM_COMPOSER_SEED,
   NEW_SECTION_COMPOSER_SEED,
@@ -434,6 +451,9 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [publicationOpen, setPublicationOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [expandedWorkspace, setExpandedWorkspace] = useState(false);
   const [now, setNow] = useState(0);
   const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [focus, setFocus] = useState<WorkspaceFocus>({ kind: 'object', label: '' });
@@ -448,19 +468,35 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const currentUser = useCurrentUser();
   const owner = currentUser.roles.includes('owner') || currentUser.user?.role === 'owner';
 
-  const load = async () => {
+  // Supporting panels must not mount twice: AgentRail owns approval effects,
+  // so the desktop rail and drawer rail are mutually exclusive at runtime.
+  useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${WORKSPACE_EXPANDED_MIN_WIDTH}px)`);
+    const sync = () => {
+      setExpandedWorkspace(media.matches);
+      if (media.matches) {
+        setPublicationOpen(false);
+        setAgentOpen(false);
+      }
+    };
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  const load = async (): Promise<Rec | undefined> => {
     const type = typeRef.current;
     if (!loc.id || !type) {
       setError('This object could not be identified. Open it from the content library.');
       setLoading(false);
-      return;
+      return undefined;
     }
     const { getObjectRecord, callObjectVerb } = await import('@core/lib/edit-mode/verbs-client');
     const { record } = await getObjectRecord(getToken, type, loc.id);
     if (!record) {
       setError(`${objectTypeLabel(type)} "${loc.id}" was not found.`);
       setLoading(false);
-      return;
+      return undefined;
     }
     setRecord(record as Rec);
     try {
@@ -477,6 +513,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     } catch {
       setReadiness(null);
     }
+    return record as Rec;
   };
 
   useEffect(() => {
@@ -493,10 +530,10 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
           return;
         }
       }
-      await load();
+      const loadedRecord = await load();
       // Chat-first (T9.14): the per-object conversation opens with the page.
       if (loc.id && typeRef.current) {
-        createObjectChat(getToken, typeRef.current, loc.id)
+        createObjectChat(getToken, typeRef.current, loc.id, loadedRecord ? objectDisplayName(loadedRecord) : undefined)
           .then(({ chat: created }) => setChatId(created.chat_id))
           .catch(() => setChatId(undefined));
       }
@@ -795,6 +832,29 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
             ? 'Failed'
             : undefined;
   const agentOccupied = chat.busy || workState !== undefined;
+  const agentRail = (
+    <AgentRail
+      chat={chat}
+      focus={focusLabel}
+      preferenceScope={`${currentUser.user?.email ?? 'anonymous'}:${record.object_id}`}
+      suggestions={focus.kind === 'object' ? suggestions : undefined}
+      contextActions={quickActions}
+      draftSeed={composerSeed}
+      approvalInStage={sequentialProposal}
+      aboveComposer={
+        readiness && readinessOpenItems > 0 ? (
+          <details className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
+            <summary className="cursor-pointer select-none text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-warning)]">
+              {readinessOpenItems} readiness item{readinessOpenItems === 1 ? '' : 's'} before publish
+            </summary>
+            <div className="mt-2">
+              <ReadinessList groups={readiness} />
+            </div>
+          </details>
+        ) : null
+      }
+    />
+  );
 
   const beginAdd = (kind: 'new-section' | 'navigation-item') => {
     const isSection = kind === 'new-section';
@@ -911,8 +971,21 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
         </div>
       </div>
 
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(12rem,20%)_minmax(0,52%)_minmax(18rem,28%)]">
-        <ObjectBrowser activeId={record.object_id} />
+      <div className={cn('mb-3 flex items-center justify-between gap-2', WORKSPACE_COMPACT_PANEL_CLASS)}>
+        <Button size="sm" variant="secondary" leftIcon={<IconLibrary size={16} />} onClick={() => setPublicationOpen(true)}>
+          Publication
+        </Button>
+        <Button size="sm" variant="secondary" leftIcon={<IconSparkles size={16} />} onClick={() => setAgentOpen(true)}>
+          Publishing Agent
+        </Button>
+      </div>
+
+      <div className={cn('grid min-h-0 gap-4', WORKSPACE_EXPANDED_GRID_CLASS)}>
+        {expandedWorkspace ? (
+          <div className={WORKSPACE_EXPANDED_PANEL_CLASS}>
+            <ObjectBrowser activeId={record.object_id} />
+          </div>
+        ) : null}
         <section
           className="flex min-h-0 flex-col overflow-hidden rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] lg:h-[calc(100dvh-8rem)]"
           aria-label={`${objectTypeLabel(record.object_type)} workspace`}
@@ -1055,28 +1128,20 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
             )}
           </div>
         </section>
-        <AgentRail
-          chat={chat}
-          focus={focusLabel}
-          preferenceScope={`${currentUser.user?.email ?? 'anonymous'}:${record.object_id}`}
-          suggestions={focus.kind === 'object' ? suggestions : undefined}
-          contextActions={quickActions}
-          draftSeed={composerSeed}
-          approvalInStage={sequentialProposal}
-          aboveComposer={
-            readiness && readinessOpenItems > 0 ? (
-              <details className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
-                <summary className="cursor-pointer select-none text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-warning)]">
-                  {readinessOpenItems} readiness item{readinessOpenItems === 1 ? '' : 's'} before publish
-                </summary>
-                <div className="mt-2">
-                  <ReadinessList groups={readiness} />
-                </div>
-              </details>
-            ) : null
-          }
-        />
+        {expandedWorkspace ? <div className={WORKSPACE_EXPANDED_PANEL_CLASS}>{agentRail}</div> : null}
       </div>
+
+      {!expandedWorkspace ? (
+        <Drawer open={publicationOpen} onClose={() => setPublicationOpen(false)} title="Publication" side="left" width={360}>
+          {publicationOpen ? <ObjectBrowser activeId={record.object_id} /> : null}
+        </Drawer>
+      ) : null}
+
+      {!expandedWorkspace ? (
+        <Drawer open={agentOpen} onClose={() => setAgentOpen(false)} title="Publishing Agent" width={480}>
+          {agentOpen ? agentRail : null}
+        </Drawer>
+      ) : null}
 
       {/* Details drawer — the classic CMS forms, one click away, never gone. */}
       <Drawer open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Details" width={560}>

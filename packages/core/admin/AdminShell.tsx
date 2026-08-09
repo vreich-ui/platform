@@ -44,6 +44,8 @@ import { avatarSrc } from '@core/lib/admin/users-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { listChats } from '@core/lib/admin/chat-client';
 import { getWorkSummary } from '@core/lib/admin/work-summary';
+import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
+import { settingsNavigationLabel } from '@core/lib/admin/admin-navigation';
 
 async function shellToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -76,7 +78,7 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    label: 'Settings · Platform',
+    label: 'Settings',
     ownerOnly: true,
     items: [
       { label: 'Visual identity', href: '/admin/settings/visual-identity', icon: IconPalette },
@@ -95,7 +97,17 @@ function isActive(currentPath: string, href: string): boolean {
   return currentPath === href || currentPath.startsWith(`${href}/`);
 }
 
-function NavList({ currentPath, owner, onNavigate }: { currentPath: string; owner: boolean; onNavigate?: () => void }) {
+function NavList({
+  currentPath,
+  owner,
+  settingsLabel,
+  onNavigate,
+}: {
+  currentPath: string;
+  owner: boolean;
+  settingsLabel: string;
+  onNavigate?: () => void;
+}) {
   const groups = NAV.filter((group) => !group.ownerOnly || owner);
   return (
     <nav className="flex flex-col gap-5" aria-label="Admin sections">
@@ -103,7 +115,7 @@ function NavList({ currentPath, owner, onNavigate }: { currentPath: string; owne
         <div key={group.label ?? `group-${gi}`} className="flex flex-col gap-1">
           {group.label ? (
             <p className="px-3 pb-1 text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
-              {group.label}
+              {group.label === 'Settings' ? settingsLabel : group.label}
             </p>
           ) : null}
           {group.items.map((item) => {
@@ -274,7 +286,12 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     <ToastProvider>
       <div className="adm-root flex min-h-screen bg-[var(--adm-surface-page)] text-[var(--adm-text)]">
         {/* Sidebar (desktop) */}
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-[var(--adm-border)] bg-[var(--adm-surface)] p-4 md:flex">
+        <aside
+          className={cn(
+            'sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-[var(--adm-border)] bg-[var(--adm-surface)] p-4',
+            ADMIN_EXPANDED_NAV_CLASS
+          )}
+        >
           <a href="/admin" className="adm-focusable mb-6 flex items-center gap-2 rounded px-1">
             <span className="grid h-7 w-7 place-items-center rounded-[var(--adm-radius-md)] bg-[var(--adm-accent)] text-[length:var(--adm-text-sm)] font-bold text-[var(--adm-text-on-accent)]">
               L
@@ -283,7 +300,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
               {identity.adminLabel}
             </span>
           </a>
-          <NavList currentPath={currentPath} owner={owner} />
+          <NavList currentPath={currentPath} owner={owner} settingsLabel={settingsNavigationLabel(identity.brandName)} />
           <a
             href="/"
             target="_blank"
@@ -301,7 +318,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             <IconButton
               label="Open navigation"
               icon={<IconMenu size={20} />}
-              className="md:hidden"
+              className={ADMIN_COMPACT_NAV_CLASS}
               onClick={() => setMobileNav(true)}
             />
             <h1 className="flex-1 truncate text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]">
@@ -420,7 +437,12 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
           side="left"
           width={280}
         >
-          <NavList currentPath={currentPath} owner={owner} onNavigate={() => setMobileNav(false)} />
+          <NavList
+            currentPath={currentPath}
+            owner={owner}
+            settingsLabel={settingsNavigationLabel(identity.brandName)}
+            onNavigate={() => setMobileNav(false)}
+          />
         </Drawer>
 
         <CommandPalette

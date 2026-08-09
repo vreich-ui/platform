@@ -90,6 +90,17 @@ export function peekCachedInventoryRows(): CachedInventory | null {
   return readSessionCache();
 }
 
+/**
+ * Returns persisted rows only when they are fresh enough to paint while a
+ * background refresh runs. Call this after hydration: reading browser storage
+ * during a React state initializer makes the client tree differ from SSR.
+ */
+export function freshCachedInventoryRows(nowMs = Date.now()): LibraryRow[] | null {
+  const cached = peekCachedInventoryRows();
+  if (!cached || nowMs - cached.fetchedAt > INVENTORY_PERSISTED_MAX_AGE_MS) return null;
+  return cached.rows;
+}
+
 async function requestInventory(getToken: GetToken): Promise<LibraryRow[]> {
   const { status, body } = await callObjectVerb(getToken, { action: 'inventory' });
   if (status !== 200) {

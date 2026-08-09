@@ -142,6 +142,8 @@ export const chatRunSchema = z.object({
   learning_mode: z.boolean().default(false),
   /** Human-readable object/section focus supplied by the workspace at send time. */
   focus: z.string().max(500).optional(),
+  /** Server-derived: only an Owner who explicitly requested diagnostics may see technical detail. */
+  diagnostics_requested: z.boolean().default(false),
   trigger_token: z.string().optional(),
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),
