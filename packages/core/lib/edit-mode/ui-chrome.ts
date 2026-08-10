@@ -267,6 +267,26 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-tray footer .dl-em-deploy{flex:1;font-size:11px;color:var(--dlem-muted)}
 .dl-em-tray .dl-em-btn.dl-em-primary{background:var(--dlem-accent);border-color:var(--dlem-accent);color:var(--dlem-accent-ink)}
 @media (max-width:720px){.dl-em-panel{top:auto;left:10px;right:10px;bottom:10px;width:auto;max-height:62vh}}
+/* Glass treatment (Wolf, 2026-08-10 — docs/design/marginalia-glass-ui-modernization.md
+   §2): extends the blur/tint .dl-em-chip already uses to the rest of the
+   edit-mode chrome so the whole surface reads as one glass layer instead of
+   one glass chip plus several flat opaque cards. Tokens are the same
+   --aw-color-* brand vars as the rest of the file, so the tint follows
+   whatever theme is active. Later in source than each rule's base
+   definition above, so these overrides win at equal specificity. */
+.dl-em-panel{background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 78%,transparent);
+  -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
+  border:1px solid color-mix(in srgb,var(--aw-color-primary,rgb(20 122 140)) 18%,transparent)}
+.dl-em-panel header,.dl-em-acc.dl-em-open>.dl-em-acc-head{
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 65%,transparent);
+  -webkit-backdrop-filter:blur(12px) saturate(1.3);backdrop-filter:blur(12px) saturate(1.3)}
+.dl-em-confirmcard{background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 82%,transparent);
+  -webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);
+  border:1px solid color-mix(in srgb,var(--dlem-danger) 25%,transparent)}
+.dl-em-tray{background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 70%,transparent);
+  -webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3)}
+.dl-em-msg.dl-em-ai,.dl-em-diff{background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 60%,transparent);
+  -webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2)}
 `;
 
 // ── inline icons ─────────────────────────────────────────────────────────────
