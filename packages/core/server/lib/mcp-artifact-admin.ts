@@ -44,6 +44,7 @@ import {
 } from './artifacts.js';
 import { validateRequestId } from '../../lib/agents-naming.js';
 import { getAdminStateFromEvent } from './admin-auth.js';
+import { resolveAdminAccessFromEvent } from './request-roles.js';
 
 import {
   ARTIFACT_LIST_DEFAULT_LIMIT,
@@ -290,21 +291,54 @@ const getAdminToolState = async (event: LambdaEvent) => {
  * Gate for the genuinely destructive/migration admin tools
  * (soft_delete_artifact, restore_artifact, migrate_artifact_indexes,
  * reconcile_artifact_indexes — all hidden from MCP discovery via
- * INTERNAL_ONLY_TOOLS in mcp.ts). Deliberately UNCHANGED by QA-W16-3 below:
- * these stay restricted to the server publish secret or a real Netlify
- * Identity admin session, exactly as before. Broadening this gate to any
- * MCP-authenticated caller (the QA-W16-3 fix applied to the three read-only
- * browse tools) would hand every ordinary agent connector destructive/
- * migration access it never had — out of scope for the QA-W16-3 finding,
- * which is specifically about the three tools below that have no legitimate
- * caller other than MCP agents in the first place.
+ * INTERNAL_ONLY_TOOLS in mcp.ts). These stay ADMIN-ONLY: Wolf's 2026-08-10
+ * ruling on KNOWN_ISSUES #2 chose Option B (fix the gate so it fails
+ * correctly) over Option A (widen them to any MCP-authenticated caller the
+ * way the three read-only browse tools below were widened). Do not add an
+ * `event.mcpGateAuthenticated` bypass here.
+ *
+ * What was broken (QA-W16-3): this gate never failed OPEN, it failed WRONG.
+ * It resolved authority exclusively from a role source that does not exist on
+ * the MCP path — `getAdminStateFromEvent`, called with no Lambda `context`,
+ * so its `clientContext.user` branch is unreachable and it always falls
+ * through to verifying the caller's bearer token against
+ * `${IDENTITY_URL}/user`. An MCP caller's bearer is the shared
+ * MCP_HTTP_AUTH_TOKEN, a verified per-agent token, or an OAuth access token —
+ * never a GoTrue session token — so that round trip 401s every time and the
+ * caller got `Authentication token could not be verified.`, i.e. "your MCP
+ * credentials are invalid" when in fact they were valid and merely not
+ * admin. Two consequences fixed here:
+ *   1. An MCP-gated caller is refused up front, without the doomed identity
+ *      round trip, with a message that says exactly why (admin-only) instead
+ *      of impersonating a credential failure.
+ *   2. The human path now resolves through `resolveAdminAccessFromEvent` —
+ *      the W15 S1 single admin resolver (ADMIN_EMAILS bootstrap owners ∪ the
+ *      users-store tier) — instead of `getAdminStateFromEvent`'s older
+ *      ADMIN_EMAILS-only `isAdmin`, which wrongly denied an admin granted the
+ *      tier by store invite.
+ * Every path still fails closed; only the publish secret and a real admin
+ * session pass. If an agent tier ever needs these verbs, that is a new,
+ * explicit grant added here — not the absence of a check.
  */
 const requireAdminToolAccess = async (event: LambdaEvent) => {
   if (hasValidNetlifyPublishSecret(event)) return undefined;
 
-  const adminState = await getAdminToolState(event);
+  if (event.mcpGateAuthenticated) {
+    return toolError(
+      'This tool is admin-only. Your MCP credentials are valid, but destructive and index-migration artifact tools require the server publish secret or a Netlify Identity admin session.',
+      { error_code: 'admin_required' }
+    );
+  }
 
-  return 'isError' in adminState ? adminState : undefined;
+  const access = await resolveAdminAccessFromEvent(event);
+  if (access.authenticated && access.isAdmin) return undefined;
+
+  return toolError(
+    access.authenticated
+      ? 'This user is not authorized to administer artifacts.'
+      : access.error || 'A valid admin session token is required.',
+    { error_code: 'admin_required' }
+  );
 };
 
 /**
@@ -320,7 +354,7 @@ const requireAdminToolAccess = async (event: LambdaEvent) => {
  * Root cause: nothing in this codebase ever calls these three functions from
  * a browser request carrying a real Netlify Identity session — they are
  * dispatched EXCLUSIVELY through mcp.ts's callTool. `getAdminToolState`
- * (used via requireAdminToolAccess above) unconditionally tries to verify
+ * (still the human-session path here) unconditionally tries to verify
  * the caller's Authorization bearer token as a Netlify Identity/GoTrue
  * session token. Every MCP caller's bearer token is the shared
  * MCP_HTTP_AUTH_TOKEN or a verified per-agent token — never a GoTrue token —

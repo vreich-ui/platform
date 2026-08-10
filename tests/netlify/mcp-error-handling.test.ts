@@ -82,12 +82,16 @@ test('admin artifact browsing and reconciliation MCP tools require admin authent
       }),
     });
     const body = JSON.parse(response.body) as {
-      result: { isError: boolean; structuredContent: { error: string } };
+      result: { isError: boolean; structuredContent: { error: string; error_code?: string } };
     };
 
     assert.equal(response.statusCode, 200);
     assert.equal(body.result.isError, true);
-    assert.match(body.result.structuredContent.error, /Clerk session token|required/i);
+    // QA-W16-3 / KNOWN_ISSUES #2 (Option B): still refused, but now with the
+    // catalogued code and the real reason — not a bogus "your credentials
+    // could not be verified" from an identity check no MCP caller can pass.
+    assert.equal(body.result.structuredContent.error_code, 'admin_required');
+    assert.match(body.result.structuredContent.error, /admin-only/i);
   } finally {
     if (previousClerkSecret === undefined) delete process.env.CLERK_SECRET_KEY;
     else process.env.CLERK_SECRET_KEY = previousClerkSecret;
