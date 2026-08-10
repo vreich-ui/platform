@@ -84,7 +84,7 @@ const OPTIONAL_HANDLER_TOOLS = new Set(['verify_article_images']);
  * not part of normal information exchange or governed object editing, and a
  * large destructive/upload surface makes agent planning needlessly noisy.
  */
-const INTERNAL_ONLY_TOOLS = new Set([
+export const INTERNAL_ONLY_TOOLS = new Set([
   'trigger_netlify_build',
   'create_artifact_upload_intent',
   'create_artifact_from_url',
@@ -94,6 +94,10 @@ const INTERNAL_ONLY_TOOLS = new Set([
   'migrate_artifact_indexes',
   'wipe_blob_stores',
   'reconcile_artifact_indexes',
+  // T16.5: an operational diagnostic (per-family env-gate truth), not part of
+  // normal agent object editing — callable (the fleet capability probe uses
+  // it) but not advertised, same rationale as the tools above it.
+  'capability_status',
 ]);
 
 /** True when this site supplied the article-image verification handler. */
@@ -128,6 +132,7 @@ import { getStripeClient } from '../lib/stripe-env.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { getGovernanceBlobStore } from '../lib/governance-store.js';
+import { getCapabilityStatus } from '../lib/capability-status.js';
 import { getAgentKeysDoc, resolveVerifiedAgentName, type AgentKeysBlobStore } from '../lib/agent-keys.js';
 import {
   buildWwwAuthenticate,
@@ -706,6 +711,10 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         instance_age_ms: Date.now() - INSTANCE_BOOTED_AT_MS,
         instance_invocations: instanceInvocationCount,
       });
+    case 'capability_status':
+      // T16.5: pure, synchronous, in-process — no store round trip, nothing
+      // secret-shaped in the response (booleans + env-var NAMES only).
+      return toolResult(getCapabilityStatus());
     case 'deploy_status':
       return callDeployStatus(event, input);
     case 'verify_article_images':

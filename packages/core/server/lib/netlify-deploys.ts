@@ -37,15 +37,32 @@ const getNetlifyDeployConfig = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAM
   return { siteId, token };
 };
 
-export const isNetlifyDeployLookupConfigured = () => {
-  const { siteId, token } = getNetlifyDeployConfig();
-
-  return Boolean(siteId && token);
+/**
+ * T16.5: the single predicate for "is deploy lookup configured" — both the
+ * real call path (isNetlifyDeployLookupConfigured below) and
+ * capability-status.ts's `deploy_lookup` family read this same function.
+ * Reports the CANONICAL name of each missing binding (the first entry in the
+ * site-binding fallback chain — the T11.7 table's documented name), not
+ * every alias.
+ */
+export const netlifyDeployLookupMissingEnvVars = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): string[] => {
+  const { siteId, token } = getNetlifyDeployConfig(envNames);
+  return [...(siteId ? [] : [envNames.blobSiteId[0]]), ...(token ? [] : [envNames.deployLookupToken[0]])];
 };
+
+export const isNetlifyDeployLookupConfigured = () => netlifyDeployLookupMissingEnvVars().length === 0;
 
 const getNetlifyBuildHookUrl = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) => readBoundEnv(envNames.buildHookUrl) ?? '';
 
-export const isNetlifyBuildHookConfigured = () => Boolean(getNetlifyBuildHookUrl());
+/**
+ * T16.5: the single predicate for "is the build hook configured" — both the
+ * real call path (isNetlifyBuildHookConfigured below) and
+ * capability-status.ts's `build_hook` family read this same function.
+ */
+export const netlifyBuildHookMissingEnvVars = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): string[] =>
+  getNetlifyBuildHookUrl(envNames) ? [] : [envNames.buildHookUrl[0]];
+
+export const isNetlifyBuildHookConfigured = () => netlifyBuildHookMissingEnvVars().length === 0;
 
 export class NetlifyBuildHookTriggerError extends Error {
   statusCode: number;

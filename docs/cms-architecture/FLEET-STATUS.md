@@ -58,6 +58,29 @@ All three tenants still need the same three account-authority steps before `/adm
 - [ ] **Housekeeping, low priority**: fold the S2 and S6 state-of-play sidecar entries into `state-of-play.md` proper (queued as `W15.FOLD` in `queue.tsv`, deferred for cost — it's a ~412 KB file with no cheap partial-write path here).
 - [ ] **Branch cleanup**: 7 now-dead W15 branches are safe to delete (`w15/s1-admin-core-repairs`, `w15/s2-fleet-admin-genesis`, `w15/s3-tenant-retrofit`, `w15/s3-resolved`, `w15/s3-docs-completion`, `w15/s4x-ask-ai-context-enrichment`, `w15/s6-verification-records`) — needs someone with real repo write access, the agent sessions here don't have branch-delete permission.
 
+## Tenant capability matrix (live)
+
+**T16.5**: nine tool families are advertised identically across the fleet but
+env-gated at CALL TIME (pdf bridge, pdf storage grant, commerce/Stripe,
+purchase token, build hook, deploy lookup, git committer, blob credentials,
+artifact upload — `mcp_auth` is trivially true whenever a call answers at
+all). A tool that lists in `tools/list` but 503s on one tenant is a P1
+violation, not "configuration" (16-genesis-parity-plan.md §3, law P3) — this
+table is the live proof, refreshed after any env/provisioning change and by
+the credentialed drives, never inferred from repo state.
+
+`node scripts/fleet-capability-probe.mjs --all --markdown` (or `--site <slug>
+--endpoint <url>`, repeatable) regenerates the block below against live
+`/mcp` endpoints — per-site token from `MCP_HTTP_AUTH_TOKEN__<SLUG>` in env,
+never argv. **T16.9 runs it against the real fleet and replaces this stub**;
+until then this row is exactly what it says: not yet run.
+
+| Tenant | pdf_bridge | pdf_storage_grant | commerce | purchase_token | build_hook | deploy_lookup | git_committer | blob_credentials | mcp_auth | artifact_upload |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Dr-Lurie (root) | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run |
+| Platform | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run |
+| Fernwell | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run | not yet run |
+
 ## Verification evidence (S6 session, 2026-08-04, still accurate for what it covered)
 
 Fresh clone of `main` at the time, `npm ci` → `npm run check` (0 errors/warnings) → `npm test` (1636+102 pass) → root build (75 pages) → `sites/platform` build (44 pages) all green. Fleet parity audit PASS on all three tenants plus a throwaway scaffold. A 7-assertion headless-Chromium drive against the built `sites/platform` confirmed: `/admin` loads, the content library loads, the S1 deep-link regression (`/admin/content/page_home` without `?type=`) is genuinely fixed, "Back to library" doesn't loop, and a signed-out visitor triggers zero admin network calls and never loads the real editor bundle. Independently re-verified after S3/S4x landed: `npm run check` clean, 1642+102 tests passing (S3 PR #505's own verification pass).

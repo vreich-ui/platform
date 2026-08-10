@@ -18,17 +18,34 @@ const nonEmpty = (value: string | undefined): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
-export const resolvePdfToolClientConfig = (env: EnvSource = process.env) => {
-  const baseUrl = nonEmpty(env.PDF_TOOL_BASE_URL)?.replace(/\/+$/, '');
+/**
+ * T16.5: the single predicate for "is the pdf-tool bridge configured" — both
+ * the real call path (resolvePdfToolClientConfig below) and
+ * capability-status.ts's `pdf_bridge` family read this same function, so
+ * there is exactly one place the env names live.
+ */
+export const pdfToolBridgeMissingEnvVars = (env: EnvSource = process.env): string[] => {
+  const baseUrl = nonEmpty(env.PDF_TOOL_BASE_URL);
   const token = nonEmpty(env.PDF_TOOL_AGENT_RUN_TOKEN);
-  const missing = [...(baseUrl ? [] : ['PDF_TOOL_BASE_URL']), ...(token ? [] : ['PDF_TOOL_AGENT_RUN_TOKEN'])];
-  return missing.length > 0
-    ? {
-        ok: false as const,
-        error: `Platform's pdf-tool bridge is not configured (missing ${missing.join(' and ')}).`,
-        errorCode: 'pdf_tool_bridge_not_configured' as const,
-      }
-    : { ok: true as const, baseUrl: baseUrl!, token: token! };
+  return [...(baseUrl ? [] : ['PDF_TOOL_BASE_URL']), ...(token ? [] : ['PDF_TOOL_AGENT_RUN_TOKEN'])];
+};
+
+export const isPdfToolBridgeConfigured = (env: EnvSource = process.env): boolean =>
+  pdfToolBridgeMissingEnvVars(env).length === 0;
+
+export const resolvePdfToolClientConfig = (env: EnvSource = process.env) => {
+  const missing = pdfToolBridgeMissingEnvVars(env);
+  if (missing.length > 0) {
+    return {
+      ok: false as const,
+      error: `Platform's pdf-tool bridge is not configured (missing ${missing.join(' and ')}).`,
+      errorCode: 'pdf_tool_bridge_not_configured' as const,
+      missing,
+    };
+  }
+  const baseUrl = nonEmpty(env.PDF_TOOL_BASE_URL)!.replace(/\/+$/, '');
+  const token = nonEmpty(env.PDF_TOOL_AGENT_RUN_TOKEN)!;
+  return { ok: true as const, baseUrl, token };
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

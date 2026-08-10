@@ -74,19 +74,33 @@ const toNonEmptyString = (value: string | undefined) => {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 };
 
-export const buildPdfToolStorageGrant = (now: Date = new Date()): BuildPdfToolStorageGrantResult => {
+/**
+ * T16.5: the single predicate for "is the pdf-tool storage grant configured"
+ * — both the real call path (buildPdfToolStorageGrant below) and
+ * capability-status.ts's `pdf_storage_grant` family read this same function,
+ * so there is exactly one place the env names live.
+ */
+export const pdfToolStorageGrantMissingEnvVars = (): string[] => {
   const token = toNonEmptyString(process.env.PDF_TOOL_STORAGE_TOKEN);
   const siteId = toNonEmptyString(process.env.PDF_TOOL_STORAGE_SITE_ID);
+  return [...(token ? [] : ['PDF_TOOL_STORAGE_TOKEN']), ...(siteId ? [] : ['PDF_TOOL_STORAGE_SITE_ID'])];
+};
 
-  if (!token || !siteId) {
-    const missing = [...(token ? [] : ['PDF_TOOL_STORAGE_TOKEN']), ...(siteId ? [] : ['PDF_TOOL_STORAGE_SITE_ID'])];
+export const isPdfToolStorageGrantConfigured = (): boolean => pdfToolStorageGrantMissingEnvVars().length === 0;
 
+export const buildPdfToolStorageGrant = (now: Date = new Date()): BuildPdfToolStorageGrantResult => {
+  const missing = pdfToolStorageGrantMissingEnvVars();
+
+  if (missing.length > 0) {
     return {
       ok: false,
       error: `pdf-tool storage grants are not configured on this server (missing ${missing.join(' and ')}).`,
       errorCode: 'pdf_tool_storage_grant_not_configured',
     };
   }
+
+  const token = toNonEmptyString(process.env.PDF_TOOL_STORAGE_TOKEN)!;
+  const siteId = toNonEmptyString(process.env.PDF_TOOL_STORAGE_SITE_ID)!;
 
   return {
     ok: true,

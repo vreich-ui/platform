@@ -80,6 +80,24 @@ const getSiteIdDiagnostic = (
   };
 };
 
+/**
+ * T16.5: the single predicate for "is the explicit Netlify Blobs API
+ * credential pair configured" — both the real call path
+ * (getBlobStoreSourceDiagnostics/getApiStoreConfig below) and
+ * capability-status.ts's `blob_credentials` family read this same function.
+ * Absence is NOT necessarily an outage (blob-store falls back to the Lambda
+ * blob context or a local file-backed store), so this reports "explicit
+ * API config present", not "blobs reachable at all".
+ */
+export const blobCredentialsMissingEnvVars = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): string[] => {
+  const siteID = readBoundEnv(envNames.blobSiteId);
+  const token = readBoundEnv(envNames.blobToken);
+  return [...(siteID ? [] : [envNames.blobSiteId[0]]), ...(token ? [] : [envNames.blobToken[0]])];
+};
+
+export const isBlobCredentialsConfigured = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): boolean =>
+  blobCredentialsMissingEnvVars(envNames).length === 0;
+
 export const getBlobStoreSourceDiagnostics = (
   storeName: string,
   event: unknown,
@@ -88,7 +106,7 @@ export const getBlobStoreSourceDiagnostics = (
   const envNames = binding?.env ?? PLATFORM_ENV_NAMES;
   const siteID = readBoundEnv(envNames.blobSiteId);
   const token = readBoundEnv(envNames.blobToken);
-  const explicitApiConfigUsed = Boolean(siteID && token);
+  const explicitApiConfigUsed = isBlobCredentialsConfigured(envNames);
   const lambdaBlobContextUsed = !explicitApiConfigUsed && hasNetlifyBlobContext(event);
   const source = explicitApiConfigUsed
     ? 'explicit-api-config'
@@ -125,7 +143,7 @@ const getApiStoreConfig = (
   const siteID = readBoundEnv(envNames.blobSiteId);
   const token = readBoundEnv(envNames.blobToken);
 
-  if (!siteID || !token) return undefined;
+  if (!isBlobCredentialsConfigured(envNames)) return undefined;
 
   const apiURL = readBoundEnv(envNames.blobApiUrl);
 

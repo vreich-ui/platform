@@ -37,6 +37,21 @@ export const stripeWebhookSecret = (env: NodeJS.ProcessEnv = process.env): strin
   return value ? value : undefined;
 };
 
+/**
+ * T16.5: the single predicate for "is commerce/Stripe configured" — both the
+ * real call path (getStripeClient, via stripeSecretKey above) and
+ * capability-status.ts's `commerce` family read the same
+ * stripeSecretKey/stripeMode logic, so there is exactly one place the
+ * mode->env-var mapping lives. Reports only the ONE key the active mode
+ * actually needs — the other mode's key is irrelevant to whether commerce
+ * works right now.
+ */
+export const commerceMissingEnvVars = (env: NodeJS.ProcessEnv = process.env): string[] =>
+  stripeSecretKey(env) ? [] : [stripeMode(env) === 'live' ? 'STRIPE_SECRET_KEY' : 'STRIPE_SECRET_KEY_TEST'];
+
+export const isCommerceConfigured = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  commerceMissingEnvVars(env).length === 0;
+
 /** The product linkage block matching the server's mode (§8.7). */
 export const stripeLinkageForMode = (
   commerce: Pick<ProductCommerce, 'stripe' | 'stripe_test'>,

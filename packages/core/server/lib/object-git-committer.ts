@@ -108,6 +108,23 @@ export type CommitMaterializedFilesResult = {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const defaultBackoffMs = (attempt: number) => DEFAULT_BACKOFF_BASE_MS * 2 ** (attempt - 1);
 
+/**
+ * T16.5: the single predicate for "is the object git committer configured" —
+ * both the real call path (resolveGitHubConfig below) and
+ * capability-status.ts's `git_committer` family read this same function, so
+ * there is exactly one place the required env names live. GITHUB_BRANCH is
+ * deliberately excluded: it defaults to 'main' and never gates configured/
+ * not-configured (T11.7 census).
+ */
+export const gitCommitterMissingEnvVars = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): string[] => {
+  const token = readBoundEnv(envNames.gitContentToken);
+  const repo = readBoundEnv(envNames.gitRepository);
+  return [...(token ? [] : ['GITHUB_CONTENT_TOKEN']), ...(repo ? [] : ['GITHUB_REPOSITORY'])];
+};
+
+export const isGitCommitterConfigured = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): boolean =>
+  gitCommitterMissingEnvVars(envNames).length === 0;
+
 const resolveGitHubConfig = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) => {
   const token = readBoundEnv(envNames.gitContentToken);
   const repo = readBoundEnv(envNames.gitRepository);

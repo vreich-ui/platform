@@ -73,6 +73,17 @@ const getNetlifyEnvValue = (key: string) => {
 export const getArtifactUploadTokenSecret = () =>
   getNetlifyEnvValue('ARTIFACT_UPLOAD_TOKEN_SECRET') || process.env.ARTIFACT_UPLOAD_TOKEN_SECRET || '';
 
+/**
+ * T16.5: the single predicate for "is artifact-upload token signing
+ * configured" — both the real call path (createArtifactUploadToken /
+ * verifyArtifactUploadToken above, via getArtifactUploadTokenSecret) and
+ * capability-status.ts's `artifact_upload` family read this same function.
+ */
+export const artifactUploadMissingEnvVars = (): string[] =>
+  getArtifactUploadTokenSecret() ? [] : ['ARTIFACT_UPLOAD_TOKEN_SECRET'];
+
+export const isArtifactUploadConfigured = (): boolean => artifactUploadMissingEnvVars().length === 0;
+
 export const getDirectArtifactUploadMaxBytes = () => {
   const raw = getNetlifyEnvValue('ARTIFACT_UPLOAD_MAX_BYTES') || process.env.ARTIFACT_UPLOAD_MAX_BYTES;
   if (!raw) return defaultDirectArtifactUploadMaxBytes;

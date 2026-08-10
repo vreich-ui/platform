@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { configureMcp, visibleToolDefinitions } from '../../packages/core/server/functions/mcp.js';
+import { configureMcp, visibleToolDefinitions, INTERNAL_ONLY_TOOLS } from '../../packages/core/server/functions/mcp.js';
 
 /** Walk up to the repo root — this file runs from the COMPILED tree. */
 const repoRoot = (): string => {
@@ -80,6 +80,16 @@ test('verify_article_images is omitted on a site that does not inject its handle
 
   configureMcp(governedOnly);
   assert.ok(!visibleToolDefinitions().some((tool) => tool.name === 'verify_article_images'));
+});
+
+test('INTERNAL_ONLY_TOOLS (T16.5: capability_status joins this set) are callable but never advertised', () => {
+  for (const handlers of [governedOnly, withVerifyArticleImages]) {
+    configureMcp(handlers);
+    const names = new Set(visibleToolDefinitions().map((tool) => tool.name));
+    for (const internalToolName of INTERNAL_ONLY_TOOLS) {
+      assert.ok(!names.has(internalToolName), `${internalToolName} must not appear in tools/list`);
+    }
+  }
 });
 
 test('omitting the optional handler hides only the tools that need it', () => {

@@ -48,6 +48,18 @@ export const purchaseTokenSecret = (env: NodeJS.ProcessEnv = process.env): strin
   return value.length >= 16 ? value : undefined;
 };
 
+/**
+ * T16.5: the single predicate for "is purchase-token delivery configured" —
+ * both the real call path (order-reissue.ts, get-purchase.ts, stripe-webhook,
+ * claim-free.ts, all via purchaseTokenSecret above) and capability-status.ts's
+ * `purchase_token` family read the same purchaseTokenSecret check.
+ */
+export const purchaseTokenMissingEnvVars = (env: NodeJS.ProcessEnv = process.env): string[] =>
+  purchaseTokenSecret(env) ? [] : [PURCHASE_TOKEN_SECRET_ENV];
+
+export const isPurchaseTokenConfigured = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  purchaseTokenMissingEnvVars(env).length === 0;
+
 export const mintPurchaseToken = (payload: PurchaseTokenPayload, secret: string): string => {
   const body = b64url(JSON.stringify(payload));
   return `${body}.${sign(body, secret)}`;

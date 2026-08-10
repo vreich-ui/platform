@@ -693,4 +693,10 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       limit: artifactReconcileLimitJsonSchema,
     }),
   },
+  {
+    name: 'capability_status',
+    description:
+      "Admin-only diagnostic (T16.5): reports this tenant's per-family env-gate status for every tool family that is env-gated at call time (pdf_bridge, pdf_storage_grant, commerce, purchase_token, build_hook, deploy_lookup, git_committer, blob_credentials, mcp_auth, artifact_upload). Each family reports {configured, missing} — missing is a list of env-var NAMES only, never values, lengths, or prefixes. Takes no arguments. Also returns this deployment's own site_id (non-secret) so a fleet probe can target the right site for the pdf-tool bridge families. Use this to find a tenant where a tool family lists in tools/list but 503s at call time — the class of gap docs/cms-architecture/16-genesis-parity-plan.md §1.1 records as previously undetected.",
+    inputSchema: objectSchema({}),
+  },
 ];
