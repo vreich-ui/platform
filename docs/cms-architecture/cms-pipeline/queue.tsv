@@ -137,12 +137,13 @@ T13.13	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.13-sco
 #W15.S3	human_gate	claude-sonnet-5	medium	docs/cms-architecture/FLEET-STATUS.md
 #W15.S4x	human_gate	claude-sonnet-5	medium	docs/cms-architecture/FLEET-STATUS.md
 #W15.LEAK	notify	claude-sonnet-5	low	docs/cms-architecture/FLEET-STATUS.md
-# Housekeeping (auto, mechanical, no diagnosis needed) — still pending, deferred for cost (state-of-play.md is
-# 412 KB, too large to push whole through the contents API cheaply without a dedicated pass): fold
-# state-of-play-2026-08-04-w15-s2.md AND state-of-play-2026-08-04-w15-s6.md
-# into the top of state-of-play.md (this-S6-entry above S2's, both above the
-# 2026-08-03 entry), then delete both standalone files.
-W15.FOLD	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/state-of-play-2026-08-04-w15-s6.md
+# W15.FOLD row below is RESOLVED — left commented for audit trail, do not re-run. Closed 2026-08-10:
+# the three sidecars (state-of-play-ENTRY-2026-08-04-w15-s3.md, state-of-play-2026-08-04-w15-s6.md,
+# state-of-play-2026-08-04-w15-s2.md) were folded into the top of state-of-play.md in order
+# S3 → S6 → S2 (each sidecar's own commit timestamp as tiebreaker — the sidecars' embedded
+# instructions disagreed with each other), inserted below the 2026-08-10 W16 entry and above the
+# 2026-08-03 entry, then all three sidecar files were deleted.
+#W15.FOLD	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/state-of-play-2026-08-04-w15-s6.md
 #
 # W16 — genesis scope + fleet parity (mandate: docs/cms-architecture/16-genesis-parity-plan.md, from the
 # 2026-08-10 fleet audit). T16.0 first — it is the manifest the rest consume. T16.9 is the only

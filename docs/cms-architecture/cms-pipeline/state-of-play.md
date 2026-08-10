@@ -69,6 +69,244 @@ Next actions, in order: (1) land + release this wave (deploys all three sites), 
 replace the FLEET-STATUS matrix stub with real output, (4) the two doc follow-ups: add
 `PURCHASE_TOKEN_SECRET` to T11.7's table; decide drlurie's tracking onboarding timing.
 
+## Session 2026-08-04 (W15 S3 — existing tenants retrofitted to admin parity; the whole W15 stack landed on main)
+
+Every EXISTING tenant now matches what `create-site` emits for a new client,
+and the W15 stack is MERGED: main carries S1 (partial, 1/4), S2 (audit
+machinery + genesis completeness), S3 (this retrofit, landed as PR #505),
+plus the PDF template bridge (was draft PR #501) and an S4x Ask-AI context
+enrichment (PR #504) that rode the same landing window.
+
+**Session-topology note (nothing hidden):** this stage ran as MULTIPLE
+concurrent sessions racing on the same branch. One session pushed the
+retrofit in four commits off S1 and opened PR #503 — unaware S2's branch and
+PR #502 had surfaced mid-flight. A second session verified that work end to
+end, merged `w15/s2-fleet-admin-genesis` into the branch, and re-verified
+the union. A third actor restacked and landed everything: it recreated
+S1+S2 on main, redid the S3 content against that base
+(`w15/s3-resolved`, PR #505, squash-merged 15:30 +03), and closed the
+morning's PR queue. The result on main was then INDEPENDENTLY verified by
+the second session (below). The S3 retrofit content on main and the
+verified reconciliation tree agree file-for-file; the only casualties of
+the race were process, not content. Stale branches from the race
+(`w15/s3-tenant-retrofit` with post-restack reconcile commits,
+`w15/s1-admin-core-repairs` with a dead-end #503 merge) can be deleted —
+nothing on them is missing from main except this entry and the checklist
+refinements landed alongside it.
+
+**The retrofit itself (what W15 S3 changed):** fernwell's four missing
+`[...blog]` reader loaders (now byte-identical to
+`site-reader-route-templates.mjs`'s F14 block-body output); the `postDir`
+pin on platform + fernwell (`buildSiteCollections` defaulted to
+`src/data/post` — Dr-Lurie's preserved legacy shelf — so Dr-Lurie's
+committed `test-article-dry-run` was PUBLICLY SERVED on kugel-platform's
+`/test-article-dry-run` and listed on `/library`; each tenant now has its
+own empty `data/post/` shelf and `create-site` emits the pin); per-site
+`SECRETS_SCAN_OMIT_KEYS = "GITHUB_REPOSITORY"` (root parity, the T9.24
+lesson); and the site-config drift test widened from Dr-Lurie-only to all
+three tenants. Fernwell is NOT retired — F6 was a page-retire drill ON
+fernwell, and T14.9 leaves it up for feature testing — so it was
+retrofitted like the rest. Client sites outside this repo: none
+(13-separation-plan is design-only; the monorepo is the whole fleet).
+
+**Verification at current main (084198b), independent of the landing
+actor:** `npm run check` clean (astro check 0 errors); full suite
+**1647 + 102 pass, 0 fail** (includes S2's 13 admin-parity tests, which run
+the audit against every real tenant on every `npm test`, the widened drift
+guards, the PDF-bridge tests, and the S4x test);
+`audit-site-admin-parity.mjs --all` — **12/12 automatable checks PASS ×3
+tenants**; `migrate-site --admin-parity` — nothing automatable to fix; all
+three builds green (root 75 pages, platform 43, fernwell 15 incl.
+`/learn/library`), every `/admin` route present in each dist. **Build-diff
+discipline:** root reader pages byte-identical; platform/fernwell reader
+pages identical EXCEPT the documented leak removal (`/test-article-dry-run`
++ library listing + sitemap). One pre-existing oddity worth its own look:
+the admin `_astro` chunk hashes churn on every same-tree rebuild (verified
+by building an identical tree twice) — build nondeterminism in the admin
+React bundles, not a W15 change.
+
+**What the parity machinery should learn** (recorded in
+`15-tenant-retrofit-checklist.md`): the `postDir` pin and the per-site
+secrets-scan omission as `admin-parity.mjs` audit checks + `--write` fixes.
+**Wolf's remaining human steps** are in that checklist — first-Owner
+sign-in confirmation on platform/fernwell, one 12-store probe run per
+tenant (4 stores were never probed pre-S2 — use `--netlify-site-name`, see
+the checklist warning), and verifying the three post-merge production
+deploys went green. The audit ran twice over (by hand against `create-site`
+emissions, and via S2's script) and the two agree everywhere they overlap.
+
+## Session 2026-08-04 (W15 S6 — fleet verification + status)
+
+Final stage of the scheduled [W15-fleet] sequence: an autonomous verification
+pass over everything the earlier sessions produced, run against a fresh
+clone of `main` and the live GitHub PR/branch state (read-only — nothing in
+this session merged, deployed, or released anything).
+
+**Headline finding: two PRs report "merged" on GitHub but their commits are
+NOT reachable from `main`.** `git merge-base --is-ancestor` against
+`origin/main` was run for every [W15-fleet] PR's head commit:
+
+- **#500 (S1)** — squashed into `main` as `27696ed`. Confirmed present.
+- **#502 (S2)** — squashed into `main` as `776e59e` (current `main` HEAD at
+  the time of this session). Confirmed present.
+- **#503 (S3 — tenant retrofit)** — GitHub reports `merged: true`,
+  `merged_at: 2026-08-04T12:08:17Z`. Its head commit
+  `676de97ff207f991ba1a666ee3e7fb35ef91f171` is **not an ancestor of
+  `main`** and no `w15/*` branch remains that contains it — the commit only
+  still exists because GitHub hasn't garbage-collected it yet (fetchable by
+  SHA). S3's own PR body already flagged the risk: it was based on
+  `w15/s1-admin-core-repairs` because "S2 never ran" at the time it was
+  authored; S2 landed 17 minutes later and squash-merged/deleted that base
+  branch out from under it. The apparent GitHub merge afterward did not
+  bring the diff into `main`.
+- **#504 (S4x — canvas Ask-AI context enrichment, NOT the Marginalia
+  editor)** — same pattern. `merged: true`, `merged_at: 2026-08-04T12:19:31Z`,
+  head `6dd7f4d3dde2be6d23d488aa4b4a2f65d79a0266`, **not an ancestor of
+  `main`**. This PR was not part of the originally scheduled S1–S5 sequence
+  — it appears to be additional prompt-assembly work for canvas Ask-AI
+  (folds `editorial_voice`, claims/compliance, section notes, and review
+  state into the AI suggestion prompt; explicitly out-of-scope for
+  Marginalia/canvas UI). Scoped, tested (5 new tests, 1640+89 passing per
+  its own PR body), and by its own account inert in production today (no
+  site has a live `editorial_voice` object yet) — but it is also orphaned
+  and needs the same recovery action as S3.
+
+Recovery for both is mechanical (cherry-pick or re-branch from the orphaned
+SHA and re-open a PR against current `main`) but is a human/next-session
+decision, not something this read-only verification session should do.
+
+**What's actually verified in `main` (S1 + S2 only):**
+
+- `npm ci` — clean, 1050 packages.
+- `npm run check` — 0 errors, 0 warnings (12 pre-existing `ts(6133)`/`ts(7043)`
+  hints, unrelated to W15).
+- `npm test` — 1636 + 102 pass, 0 fail.
+- `npm run build` (root, Dr-Lurie) — 75 pages, success.
+- `astro build --config sites/platform/astro.config.ts` — 44 pages, success.
+- `node scripts/audit-site-admin-parity.mjs --all` — PASS for all three
+  tenants (`sites/fernwell`, `sites/platform`, root/drlurie): 12/12
+  automatable checks, 3 human-gated rows each (Identity enablement,
+  admin env values, live store probe — all account-authority actions,
+  expected).
+- `node packages/core/cli/create-site.mjs --name w15s6probe --dry-run` — full
+  73-file genesis plan printed (shell routes, 34 function shims, 14 infra
+  redirects, blog reader loaders, blob-store probe list, ADMIN WORKSPACE
+  BOOTSTRAP checklist), zero files written. Proves a **future** client is
+  born at admin parity by construction, not just the three current tenants.
+- 7-assertion headless-Chromium drive (Playwright, mocked GoTrue session +
+  `/.netlify/functions/admin-*` endpoints, replicating
+  `sites/platform/netlify.toml`'s actual S1 rewrite rule byte-for-byte)
+  against the built `sites/platform` output — **7/7 checks pass**:
+  `/admin` reachable; `/admin/content` (library) loads; the S1 regression
+  target `/admin/content/page_home` resolves **without** a `?type=` param;
+  "Back to library" returns to the static library index with no loop;
+  a signed-out visitor triggers zero admin/identity network calls and never
+  fetches the real edit-mode bundle (only the ~600B always-present
+  pre-check script loads, confirmed by content-matching the bundle that
+  actually exports `bootEditMode`, not just filename substrings — the
+  naive filename check false-positived on `policy-bindings.*.js`, which
+  customer-facing header/login components also import).
+
+**Still-open bug confirmed live**: S3 diagnosed that `sites/platform`
+inherits Dr-Lurie's committed `src/data/post/test-article-dry-run.md` via
+shared `postDir`, so `kugel-platform` serves a leaked test post at
+`/test-article-dry-run` (and lists it on `/library`). Because S3's fix never
+reached `main`, this is **still present** in the current `sites/platform`
+build — confirmed by building it fresh this session: 44 pages, including
+`dist-platform/test-article-dry-run/`. This is a real, currently-live defect
+on the public site, not a stale audit finding.
+
+**Deferred stages, as scheduled — not failures:**
+
+- **S4 (Marginalia editor)** — no PR, no branch. Deferred for cost per
+  standing instruction. (Not to be confused with #504/S4x above, a
+  different and much narrower piece of work.)
+- **S5 (client publishing chat / LibreChat)** — no PR in `platform`, and no
+  `[W15-fleet]`-tagged PR in `vreich-ui/CMS-Agent` (checked both
+  `search_pull_requests` and a full recent `list_pull_requests`). Deferred
+  for cost per standing instruction; `deploy/librechat/librechat.yaml`
+  validation and per-client publisher-agent-preset checks were skipped
+  because there is nothing to check.
+
+**Fleet parity, current state:** all three tenants (Dr-Lurie/root, Platform,
+Fernwell) pass the S2 audit at 12/12. A fourth, throwaway scaffold proves
+future-client genesis at the same parity. No fleet-wide gap is open on the
+audit's own terms — the open items are the two orphaned PRs above and the
+one live leak they would have fixed.
+
+Full write-up, with per-stage table and the ordered human checklist:
+`docs/cms-architecture/FLEET-STATUS.md`.
+
+## Session 2026-08-04 (W15 S2 — fleet admin genesis: provisioning completeness + parity audit)
+
+Wolf's W15 mandate: every tenant — current and future — gets the full admin
+workspace and canvas editor, not just Dr. Lurie. The surface was already
+fleet law; the LAST MILE (shims, rewrites, Identity, ADMIN_EMAILS, blob
+stores, pre-wave scaffolds) was tribal knowledge. This session made
+admin/editor completeness a **checked property of site genesis**.
+
+**The machinery.** `packages/core/cli/admin-parity.mjs` is the single source
+of truth: the canonical 14-rule infra redirect table (pdf/img, `/mcp`, the
+nine OAuth-AS rules, `/api/t`, and the S1 single-segment unforced
+`/admin/content/:objectId` rewrite — any `/admin/content/*` splat is stale
+by definition), the admin-critical env inventory, the store expectations,
+and every automatable check. Two consumers:
+`scripts/audit-site-admin-parity.mjs` (read-only pass/gap table per tenant —
+`--site sites/<slug>`, `--root` for the drlurie deploy, `--all`; exit 1 on
+any gap) and `migrate-site --admin-parity [--write]` (retrofit an older
+site: adds missing shims/redirect rules/keepalive schedule/reader loaders,
+replaces the stale admin splat in netlify.toml AND site.config.ts, never
+overwrites an existing file, provably idempotent). The schema half of
+migrate-site now lazy-loads its compiled-tree imports so the parity half
+runs on a raw checkout. Human-readable inventory with per-requirement
+provisioner (scaffold | migrate-site | Netlify console | env):
+`docs/cms-architecture/15-fleet-admin-parity.md`.
+
+**Genesis completeness.** `create-site` now: probes **all 12** core blob
+stores (the audit caught the probe list covering 8 — `agent-profiles`, the
+W9 §4a dedicated-agent store the admin chat resolves profiles from, plus
+`opt-ins`/`commerce-events`/`tracking-events` were used by core but never
+probed; the list is now CHECKED against the store literals via
+`scanCoreBlobStoreNames`); prints an ADMIN WORKSPACE BOOTSTRAP human-gate
+checklist (enable Identity → set ADMIN_EMAILS → invite first Owner) with
+every plan and run; carries sharpened ADMIN_EMAILS/IDENTITY_URL checklist
+rows; and dropped the stale `OPENAI_CHATKIT_WORKFLOW_ID` row (ChatKit
+retired T9.24; zero code consumers). The dry-run fixture was regenerated.
+The provisioning runbook gained **§3a — the admin human gate**: exact
+console steps, marked as the only part of admin bootstrap a CLI cannot do.
+
+**Fleet state, from the audit.** sites/platform: 12/12 automatable checks
+PASS. Root drlurie wiring: 12/12 PASS (S1's rewrite fix verified in place;
+`verify-article-images` correctly reported as a site-local extra).
+sites/fernwell: 1 gap — it predated W14 F11 and was missing all four
+`[...blog]` reader route loaders (published articles and their canvas chips
+unreachable); repaired in this change via
+`migrate-site --site sites/fernwell --admin-parity --write`, re-audit clean,
+fernwell build verified green locally (15 pages, zero-article corpus).
+`tests/scripts/admin-parity.test.mjs` (13 tests) pins
+genesis-parity-by-construction, the degrade→repair→no-op loop,
+never-overwrite, and runs the audit against every real tenant on every
+`npm test` — the fleet cannot silently drift below admin parity again.
+
+**F14 (found and fixed en route).** `create-site`'s emitted article loader
+(`site-reader-route-templates.mjs`, the F11 addition) used the
+single-expression form "(async () => await getStaticPathsBlogPost())
+satisfies GetStaticPaths" — which makes the Astro compiler's hoist pass drag
+the adjacent "const { post } = Astro.props" up to MODULE scope. The compiled
+route then throws "Cannot destructure property 'post' of 'Astro.props'" at
+import time and fails the ENTIRE build — reproduced on fernwell's
+zero-article tree; every fresh scaffold since F11 would have failed its
+first build the same way (the F11 session's local builds were recorded
+infrastructure-inconclusive, so this never surfaced). All four loader
+templates now use the block-body + blank-line shape sites/platform's proven
+committed loaders use, with the finding documented at the template site;
+fernwell's committed loaders are the fixed templates' output, build-proven.
+
+**Residual human gates (unchanged in kind, now visible per-run):** enabling
+Identity, ADMIN_EMAILS/env values, first-Owner invite, and the credentialed
+store probe need account authority — the audit prints them as HUMAN rows;
+§3a has the clicks.
+
 ## Session 2026-08-03 (Platform README integration and forward-contract cleanup)
 
 PR #499 carries the Platform README routing and template-contract fixes. Its
