@@ -66,6 +66,7 @@ import { getIdempotencyBlobStore } from './blob-store.js';
 import { getCachedValue, setCachedValue, type IdempotencyBlobStore } from './idempotency-store.js';
 import {
   getHeader,
+  getRecordValue,
   invokeSaveArtifact,
   objectStoreHandler,
   deployStatusHandler,
@@ -735,6 +736,236 @@ const pollArtifactJobForInlineWait = async (
   };
 };
 
+// ── W16 C4: server-side brand-aware image prompt assembly ──────────────────
+// Agents supply the image SUBJECT only; when the owning site has declared a
+// `brandImagery` contract (W16 C1, §4 vocabulary), Platform -- the trusted
+// bridge, exactly like the storage grant -- assembles the full generation
+// request itself: styleSentence + hex-bound palette + negative list +
+// per-context aspect ratio, composed server-side. Any agent-supplied
+// generation-control field that gets overridden is reported back (non-fatal)
+// in the tool result's overriddenFields, never silently dropped. Applies
+// ONLY to image-GENERATION jobs (artifactKind "image", operation "generate")
+// -- never template renders, PDF jobs, or edits.
+type ImageMedium = 'photograph' | 'digital_illustration' | 'flat_vector' | 'editorial_collage';
+type BrandImageryComposition = { subjectScale?: string; cropRule?: string; depthOfField?: string };
+type BrandImageryLora = { url: string; scale?: number; triggerPhrase?: string; version?: string; modelEndpoint?: string };
+type ImageLoraRef = { path: string; scale?: number };
+
+type BrandImageryRecord = {
+  version: 1;
+  medium: ImageMedium;
+  styleSentence: string;
+  palette: string[];
+  negative: string[];
+  composition?: BrandImageryComposition;
+  aspectRatios?: Record<string, string>;
+  seedBase: number;
+  lora?: BrandImageryLora;
+};
+
+const IMAGE_MEDIUMS = new Set<ImageMedium>(['photograph', 'digital_illustration', 'flat_vector', 'editorial_collage']);
+
+const toFiniteNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const toMedium = (value: unknown): ImageMedium | undefined => {
+  const str = toNonEmptyString(value);
+  return str && (IMAGE_MEDIUMS as Set<string>).has(str) ? (str as ImageMedium) : undefined;
+};
+
+const toStringArray = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return items.length > 0 ? items : undefined;
+};
+
+// Agent-supplied loras wire shape (pdf-tool's ImageLoraRef: path + optional
+// scale) -- distinct from the site's brandImagery.lora (url + optional
+// scale/triggerPhrase/version/modelEndpoint), which assembleBrandAwareImageRequest
+// converts into this same {path, scale} shape when forwarding it.
+const toLoraList = (value: unknown): ImageLoraRef[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const loras: ImageLoraRef[] = [];
+  for (const entry of value) {
+    const record = getRecordValue(entry);
+    const path = toNonEmptyString(record?.path);
+    if (!path) continue;
+    const scale = toFiniteNumber(record?.scale);
+    loras.push({ path, ...(scale === undefined ? {} : { scale }) });
+  }
+  return loras.length > 0 ? loras : undefined;
+};
+
+const toComposition = (value: unknown): BrandImageryComposition | undefined => {
+  const record = getRecordValue(value);
+  if (!record) return undefined;
+  const composition: BrandImageryComposition = {};
+  const subjectScale = toNonEmptyString(record.subjectScale);
+  if (subjectScale) composition.subjectScale = subjectScale;
+  const cropRule = toNonEmptyString(record.cropRule);
+  if (cropRule) composition.cropRule = cropRule;
+  const depthOfField = toNonEmptyString(record.depthOfField);
+  if (depthOfField) composition.depthOfField = depthOfField;
+  return Object.keys(composition).length > 0 ? composition : undefined;
+};
+
+const toAspectRatios = (value: unknown): Record<string, string> | undefined => {
+  const record = getRecordValue(value);
+  if (!record) return undefined;
+  const ratios: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    const ratio = toNonEmptyString(raw);
+    if (ratio) ratios[key] = ratio;
+  }
+  return Object.keys(ratios).length > 0 ? ratios : undefined;
+};
+
+const toLora = (value: unknown): BrandImageryLora | undefined => {
+  const record = getRecordValue(value);
+  const url = toNonEmptyString(record?.url);
+  if (!url) return undefined;
+  const scale = toFiniteNumber(record?.scale);
+  const triggerPhrase = toNonEmptyString(record?.triggerPhrase);
+  const version = toNonEmptyString(record?.version);
+  const modelEndpoint = toNonEmptyString(record?.modelEndpoint);
+  return {
+    url,
+    ...(scale === undefined ? {} : { scale }),
+    ...(triggerPhrase ? { triggerPhrase } : {}),
+    ...(version ? { version } : {}),
+    ...(modelEndpoint ? { modelEndpoint } : {}),
+  };
+};
+
+const parseBrandImagery = (body: Record<string, unknown> | undefined): BrandImageryRecord | undefined => {
+  const raw = getRecordValue(body?.brandImagery);
+  if (!raw) return undefined;
+  const medium = toMedium(raw.medium);
+  const styleSentence = toNonEmptyString(raw.styleSentence);
+  const palette = toStringArray(raw.palette);
+  const seedBase = toFiniteNumber(raw.seedBase);
+  // version/medium/styleSentence/palette/seedBase are all REQUIRED by the
+  // site.v1 schema -- a stored record missing one of them failed to write
+  // validly, so degrade to "no brandImagery" (additive contract, never a
+  // hard failure -- rule 3, backward-compatible passthrough) instead of
+  // half-applying an incomplete contract.
+  if (raw.version !== 1 || !medium || !styleSentence || !palette || seedBase === undefined) return undefined;
+  return {
+    version: 1,
+    medium,
+    styleSentence,
+    palette,
+    negative: toStringArray(raw.negative) ?? [],
+    composition: toComposition(raw.composition),
+    aspectRatios: toAspectRatios(raw.aspectRatios),
+    seedBase,
+    lora: toLora(raw.lora),
+  };
+};
+
+// Read-only site lookup reusing the SAME object-store access path
+// resolveArtifactBridgeScope already uses for content_item ownership --
+// there is exactly one store-access seam in this file, not a second one.
+// Any lookup failure (site object absent, transient error) degrades to "no
+// brandImagery" rather than failing the job: this is an additive style
+// contract, not a required one (rule 3 -- backward compatible passthrough).
+const loadSiteBrandImagery = async (
+  event: LambdaEvent,
+  siteId: string
+): Promise<BrandImageryRecord | undefined> => {
+  const lookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
+  if ('isError' in lookup) return undefined;
+  const record = getRecordValue(lookup.record);
+  return parseBrandImagery(getRecordValue(record?.body));
+};
+
+// A tiny non-cryptographic string hash (FNV-1a, 32-bit) used ONLY to derive a
+// stable per-job seed offset from job identity -- deterministic, no
+// Date.now()/Math.random(): the same {requestId, slot, subject} always
+// derives the same seed, so a re-run of the same job is reproducible.
+const fnv1aHash = (input: string): number => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+};
+
+// Fits a signed 32-bit int -- the common range image-model seed params
+// accept -- and keeps `seedBase % SAFE_SEED_BOUND` inside float64's exact-
+// integer range before adding the hash offset, so no precision is lost even
+// for a seedBase near Number.MAX_SAFE_INTEGER.
+const SAFE_SEED_BOUND = 2 ** 31;
+
+const deriveBrandSeed = (
+  seedBase: number,
+  requestId: string,
+  slot: string | undefined,
+  subject: string | undefined
+): number => {
+  const identity = `${requestId}|${slot ?? ''}|${subject ?? ''}`;
+  const offset = fnv1aHash(identity) % SAFE_SEED_BOUND;
+  return ((seedBase % SAFE_SEED_BOUND) + offset) % SAFE_SEED_BOUND;
+};
+
+type BrandAwareImageAgentInput = {
+  subject: string | undefined;
+  negativePrompt?: string;
+  requestId: string;
+  slot?: string;
+  seed?: number;
+  loras?: ImageLoraRef[];
+};
+
+const assembleBrandAwareImageRequest = (brand: BrandImageryRecord, agent: BrandAwareImageAgentInput) => {
+  // styleSentence is always prepended, then the agent's subject. A palette
+  // clause follows: FLUX.2 binds a hex value best when it's attached to a
+  // NAMED OBJECT in the prompt (e.g. "the jacket is #2E5C42"), a per-object
+  // pairing only the author of the subject text could make -- this plain
+  // "Palette: ..." clause is the pragmatic hex-binding available at this
+  // server-side layer, which has no way to know what objects the subject
+  // names. Finally, a short composition clause when the site declared one.
+  const styleSentence = brand.styleSentence.trim();
+  const styleSentenceWithStop = /[.!?]$/.test(styleSentence) ? styleSentence : `${styleSentence}.`;
+  const promptParts = [styleSentenceWithStop, ...(agent.subject ? [agent.subject] : [])];
+  let prompt = promptParts.join(' ');
+  if (brand.palette.length > 0) prompt += ` Palette: ${brand.palette.join(', ')}.`;
+  if (brand.composition) {
+    const compositionClause = [
+      brand.composition.subjectScale,
+      brand.composition.cropRule,
+      brand.composition.depthOfField,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(', ');
+    if (compositionClause) prompt += ` ${compositionClause}.`;
+  }
+
+  // Negatives are additive (a list): the site's and the agent's merge rather
+  // than one overriding the other -- unlike seed/loras below, there is no
+  // conflict to resolve, so negative_prompt is never noted in
+  // overriddenFields.
+  const negativeParts = [...brand.negative, ...(agent.negativePrompt ? [agent.negativePrompt] : [])];
+  const negativePrompt = negativeParts.length > 0 ? negativeParts.join(', ') : undefined;
+
+  const seed = deriveBrandSeed(brand.seedBase, agent.requestId, agent.slot, agent.subject);
+  const loras = brand.lora
+    ? [{ path: brand.lora.url, ...(brand.lora.scale === undefined ? {} : { scale: brand.lora.scale }) }]
+    : undefined;
+
+  // brandImagery always wins on seed/loras. Only note a field in
+  // overriddenFields when the agent actually supplied a conflicting value --
+  // an agent that never touched these fields sees no note.
+  const overriddenFields: string[] = [];
+  if (agent.seed !== undefined && agent.seed !== seed) overriddenFields.push('seed');
+  if (agent.loras !== undefined && JSON.stringify(agent.loras) !== JSON.stringify(loras ?? [])) {
+    overriddenFields.push('loras');
+  }
+
+  return { prompt, negativePrompt, seed, loras, overriddenFields };
+};
+
 export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const scoped = await resolveArtifactBridgeScope(event, input);
   if (!scoped.ok) return scoped.result;
@@ -744,18 +975,55 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     return toolError('artifact_kind must be image or pdf, and filename is required.');
   }
   const wait = input.wait !== false;
+  const operationInput = toNonEmptyString(input.operation);
 
   const built = buildArtifactBridgeGrant();
   if (!built.ok) return built.result;
+
+  const slotInput = toNonEmptyString(input.slot);
+  let promptOverride = toNonEmptyString(input.prompt);
+  let negativePromptOverride = toNonEmptyString(input.negative_prompt);
+  let seedOverride = toFiniteNumber(input.seed);
+  let lorasOverride = toLoraList(input.loras);
+  let brandOverriddenFields: string[] = [];
+
+  // Rule 1: image-GENERATION jobs only -- never template renders (artifactKind
+  // "pdf"), never edits (a masked_edit/image_variation/deterministic_transform
+  // job carries no `prompt` at all).
+  if (artifactKind === 'image' && (operationInput ?? 'generate') === 'generate') {
+    const brand = await loadSiteBrandImagery(event, scoped.scope.siteId);
+    if (brand) {
+      const assembled = assembleBrandAwareImageRequest(brand, {
+        subject: promptOverride,
+        negativePrompt: negativePromptOverride,
+        requestId: scoped.scope.requestId,
+        slot: slotInput,
+        seed: seedOverride,
+        loras: lorasOverride,
+      });
+      promptOverride = assembled.prompt;
+      negativePromptOverride = assembled.negativePrompt;
+      seedOverride = assembled.seed;
+      lorasOverride = assembled.loras;
+      brandOverriddenFields = assembled.overriddenFields;
+      event.log?.({
+        event: 'brand_prompt_assembled',
+        siteId: scoped.scope.siteId,
+        requestId: scoped.scope.requestId,
+        overriddenFields: brandOverriddenFields,
+        derivedSeedPresent: assembled.seed !== undefined,
+      });
+    }
+  }
+
   const jobInput: PlatformArtifactJobInput = {
     requestId: scoped.scope.requestId,
     artifactKind,
     filename,
-    ...(toNonEmptyString(input.operation)
-      ? { operation: toNonEmptyString(input.operation) as 'generate' | 'edit' }
-      : {}),
-    ...(toNonEmptyString(input.prompt) ? { prompt: toNonEmptyString(input.prompt) } : {}),
-    ...(toNonEmptyString(input.slot) ? { slot: toNonEmptyString(input.slot) } : {}),
+    ...(operationInput ? { operation: operationInput as 'generate' | 'edit' } : {}),
+    ...(promptOverride ? { prompt: promptOverride } : {}),
+    ...(negativePromptOverride ? { negativePrompt: negativePromptOverride } : {}),
+    ...(slotInput ? { slot: slotInput } : {}),
     ...(toNonEmptyString(input.model) ? { model: toNonEmptyString(input.model) } : {}),
     ...(input.requirements && typeof input.requirements === 'object' && !Array.isArray(input.requirements)
       ? { requirements: input.requirements as Record<string, unknown> }
@@ -765,6 +1033,8 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     ...(input.assets && typeof input.assets === 'object' && !Array.isArray(input.assets)
       ? { assets: input.assets as { images?: unknown[] } }
       : {}),
+    ...(seedOverride !== undefined ? { seed: seedOverride } : {}),
+    ...(lorasOverride ? { loras: lorasOverride } : {}),
   };
   const created = await createPlatformArtifactJob(built.grant, jobInput);
   if (!created.ok) return pdfToolBridgeError(created);
@@ -788,6 +1058,7 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     projectId: built.grant.projectId,
     requestId: scoped.scope.requestId,
     polling: platformPolling(scoped.scope, jobId),
+    ...(brandOverriddenFields.length > 0 ? { overriddenFields: brandOverriddenFields } : {}),
   };
 
   if (!wait) return toolResult(pendingResponsePayload);

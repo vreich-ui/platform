@@ -357,14 +357,16 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'create_agent_artifact_job',
     description:
-      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
+      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
         request_id: stringSchema('Existing content_item object id that will own the artifact.'),
         artifact_kind: { type: 'string', enum: ['image', 'pdf'], description: 'Artifact kind.' },
         operation: { type: 'string', enum: ['generate', 'edit'], description: 'Defaults to generate.' },
-        prompt: stringSchema('Generation prompt; required for image generation.'),
+        prompt: stringSchema(
+          'Generation prompt; required for image generation. For an image-GENERATION job on a site with a brandImagery contract this is the SUBJECT ONLY (e.g. "a jar of moisturizer on a marble countertop") — Platform prepends the site\'s styleSentence server-side. Never author style/medium/lighting/mood here; a site without brandImagery uses this text verbatim.'
+        ),
         filename: stringSchema('Output filename including the format-matching extension.'),
         slot: stringSchema('Stable request-scoped slot such as article_image_1.'),
         model: stringSchema('Optional explicit model; omit to use the registered project policy.'),
@@ -375,6 +377,22 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         data: anyObjectSchema('Template data payload for a template_id-driven PDF render.'),
         assets: anyObjectSchema(
           'Optional supporting assets (e.g. {images: [...]}) for a template_id-driven PDF render.'
+        ),
+        negative_prompt: stringSchema(
+          "Image generation only: what the output must avoid. On a site with brandImagery this is MERGED with (not replacing) the site's negative list — it never lets you remove a brand negative, only add to it."
+        ),
+        seed: intSchema(
+          "Image generation only: a deterministic seed. On a site with brandImagery this is OVERRIDDEN by a seed derived from the site's seedBase — see overriddenFields in the response."
+        ),
+        loras: arraySchema(
+          objectSchema(
+            {
+              path: stringSchema('HTTPS URL of the trained LoRA .safetensors.'),
+              scale: { type: 'number', description: 'LoRA strength.' },
+            },
+            ['path']
+          ),
+          "Image generation only: trained per-brand LoRAs. On a site with brandImagery this is OVERRIDDEN by the site's own lora."
         ),
         wait: {
           type: 'boolean',

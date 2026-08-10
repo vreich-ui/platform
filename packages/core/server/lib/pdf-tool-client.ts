@@ -172,6 +172,13 @@ export type PlatformArtifactJobInput = {
   templateRef?: { storeName?: string; blobKey: string; version?: number };
   data?: unknown;
   assets?: { images?: unknown[] };
+  // W16 C4: brand-aware image generation controls. For image-GENERATION jobs
+  // on a site with a `brandImagery` contract these are assembled/overridden
+  // server-side (see mcp-tool-handlers.ts's assembleBrandAwareImageRequest)
+  // rather than agent-supplied verbatim; forwarded unchanged otherwise.
+  negativePrompt?: string;
+  seed?: number;
+  loras?: Array<{ path: string; scale?: number }>;
 };
 
 const projectPayload = (grant: PdfToolStorageGrant, payload: Record<string, unknown>) => ({
@@ -200,6 +207,9 @@ export const createPlatformArtifactJob = (
       templateRef: input.templateRef,
       data: input.data,
       assets: input.assets,
+      negativePrompt: input.negativePrompt,
+      seed: input.seed,
+      loras: input.loras,
     }),
     options
   );
