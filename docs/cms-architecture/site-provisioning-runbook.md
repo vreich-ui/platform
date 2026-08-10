@@ -8,6 +8,11 @@ because no CLI can hold those on an agent's behalf. Read
 full per-site env table this runbook and the CLI's checklist both draw from
 (kept in sync with the T11.10 governance/secrets inventory).
 
+**Birthing a client end to end?** Start at
+[`new-client-acceptance.md`](./new-client-acceptance.md) instead — the
+ordered checklist (npm scripts, proofs, agent-vs-human authority) that this
+runbook's detail tables feed into.
+
 ## 1. Scaffold the client
 
 ```

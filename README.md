@@ -230,6 +230,8 @@ All commands are run from the root of the project, from a terminal:
 | `npm run fix`       | Run Eslint and format codes with Prettier          |
 | `npm run astro ...` | Run CLI commands like `astro add`, `astro preview` |
 
+This is a multi-tenant fleet, not a single site — `npm run site:create`, `site:genesis`, `site:verify`, `fleet:parity`, and `fleet:capability` provision and verify a client. Start at [`docs/cms-architecture/new-client-acceptance.md`](./docs/cms-architecture/new-client-acceptance.md) to birth one.
+
 <br>
 
 ### Configuration

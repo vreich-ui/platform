@@ -93,6 +93,9 @@ tenant. That is T16.5.
 ## 2. The genesis line (LAW)
 
 A tenant's birth has four stages. Genesis is stages 0–1 and NOTHING else.
+(The ordered command-by-command checklist for actually running stages 0–1
+plus verification is [`new-client-acceptance.md`](./new-client-acceptance.md)
+— this section is the law it implements, not a substitute for it.)
 
 **Stage 0 — Scaffold (repo files).** Owner: `create-site --name <client>`.
 Produces the full per-site tree: config bundle, function shims, netlify.toml
