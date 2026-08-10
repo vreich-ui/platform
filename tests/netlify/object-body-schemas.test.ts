@@ -713,6 +713,170 @@ test('site: fixture parses cleanly and strictness rejects stray config keys', ()
   );
 });
 
+// brandImagery (W16 C1, §4 vocabulary): additive-optional visual-identity
+// contract for AI image generation/search — bounded the same way brandTokens'
+// value grammar keeps the palette small (capped array/string lengths, no
+// unbounded blobs). `palette` is deliberately separate from
+// brandTokens.colors (see the schema module's doc comment for why).
+const VALID_BRAND_IMAGERY = {
+  version: 1,
+  medium: 'photograph',
+  styleSentence: 'Clinical-clean skincare editorial photography with soft studio light.',
+  palette: ['#2E5C42', '#C2A878'],
+  negative: ['no stock-photo gloss', 'no harsh flash'],
+  composition: { subjectScale: 'medium close-up', cropRule: 'rule of thirds', depthOfField: 'shallow' },
+  aspectRatios: { article_header: '3:2', article_body: '4:3', pdf_cover: '1:1' },
+  seedBase: 100001,
+  lora: {
+    url: 'https://fal.media/files/brand/dr-lurie-v3.safetensors',
+    scale: 0.8,
+    triggerPhrase: 'drlurie_style',
+    version: 'v3',
+    modelEndpoint: 'fal-ai/flux-2/klein/9b',
+  },
+} as const;
+
+test('site.brandImagery: optional, bounded, and matches the §4 vocabulary', () => {
+  assert.equal(
+    siteBodySchema.safeParse(siteFixture).success,
+    true,
+    'brandImagery is optional — a site without one still parses'
+  );
+
+  const withImagery = { ...siteFixture, brandImagery: VALID_BRAND_IMAGERY };
+  assert.equal(siteBodySchema.safeParse(withImagery).success, true, JSON.stringify(withImagery));
+
+  // The minimal shape (no composition, no lora) also parses.
+  const { composition: _composition, lora: _lora, ...minimalImagery } = VALID_BRAND_IMAGERY;
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: minimalImagery }).success,
+    true,
+    'composition and lora are optional'
+  );
+
+  // Unknown keys are rejected (strict), matching brandTokens' posture.
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: { ...VALID_BRAND_IMAGERY, stray: 'nope' },
+    }).success,
+    false
+  );
+
+  // version is a pinned literal — only exactly 1 is accepted.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, version: 2 } }).success,
+    false,
+    'version must be exactly 1'
+  );
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: (() => {
+        const { version: _version, ...rest } = VALID_BRAND_IMAGERY;
+        return rest;
+      })(),
+    }).success,
+    false,
+    'version is required'
+  );
+
+  // medium is a bounded enum — an unknown medium is rejected.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, medium: 'oil_painting' } })
+      .success,
+    false
+  );
+
+  // palette entries must be #RRGGBB hex — case-insensitive hex passes,
+  // anything else (named colors, short hex, missing '#') is rejected.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, palette: ['#aAbBcC'] } })
+      .success,
+    true,
+    'lowercase/mixed-case hex is accepted'
+  );
+  for (const bad of ['red', '#fff', '2E5C42', '#2E5C4', '#2E5C42FF']) {
+    assert.equal(
+      siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, palette: [bad] } }).success,
+      false,
+      `palette entry "${bad}" must be rejected`
+    );
+  }
+  // palette requires at least one entry and is capped at 8.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, palette: [] } }).success,
+    false
+  );
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: { ...VALID_BRAND_IMAGERY, palette: Array.from({ length: 9 }, () => '#2E5C42') },
+    }).success,
+    false
+  );
+
+  // aspectRatios values must be "W:H" ratio strings; keys must be bounded
+  // lowercase snake_case.
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: { ...VALID_BRAND_IMAGERY, aspectRatios: { article_header: '3x2' } },
+    }).success,
+    false,
+    'aspect ratio value must be "W:H", not "WxH"'
+  );
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: { ...VALID_BRAND_IMAGERY, aspectRatios: { 'Article Header': '3:2' } },
+    }).success,
+    false,
+    'aspect ratio context keys must be lowercase snake_case'
+  );
+
+  // seedBase must be a non-negative safe integer.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, seedBase: -1 } }).success,
+    false
+  );
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, seedBase: 1.5 } }).success,
+    false
+  );
+
+  // Bounded string lengths: an oversized styleSentence is rejected so nothing
+  // unbounded lands in the store.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, styleSentence: 'x'.repeat(500) } })
+      .success,
+    false
+  );
+
+  // negative is capped at 12 entries.
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: { ...VALID_BRAND_IMAGERY, negative: Array.from({ length: 13 }, (_, i) => `bad-${i}`) },
+    }).success,
+    false
+  );
+
+  // lora needs a non-empty url; scale/triggerPhrase/version/modelEndpoint stay optional.
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      brandImagery: { ...VALID_BRAND_IMAGERY, lora: { url: 'https://fal.media/files/brand/x.safetensors' } },
+    }).success,
+    true,
+    'lora only requires url'
+  );
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, lora: { url: '' } } }).success,
+    false
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Taxonomy ('taxonomy.v1', D§3.7)
 // ---------------------------------------------------------------------------

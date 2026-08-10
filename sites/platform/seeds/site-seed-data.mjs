@@ -45,6 +45,22 @@ export const siteBody = {
       heading: 'Georgia, serif',
     },
   },
+  // W16 C1 (§4 vocabulary): the visual-identity contract for AI image
+  // generation/search — the STYLE half agents never supply themselves.
+  // Minimal starter stanza; no composition/lora tuning yet.
+  brandImagery: {
+    version: 1,
+    medium: 'flat_vector',
+    styleSentence: 'Neutral professional flat-vector SaaS illustration with clean geometric line art.',
+    palette: ['#2563EB', '#0F172A'],
+    negative: ['no photorealism', 'no gradients or drop shadows'],
+    aspectRatios: {
+      article_header: '3:2',
+      article_body: '4:3',
+      pdf_cover: '1:1',
+    },
+    seedBase: 100002,
+  },
   chrome: {
     showRssFeed: false,
     showThemeToggle: true,

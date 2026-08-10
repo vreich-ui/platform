@@ -1003,6 +1003,11 @@ const applyOp = (objectType: ObjectType, body: UnknownRecord, op: PatchOp): Patc
     case 'set_site_brand_tokens':
       return applyFieldsOp(op, body, op.fields as UnknownRecord);
 
+    // The visual-identity writer (W16 C1, theme-only-style governance): same
+    // deep-merge mechanics; the grammar restricts `fields` to `brandImagery`.
+    case 'set_site_brand_imagery':
+      return applyFieldsOp(op, body, op.fields as UnknownRecord);
+
     // ——— product family ———
     // Same deep-merge mechanics as set_site_fields; the grammar already
     // refuses commerce.price / commerce.stripe / commerce.stripe_test
@@ -1135,9 +1140,11 @@ export const applyPatchOps = (
         'op_not_applicable',
         record.object_type === 'content_item'
           ? `ops[${index}]: content_item is served by the existing article tool surface (C§2.0); generic patch ops do not apply.`
-          : PRIVILEGED_PATCH_OPS.includes(parsed.op as never)
+          : parsed.op === 'set_site_brand_tokens'
             ? `ops[${index}]: op '${parsed.op}' is tool-authored (not hand-authorable) — the palette changes only through site_apply_theme.`
-            : `ops[${index}]: op '${parsed.op}' does not apply to object_type '${record.object_type}'.`
+            : PRIVILEGED_PATCH_OPS.includes(parsed.op as never)
+              ? `ops[${index}]: op '${parsed.op}' is tool-authored (not hand-authorable).`
+              : `ops[${index}]: op '${parsed.op}' does not apply to object_type '${record.object_type}'.`
       );
     }
     return parsed;
@@ -1264,6 +1271,7 @@ export const derivePatchInverse = (op: PatchOp, capture: PatchOpCapture): PatchO
     case 'set_nav_meta':
     case 'set_site_fields':
     case 'set_site_brand_tokens':
+    case 'set_site_brand_imagery':
     case 'set_product_fields':
     case 'set_product_price':
     case 'set_article_meta':

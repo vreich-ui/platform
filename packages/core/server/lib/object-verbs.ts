@@ -1368,6 +1368,17 @@ export const handleObjectVerb = async (
       // The theme must EXIST (draft is fine) and parse as theme.v1; the site
       // record must exist and parse as site.v1 (the diff needs its current
       // brandTokens).
+      //
+      // W16 C1 (§4/§5): a theme MAY also carry brandImagery, but this verb's
+      // copy stays brandTokens-only (colors/fonts/axes) — deliberate, not an
+      // oversight. brandTokens' exact-replace semantics need a per-KEY
+      // stale-unset diff (see below); brandImagery has no equivalent
+      // key-by-key merge target (styleSentence/medium/seedBase are single
+      // scalars, palette/negative are whole-list replacements, aspectRatios
+      // is an open-keyed record) — copying it faithfully is a separate,
+      // non-trivial feature, not a small extension of the brandTokens path.
+      // A theme's brandImagery is preset data for a future writer, unused
+      // by apply_theme today.
       const themeRecord = await loadRecord(store, objectRecordKey('theme', request.theme_id));
       if (!themeRecord) {
         return err(404, { error: 'Theme not found', not_found: true, theme_id: request.theme_id });

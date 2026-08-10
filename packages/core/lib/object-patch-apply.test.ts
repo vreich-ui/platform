@@ -500,6 +500,39 @@ const ROUND_TRIP_CASES: RoundTripCase[] = [
     // inverse re-applied here) may apply it.
     privilegedOps: ['set_site_brand_tokens'],
   },
+  // brandImagery's writer (W16 C1, §4 vocabulary) — same privileged funnel as
+  // brandTokens: deep-merges nested fields and unsets a subtree, and inverts
+  // exactly.
+  {
+    name: 'set_site_brand_imagery deep-merges nested fields and unsets a subtree',
+    objectType: 'site',
+    body: () => ({
+      ...siteBody(),
+      brandImagery: {
+        version: 1,
+        medium: 'photograph',
+        styleSentence: 'Clinical-clean skincare editorial photography.',
+        palette: ['#2E5C42'],
+        negative: ['no stock-photo gloss'],
+        aspectRatios: { article_header: '3:2' },
+        seedBase: 100001,
+        composition: { subjectScale: 'medium close-up' },
+      },
+    }),
+    op: {
+      op: 'set_site_brand_imagery',
+      fields: {
+        brandImagery: {
+          styleSentence: 'Clinical-clean skincare editorial photography, soft studio light.',
+          composition: null,
+        },
+      },
+    },
+    // Privileged: not in the site allowlist — hand-authoring it via
+    // object_patch is refused (op_not_applicable); only a future privileged
+    // writer (and the inverse re-applied here) may apply it.
+    privilegedOps: ['set_site_brand_imagery'],
+  },
   // product family
   {
     name: 'set_product_fields deep-merges presentation, unsets excerpt, and flips availability',
@@ -684,6 +717,36 @@ describe('apply(op) then apply(inverse(op)) restores the prior body exactly', ()
     assert.equal(
       (okApply.record.body as { brandTokens: { colors: { primary: string } } }).brandTokens.colors.primary,
       '#000'
+    );
+  });
+
+  it('set_site_brand_imagery is REFUSED without privilege (object_patch cannot hand-author it)', () => {
+    const record = makeRecord('site', siteBody());
+    assert.throws(
+      () =>
+        apply(record, [
+          { op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } },
+        ]),
+      (error: unknown) => error instanceof PatchApplyError && error.code === 'op_not_applicable'
+    );
+    // …but the exact same op applies when the caller is privileged.
+    const okApply = apply(
+      record,
+      [{ op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } }],
+      ['set_site_brand_imagery']
+    );
+    assert.deepEqual(
+      (okApply.record.body as { brandImagery: { styleSentence: string } }).brandImagery.styleSentence,
+      'Clinical-clean.'
+    );
+  });
+
+  it('set_site_fields REFUSES a brandImagery-carrying patch (theme-only-style governance)', () => {
+    const record = makeRecord('site', siteBody());
+    assert.throws(
+      () =>
+        apply(record, [{ op: 'set_site_fields', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } }]),
+      (error: unknown) => error instanceof PatchApplyError && error.code === 'invalid_op'
     );
   });
 

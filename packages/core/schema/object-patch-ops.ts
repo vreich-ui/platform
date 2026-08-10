@@ -359,6 +359,12 @@ const setSiteFieldsSchema = z.strictObject({
   op: z.literal('set_site_fields'),
   fields: fieldsSchema
     .superRefine(forbidKeys(['brandTokens'], 'set_site_fields (the palette changes only via site_apply_theme)'))
+    .superRefine(
+      forbidKeys(
+        ['brandImagery'],
+        'set_site_fields (the visual-identity contract changes only via the privileged set_site_brand_imagery op)'
+      )
+    )
     .superRefine(forbidKeys(['tracking'], 'set_site_fields (tracking changes only via set_tracking)')),
   ...guard,
 });
@@ -373,6 +379,25 @@ const setSiteFieldsSchema = z.strictObject({
 const setSiteBrandTokensSchema = z.strictObject({
   op: z.literal('set_site_brand_tokens'),
   fields: z.strictObject({ brandTokens: fieldsSchema }),
+  ...guard,
+});
+
+// brandImagery's privileged writer (W16 C1) — the exact same funnel shape as
+// set_site_brand_tokens: `fields` carries ONLY `brandImagery`, hand-authoring
+// via object_patch is refused (PRIVILEGED_PATCH_OPS below), and the inverse is
+// this same op with the captured before-tree. No verb constructs it yet (a
+// follow-up task wires the writer that reads it into prompt assembly); it
+// exists now so the grammar, discard/inverse handling, and write-time
+// protection land in the same change as the site.v1 field.
+//
+// Unlike brandTokens (body-required, so its capture.before is always an
+// object), brandImagery is body-OPTIONAL — a site's first-ever grant of it
+// captures `before: null` (the unset marker). The pinned type here allows
+// that top-level null alongside the ordinary object-merge shape so the
+// inverse of a first set (a full unset) re-parses through this same op.
+const setSiteBrandImagerySchema = z.strictObject({
+  op: z.literal('set_site_brand_imagery'),
+  fields: z.strictObject({ brandImagery: z.union([fieldsSchema, z.null()]) }),
   ...guard,
 });
 
@@ -674,6 +699,7 @@ export const patchOpUnionSchema = z.discriminatedUnion('op', [
   removeTermSchema,
   setSiteFieldsSchema,
   setSiteBrandTokensSchema,
+  setSiteBrandImagerySchema,
   setProductFieldsSchema,
   setProductPriceSchema,
   setArticleMetaSchema,
@@ -806,8 +832,11 @@ export const isPatchOpAllowedForObjectType = (objectType: ObjectType, opName: Pa
 // inverse, re-applied on Discard). `set_site_brand_tokens` is the palette
 // writer — a hand-authored one via object_patch is refused (op_not_applicable),
 // so the site palette changes solely through site_apply_theme (theme-only
-// governance, Wolf 2026-07-15). Unlike set_product_price (which stays
-// agent-submittable and leans on the product review gate), the site is
+// governance, Wolf 2026-07-15). `set_site_brand_imagery` (W16 C1) is the same
+// funnel for the visual-identity contract — no verb produces it yet, but
+// hand-authoring it is refused the same way so the field can never become an
+// ordinary agent-writable one by accident. Unlike set_product_price (which
+// stays agent-submittable and leans on the product review gate), the site is
 // autonomous, so the op itself must be un-submittable. applyPatchOps accepts
 // these only when a caller passes them as `privilegedOps`.
-export const PRIVILEGED_PATCH_OPS: readonly PatchOpName[] = ['set_site_brand_tokens'];
+export const PRIVILEGED_PATCH_OPS: readonly PatchOpName[] = ['set_site_brand_tokens', 'set_site_brand_imagery'];
