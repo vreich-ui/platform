@@ -190,17 +190,39 @@ test('the real committed exports emit ZERO paths today — every page object is 
   // files are deleted and the objects own the routes, zero code each.
   // 2026-07-13: `page_object_showcase` (a QA/dev surface, standard pageType on
   // a free route, robots-noindex, unwired from nav) is served the same way.
-  assert.deepEqual(
-    [...paths].sort((a, b) => a.route.localeCompare(b.route)),
-    [
-      { objectId: 'page_object_showcase', route: '/object-showcase', param: 'object-showcase' },
-      { objectId: 'page_pricing', route: '/pricing', param: 'pricing' },
-      { objectId: 'page_services', route: '/services', param: 'services' },
-      { objectId: 'page_shop', route: '/shop', param: 'shop' },
-      { objectId: 'page_shop_preview', route: '/solutions/shop-preview', param: 'solutions/shop-preview' },
-    ],
-    JSON.stringify(paths)
+  // BASELINE_FREE_ROUTES is the permanent regression check for these — a
+  // fixed, hand-converted set that migration must never re-file-own or
+  // misclassify. It is deliberately NOT the full exact-match assertion:
+  // this is an agentic publishing fleet, and any later agent-published
+  // standard-pageType page on a free route (e.g. `page_skincare_is_not_
+  // self_worth` / `/skincare-is-not-self-worth`, added 2026-08-09) is
+  // EXPECTED to also start appearing here as content grows. Hardcoding the
+  // full exact set would make this test fail on every future publish and
+  // prove nothing the synthetic fixture tests above don't already cover —
+  // the mechanism itself (routing rules, skip reasons) is what matters, not
+  // today's exact page census (T16.6).
+  const BASELINE_FREE_ROUTES = [
+    { objectId: 'page_object_showcase', route: '/object-showcase', param: 'object-showcase' },
+    { objectId: 'page_pricing', route: '/pricing', param: 'pricing' },
+    { objectId: 'page_services', route: '/services', param: 'services' },
+    { objectId: 'page_shop', route: '/shop', param: 'shop' },
+    { objectId: 'page_shop_preview', route: '/solutions/shop-preview', param: 'solutions/shop-preview' },
+  ];
+  const sortedPaths = [...paths].sort((a, b) => a.route.localeCompare(b.route));
+  for (const expected of BASELINE_FREE_ROUTES) {
+    assert.deepEqual(
+      sortedPaths.find((emitted) => emitted.objectId === expected.objectId),
+      expected,
+      `${expected.objectId} must still be served via the object-page catch-all: ${JSON.stringify(sortedPaths)}`
+    );
+  }
+  // Anything emitted beyond the baseline is later-published content — still
+  // required to be internally sane: no two pages fighting over one route.
+  const extraPaths = sortedPaths.filter(
+    (emitted) => !BASELINE_FREE_ROUTES.some((baseline) => baseline.objectId === emitted.objectId)
   );
+  const extraRoutes = new Set(extraPaths.map((emitted) => emitted.route));
+  assert.equal(extraRoutes.size, extraPaths.length, `duplicate routes among catch-all-served pages: ${JSON.stringify(extraPaths)}`);
   assert.equal(skipped.length, pageExports.length - paths.length);
   // Every other committed export is served by a dedicated file: the 12
   // originally converted pages by their thin loaders (file_route), and the
