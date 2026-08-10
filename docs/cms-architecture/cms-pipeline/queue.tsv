@@ -143,3 +143,18 @@ T13.13	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.13-sco
 # into the top of state-of-play.md (this-S6-entry above S2's, both above the
 # 2026-08-03 entry), then delete both standalone files.
 W15.FOLD	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/state-of-play-2026-08-04-w15-s6.md
+#
+# W16 — genesis scope + fleet parity (mandate: docs/cms-architecture/16-genesis-parity-plan.md, from the
+# 2026-08-10 fleet audit). T16.0 first — it is the manifest the rest consume. T16.9 is the only
+# credentialed/interactive row; everything else is auto and sized for Sonnet except the two Opus rows.
+T16.0	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T16.0-genesis-manifest.md
+T16.1	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.1-seed-pack-completion.md
+T16.2	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.2-netlify-toml-parity.md
+T16.3	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.3-binding-capability-flags.md
+T16.4	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T16.4-core-rss-search-routes.md
+T16.5	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.5-capability-status-probe.md
+T16.6	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.6-lint-test-defects.md
+T16.7	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.7-core-package-rename.md
+T16.8	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.8-genesis-verify-mode.md
+T16.9	notify	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.9-credentialed-fleet-drive.md
+T16.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.10-genesis-entrypoints.md
