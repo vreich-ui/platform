@@ -169,7 +169,9 @@ T16.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.10-genesi
 # T17.3 DONE 2026-08-10 — margin rail + hover-reveal bubbles + page-slide landed; record in
 # 17-canvas-ux-plan.md §7. Row kept, commented, for the audit trail (the W15 convention).
 #T17.3	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.3-margin-rail-hover-reveal.md
-T17.8	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.8-double-click-inline-edit.md
+# T17.8 DONE 2026-08-10 — double-click inline block editing landed; record in
+# 17-canvas-ux-plan.md §7.
+#T17.8	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.8-double-click-inline-edit.md
 T17.6	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6-attention-badges-counter.md
 T17.4	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.4-selected-text-span-anchoring.md
 T17.5	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.5-reply-threading-ui.md

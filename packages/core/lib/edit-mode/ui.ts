@@ -43,6 +43,14 @@ import {
   type EditTarget,
   type FieldChange,
 } from './targets.js';
+import {
+  derivePrimaryInlineField,
+  inlineEditOps,
+  shouldCaptureSelection,
+  NON_COPY_KEY_RE,
+  type InlineField,
+} from './inline-edit.js';
+import type { RichTextEditorHandle } from './richtext-editor.js';
 import { applyNavChangesToBody, navChangesToOps, navEditFieldsFor, type NavEditField } from './nav-editor.js';
 import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
@@ -146,14 +154,6 @@ type PanelState = {
 
 /** Section types whose data carries an image the image tool should offer. */
 const IMAGE_SECTION_TYPES = new Set(['bio', 'content_split']);
-
-/**
- * Manual-edit field selection (client-side heuristic): copy fields only.
- * Media/asset/link/binding keys are excluded here for the same reason the AI
- * schema strips them — except the image tool, which edits image fields
- * DELIBERATELY through its own dedicated form.
- */
-const NON_COPY_KEY_RE = /asset|image|portrait|logo|icon|src|url|href|route|anchor|formname|ogimage/i;
 
 const isImageValue = (value: unknown): value is { src: string; alt?: string } =>
   Boolean(value) &&
@@ -993,7 +993,10 @@ export const mountEditMode = (options: MountOptions): void => {
       preloadRecords();
       scheduleGapRebuild();
       void refreshRailThreads();
+      syncRegionFocusability(true);
     } else {
+      cancelInlineEdit();
+      syncRegionFocusability(false);
       chip.style.display = 'none';
       panel.classList.remove('dl-em-open');
       tray.classList.remove('dl-em-open');
@@ -1118,6 +1121,7 @@ export const mountEditMode = (options: MountOptions): void => {
     layoutRail(true);
     gapLayer.innerHTML = '';
     if (!document.body.classList.contains('dl-em-on')) return;
+    syncRegionFocusability(true); // freshly inserted draft blocks are editable too
     for (const gap of [...gapsFromRegions(), ...nodeGapsFromRegions()]) {
       const button = document.createElement('button');
       button.className = 'dl-em-gap';
@@ -2025,6 +2029,9 @@ export const mountEditMode = (options: MountOptions): void => {
   const scheduleRailReveal = (region: HTMLElement): void => {
     window.clearTimeout(railRevealTimer);
     window.clearTimeout(railHideTimer);
+    // While a block is in inline edit (T17.8), other blocks' hover-reveal is
+    // suppressed — the edited block's own bubble stays pinned (spec §5.3).
+    if (inlineEdit && inlineEdit.region !== region) return;
     if (revealedRegion === region) return;
     railRevealTimer = window.setTimeout(() => {
       revealedRegion = region;
@@ -2152,6 +2159,15 @@ export const mountEditMode = (options: MountOptions): void => {
       // dispatches AFTER mouseup, and re-rendering would replace the Ask-AI
       // button before its click listener ever fires.
       if (chip.contains(event.target as Node)) return;
+      // A double-click selects a word on its way into the inline editor
+      // (T17.8) — that is a gesture, not an Ask-AI scope. Drop any scope that
+      // was armed too, so a double-click can never leave one behind (§5.3).
+      if (!shouldCaptureSelection(event.detail)) {
+        currentSelectionText = undefined;
+        selectionRegion = undefined;
+        if (hotRegion) renderChip(hotRegion);
+        return;
+      }
       const selection = window.getSelection();
       const anchor = selection?.anchorNode;
       const anchorElement =
@@ -2166,6 +2182,355 @@ export const mountEditMode = (options: MountOptions): void => {
     },
     { signal }
   );
+
+  // ── the editable unit inside a record body
+  // A region addresses one section instance or one article node. Both the
+  // panel and the inline editor (T17.8) need the same resolution, and they
+  // must not drift: one function, two callers.
+  type ArticleNode = {
+    id: string;
+    public?: Record<string, unknown>;
+    private?: { strategy?: string; intent?: string; agentNotes?: string };
+  };
+  type EditableUnit = { currentData: Record<string, unknown>; patchSectionId: string; node?: ArticleNode };
+
+  const editableUnitFor = (target: EditTarget, body: Record<string, unknown>): EditableUnit | undefined => {
+    if (target.objectType === 'page') {
+      const sectionList = (body.sections as Array<{ id: string; data: Record<string, unknown> }> | undefined) ?? [];
+      const instance = sectionList.find((entry) => entry.id === target.sectionId);
+      return instance?.data && instance.id ? { currentData: instance.data, patchSectionId: instance.id } : undefined;
+    }
+    if (target.objectType === 'content_item') {
+      // Article node (W7.8): the editable unit is the node's PUBLIC fields —
+      // update_node scopes by target.nodeId (patchSectionId is unused there
+      // but kept non-empty for the shared panel state shape).
+      const nodes = (body.nodes as ArticleNode[] | undefined) ?? [];
+      const node = nodes.find((entry) => entry.id === target.nodeId);
+      return node?.public && node.id ? { currentData: node.public, patchSectionId: node.id, node } : undefined;
+    }
+    if (target.objectType === 'section') {
+      const inner = body.section as { id: string; data: Record<string, unknown> } | undefined;
+      return inner?.data && inner.id ? { currentData: inner.data, patchSectionId: inner.id } : undefined;
+    }
+    return undefined; // navigation edits through the nav grammar, never a data blob
+  };
+
+  // ── double-click to edit, inline (T17.8) ────────────────────────────────
+  // Changing a word used to cost hover → chip → pencil → panel → field →
+  // save. The concept removes all of it for the common case: double-click the
+  // block, type, commit. The write is the SAME EditSession checkout → patch
+  // the panel uses — there is deliberately no second write path (spec §5.2).
+  type InlineEditState = {
+    region: HTMLElement;
+    target: EditTarget;
+    field: InlineField;
+    patchSectionId: string;
+    /** The value at entry — what Esc reverts to and what a commit diffs against. */
+    before: unknown;
+    snapshot: RegionSnapshot;
+    host: HTMLElement;
+    richText?: RichTextEditorHandle;
+    committing: boolean;
+  };
+  let inlineEdit: InlineEditState | undefined;
+
+  /** Read the surface back: a rich-text document, or the text the editor holds. */
+  const inlineEditValue = (edit: InlineEditState): unknown => {
+    if (edit.field.kind === 'doc') return edit.richText?.getRichTextV1();
+    // innerText keeps line breaks (blank line = new paragraph for article
+    // bodies); nbsp from contenteditable normalises back to a plain space.
+    return (edit.host.innerText ?? '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\t ]+$/gm, '')
+      .replace(/\n+$/, '');
+  };
+
+  /**
+   * A commit is a round trip, so the surface outlives the keystroke that ends
+   * it. Anything that would start a NEW edit waits on this, and every teardown
+   * names the edit it tears down — otherwise a slow save could restore its own
+   * snapshot over whatever the editor is doing by then.
+   */
+  let inlineCommitInFlight: Promise<void> = Promise.resolve();
+
+  /** Leave inline edit, restoring the block's rendered content. */
+  const finishInlineEdit = (edit: InlineEditState): void => {
+    if (inlineEdit === edit) inlineEdit = undefined;
+    edit.richText?.destroy();
+    restoreRegion(edit.snapshot);
+    edit.region.classList.remove('dl-em-editing');
+  };
+
+  const cancelInlineEdit = (): void => {
+    const edit = inlineEdit;
+    if (!edit) return;
+    edit.committing = true; // a late blur must not then save it
+    finishInlineEdit(edit);
+    setStatus('Edit cancelled — nothing saved.');
+  };
+
+  /**
+   * Commit through the reviewable path: checkout → patch → invalidate → mark
+   * the block a draft → refresh the pending tray. A held lock refuses with the
+   * existing message and the block goes back to read-only, unwritten.
+   */
+  const runInlineCommit = async (edit: InlineEditState): Promise<void> => {
+    const after = inlineEditValue(edit);
+    if (after === undefined || JSON.stringify(after) === JSON.stringify(edit.before)) {
+      finishInlineEdit(edit);
+      return;
+    }
+    const objectSession = session(edit.target.objectType, edit.target.objectId);
+    setStatus('Saving…');
+    const checkout = await objectSession.ensureCheckout();
+    if (!checkout.ok) {
+      // Refuse, keep nothing, hand the block back read-only.
+      finishInlineEdit(edit);
+      setStatus(`Locked by ${checkout.heldBy ?? 'another editor'} — try again when the lock frees.`);
+      return;
+    }
+    const ops = inlineEditOps(edit.target, edit.field, after, edit.patchSectionId);
+    const changed = { [edit.field.key]: after };
+    const manualEdits =
+      edit.field.kind === 'doc'
+        ? []
+        : buildManualRichTextEdits(
+            edit.target,
+            { [edit.field.key]: edit.before },
+            changed,
+            [edit.field.key],
+            new Date().toISOString()
+          );
+    attachLearningTrail(edit.target, ops, changed, manualEdits);
+    const outcome = await objectSession.patch(ops);
+    finishInlineEdit(edit);
+    if (!outcome.ok) {
+      const blockers = outcome.blockers?.length ? ` ${outcome.blockers.join(' ')}` : '';
+      setStatus(`Not saved: ${outcome.error}${blockers}`);
+      return;
+    }
+    clearLearningTrail(edit.target);
+    invalidateRecord(edit.target.objectType, edit.target.objectId);
+    // Show the saved value where it can be located unambiguously; where it
+    // can't, the dashed draft outline and the tray remain the honest record —
+    // the same contract the panel's saves have always had.
+    if (edit.field.kind !== 'doc' && typeof edit.before === 'string' && typeof after === 'string') {
+      previewFieldChange(edit.region, edit.field.kind === 'html' ? 'html' : 'string', edit.before, after);
+    }
+    edit.region.classList.add('dl-em-draft');
+    setStatus(`${edit.target.objectId}: draft saved — not published.`);
+    await refreshPending();
+    scheduleGapRebuild();
+  };
+
+  const commitInlineEdit = (): Promise<void> => {
+    const edit = inlineEdit;
+    if (!edit || edit.committing) return inlineCommitInFlight;
+    edit.committing = true;
+    inlineCommitInFlight = runInlineCommit(edit);
+    return inlineCommitInFlight;
+  };
+
+  /** Put the caret where the pointer was, so the gesture lands like a click in text. */
+  const placeCaret = (host: HTMLElement, at?: { x: number; y: number }): void => {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range =
+      at && typeof document.caretRangeFromPoint === 'function' ? document.caretRangeFromPoint(at.x, at.y) : undefined;
+    if (range && host.contains(range.startContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    const end = document.createRange();
+    end.selectNodeContents(host);
+    end.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(end);
+  };
+
+  const startInlineEdit = async (region: HTMLElement, at?: { x: number; y: number }): Promise<void> => {
+    if (inlineEdit) {
+      if (inlineEdit.region === region) return;
+      void commitInlineEdit();
+    }
+    // Never start on top of a save still in flight: its teardown restores the
+    // block's pre-edit HTML, which would wipe a surface mounted meanwhile.
+    await inlineCommitInFlight;
+    const target = targetFor(region);
+    if (!target) return;
+    const { status, record } = await cachedRecord(target.objectType, target.objectId);
+    if (status !== 200 || !record) {
+      setStatus(`Could not load ${target.objectId} (HTTP ${status}).`);
+      return;
+    }
+    const unit = editableUnitFor(target, record.body as Record<string, unknown>);
+    const field = unit ? derivePrimaryInlineField(unit.currentData, target.objectType) : undefined;
+    if (!unit || !field) {
+      // No single primary copy field (image node, grid, navigation chrome):
+      // the double-click opens the panel it would have opened anyway (§5.1).
+      void openPanel(target, region, 'edit');
+      return;
+    }
+    const before = unit.currentData[field.key];
+    const snapshot = snapshotRegion(region);
+    const host = document.createElement('div');
+    host.className = field.kind === 'doc' ? 'dl-em-inline dl-em-inline-rich' : 'dl-em-inline';
+    if (field.kind === 'html') host.classList.add('dl-em-inline-code');
+    host.setAttribute('role', 'textbox');
+    host.setAttribute('aria-label', `Edit ${field.key}`);
+    region.replaceChildren(host);
+    region.classList.add('dl-em-editing');
+
+    const edit: InlineEditState = {
+      region,
+      target,
+      field,
+      patchSectionId: unit.patchSectionId,
+      before,
+      snapshot,
+      host,
+      committing: false,
+    };
+    inlineEdit = edit;
+
+    if (field.kind === 'doc') {
+      // The grammar-bound TipTap editor, imported only when one is needed so
+      // @tiptap never enters the canvas's base bundle. Allowlist, paste
+      // sanitizer and https-only links come with it, unchanged.
+      const { createRichTextEditor } = await import('./richtext-editor.js');
+      if (inlineEdit !== edit) return; // cancelled while the chunk loaded
+      edit.richText = await createRichTextEditor({
+        element: host,
+        doc: before as Parameters<typeof createRichTextEditor>[0]['doc'],
+      });
+      if (inlineEdit !== edit) {
+        edit.richText.destroy();
+        return;
+      }
+      edit.richText.focus();
+    } else {
+      host.setAttribute('contenteditable', 'plaintext-only');
+      host.textContent = typeof before === 'string' ? before : '';
+      host.focus();
+      placeCaret(host, at);
+      // Belt and braces where contenteditable="plaintext-only" is not honoured:
+      // a paste still lands as text, never as foreign markup.
+      host.addEventListener('paste', (event) => {
+        const text = event.clipboardData?.getData('text/plain');
+        if (text === undefined) return;
+        event.preventDefault();
+        document.execCommand('insertText', false, text);
+      });
+    }
+
+    host.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelInlineEdit();
+        region.focus?.();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        void commitInlineEdit();
+      }
+    });
+    host.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && host.contains(next)) return;
+      void commitInlineEdit();
+    });
+
+    // The block's own bubble stays up while it is edited (§5.3 collision 2) —
+    // comments about the thing you are editing are the point.
+    const anchorKey = anchorKeyForRegion(region);
+    if (anchorKey) pinRail(anchorKey, region);
+    chip.style.display = 'none';
+    setStatus('Editing in place — ⌘↵ or click away to save, Esc to cancel.');
+  };
+
+  document.addEventListener(
+    'dblclick',
+    (event) => {
+      if (!document.body.classList.contains('dl-em-on')) return;
+      const element = event.target as HTMLElement | null;
+      if (!element) return;
+      if (rail.contains(element) || panel.contains(element) || chip.contains(element) || tray.contains(element)) return;
+      if (inlineEdit?.host.contains(element)) return;
+      const region =
+        element.closest<HTMLElement>(NODE_SELECTOR) ??
+        element.closest<HTMLElement>(REGION_SELECTOR) ??
+        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!region) return;
+      event.preventDefault();
+      void startInlineEdit(region, { x: event.clientX, y: event.clientY });
+    },
+    { signal }
+  );
+
+  // Keyboard equivalent (spec §9): Enter on a focused block edits it. A
+  // mouse-only editing gesture would be the only one on the canvas.
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!document.body.classList.contains('dl-em-on') || inlineEdit) return;
+      const element = document.activeElement as HTMLElement | null;
+      if (!element || element === document.body) return;
+      if (rail.contains(element) || panel.contains(element) || chip.contains(element) || tray.contains(element)) return;
+      if (bar.contains(element) || element.isContentEditable) return;
+      if (/^(input|textarea|select|button|a|summary|details)$/i.test(element.tagName)) return;
+      const region =
+        element.closest<HTMLElement>(NODE_SELECTOR) ??
+        element.closest<HTMLElement>(REGION_SELECTOR) ??
+        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!region) return;
+      event.preventDefault();
+      void startInlineEdit(region);
+    },
+    { signal }
+  );
+
+  // A click outside the surface commits it (§5.3 — every other autosaving
+  // inline editor behaves this way), and an in-content link never navigates:
+  // in edit mode a click on one almost always meant "put a cursor here".
+  // Chrome (navigation objects) is exempt — an editor must still be able to
+  // move around the site while edit mode is on.
+  document.addEventListener(
+    'mousedown',
+    (event) => {
+      if (!inlineEdit) return;
+      const element = event.target as Node | null;
+      if (element && (inlineEdit.host.contains(element) || panel.contains(element) || rail.contains(element))) return;
+      void commitInlineEdit();
+    },
+    { signal }
+  );
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!document.body.classList.contains('dl-em-on')) return;
+      const anchor = (event.target as HTMLElement | null)?.closest?.<HTMLAnchorElement>('a[href]');
+      if (!anchor || anchor.closest(NAV_SELECTOR)) return;
+      if (!anchor.closest(`${NODE_SELECTOR}, ${REGION_SELECTOR}`)) return;
+      event.preventDefault();
+    },
+    { signal }
+  );
+
+  /** Annotated blocks are focusable in edit mode only — never for a visitor. */
+  const syncRegionFocusability = (on: boolean): void => {
+    for (const region of annotatedRegions()) {
+      if (on) {
+        if (!region.hasAttribute('tabindex')) region.setAttribute('tabindex', '0');
+      } else if (region.getAttribute('tabindex') === '0') {
+        region.removeAttribute('tabindex');
+      }
+    }
+  };
 
   // ── panel
   let panelState: PanelState | undefined;
@@ -2332,31 +2697,13 @@ export const mountEditMode = (options: MountOptions): void => {
       renderNavForm(panelState);
       return;
     }
-    let currentData: Record<string, unknown> | undefined;
-    let patchSectionId: string | undefined;
+    const unit = editableUnitFor(target, body);
+    const currentData = unit?.currentData;
+    const patchSectionId = unit?.patchSectionId;
     let nodePrivate: PanelState['nodePrivate'];
     let articleMeta: PanelState['articleMeta'];
-    if (target.objectType === 'page') {
-      const sectionList = (body.sections as Array<{ id: string; data: Record<string, unknown> }> | undefined) ?? [];
-      const instance = sectionList.find((entry) => entry.id === target.sectionId);
-      currentData = instance?.data;
-      patchSectionId = instance?.id;
-    } else if (target.objectType === 'content_item') {
-      // Article node (W7.8): the editable unit is the node's PUBLIC fields —
-      // update_node scopes by target.nodeId (patchSectionId is unused there
-      // but kept non-empty for the shared panel state shape).
-      const nodes =
-        (body.nodes as
-          | Array<{
-              id: string;
-              public?: Record<string, unknown>;
-              private?: { strategy?: string; intent?: string; agentNotes?: string };
-            }>
-          | undefined) ?? [];
-      const node = nodes.find((entry) => entry.id === target.nodeId);
-      currentData = node?.public;
-      patchSectionId = node?.id;
-      nodePrivate = node?.private;
+    if (target.objectType === 'content_item') {
+      nodePrivate = unit?.node?.private;
       articleMeta = {
         slug: body.slug,
         author: body.author,
@@ -2365,13 +2712,9 @@ export const mountEditMode = (options: MountOptions): void => {
         seo: body.seo,
       };
       // The record is in hand — fill the header role synchronously.
-      const role = roleOf(node);
+      const role = roleOf(unit?.node);
       const roleEl = identEl.querySelector('[data-em-role]');
       if (role && roleEl) roleEl.textContent = role;
-    } else {
-      const inner = body.section as { id: string; data: Record<string, unknown> } | undefined;
-      currentData = inner?.data;
-      patchSectionId = inner?.id;
     }
     if (!currentData || !patchSectionId) {
       log('sys', `Not in the draft record yet — edit via /admin/content/${escapeHtml(target.objectId)}.`);

@@ -108,7 +108,7 @@ model or touching layout/anchoring logic with no existing precedent in the file.
 | **T17.5** | Reply-threading UI (item 10) — `parentCommentId` already reserved, client renders flat today | auto | `claude-sonnet-5` | medium |
 | **T17.6** | Gutter badges / dot counters + the global "Attention N" toolbar counter (item 11 + PDF) | auto | `claude-sonnet-5` | medium |
 | **T17.7** | Agent-routed composer: note / change-request / question → CMS Agent — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
-| **T17.8** | Double-click-to-edit block inline, no panel step — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
+| **T17.8** | Double-click-to-edit block inline, no panel step — *PDF, not in items 9–16* — **DONE 2026-08-10 (§7)** | auto | `claude-opus-5` | high |
 | **T17.9** | Image-ref-specific comments (item 12) | auto | `claude-sonnet-5` | medium |
 | **T17.10** | Notifications / digests (item 13) — delivery channel is a product decision, not an agent one | checkpoint | `claude-sonnet-5` | medium |
 | **T17.11** | Per-role comment-visibility policy (item 14) — follows the existing `isOwner`/`resolveRolesFromEvent` pattern | auto | `claude-sonnet-5` | medium |
@@ -225,3 +225,54 @@ what changed and where a later task should look first.
   three layout modes at real viewport widths, the reveal/dismiss feel, and
   whether the chip/bubble stacking reads as intended. Everything mechanical is
   covered by the pure tests; the rest wants T17.13's smoke test or a human.
+
+### T17.8 — double-click to edit a block inline (2026-08-10)
+
+- **New:** `packages/core/lib/edit-mode/inline-edit.ts` (+ `.test.ts`, 20
+  cases) — primary-field derivation from a block's own data (never a per-type
+  map), the `event.detail >= 2` selection-suppression predicate, and the
+  value→ops mapping, which is `suggestionToOps` and nothing else.
+- **`ui.ts`:** a `dblclick` (and `Enter`-on-focused-block) handler mounts an
+  editing surface in the block's own box — the grammar-bound TipTap editor for
+  a `rich_text.v1` document (dynamically imported, so @tiptap stays out of the
+  canvas's base chunk), a plain-text `contenteditable` otherwise. `⌘/Ctrl+↵`,
+  blur or an outside click commit; `Esc` reverts. The commit is
+  `EditSession.ensureCheckout()` → `patch` → `invalidateRecord` →
+  `dl-em-draft` → `refreshPending()` — the panel's own path, with the same
+  lock-refusal message and the same learning-trail attachment.
+- **The three collisions (spec §5.3):** the `mouseup` selection capture skips
+  (and *clears*) on `event.detail >= 2`, so a double-click can never leave an
+  Ask-AI scope armed; other blocks' hover-reveal is suppressed while a block
+  is being edited, and the edited block's own bubble is pinned; in-content
+  anchors are `preventDefault`-ed.
+- **Also extracted:** `editableUnitFor(target, body)` — the section/node
+  resolution `openPanel` used to inline. One function, two callers, so the
+  panel and the inline editor can never disagree about what a region edits.
+
+Deviations, and why:
+
+- **Preferred-key ordering.** The spec says "the first field `formFieldsFor`
+  would render". Object key order in a stored record is incidental, so that
+  rule makes double-clicking a paragraph edit the block's *heading* whenever
+  `title` happens to be serialised first. The derivation prefers
+  `body`/`text`/`title`/`heading` and only then falls back to first-eligible.
+- **String arrays are not eligible.** A bullet list is not one value; a block
+  whose only copy is `items` falls through to the panel, like an image node.
+- **The surface replaces the block's rendered content** rather than making the
+  rendered element itself `contenteditable`. The value then round-trips
+  exactly (what goes in is what comes back), which matters more than caret
+  fidelity given none of this could be driven in a browser here; the caret is
+  still placed at the pointer via `caretRangeFromPoint`.
+- **Navigation chrome is exempt from the link `preventDefault`.** Trapping an
+  editor on one page for the duration of edit mode is not what §5.3 is for.
+- **A committed `rich_text.v1` document is not previewed in place** — it is
+  saved, the block is marked draft, and the pre-edit rendering stays until
+  publish + release. Re-rendering it here would mean a second renderer beside
+  `render-nodes.ts`, which the repo forbids. Plain and HTML fields DO preview,
+  through the existing `previewFieldChange`.
+- **Not verified in a browser:** the caret placement, the feel of the editing
+  surface, whether `contenteditable="plaintext-only"` is honoured in Wolf's
+  browser (a paste handler backstops it), and whether `tabindex` on a
+  `display:contents` article-node wrapper is focusable at all — if it is not,
+  the `Enter` path still works from any focusable descendant, and T17.6's
+  gutter buttons give every block a real focus target.

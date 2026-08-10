@@ -322,6 +322,19 @@ body.dl-em-slide{padding-right:var(--dlem-slide-pad,0px)}
 /* Held for the one synchronous reflow the rail needs to measure the UNSLID
    content column, so the slide it removes and restores never animates. */
 body.dl-em-measuring{transition:none!important}
+/* ── inline editing (T17.8) ─────────────────────────────────────────────────
+   Double-click a block and its copy becomes editable IN the page, in the
+   block's own box: the surface inherits the site's typography (it renders
+   inside the article's prose wrapper), so what you type looks like what will
+   publish. pre-wrap keeps the blank-line-is-a-new-paragraph rule article
+   bodies use visible while editing. */
+.dl-em-inline{white-space:pre-wrap;outline:2px solid var(--dlem-accent);outline-offset:6px;border-radius:2px;
+  min-height:1.4em;caret-color:var(--dlem-accent)}
+.dl-em-inline:focus,.dl-em-inline .ProseMirror:focus{outline:2px solid var(--dlem-accent);outline-offset:6px}
+.dl-em-inline-code{font:12.5px/1.6 ui-monospace,monospace;color:var(--dlem-text)}
+.dl-em-inline-rich{white-space:normal}
+/* The hover outline would double up on the block being edited. */
+body.dl-em-on [data-cms-section-id].dl-em-editing>*,body.dl-em-on [data-cms-nav-object].dl-em-editing>*{outline:none}
 /* Sheet mode (< 900px): no rail column — the bubbles become the bottom sheet. */
 .dl-em-rail.dl-em-rail-sheet{top:auto;left:10px;right:10px;bottom:10px;width:auto;height:auto;max-height:62vh;
   overflow-y:auto;pointer-events:auto}
