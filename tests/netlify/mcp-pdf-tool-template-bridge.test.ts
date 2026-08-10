@@ -271,6 +271,44 @@ test('foreign site_id fails template bridge tools with template_site_mismatch an
   }
 });
 
+test('validate_pdf_template forwards required worst-case sample data and rejects a call missing it', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    validate_pdf_template: (body) => ({
+      body: {
+        projectId: body.projectId,
+        templateId: body.templateId,
+        version: body.version ?? 1,
+        validationId: 'val_1',
+        status: 'pending',
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const data = { title: 'Worst Case Title That Is Extremely Long', lines: ['a', 'b', 'c'] };
+    const validated = await rpc('validate_pdf_template', {
+      site_id: 'site_drlurie',
+      template_id: 'tpl_react_report',
+      data,
+    });
+    assert.ok(!validated.result.isError, JSON.stringify(validated.result.structuredContent));
+    assert.equal(validated.result.structuredContent?.validationId, 'val_1');
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body.data, data);
+
+    const missingData = await rpc('validate_pdf_template', {
+      site_id: 'site_drlurie',
+      template_id: 'tpl_react_report',
+    });
+    assert.equal(missingData.result.isError, true);
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('create_agent_artifact_job forwards template_id, data, and assets to pdf-tool', async () => {
   await resetAndSeedRequest();
   const originalFetch = globalThis.fetch;

@@ -311,13 +311,14 @@ export const publishPlatformPdfTemplate = (
  */
 export const validatePlatformPdfTemplate = (
   grant: PdfToolStorageGrant,
-  input: { templateId: string; version?: number },
+  input: { templateId: string; version?: number; data: Record<string, unknown> },
   options: PdfToolClientOptions = {}
 ) =>
   postPdfTool(
     'validate-pdf-template',
     projectPayload(grant, {
       templateId: input.templateId,
+      data: input.data,
       ...(input.version ? { version: input.version } : {}),
     }),
     options

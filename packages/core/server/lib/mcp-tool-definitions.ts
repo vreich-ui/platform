@@ -468,8 +468,11 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         site_id: stringSchema('Owning site object id; must match this deployment.'),
         template_id: stringSchema('The template object id to validate.'),
         version: intSchema('Optional specific version to validate; omit for the latest draft version.'),
+        data: anyObjectSchema(
+          'Required worst-case sample data for the validation render, forwarded verbatim to pdf-tool. pdf-tool renders the template against this data during validation, so it should exercise the template\'s longest/edge-case field values, not typical data.'
+        ),
       },
-      ['site_id', 'template_id']
+      ['site_id', 'template_id', 'data']
     ),
   },
   {

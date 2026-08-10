@@ -1073,11 +1073,19 @@ export const callValidatePdfTemplate = async (event: LambdaEvent, input: Record<
   if (!scoped.ok) return scoped.result;
   const templateId = toNonEmptyString(input.template_id);
   if (!templateId) return toolError('template_id is required.');
+  const data = input.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return toolError('data is required: provide worst-case sample data as a JSON object.');
+  }
   const built = buildArtifactBridgeGrant();
   if (!built.ok) return built.result;
 
   const version = typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : undefined;
-  const validated = await validatePlatformPdfTemplate(built.grant, { templateId, ...(version ? { version } : {}) });
+  const validated = await validatePlatformPdfTemplate(built.grant, {
+    templateId,
+    data: data as Record<string, unknown>,
+    ...(version ? { version } : {}),
+  });
   if (!validated.ok) return pdfToolBridgeError(validated);
 
   event.log?.({
