@@ -535,8 +535,8 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 # gate root's \`npm run build\` always ran — a corrupt/mismatched committed
 # upload image or a dangling markdown image reference fails the BUILD, not
 # just a later render. This site's own tree lays out uploads under
-# assets/images and legacy markdown posts under data/post (not root/
-# Dr-Lurie's src/-prefixed layout), so both roots are passed explicitly,
+# assets/images and legacy markdown posts under data/post (not the
+# root deploy's src/-prefixed legacy layout), so both roots are passed explicitly,
 # site-relative (Netlify runs this command with sites/${ids.clientSlug} as cwd).
 [build]
   publish = "dist"
