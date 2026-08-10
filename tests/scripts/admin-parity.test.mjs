@@ -37,7 +37,13 @@ import {
   resolveAuditTarget,
   scanCoreBlobStoreNames,
 } from '../../packages/core/cli/admin-parity.mjs';
-import { buildPlan, writeFiles, CORE_BLOB_STORES, ENV_CHECKLIST } from '../../packages/core/cli/create-site.mjs';
+import {
+  buildPlan,
+  writeFiles,
+  CORE_BLOB_STORES,
+  ENV_CHECKLIST,
+  SITE_BINDING_CAPABILITY_FLAGS,
+} from '../../packages/core/cli/create-site.mjs';
 import { runAdminParity } from '../../packages/core/cli/migrate-site.mjs';
 import { discoverTargets } from '../../scripts/audit-site-admin-parity.mjs';
 
@@ -131,6 +137,47 @@ test('every admin-critical env row the audit requires is declared in create-site
   const names = ENV_CHECKLIST.flatMap((g) => g.rows.map((r) => r.name));
   for (const row of ADMIN_CRITICAL_ENV.filter((e) => e.checklist)) {
     assert.ok(names.includes(row.name), `expected ${row.name} in ENV_CHECKLIST`);
+  }
+});
+
+// ─── binding-capability (T16.3) ──────────────────────────────────────────────
+
+test('SITE_BINDING_CAPABILITY_FLAGS is non-empty and the create-site template emits every flag as `true`', () => {
+  assert.ok(SITE_BINDING_CAPABILITY_FLAGS.length > 0);
+  const plan = buildPlan({ name: 'binding-capability-probe' });
+  const bindingFile = plan.files.find((f) => f.path === 'sites/binding-capability-probe/config/site-binding.ts');
+  assert.ok(bindingFile, 'expected the scaffold to emit config/site-binding.ts');
+  for (const flag of SITE_BINDING_CAPABILITY_FLAGS) {
+    assert.match(bindingFile.content, new RegExp(`\\b${flag}\\s*:\\s*true\\b`), `template must declare ${flag}: true`);
+  }
+});
+
+test('binding-capability: every real tenant’s config/site-binding.ts declares the full capability flag set', () => {
+  for (const targetArg of discoverTargets()) {
+    const checks = computeAdminParity(resolveAuditTarget(targetArg));
+    const check = checks.find((c) => c.id === 'binding-capability');
+    assert.ok(check, `expected a binding-capability check for ${targetArg}`);
+    assert.equal(check.status, 'PASS', `${targetArg}: ${check.detail}`);
+  }
+});
+
+test('binding-capability surfaces a GAP when a site-binding.ts is missing a capability flag', () => {
+  const slug = 'parity-scratch-bindcap';
+  const dir = scratchSite(slug);
+  try {
+    const bindingPath = path.join(dir, 'config', 'site-binding.ts');
+    const withFlags = fs.readFileSync(bindingPath, 'utf8');
+    for (const flag of SITE_BINDING_CAPABILITY_FLAGS) {
+      assert.match(withFlags, new RegExp(`\\b${flag}\\s*:\\s*true\\b`));
+    }
+    fs.writeFileSync(bindingPath, withFlags.replace(/\n\s*warmAdminKeepalive:\s*true,\n/, '\n'));
+
+    const checks = computeAdminParity(resolveAuditTarget(`sites/${slug}`));
+    const check = checks.find((c) => c.id === 'binding-capability');
+    assert.equal(check.status, 'GAP');
+    assert.match(check.detail, /warmAdminKeepalive/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

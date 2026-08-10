@@ -38,6 +38,7 @@ import {
   idsFor,
   ENV_CHECKLIST,
   CORE_BLOB_STORES,
+  SITE_BINDING_CAPABILITY_FLAGS,
   buildPlan,
 } from './create-site.mjs';
 import { siteReaderRouteTemplates } from './site-reader-route-templates.mjs';
@@ -658,7 +659,33 @@ export const computeAdminParity = (target) => {
       : `seeds/templates-seed-data.mjs is missing or incomplete (found: ${genesisTemplateIds.join(', ') || 'none'}) — a new tenant would have no starter page recipe to instantiate from`
   );
 
-  // 15+. The human gates — real requirements no repo check can prove. Named
+  // 15. Binding capability-flag parity (T16.3): the perf/behavior flags a
+  //     SiteBinding can opt into (today just `warmAdminKeepalive`, the
+  //     admin cold-start fix) drifted to drlurie-only before this check
+  //     existed — platform and fernwell scaffolded before the flag existed
+  //     and never got it retrofitted. create-site.mjs's own template is the
+  //     single source of truth for what the flag set IS
+  //     (SITE_BINDING_CAPABILITY_FLAGS); this check proves every tenant's
+  //     committed `config/site-binding.ts` actually declares it `true`, not
+  //     just that the flag exists somewhere in core.
+  const siteBindingPath = path.join(target.siteDir, 'config', 'site-binding.ts');
+  const siteBindingSrc = fs.existsSync(siteBindingPath) ? fs.readFileSync(siteBindingPath, 'utf8') : '';
+  const missingFlags = SITE_BINDING_CAPABILITY_FLAGS.filter(
+    (flag) => !new RegExp(`\\b${flag}\\s*:\\s*true\\b`).test(siteBindingSrc)
+  );
+  add(
+    'binding-capability',
+    `config/site-binding.ts declares the full capability flag set create-site's template emits (${SITE_BINDING_CAPABILITY_FLAGS.join(', ')})`,
+    'scaffold (create-site) | migrate-site --admin-parity',
+    !siteBindingSrc ? 'GAP' : missingFlags.length ? 'GAP' : 'PASS',
+    !siteBindingSrc
+      ? `missing ${path.relative(repoRoot, siteBindingPath)}`
+      : missingFlags.length
+        ? `missing flag(s): ${missingFlags.join(', ')}`
+        : `all ${SITE_BINDING_CAPABILITY_FLAGS.length} capability flag(s) declared true`
+  );
+
+  // 16+. The human gates — real requirements no repo check can prove. Named
   //      here so the table is the complete truth, not the automatable subset.
   add(
     'identity-enabled',

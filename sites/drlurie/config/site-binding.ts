@@ -12,6 +12,16 @@
  *
  * `sites/drlurie/site.config.ts` re-exports this binding (single source —
  * do not construct a second SiteBinding there).
+ *
+ * Export-name unification (T16.3, 2026-08-10): every CLI-born site
+ * (create-site.mjs's template) exports its binding as plain `siteBinding` —
+ * Dr-Lurie predates that convention and exports `drlurieSiteBinding`, which
+ * every root `netlify/functions/*` shim still imports by that name. Both
+ * names are exported here, pointing at the SAME object: `drlurieSiteBinding`
+ * stays for those existing importers (never removed — see the T16.3 grep of
+ * the whole repo), and `siteBinding` is the fleet-uniform alias so tooling
+ * that expects the CLI-born shape (e.g. a future generic per-site import)
+ * works here too.
  */
 import { PLATFORM_ENV_NAMES, type SiteBinding } from '../../../packages/core/server/lib/site-binding.js';
 import { siteIdentityConfig } from './site-identity.js';
@@ -24,3 +34,6 @@ export const drlurieSiteBinding: SiteBinding = {
   // ~1.3s TTFB to /admin/content. Warm them on the same schedule as /mcp.
   warmAdminKeepalive: true,
 };
+
+/** Fleet-uniform alias (T16.3) — same object as `drlurieSiteBinding` above. */
+export const siteBinding: SiteBinding = drlurieSiteBinding;

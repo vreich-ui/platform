@@ -413,6 +413,16 @@ export const siteIdentityConfig = {
 } satisfies SiteIdentityConfig;
 `;
 
+/**
+ * Capability flags every `SiteBinding` this template scaffolds — AND every
+ * already-existing `sites/<client>/config/site-binding.ts` — must declare
+ * `true` (T16.3 fleet-wide parity; `warmAdminKeepalive` was drlurie-only
+ * before). Single source of truth for `admin-parity`'s `binding-capability`
+ * check (packages/core/cli/admin-parity.mjs): add a flag here AND to the
+ * template below in the SAME change, never one without the other.
+ */
+export const SITE_BINDING_CAPABILITY_FLAGS = ['warmAdminKeepalive'];
+
 const siteBindingTemplate = (ids) => `/**
  * ${ids.clientSlug} SiteBinding (T11.7 scaffold) — this client's instantiation
  * of the core server layer's per-site seam (packages/core/server/lib/
@@ -428,6 +438,10 @@ export const siteBinding: SiteBinding = {
   siteId: siteIdentityConfig.siteId,
   env: PLATFORM_ENV_NAMES,
   dataRoot: 'sites/${ids.clientSlug}/data/site',
+  // Admin cold-start fix (T16.3 fleet parity): admin-object/admin-audit
+  // cold starts add ~1.3s TTFB to /admin/content. Warm them on the same
+  // schedule as /mcp.
+  warmAdminKeepalive: true,
 };
 `;
 
