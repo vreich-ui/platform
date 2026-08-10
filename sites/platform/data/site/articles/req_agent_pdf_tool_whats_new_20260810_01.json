@@ -1,0 +1,123 @@
+{
+  "__generated": {
+    "at": "2026-08-10T18:56:51.003Z",
+    "from": "objects/content_item/by-id/req_agent_pdf_tool_whats_new_20260810_01.json",
+    "record_version": 5
+  },
+  "author": "Platform Documentation",
+  "deck": "The document generator behind this platform just got three real upgrades: you can now see what every generation costs, set a hard spending limit, and lock AI-generated images to a consistent brand look.",
+  "description": "A plain-language rundown of PDF-Tool's latest update: per-job cost receipts, a configurable spending guardrail, and seed/LoRA support for brand-consistent AI imagery -- plus an honest look at what's still catching up.",
+  "nodes": [
+    {
+      "id": "n_upd01",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "Generating a document or an image used to be a bit of a black box: it worked, but you couldn't see what it cost, and nothing stopped a runaway job from quietly running up a bill. AI-generated product photos also tended to drift -- ask for the same kind of image twice and you'd get two different styles. This update fixes all three: every generation now reports what it actually cost, a spending limit catches problems before they get expensive, and images can be locked to a consistent, repeatable brand look.",
+        "title": "Why this update matters"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd02",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "This builds on ground already covered: PDFs generated here can flow across multiple pages and mix photos, colored panels, dividing lines, and real tables in the site's own colors -- confirmed live and covered in detail in the platform's own downloadable-PDFs article. The catalog attached to this article is a fresh example: seven pages, built entirely from that same pipeline.",
+        "title": "Real documents, not just longer ones"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd03",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Every image or PDF job now comes back with a real cost receipt: which provider and model did the work, how the price was calculated, and the estimated cost in dollars. Free, template-only PDF renders get a receipt too -- an honest zero, not silence -- so a per-request total can always be trusted rather than guessed at.",
+        "title": "You can now see what every generation costs"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd04",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Each request now runs against a spending ceiling. If a job would push a request's total past that limit, it stops with a clear error instead of running unchecked -- cheap insurance against a stuck loop turning into a real bill. The limit is configurable per site; a sensible default is on by default.",
+        "title": "A spending limit that catches problems before they get expensive"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd05",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Two new controls keep AI-generated imagery consistent instead of random. A seed locks in the same visual outcome for the same prompt, so a re-run looks like the same photoshoot rather than a different one. A per-brand style file (a trained LoRA) goes further, locking the look itself -- palette, mood, medium -- across hundreds of generations. The system also now refuses to pair a brand style file with a model that can't actually carry it, so that combination can't silently fall back to an off-brand result. At roughly a tenth of the cost of the general-purpose alternative for the same volume, this is the default path going forward, not a premium option.",
+        "title": "Product photos that actually match your brand"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd06",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "In the spirit of this site's own documentation standard, here's what this update does not yet prove. Longer, web-page-style PDFs (built from real HTML and CSS rather than a fixed template) are one step closer to publishable this update, but nobody has taken one all the way through a real validate-and-publish cycle yet -- so treat that path as unlocked, not proven. Searching stock photo libraries from directly inside the platform is fully built behind the scenes but still isn't reachable from here; for now, image generation is the supported path. Neither gap affects anything described above, which is confirmed working today.",
+        "title": "What's still catching up"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd07",
+      "kind": "action",
+      "private": {
+        "intent": "convert",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "A seven-page, on-brand catalog covering every feature in this update, including the cost and consistency comparisons above -- generated through the same pipeline it describes.",
+        "ctaLink": "https://kugel-platform.netlify.app/pdf/req_agent_pdf_tool_whats_new_20260810_01/d01fd8d3a8fbaeba1ef3260516701e83e2a6ef8e5f315cf50f1cf570ad371673.pdf",
+        "ctaText": "Download the PDF catalog",
+        "title": "Get the Full Feature Catalog"
+      },
+      "visibility": "public"
+    }
+  ],
+  "publication_context": {
+    "domain": "kugel-platform.netlify.app",
+    "publication_name": "Platform",
+    "topic_scope": "CMS artifact generation"
+  },
+  "seo": {
+    "meta_description": "What changed in PDF-Tool's latest release: visible per-generation costs, a built-in spending guardrail, and brand-locked AI imagery via seed and LoRA support.",
+    "meta_title": "PDF-Tool Update: Cost Receipts, Spending Limits, and On-Brand Images"
+  },
+  "slug": "pdf-tool-whats-new-august-2026",
+  "taxonomy": {
+    "category": "guide",
+    "tags": [
+      "publishing",
+      "architecture"
+    ]
+  },
+  "title": "What's New in PDF-Tool: Cost Visibility, Spending Guardrails, and On-Brand Images"
+}
