@@ -61,6 +61,23 @@ Tool surfaces are uniform across tenants except via the documented
 `OPTIONAL_HANDLER_TOOLS` mechanism with a recorded ruling (today:
 `verify_article_images` only). Execution: the W16 rows in queue.tsv.
 
+## W17 — CANVAS UX SCOPE: THE FULL MARGINALIA CONCEPT (Wolf, 2026-08-10, GOVERNING)
+
+Wolf answered `docs/cms-architecture/17-canvas-ux-plan.md` §2 with **(a) — the
+full concept**: `docs/design/marginalia-concept-b-final.pdf` is the acceptance
+standard, in full, and T17.0–T17.13 all run. Recorded in
+[`docs/cms-architecture/decisions/2026-08-10-canvas-ux-scope-ruling.md`](docs/cms-architecture/decisions/2026-08-10-canvas-ux-scope-ruling.md).
+The two things you will hit in ordinary work: **the PDF, not any prose list, is
+what a W17 task is measured against** — where it is silent,
+[`docs/design/marginalia-interaction-model.md`](docs/design/marginalia-interaction-model.md)
+is the specification and its §11 indexes every place that spec went past the
+PDF as an explicit proposal; and **this is a rewrite of the canvas annotation
+surface, not eight bolt-on features** — T17.3 retires the Comments accordion in
+favour of a margin rail, T17.7 and T17.8 are new work no earlier plan accounts
+for. Sequencing is binding (plan §5): Batch B (T17.3 → T17.8 → T17.6) runs
+sequentially in ONE session with ONE agent, T17.4 before Batch C, T17.13 last.
+Execution: the W17 rows in queue.tsv.
+
 ## Definition of "converted" — NO HALF MEASURES (Wolf, 2026-07-10, GOVERNING)
 
 The entire project goal is: **agents can change objects on every page — add

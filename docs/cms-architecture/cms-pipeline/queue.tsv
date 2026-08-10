@@ -157,4 +157,23 @@ T16.6	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.6-lint-tes
 T16.7	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.7-core-package-rename.md
 T16.8	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.8-genesis-verify-mode.md
 T16.9	notify	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T16.9-credentialed-fleet-drive.md
-T16.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.10-genesis-entrypoints.md
+T16.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.10-genesis-entrypoints.md#
+# W17 — Canvas UX / Marginalia concept build (plan: docs/cms-architecture/17-canvas-ux-plan.md;
+# spec: docs/design/marginalia-interaction-model.md; scope ruling (a) = the full concept:
+# docs/cms-architecture/decisions/2026-08-10-canvas-ux-scope-ruling.md). T17.0/T17.1/T17.2 are DONE
+# and deliberately absent. Row order IS the execution order. Batch B = T17.3 -> T17.8 -> T17.6, which
+# MUST run sequentially in ONE session with ONE agent (they rewrite the same positioning/event code).
+# T17.4 runs alone after Batch B and before Batch C (T17.5, T17.9, T17.11, T17.12 — parallelisable in
+# separate worktrees). T17.7 (Batch D) may run parallel to Batch C. T17.13 is last. T17.10 is a
+# checkpoint parked on Wolf's delivery-channel answer and blocks nothing.
+T17.3	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.3-margin-rail-hover-reveal.md
+T17.8	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.8-double-click-inline-edit.md
+T17.6	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6-attention-badges-counter.md
+T17.4	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.4-selected-text-span-anchoring.md
+T17.5	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.5-reply-threading-ui.md
+T17.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.9-image-ref-comments.md
+T17.11	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.11-comment-visibility-policy.md
+T17.12	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.12-review-decision-linking.md
+T17.7	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.7-agent-routed-composer.md
+T17.10	checkpoint	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.10-notifications-digests.md
+T17.13	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.13-canvas-smoke-test.md
