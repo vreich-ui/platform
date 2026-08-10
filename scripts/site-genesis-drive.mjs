@@ -33,6 +33,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { genesisSeedFiles } from '../packages/core/cli/genesis-manifest.mjs';
+
 const args = process.argv.slice(2);
 const flag = (name) => {
   const i = args.indexOf(name);
@@ -64,14 +66,10 @@ const AGENT = 'site-genesis-drive';
 // Seed modules first, in dependency order, then the bootstrap page exports.
 // Pages come last: they may reference navigation (navigationOverrides) and the
 // site's own defaults.
-const SEED_MODULES = [
-  'navigation-seed-data.mjs', // LAW: navs before the site singleton
-  'site-seed-data.mjs',
-  'taxonomy-seed-data.mjs',
-  'themes-seed-data.mjs',
-  'section-templates-seed-data.mjs',
-  'templates-seed-data.mjs', // W15 S3 follow-up: starter page-template recipes
-];
+// T16.0: the list and its order come from the genesis manifest — the one
+// staged source of truth `create-site` also derives from. Add a seed THERE,
+// not here; `driveOrder` in the manifest carries the navs-first law.
+const SEED_MODULES = genesisSeedFiles();
 
 const loadSeeds = async () => {
   const plan = [];

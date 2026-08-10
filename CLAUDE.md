@@ -44,6 +44,23 @@ finish-line directive, verbatim:
 > (Netlify token, GitHub admin clicks). The project crosses the line as a solid
 > V1.
 
+## W16 — GENESIS SCOPE + FLEET PARITY LAW (Wolf, 2026-08-10, GOVERNING)
+
+Genesis and cross-tenant parity are governed by
+[`docs/cms-architecture/16-genesis-parity-plan.md`](docs/cms-architecture/16-genesis-parity-plan.md):
+the four-stage line (scaffold → genesis → onboarding → content; genesis = the
+first two only, per the 2026-08-05 types-not-instances ruling) and laws P1–P5.
+The two you will hit in ordinary work: **P1 — any change under
+`packages/core` (incl. the create-site templates) that alters what a site's
+repo tree, netlify.toml, env set, or seed pack must contain is INCOMPLETE
+until applied to every existing `sites/<client>` in the same change.**
+**P2 — any new env var read by core lands, in the same change, in the T11.7
+env table + `ENV_CHECKLIST` + every existing site's env (or degrades with an
+explicit catalogued `error_code`) and is covered by the capability probe.**
+Tool surfaces are uniform across tenants except via the documented
+`OPTIONAL_HANDLER_TOOLS` mechanism with a recorded ruling (today:
+`verify_article_images` only). Execution: the W16 rows in queue.tsv.
+
 ## Definition of "converted" — NO HALF MEASURES (Wolf, 2026-07-10, GOVERNING)
 
 The entire project goal is: **agents can change objects on every page — add

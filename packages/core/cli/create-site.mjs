@@ -60,6 +60,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { dataSiteSubdirs, scaffoldSeedFiles } from './genesis-manifest.mjs';
 import { siteReaderRouteTemplates } from './site-reader-route-templates.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -344,16 +345,9 @@ export const CORE_BLOB_STORES = [
   'idempotency',
 ];
 
-const DATA_SITE_SUBDIRS = [
-  'navigation',
-  'pages',
-  'products',
-  'section-templates',
-  'sections',
-  'templates',
-  'themes',
-  'articles',
-];
+// T16.0: derived from the genesis manifest, the one staged source of truth
+// shared with site-genesis-drive.mjs. Add a subdir THERE, not here.
+const DATA_SITE_SUBDIRS = dataSiteSubdirs();
 
 // ─── validation ───
 
@@ -1629,6 +1623,18 @@ export const buildPlan = (opts) => {
   const canonicalHost = opts.canonicalHost || `https://${clientSlug}.netlify.app`;
   const dir = `sites/${clientSlug}`;
 
+  // T16.0: WHICH seed files a tenant is born with is the genesis manifest's
+  // call; this table only says how each one is rendered. A manifest entry with
+  // no template here is a scaffold gap and the drift test says so.
+  const seedTemplates = {
+    'site-seed-data.mjs': () => siteSeedTemplate(ids, brandName, canonicalHost),
+    'navigation-seed-data.mjs': () => navigationSeedTemplate(ids, brandName),
+    'taxonomy-seed-data.mjs': () => taxonomySeedTemplate(ids),
+    'themes-seed-data.mjs': () => themeSeedTemplate(ids),
+    'section-templates-seed-data.mjs': () => sectionTemplatesSeedTemplate(ids),
+    'templates-seed-data.mjs': () => templatesSeedTemplate(ids),
+  };
+
   const files = [
     { path: `${dir}/config/site-identity.ts`, content: siteIdentityTemplate(ids, brandName) },
     { path: `${dir}/config/site-binding.ts`, content: siteBindingTemplate(ids) },
@@ -1639,12 +1645,9 @@ export const buildPlan = (opts) => {
     { path: `${dir}/site.config.ts`, content: siteConfigTemplate(ids, brandName, canonicalHost) },
     { path: `${dir}/netlify.toml`, content: netlifyTomlTemplate(ids) },
     { path: `${dir}/package.json`, content: packageJsonTemplate(ids) },
-    { path: `${dir}/seeds/site-seed-data.mjs`, content: siteSeedTemplate(ids, brandName, canonicalHost) },
-    { path: `${dir}/seeds/navigation-seed-data.mjs`, content: navigationSeedTemplate(ids, brandName) },
-    { path: `${dir}/seeds/taxonomy-seed-data.mjs`, content: taxonomySeedTemplate(ids) },
-    { path: `${dir}/seeds/themes-seed-data.mjs`, content: themeSeedTemplate(ids) },
-    { path: `${dir}/seeds/section-templates-seed-data.mjs`, content: sectionTemplatesSeedTemplate(ids) },
-    { path: `${dir}/seeds/templates-seed-data.mjs`, content: templatesSeedTemplate(ids) },
+    ...scaffoldSeedFiles()
+      .filter((file) => seedTemplates[file])
+      .map((file) => ({ path: `${dir}/seeds/${file}`, content: seedTemplates[file]() })),
     ...DATA_SITE_SUBDIRS.map((sub) => ({ path: `${dir}/data/site/${sub}/.gitkeep`, content: '' })),
     // The site's OWN legacy post shelf (empty by design) — the target of the
     // content config's `postDir` pin above, so the glob has a real directory.
