@@ -38,6 +38,55 @@ export const diffFieldsForMerge = (target, current) => {
   return fields;
 };
 
+const deepEqual = (a, b) => {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, i) => deepEqual(item, b[i]));
+  }
+  if (isPlainObject(a) || isPlainObject(b)) {
+    if (!isPlainObject(a) || !isPlainObject(b)) return false;
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) if (!deepEqual(a[key], b[key])) return false;
+    return true;
+  }
+  return false; // a !== b, neither array nor plain object: primitives that differ
+};
+
+/**
+ * Field-level DRIFT report for read-only verification (T16.8's `--verify`):
+ * `diffFieldsForMerge` doubles as a heal-op payload builder (see `reconcileOps`
+ * below), so it always reports the FULL target shape — every top-level key
+ * target carries, whether or not `current` already matches it — because that
+ * whole shape is what a real `set_X_fields` call needs to send. A read-only
+ * verifier wants the opposite: only the keys that actually differ. This
+ * reuses `diffFieldsForMerge`'s exact merge-aware structure (recurse into
+ * keys that are plain objects on both sides, treat arrays/scalars as atomic,
+ * per playbook trap 2) and prunes away every entry that already matches, so
+ * what's left is a true drift diff — empty `{}` means `current` already
+ * equals `target` under merge semantics.
+ */
+export const driftFields = (target, current) => {
+  const fields = diffFieldsForMerge(target, current);
+  const prune = (node, currentNode) => {
+    const currentObj = isPlainObject(currentNode) ? currentNode : {};
+    const kept = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (value === null) {
+        if (key in currentObj) kept[key] = null; // a real stray key, still present on the record
+        continue;
+      }
+      if (isPlainObject(value) && isPlainObject(currentObj[key])) {
+        const nested = prune(value, currentObj[key]);
+        if (Object.keys(nested).length > 0) kept[key] = nested;
+        continue;
+      }
+      if (!deepEqual(value, currentObj[key])) kept[key] = value;
+    }
+    return kept;
+  };
+  return prune(fields, current);
+};
+
 const PAGE_META_KEYS = ['route', 'pageType', 'title', 'seo', 'navigationOverrides', 'template'];
 // set_template_meta forbids 'slots' (the slot ops own them) — mirror that split.
 // W8.3b: the recipe-metadata trio is meta too (this is what backfills the 3
