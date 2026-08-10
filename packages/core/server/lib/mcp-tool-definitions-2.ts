@@ -183,7 +183,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'object_patch',
     description:
-      'Apply typed patch ops under a held lock. Requires lock_token and expected_record_version (stale version → 409; missing/expired/wrong lock → 423). Omitted ids on add_term/upsert_* ops are minted server-side. A resulting body that fails validation rejects the op (422) without persisting. Palette governance: site.brandTokens is NOT patchable here — a set_site_fields carrying brandTokens is refused; the palette changes only through the site_apply_theme tool (theme-only, Wolf 2026-07-15). set_site_brand_tokens is tool-authored (do not hand-author it).',
+      'Apply typed patch ops under a held lock. Requires lock_token and expected_record_version (stale version → 409; missing/expired/wrong lock → 423). Omitted ids on add_term/upsert_* ops are minted server-side. A resulting body that fails validation rejects the op (422) without persisting. Palette governance: site.brandTokens is NOT patchable here — a set_site_fields carrying brandTokens is refused; the palette changes only through the site_apply_theme tool (theme-only, Wolf 2026-07-15). set_site_brand_tokens is tool-authored (do not hand-author it). Same governance for site.brandImagery (W16 C1, the visual-identity contract for AI image generation/search) via the privileged set_site_brand_imagery op — no agent-facing writer exists yet.',
     inputSchema: objectSchema(
       {
         object_type: objectTypeEnumSchema(),

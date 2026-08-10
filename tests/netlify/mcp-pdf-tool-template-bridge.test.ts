@@ -78,6 +78,48 @@ test('tools/list exposes the pdf template bridge tools', async () => {
   assert.ok(names.has('get_pdf_template'));
   assert.ok(names.has('publish_pdf_template'));
   assert.ok(names.has('delete_pdf_template'));
+  assert.ok(names.has('health'));
+});
+
+test('health returns pdf-tool capability manifest through the bridge and never exposes the grant', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    health: () => ({
+      body: {
+        ok: true,
+        renderers: { pdfme: 'available', 'react-pdf': 'available', typst: 'degraded', chromium: 'available' },
+        featureFlags: { imageSearch: true },
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+    const health = await rpc('health', { site_id: 'site_drlurie' }, logs);
+    assert.ok(!health.result.isError, JSON.stringify(health.result.structuredContent));
+    assert.equal(health.result.structuredContent?.ok, true);
+    assert.equal(health.result.structuredContent?.siteId, 'site_drlurie');
+    assert.deepEqual(health.result.structuredContent?.renderers, {
+      pdfme: 'available',
+      'react-pdf': 'available',
+      typst: 'degraded',
+      chromium: 'available',
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].authorization, `Bearer ${RUN_SECRET}`);
+    // B2 fix: upstream health args schema is a strict empty object, and health
+    // is grant-optional -- the bridged call must forward NO business args at
+    // all (a stray projectId fails upstream validation; storage would be
+    // stripped but is not sent either).
+    assert.deepEqual(calls[0].body, {});
+
+    const visible = JSON.stringify({ logs, health: health.response.body });
+    assert.ok(!visible.includes(STORAGE_SECRET));
+    assert.ok(!visible.includes(RUN_SECRET));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('Platform creates then publishes a pdfme template end-to-end and never exposes the grant', async () => {
@@ -266,6 +308,44 @@ test('foreign site_id fails template bridge tools with template_site_mismatch an
     assert.equal(del.result.structuredContent?.error_code, 'template_site_mismatch');
 
     assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('validate_pdf_template forwards required worst-case sample data and rejects a call missing it', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    validate_pdf_template: (body) => ({
+      body: {
+        projectId: body.projectId,
+        templateId: body.templateId,
+        version: body.version ?? 1,
+        validationId: 'val_1',
+        status: 'pending',
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const data = { title: 'Worst Case Title That Is Extremely Long', lines: ['a', 'b', 'c'] };
+    const validated = await rpc('validate_pdf_template', {
+      site_id: 'site_drlurie',
+      template_id: 'tpl_react_report',
+      data,
+    });
+    assert.ok(!validated.result.isError, JSON.stringify(validated.result.structuredContent));
+    assert.equal(validated.result.structuredContent?.validationId, 'val_1');
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body.data, data);
+
+    const missingData = await rpc('validate_pdf_template', {
+      site_id: 'site_drlurie',
+      template_id: 'tpl_react_report',
+    });
+    assert.equal(missingData.result.isError, true);
+    assert.equal(calls.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

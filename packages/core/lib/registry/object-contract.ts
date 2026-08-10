@@ -625,6 +625,18 @@ const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
             'policy (Wolf 2026-07-15).',
         },
         BRAND_TOKEN_AXES_CONSTRAINT,
+        {
+          id: 'brand_imagery_privileged_write',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'brandImagery (W16 C1) is the site’s visual-identity contract for AI image generation/search — the ' +
+            'STYLE half an agent must never author itself (agents supply SUBJECT only). It cannot be patched via ' +
+            'set_site_fields; the only writer is the privileged set_site_brand_imagery op (tool-authored — do not ' +
+            'hand-author it), exactly the set_site_brand_tokens funnel applied to imagery. No agent-facing verb ' +
+            'produces it yet. Every field is bounded (capped array/string lengths) by the site.v1 schema so ' +
+            'nothing unbounded lands in the store.',
+        },
       ];
     case 'section_template':
       return [

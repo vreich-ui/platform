@@ -48,6 +48,22 @@ export const siteBody = {
       heading: 'Georgia, serif',
     },
   },
+  // W16 C1 (§4 vocabulary): the visual-identity contract for AI image
+  // generation/search — the STYLE half agents never supply themselves.
+  // Minimal starter stanza; no composition/lora tuning yet.
+  brandImagery: {
+    version: 1,
+    medium: 'photograph',
+    styleSentence: 'Warm botanical lifestyle photography in natural daylight with lush houseplants close at hand.',
+    palette: ['#4C7A4C', '#D9A441'],
+    negative: ['no studio backdrops', 'no artificial lighting'],
+    aspectRatios: {
+      article_header: '3:2',
+      article_body: '4:3',
+      pdf_cover: '1:1',
+    },
+    seedBase: 100003,
+  },
   chrome: {
     showRssFeed: false,
     showThemeToggle: true,

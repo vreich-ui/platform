@@ -68,6 +68,100 @@ export const brandTokensSchema = z
   .strict();
 export type BrandTokens = z.infer<typeof brandTokensSchema>;
 
+// brandImagery (W16 C1, §4 vocabulary — Wolf 2026-08-10, supersedes the
+// original styleDescriptors/seedStrategy/loras[]/referenceArtifactIds shape):
+// the site-level visual-identity contract for AI image generation and image
+// search — the STYLE half an agent must never author itself (agents supply
+// SUBJECT; W16 C4 wires this into server-side prompt assembly). Optional and
+// additive: a site that hasn't declared one carries no style constraint yet.
+// Every field is bounded (capped array/string lengths) so nothing unbounded
+// lands in the store — the posture brandTokens' CSS-value grammar enforces
+// for the palette, applied here to keep the contract small and reviewable.
+//
+// `palette` is DELIBERATELY separate from brandTokens.colors: brandTokens is
+// the site's UI palette (buttons, backgrounds, CSS custom properties), never
+// consumed by image generation. FLUX.2 binds a hex value best when it is
+// attached to a NAMED OBJECT in the prompt (e.g. "the jacket is #2E5C42"),
+// a binding brandTokens' CSS-variable keys cannot express — so the two
+// palettes live separately and are allowed to diverge.
+//
+// `lora` carries `version`/`modelEndpoint` alongside the fal CDN url so a
+// forced retrain (fal's LoRA hosting has ~7d retention) is a config change —
+// bump version, swap url/modelEndpoint — never archaeology through job
+// history to work out which weights are actually live.
+//
+// `seedBase` gives deterministic PER-ARTIFACT seed derivation: W16 C4 derives
+// the actual per-job seed from this plus a stable hash of job identity
+// (never Date/Math.random), so the same site never reuses one fixed seed for
+// every image yet stays reproducible for the same inputs.
+const IMAGE_MEDIUMS = ['photograph', 'digital_illustration', 'flat_vector', 'editorial_collage'] as const;
+
+const boundedString = (max: number) => z.string().trim().min(1).max(max);
+const boundedStringArray = (maxItems: number, maxLen: number) => z.array(boundedString(maxLen)).max(maxItems);
+
+const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const hexColorSchema = z.string().regex(HEX_COLOR_PATTERN, 'must be a 6-digit hex color, e.g. #2E5C42');
+
+// Per-context "W:H" ratio string, e.g. { article_header: "3:2", pdf_cover: "1:1" }.
+// The key set is open (new contexts land without a schema change); each key
+// is itself bounded so the record can't carry an unbounded number of
+// arbitrarily long context names.
+const ASPECT_RATIO_PATTERN = /^\d{1,2}:\d{1,2}$/;
+const aspectRatioValueSchema = z.string().regex(ASPECT_RATIO_PATTERN, 'must be a "W:H" ratio string, e.g. "3:2"');
+const aspectRatioContextKeySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{1,39}$/, 'context key must be lowercase snake_case, e.g. article_header');
+
+export const brandImageryLoraSchema = z
+  .object({
+    // HTTPS URL of the trained LoRA .safetensors on fal's CDN.
+    url: boundedString(2048),
+    // LoRA strength; forwarded straight through to pdf-tool as `scale`.
+    scale: z.number().finite().optional(),
+    // Prompt phrase the LoRA was trained against, if any.
+    triggerPhrase: boundedString(200).optional(),
+    // Deliberate: a forced retrain bumps this (and usually url/modelEndpoint)
+    // rather than requiring a reader to diff job history to find out which
+    // weights are live.
+    version: boundedString(60).optional(),
+    modelEndpoint: boundedString(200).optional(),
+  })
+  .strict();
+export type BrandImageryLora = z.infer<typeof brandImageryLoraSchema>;
+
+export const brandImageryCompositionSchema = z
+  .object({
+    subjectScale: boundedString(120).optional(),
+    cropRule: boundedString(120).optional(),
+    depthOfField: boundedString(120).optional(),
+  })
+  .strict();
+export type BrandImageryComposition = z.infer<typeof brandImageryCompositionSchema>;
+
+export const brandImagerySchema = z
+  .object({
+    version: z.literal(1),
+    medium: z.enum(IMAGE_MEDIUMS),
+    // One sentence, prepended to every prompt server-side (W16 C4).
+    styleSentence: boundedString(400),
+    // Hex swatches bound to named objects per FLUX.2 guidance (see the
+    // module doc comment above) — deliberately separate from brandTokens.
+    palette: z.array(hexColorSchema).min(1).max(8),
+    // What must never appear in the output.
+    negative: boundedStringArray(12, 120),
+    // Optional; sensible bounded strings, not a full camera-control grammar.
+    composition: brandImageryCompositionSchema.optional(),
+    // Required (unlike composition/lora): every site declaring brandImagery
+    // must say what ratio each context renders at.
+    aspectRatios: z.record(aspectRatioContextKeySchema, aspectRatioValueSchema),
+    // zod's `.int()` already bounds this to the safe-integer range.
+    seedBase: z.number().int().nonnegative(),
+    // Layer 2 slot: at most one trained per-brand LoRA today.
+    lora: brandImageryLoraSchema.optional(),
+  })
+  .strict();
+export type BrandImagery = z.infer<typeof brandImagerySchema>;
+
 export const siteBodySchema = z
   .object({
     // W13: shared tracking attribute (12-plan §2) — set_tracking is its one writer.
@@ -94,6 +188,10 @@ export const siteBodySchema = z
       })
       .strict(),
     brandTokens: brandTokensSchema,
+    // W16 C1: additive-optional, privileged-write-only (see object-patch-ops.ts
+    // set_site_brand_imagery) — not patchable via set_site_fields, same funnel
+    // as brandTokens/site_apply_theme.
+    brandImagery: brandImagerySchema.optional(),
     chrome: z
       .object({
         showRssFeed: z.boolean(),

@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { handler } from '../../netlify/functions/mcp.js';
 import { createLocalBlobStore, setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
+import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import { stubPdfToolMcp } from './pdf-tool-mcp-fetch-stub.js';
 
 const REQUEST_ID = 'req_agent_simple_skincare_routine_id_choose_20260802_01';
@@ -65,6 +66,44 @@ const resetAndSeedRequest = async () => {
   });
   assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
 };
+
+// W16 C4: seeds the site_drlurie singleton record directly into the same
+// local site-objects store the MCP object verbs read from -- resetAndSeedRequest
+// wipes that whole store, so this must be called AFTER it, per test. Written
+// straight to the store (not via object_create) because the site body's real
+// reference-integrity requirements (defaultNavigation, urls, ...) are
+// irrelevant to a 'get' lookup, which never validates the body.
+const seedSiteRecord = async (body: Record<string, unknown>) => {
+  const store = createLocalBlobStore('site-objects');
+  await store.setJSON(objectRecordKey('site', 'site_drlurie'), {
+    object_id: 'site_drlurie',
+    object_type: 'site',
+    schema_version: 'site.v1',
+    site: 'site_drlurie',
+    created_at: '2026-08-10T00:00:00.000Z',
+    updated_at: '2026-08-10T00:00:00.000Z',
+    status: 'active',
+    body,
+    publication: { published_time: null },
+    history: [],
+    version: 1,
+    content_revision: 1,
+  });
+};
+
+const pendingArtifactJobRoute =
+  (jobId: string) =>
+  (body: Record<string, unknown>) => ({
+    status: 202,
+    body: {
+      jobId,
+      status: 'pending',
+      projectId: body.projectId,
+      requestId: body.requestId,
+      artifactKind: body.artifactKind,
+      polling: { tool: 'get_agent_artifact_job_status', input: { projectId: body.projectId } },
+    },
+  });
 
 const referenceForSlot = (slot: string) => {
   const digit = slot.endsWith('1') ? 'a' : 'b';
@@ -371,6 +410,234 @@ test('bridge redacts upstream error echoes of both service and storage credentia
     assert.ok(!failed.response.body.includes(STORAGE_SECRET));
     assert.ok(!failed.response.body.includes(PROOF_SECRET));
     assert.match(failed.response.body, /REDACTED/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// W16 C4 (§4 vocabulary): server-side brand-aware image prompt assembly.
+// A local replica of mcp-tool-handlers.ts's deterministic seed derivation --
+// kept independent (not imported) so this test actually PROVES the wire
+// value matches a from-scratch recomputation off seedBase, rather than just
+// echoing whatever the handler happened to produce.
+const SAFE_SEED_BOUND = 2 ** 31;
+const fnv1aHash = (input: string): number => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+};
+const expectedBrandSeed = (seedBase: number, requestId: string, slot: string, subject: string): number => {
+  const offset = fnv1aHash(`${requestId}|${slot}|${subject}`) % SAFE_SEED_BOUND;
+  return ((seedBase % SAFE_SEED_BOUND) + offset) % SAFE_SEED_BOUND;
+};
+
+const SEEDED_BRAND_IMAGERY = {
+  version: 1,
+  medium: 'photograph',
+  styleSentence: 'Clinical-clean skincare editorial photography with soft studio light.',
+  palette: ['#2E5C42', '#C2A878'],
+  negative: ['no stock-photo gloss'],
+  composition: { subjectScale: 'medium close-up', cropRule: 'rule of thirds' },
+  aspectRatios: { article_header: '3:2' },
+  seedBase: 100001,
+  // A lora in the TEST's seeded brandImagery (not in the committed site
+  // seeds, per the task brief) so wire forwarding is exercised here.
+  lora: {
+    url: 'https://cdn.example.com/lora/dr-lurie.safetensors',
+    scale: 0.8,
+    triggerPhrase: 'drlurie_style',
+    version: 'v3',
+    modelEndpoint: 'fal-ai/flux-2/klein/9b',
+  },
+};
+
+test('brand-aware image generation: site brandImagery assembles the prompt/palette/composition/negatives, derives a stable seed, forwards the lora, and overrides agent-supplied generation controls', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-brand-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  const subject = 'A jar of moisturizer on a marble countertop';
+  const requestArgs = {
+    site_id: 'site_drlurie',
+    request_id: REQUEST_ID,
+    artifact_kind: 'image',
+    operation: 'generate',
+    prompt: subject,
+    negative_prompt: 'no harsh shadows',
+    seed: 999,
+    loras: [{ path: 'https://agent.example.com/not-the-brand-lora.safetensors' }],
+    filename: 'moisturizer-hero.webp',
+    slot: 'article_image_1',
+    wait: false,
+  };
+
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+    const created = await rpc('create_agent_artifact_job', requestArgs, logs);
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    assert.equal(
+      call!.body.prompt,
+      'Clinical-clean skincare editorial photography with soft studio light. ' +
+        'A jar of moisturizer on a marble countertop Palette: #2E5C42, #C2A878. medium close-up, rule of thirds.'
+    );
+    assert.equal(String(call!.body.prompt).startsWith(SEEDED_BRAND_IMAGERY.styleSentence), true);
+    assert.match(String(call!.body.prompt), /Palette: #2E5C42, #C2A878\./);
+    assert.equal(call!.body.negativePrompt, 'no stock-photo gloss, no harsh shadows');
+    const expectedSeed = expectedBrandSeed(SEEDED_BRAND_IMAGERY.seedBase, REQUEST_ID, 'article_image_1', subject);
+    assert.equal(call!.body.seed, expectedSeed);
+    assert.deepEqual(call!.body.loras, [{ path: 'https://cdn.example.com/lora/dr-lurie.safetensors', scale: 0.8 }]);
+
+    assert.deepEqual((created.result.structuredContent?.overriddenFields as string[]).slice().sort(), [
+      'loras',
+      'seed',
+    ]);
+
+    const assemblyLog = logs.find((entry) => entry.event === 'brand_prompt_assembled');
+    assert.ok(assemblyLog);
+    assert.equal(assemblyLog!.siteId, 'site_drlurie');
+    assert.equal(assemblyLog!.requestId, REQUEST_ID);
+    assert.equal(assemblyLog!.derivedSeedPresent, true);
+    assert.deepEqual((assemblyLog!.overriddenFields as string[]).slice().sort(), ['loras', 'seed']);
+    assert.ok(!JSON.stringify(assemblyLog).includes('marble countertop'), 'no prompt text in logs');
+
+    // Determinism: an identical second call (same requestId/slot/subject)
+    // derives the SAME seed -- no Date.now()/Math.random() in the path.
+    const repeated = await rpc('create_agent_artifact_job', requestArgs, logs);
+    assert.ok(!repeated.result.isError, JSON.stringify(repeated.result.structuredContent));
+    const repeatedCall = calls.filter((entry) => entry.tool === 'create_agent_artifact_job')[1];
+    assert.ok(repeatedCall);
+    assert.equal(repeatedCall.body.seed, expectedSeed, 'the derived seed is stable across identical calls');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('image generation on a site with no brandImagery passes prompt/negative/seed/loras through unchanged', async () => {
+  await resetAndSeedRequest();
+  // The site record exists (drift-safe: brandImagery removed/never set) but
+  // carries no brandImagery key at all.
+  await seedSiteRecord({ name: 'Dr. Lurié' });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-passthrough-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+    const created = await rpc(
+      'create_agent_artifact_job',
+      {
+        site_id: 'site_drlurie',
+        request_id: REQUEST_ID,
+        artifact_kind: 'image',
+        operation: 'generate',
+        prompt: 'A jar of moisturizer on a marble countertop',
+        negative_prompt: 'no harsh shadows',
+        seed: 999,
+        loras: [{ path: 'https://agent.example.com/lora.safetensors' }],
+        filename: 'moisturizer-hero.webp',
+        slot: 'article_image_2',
+        wait: false,
+      },
+      logs
+    );
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    assert.equal(call!.body.prompt, 'A jar of moisturizer on a marble countertop');
+    assert.equal(call!.body.negativePrompt, 'no harsh shadows');
+    assert.equal(call!.body.seed, 999);
+    assert.deepEqual(call!.body.loras, [{ path: 'https://agent.example.com/lora.safetensors' }]);
+
+    assert.equal(created.result.structuredContent?.overriddenFields, undefined);
+    assert.ok(!logs.some((entry) => entry.event === 'brand_prompt_assembled'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('brand-aware assembly does not apply to non-image-generation job kinds (template PDF render, image edit)', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({
+    name: 'Dr. Lurié',
+    brandImagery: {
+      version: 1,
+      medium: 'photograph',
+      styleSentence: 'Clinical-clean skincare editorial photography.',
+      palette: ['#2E5C42'],
+      negative: ['no stock-photo gloss'],
+      aspectRatios: { article_header: '3:2' },
+      seedBase: 100001,
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: (body) => pendingArtifactJobRoute(`job-${body.artifactKind}-${body.operation}`)(body),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+
+    // A template-driven PDF render: no prompt, brandImagery must never be
+    // consulted for a non-image artifact kind.
+    const pdfCreated = await rpc(
+      'create_agent_artifact_job',
+      {
+        site_id: 'site_drlurie',
+        request_id: REQUEST_ID,
+        artifact_kind: 'pdf',
+        template_id: 'tpl_some_template',
+        data: { title: 'x' },
+        filename: 'report.pdf',
+        wait: false,
+      },
+      logs
+    );
+    assert.ok(!pdfCreated.result.isError, JSON.stringify(pdfCreated.result.structuredContent));
+    const pdfCall = calls.find((entry) => entry.body.artifactKind === 'pdf');
+    assert.ok(pdfCall);
+    assert.equal(pdfCall!.body.negativePrompt, undefined);
+    assert.equal(pdfCall!.body.seed, undefined);
+    assert.equal(pdfCreated.result.structuredContent?.overriddenFields, undefined);
+
+    // An image EDIT job (operation "edit", not "generate") must also pass
+    // through untouched -- brandImagery applies to generation only.
+    const editCreated = await rpc(
+      'create_agent_artifact_job',
+      {
+        site_id: 'site_drlurie',
+        request_id: REQUEST_ID,
+        artifact_kind: 'image',
+        operation: 'edit',
+        seed: 111,
+        filename: 'edited.webp',
+        wait: false,
+      },
+      logs
+    );
+    assert.ok(!editCreated.result.isError, JSON.stringify(editCreated.result.structuredContent));
+    const editCall = calls.find((entry) => entry.body.artifactKind === 'image' && entry.body.operation === 'edit');
+    assert.ok(editCall);
+    assert.equal(editCall!.body.seed, 111);
+    assert.equal(editCreated.result.structuredContent?.overriddenFields, undefined);
+
+    assert.ok(!logs.some((entry) => entry.event === 'brand_prompt_assembled'));
   } finally {
     globalThis.fetch = originalFetch;
   }

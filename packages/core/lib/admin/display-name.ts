@@ -295,6 +295,7 @@ export const VERB_PHRASES: Record<string, string> = {
   // Site
   set_site_fields: 'updated site details',
   set_site_brand_tokens: 'updated the site palette',
+  set_site_brand_imagery: 'updated the site visual-identity contract',
   // Product
   set_product_fields: 'updated product details',
   set_product_price: 'updated the product price',

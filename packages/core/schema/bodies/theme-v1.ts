@@ -17,7 +17,7 @@
 import { z } from 'zod';
 
 import { recipeMetadataShape } from './recipe-metadata-v1.js';
-import { brandTokensSchema } from './site-v1.js';
+import { brandImagerySchema, brandTokensSchema } from './site-v1.js';
 import { trackingAttributeShape } from './tracking-attribute-v1.js';
 
 export const THEME_SCHEMA_VERSION = 'theme.v1';
@@ -30,6 +30,12 @@ export const themeBodySchema = z
     // Self-description (W8.3b): schema-optional, required to publish.
     ...recipeMetadataShape,
     tokens: brandTokensSchema,
+    // W16 C1 (§4/§5): a theme preset may also carry a visual-identity
+    // contract, reusing the exact site.brandImagery shape so the two cannot
+    // drift. Optional — most themes today only preset brandTokens; nothing
+    // reads/applies this from a theme yet (site_apply_theme's copy stays
+    // brandTokens-only — see its own doc comment).
+    brandImagery: brandImagerySchema.optional(),
   })
   .strict();
 export type ThemeBody = z.infer<typeof themeBodySchema>;

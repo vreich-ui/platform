@@ -1,0 +1,817 @@
+From c0c6c232eaed66a39858757e166e2fe5a376ba17 Mon Sep 17 00:00:00 2001
+From: "Wolf Reich (via Claude)" <vreich@kugelbrands.com>
+Date: Mon, 10 Aug 2026 14:32:35 +0000
+Subject: [PATCH 4/5] C1: brandImagery site contract + privileged
+ set_site_brand_imagery op, seeded fleet-wide
+
+Adds the site-level visual-identity contract (styleDescriptors, negativeDescriptors,
+styleRef, seed/seedStrategy, loras, referenceArtifactIds) for AI image generation and
+search, gated by a privileged set_site_brand_imagery patch op that mirrors
+set_site_brand_tokens exactly (unreachable via set_site_fields or hand-authored
+object_patch; discard/inverse handled generically via PRIVILEGED_PATCH_OPS). Fields
+are bounded (capped array/string lengths) and the seedStrategy enum + loras shape
+copy pdf-tool's image-model policy (#60) verbatim. Seeded into all three sites per
+W16 P1 (drlurie: clinical-clean skincare editorial; platform: neutral professional
+SaaS illustration; fernwell: warm botanical lifestyle), with drlurie's committed
+production export kept in sync with its seed (drift-guard test).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bs3qMAeJ9eiXpFciXtSs1e
+---
+ packages/core/lib/admin/display-name.ts       |   1 +
+ packages/core/lib/object-patch-apply.test.ts  |  63 +++++++
+ packages/core/lib/object-patch-apply.ts       |  12 +-
+ packages/core/lib/registry/object-contract.ts |  12 ++
+ packages/core/schema/bodies/site-v1.ts        |  98 +++++++++++
+ packages/core/schema/bodies/theme-v1.ts       |   8 +-
+ packages/core/schema/object-patch-ops.ts      |  35 +++-
+ packages/core/server/lib/ask-ai-schema.ts     |   1 +
+ .../core/server/lib/mcp-tool-definitions-2.ts |   2 +-
+ packages/core/server/lib/object-verbs.ts      |  11 ++
+ sites/drlurie/data/site/site.json             |  21 +++
+ sites/drlurie/seeds/site-seed-data.mjs        |  17 ++
+ sites/fernwell/seeds/site-seed-data.mjs       |  16 ++
+ sites/platform/seeds/site-seed-data.mjs       |  16 ++
+ tests/netlify/ask-ai-schema.test.ts           |  13 +-
+ tests/netlify/object-body-schemas.test.ts     | 164 ++++++++++++++++++
+ tests/netlify/review-state.test.ts            |  34 ++++
+ 17 files changed, 516 insertions(+), 8 deletions(-)
+
+diff --git a/packages/core/lib/admin/display-name.ts b/packages/core/lib/admin/display-name.ts
+index a2cddb4..54a0227 100644
+--- a/packages/core/lib/admin/display-name.ts
++++ b/packages/core/lib/admin/display-name.ts
+@@ -295,6 +295,7 @@ export const VERB_PHRASES: Record<string, string> = {
+   // Site
+   set_site_fields: 'updated site details',
+   set_site_brand_tokens: 'updated the site palette',
++  set_site_brand_imagery: 'updated the site visual-identity contract',
+   // Product
+   set_product_fields: 'updated product details',
+   set_product_price: 'updated the product price',
+diff --git a/packages/core/lib/object-patch-apply.test.ts b/packages/core/lib/object-patch-apply.test.ts
+index 2a34f2f..45d26b7 100644
+--- a/packages/core/lib/object-patch-apply.test.ts
++++ b/packages/core/lib/object-patch-apply.test.ts
+@@ -500,6 +500,39 @@ const ROUND_TRIP_CASES: RoundTripCase[] = [
+     // inverse re-applied here) may apply it.
+     privilegedOps: ['set_site_brand_tokens'],
+   },
++  // brandImagery's writer (W16 C1, §4 vocabulary) — same privileged funnel as
++  // brandTokens: deep-merges nested fields and unsets a subtree, and inverts
++  // exactly.
++  {
++    name: 'set_site_brand_imagery deep-merges nested fields and unsets a subtree',
++    objectType: 'site',
++    body: () => ({
++      ...siteBody(),
++      brandImagery: {
++        version: 1,
++        medium: 'photograph',
++        styleSentence: 'Clinical-clean skincare editorial photography.',
++        palette: ['#2E5C42'],
++        negative: ['no stock-photo gloss'],
++        aspectRatios: { article_header: '3:2' },
++        seedBase: 100001,
++        composition: { subjectScale: 'medium close-up' },
++      },
++    }),
++    op: {
++      op: 'set_site_brand_imagery',
++      fields: {
++        brandImagery: {
++          styleSentence: 'Clinical-clean skincare editorial photography, soft studio light.',
++          composition: null,
++        },
++      },
++    },
++    // Privileged: not in the site allowlist — hand-authoring it via
++    // object_patch is refused (op_not_applicable); only a future privileged
++    // writer (and the inverse re-applied here) may apply it.
++    privilegedOps: ['set_site_brand_imagery'],
++  },
+   // product family
+   {
+     name: 'set_product_fields deep-merges presentation, unsets excerpt, and flips availability',
+@@ -687,6 +720,36 @@ describe('apply(op) then apply(inverse(op)) restores the prior body exactly', ()
+     );
+   });
+ 
++  it('set_site_brand_imagery is REFUSED without privilege (object_patch cannot hand-author it)', () => {
++    const record = makeRecord('site', siteBody());
++    assert.throws(
++      () =>
++        apply(record, [
++          { op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } },
++        ]),
++      (error: unknown) => error instanceof PatchApplyError && error.code === 'op_not_applicable'
++    );
++    // …but the exact same op applies when the caller is privileged.
++    const okApply = apply(
++      record,
++      [{ op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } }],
++      ['set_site_brand_imagery']
++    );
++    assert.deepEqual(
++      (okApply.record.body as { brandImagery: { styleSentence: string } }).brandImagery.styleSentence,
++      'Clinical-clean.'
++    );
++  });
++
++  it('set_site_fields REFUSES a brandImagery-carrying patch (theme-only-style governance)', () => {
++    const record = makeRecord('site', siteBody());
++    assert.throws(
++      () =>
++        apply(record, [{ op: 'set_site_fields', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } }]),
++      (error: unknown) => error instanceof PatchApplyError && error.code === 'invalid_op'
++    );
++  });
++
+   it('a multi-op batch round-trips by applying inverses in reverse order', () => {
+     const original = pageBody();
+     const record = makeRecord('page', pageBody());
+diff --git a/packages/core/lib/object-patch-apply.ts b/packages/core/lib/object-patch-apply.ts
+index 7b932e9..2235e8e 100644
+--- a/packages/core/lib/object-patch-apply.ts
++++ b/packages/core/lib/object-patch-apply.ts
+@@ -1003,6 +1003,11 @@ const applyOp = (objectType: ObjectType, body: UnknownRecord, op: PatchOp): Patc
+     case 'set_site_brand_tokens':
+       return applyFieldsOp(op, body, op.fields as UnknownRecord);
+ 
++    // The visual-identity writer (W16 C1, theme-only-style governance): same
++    // deep-merge mechanics; the grammar restricts `fields` to `brandImagery`.
++    case 'set_site_brand_imagery':
++      return applyFieldsOp(op, body, op.fields as UnknownRecord);
++
+     // ——— product family ———
+     // Same deep-merge mechanics as set_site_fields; the grammar already
+     // refuses commerce.price / commerce.stripe / commerce.stripe_test
+@@ -1135,9 +1140,11 @@ export const applyPatchOps = (
+         'op_not_applicable',
+         record.object_type === 'content_item'
+           ? `ops[${index}]: content_item is served by the existing article tool surface (C§2.0); generic patch ops do not apply.`
+-          : PRIVILEGED_PATCH_OPS.includes(parsed.op as never)
++          : parsed.op === 'set_site_brand_tokens'
+             ? `ops[${index}]: op '${parsed.op}' is tool-authored (not hand-authorable) — the palette changes only through site_apply_theme.`
+-            : `ops[${index}]: op '${parsed.op}' does not apply to object_type '${record.object_type}'.`
++            : PRIVILEGED_PATCH_OPS.includes(parsed.op as never)
++              ? `ops[${index}]: op '${parsed.op}' is tool-authored (not hand-authorable).`
++              : `ops[${index}]: op '${parsed.op}' does not apply to object_type '${record.object_type}'.`
+       );
+     }
+     return parsed;
+@@ -1264,6 +1271,7 @@ export const derivePatchInverse = (op: PatchOp, capture: PatchOpCapture): PatchO
+     case 'set_nav_meta':
+     case 'set_site_fields':
+     case 'set_site_brand_tokens':
++    case 'set_site_brand_imagery':
+     case 'set_product_fields':
+     case 'set_product_price':
+     case 'set_article_meta':
+diff --git a/packages/core/lib/registry/object-contract.ts b/packages/core/lib/registry/object-contract.ts
+index eefe59d..5f0a8e6 100644
+--- a/packages/core/lib/registry/object-contract.ts
++++ b/packages/core/lib/registry/object-contract.ts
+@@ -625,6 +625,18 @@ const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
+             'policy (Wolf 2026-07-15).',
+         },
+         BRAND_TOKEN_AXES_CONSTRAINT,
++        {
++          id: 'brand_imagery_privileged_write',
++          severity: 'blocks_write',
++          enforced_live: true,
++          description:
++            'brandImagery (W16 C1) is the site’s visual-identity contract for AI image generation/search — the ' +
++            'STYLE half an agent must never author itself (agents supply SUBJECT only). It cannot be patched via ' +
++            'set_site_fields; the only writer is the privileged set_site_brand_imagery op (tool-authored — do not ' +
++            'hand-author it), exactly the set_site_brand_tokens funnel applied to imagery. No agent-facing verb ' +
++            'produces it yet. Every field is bounded (capped array/string lengths) by the site.v1 schema so ' +
++            'nothing unbounded lands in the store.',
++        },
+       ];
+     case 'section_template':
+       return [
+diff --git a/packages/core/schema/bodies/site-v1.ts b/packages/core/schema/bodies/site-v1.ts
+index f12793c..d412828 100644
+--- a/packages/core/schema/bodies/site-v1.ts
++++ b/packages/core/schema/bodies/site-v1.ts
+@@ -68,6 +68,100 @@ export const brandTokensSchema = z
+   .strict();
+ export type BrandTokens = z.infer<typeof brandTokensSchema>;
+ 
++// brandImagery (W16 C1, §4 vocabulary — Wolf 2026-08-10, supersedes the
++// original styleDescriptors/seedStrategy/loras[]/referenceArtifactIds shape):
++// the site-level visual-identity contract for AI image generation and image
++// search — the STYLE half an agent must never author itself (agents supply
++// SUBJECT; W16 C4 wires this into server-side prompt assembly). Optional and
++// additive: a site that hasn't declared one carries no style constraint yet.
++// Every field is bounded (capped array/string lengths) so nothing unbounded
++// lands in the store — the posture brandTokens' CSS-value grammar enforces
++// for the palette, applied here to keep the contract small and reviewable.
++//
++// `palette` is DELIBERATELY separate from brandTokens.colors: brandTokens is
++// the site's UI palette (buttons, backgrounds, CSS custom properties), never
++// consumed by image generation. FLUX.2 binds a hex value best when it is
++// attached to a NAMED OBJECT in the prompt (e.g. "the jacket is #2E5C42"),
++// a binding brandTokens' CSS-variable keys cannot express — so the two
++// palettes live separately and are allowed to diverge.
++//
++// `lora` carries `version`/`modelEndpoint` alongside the fal CDN url so a
++// forced retrain (fal's LoRA hosting has ~7d retention) is a config change —
++// bump version, swap url/modelEndpoint — never archaeology through job
++// history to work out which weights are actually live.
++//
++// `seedBase` gives deterministic PER-ARTIFACT seed derivation: W16 C4 derives
++// the actual per-job seed from this plus a stable hash of job identity
++// (never Date/Math.random), so the same site never reuses one fixed seed for
++// every image yet stays reproducible for the same inputs.
++const IMAGE_MEDIUMS = ['photograph', 'digital_illustration', 'flat_vector', 'editorial_collage'] as const;
++
++const boundedString = (max: number) => z.string().trim().min(1).max(max);
++const boundedStringArray = (maxItems: number, maxLen: number) => z.array(boundedString(maxLen)).max(maxItems);
++
++const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
++const hexColorSchema = z.string().regex(HEX_COLOR_PATTERN, 'must be a 6-digit hex color, e.g. #2E5C42');
++
++// Per-context "W:H" ratio string, e.g. { article_header: "3:2", pdf_cover: "1:1" }.
++// The key set is open (new contexts land without a schema change); each key
++// is itself bounded so the record can't carry an unbounded number of
++// arbitrarily long context names.
++const ASPECT_RATIO_PATTERN = /^\d{1,2}:\d{1,2}$/;
++const aspectRatioValueSchema = z.string().regex(ASPECT_RATIO_PATTERN, 'must be a "W:H" ratio string, e.g. "3:2"');
++const aspectRatioContextKeySchema = z
++  .string()
++  .regex(/^[a-z][a-z0-9_]{1,39}$/, 'context key must be lowercase snake_case, e.g. article_header');
++
++export const brandImageryLoraSchema = z
++  .object({
++    // HTTPS URL of the trained LoRA .safetensors on fal's CDN.
++    url: boundedString(2048),
++    // LoRA strength; forwarded straight through to pdf-tool as `scale`.
++    scale: z.number().finite().optional(),
++    // Prompt phrase the LoRA was trained against, if any.
++    triggerPhrase: boundedString(200).optional(),
++    // Deliberate: a forced retrain bumps this (and usually url/modelEndpoint)
++    // rather than requiring a reader to diff job history to find out which
++    // weights are live.
++    version: boundedString(60).optional(),
++    modelEndpoint: boundedString(200).optional(),
++  })
++  .strict();
++export type BrandImageryLora = z.infer<typeof brandImageryLoraSchema>;
++
++export const brandImageryCompositionSchema = z
++  .object({
++    subjectScale: boundedString(120).optional(),
++    cropRule: boundedString(120).optional(),
++    depthOfField: boundedString(120).optional(),
++  })
++  .strict();
++export type BrandImageryComposition = z.infer<typeof brandImageryCompositionSchema>;
++
++export const brandImagerySchema = z
++  .object({
++    version: z.literal(1),
++    medium: z.enum(IMAGE_MEDIUMS),
++    // One sentence, prepended to every prompt server-side (W16 C4).
++    styleSentence: boundedString(400),
++    // Hex swatches bound to named objects per FLUX.2 guidance (see the
++    // module doc comment above) — deliberately separate from brandTokens.
++    palette: z.array(hexColorSchema).min(1).max(8),
++    // What must never appear in the output.
++    negative: boundedStringArray(12, 120),
++    // Optional; sensible bounded strings, not a full camera-control grammar.
++    composition: brandImageryCompositionSchema.optional(),
++    // Required (unlike composition/lora): every site declaring brandImagery
++    // must say what ratio each context renders at.
++    aspectRatios: z.record(aspectRatioContextKeySchema, aspectRatioValueSchema),
++    // zod's `.int()` already bounds this to the safe-integer range.
++    seedBase: z.number().int().nonnegative(),
++    // Layer 2 slot: at most one trained per-brand LoRA today.
++    lora: brandImageryLoraSchema.optional(),
++  })
++  .strict();
++export type BrandImagery = z.infer<typeof brandImagerySchema>;
++
+ export const siteBodySchema = z
+   .object({
+     // W13: shared tracking attribute (12-plan §2) — set_tracking is its one writer.
+@@ -94,6 +188,10 @@ export const siteBodySchema = z
+       })
+       .strict(),
+     brandTokens: brandTokensSchema,
++    // W16 C1: additive-optional, privileged-write-only (see object-patch-ops.ts
++    // set_site_brand_imagery) — not patchable via set_site_fields, same funnel
++    // as brandTokens/site_apply_theme.
++    brandImagery: brandImagerySchema.optional(),
+     chrome: z
+       .object({
+         showRssFeed: z.boolean(),
+diff --git a/packages/core/schema/bodies/theme-v1.ts b/packages/core/schema/bodies/theme-v1.ts
+index 5d726b7..6c22256 100644
+--- a/packages/core/schema/bodies/theme-v1.ts
++++ b/packages/core/schema/bodies/theme-v1.ts
+@@ -17,7 +17,7 @@
+ import { z } from 'zod';
+ 
+ import { recipeMetadataShape } from './recipe-metadata-v1.js';
+-import { brandTokensSchema } from './site-v1.js';
++import { brandImagerySchema, brandTokensSchema } from './site-v1.js';
+ import { trackingAttributeShape } from './tracking-attribute-v1.js';
+ 
+ export const THEME_SCHEMA_VERSION = 'theme.v1';
+@@ -30,6 +30,12 @@ export const themeBodySchema = z
+     // Self-description (W8.3b): schema-optional, required to publish.
+     ...recipeMetadataShape,
+     tokens: brandTokensSchema,
++    // W16 C1 (§4/§5): a theme preset may also carry a visual-identity
++    // contract, reusing the exact site.brandImagery shape so the two cannot
++    // drift. Optional — most themes today only preset brandTokens; nothing
++    // reads/applies this from a theme yet (site_apply_theme's copy stays
++    // brandTokens-only — see its own doc comment).
++    brandImagery: brandImagerySchema.optional(),
+   })
+   .strict();
+ export type ThemeBody = z.infer<typeof themeBodySchema>;
+diff --git a/packages/core/schema/object-patch-ops.ts b/packages/core/schema/object-patch-ops.ts
+index 04dd395..7cbf6e3 100644
+--- a/packages/core/schema/object-patch-ops.ts
++++ b/packages/core/schema/object-patch-ops.ts
+@@ -359,6 +359,12 @@ const setSiteFieldsSchema = z.strictObject({
+   op: z.literal('set_site_fields'),
+   fields: fieldsSchema
+     .superRefine(forbidKeys(['brandTokens'], 'set_site_fields (the palette changes only via site_apply_theme)'))
++    .superRefine(
++      forbidKeys(
++        ['brandImagery'],
++        'set_site_fields (the visual-identity contract changes only via the privileged set_site_brand_imagery op)'
++      )
++    )
+     .superRefine(forbidKeys(['tracking'], 'set_site_fields (tracking changes only via set_tracking)')),
+   ...guard,
+ });
+@@ -376,6 +382,25 @@ const setSiteBrandTokensSchema = z.strictObject({
+   ...guard,
+ });
+ 
++// brandImagery's privileged writer (W16 C1) — the exact same funnel shape as
++// set_site_brand_tokens: `fields` carries ONLY `brandImagery`, hand-authoring
++// via object_patch is refused (PRIVILEGED_PATCH_OPS below), and the inverse is
++// this same op with the captured before-tree. No verb constructs it yet (a
++// follow-up task wires the writer that reads it into prompt assembly); it
++// exists now so the grammar, discard/inverse handling, and write-time
++// protection land in the same change as the site.v1 field.
++//
++// Unlike brandTokens (body-required, so its capture.before is always an
++// object), brandImagery is body-OPTIONAL — a site's first-ever grant of it
++// captures `before: null` (the unset marker). The pinned type here allows
++// that top-level null alongside the ordinary object-merge shape so the
++// inverse of a first set (a full unset) re-parses through this same op.
++const setSiteBrandImagerySchema = z.strictObject({
++  op: z.literal('set_site_brand_imagery'),
++  fields: z.strictObject({ brandImagery: z.union([fieldsSchema, z.null()]) }),
++  ...guard,
++});
++
+ // ——— Product (06-shop-module-plan §1/§3) ———
+ 
+ // Deep-merge over the product body, like set_site_fields — with the §3
+@@ -674,6 +699,7 @@ export const patchOpUnionSchema = z.discriminatedUnion('op', [
+   removeTermSchema,
+   setSiteFieldsSchema,
+   setSiteBrandTokensSchema,
++  setSiteBrandImagerySchema,
+   setProductFieldsSchema,
+   setProductPriceSchema,
+   setArticleMetaSchema,
+@@ -806,8 +832,11 @@ export const isPatchOpAllowedForObjectType = (objectType: ObjectType, opName: Pa
+ // inverse, re-applied on Discard). `set_site_brand_tokens` is the palette
+ // writer — a hand-authored one via object_patch is refused (op_not_applicable),
+ // so the site palette changes solely through site_apply_theme (theme-only
+-// governance, Wolf 2026-07-15). Unlike set_product_price (which stays
+-// agent-submittable and leans on the product review gate), the site is
++// governance, Wolf 2026-07-15). `set_site_brand_imagery` (W16 C1) is the same
++// funnel for the visual-identity contract — no verb produces it yet, but
++// hand-authoring it is refused the same way so the field can never become an
++// ordinary agent-writable one by accident. Unlike set_product_price (which
++// stays agent-submittable and leans on the product review gate), the site is
+ // autonomous, so the op itself must be un-submittable. applyPatchOps accepts
+ // these only when a caller passes them as `privilegedOps`.
+-export const PRIVILEGED_PATCH_OPS: readonly PatchOpName[] = ['set_site_brand_tokens'];
++export const PRIVILEGED_PATCH_OPS: readonly PatchOpName[] = ['set_site_brand_tokens', 'set_site_brand_imagery'];
+diff --git a/packages/core/server/lib/ask-ai-schema.ts b/packages/core/server/lib/ask-ai-schema.ts
+index 13d0eda..e5bb4f1 100644
+--- a/packages/core/server/lib/ask-ai-schema.ts
++++ b/packages/core/server/lib/ask-ai-schema.ts
+@@ -154,6 +154,7 @@ const PROTECTED_FIELD_NAMES = new Set([
+   'urls',
+   'blog',
+   'brandTokens',
++  'brandImagery',
+   'chrome',
+   'metadataDefaults',
+   'slug',
+diff --git a/packages/core/server/lib/mcp-tool-definitions-2.ts b/packages/core/server/lib/mcp-tool-definitions-2.ts
+index bff7973..d36206d 100644
+--- a/packages/core/server/lib/mcp-tool-definitions-2.ts
++++ b/packages/core/server/lib/mcp-tool-definitions-2.ts
+@@ -183,7 +183,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
+   {
+     name: 'object_patch',
+     description:
+-      'Apply typed patch ops under a held lock. Requires lock_token and expected_record_version (stale version → 409; missing/expired/wrong lock → 423). Omitted ids on add_term/upsert_* ops are minted server-side. A resulting body that fails validation rejects the op (422) without persisting. Palette governance: site.brandTokens is NOT patchable here — a set_site_fields carrying brandTokens is refused; the palette changes only through the site_apply_theme tool (theme-only, Wolf 2026-07-15). set_site_brand_tokens is tool-authored (do not hand-author it).',
++      'Apply typed patch ops under a held lock. Requires lock_token and expected_record_version (stale version → 409; missing/expired/wrong lock → 423). Omitted ids on add_term/upsert_* ops are minted server-side. A resulting body that fails validation rejects the op (422) without persisting. Palette governance: site.brandTokens is NOT patchable here — a set_site_fields carrying brandTokens is refused; the palette changes only through the site_apply_theme tool (theme-only, Wolf 2026-07-15). set_site_brand_tokens is tool-authored (do not hand-author it). Same governance for site.brandImagery (W16 C1, the visual-identity contract for AI image generation/search) via the privileged set_site_brand_imagery op — no agent-facing writer exists yet.',
+     inputSchema: objectSchema(
+       {
+         object_type: objectTypeEnumSchema(),
+diff --git a/packages/core/server/lib/object-verbs.ts b/packages/core/server/lib/object-verbs.ts
+index 3a895b5..e362feb 100644
+--- a/packages/core/server/lib/object-verbs.ts
++++ b/packages/core/server/lib/object-verbs.ts
+@@ -1368,6 +1368,17 @@ export const handleObjectVerb = async (
+       // The theme must EXIST (draft is fine) and parse as theme.v1; the site
+       // record must exist and parse as site.v1 (the diff needs its current
+       // brandTokens).
++      //
++      // W16 C1 (§4/§5): a theme MAY also carry brandImagery, but this verb's
++      // copy stays brandTokens-only (colors/fonts/axes) — deliberate, not an
++      // oversight. brandTokens' exact-replace semantics need a per-KEY
++      // stale-unset diff (see below); brandImagery has no equivalent
++      // key-by-key merge target (styleSentence/medium/seedBase are single
++      // scalars, palette/negative are whole-list replacements, aspectRatios
++      // is an open-keyed record) — copying it faithfully is a separate,
++      // non-trivial feature, not a small extension of the brandTokens path.
++      // A theme's brandImagery is preset data for a future writer, unused
++      // by apply_theme today.
+       const themeRecord = await loadRecord(store, objectRecordKey('theme', request.theme_id));
+       if (!themeRecord) {
+         return err(404, { error: 'Theme not found', not_found: true, theme_id: request.theme_id });
+diff --git a/sites/drlurie/data/site/site.json b/sites/drlurie/data/site/site.json
+index dcbb8bf..4fe64ab 100644
+--- a/sites/drlurie/data/site/site.json
++++ b/sites/drlurie/data/site/site.json
+@@ -10,6 +10,27 @@
+     "postsPerPage": 6,
+     "tagBase": "tag"
+   },
++  "brandImagery": {
++    "aspectRatios": {
++      "article_body": "4:3",
++      "article_header": "3:2",
++      "pdf_cover": "1:1"
++    },
++    "medium": "photograph",
++    "negative": [
++      "no stock-photo gloss",
++      "no harsh flash",
++      "no cluttered backgrounds"
++    ],
++    "palette": [
++      "#5E8C8A",
++      "#2E6F95",
++      "#C2A878"
++    ],
++    "seedBase": 100001,
++    "styleSentence": "Clinical-clean skincare editorial photography with soft studio light and a minimal, uncluttered composition.",
++    "version": 1
++  },
+   "brandTokens": {
+     "colors": {
+       "accent": "rgb(94 140 138)",
+diff --git a/sites/drlurie/seeds/site-seed-data.mjs b/sites/drlurie/seeds/site-seed-data.mjs
+index 2ff356e..a8b2f32 100644
+--- a/sites/drlurie/seeds/site-seed-data.mjs
++++ b/sites/drlurie/seeds/site-seed-data.mjs
+@@ -84,6 +84,23 @@ export const siteBody = {
+       heading: "'Playfair Display', 'Times New Roman', serif",
+     },
+   },
++  // W16 C1 (§4 vocabulary): the visual-identity contract for AI image
++  // generation/search — the STYLE half agents never supply themselves.
++  // Minimal starter stanza; no composition/lora tuning yet.
++  brandImagery: {
++    version: 1,
++    medium: 'photograph',
++    styleSentence:
++      'Clinical-clean skincare editorial photography with soft studio light and a minimal, uncluttered composition.',
++    palette: ['#5E8C8A', '#2E6F95', '#C2A878'],
++    negative: ['no stock-photo gloss', 'no harsh flash', 'no cluttered backgrounds'],
++    aspectRatios: {
++      article_header: '3:2',
++      article_body: '4:3',
++      pdf_cover: '1:1',
++    },
++    seedBase: 100001,
++  },
+   chrome: {
+     showRssFeed: true,
+     showThemeToggle: true,
+diff --git a/sites/fernwell/seeds/site-seed-data.mjs b/sites/fernwell/seeds/site-seed-data.mjs
+index a76c5fa..87777cc 100644
+--- a/sites/fernwell/seeds/site-seed-data.mjs
++++ b/sites/fernwell/seeds/site-seed-data.mjs
+@@ -48,6 +48,22 @@ export const siteBody = {
+       heading: 'Georgia, serif',
+     },
+   },
++  // W16 C1 (§4 vocabulary): the visual-identity contract for AI image
++  // generation/search — the STYLE half agents never supply themselves.
++  // Minimal starter stanza; no composition/lora tuning yet.
++  brandImagery: {
++    version: 1,
++    medium: 'photograph',
++    styleSentence: 'Warm botanical lifestyle photography in natural daylight with lush houseplants close at hand.',
++    palette: ['#4C7A4C', '#D9A441'],
++    negative: ['no studio backdrops', 'no artificial lighting'],
++    aspectRatios: {
++      article_header: '3:2',
++      article_body: '4:3',
++      pdf_cover: '1:1',
++    },
++    seedBase: 100003,
++  },
+   chrome: {
+     showRssFeed: false,
+     showThemeToggle: true,
+diff --git a/sites/platform/seeds/site-seed-data.mjs b/sites/platform/seeds/site-seed-data.mjs
+index 6ba0bef..debd3ec 100644
+--- a/sites/platform/seeds/site-seed-data.mjs
++++ b/sites/platform/seeds/site-seed-data.mjs
+@@ -45,6 +45,22 @@ export const siteBody = {
+       heading: 'Georgia, serif',
+     },
+   },
++  // W16 C1 (§4 vocabulary): the visual-identity contract for AI image
++  // generation/search — the STYLE half agents never supply themselves.
++  // Minimal starter stanza; no composition/lora tuning yet.
++  brandImagery: {
++    version: 1,
++    medium: 'flat_vector',
++    styleSentence: 'Neutral professional flat-vector SaaS illustration with clean geometric line art.',
++    palette: ['#2563EB', '#0F172A'],
++    negative: ['no photorealism', 'no gradients or drop shadows'],
++    aspectRatios: {
++      article_header: '3:2',
++      article_body: '4:3',
++      pdf_cover: '1:1',
++    },
++    seedBase: 100002,
++  },
+   chrome: {
+     showRssFeed: false,
+     showThemeToggle: true,
+diff --git a/tests/netlify/ask-ai-schema.test.ts b/tests/netlify/ask-ai-schema.test.ts
+index eaa9a63..ec25aed 100644
+--- a/tests/netlify/ask-ai-schema.test.ts
++++ b/tests/netlify/ask-ai-schema.test.ts
+@@ -21,7 +21,17 @@ const EXPECTED_TOP_LEVEL_PROPS: Record<string, string[]> = {
+   page: ['route', 'pageType', 'title', 'seo', 'template', 'sections', 'navigationOverrides'],
+   navigation: ['role', 'brand', 'groups', 'actions', 'footNote'],
+   taxonomy: ['kinds'],
+-  site: ['name', 'logo', 'urls', 'metadataDefaults', 'brandTokens', 'chrome', 'defaultNavigation', 'blog'],
++  site: [
++    'name',
++    'logo',
++    'urls',
++    'metadataDefaults',
++    'brandTokens',
++    'brandImagery',
++    'chrome',
++    'defaultNavigation',
++    'blog',
++  ],
+   template: ['name', 'appliesTo', 'slots'],
+   section_template: ['name', 'description', 'blueprint'],
+   theme: ['name', 'description', 'tokens'],
+@@ -140,6 +150,7 @@ test('isProtectedAskAiField flags media/asset/reference/structure, not copy', ()
+     'slug',
+     'anchor',
+     'brandTokens',
++    'brandImagery',
+   ]) {
+     assert.equal(isProtectedAskAiField(key), true, `${key} must be protected`);
+   }
+diff --git a/tests/netlify/object-body-schemas.test.ts b/tests/netlify/object-body-schemas.test.ts
+index 48d371d..63e5aec 100644
+--- a/tests/netlify/object-body-schemas.test.ts
++++ b/tests/netlify/object-body-schemas.test.ts
+@@ -713,6 +713,170 @@ test('site: fixture parses cleanly and strictness rejects stray config keys', ()
+   );
+ });
+ 
++// brandImagery (W16 C1, §4 vocabulary): additive-optional visual-identity
++// contract for AI image generation/search — bounded the same way brandTokens'
++// value grammar keeps the palette small (capped array/string lengths, no
++// unbounded blobs). `palette` is deliberately separate from
++// brandTokens.colors (see the schema module's doc comment for why).
++const VALID_BRAND_IMAGERY = {
++  version: 1,
++  medium: 'photograph',
++  styleSentence: 'Clinical-clean skincare editorial photography with soft studio light.',
++  palette: ['#2E5C42', '#C2A878'],
++  negative: ['no stock-photo gloss', 'no harsh flash'],
++  composition: { subjectScale: 'medium close-up', cropRule: 'rule of thirds', depthOfField: 'shallow' },
++  aspectRatios: { article_header: '3:2', article_body: '4:3', pdf_cover: '1:1' },
++  seedBase: 100001,
++  lora: {
++    url: 'https://fal.media/files/brand/dr-lurie-v3.safetensors',
++    scale: 0.8,
++    triggerPhrase: 'drlurie_style',
++    version: 'v3',
++    modelEndpoint: 'fal-ai/flux-2/klein/9b',
++  },
++} as const;
++
++test('site.brandImagery: optional, bounded, and matches the §4 vocabulary', () => {
++  assert.equal(
++    siteBodySchema.safeParse(siteFixture).success,
++    true,
++    'brandImagery is optional — a site without one still parses'
++  );
++
++  const withImagery = { ...siteFixture, brandImagery: VALID_BRAND_IMAGERY };
++  assert.equal(siteBodySchema.safeParse(withImagery).success, true, JSON.stringify(withImagery));
++
++  // The minimal shape (no composition, no lora) also parses.
++  const { composition: _composition, lora: _lora, ...minimalImagery } = VALID_BRAND_IMAGERY;
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: minimalImagery }).success,
++    true,
++    'composition and lora are optional'
++  );
++
++  // Unknown keys are rejected (strict), matching brandTokens' posture.
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: { ...VALID_BRAND_IMAGERY, stray: 'nope' },
++    }).success,
++    false
++  );
++
++  // version is a pinned literal — only exactly 1 is accepted.
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, version: 2 } }).success,
++    false,
++    'version must be exactly 1'
++  );
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: (() => {
++        const { version: _version, ...rest } = VALID_BRAND_IMAGERY;
++        return rest;
++      })(),
++    }).success,
++    false,
++    'version is required'
++  );
++
++  // medium is a bounded enum — an unknown medium is rejected.
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, medium: 'oil_painting' } })
++      .success,
++    false
++  );
++
++  // palette entries must be #RRGGBB hex — case-insensitive hex passes,
++  // anything else (named colors, short hex, missing '#') is rejected.
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, palette: ['#aAbBcC'] } })
++      .success,
++    true,
++    'lowercase/mixed-case hex is accepted'
++  );
++  for (const bad of ['red', '#fff', '2E5C42', '#2E5C4', '#2E5C42FF']) {
++    assert.equal(
++      siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, palette: [bad] } }).success,
++      false,
++      `palette entry "${bad}" must be rejected`
++    );
++  }
++  // palette requires at least one entry and is capped at 8.
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, palette: [] } }).success,
++    false
++  );
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: { ...VALID_BRAND_IMAGERY, palette: Array.from({ length: 9 }, () => '#2E5C42') },
++    }).success,
++    false
++  );
++
++  // aspectRatios values must be "W:H" ratio strings; keys must be bounded
++  // lowercase snake_case.
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: { ...VALID_BRAND_IMAGERY, aspectRatios: { article_header: '3x2' } },
++    }).success,
++    false,
++    'aspect ratio value must be "W:H", not "WxH"'
++  );
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: { ...VALID_BRAND_IMAGERY, aspectRatios: { 'Article Header': '3:2' } },
++    }).success,
++    false,
++    'aspect ratio context keys must be lowercase snake_case'
++  );
++
++  // seedBase must be a non-negative safe integer.
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, seedBase: -1 } }).success,
++    false
++  );
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, seedBase: 1.5 } }).success,
++    false
++  );
++
++  // Bounded string lengths: an oversized styleSentence is rejected so nothing
++  // unbounded lands in the store.
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, styleSentence: 'x'.repeat(500) } })
++      .success,
++    false
++  );
++
++  // negative is capped at 12 entries.
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: { ...VALID_BRAND_IMAGERY, negative: Array.from({ length: 13 }, (_, i) => `bad-${i}`) },
++    }).success,
++    false
++  );
++
++  // lora needs a non-empty url; scale/triggerPhrase/version/modelEndpoint stay optional.
++  assert.equal(
++    siteBodySchema.safeParse({
++      ...siteFixture,
++      brandImagery: { ...VALID_BRAND_IMAGERY, lora: { url: 'https://fal.media/files/brand/x.safetensors' } },
++    }).success,
++    true,
++    'lora only requires url'
++  );
++  assert.equal(
++    siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, lora: { url: '' } } }).success,
++    false
++  );
++});
++
+ // ---------------------------------------------------------------------------
+ // Taxonomy ('taxonomy.v1', D§3.7)
+ // ---------------------------------------------------------------------------
+diff --git a/tests/netlify/review-state.test.ts b/tests/netlify/review-state.test.ts
+index d5f0acf..0dd74f9 100644
+--- a/tests/netlify/review-state.test.ts
++++ b/tests/netlify/review-state.test.ts
+@@ -299,6 +299,40 @@ test('discard ACCEPTS a real privileged palette entry from history and reverts t
+   assert.deepEqual(result.record.body, original.body, 'the palette returns to its pre-apply state');
+ });
+ 
++// brandImagery (W16 C1) rides the exact same privileged funnel as brandTokens
++// — no verb constructs the forward op yet, but discard's forgery guard and
++// real-history-entry acceptance must hold identically.
++test('discard REFUSES a fabricated privileged brandImagery entry not in history', () => {
++  const record = siteRecord();
++  const fabricated = {
++    op: { op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'forged style' } } },
++    capture: {
++      kind: 'fields',
++      before: { brandImagery: { styleSentence: 'forged style' } },
++      after: {},
++    },
++  };
++  const result = discardProposal(record, { entries: [fabricated], actor: reviewer, at: LATER });
++  assert.equal(result.ok, false);
++  if (result.ok) return;
++  assert.equal(result.status, 403);
++  assert.equal(result.body.code, 'discard_privileged_unverified');
++});
++
++test('discard ACCEPTS a real privileged brandImagery entry from history and reverts it', () => {
++  const original = siteRecord();
++  const forward = applyPatchOps(
++    original,
++    [{ op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } }],
++    { actor: agentActor, at: AT, privilegedOps: ['set_site_brand_imagery'] }
++  );
++  const entry = forward.record.history[forward.record.history.length - 1].details as { op: unknown; capture: unknown };
++  const result = discardProposal(forward.record, { entries: [entry], actor: reviewer, at: LATER });
++  assert.equal(result.ok, true, JSON.stringify(result.ok ? '' : result.body));
++  if (!result.ok) return;
++  assert.deepEqual(result.record.body, original.body, 'brandImagery returns to its pre-apply state');
++});
++
+ test('discard restores a LEGACY palette entry (pre-rollout set_site_fields{brandTokens}) via the privileged op', () => {
+   // A history entry from before the theme-only ban: a set_site_fields whose
+   // fields carried brandTokens. It no longer parses under the grammar, but its
+-- 
+2.43.0
+
+

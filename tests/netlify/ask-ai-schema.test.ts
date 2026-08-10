@@ -21,7 +21,17 @@ const EXPECTED_TOP_LEVEL_PROPS: Record<string, string[]> = {
   page: ['route', 'pageType', 'title', 'seo', 'template', 'sections', 'navigationOverrides'],
   navigation: ['role', 'brand', 'groups', 'actions', 'footNote'],
   taxonomy: ['kinds'],
-  site: ['name', 'logo', 'urls', 'metadataDefaults', 'brandTokens', 'chrome', 'defaultNavigation', 'blog'],
+  site: [
+    'name',
+    'logo',
+    'urls',
+    'metadataDefaults',
+    'brandTokens',
+    'brandImagery',
+    'chrome',
+    'defaultNavigation',
+    'blog',
+  ],
   template: ['name', 'appliesTo', 'slots'],
   section_template: ['name', 'description', 'blueprint'],
   theme: ['name', 'description', 'tokens'],
@@ -140,6 +150,7 @@ test('isProtectedAskAiField flags media/asset/reference/structure, not copy', ()
     'slug',
     'anchor',
     'brandTokens',
+    'brandImagery',
   ]) {
     assert.equal(isProtectedAskAiField(key), true, `${key} must be protected`);
   }

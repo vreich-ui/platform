@@ -10,6 +10,27 @@
     "postsPerPage": 6,
     "tagBase": "tag"
   },
+  "brandImagery": {
+    "aspectRatios": {
+      "article_body": "4:3",
+      "article_header": "3:2",
+      "pdf_cover": "1:1"
+    },
+    "medium": "photograph",
+    "negative": [
+      "no stock-photo gloss",
+      "no harsh flash",
+      "no cluttered backgrounds"
+    ],
+    "palette": [
+      "#5E8C8A",
+      "#2E6F95",
+      "#C2A878"
+    ],
+    "seedBase": 100001,
+    "styleSentence": "Clinical-clean skincare editorial photography with soft studio light and a minimal, uncluttered composition.",
+    "version": 1
+  },
   "brandTokens": {
     "colors": {
       "accent": "rgb(94 140 138)",

@@ -1,0 +1,1208 @@
+From 00ba36fb121bbc0d7961a939ca513b0257a960cb Mon Sep 17 00:00:00 2001
+From: "Wolf Reich (via Claude)" <vreich@kugelbrands.com>
+Date: Mon, 10 Aug 2026 13:47:24 +0000
+Subject: [PATCH 3/5] B3: bridge the image-search and image-model tool family
+
+Adds the four standard touch points for pdf-tool's ten image-family MCP
+tools (search_images, get_image_search_job_status, get_image_search_bank,
+update_image_search_candidate, import_image_from_url,
+import_images_from_url, get/set_image_search_policy,
+get/set_image_model_policy), following delete_pdf_template/health exactly:
+wrappers in pdf-tool-client.ts, handlers in mcp-tool-handlers.ts using the
+same site-only resolveTemplateBridgeScope as callPdfToolHealth (with
+event.log?. structured entries on the mutating tools), tool definitions in
+mcp-tool-definitions.ts mirroring pdf-tool's own zod schemas
+(netlify/lib/mcp-tool-schemas.ts, cloned read-only from the pdf-tool repo),
+dispatch cases in functions/mcp.ts, and a new sibling test file
+(tests/netlify/mcp-pdf-tool-image-bridge.test.ts) covering tools/list
+exposure, one happy path per tool, an upstream-error passthrough, and
+missing-required-arg/foreign-site rejections.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bs3qMAeJ9eiXpFciXtSs1e
+---
+ packages/core/server/functions/mcp.ts         |  30 ++
+ .../core/server/lib/mcp-tool-definitions.ts   | 191 +++++++
+ packages/core/server/lib/mcp-tool-handlers.ts | 245 +++++++++
+ packages/core/server/lib/pdf-tool-client.ts   | 158 ++++++
+ .../netlify/mcp-pdf-tool-image-bridge.test.ts | 469 ++++++++++++++++++
+ 5 files changed, 1093 insertions(+)
+ create mode 100644 tests/netlify/mcp-pdf-tool-image-bridge.test.ts
+
+diff --git a/packages/core/server/functions/mcp.ts b/packages/core/server/functions/mcp.ts
+index 94dd6ba..67d51ba 100644
+--- a/packages/core/server/functions/mcp.ts
++++ b/packages/core/server/functions/mcp.ts
+@@ -185,13 +185,23 @@ import {
+   callDeployStatus,
+   callGetAgentArtifactBySlot,
+   callGetAgentArtifactJobStatus,
++  callGetImageModelPolicy,
++  callGetImageSearchBank,
++  callGetImageSearchJobStatus,
++  callGetImageSearchPolicy,
+   callGetPdfTemplate,
++  callImportImageFromUrl,
++  callImportImagesFromUrl,
+   callListPdfTemplates,
+   callObjectAction,
+   callObjectPublish,
+   callGetPdfTemplateValidation,
+   callPdfToolHealth,
+   callPublishPdfTemplate,
++  callSearchImages,
++  callSetImageModelPolicy,
++  callSetImageSearchPolicy,
++  callUpdateImageSearchCandidate,
+   callValidatePdfTemplate,
+   callReleaseToProduction,
+   callTriggerNetlifyBuild,
+@@ -750,6 +760,26 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
+       return callDeletePdfTemplate(event, input);
+     case 'health':
+       return callPdfToolHealth(event, input);
++    case 'search_images':
++      return callSearchImages(event, input);
++    case 'get_image_search_job_status':
++      return callGetImageSearchJobStatus(event, input);
++    case 'get_image_search_bank':
++      return callGetImageSearchBank(event, input);
++    case 'update_image_search_candidate':
++      return callUpdateImageSearchCandidate(event, input);
++    case 'import_image_from_url':
++      return callImportImageFromUrl(event, input);
++    case 'import_images_from_url':
++      return callImportImagesFromUrl(event, input);
++    case 'get_image_search_policy':
++      return callGetImageSearchPolicy(event, input);
++    case 'set_image_search_policy':
++      return callSetImageSearchPolicy(event, input);
++    case 'get_image_model_policy':
++      return callGetImageModelPolicy(event, input);
++    case 'set_image_model_policy':
++      return callSetImageModelPolicy(event, input);
+     case 'create_artifact_upload_intent':
+       return callCreateArtifactUploadIntent(event, input);
+     case 'create_artifact_from_url': {
+diff --git a/packages/core/server/lib/mcp-tool-definitions.ts b/packages/core/server/lib/mcp-tool-definitions.ts
+index 0a67bdf..442ed4e 100644
+--- a/packages/core/server/lib/mcp-tool-definitions.ts
++++ b/packages/core/server/lib/mcp-tool-definitions.ts
+@@ -525,6 +525,197 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
+       ['site_id']
+     ),
+   },
++  {
++    name: 'search_images',
++    description:
++      "Start a least-cost image sourcing job for THIS site's content_item request through the trusted Platform bridge: pdf-tool searches the project media library first, then external providers by ascending cost tier (per the project's image search policy — see get_image_search_policy/set_image_search_policy), and banks up to five scored candidates. Platform resolves the canonical project and mints/forwards a short-lived storage grant server-side; never call pdf-tool directly or pass a grant yourself — this bridge is the ONLY place the grant is minted, and it is never returned to you. Returns job metadata and polling instructions only, never image bytes. Sequence: search_images -> poll get_image_search_job_status until terminal -> get_image_search_bank to see the banked candidates -> update_image_search_candidate to approve/reject/annotate one -> import_image_from_url (or the candidate's own artifact reference) to use it. policy_overrides merges a partial policy over the stored one for this search call only.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        request_id: stringSchema('The content_item request id this search is sourcing images for.'),
++        query: stringSchema('Search prompt describing the desired image.'),
++        count: {
++          type: 'number',
++          description: 'Optional desired number of new candidates (1-5); defaults to the policy candidateTarget.',
++        },
++        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional tags recorded on the banked candidates.'),
++        label: stringSchema('Optional human-readable label recorded on the banked candidates.'),
++        policy_overrides: anyObjectSchema(
++          "Optional partial image sourcing policy merged over the project's stored policy for this search only."
++        ),
++      },
++      ['site_id', 'request_id', 'query']
++    ),
++  },
++  {
++    name: 'get_image_search_job_status',
++    description:
++      "Poll a job started by search_images through THIS site's trusted Platform bridge. Site ownership, canonical project, and storage grant are resolved server-side exactly like search_images — never call pdf-tool directly. Completed jobs include the banked candidate metadata (artifact references, scores, licenses); never image bytes. Terminal statuses are complete and failed; poll get_image_search_bank once complete to work with the results.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        job_id: stringSchema('Job id returned by search_images.'),
++      },
++      ['site_id', 'job_id']
++    ),
++  },
++  {
++    name: 'get_image_search_bank',
++    description:
++      "Read the per-request image selection bank for THIS site through the trusted Platform bridge: every candidate found across search_images/import_image_from_url/import_images_from_url calls for the given request_id, with states, scores, licenses, and artifact references. Metadata only, never image bytes. Optionally paginated via limit/cursor (the bank itself is a single read either way). Feed candidateId values from here into update_image_search_candidate.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        request_id: stringSchema('The content_item request id whose image search bank to read.'),
++        limit: intSchema('Optional max candidates to return (default all, max 200).'),
++        cursor: stringSchema('Optional pagination cursor from a previous get_image_search_bank call.'),
++      },
++      ['site_id', 'request_id']
++    ),
++  },
++  {
++    name: 'update_image_search_candidate',
++    description:
++      "Update a banked image candidate's state for THIS site through the trusted Platform bridge: selected (the agent's final choice), kept, pending_review, or discarded. Discarding with delete_artifact=true also deletes the imported blob bytes; candidates sourced from the project media library are never deleted. Use this after reviewing get_image_search_bank's results.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        request_id: stringSchema('The content_item request id that owns the candidate.'),
++        candidate_id: stringSchema('The candidate id from get_image_search_bank.'),
++        state: {
++          type: 'string',
++          enum: ['kept', 'pending_review', 'selected', 'discarded'],
++          description: "The candidate's new state.",
++        },
++        reason: stringSchema('Optional human-readable reason, forwarded to pdf-tool.'),
++        delete_artifact: {
++          type: 'boolean',
++          description:
++            'When state is discarded, also delete the imported blob bytes. Ignored for library-origin candidates, which are never deleted.',
++        },
++      },
++      ['site_id', 'request_id', 'candidate_id', 'state']
++    ),
++  },
++  {
++    name: 'import_image_from_url',
++    description:
++      "Import a single image from an https URL for THIS site's content_item request through the trusted Platform bridge, bank it as a url_import candidate, and synchronously return its ArtifactReference + candidate_id. Non-native formats convert to png/jpeg. For zips, folder pages, or multiple URLs use import_images_from_url instead. Never returns bytes; rights clearance is the caller's responsibility. Bounded to this call's remaining execution budget — a near-timeout returns a structured, retryable error rather than a dropped connection.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        request_id: stringSchema('The content_item request id this import is scoped to.'),
++        url: stringSchema('https URL of the image to import.'),
++        filename: stringSchema('Optional target filename; derived from the URL if omitted.'),
++        slot: stringSchema('Optional safe slot so the artifact is retrievable via get_agent_artifact_by_slot.'),
++        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional tags recorded on the banked candidate.'),
++        label: stringSchema('Optional human-readable label.'),
++        license: objectSchema(
++          {
++            class: {
++              type: 'string',
++              enum: ['public-domain', 'permissive', 'paid', 'unknown'],
++              description: 'License class.',
++            },
++            name: stringSchema('License name.'),
++            url: stringSchema('License URL.'),
++            attribution: stringSchema('Required attribution text, if any.'),
++            commercialUse: {
++              anyOf: [{ type: 'boolean' }, { type: 'string' }],
++              description: 'Whether commercial use is permitted, or a free-text note.',
++            },
++          },
++          [],
++          'Caller-asserted license recorded in artifact metadata; defaults to unknown.'
++        ),
++        max_bytes: intSchema('Optional byte cap for the stored image (max 5000000).'),
++      },
++      ['site_id', 'request_id', 'url']
++    ),
++  },
++  {
++    name: 'import_images_from_url',
++    description:
++      "Start a batch url-import job for THIS site's content_item request through the trusted Platform bridge: each source URL may be a direct image, a zip archive of images, or an https folder/index page (same-host images are collected). Every imported image is saved to the project artifact store and banked as a url_import candidate; bounded by policy quotas (default 20 per batch, 50 per request). Returns job metadata and polling instructions — poll get_image_search_job_status, then get_image_search_bank for the imported candidates. Results are ArtifactReferences, never bytes.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        request_id: stringSchema('The content_item request id this import batch is scoped to.'),
++        urls: arraySchema(
++          { type: 'string', minLength: 1 },
++          'https URLs: direct images, zip archives, or folder/index pages (max 50).'
++        ),
++        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional tags applied to every imported candidate.'),
++        label: stringSchema('Optional human-readable label applied to every imported candidate.'),
++        license: objectSchema(
++          {
++            class: {
++              type: 'string',
++              enum: ['public-domain', 'permissive', 'paid', 'unknown'],
++              description: 'License class.',
++            },
++            name: stringSchema('License name.'),
++            url: stringSchema('License URL.'),
++            attribution: stringSchema('Required attribution text, if any.'),
++            commercialUse: {
++              anyOf: [{ type: 'boolean' }, { type: 'string' }],
++              description: 'Whether commercial use is permitted, or a free-text note.',
++            },
++          },
++          [],
++          'Caller-asserted license applied to all imported images; defaults to unknown.'
++        ),
++        policy_overrides: anyObjectSchema(
++          'Optional partial image sourcing policy (e.g. quotas.maxUrlImportsPerBatch) merged for this job only.'
++        ),
++      },
++      ['site_id', 'request_id', 'urls']
++    ),
++  },
++  {
++    name: 'get_image_search_policy',
++    description:
++      "Read THIS site's effective image sourcing policy JSON (stored policy merged over defaults) through the trusted Platform bridge: candidate targets, provider tiers, license rules, scoring weights, budgets, and quotas. search_images and import_images_from_url honor this policy unless overridden per call.",
++    inputSchema: objectSchema(
++      { site_id: stringSchema('Owning site object id; must match this deployment.') },
++      ['site_id']
++    ),
++  },
++  {
++    name: 'set_image_search_policy',
++    description:
++      "Replace THIS site's stored image sourcing policy through the trusted Platform bridge with the given partial policy (validated by pdf-tool, merged over defaults). Candidate caps are clamped to five per request. styleRef/seedStrategy fields, and allowed-provider/licensing constraints, are enforced provider-side once stored — this bridge forwards the policy verbatim, it does not itself interpret or enforce those fields.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        policy: anyObjectSchema('Partial ImageSourcingPolicy JSON, merged over the project defaults by pdf-tool.'),
++      },
++      ['site_id', 'policy']
++    ),
++  },
++  {
++    name: 'get_image_model_policy',
++    description:
++      "Read THIS site's effective image MODEL routing policy (stored policy merged over defaults) through the trusted Platform bridge: which generation model each requirements.image.usageContext routes to when a create_agent_artifact_job image request omits model. An explicit job model always wins over this policy.",
++    inputSchema: objectSchema(
++      { site_id: stringSchema('Owning site object id; must match this deployment.') },
++      ['site_id']
++    ),
++  },
++  {
++    name: 'set_image_model_policy',
++    description:
++      "Replace THIS site's stored image model routing policy through the trusted Platform bridge with the given partial policy (validated by pdf-tool, merged over defaults). Entries map a usageContext to { model } (null clears an entry back to the project default backend). Models must be routable and in the project's allowedModels — pdf-tool enforces this; this bridge forwards the policy verbatim.",
++    inputSchema: objectSchema(
++      {
++        site_id: stringSchema('Owning site object id; must match this deployment.'),
++        policy: anyObjectSchema(
++          'Partial ImageModelPolicy JSON: { byUsageContext: { article_header: { model: "flux-2" }, ... } }.'
++        ),
++      },
++      ['site_id', 'policy']
++    ),
++  },
+   {
+     name: 'create_artifact_upload_intent',
+     description:
+diff --git a/packages/core/server/lib/mcp-tool-handlers.ts b/packages/core/server/lib/mcp-tool-handlers.ts
+index 4230e5c..624ee8c 100644
+--- a/packages/core/server/lib/mcp-tool-handlers.ts
++++ b/packages/core/server/lib/mcp-tool-handlers.ts
+@@ -27,15 +27,26 @@ import {
+   deletePlatformPdfTemplate,
+   getPlatformArtifactBySlot,
+   getPlatformArtifactJobStatus,
++  getPlatformImageModelPolicy,
++  getPlatformImageSearchBank,
++  getPlatformImageSearchJobStatus,
++  getPlatformImageSearchPolicy,
+   getPlatformPdfTemplate,
+   getPlatformPdfTemplateValidation,
+   healthPlatformPdfTool,
++  importPlatformImageFromUrl,
++  importPlatformImagesFromUrl,
+   listPlatformPdfTemplates,
+   publishPlatformPdfTemplate,
++  searchPlatformImages,
++  setPlatformImageModelPolicy,
++  setPlatformImageSearchPolicy,
++  updatePlatformImageSearchCandidate,
+   validatePlatformPdfTemplate,
+   verifyPlatformArtifact,
+   type PlatformArtifactJobInput,
+   type PlatformCreateTemplateInput,
++  type PlatformImageLicenseInput,
+ } from './pdf-tool-client.js';
+ import {
+   createArtifactUploadToken,
+@@ -1166,6 +1177,240 @@ export const callPdfToolHealth = async (event: LambdaEvent, input: Record<string
+   return toolResult({ ...health.body, siteId: scoped.siteId });
+ };
+ 
++/**
++ * B3: the image-search / image-model bridge. All ten tools use the same
++ * site-only resolveTemplateBridgeScope as health/callValidatePdfTemplate
++ * above -- pdf-tool owns request-scoped ownership of the image search bank
++ * and job records itself, so Platform doesn't re-derive a heavier
++ * content_item-owning scope for these the way the artifact bridge does.
++ * request_id is forwarded verbatim as a required business argument, exactly
++ * like template_id is for the template bridge.
++ */
++const normalizeImageLicenseInput = (value: unknown): PlatformImageLicenseInput | undefined => {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
++  return value as PlatformImageLicenseInput;
++};
++
++export const callSearchImages = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const requestId = toNonEmptyString(input.request_id);
++  const query = toNonEmptyString(input.query);
++  if (!requestId || !query) return toolError('request_id and query are required.');
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const count = typeof input.count === 'number' && Number.isFinite(input.count) ? input.count : undefined;
++  const searched = await searchPlatformImages(built.grant, {
++    requestId,
++    query,
++    ...(count !== undefined ? { count } : {}),
++    ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
++    ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
++    ...(input.policy_overrides && typeof input.policy_overrides === 'object' && !Array.isArray(input.policy_overrides)
++      ? { policyOverrides: input.policy_overrides as Record<string, unknown> }
++      : {}),
++  });
++  if (!searched.ok) return pdfToolBridgeError(searched);
++  return toolResult({ ...searched.body, siteId: scoped.siteId });
++};
++
++export const callGetImageSearchJobStatus = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const jobId = toNonEmptyString(input.job_id);
++  if (!jobId) return toolError('job_id is required.');
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const status = await getPlatformImageSearchJobStatus(built.grant, jobId);
++  if (!status.ok) return pdfToolBridgeError(status);
++  return toolResult({ ...status.body, siteId: scoped.siteId });
++};
++
++export const callGetImageSearchBank = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const requestId = toNonEmptyString(input.request_id);
++  if (!requestId) return toolError('request_id is required.');
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const limit = typeof input.limit === 'number' && Number.isFinite(input.limit) ? input.limit : undefined;
++  const bank = await getPlatformImageSearchBank(built.grant, {
++    requestId,
++    ...(limit !== undefined ? { limit } : {}),
++    ...(toNonEmptyString(input.cursor) ? { cursor: toNonEmptyString(input.cursor) } : {}),
++  });
++  if (!bank.ok) return pdfToolBridgeError(bank);
++  return toolResult({ ...bank.body, siteId: scoped.siteId });
++};
++
++const IMAGE_SEARCH_CANDIDATE_STATES = new Set(['kept', 'pending_review', 'selected', 'discarded']);
++
++export const callUpdateImageSearchCandidate = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const requestId = toNonEmptyString(input.request_id);
++  const candidateId = toNonEmptyString(input.candidate_id);
++  const state = toNonEmptyString(input.state);
++  if (!requestId || !candidateId || !state || !IMAGE_SEARCH_CANDIDATE_STATES.has(state)) {
++    return toolError('request_id, candidate_id, and a state of kept, pending_review, selected, or discarded are required.');
++  }
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const reason = toNonEmptyString(input.reason);
++  const updated = await updatePlatformImageSearchCandidate(built.grant, {
++    requestId,
++    candidateId,
++    state: state as 'kept' | 'pending_review' | 'selected' | 'discarded',
++    ...(reason ? { reason } : {}),
++    ...(typeof input.delete_artifact === 'boolean' ? { deleteArtifact: input.delete_artifact } : {}),
++  });
++  if (!updated.ok) return pdfToolBridgeError(updated);
++
++  event.log?.({
++    event: 'image_search_bridge_candidate_updated',
++    siteId: scoped.siteId,
++    projectId: built.grant.projectId,
++    requestId,
++    candidateId,
++    state,
++  });
++  return toolResult({ ...updated.body, siteId: scoped.siteId });
++};
++
++export const callImportImageFromUrl = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const requestId = toNonEmptyString(input.request_id);
++  const url = toNonEmptyString(input.url);
++  if (!requestId || !url) return toolError('request_id and url are required.');
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const maxBytes = typeof input.max_bytes === 'number' && Number.isFinite(input.max_bytes) ? input.max_bytes : undefined;
++  const license = normalizeImageLicenseInput(input.license);
++  const imported = await importPlatformImageFromUrl(built.grant, {
++    requestId,
++    url,
++    ...(toNonEmptyString(input.filename) ? { filename: toNonEmptyString(input.filename) } : {}),
++    ...(toNonEmptyString(input.slot) ? { slot: toNonEmptyString(input.slot) } : {}),
++    ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
++    ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
++    ...(license ? { license } : {}),
++    ...(maxBytes !== undefined ? { maxBytes } : {}),
++  });
++  if (!imported.ok) return pdfToolBridgeError(imported);
++
++  event.log?.({
++    event: 'image_search_bridge_url_import',
++    siteId: scoped.siteId,
++    projectId: built.grant.projectId,
++    requestId,
++    candidateId: imported.body.candidateId,
++  });
++  return toolResult({ ...imported.body, siteId: scoped.siteId });
++};
++
++export const callImportImagesFromUrl = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const requestId = toNonEmptyString(input.request_id);
++  const urls = Array.isArray(input.urls) ? input.urls.filter((url): url is string => typeof url === 'string') : [];
++  if (!requestId || urls.length === 0) return toolError('request_id and a non-empty urls array are required.');
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const license = normalizeImageLicenseInput(input.license);
++  const imported = await importPlatformImagesFromUrl(built.grant, {
++    requestId,
++    urls,
++    ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
++    ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
++    ...(license ? { license } : {}),
++    ...(input.policy_overrides && typeof input.policy_overrides === 'object' && !Array.isArray(input.policy_overrides)
++      ? { policyOverrides: input.policy_overrides as Record<string, unknown> }
++      : {}),
++  });
++  if (!imported.ok) return pdfToolBridgeError(imported);
++
++  event.log?.({
++    event: 'image_search_bridge_url_import_batch',
++    siteId: scoped.siteId,
++    projectId: built.grant.projectId,
++    requestId,
++    jobId: imported.body.jobId,
++    urlCount: urls.length,
++  });
++  return toolResult({ ...imported.body, siteId: scoped.siteId });
++};
++
++export const callGetImageSearchPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const policy = await getPlatformImageSearchPolicy(built.grant);
++  if (!policy.ok) return pdfToolBridgeError(policy);
++  return toolResult({ ...policy.body, siteId: scoped.siteId });
++};
++
++export const callSetImageSearchPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const policy = input.policy;
++  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
++    return toolError('policy is required and must be an object.');
++  }
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const saved = await setPlatformImageSearchPolicy(built.grant, policy as Record<string, unknown>);
++  if (!saved.ok) return pdfToolBridgeError(saved);
++
++  event.log?.({
++    event: 'image_search_bridge_policy_set',
++    siteId: scoped.siteId,
++    projectId: built.grant.projectId,
++  });
++  return toolResult({ ...saved.body, siteId: scoped.siteId });
++};
++
++export const callGetImageModelPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const policy = await getPlatformImageModelPolicy(built.grant);
++  if (!policy.ok) return pdfToolBridgeError(policy);
++  return toolResult({ ...policy.body, siteId: scoped.siteId });
++};
++
++export const callSetImageModelPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
++  const scoped = resolveTemplateBridgeScope(input);
++  if (!scoped.ok) return scoped.result;
++  const policy = input.policy;
++  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
++    return toolError('policy is required and must be an object.');
++  }
++  const built = buildArtifactBridgeGrant();
++  if (!built.ok) return built.result;
++
++  const saved = await setPlatformImageModelPolicy(built.grant, policy as Record<string, unknown>);
++  if (!saved.ok) return pdfToolBridgeError(saved);
++
++  event.log?.({
++    event: 'image_model_bridge_policy_set',
++    siteId: scoped.siteId,
++    projectId: built.grant.projectId,
++  });
++  return toolResult({ ...saved.body, siteId: scoped.siteId });
++};
++
+ export const callObjectAction = async (event: LambdaEvent, payload: Record<string, unknown>) => {
+   const result = await invokeObjectStore(event, payload);
+ 
+diff --git a/packages/core/server/lib/pdf-tool-client.ts b/packages/core/server/lib/pdf-tool-client.ts
+index 6d46b52..f94a3e0 100644
+--- a/packages/core/server/lib/pdf-tool-client.ts
++++ b/packages/core/server/lib/pdf-tool-client.ts
+@@ -372,6 +372,164 @@ export const deletePlatformPdfTemplate = (
+ export const healthPlatformPdfTool = (options: PdfToolClientOptions = {}) =>
+   postPdfTool('health', {}, options);
+ 
++/**
++ * B3: the image-search / image-model policy bridge -- pdf-tool's own image
++ * sourcing pipeline (least-cost provider search -> banked candidates ->
++ * approve/import) plus the two policy pairs that steer it. Every call here
++ * follows the exact same trusted-bridge shape as the template bridge above:
++ * the grant is minted server-side (buildArtifactBridgeGrant in
++ * mcp-tool-handlers.ts) and forwarded via projectPayload(grant, ...), never
++ * invented per-call or returned to the MCP caller.
++ */
++export type PlatformImageLicenseInput = {
++  class?: 'public-domain' | 'permissive' | 'paid' | 'unknown';
++  name?: string;
++  url?: string;
++  attribution?: string;
++  commercialUse?: boolean | string;
++};
++
++export const searchPlatformImages = (
++  grant: PdfToolStorageGrant,
++  input: {
++    requestId: string;
++    query: string;
++    count?: number;
++    tags?: string[];
++    label?: string;
++    policyOverrides?: Record<string, unknown>;
++  },
++  options: PdfToolClientOptions = {}
++) =>
++  postPdfTool(
++    'search-images',
++    projectPayload(grant, {
++      requestId: input.requestId,
++      query: input.query,
++      ...(input.count !== undefined ? { count: input.count } : {}),
++      ...(input.tags ? { tags: input.tags } : {}),
++      ...(input.label ? { label: input.label } : {}),
++      ...(input.policyOverrides ? { policyOverrides: input.policyOverrides } : {}),
++    }),
++    options
++  );
++
++export const getPlatformImageSearchJobStatus = (
++  grant: PdfToolStorageGrant,
++  jobId: string,
++  options: PdfToolClientOptions = {}
++) => postPdfTool('get-image-search-job-status', projectPayload(grant, { jobId }), options);
++
++export const getPlatformImageSearchBank = (
++  grant: PdfToolStorageGrant,
++  input: { requestId: string; limit?: number; cursor?: string },
++  options: PdfToolClientOptions = {}
++) =>
++  postPdfTool(
++    'get-image-search-bank',
++    projectPayload(grant, {
++      requestId: input.requestId,
++      ...(input.limit !== undefined ? { limit: input.limit } : {}),
++      ...(input.cursor ? { cursor: input.cursor } : {}),
++    }),
++    options
++  );
++
++export const updatePlatformImageSearchCandidate = (
++  grant: PdfToolStorageGrant,
++  input: {
++    requestId: string;
++    candidateId: string;
++    state: 'kept' | 'pending_review' | 'selected' | 'discarded';
++    reason?: string;
++    deleteArtifact?: boolean;
++  },
++  options: PdfToolClientOptions = {}
++) =>
++  postPdfTool(
++    'update-image-search-candidate',
++    projectPayload(grant, {
++      requestId: input.requestId,
++      candidateId: input.candidateId,
++      state: input.state,
++      ...(input.reason ? { reason: input.reason } : {}),
++      ...(input.deleteArtifact !== undefined ? { deleteArtifact: input.deleteArtifact } : {}),
++    }),
++    options
++  );
++
++export const importPlatformImageFromUrl = (
++  grant: PdfToolStorageGrant,
++  input: {
++    requestId: string;
++    url: string;
++    filename?: string;
++    slot?: string;
++    tags?: string[];
++    label?: string;
++    license?: PlatformImageLicenseInput;
++    maxBytes?: number;
++  },
++  options: PdfToolClientOptions = {}
++) =>
++  postPdfTool(
++    'import-image-from-url',
++    projectPayload(grant, {
++      requestId: input.requestId,
++      url: input.url,
++      ...(input.filename ? { filename: input.filename } : {}),
++      ...(input.slot ? { slot: input.slot } : {}),
++      ...(input.tags ? { tags: input.tags } : {}),
++      ...(input.label ? { label: input.label } : {}),
++      ...(input.license ? { license: input.license } : {}),
++      ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
++    }),
++    options
++  );
++
++export const importPlatformImagesFromUrl = (
++  grant: PdfToolStorageGrant,
++  input: {
++    requestId: string;
++    urls: string[];
++    tags?: string[];
++    label?: string;
++    license?: PlatformImageLicenseInput;
++    policyOverrides?: Record<string, unknown>;
++  },
++  options: PdfToolClientOptions = {}
++) =>
++  postPdfTool(
++    'import-images-from-url',
++    projectPayload(grant, {
++      requestId: input.requestId,
++      urls: input.urls,
++      ...(input.tags ? { tags: input.tags } : {}),
++      ...(input.label ? { label: input.label } : {}),
++      ...(input.license ? { license: input.license } : {}),
++      ...(input.policyOverrides ? { policyOverrides: input.policyOverrides } : {}),
++    }),
++    options
++  );
++
++export const getPlatformImageSearchPolicy = (grant: PdfToolStorageGrant, options: PdfToolClientOptions = {}) =>
++  postPdfTool('get-image-search-policy', projectPayload(grant, {}), options);
++
++export const setPlatformImageSearchPolicy = (
++  grant: PdfToolStorageGrant,
++  policy: Record<string, unknown>,
++  options: PdfToolClientOptions = {}
++) => postPdfTool('set-image-search-policy', projectPayload(grant, { policy }), options);
++
++export const getPlatformImageModelPolicy = (grant: PdfToolStorageGrant, options: PdfToolClientOptions = {}) =>
++  postPdfTool('get-image-model-policy', projectPayload(grant, {}), options);
++
++export const setPlatformImageModelPolicy = (
++  grant: PdfToolStorageGrant,
++  policy: Record<string, unknown>,
++  options: PdfToolClientOptions = {}
++) => postPdfTool('set-image-model-policy', projectPayload(grant, { policy }), options);
++
+ export const canonicalPlatformArtifact = (body: Record<string, unknown>) => {
+   const reference = isRecord(body.artifactReference)
+     ? body.artifactReference
+diff --git a/tests/netlify/mcp-pdf-tool-image-bridge.test.ts b/tests/netlify/mcp-pdf-tool-image-bridge.test.ts
+new file mode 100644
+index 0000000..b991c3c
+--- /dev/null
++++ b/tests/netlify/mcp-pdf-tool-image-bridge.test.ts
+@@ -0,0 +1,469 @@
++import '../../sites/drlurie/config/policy-bindings.js';
++import assert from 'node:assert/strict';
++import { join } from 'node:path';
++import test from 'node:test';
++
++import { handler } from '../../netlify/functions/mcp.js';
++import { setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
++import { stubPdfToolMcp } from './pdf-tool-mcp-fetch-stub.js';
++
++const REQUEST_ID = 'req_agent_image_search_bridge_hero_shot_20260810_01';
++const STORAGE_SECRET = 'storage-secret-never-expose';
++const RUN_SECRET = 'run-secret-never-expose';
++const LOCAL_BLOBS_ROOT = join(process.cwd(), '.netlify', 'local-blobs-test', 'mcp-pdf-tool-image-bridge');
++setLocalBlobsRootForTesting(LOCAL_BLOBS_ROOT);
++
++for (const key of [
++  'NETLIFY',
++  'NETLIFY_SITE_ID',
++  'NETLIFY_BLOBS_TOKEN',
++  'NETLIFY_AUTH_TOKEN',
++  'SITE_ID',
++  'MCP_HTTP_AUTH_TOKEN',
++]) {
++  delete process.env[key];
++}
++process.env.PUBLISH_SECRET = 'test-publish-secret';
++process.env.PDF_TOOL_STORAGE_TOKEN = STORAGE_SECRET;
++process.env.PDF_TOOL_STORAGE_SITE_ID = 'site-api-id';
++process.env.PDF_TOOL_BASE_URL = 'https://pdf-tool.test';
++process.env.PDF_TOOL_AGENT_RUN_TOKEN = RUN_SECRET;
++
++type ToolResult = { isError?: boolean; structuredContent?: Record<string, unknown> };
++
++const rpc = async (name: string, args: Record<string, unknown>, logs: Array<Record<string, unknown>> = []) => {
++  const response = await handler({
++    httpMethod: 'POST',
++    headers: { 'content-type': 'application/json' },
++    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
++    log: (payload) => logs.push(payload),
++  });
++  assert.equal(response.statusCode, 200);
++  return { response, result: (JSON.parse(response.body) as { result: ToolResult }).result };
++};
++
++const assertGrantNeverExposed = (visibleJson: string) => {
++  assert.ok(!visibleJson.includes(STORAGE_SECRET));
++  assert.ok(!visibleJson.includes(RUN_SECRET));
++};
++
++test('tools/list exposes all ten image-search and image-model bridge tools', async () => {
++  const response = await handler({
++    httpMethod: 'POST',
++    headers: { 'content-type': 'application/json' },
++    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
++  });
++  const tools = (JSON.parse(response.body) as { result: { tools: Array<{ name: string }> } }).result.tools;
++  const names = new Set(tools.map((tool) => tool.name));
++  assert.ok(names.has('search_images'));
++  assert.ok(names.has('import_image_from_url'));
++  assert.ok(names.has('import_images_from_url'));
++  assert.ok(names.has('get_image_search_policy'));
++  assert.ok(names.has('set_image_search_policy'));
++  assert.ok(names.has('get_image_search_bank'));
++  assert.ok(names.has('update_image_search_candidate'));
++  assert.ok(names.has('get_image_search_job_status'));
++  assert.ok(names.has('get_image_model_policy'));
++  assert.ok(names.has('set_image_model_policy'));
++});
++
++test('search_images starts a job through the bridge and never exposes the grant', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    search_images: (body) => ({
++      status: 202,
++      body: {
++        jobId: 'job-image-search-1',
++        status: 'pending',
++        projectId: body.projectId,
++        requestId: body.requestId,
++        query: body.query,
++        polling: { tool: 'get_image_search_job_status', input: { projectId: body.projectId, jobId: 'job-image-search-1' } },
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const searched = await rpc('search_images', {
++      site_id: 'site_drlurie',
++      request_id: REQUEST_ID,
++      query: 'a warm, natural-light hero shot of skincare bottles on a linen towel',
++      count: 3,
++      tags: ['hero', 'skincare'],
++    });
++    assert.ok(!searched.result.isError, JSON.stringify(searched.result.structuredContent));
++    assert.equal(searched.result.structuredContent?.jobId, 'job-image-search-1');
++    assert.equal(searched.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    const call = calls[0];
++    assert.equal(call.authorization, `Bearer ${RUN_SECRET}`);
++    assert.equal(call.body.projectId, 'dr-lurie');
++    assert.equal(call.body.requestId, REQUEST_ID);
++    assert.equal(call.body.query, 'a warm, natural-light hero shot of skincare bottles on a linen towel');
++    assert.equal(call.body.count, 3);
++    assert.deepEqual(call.body.tags, ['hero', 'skincare']);
++    assert.equal((call.body.storage as { token: string }).token, STORAGE_SECRET);
++
++    assertGrantNeverExposed(JSON.stringify(searched.response.body));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('get_image_search_job_status polls a search job through the bridge', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    get_image_search_job_status: (body) => ({
++      body: {
++        jobId: body.jobId,
++        projectId: body.projectId,
++        status: 'complete',
++        result: { candidateCount: 3 },
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const status = await rpc('get_image_search_job_status', { site_id: 'site_drlurie', job_id: 'job-image-search-1' });
++    assert.ok(!status.result.isError, JSON.stringify(status.result.structuredContent));
++    assert.equal(status.result.structuredContent?.status, 'complete');
++    assert.equal(status.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.equal(calls[0].body.jobId, 'job-image-search-1');
++    assertGrantNeverExposed(JSON.stringify(status.response.body));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('get_image_search_bank reads banked candidates through the bridge', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    get_image_search_bank: (body) => ({
++      body: {
++        projectId: body.projectId,
++        bank: {
++          requestId: body.requestId,
++          candidates: [{ candidateId: 'cand_1', state: 'pending_review', score: 0.9 }],
++        },
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const bank = await rpc('get_image_search_bank', {
++      site_id: 'site_drlurie',
++      request_id: REQUEST_ID,
++      limit: 10,
++      cursor: '0',
++    });
++    assert.ok(!bank.result.isError, JSON.stringify(bank.result.structuredContent));
++    const bankBody = bank.result.structuredContent?.bank as { candidates: Array<{ candidateId: string }> };
++    assert.equal(bankBody.candidates[0]?.candidateId, 'cand_1');
++    assert.equal(bank.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.equal(calls[0].body.requestId, REQUEST_ID);
++    assert.equal(calls[0].body.limit, 10);
++    assert.equal(calls[0].body.cursor, '0');
++    assertGrantNeverExposed(JSON.stringify(bank.response.body));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('update_image_search_candidate updates a candidate state through the bridge and logs it', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    update_image_search_candidate: (body) => ({
++      body: {
++        projectId: body.projectId,
++        candidate: { candidateId: body.candidateId, state: body.state },
++        artifactDeleted: false,
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const logs: Array<Record<string, unknown>> = [];
++    const updated = await rpc(
++      'update_image_search_candidate',
++      { site_id: 'site_drlurie', request_id: REQUEST_ID, candidate_id: 'cand_1', state: 'selected' },
++      logs
++    );
++    assert.ok(!updated.result.isError, JSON.stringify(updated.result.structuredContent));
++    const candidate = updated.result.structuredContent?.candidate as { state: string };
++    assert.equal(candidate.state, 'selected');
++    assert.equal(updated.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.equal(calls[0].body.candidateId, 'cand_1');
++    assert.equal(calls[0].body.state, 'selected');
++    assert.ok(logs.some((log) => log.event === 'image_search_bridge_candidate_updated'));
++    assertGrantNeverExposed(JSON.stringify({ logs, updated: updated.response.body }));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('import_image_from_url imports and banks a single image through the bridge and logs it', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    import_image_from_url: (body) => ({
++      body: {
++        projectId: body.projectId,
++        requestId: body.requestId,
++        artifactReference: { blobKey: `image/${body.requestId}/${'a'.repeat(64)}.webp`, sha256: 'a'.repeat(64) },
++        candidateId: 'cand_url_1',
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const logs: Array<Record<string, unknown>> = [];
++    const imported = await rpc(
++      'import_image_from_url',
++      {
++        site_id: 'site_drlurie',
++        request_id: REQUEST_ID,
++        url: 'https://example.com/hero.jpg',
++        label: 'Hero shot',
++        license: { class: 'permissive', name: 'CC-BY', commercialUse: true },
++      },
++      logs
++    );
++    assert.ok(!imported.result.isError, JSON.stringify(imported.result.structuredContent));
++    assert.equal(imported.result.structuredContent?.candidateId, 'cand_url_1');
++    assert.equal(imported.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.equal(calls[0].body.url, 'https://example.com/hero.jpg');
++    assert.deepEqual(calls[0].body.license, { class: 'permissive', name: 'CC-BY', commercialUse: true });
++    assert.ok(logs.some((log) => log.event === 'image_search_bridge_url_import'));
++    assertGrantNeverExposed(JSON.stringify({ logs, imported: imported.response.body }));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('import_images_from_url starts a batch import job through the bridge and logs it', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    import_images_from_url: (body) => ({
++      status: 202,
++      body: {
++        jobId: 'job-url-import-1',
++        status: 'pending',
++        projectId: body.projectId,
++        requestId: body.requestId,
++        urls: body.urls,
++        polling: { tool: 'get_image_search_job_status', input: { projectId: body.projectId, jobId: 'job-url-import-1' } },
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const logs: Array<Record<string, unknown>> = [];
++    const urls = ['https://example.com/a.jpg', 'https://example.com/b.jpg'];
++    const imported = await rpc(
++      'import_images_from_url',
++      { site_id: 'site_drlurie', request_id: REQUEST_ID, urls },
++      logs
++    );
++    assert.ok(!imported.result.isError, JSON.stringify(imported.result.structuredContent));
++    assert.equal(imported.result.structuredContent?.jobId, 'job-url-import-1');
++    assert.equal(imported.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.deepEqual(calls[0].body.urls, urls);
++    assert.ok(logs.some((log) => log.event === 'image_search_bridge_url_import_batch'));
++    assertGrantNeverExposed(JSON.stringify({ logs, imported: imported.response.body }));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('get_image_search_policy reads the project policy through the bridge', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    get_image_search_policy: (body) => ({
++      body: { projectId: body.projectId, policy: { candidateTarget: 5, providers: ['library', 'stock'] } },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const policy = await rpc('get_image_search_policy', { site_id: 'site_drlurie' });
++    assert.ok(!policy.result.isError, JSON.stringify(policy.result.structuredContent));
++    const policyBody = policy.result.structuredContent?.policy as { candidateTarget: number };
++    assert.equal(policyBody.candidateTarget, 5);
++    assert.equal(policy.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assertGrantNeverExposed(JSON.stringify(policy.response.body));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('set_image_search_policy writes the project policy through the bridge and logs it', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    set_image_search_policy: (body) => ({
++      body: { projectId: body.projectId, policy: body.policy },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const logs: Array<Record<string, unknown>> = [];
++    const policyPatch = { candidateTarget: 3, quotas: { maxUrlImportsPerBatch: 10 } };
++    const saved = await rpc('set_image_search_policy', { site_id: 'site_drlurie', policy: policyPatch }, logs);
++    assert.ok(!saved.result.isError, JSON.stringify(saved.result.structuredContent));
++    assert.deepEqual(saved.result.structuredContent?.policy, policyPatch);
++    assert.equal(saved.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.deepEqual(calls[0].body.policy, policyPatch);
++    assert.ok(logs.some((log) => log.event === 'image_search_bridge_policy_set'));
++    assertGrantNeverExposed(JSON.stringify({ logs, saved: saved.response.body }));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('get_image_model_policy reads the project model routing policy through the bridge', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    get_image_model_policy: (body) => ({
++      body: { projectId: body.projectId, policy: { byUsageContext: { article_header: { model: 'flux-2' } } } },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const policy = await rpc('get_image_model_policy', { site_id: 'site_drlurie' });
++    assert.ok(!policy.result.isError, JSON.stringify(policy.result.structuredContent));
++    const policyBody = policy.result.structuredContent?.policy as { byUsageContext: Record<string, unknown> };
++    assert.deepEqual(policyBody.byUsageContext, { article_header: { model: 'flux-2' } });
++    assert.equal(policy.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assertGrantNeverExposed(JSON.stringify(policy.response.body));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('set_image_model_policy writes the project model routing policy through the bridge and logs it', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    set_image_model_policy: (body) => ({
++      body: { projectId: body.projectId, policy: body.policy },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const logs: Array<Record<string, unknown>> = [];
++    const policyPatch = { byUsageContext: { article_header: { model: 'flux-2' } } };
++    const saved = await rpc('set_image_model_policy', { site_id: 'site_drlurie', policy: policyPatch }, logs);
++    assert.ok(!saved.result.isError, JSON.stringify(saved.result.structuredContent));
++    assert.deepEqual(saved.result.structuredContent?.policy, policyPatch);
++    assert.equal(saved.result.structuredContent?.siteId, 'site_drlurie');
++
++    assert.equal(calls.length, 1);
++    assert.deepEqual(calls[0].body.policy, policyPatch);
++    assert.ok(logs.some((log) => log.event === 'image_model_bridge_policy_set'));
++    assertGrantNeverExposed(JSON.stringify({ logs, saved: saved.response.body }));
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('set_image_search_policy surfaces an upstream 400 invalid-policy error unchanged', async () => {
++  const originalFetch = globalThis.fetch;
++  globalThis.fetch = (async () =>
++    Response.json(
++      { error: 'candidateTarget must be between 1 and 5.', errorCode: 'IMAGE_POLICY_INVALID' },
++      { status: 400 }
++    )) as typeof fetch;
++  try {
++    const saved = await rpc('set_image_search_policy', {
++      site_id: 'site_drlurie',
++      policy: { candidateTarget: 99 },
++    });
++    assert.equal(saved.result.isError, true);
++    assert.equal(saved.result.structuredContent?.statusCode, 400);
++    assert.equal(saved.result.structuredContent?.errorCode, 'IMAGE_POLICY_INVALID');
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('rejects calls missing required arguments across the image bridge tools without any outbound fetch', async () => {
++  const originalFetch = globalThis.fetch;
++  let fetchCalls = 0;
++  globalThis.fetch = (async () => {
++    fetchCalls += 1;
++    return Response.json({ error: 'must not be reached' }, { status: 500 });
++  }) as typeof fetch;
++  try {
++    const missingQuery = await rpc('search_images', { site_id: 'site_drlurie', request_id: REQUEST_ID });
++    assert.equal(missingQuery.result.isError, true);
++
++    const missingJobId = await rpc('get_image_search_job_status', { site_id: 'site_drlurie' });
++    assert.equal(missingJobId.result.isError, true);
++
++    const missingRequestId = await rpc('get_image_search_bank', { site_id: 'site_drlurie' });
++    assert.equal(missingRequestId.result.isError, true);
++
++    const badState = await rpc('update_image_search_candidate', {
++      site_id: 'site_drlurie',
++      request_id: REQUEST_ID,
++      candidate_id: 'cand_1',
++      state: 'not_a_real_state',
++    });
++    assert.equal(badState.result.isError, true);
++
++    const missingUrl = await rpc('import_image_from_url', { site_id: 'site_drlurie', request_id: REQUEST_ID });
++    assert.equal(missingUrl.result.isError, true);
++
++    const missingUrls = await rpc('import_images_from_url', { site_id: 'site_drlurie', request_id: REQUEST_ID });
++    assert.equal(missingUrls.result.isError, true);
++
++    const missingPolicy = await rpc('set_image_search_policy', { site_id: 'site_drlurie' });
++    assert.equal(missingPolicy.result.isError, true);
++
++    const missingModelPolicy = await rpc('set_image_model_policy', { site_id: 'site_drlurie' });
++    assert.equal(missingModelPolicy.result.isError, true);
++
++    assert.equal(fetchCalls, 0);
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
++test('foreign site_id fails every image bridge tool with template_site_mismatch and makes zero outbound fetches', async () => {
++  const originalFetch = globalThis.fetch;
++  let fetchCalls = 0;
++  globalThis.fetch = (async () => {
++    fetchCalls += 1;
++    return Response.json({ error: 'must not be reached' }, { status: 500 });
++  }) as typeof fetch;
++  try {
++    const search = await rpc('search_images', { site_id: 'site_other', request_id: REQUEST_ID, query: 'x' });
++    assert.equal(search.result.isError, true);
++    assert.equal(search.result.structuredContent?.error_code, 'template_site_mismatch');
++
++    const getPolicy = await rpc('get_image_search_policy', { site_id: 'site_other' });
++    assert.equal(getPolicy.result.isError, true);
++    assert.equal(getPolicy.result.structuredContent?.error_code, 'template_site_mismatch');
++
++    const getModelPolicy = await rpc('get_image_model_policy', { site_id: 'site_other' });
++    assert.equal(getModelPolicy.result.isError, true);
++    assert.equal(getModelPolicy.result.structuredContent?.error_code, 'template_site_mismatch');
++
++    assert.equal(fetchCalls, 0);
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
+-- 
+2.43.0
+
+

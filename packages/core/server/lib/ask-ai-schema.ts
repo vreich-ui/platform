@@ -154,6 +154,7 @@ const PROTECTED_FIELD_NAMES = new Set([
   'urls',
   'blog',
   'brandTokens',
+  'brandImagery',
   'chrome',
   'metadataDefaults',
   'slug',

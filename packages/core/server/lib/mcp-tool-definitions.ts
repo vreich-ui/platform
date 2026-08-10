@@ -357,14 +357,16 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'create_agent_artifact_job',
     description:
-      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
+      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
         request_id: stringSchema('Existing content_item object id that will own the artifact.'),
         artifact_kind: { type: 'string', enum: ['image', 'pdf'], description: 'Artifact kind.' },
         operation: { type: 'string', enum: ['generate', 'edit'], description: 'Defaults to generate.' },
-        prompt: stringSchema('Generation prompt; required for image generation.'),
+        prompt: stringSchema(
+          'Generation prompt; required for image generation. For an image-GENERATION job on a site with a brandImagery contract this is the SUBJECT ONLY (e.g. "a jar of moisturizer on a marble countertop") — Platform prepends the site\'s styleSentence server-side. Never author style/medium/lighting/mood here; a site without brandImagery uses this text verbatim.'
+        ),
         filename: stringSchema('Output filename including the format-matching extension.'),
         slot: stringSchema('Stable request-scoped slot such as article_image_1.'),
         model: stringSchema('Optional explicit model; omit to use the registered project policy.'),
@@ -375,6 +377,22 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         data: anyObjectSchema('Template data payload for a template_id-driven PDF render.'),
         assets: anyObjectSchema(
           'Optional supporting assets (e.g. {images: [...]}) for a template_id-driven PDF render.'
+        ),
+        negative_prompt: stringSchema(
+          "Image generation only: what the output must avoid. On a site with brandImagery this is MERGED with (not replacing) the site's negative list — it never lets you remove a brand negative, only add to it."
+        ),
+        seed: intSchema(
+          "Image generation only: a deterministic seed. On a site with brandImagery this is OVERRIDDEN by a seed derived from the site's seedBase — see overriddenFields in the response."
+        ),
+        loras: arraySchema(
+          objectSchema(
+            {
+              path: stringSchema('HTTPS URL of the trained LoRA .safetensors.'),
+              scale: { type: 'number', description: 'LoRA strength.' },
+            },
+            ['path']
+          ),
+          "Image generation only: trained per-brand LoRAs. On a site with brandImagery this is OVERRIDDEN by the site's own lora."
         ),
         wait: {
           type: 'boolean',
@@ -468,8 +486,11 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         site_id: stringSchema('Owning site object id; must match this deployment.'),
         template_id: stringSchema('The template object id to validate.'),
         version: intSchema('Optional specific version to validate; omit for the latest draft version.'),
+        data: anyObjectSchema(
+          'Required worst-case sample data for the validation render, forwarded verbatim to pdf-tool. pdf-tool renders the template against this data during validation, so it should exercise the template\'s longest/edge-case field values, not typical data.'
+        ),
       },
-      ['site_id', 'template_id']
+      ['site_id', 'template_id', 'data']
     ),
   },
   {
@@ -511,6 +532,206 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         reason: stringSchema('Optional human-readable reason for deactivation, forwarded to pdf-tool.'),
       },
       ['site_id', 'template_id']
+    ),
+  },
+  {
+    name: 'health',
+    description:
+      "Return pdf-tool's live capability/health manifest (feature flags, renderer availability, degraded subsystems) through the trusted Platform bridge. Read-only, site-scoped like the other pdf-tool bridge tools; site ownership, canonical project, and storage grant are resolved server-side and never returned to you.",
+    inputSchema: objectSchema(
+      { site_id: stringSchema('Owning site object id; must match this deployment.') },
+      ['site_id']
+    ),
+  },
+  {
+    name: 'search_images',
+    description:
+      "Start a least-cost image sourcing job for THIS site's content_item request through the trusted Platform bridge: pdf-tool searches the project media library first, then external providers by ascending cost tier (per the project's image search policy — see get_image_search_policy/set_image_search_policy), and banks up to five scored candidates. Platform resolves the canonical project and mints/forwards a short-lived storage grant server-side; never call pdf-tool directly or pass a grant yourself — this bridge is the ONLY place the grant is minted, and it is never returned to you. Returns job metadata and polling instructions only, never image bytes. Sequence: search_images -> poll get_image_search_job_status until terminal -> get_image_search_bank to see the banked candidates -> update_image_search_candidate to approve/reject/annotate one -> import_image_from_url (or the candidate's own artifact reference) to use it. policy_overrides merges a partial policy over the stored one for this search call only.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        request_id: stringSchema('The content_item request id this search is sourcing images for.'),
+        query: stringSchema('Search prompt describing the desired image.'),
+        count: {
+          type: 'number',
+          description: 'Optional desired number of new candidates (1-5); defaults to the policy candidateTarget.',
+        },
+        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional tags recorded on the banked candidates.'),
+        label: stringSchema('Optional human-readable label recorded on the banked candidates.'),
+        policy_overrides: anyObjectSchema(
+          "Optional partial image sourcing policy merged over the project's stored policy for this search only."
+        ),
+      },
+      ['site_id', 'request_id', 'query']
+    ),
+  },
+  {
+    name: 'get_image_search_job_status',
+    description:
+      "Poll a job started by search_images through THIS site's trusted Platform bridge. Site ownership, canonical project, and storage grant are resolved server-side exactly like search_images — never call pdf-tool directly. Completed jobs include the banked candidate metadata (artifact references, scores, licenses); never image bytes. Terminal statuses are complete and failed; poll get_image_search_bank once complete to work with the results.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        job_id: stringSchema('Job id returned by search_images.'),
+      },
+      ['site_id', 'job_id']
+    ),
+  },
+  {
+    name: 'get_image_search_bank',
+    description:
+      "Read the per-request image selection bank for THIS site through the trusted Platform bridge: every candidate found across search_images/import_image_from_url/import_images_from_url calls for the given request_id, with states, scores, licenses, and artifact references. Metadata only, never image bytes. Optionally paginated via limit/cursor (the bank itself is a single read either way). Feed candidateId values from here into update_image_search_candidate.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        request_id: stringSchema('The content_item request id whose image search bank to read.'),
+        limit: intSchema('Optional max candidates to return (default all, max 200).'),
+        cursor: stringSchema('Optional pagination cursor from a previous get_image_search_bank call.'),
+      },
+      ['site_id', 'request_id']
+    ),
+  },
+  {
+    name: 'update_image_search_candidate',
+    description:
+      "Update a banked image candidate's state for THIS site through the trusted Platform bridge: selected (the agent's final choice), kept, pending_review, or discarded. Discarding with delete_artifact=true also deletes the imported blob bytes; candidates sourced from the project media library are never deleted. Use this after reviewing get_image_search_bank's results.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        request_id: stringSchema('The content_item request id that owns the candidate.'),
+        candidate_id: stringSchema('The candidate id from get_image_search_bank.'),
+        state: {
+          type: 'string',
+          enum: ['kept', 'pending_review', 'selected', 'discarded'],
+          description: "The candidate's new state.",
+        },
+        reason: stringSchema('Optional human-readable reason, forwarded to pdf-tool.'),
+        delete_artifact: {
+          type: 'boolean',
+          description:
+            'When state is discarded, also delete the imported blob bytes. Ignored for library-origin candidates, which are never deleted.',
+        },
+      },
+      ['site_id', 'request_id', 'candidate_id', 'state']
+    ),
+  },
+  {
+    name: 'import_image_from_url',
+    description:
+      "Import a single image from an https URL for THIS site's content_item request through the trusted Platform bridge, bank it as a url_import candidate, and synchronously return its ArtifactReference + candidate_id. Non-native formats convert to png/jpeg. For zips, folder pages, or multiple URLs use import_images_from_url instead. Never returns bytes; rights clearance is the caller's responsibility. Bounded to this call's remaining execution budget — a near-timeout returns a structured, retryable error rather than a dropped connection.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        request_id: stringSchema('The content_item request id this import is scoped to.'),
+        url: stringSchema('https URL of the image to import.'),
+        filename: stringSchema('Optional target filename; derived from the URL if omitted.'),
+        slot: stringSchema('Optional safe slot so the artifact is retrievable via get_agent_artifact_by_slot.'),
+        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional tags recorded on the banked candidate.'),
+        label: stringSchema('Optional human-readable label.'),
+        license: objectSchema(
+          {
+            class: {
+              type: 'string',
+              enum: ['public-domain', 'permissive', 'paid', 'unknown'],
+              description: 'License class.',
+            },
+            name: stringSchema('License name.'),
+            url: stringSchema('License URL.'),
+            attribution: stringSchema('Required attribution text, if any.'),
+            commercialUse: {
+              anyOf: [{ type: 'boolean' }, { type: 'string' }],
+              description: 'Whether commercial use is permitted, or a free-text note.',
+            },
+          },
+          [],
+          'Caller-asserted license recorded in artifact metadata; defaults to unknown.'
+        ),
+        max_bytes: intSchema('Optional byte cap for the stored image (max 5000000).'),
+      },
+      ['site_id', 'request_id', 'url']
+    ),
+  },
+  {
+    name: 'import_images_from_url',
+    description:
+      "Start a batch url-import job for THIS site's content_item request through the trusted Platform bridge: each source URL may be a direct image, a zip archive of images, or an https folder/index page (same-host images are collected). Every imported image is saved to the project artifact store and banked as a url_import candidate; bounded by policy quotas (default 20 per batch, 50 per request). Returns job metadata and polling instructions — poll get_image_search_job_status, then get_image_search_bank for the imported candidates. Results are ArtifactReferences, never bytes.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        request_id: stringSchema('The content_item request id this import batch is scoped to.'),
+        urls: arraySchema(
+          { type: 'string', minLength: 1 },
+          'https URLs: direct images, zip archives, or folder/index pages (max 50).'
+        ),
+        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional tags applied to every imported candidate.'),
+        label: stringSchema('Optional human-readable label applied to every imported candidate.'),
+        license: objectSchema(
+          {
+            class: {
+              type: 'string',
+              enum: ['public-domain', 'permissive', 'paid', 'unknown'],
+              description: 'License class.',
+            },
+            name: stringSchema('License name.'),
+            url: stringSchema('License URL.'),
+            attribution: stringSchema('Required attribution text, if any.'),
+            commercialUse: {
+              anyOf: [{ type: 'boolean' }, { type: 'string' }],
+              description: 'Whether commercial use is permitted, or a free-text note.',
+            },
+          },
+          [],
+          'Caller-asserted license applied to all imported images; defaults to unknown.'
+        ),
+        policy_overrides: anyObjectSchema(
+          'Optional partial image sourcing policy (e.g. quotas.maxUrlImportsPerBatch) merged for this job only.'
+        ),
+      },
+      ['site_id', 'request_id', 'urls']
+    ),
+  },
+  {
+    name: 'get_image_search_policy',
+    description:
+      "Read THIS site's effective image sourcing policy JSON (stored policy merged over defaults) through the trusted Platform bridge: candidate targets, provider tiers, license rules, scoring weights, budgets, and quotas. search_images and import_images_from_url honor this policy unless overridden per call.",
+    inputSchema: objectSchema(
+      { site_id: stringSchema('Owning site object id; must match this deployment.') },
+      ['site_id']
+    ),
+  },
+  {
+    name: 'set_image_search_policy',
+    description:
+      "Replace THIS site's stored image sourcing policy through the trusted Platform bridge with the given partial policy (validated by pdf-tool, merged over defaults). Candidate caps are clamped to five per request. styleRef/seedStrategy fields, and allowed-provider/licensing constraints, are enforced provider-side once stored — this bridge forwards the policy verbatim, it does not itself interpret or enforce those fields.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        policy: anyObjectSchema('Partial ImageSourcingPolicy JSON, merged over the project defaults by pdf-tool.'),
+      },
+      ['site_id', 'policy']
+    ),
+  },
+  {
+    name: 'get_image_model_policy',
+    description:
+      "Read THIS site's effective image MODEL routing policy (stored policy merged over defaults) through the trusted Platform bridge: which generation model each requirements.image.usageContext routes to when a create_agent_artifact_job image request omits model. An explicit job model always wins over this policy.",
+    inputSchema: objectSchema(
+      { site_id: stringSchema('Owning site object id; must match this deployment.') },
+      ['site_id']
+    ),
+  },
+  {
+    name: 'set_image_model_policy',
+    description:
+      "Replace THIS site's stored image model routing policy through the trusted Platform bridge with the given partial policy (validated by pdf-tool, merged over defaults). Entries map a usageContext to { model } (null clears an entry back to the project default backend). Models must be routable and in the project's allowedModels — pdf-tool enforces this; this bridge forwards the policy verbatim.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        policy: anyObjectSchema(
+          'Partial ImageModelPolicy JSON: { byUsageContext: { article_header: { model: "flux-2" }, ... } }.'
+        ),
+      },
+      ['site_id', 'policy']
     ),
   },
   {

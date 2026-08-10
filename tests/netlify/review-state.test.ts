@@ -299,6 +299,40 @@ test('discard ACCEPTS a real privileged palette entry from history and reverts t
   assert.deepEqual(result.record.body, original.body, 'the palette returns to its pre-apply state');
 });
 
+// brandImagery (W16 C1) rides the exact same privileged funnel as brandTokens
+// — no verb constructs the forward op yet, but discard's forgery guard and
+// real-history-entry acceptance must hold identically.
+test('discard REFUSES a fabricated privileged brandImagery entry not in history', () => {
+  const record = siteRecord();
+  const fabricated = {
+    op: { op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'forged style' } } },
+    capture: {
+      kind: 'fields',
+      before: { brandImagery: { styleSentence: 'forged style' } },
+      after: {},
+    },
+  };
+  const result = discardProposal(record, { entries: [fabricated], actor: reviewer, at: LATER });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.status, 403);
+  assert.equal(result.body.code, 'discard_privileged_unverified');
+});
+
+test('discard ACCEPTS a real privileged brandImagery entry from history and reverts it', () => {
+  const original = siteRecord();
+  const forward = applyPatchOps(
+    original,
+    [{ op: 'set_site_brand_imagery', fields: { brandImagery: { styleSentence: 'Clinical-clean.' } } }],
+    { actor: agentActor, at: AT, privilegedOps: ['set_site_brand_imagery'] }
+  );
+  const entry = forward.record.history[forward.record.history.length - 1].details as { op: unknown; capture: unknown };
+  const result = discardProposal(forward.record, { entries: [entry], actor: reviewer, at: LATER });
+  assert.equal(result.ok, true, JSON.stringify(result.ok ? '' : result.body));
+  if (!result.ok) return;
+  assert.deepEqual(result.record.body, original.body, 'brandImagery returns to its pre-apply state');
+});
+
 test('discard restores a LEGACY palette entry (pre-rollout set_site_fields{brandTokens}) via the privileged op', () => {
   // A history entry from before the theme-only ban: a set_site_fields whose
   // fields carried brandTokens. It no longer parses under the grammar, but its
