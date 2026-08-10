@@ -126,6 +126,27 @@ export const ADMIN_CONTENT_REWRITE = CANONICAL_INFRA_REDIRECTS[CANONICAL_INFRA_R
  */
 export const STALE_ADMIN_CONTENT_FROM = '/admin/content/*';
 
+// ─── the canonical build/security posture ────────────────────────────────────
+//
+// T16.2 (genesis-parity-plan §1.2 item 4): root (Dr-Lurie) alone carried
+// `pretty_urls = false`, the `/_astro/*` immutable-cache header, and the
+// CSP-Report-Only header — perf + security posture, not branding, yet
+// platform and fernwell shipped without any of it. Every tenant's
+// netlify.toml must carry this block BYTE-EQUAL to the root file's own copy
+// (verbatim, mirroring how CANONICAL_INFRA_REDIRECTS is the single source of
+// truth for the redirect table). The CSP-RO value is the ALL-PROVIDERS-
+// DISABLED baseline (tests/netlify/csp-drift.test.ts's `BASE`); a site that
+// enables a tracking provider extends its OWN copy with that provider's
+// cspHosts in the same change — this constant only pins the shared floor
+// every tenant starts from.
+export const CANONICAL_TOML_POSTURE = {
+  prettyUrls: '[build.processing.html]\n  pretty_urls = false\n',
+  astroImmutableHeaders:
+    '[[headers]]\n  for = "/_astro/*"\n  [headers.values]\n    Cache-Control = "public, max-age=31536000, immutable"\n',
+  cspReportOnly:
+    '[[headers]]\n  for = "/*"\n  [headers.values]\n    Content-Security-Policy-Report-Only = "default-src \'self\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\' https://fonts.googleapis.com; font-src \'self\' https://fonts.gstatic.com; img-src \'self\' data: https:; connect-src \'self\'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src \'none\'; base-uri \'self\'"\n',
+};
+
 // ─── admin-critical env + blob stores ────────────────────────────────────────
 //
 // The env NAMES a working admin needs on the tenant's Netlify site, with who
@@ -472,6 +493,21 @@ export const computeAdminParity = (target) => {
           ? 'S1 rule present but FORCED — must be unforced'
           : 'S1 form in place'
         : 'admin rewrite missing entirely'
+  );
+
+  // 7b. Canonical build/security posture (T16.2): pretty_urls, the
+  //     /_astro/* immutable-cache header, and the CSP-Report-Only header,
+  //     byte-equal to the root netlify.toml's own copy.
+  const postureProblems = [];
+  for (const [key, value] of Object.entries(CANONICAL_TOML_POSTURE)) {
+    if (!toml.includes(value)) postureProblems.push(`missing or drifted: ${key}`);
+  }
+  add(
+    'toml-posture',
+    'netlify.toml carries the canonical build/security posture byte-equal (pretty_urls, /_astro/* immutable headers, CSP-Report-Only)',
+    'scaffold (create-site) | migrate-site --admin-parity',
+    postureProblems.length ? 'GAP' : 'PASS',
+    postureProblems.length ? postureProblems.join('; ') : 'all canonical posture keys present, byte-equal'
   );
 
   // 8. site.config.ts mirrors netlify.toml (the drift-guard invariant).

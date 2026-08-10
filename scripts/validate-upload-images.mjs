@@ -187,8 +187,16 @@ export const validateUploadImages = async (root = defaultUploadRoot, postRoot = 
 };
 
 const main = async () => {
+  // T16.2: root/Dr-Lurie's legacy tree nests markdown posts under
+  // `src/data/post` and their referenced images under
+  // `src/assets/images/uploads` (the defaults below). Scaffolded tenants
+  // (platform, fernwell, and every create-site genesis) do not carry that
+  // `src/` legacy layout at all — their own build command must pass BOTH
+  // roots explicitly (site-relative, since Netlify runs this with the
+  // site's own directory as cwd) rather than relying on either default.
   const root = process.argv[2] || defaultUploadRoot;
-  const { files, invalid } = await validateUploadImages(root);
+  const postRoot = process.argv[3] || defaultPostRoot;
+  const { files, invalid } = await validateUploadImages(root, postRoot);
 
   if (invalid.length) {
     for (const issue of invalid) console.error(issue);

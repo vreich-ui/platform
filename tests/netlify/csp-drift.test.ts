@@ -16,12 +16,10 @@
  * OWN netlify.toml: drlurie via the root netlify.toml (no committed tracking
  * export — zero providers), platform via `sites/platform/netlify.toml` +
  * `sites/platform/data/site/tracking.json`. Plan §1.2 item 4 (`netlify.toml`
- * capability drift): platform's own netlify.toml does not carry a CSP
- * header at all yet — that's T16.2's job, landing separately (possibly
- * concurrently) — so the platform row is a deliberately ANNOTATED
- * expected-fail (`{ todo }`, visible in test output, not silently green)
- * until T16.2 lands, rather than either hiding the gap or turning the whole
- * suite red for a different task's known, tracked work.
+ * capability drift): T16.2 backfilled platform's netlify.toml with the
+ * canonical CSP-Report-Only header (byte-equal to root's — platform's own
+ * tracking.json has zero enabled providers, so the ALL-DISABLED baseline is
+ * already exact), closing the gap this row used to flag as a tracked TODO.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -136,8 +134,6 @@ type SiteTruth = {
   label: string;
   tomlPath: string;
   trackingPath?: string;
-  /** Set when this site's toml is a KNOWN, separately-tracked gap (T16.2) — the test still runs (and its real result is visible in output) but is marked `todo` so the suite stays green until that task lands. */
-  expectedFail?: string;
 };
 
 const SITES: SiteTruth[] = [
@@ -146,30 +142,25 @@ const SITES: SiteTruth[] = [
     label: 'platform (sites/platform/netlify.toml + its own tracking.json)',
     tomlPath: 'sites/platform/netlify.toml',
     trackingPath: 'sites/platform/data/site/tracking.json',
-    expectedFail: 'T16.2 — platform netlify.toml does not carry the CSP-Report-Only header yet',
   },
 ];
 
 for (const site of SITES) {
-  test(
-    `CSP-RO drift, per-site truth — ${site.label}`,
-    site.expectedFail ? { todo: site.expectedFail } : {},
-    () => {
-      const policy = readPolicyAt(site.tomlPath);
-      assert.ok(policy, `${site.tomlPath} carries the Content-Security-Policy-Report-Only header`);
-      const { keys, plausibleHost } = enabledProvidersAt(site.trackingPath);
-      for (const [directiveName, directiveKey] of DIRECTIVES) {
-        const { missing, extra } = driftFor(policy, directiveName, directiveKey, keys, plausibleHost);
-        assert.deepEqual(
-          { missing, extra },
-          { missing: [], extra: [] },
-          `${site.label} ${directiveName} drift — enabling a provider must add its adapter cspHosts to that site's ` +
-            `netlify.toml in the SAME change (and hosts nobody enabled must be removed). Adapter constants: ` +
-            `packages/core/lib/tracking/adapters/*.ts`
-        );
-      }
+  test(`CSP-RO drift, per-site truth — ${site.label}`, () => {
+    const policy = readPolicyAt(site.tomlPath);
+    assert.ok(policy, `${site.tomlPath} carries the Content-Security-Policy-Report-Only header`);
+    const { keys, plausibleHost } = enabledProvidersAt(site.trackingPath);
+    for (const [directiveName, directiveKey] of DIRECTIVES) {
+      const { missing, extra } = driftFor(policy, directiveName, directiveKey, keys, plausibleHost);
+      assert.deepEqual(
+        { missing, extra },
+        { missing: [], extra: [] },
+        `${site.label} ${directiveName} drift — enabling a provider must add its adapter cspHosts to that site's ` +
+          `netlify.toml in the SAME change (and hosts nobody enabled must be removed). Adapter constants: ` +
+          `packages/core/lib/tracking/adapters/*.ts`
+      );
     }
-  );
+  });
 }
 
 test('fixture: enabling a provider with the CSP-RO header entirely absent is drift, never a vacuous pass', () => {

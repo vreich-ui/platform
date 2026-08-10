@@ -18,9 +18,17 @@
 # workspace astro or install the root, then run astro with --no-install, which
 # makes a missing binary a loud error instead of a silent wrong-version fetch.
 # The check short-circuits on warm builds, so this costs nothing once cached.
+#
+# T16.2: the build also runs scripts/validate-upload-images.mjs, the same
+# gate root's `npm run build` always ran — a corrupt/mismatched committed
+# upload image or a dangling markdown image reference fails the BUILD, not
+# just a later render. This site's own tree lays out uploads under
+# assets/images and legacy markdown posts under data/post (not root/
+# Dr-Lurie's src/-prefixed layout), so both roots are passed explicitly,
+# site-relative (Netlify runs this command with sites/fernwell as cwd).
 [build]
   publish = "dist"
-  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && npx --no-install astro build --config astro.config.ts"
+  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts"
   # Netlify skips a build when nothing under the base directory (sites/fernwell) changed.
   # Our MCP functions bundle the shared packages/core workspace, which lives OUTSIDE this
   # base dir — so a packages/core-only change was being skipped and shipped stale functions
@@ -37,6 +45,33 @@
   # files -- and repo docs legitimately name the repo. See the root file's
   # comment for the full story.
   SECRETS_SCAN_OMIT_KEYS = "GITHUB_REPOSITORY"
+
+# T16.2 (genesis-parity-plan §1.2 item 4): the core build/security posture
+# root netlify.toml has always carried — pretty_urls off, the /_astro/*
+# immutable-cache header, and the CSP-Report-Only header — copied verbatim
+# (the admin-parity `toml-posture` check enforces byte equality against
+# packages/core/cli/admin-parity.mjs's CANONICAL_TOML_POSTURE).
+[build.processing.html]
+  pretty_urls = false
+[[headers]]
+  for = "/_astro/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# W13 T13.8 (12-plan §4): the site's first CSP — REPORT-ONLY until T13.11's
+# clean soak promotes the header name to Content-Security-Policy. This value
+# is the ALL-PROVIDERS-DISABLED baseline: script-src keeps 'unsafe-inline'
+# (the inline consent bootstrap + astro-compress reality); style/font cover
+# the Google Fonts chrome; frame-src covers the T10.5 media mint's embed
+# hosts (youtube-nocookie/vimeo); img-src stays wide (article/content images
+# are externally hosted by design) — the pinning value lives in script-src,
+# connect-src, and frame-src. Enabling any ad provider REQUIRES adding its
+# adapter's cspHosts here in the SAME change: the hosts-drift test
+# (tests/netlify/csp-drift.test.ts) fails otherwise, in both directions.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'"
 
 [functions]
   directory = "netlify/functions"

@@ -25,6 +25,7 @@ import {
   ADMIN_CONTENT_REWRITE,
   ADMIN_CRITICAL_ENV,
   CANONICAL_INFRA_REDIRECTS,
+  CANONICAL_TOML_POSTURE,
   STALE_ADMIN_CONTENT_FROM,
   computeAdminParity,
   parseNetlifyTomlRedirects,
@@ -133,6 +134,15 @@ test('every admin-critical env row the audit requires is declared in create-site
   }
 });
 
+// ─── T16.2: canonical build/security posture ────────────────────────────────
+
+test('CANONICAL_TOML_POSTURE is byte-equal to the root netlify.toml’s own posture block', () => {
+  const rootToml = fs.readFileSync(path.join(repoRoot, 'netlify.toml'), 'utf8');
+  for (const [key, value] of Object.entries(CANONICAL_TOML_POSTURE)) {
+    assert.ok(rootToml.includes(value), `root netlify.toml must contain the canonical ${key} block verbatim`);
+  }
+});
+
 // ─── 2. genesis parity by construction ──────────────────────────────────────
 
 const scratchSite = (slug) => {
@@ -141,6 +151,41 @@ const scratchSite = (slug) => {
   writeFiles(buildPlan({ name: slug, brandName: 'Parity Scratch' }));
   return dir;
 };
+
+test('toml-posture check GAPs when a site netlify.toml is missing the canonical posture, and PASSes once restored', () => {
+  const slug = 'parity-scratch-posture';
+  const dir = scratchSite(slug);
+  try {
+    const tomlPath = path.join(dir, 'netlify.toml');
+    const original = fs.readFileSync(tomlPath, 'utf8');
+
+    // Genesis already carries the posture — confirm the check is a PASS by
+    // construction before degrading anything.
+    const clean = computeAdminParity(resolveAuditTarget(`sites/${slug}`));
+    const cleanCheck = clean.find((c) => c.id === 'toml-posture');
+    assert.equal(cleanCheck.status, 'PASS', cleanCheck.detail);
+
+    // Degrade: drop pretty_urls and flip a single byte in the CSP-RO value —
+    // both must be individually detected.
+    const degraded = original
+      .replace('[build.processing.html]\n  pretty_urls = false\n', '')
+      .replace('frame-src https://www.youtube-nocookie.com', 'frame-src https://youtube-nocookie.com');
+    fs.writeFileSync(tomlPath, degraded);
+
+    const checks = computeAdminParity(resolveAuditTarget(`sites/${slug}`));
+    const check = checks.find((c) => c.id === 'toml-posture');
+    assert.equal(check.status, 'GAP');
+    assert.match(check.detail, /prettyUrls/);
+    assert.match(check.detail, /cspReportOnly/);
+
+    // Restore and confirm it PASSes again.
+    fs.writeFileSync(tomlPath, original);
+    const restored = computeAdminParity(resolveAuditTarget(`sites/${slug}`));
+    assert.equal(restored.find((c) => c.id === 'toml-posture').status, 'PASS');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('a freshly scaffolded site passes the admin-parity audit with ZERO gaps', () => {
   const slug = 'parity-scratch-genesis';
