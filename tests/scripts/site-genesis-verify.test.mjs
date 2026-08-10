@@ -138,7 +138,7 @@ test('READ_ONLY_TOOLS allows only object_get, and is frozen against accidental m
 
 test('createReadOnlyTool passes object_get through and refuses every write verb, synchronously', async () => {
   const calls = [];
-  const base = async (name, args) => {
+  const base = async (name) => {
     calls.push(name);
     return { isError: false, data: { record: { body: {} } } };
   };

@@ -104,8 +104,6 @@ export const getBlobStoreSourceDiagnostics = (
   binding?: SiteBinding
 ): BlobStoreSourceDiagnostics => {
   const envNames = binding?.env ?? PLATFORM_ENV_NAMES;
-  const siteID = readBoundEnv(envNames.blobSiteId);
-  const token = readBoundEnv(envNames.blobToken);
   const explicitApiConfigUsed = isBlobCredentialsConfigured(envNames);
   const lambdaBlobContextUsed = !explicitApiConfigUsed && hasNetlifyBlobContext(event);
   const source = explicitApiConfigUsed
