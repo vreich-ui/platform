@@ -103,7 +103,7 @@ model or touching layout/anchoring logic with no existing precedent in the file.
 | **T17.1** | `--dlem-danger` colour-chain bug fix — resolves to the site's blue secondary, and the delete button doesn't even use it (§4) | auto | `claude-sonnet-5` | low |
 | **T17.2** | Glass treatment for panel / accordion heads / confirm modal / tray / message bubbles, per the spec doc | auto | `claude-sonnet-5` | medium |
 | **T17.0** | Concept-to-brief decomposition: read the PDF, write the interaction-model spec + per-task briefs for everything below | checkpoint | `claude-opus-5` | high |
-| **T17.3** | Margin rail layout + hover-reveal bubbles + narrow-screen page-slide — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
+| **T17.3** | Margin rail layout + hover-reveal bubbles + narrow-screen page-slide — *PDF, not in items 9–16* — **DONE 2026-08-10 (§7)** | auto | `claude-opus-5` | high |
 | **T17.4** | Selected-text span anchoring (item 9) — schema fields already reserved in `marginalia-v1.ts` | auto | `claude-opus-5` | high |
 | **T17.5** | Reply-threading UI (item 10) — `parentCommentId` already reserved, client renders flat today | auto | `claude-sonnet-5` | medium |
 | **T17.6** | Gutter badges / dot counters + the global "Attention N" toolbar counter (item 11 + PDF) | auto | `claude-sonnet-5` | medium |
@@ -188,3 +188,40 @@ item here with no obvious default.
   — the pre-existing W7 chip UI. Marginalia's Comments accordion sits one level
   deeper inside the panel it opens. Not a regression, not a missing feature;
   it's the layer the concept PDF replaces (T17.3).
+
+## 7. Build log — what has actually landed
+
+One entry per task, added in the same commit as the work (repo law: no record,
+not done). Machine truth for the code is the files named; this section says
+what changed and where a later task should look first.
+
+### T17.3 — margin rail + hover-reveal bubbles + page-slide (2026-08-10)
+
+- **New:** `packages/core/lib/edit-mode/rail-layout.ts` (+ `.test.ts`, 25
+  cases) — the pure half: layout-mode selection, slide padding, rail x,
+  the §8.1 top-down packer, anchor keys, thread bucketing
+  (blocks / whole-object / orphans), stack collapsing.
+- **`ui.ts`:** a `.dl-em-rail` `<aside role="complementary">` singleton beside
+  the existing chip/panel/tray; hover-reveal at 120ms with the existing 250ms
+  dismissal; click-or-focus pinning, one pinned bubble at a time, `Esc` /
+  outside-click / close-control unpin; whole-object bubbles at the rail top,
+  orphan bubbles at the bottom (split into "not on this page anymore" and
+  "block deleted in a draft"); rail x from the widest **in-viewport**
+  annotated region, remeasured with the slide off so the mode decision can
+  never oscillate.
+- **`ui-chrome.ts`:** `--dlem-rail-w/-gap/-pad`, `--dlem-gutter-x`, the rail /
+  bubble / ghost-bubble / connector CSS, `body.dl-em-slide`'s
+  `padding-right` (transitioned 180ms, skipped under reduced motion), and the
+  sheet-mode rail. The panel's bottom-sheet breakpoint moved 720px → 900px to
+  match `slideFloor` (brief's instruction).
+- **Retired:** the panel's `comments` accordion section, `PanelMode`'s
+  `'comments'` member and `openPanel`'s `isNav && mode !== 'comments'` special
+  case. `mountMarginaliaPanel` was **moved, not rewritten** — it now mounts per
+  bubble and gained one optional `selectThreads` list-transform so a bubble can
+  show only its own anchor's threads (and collapse a stack); omitting it
+  reproduces the accordion's behaviour exactly. The marginalia cache,
+  `preloadRecords` warm-up and `invalidateMarginaliaThreads` are unchanged.
+- **Not verified in a browser** (no browser in the build environment): the
+  three layout modes at real viewport widths, the reveal/dismiss feel, and
+  whether the chip/bubble stacking reads as intended. Everything mechanical is
+  covered by the pure tests; the rest wants T17.13's smoke test or a human.

@@ -48,7 +48,19 @@ import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { previewFieldChange, restoreRegion, snapshotRegion, type RegionSnapshot } from './preview.js';
-import { mountMarginaliaPanel } from './marginalia-panel.js';
+import { mountMarginaliaPanel, type MarginaliaPanelTarget } from './marginalia-panel.js';
+import {
+  collapseThreadStack,
+  isBlockAnchor,
+  marginaliaAnchorKey,
+  packRailEntries,
+  partitionRailThreads,
+  railLeftFor,
+  railSlidePadding,
+  selectRailLayoutMode,
+  type RailLayoutMode,
+  type RailMetrics,
+} from './rail-layout.js';
 import { listMarginaliaThreads } from '../admin/marginalia-client.js';
 import type { MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
 import {
@@ -87,10 +99,28 @@ const NODE_SELECTOR = '[data-cms-node-id]';
 const EMPTY_OBJECT_SELECTOR = '[data-cms-empty-object]';
 const MODE_KEY = 'dl-edit-mode';
 
+// Margin-rail geometry (T17.3) — the same numbers ui-chrome.ts declares as
+// --dlem-rail-* tokens; the CSS paints with them, this module does the math.
+const RAIL_W = 344;
+const RAIL_GAP = 24;
+const RAIL_PAD = 8;
+/** Vertical gap between packed bubbles, and the rail's top clearance under the bar. */
+const RAIL_STACK_GAP = 8;
+const RAIL_TOP = 46;
+/** Below this viewport width there is no rail — the bottom sheet serves (spec §1.3). */
+const RAIL_SLIDE_FLOOR = 900;
+/** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
+const RAIL_REVEAL_MS = 120;
+const RAIL_DISMISS_MS = 250;
+
 export type MountOptions = { email: string; roles: string[]; getToken: GetToken };
 
-/** What the panel is doing: AI chat, manual text form, the image tool, the role/annotation editor, or comments. */
-type PanelMode = 'ai' | 'edit' | 'image' | 'role' | 'meta' | 'comments';
+/**
+ * What the panel is doing: AI chat, manual text form, the image tool, or the
+ * role/annotation and article-settings editors. Comments left the panel in
+ * T17.3 — they live in the margin rail now, not in an accordion section.
+ */
+type PanelMode = 'ai' | 'edit' | 'image' | 'role' | 'meta';
 
 type PanelState = {
   target: EditTarget;
@@ -297,8 +327,6 @@ export const mountEditMode = (options: MountOptions): void => {
     `<div class="dl-em-acc-body" data-em-acc-body="role"></div></section>` +
     `<section class="dl-em-acc" data-em-acc="meta">${accHead('meta', ICON_TAG, 'Article settings')}` +
     `<div class="dl-em-acc-body" data-em-acc-body="meta"></div></section>` +
-    `<section class="dl-em-acc" data-em-acc="comments">${accHead('comments', ICON_COMMENT, 'Comments')}` +
-    `<div class="dl-em-acc-body" data-em-acc-body="comments"></div></section>` +
     `</div>`;
   document.body.append(panel);
   // Single reusable form node, moved into whichever section (edit/image) is open.
@@ -318,6 +346,15 @@ export const mountEditMode = (options: MountOptions): void => {
   palette.className = 'dl-em-pal';
   palette.style.display = 'none';
   document.body.append(palette);
+
+  // The margin rail (T17.3): the concept's annotation surface. Appended after
+  // the page content in DOM order so a screen reader reaches the article
+  // first (spec §9); positioned against the content column, not the viewport.
+  const rail = document.createElement('aside');
+  rail.className = 'dl-em-rail';
+  rail.setAttribute('role', 'complementary');
+  rail.setAttribute('aria-label', 'Comments');
+  document.body.append(rail);
 
   const tray = document.createElement('div');
   tray.className = 'dl-em-tray';
@@ -572,8 +609,9 @@ export const mountEditMode = (options: MountOptions): void => {
   // ── marginalia cache: same B4 discipline as the record cache above, applied
   // to comment threads — entering edit mode also warms every visible
   // object's threads, one list per distinct object, in parallel, so the
-  // Comments accordion opens from memory instead of paying a cold fetch.
-  // A write through the panel invalidates its own entry (mountMarginaliaPanel's
+  // margin rail's first paint (and every bubble it opens) comes from memory
+  // instead of paying a cold fetch.
+  // A write through a bubble invalidates its own entry (mountMarginaliaPanel's
   // onWrite callback), the same way object writes invalidate recordCache.
   type MarginaliaThreadsResult = { threads: MarginaliaThreadWithComments[] };
   const marginaliaCache = new Map<string, Promise<MarginaliaThreadsResult>>();
@@ -954,11 +992,16 @@ export const mountEditMode = (options: MountOptions): void => {
       // the page so every chip/panel/tool opens from memory.
       preloadRecords();
       scheduleGapRebuild();
+      void refreshRailThreads();
     } else {
       chip.style.display = 'none';
       panel.classList.remove('dl-em-open');
       tray.classList.remove('dl-em-open');
       palette.style.display = 'none';
+      revealedRegion = undefined;
+      pinnedKey = undefined;
+      pinnedRegion = undefined;
+      renderRail(); // drops every bubble and releases the page slide
       for (const objectSession of sessions.values()) void objectSession.checkin();
     }
   };
@@ -1070,6 +1113,9 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   const buildGaps = (): void => {
+    // The rail rides the same rebuild cadence: content heights changed, so
+    // the content column (and therefore the rail's x) may have too.
+    layoutRail(true);
     gapLayer.innerHTML = '';
     if (!document.body.classList.contains('dl-em-on')) return;
     for (const gap of [...gapsFromRegions(), ...nodeGapsFromRegions()]) {
@@ -1263,19 +1309,36 @@ export const mountEditMode = (options: MountOptions): void => {
   // ── hover chip
   let hotRegion: HTMLElement | undefined;
   let chipHideTimer: number | undefined;
+  /** The margin rail's current left edge (undefined = no rail up); set by layoutRail. */
+  let railLeftPx: number | undefined;
+
+  /** The edit target a region addresses — nodes innermost, then sections, then chrome. */
+  const targetFor = (region: HTMLElement): EditTarget | undefined =>
+    region.dataset.cmsNavObject !== undefined
+      ? deriveNavTarget(region.dataset as Record<string, string>)
+      : region.dataset.cmsNodeId !== undefined
+        ? deriveNodeTarget(region.dataset as Record<string, string>)
+        : deriveEditTarget(region.dataset as Record<string, string>);
 
   const positionChip = (region: HTMLElement): void => {
     const rect = regionRect(region);
     if (!rect) return;
-    // Right rail: just past the content column, top aligned with the object's
-    // first line (the heading) — well clear of the centered "+" gap buttons.
     chip.style.display = 'flex';
     chip.style.visibility = 'hidden';
     const width = chip.offsetWidth;
-    const rail = rect.right + 14;
-    const left = rail + width <= window.innerWidth - 8 ? rail : Math.max(8, window.innerWidth - width - 10);
-    chip.style.left = `${left}px`;
-    chip.style.top = `${Math.max(46, rect.top)}px`;
+    // With the margin rail up, the chip right-aligns to the RAIL and sits
+    // above the block's bubble, so the two never collide (spec §2.1).
+    // Otherwise: just past the content column, top aligned with the object's
+    // first line (the heading) — well clear of the centered "+" gap buttons.
+    const gutter = rect.right + 14;
+    const left =
+      railLeftPx !== undefined
+        ? railLeftPx + RAIL_W - width
+        : gutter + width <= window.innerWidth - 8
+          ? gutter
+          : Math.max(8, window.innerWidth - width - 10);
+    chip.style.left = `${Math.max(8, left)}px`;
+    chip.style.top = `${Math.max(RAIL_TOP, rect.top)}px`;
     chip.style.visibility = 'visible';
   };
 
@@ -1335,11 +1398,7 @@ export const mountEditMode = (options: MountOptions): void => {
   const renderChip = (region: HTMLElement): void => {
     const isNav = region.dataset.cmsNavObject !== undefined;
     const isNode = region.dataset.cmsNodeId !== undefined;
-    const target = isNav
-      ? deriveNavTarget(region.dataset as Record<string, string>)
-      : isNode
-        ? deriveNodeTarget(region.dataset as Record<string, string>)
-        : deriveEditTarget(region.dataset as Record<string, string>);
+    const target = targetFor(region);
     if (!target) return;
     const hasSelection = !isNav && Boolean(currentSelectionText && selectionRegion === region);
     const isDraft = region.classList.contains('dl-em-draft');
@@ -1476,8 +1535,561 @@ export const mountEditMode = (options: MountOptions): void => {
       chip.style.display = 'none';
       hotRegion?.classList.remove('dl-em-hot');
       hotRegion = undefined;
-    }, 250);
+    }, RAIL_DISMISS_MS);
   };
+
+  // ── margin rail (T17.3) ─────────────────────────────────────────────────
+  // Comments live BESIDE the block they annotate, revealed by hovering it —
+  // not behind a panel step. The rail is one fixed, zero-height column of
+  // absolutely-positioned bubbles; ui.ts owns the DOM, rail-layout.ts owns
+  // every rule (mode selection, packing, thread bucketing) so those are
+  // unit-tested headlessly. Spec: docs/design/marginalia-interaction-model.md
+  // §§1, 2, 8.1, 8.2, 9.
+
+  type RailThreadRow = { key: string; blockAnchored: boolean; thread: MarginaliaThreadWithComments };
+  type RailEntry = {
+    key: string;
+    /** The block this entry annotates, when it has one. */
+    region?: HTMLElement;
+    el?: HTMLElement;
+    build: () => HTMLElement;
+  };
+
+  /** Every thread on every object rendered on this page, keyed by anchor. */
+  let railRows: RailThreadRow[] = [];
+  let railPlan: RailEntry[] = [];
+  const railNodes = new Map<string, HTMLElement>();
+  /** Which anchors are currently rendered — read live by bubble thread filters. */
+  const railPresence = { present: new Set<string>(), deleted: new Set<string>() };
+  let revealedRegion: HTMLElement | undefined;
+  let pinnedRegion: HTMLElement | undefined;
+  let pinnedKey: string | undefined;
+  let railRevealTimer: number | undefined;
+  let railHideTimer: number | undefined;
+  let railColumnRight = 0;
+  let railMode: RailLayoutMode = 'inset';
+
+  const railMetrics = (): RailMetrics => ({
+    viewportWidth: window.innerWidth,
+    columnRight: railColumnRight,
+    railWidth: RAIL_W,
+    railGap: RAIL_GAP,
+    railPad: RAIL_PAD,
+    slideFloor: RAIL_SLIDE_FLOOR,
+  });
+
+  const annotatedRegions = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>(`${NODE_SELECTOR}, ${REGION_SELECTOR}, ${NAV_SELECTOR}`));
+
+  const marginaliaTargetFor = (target: EditTarget): MarginaliaPanelTarget => ({
+    objectType: target.objectType,
+    objectId: target.objectId,
+    ...(target.sectionId !== undefined ? { sectionId: target.sectionId } : {}),
+    ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
+  });
+
+  const anchorKeyForRegion = (region: HTMLElement): string | undefined => {
+    const target = targetFor(region);
+    return target ? marginaliaAnchorKey(marginaliaTargetFor(target)) : undefined;
+  };
+
+  /**
+   * The content column the rail hangs off: the widest in-viewport annotated
+   * region (spec §1.2 — one rail x per page, never a ragged edge). Measured
+   * with the slide REMOVED, because measuring it while slid would feed the
+   * mode decision its own output and oscillate; the class is off for a single
+   * synchronous reflow, with transitions suppressed so nothing animates.
+   */
+  const measureColumnRight = (): number => {
+    const slid = document.body.classList.contains('dl-em-slide');
+    if (slid) {
+      document.body.classList.add('dl-em-measuring');
+      document.body.classList.remove('dl-em-slide');
+    }
+    let inViewport = 0;
+    let anywhere = 0;
+    for (const region of annotatedRegions()) {
+      const rect = regionRect(region);
+      if (!rect || rect.width === 0) continue;
+      anywhere = Math.max(anywhere, rect.right);
+      if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+      inViewport = Math.max(inViewport, rect.right);
+    }
+    if (slid) {
+      document.body.classList.add('dl-em-slide');
+      // Re-read one property so the restored padding is committed before the
+      // transition suppression lifts (otherwise the browser may animate back).
+      void document.body.offsetWidth;
+      document.body.classList.remove('dl-em-measuring');
+    }
+    return inViewport || anywhere || window.innerWidth;
+  };
+
+  const applySlide = (pad: number): void => {
+    if (pad > 0) {
+      document.body.style.setProperty('--dlem-slide-pad', `${pad}px`);
+      document.body.classList.add('dl-em-slide');
+    } else {
+      document.body.classList.remove('dl-em-slide');
+      document.body.style.removeProperty('--dlem-slide-pad');
+    }
+  };
+
+  /** Where a bubble wants to sit: its block's top, below the chip when both show. */
+  const desiredTopFor = (entry: RailEntry): number => {
+    if (!entry.region) return RAIL_TOP;
+    const rect = regionRect(entry.region);
+    if (!rect) return RAIL_TOP;
+    const chipOffset =
+      hotRegion === entry.region && chip.style.display !== 'none' ? chip.offsetHeight + RAIL_STACK_GAP : 0;
+    return Math.max(RAIL_TOP, rect.top + chipOffset);
+  };
+
+  /**
+   * Place the rail and pack its bubbles. `remeasure` re-derives the content
+   * column (activation / resize / the gap layer's rebuild cadence); scroll
+   * passes skip it and only re-run the cheap packing.
+   */
+  const layoutRail = (remeasure = false): void => {
+    const active = document.body.classList.contains('dl-em-on') && railPlan.length > 0;
+    rail.classList.toggle('dl-em-rail-on', active);
+    if (!active) {
+      applySlide(0);
+      railLeftPx = undefined;
+      return;
+    }
+    if (remeasure || railColumnRight === 0) railColumnRight = measureColumnRight();
+    const metrics = railMetrics();
+    railMode = selectRailLayoutMode(metrics);
+    rail.classList.toggle('dl-em-rail-sheet', railMode === 'sheet');
+    applySlide(railSlidePadding(railMode, metrics));
+    railLeftPx = railLeftFor(railMode, metrics);
+    if (railMode === 'sheet') {
+      // The sheet is normal flow: no absolute tops, no rail x, no connectors.
+      rail.style.left = '';
+      for (const entry of railPlan) {
+        if (!entry.el) continue;
+        entry.el.style.top = '';
+        entry.el.querySelector<HTMLElement>('.dl-em-bubble-link')?.remove();
+      }
+      return;
+    }
+    rail.style.left = `${railLeftPx ?? 0}px`;
+    const ordered = [...railPlan].sort((a, b) => railOrder(a) - railOrder(b));
+    const boxes = ordered.map((entry) => ({
+      desiredTop: desiredTopFor(entry),
+      height: entry.el?.offsetHeight ?? 0,
+    }));
+    const tops = packRailEntries(boxes, RAIL_STACK_GAP);
+    ordered.forEach((entry, index) => {
+      const el = entry.el;
+      if (!el) return;
+      el.style.top = `${tops[index]}px`;
+      // A bubble the packer displaced draws a 1px line back to its block.
+      const drop = tops[index] - boxes[index].desiredTop;
+      let link = el.querySelector<HTMLElement>('.dl-em-bubble-link');
+      if (entry.region && drop > 2) {
+        if (!link) {
+          link = document.createElement('div');
+          link.className = 'dl-em-bubble-link';
+          el.append(link);
+        }
+        link.style.top = `${-drop}px`;
+        link.style.height = `${drop}px`;
+      } else {
+        link?.remove();
+      }
+    });
+  };
+
+  /**
+   * Scroll repositioning runs once per frame: layoutRail reads offsetHeight,
+   * and doing that synchronously inside a scroll event forces a reflow per
+   * event. rAF batches it to one read just before paint.
+   */
+  let railFrame: number | undefined;
+  const scheduleRailFrame = (): void => {
+    if (railFrame !== undefined) return;
+    railFrame = window.requestAnimationFrame(() => {
+      railFrame = undefined;
+      layoutRail();
+    });
+  };
+
+  /** Rail order: whole-object groups, then blocks in document order, then orphans. */
+  const railOrder = (entry: RailEntry): number => {
+    if (entry.key.startsWith('whole:')) return -1;
+    if (entry.key.startsWith('orphan:')) return Number.MAX_SAFE_INTEGER;
+    return desiredTopFor(entry);
+  };
+
+  const threadsAtKey = (key: string): MarginaliaThreadWithComments[] =>
+    railRows.filter((row) => row.key === key).map((row) => row.thread);
+
+  const openThreadsOf = (threads: readonly MarginaliaThreadWithComments[]): MarginaliaThreadWithComments[] =>
+    threads.filter((thread) => thread.status === 'open');
+
+  type BubbleSpec = {
+    key: string;
+    title: string;
+    target: MarginaliaPanelTarget;
+    selectThreads: (threads: readonly MarginaliaThreadWithComments[]) => MarginaliaThreadWithComments[];
+    emptyLabel: string;
+    region?: HTMLElement;
+    /** The ANCHOR key this bubble pins under; absent on whole-object/orphan groups, which always show. */
+    pinKey?: string;
+  };
+
+  const buildBubble = (spec: BubbleSpec): HTMLElement => {
+    const el = document.createElement('div');
+    el.className = 'dl-em-bubble';
+    el.dataset.emBubble = spec.key;
+    el.innerHTML =
+      `<div class="dl-em-bubble-head">` +
+      `<span class="dl-em-bubble-title">${escapeHtml(spec.title)}</span>` +
+      `<span class="dl-em-bubble-open" hidden></span>` +
+      `<button class="dl-em-close" data-em-bubble-close aria-label="Close">${ICON_CLOSE}</button>` +
+      `</div><div class="dl-em-bubble-body"></div>`;
+    const openEl = el.querySelector<HTMLElement>('.dl-em-bubble-open');
+    const moreButton = document.createElement('button');
+    moreButton.type = 'button';
+    moreButton.className = 'dl-em-bubble-more';
+    moreButton.hidden = true;
+    let expanded = false;
+    moreButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      expanded = true;
+      moreButton.hidden = true;
+      remountBubbleBody();
+    });
+
+    el.querySelector('[data-em-bubble-close]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      unpinRail();
+      revealedRegion = undefined;
+      renderRail();
+    });
+    // Click or focus anywhere in a bubble pins it (spec §2.3) — a hover-only
+    // bubble cannot host a composer.
+    if (spec.pinKey) {
+      const pinKey = spec.pinKey;
+      el.addEventListener('mousedown', () => pinRail(pinKey, spec.region));
+      el.addEventListener('focusin', () => pinRail(pinKey, spec.region));
+    }
+
+    const body = el.querySelector<HTMLElement>('.dl-em-bubble-body') as HTMLElement;
+    const remountBubbleBody = (): void => {
+      void mountMarginaliaPanel(
+        body,
+        getToken,
+        spec.target,
+        cachedMarginaliaThreads(spec.target.objectType, spec.target.objectId),
+        () => {
+          invalidateMarginaliaThreads(spec.target.objectType, spec.target.objectId);
+          void refreshRailThreads();
+        },
+        {
+          selectThreads: (threads) => {
+            const mine = spec.selectThreads(threads);
+            if (openEl) {
+              const open = openThreadsOf(mine).length;
+              openEl.hidden = open === 0;
+              openEl.textContent = `${open} open`;
+            }
+            const { visible, hidden } = expanded ? { visible: [...mine], hidden: 0 } : collapseThreadStack(mine);
+            moreButton.hidden = hidden === 0;
+            moreButton.textContent = `+${hidden} earlier`;
+            return visible;
+          },
+          emptyLabel: spec.emptyLabel,
+          composerPlaceholder: 'Comment — a question, a change, an ask',
+        }
+      );
+      body.append(moreButton);
+    };
+    remountBubbleBody();
+    return el;
+  };
+
+  const wholeObjectLabel = (objectType: string): string =>
+    objectType === 'content_item' ? 'Whole article' : objectType === 'page' ? 'Whole page' : 'Whole object';
+
+  /** The set of bubbles the rail should be showing right now. */
+  const railEntryPlan = (): RailEntry[] => {
+    railPresence.present = new Set<string>();
+    railPresence.deleted = new Set<string>();
+    const regionByKey = new Map<string, HTMLElement>();
+    for (const region of annotatedRegions()) {
+      const key = anchorKeyForRegion(region);
+      if (!key) continue;
+      if (region.classList.contains('dl-em-removed')) {
+        railPresence.deleted.add(key);
+        continue;
+      }
+      railPresence.present.add(key);
+      if (!regionByKey.has(key)) regionByKey.set(key, region);
+    }
+
+    const partition = partitionRailThreads<RailThreadRow>(
+      railRows.map((row) => ({ key: row.key, blockAnchored: row.blockAnchored, thread: row })),
+      railPresence.present
+    );
+    const plan: RailEntry[] = [];
+
+    // 1 — whole-object threads pin to the rail top, one bubble per object (§3.1).
+    const wholeByObject = new Map<string, { objectType: string; objectId: string }>();
+    for (const row of partition.wholeObject) {
+      wholeByObject.set(`${row.thread.anchor.objectType}:${row.thread.anchor.objectId}`, {
+        objectType: row.thread.anchor.objectType,
+        objectId: row.thread.anchor.objectId,
+      });
+    }
+    for (const [id, object] of wholeByObject) {
+      const key = `whole:${id}`;
+      plan.push({
+        key,
+        build: () =>
+          buildBubble({
+            key,
+            title: wholeObjectLabel(object.objectType),
+            target: { objectType: object.objectType, objectId: object.objectId },
+            selectThreads: (threads) => threads.filter((thread) => !isBlockAnchor(thread.anchor)),
+            emptyLabel: 'No comments on the whole object yet.',
+          }),
+      });
+    }
+
+    // 2 — the revealed and/or pinned block. A block with threads gets its
+    //     bubble; one without gets the concept's ghost speech bubble, which
+    //     opens an empty composer on click. A PINNED block always gets the
+    //     real bubble — that is what pinning is for.
+    const blockKeys = new Map<string, HTMLElement>();
+    if (pinnedKey && pinnedRegion && pinnedRegion.isConnected) blockKeys.set(pinnedKey, pinnedRegion);
+    if (revealedRegion?.isConnected) {
+      const key = anchorKeyForRegion(revealedRegion);
+      if (key && !blockKeys.has(key)) blockKeys.set(key, revealedRegion);
+    }
+    for (const [key, region] of blockKeys) {
+      const target = targetFor(region);
+      if (!target) continue;
+      const pinned = key === pinnedKey;
+      if (!pinned && threadsAtKey(key).length === 0) {
+        plan.push({ key: `ghost:${key}`, region, build: () => buildGhostBubble(key, region) });
+        continue;
+      }
+      plan.push({
+        key: `block:${key}`,
+        region,
+        build: () =>
+          buildBubble({
+            key: `block:${key}`,
+            title: blockLabel(region, target),
+            target: marginaliaTargetFor(target),
+            selectThreads: (threads) => threads.filter((thread) => marginaliaAnchorKey(thread.anchor) === key),
+            emptyLabel: 'No comments on this block yet.',
+            region,
+            pinKey: key,
+          }),
+      });
+    }
+
+    // 3 — orphans: never dropped, never auto-resolved (§8.2). A draft-deleted
+    //     block's threads are labelled separately, because the block comes
+    //     back if the draft is discarded.
+    const orphanObjects = new Map<string, { objectType: string; objectId: string; draftDeleted: boolean }>();
+    for (const row of partition.orphans) {
+      const draftDeleted = railPresence.deleted.has(row.key);
+      const id = `${row.thread.anchor.objectType}:${row.thread.anchor.objectId}:${draftDeleted ? 'draft' : 'gone'}`;
+      orphanObjects.set(id, {
+        objectType: row.thread.anchor.objectType,
+        objectId: row.thread.anchor.objectId,
+        draftDeleted,
+      });
+    }
+    for (const [id, object] of orphanObjects) {
+      const key = `orphan:${id}`;
+      plan.push({
+        key,
+        build: () =>
+          buildBubble({
+            key,
+            title: object.draftDeleted ? 'Block deleted in a draft' : 'Not on this page anymore',
+            target: { objectType: object.objectType, objectId: object.objectId },
+            selectThreads: (threads) =>
+              threads.filter((thread) => {
+                if (!isBlockAnchor(thread.anchor)) return false;
+                const anchorKey = marginaliaAnchorKey(thread.anchor);
+                if (railPresence.present.has(anchorKey)) return false;
+                return railPresence.deleted.has(anchorKey) === object.draftDeleted;
+              }),
+            emptyLabel: 'Nothing here anymore.',
+          }),
+      });
+    }
+    return plan;
+  };
+
+  /** A short, human name for the block a bubble annotates. */
+  const blockLabel = (region: HTMLElement, target: EditTarget): string =>
+    target.objectType === 'content_item'
+      ? `Article ${region.dataset.cmsNodeKind ?? 'block'}`
+      : target.sectionType || 'Block';
+
+  const buildGhostBubble = (key: string, region: HTMLElement): HTMLElement => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dl-em-ghostbubble';
+    button.innerHTML = ICON_COMMENT;
+    button.title = 'Comment on this block';
+    button.setAttribute('aria-label', 'Comment on this block');
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      pinRail(key, region);
+    });
+    return button;
+  };
+
+  /** Reconcile the rail's DOM against the plan — existing bubbles are kept, never rebuilt. */
+  const renderRail = (): void => {
+    const plan = document.body.classList.contains('dl-em-on') ? railEntryPlan() : [];
+    const wanted = new Set(plan.map((entry) => entry.key));
+    for (const [key, el] of railNodes) {
+      if (wanted.has(key)) continue;
+      el.remove();
+      railNodes.delete(key);
+    }
+    const pinnedEntryKey = pinnedKey ? `block:${pinnedKey}` : undefined;
+    for (const entry of plan) {
+      let el = railNodes.get(entry.key);
+      if (!el) {
+        el = entry.build();
+        railNodes.set(entry.key, el);
+        rail.append(el);
+      }
+      el.classList.toggle('dl-em-pinned', entry.key === pinnedEntryKey);
+      entry.el = el;
+    }
+    railPlan = plan;
+    layoutRail();
+  };
+
+  /** Every object rendered on this page, deduplicated — the rail's fetch set. */
+  const pageObjects = (): Array<{ type: string; id: string }> => {
+    const objects = new Map<string, { type: string; id: string }>();
+    for (const region of annotatedRegions()) {
+      const target = targetFor(region);
+      if (target)
+        objects.set(recordKey(target.objectType, target.objectId), { type: target.objectType, id: target.objectId });
+    }
+    return [...objects.values()];
+  };
+
+  /**
+   * Re-read every page object's threads from the (preloaded) marginalia cache
+   * and re-render. Called on activation and after every thread write — never
+   * on a timer: there is no background polling in V1 (spec §8.5).
+   */
+  const refreshRailThreads = async (): Promise<void> => {
+    const results = await Promise.all(
+      pageObjects().map(async (object) => {
+        try {
+          return (await cachedMarginaliaThreads(object.type, object.id)).threads;
+        } catch {
+          return [] as MarginaliaThreadWithComments[];
+        }
+      })
+    );
+    railRows = results.flat().map((thread) => ({
+      key: marginaliaAnchorKey(thread.anchor),
+      blockAnchored: isBlockAnchor(thread.anchor),
+      thread,
+    }));
+    renderRail();
+  };
+
+  const pinRail = (key: string, region: HTMLElement | undefined): void => {
+    if (pinnedKey === key) return;
+    pinnedKey = key;
+    pinnedRegion = region;
+    window.clearTimeout(railHideTimer);
+    renderRail();
+  };
+
+  const unpinRail = (): void => {
+    if (!pinnedKey) return;
+    pinnedKey = undefined;
+    pinnedRegion = undefined;
+    renderRail();
+  };
+
+  const scheduleRailReveal = (region: HTMLElement): void => {
+    window.clearTimeout(railRevealTimer);
+    window.clearTimeout(railHideTimer);
+    if (revealedRegion === region) return;
+    railRevealTimer = window.setTimeout(() => {
+      revealedRegion = region;
+      renderRail();
+    }, RAIL_REVEAL_MS);
+  };
+
+  const clearRailSoon = (): void => {
+    window.clearTimeout(railRevealTimer);
+    window.clearTimeout(railHideTimer);
+    railHideTimer = window.setTimeout(() => {
+      if (!revealedRegion) return;
+      revealedRegion = undefined;
+      renderRail();
+    }, RAIL_DISMISS_MS);
+  };
+
+  // Focus reveals exactly what hover reveals (spec §9) — keyboard users are
+  // not second class.
+  document.addEventListener(
+    'focusin',
+    (event) => {
+      if (!document.body.classList.contains('dl-em-on')) return;
+      const element = event.target as HTMLElement | null;
+      if (!element || rail.contains(element) || chip.contains(element) || panel.contains(element)) return;
+      const region =
+        element.closest<HTMLElement>(NODE_SELECTOR) ??
+        element.closest<HTMLElement>(REGION_SELECTOR) ??
+        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!region) return;
+      window.clearTimeout(railHideTimer);
+      if (revealedRegion === region) return;
+      revealedRegion = region;
+      renderRail();
+    },
+    { signal }
+  );
+
+  // Esc unpins and hands focus back to the block (spec §2.3, §9).
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Escape' || !pinnedKey) return;
+      const returnTo = pinnedRegion;
+      unpinRail();
+      revealedRegion = undefined;
+      renderRail();
+      if (returnTo?.isConnected) returnTo.focus?.();
+    },
+    { signal }
+  );
+
+  // A click outside both the bubble and its own block unpins (spec §2.3).
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!pinnedKey) return;
+      const element = event.target as HTMLElement | null;
+      if (!element) return;
+      if (rail.contains(element) || panel.contains(element) || chip.contains(element)) return;
+      if (pinnedRegion?.contains(element)) return;
+      unpinRail();
+    },
+    { signal }
+  );
 
   document.addEventListener(
     'mouseover',
@@ -1486,6 +2098,15 @@ export const mountEditMode = (options: MountOptions): void => {
       const element = event.target as HTMLElement;
       if (chip.contains(element)) {
         window.clearTimeout(chipHideTimer);
+        window.clearTimeout(railHideTimer);
+        return;
+      }
+      // The pointer inside the rail keeps everything up — the same guard
+      // shape the chip has always had (spec §2.2).
+      if (rail.contains(element)) {
+        window.clearTimeout(chipHideTimer);
+        window.clearTimeout(railHideTimer);
+        window.clearTimeout(railRevealTimer);
         return;
       }
       // Article nodes first (innermost, inside the post body), then sections
@@ -1497,6 +2118,7 @@ export const mountEditMode = (options: MountOptions): void => {
         element.closest<HTMLElement>(NAV_SELECTOR);
       if (!region) {
         clearChipSoon();
+        clearRailSoon();
         return;
       }
       window.clearTimeout(chipHideTimer);
@@ -1505,6 +2127,7 @@ export const mountEditMode = (options: MountOptions): void => {
         hotRegion = region;
         region.classList.add('dl-em-hot');
         renderChip(region);
+        scheduleRailReveal(region);
       }
     },
     { signal }
@@ -1513,6 +2136,7 @@ export const mountEditMode = (options: MountOptions): void => {
     'scroll',
     () => {
       if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
+      if (railPlan.length > 0) scheduleRailFrame();
     },
     { passive: true, signal }
   );
@@ -1672,12 +2296,9 @@ export const mountEditMode = (options: MountOptions): void => {
     // AI scoping, no images — the accordion shows just the Edit section.
     const isNav = target.objectType === 'navigation';
     panel.classList.toggle('dl-em-nav', isNav);
-    // Comments is the one accordion section every target kind reaches
-    // (including nav chrome, which otherwise forces edit mode below) — it
-    // never routes through the shared formEl.
-    if (isNav && mode !== 'comments') mode = 'edit';
+    if (isNav) mode = 'edit';
     setActiveSection(mode);
-    if (mode !== 'ai' && mode !== 'comments') panel.querySelector(`[data-em-acc-body="${mode}"]`)?.append(formEl);
+    if (mode !== 'ai') panel.querySelector(`[data-em-acc-body="${mode}"]`)?.append(formEl);
 
     const selected = mode === 'ai' && selectionRegion === region ? currentSelectionText : undefined;
     panel.classList.add('dl-em-open');
@@ -1699,30 +2320,6 @@ export const mountEditMode = (options: MountOptions): void => {
       return;
     }
     const body = record.body as Record<string, unknown>;
-    // Comments never needs the section/node's DRAFT data — only the anchor
-    // tuple `target` already carries — so it short-circuits before the
-    // per-type currentData resolution below (which can legitimately fail to
-    // find a section/node and would otherwise block comments on it too).
-    if (mode === 'comments') {
-      panelState = { target, region, mode: 'comments', currentData: {}, patchSectionId: '' };
-      logEl.innerHTML = '';
-      const commentsBody = panel.querySelector<HTMLElement>('[data-em-acc-body="comments"]');
-      if (commentsBody) {
-        void mountMarginaliaPanel(
-          commentsBody,
-          getToken,
-          {
-            objectType: target.objectType,
-            objectId: target.objectId,
-            ...(target.sectionId !== undefined ? { sectionId: target.sectionId } : {}),
-            ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
-          },
-          cachedMarginaliaThreads(target.objectType, target.objectId),
-          () => invalidateMarginaliaThreads(target.objectType, target.objectId)
-        );
-      }
-      return;
-    }
     if (isNav) {
       panelState = {
         target,

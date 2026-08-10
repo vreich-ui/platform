@@ -1,5 +1,8 @@
 /**
- * Marginalia (W15 S4, MVP) — the canvas "Comments" accordion section's body.
+ * Marginalia (W15 S4, MVP) — the canvas comments surface's body. Mounted per
+ * MARGIN-RAIL BUBBLE since T17.3; it was the panel's "Comments" accordion
+ * section body before that (retired with the accordion — same logic, new
+ * host, plus the optional per-bubble `selectThreads` narrowing below).
  *
  * Split out of edit-mode/ui.ts (which is already ~3000 lines) to keep that
  * file from growing further, mirroring how the other accordion sections
@@ -83,23 +86,49 @@ export const resolveComposerAction = (
 };
 
 /**
- * Mount the whole Comments section body into `container` (the
- * `[data-em-acc-body="comments"]` element ui.ts owns): fetch threads for
- * `target`, render them, and wire the composer + per-thread resolve toggle.
- * Reuses the SAME `dl-em-log` / `dl-em-composer` CSS classes the Ask AI
- * section already uses, so no new panel chrome is introduced.
+ * Per-mount narrowing (T17.3). The accordion showed every thread on the
+ * object because it WAS the object's comment surface; a margin-rail bubble is
+ * block-scoped and must show only the threads it is the bubble for. Applied
+ * at RENDER time only — the fetch, the composer routing and every write path
+ * are untouched, so omitting these options reproduces the accordion's
+ * behaviour exactly.
+ */
+export type MarginaliaPanelOptions = {
+  /**
+   * Narrow (and order/collapse) the fetched threads before they render. A
+   * LIST transform rather than a per-thread predicate, so the caller can also
+   * express "newest plus +N" stacking (spec §8.1) against the panel's own
+   * live list instead of a cached copy of it.
+   */
+  selectThreads?: (threads: readonly MarginaliaThreadWithComments[]) => MarginaliaThreadWithComments[];
+  /** Shown when the (narrowed) thread list is empty. */
+  emptyLabel?: string;
+  /** Composer placeholder; the accordion's wording by default. */
+  composerPlaceholder?: string;
+};
+
+/**
+ * Mount the whole comments surface into `container` (a margin-rail bubble
+ * body since T17.3; the retired `[data-em-acc-body="comments"]` accordion
+ * before it): fetch threads for `target`, render them, and wire the composer
+ * + per-thread resolve toggle. Reuses the SAME `dl-em-log` /
+ * `dl-em-composer` CSS classes the Ask AI section already uses, so no new
+ * panel chrome is introduced.
  */
 export const mountMarginaliaPanel = async (
   container: HTMLElement,
   getToken: GetToken,
   target: MarginaliaPanelTarget,
   preloaded?: Promise<{ threads: MarginaliaThreadWithComments[] }>,
-  onWrite?: () => void
+  onWrite?: () => void,
+  options: MarginaliaPanelOptions = {}
 ): Promise<void> => {
   container.innerHTML =
     `<div class="dl-em-log dl-em-marg-log" data-em-marg-log></div>` +
     `<div class="dl-em-composer"><div class="dl-em-row">` +
-    `<textarea class="dl-em-marg-input" data-em-marg-input placeholder="Add a comment…"></textarea>` +
+    `<textarea class="dl-em-marg-input" data-em-marg-input placeholder="${escapeHtml(
+      options.composerPlaceholder ?? 'Add a comment…'
+    )}"></textarea>` +
     `<button type="button" class="dl-em-btn dl-em-primary dl-em-send dl-em-ico" data-em-marg-send aria-label="Send comment">Send</button>` +
     `</div></div>`;
 
@@ -112,12 +141,13 @@ export const mountMarginaliaPanel = async (
 
   const renderThreads = (): void => {
     if (!logEl.isConnected) return;
-    if (threads.length === 0) {
-      logEl.innerHTML = `<div class="dl-em-msg dl-em-sys">No comments yet.</div>`;
+    const shown = options.selectThreads ? options.selectThreads(threads) : threads;
+    if (shown.length === 0) {
+      logEl.innerHTML = `<div class="dl-em-msg dl-em-sys">${escapeHtml(options.emptyLabel ?? 'No comments yet.')}</div>`;
       return;
     }
     logEl.innerHTML = '';
-    for (const thread of threads) {
+    for (const thread of shown) {
       const threadEl = document.createElement('div');
       threadEl.className = 'dl-em-marg-thread';
       const action = nextMarginaliaResolveAction(thread.status);
