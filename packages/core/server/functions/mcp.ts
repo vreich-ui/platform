@@ -190,6 +190,7 @@ import {
   callObjectAction,
   callObjectPublish,
   callGetPdfTemplateValidation,
+  callPdfToolHealth,
   callPublishPdfTemplate,
   callValidatePdfTemplate,
   callReleaseToProduction,
@@ -747,6 +748,8 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callPublishPdfTemplate(event, input);
     case 'delete_pdf_template':
       return callDeletePdfTemplate(event, input);
+    case 'health':
+      return callPdfToolHealth(event, input);
     case 'create_artifact_upload_intent':
       return callCreateArtifactUploadIntent(event, input);
     case 'create_artifact_from_url': {

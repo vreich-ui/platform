@@ -354,6 +354,24 @@ export const deletePlatformPdfTemplate = (
     options
   );
 
+/**
+ * B2: pdf-tool's `health` tool returns its own live capability/health
+ * manifest (feature flags, renderer availability, degraded subsystems).
+ * It is read-only and takes no template/project-scoped arguments, but it
+ * still goes through the same trusted-bridge projectPayload(grant, ...)
+ * shape as every other call in this file for consistency -- the grant is
+ * minted server-side and forwarded, never invented per-call or skipped.
+ */
+/**
+ * B2 fix: pdf-tool's health args schema is a STRICT empty object, and health is
+ * grant-optional upstream (a pre-credential liveness/discovery probe). Sending
+ * projectPayload here made every bridged call fail validation on the stray
+ * projectId key (`storage` is stripped upstream, `projectId` is not), so health
+ * is the one bridge call that forwards no grant and no project scope at all.
+ */
+export const healthPlatformPdfTool = (options: PdfToolClientOptions = {}) =>
+  postPdfTool('health', {}, options);
+
 export const canonicalPlatformArtifact = (body: Record<string, unknown>) => {
   const reference = isRecord(body.artifactReference)
     ? body.artifactReference

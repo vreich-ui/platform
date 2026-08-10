@@ -78,6 +78,48 @@ test('tools/list exposes the pdf template bridge tools', async () => {
   assert.ok(names.has('get_pdf_template'));
   assert.ok(names.has('publish_pdf_template'));
   assert.ok(names.has('delete_pdf_template'));
+  assert.ok(names.has('health'));
+});
+
+test('health returns pdf-tool capability manifest through the bridge and never exposes the grant', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    health: () => ({
+      body: {
+        ok: true,
+        renderers: { pdfme: 'available', 'react-pdf': 'available', typst: 'degraded', chromium: 'available' },
+        featureFlags: { imageSearch: true },
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+    const health = await rpc('health', { site_id: 'site_drlurie' }, logs);
+    assert.ok(!health.result.isError, JSON.stringify(health.result.structuredContent));
+    assert.equal(health.result.structuredContent?.ok, true);
+    assert.equal(health.result.structuredContent?.siteId, 'site_drlurie');
+    assert.deepEqual(health.result.structuredContent?.renderers, {
+      pdfme: 'available',
+      'react-pdf': 'available',
+      typst: 'degraded',
+      chromium: 'available',
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].authorization, `Bearer ${RUN_SECRET}`);
+    // B2 fix: upstream health args schema is a strict empty object, and health
+    // is grant-optional -- the bridged call must forward NO business args at
+    // all (a stray projectId fails upstream validation; storage would be
+    // stripped but is not sent either).
+    assert.deepEqual(calls[0].body, {});
+
+    const visible = JSON.stringify({ logs, health: health.response.body });
+    assert.ok(!visible.includes(STORAGE_SECRET));
+    assert.ok(!visible.includes(RUN_SECRET));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('Platform creates then publishes a pdfme template end-to-end and never exposes the grant', async () => {

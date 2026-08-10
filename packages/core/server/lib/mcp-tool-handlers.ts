@@ -29,6 +29,7 @@ import {
   getPlatformArtifactJobStatus,
   getPlatformPdfTemplate,
   getPlatformPdfTemplateValidation,
+  healthPlatformPdfTool,
   listPlatformPdfTemplates,
   publishPlatformPdfTemplate,
   validatePlatformPdfTemplate,
@@ -1142,6 +1143,27 @@ export const callDeletePdfTemplate = async (event: LambdaEvent, input: Record<st
     version: deleted.body.version,
   });
   return toolResult({ ...deleted.body, siteId: scoped.siteId });
+};
+
+/**
+ * B2: bridges pdf-tool's own `health` tool -- its live capability/health
+ * manifest (feature flags, renderer availability, degraded subsystems).
+ * Read-only, no template-specific input, so it reuses
+ * resolveTemplateBridgeScope exactly as-is (site_id only) rather than the
+ * heavier content_item-owning resolveArtifactBridgeScope.
+ */
+export const callPdfToolHealth = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  // B2 fix: the grant above is minted only as the bridge-configured check --
+  // health is grant-optional upstream and its strict-empty args schema rejects
+  // any forwarded projectId, so nothing from the grant is sent.
+  const health = await healthPlatformPdfTool();
+  if (!health.ok) return pdfToolBridgeError(health);
+  return toolResult({ ...health.body, siteId: scoped.siteId });
 };
 
 export const callObjectAction = async (event: LambdaEvent, payload: Record<string, unknown>) => {

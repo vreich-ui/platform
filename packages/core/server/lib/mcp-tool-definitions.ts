@@ -517,6 +517,15 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     ),
   },
   {
+    name: 'health',
+    description:
+      "Return pdf-tool's live capability/health manifest (feature flags, renderer availability, degraded subsystems) through the trusted Platform bridge. Read-only, site-scoped like the other pdf-tool bridge tools; site ownership, canonical project, and storage grant are resolved server-side and never returned to you.",
+    inputSchema: objectSchema(
+      { site_id: stringSchema('Owning site object id; must match this deployment.') },
+      ['site_id']
+    ),
+  },
+  {
     name: 'create_artifact_upload_intent',
     description:
       'Create a short-lived scoped direct artifact upload intent. New clients should call this tool first, then upload raw bytes with HTTP POST application/octet-stream to /api/artifacts/upload using the returned requiredHeaders. Keeps binary bytes out of MCP arguments and returns no server secrets other than the scoped upload token. Accepted image formats: JPEG, PNG, WebP only — the upload decodes the bytes and rejects GIF, AVIF, SVG, and anything that does not decode as the declared type. PDF uploads must start with %PDF-.',
