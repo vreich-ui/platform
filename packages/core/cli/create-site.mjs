@@ -512,7 +512,7 @@ export { siteBinding } from './config/site-binding.js';
 
 const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects here MUST equal this client's
 # site.config.ts \`redirects\` (the drift-guard discipline root netlify.toml and
-# sites/drlurie/site.config.ts already share).
+# the fleet's root-deployed site's site.config.ts already share).
 #
 # W14 T14.3: this file describes a REAL build. Set the Netlify project's BASE
 # DIRECTORY to sites/${ids.clientSlug} — that is what makes Netlify read this
@@ -702,9 +702,9 @@ const packageJsonTemplate = (ids) =>
       private: true,
       type: 'module',
       description:
-        'Scaffold only (T11.7 create-site). This client site (data + bindings only). Depends on @drlurie/core (link declared now; exercised once this site has content).',
+        'Scaffold only (T11.7 create-site). This client site (data + bindings only). Depends on @fleet/core (link declared now; exercised once this site has content).',
       dependencies: {
-        '@drlurie/core': '*',
+        '@fleet/core': '*',
       },
     },
     null,

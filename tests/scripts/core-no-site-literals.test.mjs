@@ -97,28 +97,23 @@ const stripComments = (source) => {
   return out + source.slice(cursor);
 };
 
-// T16.6: the fixed lint now actually reads `create-site.mjs` and
-// `package.json` in full, surfacing the pre-existing `@drlurie/core`
-// npm-package-name stamp (fleet core's own, not-yet-renamed package name —
-// T16.7 renames it).
+// T16.6: the fixed lint uncovered two real leaks in `packages/core` — the
+// `@drlurie/core` npm-package-name stamp (in `package.json` and in
+// `create-site.mjs`'s scaffolded-site package.json template) and a
+// generated-netlify.toml comment template in `create-site.mjs` (the
+// `netlifyTomlTemplate` string) that named `sites/drlurie/site.config.ts`
+// by name — every future scaffolded client would have carried that literal
+// client name in a comment in its own committed netlify.toml. Both were
+// temporarily allowlisted pending T16.7.
 //
-// One further real leak surfaced: a generated-netlify.toml comment template
-// in `create-site.mjs` (the `netlifyTomlTemplate` string, ~line 501) names
-// `sites/drlurie/site.config.ts` by name — every future scaffolded client
-// would carry that literal client name in a comment in its own committed
-// netlify.toml. This task's own scope is restricted to the three test files
-// listed in its brief (create-site.mjs is owned by a concurrent T16.0/T16.x
-// change landing in the same window), so it could not be reworded here.
-// Recorded as an explicit, narrowly-scoped, NON-@drlurie/core allowlist
-// entry rather than silently widening LITERAL or dropping the assertion —
-// follow-up: reword that comment to describe the fleet's root-deployed site
-// generically, the same fix already validated against the real file content
-// during this task's investigation.
-const ALLOWLIST = [
-  { file: 'packages/core/package.json', literal: '@drlurie/core' }, // @drlurie/core (until T16.7)
-  { file: 'packages/core/cli/create-site.mjs', literal: '@drlurie/core' }, // @drlurie/core (until T16.7)
-  { file: 'packages/core/cli/create-site.mjs', literal: 'sites/drlurie/site.config.ts already share' }, // real leak found by T16.6's fixed lint; NOT fixed here — create-site.mjs is outside this task's touch-only scope (see comment above). Follow-up needed.
-];
+// T16.7 fixed both: the package renamed to `@fleet/core` everywhere (core's
+// own package.json, every dependent site package.json, and the create-site
+// stamp), and the netlify.toml comment template was reworded to describe
+// the fleet's root-deployed site generically (also backported to the
+// already-committed sites/platform and sites/fernwell netlify.toml files
+// generated from that template). The allowlist below is empty — this lint
+// now passes with zero exemptions.
+const ALLOWLIST = [];
 
 const isAllowlisted = (relFile, line) =>
   ALLOWLIST.some((entry) => entry.file === relFile && line.includes(entry.literal));

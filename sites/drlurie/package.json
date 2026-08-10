@@ -3,9 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Placeholder manifest (T11.1). The Dr-Lurie client site (data + bindings only). Populated by T11.5-T11.6. Depends on @drlurie/core (link is declared now, exercised once core has content).",
+  "description": "Placeholder manifest (T11.1). The Dr-Lurie client site (data + bindings only). Populated by T11.5-T11.6. Depends on @fleet/core (link is declared now, exercised once core has content).",
   "dependencies": {
-    "@drlurie/core": "*"
+    "@fleet/core": "*"
   },
   "//": "Scaffold only. The live app still builds from the repo root today; this manifest is additive and must not change what the root build emits (T11.1 non-goal: no moves)."
 }

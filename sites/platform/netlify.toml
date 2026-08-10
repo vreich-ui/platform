@@ -1,6 +1,6 @@
 # Per-site Netlify config. The redirects here MUST equal this client's
 # site.config.ts `redirects` (the drift-guard discipline root netlify.toml and
-# sites/drlurie/site.config.ts already share).
+# the fleet's root-deployed site's site.config.ts already share).
 #
 # W14 T14.3: this file describes a REAL build. Set the Netlify project's BASE
 # DIRECTORY to sites/platform — that is what makes Netlify read this
