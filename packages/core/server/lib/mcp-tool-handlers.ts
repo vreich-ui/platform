@@ -27,15 +27,26 @@ import {
   deletePlatformPdfTemplate,
   getPlatformArtifactBySlot,
   getPlatformArtifactJobStatus,
+  getPlatformImageModelPolicy,
+  getPlatformImageSearchBank,
+  getPlatformImageSearchJobStatus,
+  getPlatformImageSearchPolicy,
   getPlatformPdfTemplate,
   getPlatformPdfTemplateValidation,
   healthPlatformPdfTool,
+  importPlatformImageFromUrl,
+  importPlatformImagesFromUrl,
   listPlatformPdfTemplates,
   publishPlatformPdfTemplate,
+  searchPlatformImages,
+  setPlatformImageModelPolicy,
+  setPlatformImageSearchPolicy,
+  updatePlatformImageSearchCandidate,
   validatePlatformPdfTemplate,
   verifyPlatformArtifact,
   type PlatformArtifactJobInput,
   type PlatformCreateTemplateInput,
+  type PlatformImageLicenseInput,
 } from './pdf-tool-client.js';
 import {
   createArtifactUploadToken,
@@ -1164,6 +1175,240 @@ export const callPdfToolHealth = async (event: LambdaEvent, input: Record<string
   const health = await healthPlatformPdfTool();
   if (!health.ok) return pdfToolBridgeError(health);
   return toolResult({ ...health.body, siteId: scoped.siteId });
+};
+
+/**
+ * B3: the image-search / image-model bridge. All ten tools use the same
+ * site-only resolveTemplateBridgeScope as health/callValidatePdfTemplate
+ * above -- pdf-tool owns request-scoped ownership of the image search bank
+ * and job records itself, so Platform doesn't re-derive a heavier
+ * content_item-owning scope for these the way the artifact bridge does.
+ * request_id is forwarded verbatim as a required business argument, exactly
+ * like template_id is for the template bridge.
+ */
+const normalizeImageLicenseInput = (value: unknown): PlatformImageLicenseInput | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as PlatformImageLicenseInput;
+};
+
+export const callSearchImages = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const requestId = toNonEmptyString(input.request_id);
+  const query = toNonEmptyString(input.query);
+  if (!requestId || !query) return toolError('request_id and query are required.');
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const count = typeof input.count === 'number' && Number.isFinite(input.count) ? input.count : undefined;
+  const searched = await searchPlatformImages(built.grant, {
+    requestId,
+    query,
+    ...(count !== undefined ? { count } : {}),
+    ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
+    ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
+    ...(input.policy_overrides && typeof input.policy_overrides === 'object' && !Array.isArray(input.policy_overrides)
+      ? { policyOverrides: input.policy_overrides as Record<string, unknown> }
+      : {}),
+  });
+  if (!searched.ok) return pdfToolBridgeError(searched);
+  return toolResult({ ...searched.body, siteId: scoped.siteId });
+};
+
+export const callGetImageSearchJobStatus = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const jobId = toNonEmptyString(input.job_id);
+  if (!jobId) return toolError('job_id is required.');
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const status = await getPlatformImageSearchJobStatus(built.grant, jobId);
+  if (!status.ok) return pdfToolBridgeError(status);
+  return toolResult({ ...status.body, siteId: scoped.siteId });
+};
+
+export const callGetImageSearchBank = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const requestId = toNonEmptyString(input.request_id);
+  if (!requestId) return toolError('request_id is required.');
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const limit = typeof input.limit === 'number' && Number.isFinite(input.limit) ? input.limit : undefined;
+  const bank = await getPlatformImageSearchBank(built.grant, {
+    requestId,
+    ...(limit !== undefined ? { limit } : {}),
+    ...(toNonEmptyString(input.cursor) ? { cursor: toNonEmptyString(input.cursor) } : {}),
+  });
+  if (!bank.ok) return pdfToolBridgeError(bank);
+  return toolResult({ ...bank.body, siteId: scoped.siteId });
+};
+
+const IMAGE_SEARCH_CANDIDATE_STATES = new Set(['kept', 'pending_review', 'selected', 'discarded']);
+
+export const callUpdateImageSearchCandidate = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const requestId = toNonEmptyString(input.request_id);
+  const candidateId = toNonEmptyString(input.candidate_id);
+  const state = toNonEmptyString(input.state);
+  if (!requestId || !candidateId || !state || !IMAGE_SEARCH_CANDIDATE_STATES.has(state)) {
+    return toolError('request_id, candidate_id, and a state of kept, pending_review, selected, or discarded are required.');
+  }
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const reason = toNonEmptyString(input.reason);
+  const updated = await updatePlatformImageSearchCandidate(built.grant, {
+    requestId,
+    candidateId,
+    state: state as 'kept' | 'pending_review' | 'selected' | 'discarded',
+    ...(reason ? { reason } : {}),
+    ...(typeof input.delete_artifact === 'boolean' ? { deleteArtifact: input.delete_artifact } : {}),
+  });
+  if (!updated.ok) return pdfToolBridgeError(updated);
+
+  event.log?.({
+    event: 'image_search_bridge_candidate_updated',
+    siteId: scoped.siteId,
+    projectId: built.grant.projectId,
+    requestId,
+    candidateId,
+    state,
+  });
+  return toolResult({ ...updated.body, siteId: scoped.siteId });
+};
+
+export const callImportImageFromUrl = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const requestId = toNonEmptyString(input.request_id);
+  const url = toNonEmptyString(input.url);
+  if (!requestId || !url) return toolError('request_id and url are required.');
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const maxBytes = typeof input.max_bytes === 'number' && Number.isFinite(input.max_bytes) ? input.max_bytes : undefined;
+  const license = normalizeImageLicenseInput(input.license);
+  const imported = await importPlatformImageFromUrl(built.grant, {
+    requestId,
+    url,
+    ...(toNonEmptyString(input.filename) ? { filename: toNonEmptyString(input.filename) } : {}),
+    ...(toNonEmptyString(input.slot) ? { slot: toNonEmptyString(input.slot) } : {}),
+    ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
+    ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
+    ...(license ? { license } : {}),
+    ...(maxBytes !== undefined ? { maxBytes } : {}),
+  });
+  if (!imported.ok) return pdfToolBridgeError(imported);
+
+  event.log?.({
+    event: 'image_search_bridge_url_import',
+    siteId: scoped.siteId,
+    projectId: built.grant.projectId,
+    requestId,
+    candidateId: imported.body.candidateId,
+  });
+  return toolResult({ ...imported.body, siteId: scoped.siteId });
+};
+
+export const callImportImagesFromUrl = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const requestId = toNonEmptyString(input.request_id);
+  const urls = Array.isArray(input.urls) ? input.urls.filter((url): url is string => typeof url === 'string') : [];
+  if (!requestId || urls.length === 0) return toolError('request_id and a non-empty urls array are required.');
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const license = normalizeImageLicenseInput(input.license);
+  const imported = await importPlatformImagesFromUrl(built.grant, {
+    requestId,
+    urls,
+    ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
+    ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
+    ...(license ? { license } : {}),
+    ...(input.policy_overrides && typeof input.policy_overrides === 'object' && !Array.isArray(input.policy_overrides)
+      ? { policyOverrides: input.policy_overrides as Record<string, unknown> }
+      : {}),
+  });
+  if (!imported.ok) return pdfToolBridgeError(imported);
+
+  event.log?.({
+    event: 'image_search_bridge_url_import_batch',
+    siteId: scoped.siteId,
+    projectId: built.grant.projectId,
+    requestId,
+    jobId: imported.body.jobId,
+    urlCount: urls.length,
+  });
+  return toolResult({ ...imported.body, siteId: scoped.siteId });
+};
+
+export const callGetImageSearchPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const policy = await getPlatformImageSearchPolicy(built.grant);
+  if (!policy.ok) return pdfToolBridgeError(policy);
+  return toolResult({ ...policy.body, siteId: scoped.siteId });
+};
+
+export const callSetImageSearchPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const policy = input.policy;
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    return toolError('policy is required and must be an object.');
+  }
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const saved = await setPlatformImageSearchPolicy(built.grant, policy as Record<string, unknown>);
+  if (!saved.ok) return pdfToolBridgeError(saved);
+
+  event.log?.({
+    event: 'image_search_bridge_policy_set',
+    siteId: scoped.siteId,
+    projectId: built.grant.projectId,
+  });
+  return toolResult({ ...saved.body, siteId: scoped.siteId });
+};
+
+export const callGetImageModelPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const policy = await getPlatformImageModelPolicy(built.grant);
+  if (!policy.ok) return pdfToolBridgeError(policy);
+  return toolResult({ ...policy.body, siteId: scoped.siteId });
+};
+
+export const callSetImageModelPolicy = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const policy = input.policy;
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    return toolError('policy is required and must be an object.');
+  }
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const saved = await setPlatformImageModelPolicy(built.grant, policy as Record<string, unknown>);
+  if (!saved.ok) return pdfToolBridgeError(saved);
+
+  event.log?.({
+    event: 'image_model_bridge_policy_set',
+    siteId: scoped.siteId,
+    projectId: built.grant.projectId,
+  });
+  return toolResult({ ...saved.body, siteId: scoped.siteId });
 };
 
 export const callObjectAction = async (event: LambdaEvent, payload: Record<string, unknown>) => {

@@ -185,13 +185,23 @@ import {
   callDeployStatus,
   callGetAgentArtifactBySlot,
   callGetAgentArtifactJobStatus,
+  callGetImageModelPolicy,
+  callGetImageSearchBank,
+  callGetImageSearchJobStatus,
+  callGetImageSearchPolicy,
   callGetPdfTemplate,
+  callImportImageFromUrl,
+  callImportImagesFromUrl,
   callListPdfTemplates,
   callObjectAction,
   callObjectPublish,
   callGetPdfTemplateValidation,
   callPdfToolHealth,
   callPublishPdfTemplate,
+  callSearchImages,
+  callSetImageModelPolicy,
+  callSetImageSearchPolicy,
+  callUpdateImageSearchCandidate,
   callValidatePdfTemplate,
   callReleaseToProduction,
   callTriggerNetlifyBuild,
@@ -750,6 +760,26 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callDeletePdfTemplate(event, input);
     case 'health':
       return callPdfToolHealth(event, input);
+    case 'search_images':
+      return callSearchImages(event, input);
+    case 'get_image_search_job_status':
+      return callGetImageSearchJobStatus(event, input);
+    case 'get_image_search_bank':
+      return callGetImageSearchBank(event, input);
+    case 'update_image_search_candidate':
+      return callUpdateImageSearchCandidate(event, input);
+    case 'import_image_from_url':
+      return callImportImageFromUrl(event, input);
+    case 'import_images_from_url':
+      return callImportImagesFromUrl(event, input);
+    case 'get_image_search_policy':
+      return callGetImageSearchPolicy(event, input);
+    case 'set_image_search_policy':
+      return callSetImageSearchPolicy(event, input);
+    case 'get_image_model_policy':
+      return callGetImageModelPolicy(event, input);
+    case 'set_image_model_policy':
+      return callSetImageModelPolicy(event, input);
     case 'create_artifact_upload_intent':
       return callCreateArtifactUploadIntent(event, input);
     case 'create_artifact_from_url': {

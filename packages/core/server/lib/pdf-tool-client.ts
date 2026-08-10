@@ -372,6 +372,164 @@ export const deletePlatformPdfTemplate = (
 export const healthPlatformPdfTool = (options: PdfToolClientOptions = {}) =>
   postPdfTool('health', {}, options);
 
+/**
+ * B3: the image-search / image-model policy bridge -- pdf-tool's own image
+ * sourcing pipeline (least-cost provider search -> banked candidates ->
+ * approve/import) plus the two policy pairs that steer it. Every call here
+ * follows the exact same trusted-bridge shape as the template bridge above:
+ * the grant is minted server-side (buildArtifactBridgeGrant in
+ * mcp-tool-handlers.ts) and forwarded via projectPayload(grant, ...), never
+ * invented per-call or returned to the MCP caller.
+ */
+export type PlatformImageLicenseInput = {
+  class?: 'public-domain' | 'permissive' | 'paid' | 'unknown';
+  name?: string;
+  url?: string;
+  attribution?: string;
+  commercialUse?: boolean | string;
+};
+
+export const searchPlatformImages = (
+  grant: PdfToolStorageGrant,
+  input: {
+    requestId: string;
+    query: string;
+    count?: number;
+    tags?: string[];
+    label?: string;
+    policyOverrides?: Record<string, unknown>;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'search-images',
+    projectPayload(grant, {
+      requestId: input.requestId,
+      query: input.query,
+      ...(input.count !== undefined ? { count: input.count } : {}),
+      ...(input.tags ? { tags: input.tags } : {}),
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.policyOverrides ? { policyOverrides: input.policyOverrides } : {}),
+    }),
+    options
+  );
+
+export const getPlatformImageSearchJobStatus = (
+  grant: PdfToolStorageGrant,
+  jobId: string,
+  options: PdfToolClientOptions = {}
+) => postPdfTool('get-image-search-job-status', projectPayload(grant, { jobId }), options);
+
+export const getPlatformImageSearchBank = (
+  grant: PdfToolStorageGrant,
+  input: { requestId: string; limit?: number; cursor?: string },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'get-image-search-bank',
+    projectPayload(grant, {
+      requestId: input.requestId,
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+    }),
+    options
+  );
+
+export const updatePlatformImageSearchCandidate = (
+  grant: PdfToolStorageGrant,
+  input: {
+    requestId: string;
+    candidateId: string;
+    state: 'kept' | 'pending_review' | 'selected' | 'discarded';
+    reason?: string;
+    deleteArtifact?: boolean;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'update-image-search-candidate',
+    projectPayload(grant, {
+      requestId: input.requestId,
+      candidateId: input.candidateId,
+      state: input.state,
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(input.deleteArtifact !== undefined ? { deleteArtifact: input.deleteArtifact } : {}),
+    }),
+    options
+  );
+
+export const importPlatformImageFromUrl = (
+  grant: PdfToolStorageGrant,
+  input: {
+    requestId: string;
+    url: string;
+    filename?: string;
+    slot?: string;
+    tags?: string[];
+    label?: string;
+    license?: PlatformImageLicenseInput;
+    maxBytes?: number;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'import-image-from-url',
+    projectPayload(grant, {
+      requestId: input.requestId,
+      url: input.url,
+      ...(input.filename ? { filename: input.filename } : {}),
+      ...(input.slot ? { slot: input.slot } : {}),
+      ...(input.tags ? { tags: input.tags } : {}),
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.license ? { license: input.license } : {}),
+      ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+    }),
+    options
+  );
+
+export const importPlatformImagesFromUrl = (
+  grant: PdfToolStorageGrant,
+  input: {
+    requestId: string;
+    urls: string[];
+    tags?: string[];
+    label?: string;
+    license?: PlatformImageLicenseInput;
+    policyOverrides?: Record<string, unknown>;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'import-images-from-url',
+    projectPayload(grant, {
+      requestId: input.requestId,
+      urls: input.urls,
+      ...(input.tags ? { tags: input.tags } : {}),
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.license ? { license: input.license } : {}),
+      ...(input.policyOverrides ? { policyOverrides: input.policyOverrides } : {}),
+    }),
+    options
+  );
+
+export const getPlatformImageSearchPolicy = (grant: PdfToolStorageGrant, options: PdfToolClientOptions = {}) =>
+  postPdfTool('get-image-search-policy', projectPayload(grant, {}), options);
+
+export const setPlatformImageSearchPolicy = (
+  grant: PdfToolStorageGrant,
+  policy: Record<string, unknown>,
+  options: PdfToolClientOptions = {}
+) => postPdfTool('set-image-search-policy', projectPayload(grant, { policy }), options);
+
+export const getPlatformImageModelPolicy = (grant: PdfToolStorageGrant, options: PdfToolClientOptions = {}) =>
+  postPdfTool('get-image-model-policy', projectPayload(grant, {}), options);
+
+export const setPlatformImageModelPolicy = (
+  grant: PdfToolStorageGrant,
+  policy: Record<string, unknown>,
+  options: PdfToolClientOptions = {}
+) => postPdfTool('set-image-model-policy', projectPayload(grant, { policy }), options);
+
 export const canonicalPlatformArtifact = (body: Record<string, unknown>) => {
   const reference = isRecord(body.artifactReference)
     ? body.artifactReference
