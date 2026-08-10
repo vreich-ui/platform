@@ -1,0 +1,136 @@
+From bc3e80fbe156268a0bd8df31d140861e23168f74 Mon Sep 17 00:00:00 2001
+From: "Wolf Reich (via Claude)" <vreich@kugelbrands.com>
+Date: Mon, 10 Aug 2026 13:32:18 +0000
+Subject: [PATCH 1/5] B1: bridge validate_pdf_template forwards required
+ worst-case sample data
+
+pdf-tool's validate_pdf_template requires `data` (the worst-case sample data
+the validation render uses); the platform bridge's schema omitted it and
+additionalProperties:false silently stripped it, so validation could never
+pass. Add data to the tool's inputSchema/required list, require+forward it
+in callValidatePdfTemplate, and forward it through validatePlatformPdfTemplate.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bs3qMAeJ9eiXpFciXtSs1e
+---
+ .../core/server/lib/mcp-tool-definitions.ts   |  5 ++-
+ packages/core/server/lib/mcp-tool-handlers.ts | 10 ++++-
+ packages/core/server/lib/pdf-tool-client.ts   |  3 +-
+ .../mcp-pdf-tool-template-bridge.test.ts      | 38 +++++++++++++++++++
+ 4 files changed, 53 insertions(+), 3 deletions(-)
+
+diff --git a/packages/core/server/lib/mcp-tool-definitions.ts b/packages/core/server/lib/mcp-tool-definitions.ts
+index b296878..39c8459 100644
+--- a/packages/core/server/lib/mcp-tool-definitions.ts
++++ b/packages/core/server/lib/mcp-tool-definitions.ts
+@@ -468,8 +468,11 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
+         site_id: stringSchema('Owning site object id; must match this deployment.'),
+         template_id: stringSchema('The template object id to validate.'),
+         version: intSchema('Optional specific version to validate; omit for the latest draft version.'),
++        data: anyObjectSchema(
++          'Required worst-case sample data for the validation render, forwarded verbatim to pdf-tool. pdf-tool renders the template against this data during validation, so it should exercise the template\'s longest/edge-case field values, not typical data.'
++        ),
+       },
+-      ['site_id', 'template_id']
++      ['site_id', 'template_id', 'data']
+     ),
+   },
+   {
+diff --git a/packages/core/server/lib/mcp-tool-handlers.ts b/packages/core/server/lib/mcp-tool-handlers.ts
+index 41dd165..213c16d 100644
+--- a/packages/core/server/lib/mcp-tool-handlers.ts
++++ b/packages/core/server/lib/mcp-tool-handlers.ts
+@@ -1073,11 +1073,19 @@ export const callValidatePdfTemplate = async (event: LambdaEvent, input: Record<
+   if (!scoped.ok) return scoped.result;
+   const templateId = toNonEmptyString(input.template_id);
+   if (!templateId) return toolError('template_id is required.');
++  const data = input.data;
++  if (!data || typeof data !== 'object' || Array.isArray(data)) {
++    return toolError('data is required: provide worst-case sample data as a JSON object.');
++  }
+   const built = buildArtifactBridgeGrant();
+   if (!built.ok) return built.result;
+ 
+   const version = typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : undefined;
+-  const validated = await validatePlatformPdfTemplate(built.grant, { templateId, ...(version ? { version } : {}) });
++  const validated = await validatePlatformPdfTemplate(built.grant, {
++    templateId,
++    data: data as Record<string, unknown>,
++    ...(version ? { version } : {}),
++  });
+   if (!validated.ok) return pdfToolBridgeError(validated);
+ 
+   event.log?.({
+diff --git a/packages/core/server/lib/pdf-tool-client.ts b/packages/core/server/lib/pdf-tool-client.ts
+index 03b8ba5..cc6518e 100644
+--- a/packages/core/server/lib/pdf-tool-client.ts
++++ b/packages/core/server/lib/pdf-tool-client.ts
+@@ -311,13 +311,14 @@ export const publishPlatformPdfTemplate = (
+  */
+ export const validatePlatformPdfTemplate = (
+   grant: PdfToolStorageGrant,
+-  input: { templateId: string; version?: number },
++  input: { templateId: string; version?: number; data: Record<string, unknown> },
+   options: PdfToolClientOptions = {}
+ ) =>
+   postPdfTool(
+     'validate-pdf-template',
+     projectPayload(grant, {
+       templateId: input.templateId,
++      data: input.data,
+       ...(input.version ? { version: input.version } : {}),
+     }),
+     options
+diff --git a/tests/netlify/mcp-pdf-tool-template-bridge.test.ts b/tests/netlify/mcp-pdf-tool-template-bridge.test.ts
+index 3df18d9..9c2cc89 100644
+--- a/tests/netlify/mcp-pdf-tool-template-bridge.test.ts
++++ b/tests/netlify/mcp-pdf-tool-template-bridge.test.ts
+@@ -271,6 +271,44 @@ test('foreign site_id fails template bridge tools with template_site_mismatch an
+   }
+ });
+ 
++test('validate_pdf_template forwards required worst-case sample data and rejects a call missing it', async () => {
++  const originalFetch = globalThis.fetch;
++  const { calls, fetchImpl } = stubPdfToolMcp({
++    validate_pdf_template: (body) => ({
++      body: {
++        projectId: body.projectId,
++        templateId: body.templateId,
++        version: body.version ?? 1,
++        validationId: 'val_1',
++        status: 'pending',
++      },
++    }),
++  });
++  globalThis.fetch = fetchImpl;
++  try {
++    const data = { title: 'Worst Case Title That Is Extremely Long', lines: ['a', 'b', 'c'] };
++    const validated = await rpc('validate_pdf_template', {
++      site_id: 'site_drlurie',
++      template_id: 'tpl_react_report',
++      data,
++    });
++    assert.ok(!validated.result.isError, JSON.stringify(validated.result.structuredContent));
++    assert.equal(validated.result.structuredContent?.validationId, 'val_1');
++
++    assert.equal(calls.length, 1);
++    assert.deepEqual(calls[0].body.data, data);
++
++    const missingData = await rpc('validate_pdf_template', {
++      site_id: 'site_drlurie',
++      template_id: 'tpl_react_report',
++    });
++    assert.equal(missingData.result.isError, true);
++    assert.equal(calls.length, 1);
++  } finally {
++    globalThis.fetch = originalFetch;
++  }
++});
++
+ test('create_agent_artifact_job forwards template_id, data, and assets to pdf-tool', async () => {
+   await resetAndSeedRequest();
+   const originalFetch = globalThis.fetch;
+-- 
+2.43.0
+
+
