@@ -285,6 +285,17 @@ export const ENV_CHECKLIST = [
       { name: 'STRIPE_SECRET_KEY_TEST', cls: 'per-site, optional', note: 'Shop test key.' },
       { name: 'STRIPE_WEBHOOK_SECRET', cls: 'per-site, optional', note: 'Shop webhook signing secret.' },
       { name: 'STRIPE_WEBHOOK_SECRET_TEST', cls: 'per-site, optional', note: 'Shop test webhook secret.' },
+      {
+        name: 'PURCHASE_TOKEN_SECRET',
+        cls: 'per-site, optional',
+        generate: randomSecret(32),
+        note:
+          'Signs the expiring bearer download token (purchase-tokens.ts) that gates digital-goods delivery — ' +
+          'get-purchase/order_reissue/stripe-webhook/claim-free all read it (free claims too, not only paid Stripe ' +
+          'orders). Needed only if this client\'s shop module delivers downloads. Unset (or <16 chars): those ' +
+          'endpoints 503 with a plain message, not a catalogued errorCode. Covered by the T16.5 capability probe ' +
+          "(purchase_token family)." ,
+      },
     ],
   },
 ];
