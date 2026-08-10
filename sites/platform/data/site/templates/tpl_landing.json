@@ -1,0 +1,75 @@
+{
+  "__generated": {
+    "at": "2026-08-10T12:52:51.024Z",
+    "from": "objects/template/by-id/tpl_landing.json",
+    "record_version": 2
+  },
+  "appliesTo": [
+    "standard"
+  ],
+  "description": "The campaign/landing shape: hero opener, optional curated highlight grid, closing CTA banner.",
+  "name": "Landing page",
+  "scope": "evergreen",
+  "slots": [
+    {
+      "allowed": [
+        "hero"
+      ],
+      "blueprint": {
+        "data": {
+          "actions": [],
+          "heading": "New page heading"
+        },
+        "id": "s_tpllandhero",
+        "type": "hero"
+      },
+      "repeatable": false,
+      "required": true,
+      "slotId": "slot_hero"
+    },
+    {
+      "allowed": [
+        "content_grid"
+      ],
+      "blueprint": {
+        "data": {
+          "heading": "Highlights",
+          "limit": 4,
+          "source": {
+            "cards": [
+              {
+                "title": "First highlight"
+              },
+              {
+                "title": "Second highlight"
+              }
+            ],
+            "kind": "cards"
+          }
+        },
+        "id": "s_tpllandgrid",
+        "type": "content_grid"
+      },
+      "repeatable": true,
+      "required": false,
+      "slotId": "slot_grid"
+    },
+    {
+      "allowed": [
+        "cta_banner"
+      ],
+      "blueprint": {
+        "data": {
+          "actions": [],
+          "heading": "Ready for the next step?"
+        },
+        "id": "s_tpllandcta",
+        "type": "cta_banner"
+      },
+      "repeatable": false,
+      "required": false,
+      "slotId": "slot_cta"
+    }
+  ],
+  "whenToUse": "Conversion-weight pages — launches, program and offer pages, campaign destinations. For ordinary informational pages use tpl_interior."
+}
