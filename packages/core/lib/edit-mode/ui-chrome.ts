@@ -16,7 +16,14 @@ export const STYLES = `
   --dlem-border:var(--adm-border,color-mix(in srgb,var(--aw-color-text-muted,rgb(58 65 73)) 24%,transparent));
   --dlem-draft:var(--adm-warning,var(--aw-color-gold,#b45309));
   --dlem-ok:var(--adm-success,var(--aw-color-accent,#15803d));
-  --dlem-danger:var(--adm-danger,var(--aw-color-secondary,#b91c1c));
+  /* --dlem-danger used to fall through --adm-danger (admin-only) straight to
+     --aw-color-secondary, a site-wide brand blue — the #b91c1c red literal
+     was unreachable on the public canvas (Wolf, 2026-08-10; see
+     docs/design/marginalia-glass-ui-modernization.md §1). Derive danger from
+     the theme's own gold blended toward rust so it stays an in-palette color
+     rather than an arbitrary red. */
+  --dlem-danger-fix:color-mix(in srgb,var(--aw-color-gold,#b45309) 40%,#7a2e22 60%);
+  --dlem-danger:var(--dlem-danger-fix);
   --dlem-font:var(--adm-font-sans,var(--aw-font-sans,ui-sans-serif,system-ui,sans-serif));
   --dlem-font-head:var(--aw-font-heading,var(--dlem-font));
   --dlem-shadow:0 14px 40px rgba(0,0,0,.24);
@@ -129,7 +136,7 @@ body.dl-em-on .dl-em-gaplayer{display:block}
   font:13px/1.5 var(--dlem-font)}
 .dl-em-confirmcard p{margin:0 0 12px}
 .dl-em-confirmrow{display:flex;gap:8px;justify-content:flex-end}
-.dl-em-btn.dl-em-danger{background:var(--dlem-draft);border-color:var(--dlem-draft);color:#fff;
+.dl-em-btn.dl-em-danger{background:var(--dlem-danger);border-color:var(--dlem-danger);color:#fff;
   display:inline-flex;align-items:center;gap:6px}
 .dl-em-btn.dl-em-danger:hover{filter:brightness(1.06);color:#fff}
 .dl-em-btn.dl-em-primary{background:var(--dlem-accent);border-color:var(--dlem-accent);color:var(--dlem-accent-ink)}
