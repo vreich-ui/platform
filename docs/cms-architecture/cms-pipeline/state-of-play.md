@@ -7,6 +7,68 @@ updates the standing tables. **Rule inherited from the mandate: never trust
 this file over real state — verify against main / test output / the live
 store before building on anything below.**
 
+---
+
+## 2026-08-10 — W16 executed: genesis scope + fleet parity (T16.0–T16.8, T16.10 landed; T16.9 partial)
+
+Mandate: `docs/cms-architecture/16-genesis-parity-plan.md` (same-day plan, ratified same day).
+All repo-side W16 tasks were implemented in one session by Sonnet/Opus subagents in three
+concurrency waves and landed as one commit per task (plus one fixup); full suite green at every
+merge point (final: 1965 compiled + 144 script tests, 0 fail, 0 todo), `audit-site-admin-parity
+--all` PASS at 16 checks per tenant (13 + toml-posture + binding-capability + the two genesis
+checks folded in W15/S3 numbering).
+
+What landed, in queue order: **T16.0** genesis manifest (`packages/core/cli/genesis-manifest.mjs`)
+now feeds `buildPlan()`, `DATA_SITE_SUBDIRS`, and the drive's `SEED_MODULES`, with a drift test
+(`tests/scripts/genesis-manifest.test.mjs`) and the W16 law section in CLAUDE.md. **T16.1** voice +
+tracking-config are onboarding-stage manifest entries; create-site emits both skeletons
+(`ONBOARDING_FILL_MARKER`, nothing invented); platform gained templates + tracking seeds, fernwell
+its voice export dir + tracking seed; dry-run fixture 77 → 80 files; zero expected-failure rows
+remain. **T16.2** `CANONICAL_TOML_POSTURE` (pretty_urls, `/_astro/*` immutable cache, CSP-RO,
+image-validation build step — `validate-upload-images.mjs` grew a postRoot arg) on all three
+deploys + the template + a `toml-posture` parity check; the csp-drift platform row runs for real
+now; drlurie's duplicate `public/_headers` deleted. **T16.3** `warmAdminKeepalive: true` fleet-wide
++ `binding-capability` check; finding: adminLabel/committer identity live on the site-identity
+seam with sane fallbacks, NOT on SiteBinding — plan §1.2 item 5 conflated the two seams, no change
+needed there. **T16.4** `/rss.xml` + `/search.json` are core-injected shell routes with an explicit
+site-override probe (Astro does NOT dedupe file vs injected routes — collision is a logged warning
+today, a hard error in a future Astro; the probe skips injection when the site owns the file);
+drlurie output byte-identical, fernwell serves a valid empty feed + `[]` index. **T16.5**
+`capability_status` internal-only MCP tool + `scripts/fleet-capability-probe.mjs` + the
+FLEET-STATUS live matrix section; every gated family's "is configured" check refactored to a
+single shared predicate; flagged: `PURCHASE_TOKEN_SECRET` is missing from T11.7's env table (P2
+gap, doc fix pending). **T16.6** the site-literal lint now strips strings before comments (the
+glob-`/*` blind spot that hid 40 % of create-site.mjs is regression-tested), walks core
+package.json files, and the CSP gate reads per-site truth; object-page-routes derives from
+committed exports instead of a hand-list. **T16.7** `@drlurie/core` → `@fleet/core` everywhere
+incl. lockfile (link-shaped delta) and the create-site stamp; lint allowlist EMPTY. **T16.8**
+`site-genesis-drive --verify` — read-only (write verbs structurally unreachable), OK/MISSING/
+DRIFTED with merge-aware field diffs, bootstrap-marker check, `--json`; 18 tests. **T16.10**
+`npm run site:create / site:genesis / site:verify / fleet:parity / fleet:capability` + 
+`docs/cms-architecture/new-client-acceptance.md` as the one genesis spine.
+
+**T16.9 ran PARTIALLY (session MCP connectors only) and is the open half:**
+- Platform: `tpl_interior` / `tpl_landing` / `tpl_legal` CREATED in the store from the T16.1 seed
+  (v1, active, unpublished). **Publish is BLOCKED: `object_publish` → `Export commit failed` on 4
+  attempts (~11:10Z)** — the git-committer family (`GITHUB_CONTENT_TOKEN` on `kugel-platform`) is
+  the prime suspect; drlurie's auto-publisher committed fine 2026-08-09 18:20Z, so it is
+  platform-scoped, and it blocks EVERY publish there, not just templates. Locks released cleanly.
+- Platform `trk_platform` exists, published — the tracking seed↔export inversion is closed
+  store-side; the T16.1 seed skeleton matches the committed export.
+- Dr-Lurie `tracking_config` store is EMPTY: the drlurie tracking seed is onboarding-stage
+  not-yet-run (recorded, per the T16.9 brief — no action).
+- Fernwell: NOT touched — no fernwell connector in the executing session. Its template
+  instantiation, admin-nav-link fix, and voice INFO check remain.
+- The full `fleet:capability` probe + `site:verify` on all three need the W16 code DEPLOYED and
+  per-site `MCP_HTTP_AUTH_TOKEN__<SLUG>` values — rerun T16.9 to completion after this lands and
+  builds.
+
+Next actions, in order: (1) land + release this wave (deploys all three sites), (2) fix
+`kugel-platform`'s export-commit env and re-run the three template publishes + one release,
+(3) re-run T16.9 with a fernwell connector or tokens: verify × 3, probe × 3, fernwell backfills,
+replace the FLEET-STATUS matrix stub with real output, (4) the two doc follow-ups: add
+`PURCHASE_TOKEN_SECRET` to T11.7's table; decide drlurie's tracking onboarding timing.
+
 ## Session 2026-08-03 (Platform README integration and forward-contract cleanup)
 
 PR #499 carries the Platform README routing and template-contract fixes. Its

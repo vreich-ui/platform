@@ -72,8 +72,19 @@ the credentialed drives, never inferred from repo state.
 `node scripts/fleet-capability-probe.mjs --all --markdown` (or `--site <slug>
 --endpoint <url>`, repeatable) regenerates the block below against live
 `/mcp` endpoints — per-site token from `MCP_HTTP_AUTH_TOKEN__<SLUG>` in env,
-never argv. **T16.9 runs it against the real fleet and replaces this stub**;
-until then this row is exactly what it says: not yet run.
+never argv. **T16.9 runs it against the real fleet and replaces this stub.**
+
+**2026-08-10, T16.9 partial (session connectors only — the probe script needs the
+W16 code deployed plus per-site tokens, neither available to that session):**
+
+| Family (live call) | Dr-Lurie | Platform | Fernwell |
+| --- | --- | --- | --- |
+| MCP endpoint answers | ✅ | ✅ | not probed (no connector in session) |
+| pdf bridge + storage grant (list/search/list-by-kind, real reads) | not probed | ✅ | not probed |
+| **git committer (object_publish export commit)** | ✅ (auto-publish landed 2026-08-09 18:20Z) | ❌ **BROKEN — `Export commit failed` on 4 attempts 2026-08-10 ~11:10Z; blocks ALL publishes on platform; check `GITHUB_CONTENT_TOKEN` on `kugel-platform`** | not probed |
+
+Full matrix: run `npm run fleet:capability` after the W16 deploy, then replace
+this block with its `--markdown` output.
 
 | Tenant | pdf_bridge | pdf_storage_grant | commerce | purchase_token | build_hook | deploy_lookup | git_committer | blob_credentials | mcp_auth | artifact_upload |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
