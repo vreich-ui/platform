@@ -92,14 +92,25 @@ export const SEED_MODULES = [
     driveOrder: 6, // W15 S3 follow-up: starter page-template recipes.
   },
   {
-    // Orphaned since it was written: all three sites carry the file, but it is
-    // in no consumer list — create-site does not emit it, the drive never
-    // births it, and `voice` is not in the export tree below. Onboarding
-    // stage: the skeleton file is fleet-uniform, the CONTENT is the client's.
+    // T16.1: joined the manifest. Onboarding stage — the skeleton file is
+    // fleet-uniform (create-site scaffolds it for every new client, same as
+    // every existing tenant already carries it), the CONTENT is the
+    // client's: genesis never invents editorial voice (Wolf's 2026-08-05
+    // types-not-instances ruling).
     file: 'voice-seed-data.mjs',
     objectTypes: ['editorial_voice'],
     stage: 'onboarding',
-    todo: 'T16.1',
+  },
+  {
+    // T16.1: joined the manifest alongside voice, same shape and same
+    // ruling — onboarding stage, skeleton file fleet-uniform, content is the
+    // client's. drlurie and platform carry the file; fernwell does not yet
+    // (see the KNOWN_GAPS row in the drift test — out of T16.1's backfill
+    // scope, left as a recorded gap for a fast-follow rather than invented
+    // here).
+    file: 'tracking-config-seed-data.mjs',
+    objectTypes: ['tracking_config'],
+    stage: 'onboarding',
   },
 ];
 
@@ -117,9 +128,9 @@ export const DATA_SITE_SUBDIRS = [
   { name: 'templates', stage: 'genesis' },
   { name: 'themes', stage: 'genesis' },
   { name: 'articles', stage: 'content' },
-  // Same T16.1 gap as voice-seed-data.mjs above: drlurie and platform have the
-  // directory, fernwell does not, and no consumer knows about it.
-  { name: 'voice', stage: 'onboarding', todo: 'T16.1' },
+  // T16.1: joined the manifest — every tenant now carries the directory
+  // (fernwell's was backfilled with a .gitkeep in the same change).
+  { name: 'voice', stage: 'onboarding' },
 ];
 
 /**

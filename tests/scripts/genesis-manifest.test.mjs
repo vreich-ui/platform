@@ -22,9 +22,14 @@
  * The manifest states the TARGET; the fleet does not meet all of it yet. Each
  * unmet target is one row in `KNOWN_GAPS` below, annotated with the task that
  * closes it, and is asserted to STILL FAIL. So the suite is green, the gaps
- * are machine-recorded rather than forgotten, and the moment T16.1 fixes one
- * this test goes red telling whoever fixed it to delete the row. Deleting the
- * rows is part of T16.1.
+ * are machine-recorded rather than forgotten, and the moment a gap is fixed
+ * this test goes red telling whoever fixed it to delete the row.
+ *
+ * T16.1 closed the four original rows (voice + platform templates). It also
+ * found a fifth, narrower one: `tracking-config-seed-data.mjs` joined the
+ * manifest alongside `voice-seed-data.mjs` (same onboarding-stage shape,
+ * same ruling), but T16.1's own backfill scope only covered platform —
+ * fernwell still lacks the seed file. That row stays open for a fast-follow.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -61,34 +66,6 @@ const SITES = fs
  * a failure, which is how the annotation gets cleaned up.
  */
 const KNOWN_GAPS = new Map([
-  [
-    'seed-scaffolded:voice-seed-data.mjs',
-    {
-      todo: 'T16.1',
-      why: 'create-site emits no editorial-voice seed, so a new tenant is born without the stage-2 skeleton every existing site already has',
-    },
-  ],
-  [
-    'subdir-scaffolded:voice',
-    {
-      todo: 'T16.1',
-      why: '`voice` is in no consumer list: create-site scaffolds no data/site/voice/ export dir',
-    },
-  ],
-  [
-    'seed-present:platform:templates-seed-data.mjs',
-    {
-      todo: 'T16.1',
-      why: 'sites/platform has no starter page-template recipes (plan §1.2 finding 3, "templates half-closed")',
-    },
-  ],
-  [
-    'subdir-present:fernwell:voice',
-    {
-      todo: 'T16.1',
-      why: 'sites/fernwell/data/site/voice/ does not exist (plan §1.2 finding 2, "voice is orphaned")',
-    },
-  ],
 ]);
 
 const exercised = new Set();

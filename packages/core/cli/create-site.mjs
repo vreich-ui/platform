@@ -1087,6 +1087,116 @@ export const CONVERSION_SEEDS = [
 ];
 `;
 
+// T16.1: the genesis manifest's ONBOARDING-stage seeds. Every genesis'd site
+// carries the governed object TYPE (editorial_voice / tracking_config both
+// validate against the shared core schema regardless of tenant) but never an
+// invented INSTANCE (Wolf's 2026-08-05 types-not-instances ruling, plan §2).
+// So these two templates emit STRUCTURALLY VALID skeletons — every id and
+// filename parameterized per client — whose actual content is a placeholder
+// an operator/agent fills in during onboarding, never copy this scaffold
+// invented for the client. Every free-text field carries the literal marker
+// string `onboarding: fill with the client` so a skeleton left un-edited is
+// unmistakable from a real one.
+const ONBOARDING_FILL_MARKER = 'onboarding: fill with the client';
+
+const voiceSeedTemplate = (ids, brandName) => `/**
+ * Editorial-voice SKELETON for '${ids.siteId}' (T16.1 create-site scaffold,
+ * onboarding stage) — structurally valid (satisfies
+ * packages/core/schema/bodies/editorial-voice-v1.ts) so the standard
+ * round-trip/reconcile tooling works unmodified for any new client, but every
+ * free-text field is a placeholder: genesis never invents a client's
+ * editorial identity (Wolf's 2026-08-05 ruling; see
+ * sites/drlurie/seeds/voice-seed-data.mjs for what a FILLED-IN voice looks
+ * like). Replace every '${ONBOARDING_FILL_MARKER}' marker with the real
+ * answer before this seed is ever driven into the store.
+ *
+ * Driver contract for scripts/home-conversion-roundtrip.mjs:
+ *   --site sites/${ids.clientSlug} --seeds sites/${ids.clientSlug}/seeds/voice-seed-data.mjs
+ */
+
+export const SEED_SITE = '${ids.siteId}';
+
+export const voiceBody = {
+  name: '${brandName} — voice (${ONBOARDING_FILL_MARKER})',
+  audience: '${ONBOARDING_FILL_MARKER} — who is this publication written for?',
+  tone: ['${ONBOARDING_FILL_MARKER}'],
+  cadence: '${ONBOARDING_FILL_MARKER} — sentence/paragraph rhythm, person, tense.',
+  lexicon: {
+    prefer: [],
+    avoid: [],
+  },
+  claim_policy: '${ONBOARDING_FILL_MARKER} — what may this publication assert, and what evidence does a claim need?',
+  cta_policy: '${ONBOARDING_FILL_MARKER} — what may this publication ask a reader to do, and how directly?',
+  reader_safety_notes: '${ONBOARDING_FILL_MARKER} — reader-harm boundaries specific to this audience, if any.',
+  frameworks: [
+    {
+      framework_id: 'fw_placeholder',
+      label: '${ONBOARDING_FILL_MARKER}',
+      description: '${ONBOARDING_FILL_MARKER}',
+      when_to_use: '${ONBOARDING_FILL_MARKER}',
+      beats: [],
+    },
+  ],
+  default_framework: 'fw_placeholder',
+};
+
+export const CONVERSION_SEEDS = [{ objectType: 'editorial_voice', objectId: 'voice_${ids.clientId}', body: voiceBody }];
+`;
+
+const trackingConfigSeedTemplate = (ids) => `/**
+ * Tracking-config SKELETON for '${ids.siteId}' (T16.1 create-site scaffold,
+ * onboarding stage) — structurally valid (satisfies
+ * packages/core/schema/bodies/tracking-config-v1.ts) so the standard
+ * round-trip/reconcile tooling works unmodified for any new client, but no
+ * provider is enabled and every free-text field is a placeholder: genesis
+ * never invents a client's analytics posture or copy (Wolf's 2026-08-05
+ * ruling; see sites/drlurie/seeds/tracking-config-seed-data.mjs for what a
+ * FILLED-IN config looks like). Replace every '${ONBOARDING_FILL_MARKER}'
+ * marker — and pick a real consent posture — before this seed is ever driven
+ * into the store.
+ *
+ * Driver contract for scripts/home-conversion-roundtrip.mjs:
+ *   --site sites/${ids.clientSlug} --seeds sites/${ids.clientSlug}/seeds/tracking-config-seed-data.mjs
+ */
+
+export const SEED_SITE = '${ids.siteId}';
+
+export const trackingConfigBody = {
+  // No analytics/ad provider is enabled by default — ${ONBOARDING_FILL_MARKER}
+  // (docs/cms-architecture/12-object-tracking-and-analytics.md §4 has the
+  // per-provider id shape when one is turned on).
+  providers: {},
+  consent: {
+    // ${ONBOARDING_FILL_MARKER} — pick the posture that matches this client's
+    // real audience geography: 'geo-adaptive' | 'consent-first' | 'us-first'.
+    posture: 'consent-first',
+    restricted_regions: [],
+    honor_gpc: true,
+    banner: {
+      headline: 'Privacy choices',
+      body: '${ONBOARDING_FILL_MARKER} — describe what this site measures and what a visitor is consenting to.',
+      accept_label: 'Accept all',
+      reject_label: 'Decline',
+      manage_label: 'Manage choices',
+    },
+  },
+  defaults: {
+    page: ['pageview'],
+    section: [],
+    content_item: [],
+    product: [],
+    navigation: [],
+    taxonomy: [],
+    outbound_links: false,
+    utm_capture: false,
+  },
+};
+
+export const CONVERSION_SEEDS = [
+  { objectType: 'tracking_config', objectId: 'trk_${ids.clientId}', body: trackingConfigBody },
+];
+`;
+
 // ─── the per-site policy bundle (W14 T14.2) ───
 //
 // T11.10 gave Dr-Lurie its own `config/approval-policy.ts` + `creation-policy.ts`
@@ -1633,6 +1743,8 @@ export const buildPlan = (opts) => {
     'themes-seed-data.mjs': () => themeSeedTemplate(ids),
     'section-templates-seed-data.mjs': () => sectionTemplatesSeedTemplate(ids),
     'templates-seed-data.mjs': () => templatesSeedTemplate(ids),
+    'voice-seed-data.mjs': () => voiceSeedTemplate(ids, brandName),
+    'tracking-config-seed-data.mjs': () => trackingConfigSeedTemplate(ids),
   };
 
   const files = [
