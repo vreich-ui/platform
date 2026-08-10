@@ -19,7 +19,20 @@
  * `[...objectPage].astro` stays site-owned for a second reason: it enumerates
  * file-owned routes with `import.meta.glob('./**\/*.astro')`, which only sees
  * the directory it lives in.
+ *
+ * W16 T16.4 adds a third category, OVERRIDABLE (`OVERRIDABLE_SHELL_ROUTES`):
+ * routes core's own components depend on — `/rss.xml` (the Header's RSS link)
+ * and `/search.json` (the Header's search overlay) — which every tenant must
+ * therefore serve, but which a site may still take ownership of by shipping
+ * its own `app/pages/<file>`. The site file WINS, enforced explicitly: the
+ * injection is skipped when the file exists. This is deliberate rather than
+ * left to Astro's route ordering — Astro 5 keeps BOTH a file route and an
+ * injected route with the same pattern in the manifest, logs
+ * "A static route cannot be defined more than once", and its own warning says
+ * "a collision will result in a hard error in following versions of Astro"
+ * (`node_modules/astro/dist/core/routing/manifest/create.js`, `detectRouteCollision`).
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AstroIntegration } from 'astro';
@@ -47,11 +60,47 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   { pattern: '/admin/studio', entry: 'admin/studio.astro' },
 ];
 
+/**
+ * Routes core's own shell depends on, injected into every site UNLESS that
+ * site owns the equivalent page file (see `siteOwnsRoute`).
+ *
+ * `siteFile` is the path, relative to a site's `app/pages/`, whose presence
+ * hands ownership back to the site. Extensions are probed (`.ts`, `.js`,
+ * `.mjs`, `.astro`), so `rss.xml` matches `rss.xml.ts` or `rss.xml.astro`.
+ */
+export const OVERRIDABLE_SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string; siteFile: string }> = [
+  { pattern: '/rss.xml', entry: 'rss.xml.ts', siteFile: 'rss.xml' },
+  { pattern: '/search.json', entry: 'search.json.ts', siteFile: 'search.json' },
+];
+
+/** Endpoint/page extensions Astro will route from a `pages/` file. */
+const PAGE_EXTENSIONS = ['.ts', '.js', '.mjs', '.astro'] as const;
+
+/**
+ * True when `<pagesDir>/<siteFile>{.ts,.js,.mjs,.astro}` exists — i.e. the
+ * site ships its own implementation and core must NOT inject over it.
+ */
+export const siteOwnsRoute = (pagesDir: string, siteFile: string): boolean =>
+  PAGE_EXTENSIONS.some((extension) => fs.existsSync(path.join(pagesDir, `${siteFile}${extension}`)));
+
 export const shellRoutes = (): AstroIntegration => ({
   name: 'platform-shell-routes',
   hooks: {
-    'astro:config:setup': ({ injectRoute }) => {
+    'astro:config:setup': ({ config, injectRoute, logger }) => {
       for (const route of SHELL_ROUTES) {
+        injectRoute({
+          pattern: route.pattern,
+          entrypoint: path.join(ROUTES_DIR, route.entry),
+        });
+      }
+
+      // `srcDir` is `sites/<client>/app` for every site (site-astro-config.ts).
+      const pagesDir = path.join(fileURLToPath(config.srcDir), 'pages');
+      for (const route of OVERRIDABLE_SHELL_ROUTES) {
+        if (siteOwnsRoute(pagesDir, route.siteFile)) {
+          logger.info(`${route.pattern}: site file route found — keeping the site's own implementation`);
+          continue;
+        }
         injectRoute({
           pattern: route.pattern,
           entrypoint: path.join(ROUTES_DIR, route.entry),
