@@ -315,6 +315,40 @@ body.dl-em-on .dl-em-rail.dl-em-rail-on{display:block}
   background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 72%,transparent);
   -webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2)}
 .dl-em-ghostbubble:hover,.dl-em-ghostbubble:focus-visible{color:var(--dlem-accent);border-color:var(--dlem-accent)}
+/* ── attention markers + the inline draft chip (T17.6) ──────────────────────
+   One marker per block that has something to say, in the LEFT gutter at the
+   block's leading edge minus --dlem-gutter-x. A block needing attention shows
+   a filled dot carrying the NUMERAL — colour is never the only carrier. The
+   attention token is --dlem-draft (the gold); --dlem-danger is reserved for
+   destruction and must not appear here. Spec §4.2. */
+.dl-em-gutter{position:fixed;top:0;left:0;width:100%;height:0;z-index:99988;display:none;pointer-events:none}
+body.dl-em-on .dl-em-gutter{display:block}
+.dl-em-badge{position:absolute;width:18px;height:18px;padding:0;border-radius:50%;pointer-events:auto;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;
+  font:700 10.5px var(--dlem-font);line-height:1;transition:transform .12s ease}
+.dl-em-badge:hover{transform:scale(1.15)}
+.dl-em-badge:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:2px}
+.dl-em-badge.dl-em-badge-open{background:var(--dlem-draft);border-color:var(--dlem-draft);color:#fff}
+.dl-em-badge.dl-em-badge-muted{width:9px;height:9px;background:transparent;
+  border-color:color-mix(in srgb,var(--dlem-muted) 60%,transparent)}
+.dl-em-badge.dl-em-badge-accent{width:9px;height:9px;background:var(--dlem-accent);border-color:var(--dlem-accent)}
+/* The PDF's "The two-night rule · draft": drawn beside the block's title line
+   rather than injected into it, so rendered copy stays byte-identical (the
+   in-place preview matches on exact text). The dashed .dl-em-draft outline
+   stays as well — this is an addition, not a replacement. */
+.dl-em-draftchip{position:absolute;pointer-events:none;white-space:nowrap;border-radius:5px;padding:1px 6px;
+  background:color-mix(in srgb,var(--dlem-draft) 16%,transparent);color:var(--dlem-draft);
+  font:700 10px var(--dlem-font)}
+/* List mode: every open thread on the page, one row each. */
+.dl-em-bubble-list .dl-em-listrows{display:flex;flex-direction:column;max-height:44vh;overflow-y:auto;padding:6px}
+.dl-em-listrow{display:flex;flex-direction:column;gap:2px;text-align:left;width:100%;border:none;border-radius:8px;
+  background:transparent;color:var(--dlem-text);padding:7px 9px;cursor:pointer;font:inherit}
+.dl-em-listrow:hover{background:color-mix(in srgb,var(--dlem-text) 8%,transparent)}
+.dl-em-listrow:disabled{cursor:default;opacity:.75}
+.dl-em-listwhere{font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;color:var(--dlem-muted)}
+.dl-em-listbody{font-size:12px;color:var(--dlem-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-em-listhead{padding:8px 9px 4px;font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;
+  color:var(--dlem-muted)}
 /* The narrow-screen page-slide: padding on the page box (never a transform, so
    fixed chrome, scrollbars and scrollIntoView all keep working). */
 body.dl-em-slide{padding-right:var(--dlem-slide-pad,0px)}

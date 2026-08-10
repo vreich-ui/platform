@@ -172,7 +172,11 @@ T16.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T16.10-genesi
 # T17.8 DONE 2026-08-10 — double-click inline block editing landed; record in
 # 17-canvas-ux-plan.md §7.
 #T17.8	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.8-double-click-inline-edit.md
-T17.6	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6-attention-badges-counter.md
+# T17.6 DONE 2026-08-10 — gutter attention badges + the Attention N counter + rail list mode
+# + the inline draft chip; record in 17-canvas-ux-plan.md §7. Closes deferred item 11.
+# NOTE: T17.6b (the PDF's three-pill toolbar reduction, spec §10.1) is NOT scheduled — it needs
+# Wolf's call on re-homing Pending / Exit / identity / status before anything moves.
+#T17.6	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6-attention-badges-counter.md
 T17.4	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.4-selected-text-span-anchoring.md
 T17.5	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.5-reply-threading-ui.md
 T17.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.9-image-ref-comments.md

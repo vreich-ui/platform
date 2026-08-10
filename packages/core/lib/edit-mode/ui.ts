@@ -58,6 +58,13 @@ import { getSiteIdentity } from '../../lib/site-identity.js';
 import { previewFieldChange, restoreRegion, snapshotRegion, type RegionSnapshot } from './preview.js';
 import { mountMarginaliaPanel, type MarginaliaPanelTarget } from './marginalia-panel.js';
 import {
+  blockAttentionCounts,
+  gutterMarkerState,
+  markerAriaLabel,
+  pageAttentionTotal,
+  type BlockAttention,
+} from './attention.js';
+import {
   collapseThreadStack,
   isBlockAnchor,
   marginaliaAnchorKey,
@@ -68,6 +75,7 @@ import {
   selectRailLayoutMode,
   type RailLayoutMode,
   type RailMetrics,
+  type RailPartition,
 } from './rail-layout.js';
 import { listMarginaliaThreads } from '../admin/marginalia-client.js';
 import type { MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
@@ -117,6 +125,8 @@ const RAIL_STACK_GAP = 8;
 const RAIL_TOP = 46;
 /** Below this viewport width there is no rail — the bottom sheet serves (spec §1.3). */
 const RAIL_SLIDE_FLOOR = 900;
+/** Gutter-marker centre, left of the block's leading edge (spec §4.2). */
+const GUTTER_X = 28;
 /** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
 const RAIL_REVEAL_MS = 120;
 const RAIL_DISMISS_MS = 250;
@@ -277,6 +287,11 @@ export const mountEditMode = (options: MountOptions): void => {
     `<span class="dl-em-who">${escapeHtml(email)}</span>` +
     `<span class="dl-em-status" data-em-status></span>` +
     `<button class="dl-em-btn" data-em-tray-toggle>Pending<span class="dl-em-count" data-em-count>0</span></button>` +
+    // Attention ≠ Pending: open comment threads on THIS page, versus objects
+    // with unpublished changes anywhere. Both quantities, both controls
+    // (spec §4.3; the toolbar's reduction to three pills is T17.6b, not this).
+    `<button class="dl-em-btn" data-em-attention aria-pressed="false" title="Open comments on this page">` +
+    `Attention<span class="dl-em-count" data-em-attention-count>0</span></button>` +
     `<button class="dl-em-btn dl-em-primary" data-em-release ${allowPublish ? '' : 'disabled title="Requires publisher role"'}>Release to production</button>` +
     `<button class="dl-em-btn" data-em-exit>Exit</button>`;
   document.body.append(bar);
@@ -355,6 +370,14 @@ export const mountEditMode = (options: MountOptions): void => {
   rail.setAttribute('role', 'complementary');
   rail.setAttribute('aria-label', 'Comments');
   document.body.append(rail);
+
+  // The left gutter (T17.6): one marker per annotated block that has
+  // something to say — the numeral badge the concept puts beside a block that
+  // needs you. Fixed and pointer-transparent like the rail; the buttons
+  // inside take pointer events.
+  const gutter = document.createElement('div');
+  gutter.className = 'dl-em-gutter';
+  document.body.append(gutter);
 
   const tray = document.createElement('div');
   tray.className = 'dl-em-tray';
@@ -690,6 +713,7 @@ export const mountEditMode = (options: MountOptions): void => {
       const objectId = targetObjectIdOf(region);
       region.classList.toggle('dl-em-draft', Boolean(objectId && draftIds.has(objectId)));
     });
+    positionDraftChips(); // the inline "· draft" chip follows the same set (spec §10.2)
   };
 
   // ── tray (B5): rows say WHAT changed WHERE, not a req_* id
@@ -1568,6 +1592,8 @@ export const mountEditMode = (options: MountOptions): void => {
   let revealedRegion: HTMLElement | undefined;
   let pinnedRegion: HTMLElement | undefined;
   let pinnedKey: string | undefined;
+  /** T17.6: the rail shows every open thread on the page instead of block bubbles. */
+  let railListMode = false;
   let railRevealTimer: number | undefined;
   let railHideTimer: number | undefined;
   let railColumnRight = 0;
@@ -1676,6 +1702,7 @@ export const mountEditMode = (options: MountOptions): void => {
         entry.el.style.top = '';
         entry.el.querySelector<HTMLElement>('.dl-em-bubble-link')?.remove();
       }
+      positionGutter();
       return;
     }
     rail.style.left = `${railLeftPx ?? 0}px`;
@@ -1704,6 +1731,7 @@ export const mountEditMode = (options: MountOptions): void => {
         link?.remove();
       }
     });
+    positionGutter();
   };
 
   /**
@@ -1720,8 +1748,9 @@ export const mountEditMode = (options: MountOptions): void => {
     });
   };
 
-  /** Rail order: whole-object groups, then blocks in document order, then orphans. */
+  /** Rail order: the attention list, whole-object groups, blocks in document order, orphans. */
   const railOrder = (entry: RailEntry): number => {
+    if (entry.key === ATTENTION_LIST_KEY) return -2;
     if (entry.key.startsWith('whole:')) return -1;
     if (entry.key.startsWith('orphan:')) return Number.MAX_SAFE_INTEGER;
     return desiredTopFor(entry);
@@ -1748,6 +1777,8 @@ export const mountEditMode = (options: MountOptions): void => {
     const el = document.createElement('div');
     el.className = 'dl-em-bubble';
     el.dataset.emBubble = spec.key;
+    // A block bubble is what its gutter marker's aria-controls points at.
+    if (spec.pinKey) el.id = bubbleDomId(spec.pinKey);
     el.innerHTML =
       `<div class="dl-em-bubble-head">` +
       `<span class="dl-em-bubble-title">${escapeHtml(spec.title)}</span>` +
@@ -1863,6 +1894,10 @@ export const mountEditMode = (options: MountOptions): void => {
       });
     }
 
+    // 1b — list mode (the `Attention N` control): every open thread on the
+    //      page in one card, document order, orphans last (§4.3).
+    if (railListMode) plan.push(attentionListEntry(partition, regionByKey));
+
     // 2 — the revealed and/or pinned block. A block with threads gets its
     //     bubble; one without gets the concept's ghost speech bubble, which
     //     opens an empty composer on click. A PINNED block always gets the
@@ -1975,6 +2010,7 @@ export const mountEditMode = (options: MountOptions): void => {
     }
     railPlan = plan;
     layoutRail();
+    renderGutter();
   };
 
   /** Every object rendered on this page, deduplicated — the rail's fetch set. */
@@ -2008,6 +2044,11 @@ export const mountEditMode = (options: MountOptions): void => {
       blockAnchored: isBlockAnchor(thread.anchor),
       thread,
     }));
+    updateAttentionCount();
+    // List mode's rows are a snapshot of the plan, so a write has to rebuild
+    // the card rather than keep it (reconciliation would preserve it by key).
+    railNodes.get(ATTENTION_LIST_KEY)?.remove();
+    railNodes.delete(ATTENTION_LIST_KEY);
     renderRail();
   };
 
@@ -2048,6 +2089,257 @@ export const mountEditMode = (options: MountOptions): void => {
       renderRail();
     }, RAIL_DISMISS_MS);
   };
+
+  // ── attention: gutter markers, the toolbar counter, list mode (T17.6) ────
+  // The surface has to answer the question an editor actually has — what
+  // needs me? — without opening anything. Every number here means ONE thing:
+  // an open thread (attention.ts owns that definition and its tests).
+  // Spec §4, §9, §10.2.
+
+  const ATTENTION_LIST_KEY = 'list:attention';
+  const attentionCountEl = q<HTMLElement>(bar, '[data-em-attention-count]');
+  const attentionButton = q<HTMLButtonElement>(bar, '[data-em-attention]');
+  const gutterMarkers = new Map<string, HTMLButtonElement>();
+  /** Stable element ids so a marker's aria-controls can name its bubble. */
+  const bubbleDomIds = new Map<string, string>();
+
+  const bubbleDomId = (anchorKey: string): string => {
+    let id = bubbleDomIds.get(anchorKey);
+    if (!id) {
+      id = `dl-em-bubble-${bubbleDomIds.size + 1}`;
+      bubbleDomIds.set(anchorKey, id);
+    }
+    return id;
+  };
+
+  const updateAttentionCount = (): void => {
+    const total = pageAttentionTotal(railRows);
+    attentionCountEl.textContent = String(total);
+    attentionCountEl.classList.toggle('dl-em-hot', total > 0);
+  };
+
+  /** Where a marker sits: the block's own leading edge, one gutter step left. */
+  const markerPosition = (region: HTMLElement): { left: number; top: number } | undefined => {
+    const rect = regionRect(region);
+    if (!rect) return undefined;
+    return { left: Math.max(4, rect.left - GUTTER_X), top: Math.max(RAIL_TOP, rect.top) };
+  };
+
+  const markerRegions = new Map<string, HTMLElement>();
+
+  const positionGutter = (): void => {
+    for (const [key, marker] of gutterMarkers) {
+      const region = markerRegions.get(key);
+      const at = region ? markerPosition(region) : undefined;
+      if (!at) {
+        marker.style.display = 'none';
+        continue;
+      }
+      marker.style.display = '';
+      marker.style.left = `${at.left}px`;
+      marker.style.top = `${at.top}px`;
+    }
+    positionDraftChips();
+  };
+
+  /**
+   * One marker per annotated block that has something to show: any block with
+   * threads, plus the hovered block (which gets the concept's accent dot as
+   * its "you can comment here" affordance). Everything else draws nothing.
+   */
+  const renderGutter = (): void => {
+    if (!document.body.classList.contains('dl-em-on')) {
+      gutter.replaceChildren();
+      gutterMarkers.clear();
+      markerRegions.clear();
+      return;
+    }
+    const counts = blockAttentionCounts(railRows);
+    const wanted = new Map<string, { region: HTMLElement; counts: BlockAttention; hovered: boolean }>();
+    for (const region of annotatedRegions()) {
+      if (region.classList.contains('dl-em-removed')) continue;
+      const key = anchorKeyForRegion(region);
+      if (!key) continue;
+      const blockCounts = counts.get(key) ?? { open: 0, resolved: 0 };
+      const hovered = region === hotRegion || region === revealedRegion || key === pinnedKey;
+      if (gutterMarkerState({ ...blockCounts, hovered }) === 'none') continue;
+      if (!wanted.has(key)) wanted.set(key, { region, counts: blockCounts, hovered });
+    }
+    for (const [key, marker] of gutterMarkers) {
+      if (wanted.has(key)) continue;
+      marker.remove();
+      gutterMarkers.delete(key);
+      markerRegions.delete(key);
+    }
+    for (const [key, entry] of wanted) {
+      let marker = gutterMarkers.get(key);
+      if (!marker) {
+        marker = document.createElement('button');
+        marker.type = 'button';
+        marker.className = 'dl-em-badge';
+        marker.dataset.emRegionKey = key;
+        marker.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const region = markerRegions.get(key);
+          if (pinnedKey === key) unpinRail();
+          else pinRail(key, region);
+        });
+        gutter.append(marker);
+        gutterMarkers.set(key, marker);
+      }
+      markerRegions.set(key, entry.region);
+      const target = targetFor(entry.region);
+      const state = gutterMarkerState({ ...entry.counts, hovered: entry.hovered });
+      marker.classList.toggle('dl-em-badge-open', state === 'count');
+      marker.classList.toggle('dl-em-badge-muted', state === 'muted');
+      marker.classList.toggle('dl-em-badge-accent', state === 'accent');
+      // Colour is never the only carrier of "needs attention" — the numeral is.
+      marker.textContent = state === 'count' ? String(entry.counts.open) : '';
+      marker.setAttribute(
+        'aria-label',
+        markerAriaLabel(state, entry.counts.open, target ? blockLabel(entry.region, target) : 'this block')
+      );
+      marker.setAttribute('aria-expanded', String(pinnedKey === key));
+      marker.setAttribute('aria-controls', bubbleDomId(key));
+    }
+    positionGutter();
+  };
+
+  // The inline "· draft" chip (spec §10.2, folded in here): the PDF shows
+  // draft state beside the block's heading, in the flow. It is drawn in the
+  // gutter layer rather than injected into the heading, because inserting a
+  // node into rendered copy would break previewFieldChange's exact-text match
+  // — and the dashed .dl-em-draft outline stays exactly as it was.
+  const draftChips = new Map<HTMLElement, HTMLElement>();
+
+  /** The end of the block's title line, in viewport coordinates. */
+  const draftChipAnchor = (region: HTMLElement): { left: number; top: number } | undefined => {
+    const heading = region.querySelector<HTMLElement>('h1,h2,h3,h4,h5,h6') ?? undefined;
+    const host = heading ?? (region.firstElementChild as HTMLElement | null) ?? undefined;
+    if (!host) return undefined;
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    const rects = Array.from(range.getClientRects());
+    const last = rects[rects.length - 1];
+    if (!last || last.width === 0) return undefined;
+    return { left: last.right + 8, top: last.top + last.height / 2 - 8 };
+  };
+
+  const positionDraftChips = (): void => {
+    const drafts = new Set(
+      Array.from(document.querySelectorAll<HTMLElement>(`${REGION_SELECTOR}.dl-em-draft, ${NODE_SELECTOR}.dl-em-draft`))
+    );
+    for (const [region, chipEl] of draftChips) {
+      if (drafts.has(region) && region.isConnected) continue;
+      chipEl.remove();
+      draftChips.delete(region);
+    }
+    for (const region of drafts) {
+      const at = draftChipAnchor(region);
+      let chipEl = draftChips.get(region);
+      if (!at) {
+        chipEl?.remove();
+        draftChips.delete(region);
+        continue;
+      }
+      if (!chipEl) {
+        chipEl = document.createElement('span');
+        chipEl.className = 'dl-em-draftchip';
+        chipEl.textContent = '· draft';
+        chipEl.title = 'Unpublished draft';
+        gutter.append(chipEl);
+        draftChips.set(region, chipEl);
+      }
+      chipEl.style.left = `${at.left}px`;
+      chipEl.style.top = `${at.top}px`;
+    }
+  };
+
+  /**
+   * List mode: every OPEN thread on the page in document order, whole-object
+   * first, orphans last under their own heading. A row scrolls its block into
+   * view and pins its bubble (§4.3).
+   */
+  const attentionListEntry = (
+    partition: RailPartition<RailThreadRow>,
+    regionByKey: Map<string, HTMLElement>
+  ): RailEntry => ({
+    key: ATTENTION_LIST_KEY,
+    build: () => {
+      const el = document.createElement('div');
+      el.className = 'dl-em-bubble dl-em-bubble-list';
+      el.innerHTML =
+        `<div class="dl-em-bubble-head"><span class="dl-em-bubble-title">Needs you</span>` +
+        `<button class="dl-em-close" data-em-list-close aria-label="Close">${ICON_CLOSE}</button></div>` +
+        `<div class="dl-em-listrows"></div>`;
+      el.querySelector('[data-em-list-close]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setListMode(false);
+      });
+      const rows = el.querySelector<HTMLElement>('.dl-em-listrows') as HTMLElement;
+      const addRow = (label: string, thread: MarginaliaThreadWithComments, key?: string): void => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'dl-em-listrow';
+        const first = thread.comments[0]?.body ?? '';
+        button.innerHTML =
+          `<span class="dl-em-listwhere">${escapeHtml(label)}</span>` +
+          `<span class="dl-em-listbody">${escapeHtml(shortValue(first))}</span>`;
+        if (key) {
+          button.addEventListener('click', () => {
+            const region = regionByKey.get(key);
+            region?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            pinRail(key, region);
+          });
+        } else {
+          button.disabled = true;
+        }
+        rows.append(button);
+      };
+      const openOnly = (list: readonly RailThreadRow[]): RailThreadRow[] =>
+        list.filter((entry) => entry.thread.status === 'open');
+      for (const entry of openOnly(partition.wholeObject)) addRow('Whole object', entry.thread);
+      // Document order: walk the DOM, not the thread list.
+      for (const region of annotatedRegions()) {
+        const key = anchorKeyForRegion(region);
+        if (!key) continue;
+        const target = targetFor(region);
+        for (const entry of openOnly(partition.blocks.get(key) ?? [])) {
+          addRow(target ? blockLabel(region, target) : 'Block', entry.thread, key);
+        }
+      }
+      const orphans = openOnly(partition.orphans);
+      if (orphans.length > 0) {
+        const heading = document.createElement('div');
+        heading.className = 'dl-em-listhead';
+        heading.textContent = 'Not on this page anymore';
+        rows.append(heading);
+        for (const entry of orphans) addRow('Orphaned', entry.thread);
+      }
+      if (rows.children.length === 0) {
+        rows.innerHTML = `<div class="dl-em-msg dl-em-sys">Nothing open on this page.</div>`;
+      }
+      return el;
+    },
+  });
+
+  const setListMode = (on: boolean): void => {
+    if (railListMode === on) return;
+    railListMode = on;
+    attentionButton.setAttribute('aria-pressed', String(on));
+    attentionButton.classList.toggle('dl-em-primary', on);
+    // The list is rebuilt from scratch: its rows are a snapshot of the plan.
+    railNodes.get(ATTENTION_LIST_KEY)?.remove();
+    railNodes.delete(ATTENTION_LIST_KEY);
+    renderRail();
+  };
+
+  attentionButton.addEventListener('click', () => {
+    // Counts can be stale between actions — there is no background polling
+    // (spec §8.5), so this click is one of the three refresh points.
+    void refreshRailThreads();
+    setListMode(!railListMode);
+  });
 
   // Focus reveals exactly what hover reveals (spec §9) — keyboard users are
   // not second class.
@@ -2135,6 +2427,7 @@ export const mountEditMode = (options: MountOptions): void => {
         region.classList.add('dl-em-hot');
         renderChip(region);
         scheduleRailReveal(region);
+        renderGutter(); // the hovered block's marker appears/changes state
       }
     },
     { signal }

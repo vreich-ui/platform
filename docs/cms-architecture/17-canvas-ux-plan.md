@@ -106,7 +106,7 @@ model or touching layout/anchoring logic with no existing precedent in the file.
 | **T17.3** | Margin rail layout + hover-reveal bubbles + narrow-screen page-slide — *PDF, not in items 9–16* — **DONE 2026-08-10 (§7)** | auto | `claude-opus-5` | high |
 | **T17.4** | Selected-text span anchoring (item 9) — schema fields already reserved in `marginalia-v1.ts` | auto | `claude-opus-5` | high |
 | **T17.5** | Reply-threading UI (item 10) — `parentCommentId` already reserved, client renders flat today | auto | `claude-sonnet-5` | medium |
-| **T17.6** | Gutter badges / dot counters + the global "Attention N" toolbar counter (item 11 + PDF) | auto | `claude-sonnet-5` | medium |
+| **T17.6** | Gutter badges / dot counters + the global "Attention N" toolbar counter (item 11 + PDF) — **DONE 2026-08-10 (§7)** | auto | `claude-sonnet-5` | medium |
 | **T17.7** | Agent-routed composer: note / change-request / question → CMS Agent — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
 | **T17.8** | Double-click-to-edit block inline, no panel step — *PDF, not in items 9–16* — **DONE 2026-08-10 (§7)** | auto | `claude-opus-5` | high |
 | **T17.9** | Image-ref-specific comments (item 12) | auto | `claude-sonnet-5` | medium |
@@ -276,3 +276,49 @@ Deviations, and why:
   `display:contents` article-node wrapper is focusable at all — if it is not,
   the `Enter` path still works from any focusable descendant, and T17.6's
   gutter buttons give every block a real focus target.
+
+### T17.6 — attention badges + the `Attention N` counter (2026-08-10)
+
+- **New:** `packages/core/lib/edit-mode/attention.ts` (+ `.test.ts`, 13 cases)
+  — the one definition of "needs attention" (`status === 'open'`, nothing
+  else), per-block tallies, the page total, the §4.2 marker-state table and
+  the markers' accessible names.
+- **`ui.ts`:** a `.dl-em-gutter` layer of `<button>` markers at
+  `blockLeft - var(--dlem-gutter-x)`, aligned to the block's top and
+  repositioned on the same pass as the rail's bubbles; `Attention N` in
+  `.dl-em-bar` next to `Pending N`; rail **list mode** (whole-object first,
+  block threads in DOM order, orphans last under "Not on this page anymore",
+  a row scrolls its block into view and pins its bubble); and the inline
+  `· draft` chip.
+- **`ui-chrome.ts`:** the gutter, marker states (open = filled
+  `--dlem-draft` dot with the numeral; resolved-only = hollow, on hover only;
+  no threads + hovered = accent dot), the draft chip and the list rows.
+  `--dlem-danger` is deliberately untouched — T17.1 repointed it to the
+  destructive rust and it stays reserved for destruction.
+- **Counts refresh** on edit-mode activation, after every thread write, and on
+  an `Attention` click. No background polling: spec §8.5 makes that a cost
+  decision, not a UI one.
+
+Deviations, and why:
+
+- **The `· draft` chip is drawn in the gutter layer**, positioned at the end
+  of the block's title line via a `Range`, rather than injected into the
+  heading. Injecting a node into rendered copy would change the heading's text
+  content and break `previewFieldChange`'s exact-text match — the in-place
+  preview both the panel and T17.8 rely on. Visually the same; the dashed
+  `.dl-em-draft` outline is untouched, as the brief requires.
+- **Markers use each block's own leading edge**, clamped to ≥ 4px, rather than
+  one page-wide `columnLeft`: full-bleed sections start at x = 0 and a single
+  shared column would push their marker off-screen. In `sheet` mode the clamp
+  is what puts the marker inline at the block's leading edge.
+- **`aria-controls` can name a bubble that is not mounted yet** (a bubble only
+  exists while revealed or pinned). The alternative was no `aria-controls` at
+  all; the id is stable and correct the moment the bubble appears.
+- **Explicitly NOT done:** the toolbar reduction to three pills (T17.6b —
+  spec §10.1 — needs Wolf's call on where `Pending`, `Exit`, identity and the
+  status line go; nothing was dropped or re-homed here), and the
+  `≈ $1.42 · 3 runs` chip (spec §10.3 — no data source exists in core).
+- **Not verified in a browser:** marker alignment against real first-line
+  boxes, the draft chip's placement at the end of a wrapped heading, and the
+  screen-reader path. The counts, states and labels behind all of it are
+  covered by the pure tests.
