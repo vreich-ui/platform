@@ -38,14 +38,35 @@ export const STYLES = `
   --dlem-rail-gap:24px;
   --dlem-rail-pad:8px;
   --dlem-gutter-x:28px;
+  /* The page displacement (W17 Fix 4). ui.ts writes this ONE value on
+     <html> when the ladder picks the slide rung; everything that must stay in
+     register with the page reads it from here — the page box itself, and
+     every position:fixed element, which gets no say in the page box at all.
+     0px for a visitor, always. */
+  --dlem-shift:0px;
 }
-.dl-em-bar{position:fixed;top:0;left:0;right:0;z-index:99990;display:none;align-items:center;gap:10px;
+/* The page displacement itself. Padding, not a transform: a transform would
+   make <body> the containing block for every position:fixed descendant and
+   would break the site's sticky header, scroll anchoring and view
+   transitions. Padding leaves the page in normal flow — full-bleed bands
+   narrow from the right, centred columns re-centre in what is left, sticky
+   chrome keeps sticking — which is exactly Wolf's "they can't all move the
+   same way but they can move" (2026-08-11). */
+body.dl-em-on{padding-right:var(--dlem-shift,0px)}
+@media (prefers-reduced-motion:no-preference){body.dl-em-on{transition:padding-right .18s ease}}
+/* Held for the single synchronous reflow measureNaturalColumnRight needs to
+   read the UNDISPLACED column, so lifting and restoring the displacement in
+   one task can never animate. */
+body.dl-em-measuring{transition:none!important}
+.dl-em-bar{position:fixed;top:0;left:0;right:var(--dlem-shift,0px);z-index:99990;display:none;align-items:center;gap:10px;
   padding:6px 14px;background:var(--dlem-surface-2);color:var(--dlem-text);font:600 12.5px/1.4 var(--dlem-font);
   border-bottom:1px solid var(--dlem-border);box-shadow:0 2px 12px rgba(0,0,0,.12)}
-/* The bar OVERLAYS the page — it does not push it down. Nothing edit mode
-   does may change a box-model property on <body> or <html> (Wolf,
-   2026-08-11: "The article must never move"); the old padding-top:38px here
-   shifted every page down 38px the moment edit mode came on. */
+/* The bar OVERLAYS the page vertically — it does not push it down; the old
+   padding-top:38px here shifted every page down 38px the moment edit mode came
+   on. Horizontally it is the opposite: the bar is fixed, so it takes no notice
+   of the page box at all unless told to, and its right edge follows the
+   displacement (W17 Fix 4) — otherwise it is the one thing on screen still
+   spanning the width the page just left. */
 body.dl-em-on .dl-em-bar{display:flex}
 .dl-em-bar .dl-em-dot{width:8px;height:8px;border-radius:50%;background:var(--dlem-accent);flex:none}
 .dl-em-bar .dl-em-who{color:var(--dlem-muted);font-weight:400}
@@ -61,7 +82,7 @@ body.dl-em-on .dl-em-bar{display:flex}
   margin-left:6px;padding:0 5px;border-radius:9px;background:color-mix(in srgb,var(--dlem-text) 40%,transparent);
   color:var(--dlem-surface);font-size:10.5px}
 .dl-em-count.dl-em-hot{background:var(--dlem-draft);color:#fff}
-.dl-em-fab{position:fixed;right:18px;bottom:18px;z-index:99990;width:44px;height:44px;border-radius:50%;
+.dl-em-fab{position:fixed;right:calc(18px + var(--dlem-shift,0px));bottom:18px;z-index:99990;width:44px;height:44px;border-radius:50%;
   border:none;background:var(--dlem-accent);color:var(--dlem-accent-ink);font:18px var(--dlem-font);cursor:pointer;
   box-shadow:var(--dlem-shadow)}
 body.dl-em-on .dl-em-fab{display:none}
@@ -140,7 +161,7 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 /* A deleted region disappears in place (draft — publish makes it real). */
 .dl-em-removed{display:none!important}
 /* Delete confirmation modal. */
-.dl-em-confirm{position:fixed;inset:0;z-index:99996;display:flex;align-items:center;justify-content:center;
+.dl-em-confirm{position:fixed;inset:0;right:var(--dlem-shift,0px);z-index:99996;display:flex;align-items:center;justify-content:center;
   background:color-mix(in srgb,var(--dlem-text) 26%,transparent)}
 .dl-em-confirmcard{width:340px;max-width:calc(100vw - 40px);background:var(--dlem-surface);color:var(--dlem-text);
   border:1px solid var(--dlem-border);border-radius:12px;box-shadow:var(--dlem-shadow);padding:16px 16px 12px;
@@ -180,7 +201,8 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-formfoot .dl-em-ghost{width:38px;padding:0;flex:none}
 /* Content-sized, never viewport-pinned: the panel grows with what's in it
    (capped), instead of always spanning top bar → bottom of the screen. */
-.dl-em-panel{position:fixed;top:46px;right:12px;width:372px;max-width:calc(100vw - 24px);
+.dl-em-panel{position:fixed;top:46px;right:calc(12px + var(--dlem-shift,0px));width:372px;
+  max-width:calc(100vw - 24px - var(--dlem-shift,0px));
   max-height:calc(100vh - 58px);
   z-index:99992;display:none;flex-direction:column;background:var(--dlem-surface);color:var(--dlem-text);
   border:1px solid var(--dlem-border);border-radius:14px;box-shadow:var(--dlem-shadow);font:13px/1.5 var(--dlem-font);
@@ -264,7 +286,8 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-marg-comment p{margin:0;white-space:pre-wrap}
 .dl-em-marg-input{flex:1;height:44px;resize:none;border:1px solid var(--dlem-border);border-radius:9px;
   padding:8px 10px;font:12.5px/1.45 var(--dlem-font);background:var(--dlem-surface);color:var(--dlem-text)}
-.dl-em-tray{position:fixed;top:44px;right:12px;width:420px;max-width:calc(100vw - 24px);z-index:99992;display:none;
+.dl-em-tray{position:fixed;top:44px;right:calc(12px + var(--dlem-shift,0px));width:420px;
+  max-width:calc(100vw - 24px - var(--dlem-shift,0px));z-index:99992;display:none;
   flex-direction:column;background:var(--dlem-surface);color:var(--dlem-text);border:1px solid var(--dlem-border);
   border-radius:12px;box-shadow:var(--dlem-shadow);font:12.5px/1.5 var(--dlem-font)}
 .dl-em-tray.dl-em-open{display:flex}
@@ -353,12 +376,25 @@ body.dl-em-on .dl-em-gutter{display:block}
 .dl-em-listbody{font-size:12px;color:var(--dlem-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-em-listhead{padding:8px 9px 4px;font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;
   color:var(--dlem-muted)}
-/* The narrow-screen page-slide is RETRACTED (Wolf, 2026-08-11 — spec §1.3).
-   It re-centred the article column 188px left the first time anything was
-   hovered, and reversed on hover-out. The rail narrows instead: compact mode
-   writes --dlem-rail-w on the rail element, markers mode drops the rail for
-   gutter markers plus a popover. No rule below this line, and no code in
-   ui.ts, touches the page box. */
+/* The page displacement is declared at the top of this sheet, on
+   body.dl-em-on, and gated by the slide rung of the ladder (spec §1.3).
+   What made its first version unusable was not the movement — Wolf's revision
+   of 2026-08-11 keeps that — but that it was decided from a rail plan that
+   only fills on hover, so the page moved under the pointer. It is now a
+   function of the viewport and the surface, decided on activation and resize.
+   Below the slide rung the rail still adapts instead: compact writes --dlem-rail-w
+   on the rail element, markers drops the rail for gutter markers plus a
+   popover. */
+/* Nothing is drawn against a page box that is still moving (W17 Fix 4). ui.ts
+   hides the anchored overlays for the length of the glide and re-runs the whole
+   re-layout pass on transitionend; this is the hide. It is deliberately
+   visibility, not display: a hidden bubble keeps its measured height, so the
+   packing pass that runs on settle is not measuring zero-height boxes.
+   The rail, gutter, chip, gap layer and palette are all positioned by ui.ts in
+   viewport coordinates read from live boxes, so they need no --dlem-shift
+   compensation of their own — only the fixed chrome above, which is pinned by
+   CSS to an edge the page no longer reaches, does. */
+.dl-em-settling{visibility:hidden!important}
 /* ── inline editing (T17.8) ─────────────────────────────────────────────────
    Double-click a block and its copy becomes editable IN the page, in the
    block's own box: the host REPLACES the element that renders the field and

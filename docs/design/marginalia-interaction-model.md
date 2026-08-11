@@ -55,9 +55,11 @@ Everything visible in the render:
 | 6 | A metadata line `Aug 2, 2026 · Dr. N. Lurié · Skincare · retinol sensitive-skin` with `≈ $1.42 · 3 runs` right-aligned | in the content flow |
 | 7 | The content column sits **left of centre**, not centred — the page is already slid | whole layout |
 
-Items 1–4 are specified in this document. **Item 7 is RETRACTED** (Wolf,
-2026-08-11 — see §1.3): the article never moves, so the page is never slid and
-the render's off-centre column is not a requirement. Items 5 and 6 have no owner in
+Items 1–4 are specified in this document. **Item 7 was retracted on the morning
+of 2026-08-11 and REINSTATED the same day** (Wolf's revision — see §1.3): the
+page is slid, by exactly one rail's worth, whenever it can spare the width, so
+the render's off-centre column IS a requirement again — with the correction
+that everything on the page moves with it. Items 5 and 6 have no owner in
 the §3 task table and no data source in core; they are recorded in §10 as
 **unassigned PDF requirements** so they are not lost.
 
@@ -98,13 +100,14 @@ existing `--dlem-*` set:
 
 ### 1.2 Anchor geometry
 
-> **Retracted and rewritten by W17 Fix 1 (2026-08-11).** The original §1.2
-> measured `columnRight` as the maximum `regionRect(...).right` over every
-> annotated region in the viewport. `[data-cms-nav-object]` wraps the sticky,
-> full-bleed site header, which is in the viewport at every scroll position on
-> every page, so `columnRight` was always the viewport width, the natural
-> margin always read as the scrollbar's width, and §1.3's `slide` fired
-> everywhere. That defect is what this fix exists to remove.
+> **Rewritten twice on 2026-08-11.** W17 Fix 1 corrected the measurement: the
+> original §1.2 took `columnRight` as the maximum `regionRect(...).right` over
+> every annotated region in the viewport, and `[data-cms-nav-object]` wraps the
+> sticky, full-bleed site header, which is in the viewport at every scroll
+> position on every page — so `columnRight` was always the viewport width and
+> §1.3's `slide` fired everywhere. **W17 Fix 4 completed it:** measuring the
+> content column is not enough if the overlays are then drawn against the
+> outer box, which is what most of them still did.
 
 The rail's left edge and its width are derived from the **content column**, not
 the viewport:
@@ -125,6 +128,32 @@ chrome; the `max-w-*` column inside it is the content. The same function places
 the gutter markers, which is what stops a marker on a full-bleed section from
 pinning to the x=4 clamp.
 
+`contentRect`'s descent skips children that are **out of normal flow**.
+`WidgetWrapper.astro` gives every widget section two children — a decorative
+`absolute inset-0` background band and the real `max-w-7xl` container — so a
+naive single-child descent stopped at the full-bleed `<section>` and handed
+every anchor the band. An absolutely-positioned decoration cannot be a content
+column; ignoring it is what makes the descent reach the column on ordinary
+sections at all (W17 Fix 4).
+
+**Every anchor path uses it.** `markerPosition` (gutter markers), the `· draft`
+chips, `positionChip`, `desiredTopFor` (where a bubble wants to sit), the gap
+`+` affordance's x, and `measureColumnRight` itself. That list is the
+definition of "in register" for the two section shapes Wolf named:
+
+- **Full-bleed / left-aligned sections.** Their outer box is flush with x=0 by
+  definition and stays there; what moves is their right edge (they narrow with
+  the page) and the `max-w-*` column inside them, which re-centres exactly like
+  the reading column. Anchoring to the content box is therefore the only
+  anchoring that moves with the copy; anchoring to the band leaves every marker
+  pinned at the x=4 clamp, which is what it did.
+- **Split / two-column sections.** The descent stops at the container holding
+  both columns (two in-flow children end it), so a `content_split`'s overlays
+  hang off **that block's own** content box rather than a page-wide left edge,
+  and stay attached however the columns reflow. Narrowing is all that happens
+  to the columns themselves: they are `md:basis-1/2` inside that container, so
+  they share the loss and stack at the existing breakpoint.
+
 Two classes of box are never columns and are excluded from the measurement:
 
 - **navigation regions** (`[data-cms-nav-object]`, and anything inside one) —
@@ -144,61 +173,109 @@ not specify what happens on a page whose sections have different widths;
 proposed: one rail x-position per page, taken from the widest in-viewport
 content column, so bubbles never form a ragged edge.**
 
-### 1.3 The layout ladder — the page never moves
+**The measurement is always taken against the page as published.**
+`measureNaturalColumnRight` lifts any applied displacement for the single
+synchronous reflow the read needs (transitions suppressed by
+`body.dl-em-measuring`, both writes in one task, so nothing is painted or
+animated in between). Without it the ladder reads back its own output: a
+displaced page has a wider margin, which reads as `inset`, which removes the
+displacement, which narrows the margin again. `displacement-registration.test.ts`
+pins that this loop is real, so the lift is never removed as dead weight.
 
-> **Retracted and rewritten by W17 Fix 1 (2026-08-11).** The original §1.3
-> specified a **slide** mode: `padding-right: 376px` on `<body>`, so the
-> `mx-auto` column re-centred in the narrowed area and the article moved 188px
-> left. Because the rail plan is empty until something is revealed, that fired
-> **on hover** and reversed on hover-out — the page bounced under the pointer.
-> The slide is **retracted in full**, along with the `body.dl-em-slide`,
-> `body.dl-em-measuring` and `body.dl-em-on{padding-top:38px}` rules, the
-> `padding-right` transition, `railSlidePadding`, and the measure-with-the-
-> slide-removed dance the slide made necessary. The PDF's own render is drawn
-> in the slid state and its legend says "on narrow screens the page slides over
-> to make room"; **that part of the concept does not ship.**
+### 1.3 The layout ladder — the page may move, together
 
-**Wolf's ruling (2026-08-11), governing:**
+> **Retracted and rewritten twice on 2026-08-11.** The original §1.3 specified
+> a **slide**: `padding-right: 376px` on `<body>`, so the `mx-auto` column
+> re-centred and the article moved 188px left. Because the rail plan is empty
+> until something is revealed, that fired **on hover** and reversed on
+> hover-out — the page bounced under the pointer. W17 Fix 1 retracted the slide
+> entirely. **W17 Fix 4 brings it back on Wolf's revision (below), with the
+> decision moved off the pointer and the registration fixed.**
 
-> **The article must never move.** "Keep everything like it is published."
->
-> On the narrow-window case: *"let's keep this rule for articles only. if it
-> doesn't fit move other objects."*
+**Wolf's revision (2026-08-11), governing, verbatim:**
 
-What that means here: **on article/content pages the reading column and the
-block being worked on never move, at any width — the rail adapts instead.** On
-non-article surfaces, if the rail genuinely cannot fit, other objects may be
-displaced to make room. No mode in the ladder below displaces anything today,
-on any surface, so the second half of the ruling has no implementation yet; the
-single seam where it will be gated is `railMayDisplaceContent(surface)` in
-`rail-layout.ts`, which answers `false` for every surface. Nothing else in the
-canvas is allowed to ask the question.
+> *"i think that text move the way it is done in canvas is not bad. my only
+> concern is left side placed objects. so they can't all move the same way but
+> they can move."*
+
+Asked which "left side placed objects" he meant, he selected all three —
+left-aligned/full-bleed page content, two-column/split sections, and the top
+bar and its controls — and chose: **"Keep it, fix the registration."**
+
+So the requirement is no longer "nothing moves". It is: **the page may move to
+open the rail's margin — but everything must move together, and nothing may be
+left behind or drawn against a stale box.** The morning's ruling (*"The article
+must never move"*, and its articles-only carve-out) is superseded by this one.
 
 Let `naturalMargin = viewportWidth - columnRight` and
-`chrome = railGap + railPad`.
+`chrome = railGap + railPad`, both measured on the **undisplaced** page (§1.2).
 
 | Mode | Condition | Behaviour |
 | --- | --- | --- |
-| **inset** | `naturalMargin ≥ railW + chrome` | The rail floats at full width in the margin the page already has. This is the "the text stays readable" case. |
-| **compact** | `naturalMargin ≥ railMinW + chrome` | The rail **narrows to the real margin** — `--dlem-rail-w` is written to `naturalMargin − chrome`, floor `railMinW` — and sits at `right: railPad`. The page does not move. |
-| **markers** | `viewportWidth ≥ sheetFloor`, margin below the floor | **No rail.** Gutter markers only; clicking a marker opens that block's bubble as a popover anchored to the marker, overlaying the page rather than displacing it. |
-| **sheet** | `viewportWidth < sheetFloor` | No rail. Threads open as the existing bottom sheet (`ui-chrome.ts`'s `@media (max-width:720px)` rule on `.dl-em-panel`). Gutter badges still render, inline at the block's leading edge rather than in a gutter. |
+| **inset** | `naturalMargin ≥ railW + chrome` | The rail floats at full width in the margin the page already has. Nothing moves, because nothing needs to. |
+| **slide** | the page can spare a rail: `viewportWidth − (railW + chrome) ≥ sheetFloor`, and `railMayDisplaceContent(surface)` | The page is displaced by exactly `railW + chrome` (376px) and the rail sits in the strip it vacated, one `railGap` right of the page's new edge. A slid page is an `inset` page whose margin was bought rather than found. |
+| **compact** | `naturalMargin ≥ railMinW + chrome` | No displacement available (too narrow to spare one): the rail **narrows to the real margin** — `--dlem-rail-w` = `naturalMargin − chrome`, floor `railMinW` — at `right: railPad`. |
+| **markers** | `viewportWidth ≥ sheetFloor`, margin below the floor | **No rail.** Gutter markers only; a marker click opens that block's bubble as a popover anchored to it. |
+| **sheet** | `viewportWidth < sheetFloor` | No rail. Threads open as the existing bottom sheet. Gutter badges render inline at the block's leading edge. |
 
 Tokens: `railW = 344`, `railMinW = 260`, `railGap = 24`, `railPad = 8`,
 `sheetFloor = 900`. **The PDF does not specify the narrow-screen breakpoint or
-what replaces the slide; the ladder above is proposed,** with `sheetFloor = 900`
-kept from the original §1.3.
+the ladder; both are proposed,** with `sheetFloor = 900` kept from the original
+§1.3. Displacement opens a margin — it does not replace the ladder: below
+1276px viewport width no page can spare a rail, so `compact` and `markers`
+still serve genuinely narrow windows.
 
-**Hysteresis.** A mode narrows the moment its threshold is crossed and widens
-again only `RAIL_MODE_HYSTERESIS = 24px` past it, so a viewport parked on a
-boundary cannot flap. The mode is re-evaluated **on resize (and on the content
-rebuild cadence) only — never on hover, focus, pin or thread write.** A pointer
-must not be able to change the page's layout at all; that, not the geometry, is
-what made the original defect so visible.
+**The mechanism, and why.** The displacement is one value, `--dlem-shift`,
+written on `<html>` by one function in `ui.ts`, and consumed by
+`body.dl-em-on{padding-right:var(--dlem-shift,0px)}`.
 
-**The invariant, pinned by tests** (`no-page-movement.test.ts`): no edit-mode
-code path may change any box-model property on `<body>` or `<html>`. The rail
-being up or down, wide or narrow, changes nothing about where the article sits.
+- **Padding on the page box, not a wrapper the overlay owns.** `Layout.astro`
+  mounts `<ClientRouter>`; Astro's swap replaces `<body>`'s children wholesale
+  on every navigation, so an overlay-owned wrapper is destroyed mid-navigation
+  and re-created on `astro:page-load` — reparenting the whole page on every
+  route change. And a wrapper buys nothing for the elements that actually need
+  help: `position:fixed` descendants ignore an ancestor's padding, and the only
+  way to make them see it is a `transform` on the wrapper, which makes it their
+  containing block and breaks the site's sticky header.
+- **Padding, not a transform, on the page box either** — for the same reason,
+  plus scroll anchoring and `scrollIntoView`.
+- Padding leaves the page in normal flow, which is precisely Wolf's "they can't
+  all move the same way but they can move": full-bleed bands narrow from the
+  right, centred columns re-centre in what is left, sticky chrome keeps
+  sticking.
+
+**Fixed chrome is compensated explicitly**, because a fixed element gets no say
+in the page box at all: `.dl-em-bar` (`right: var(--dlem-shift)`), `.dl-em-fab`,
+`.dl-em-panel`, `.dl-em-tray` (offset **and** `max-width`), `.dl-em-confirm`,
+and the site's own `BackToTop`, whose
+`max(1rem, calc((100vw - 720px)/2 - 4.5rem))` centres it on the reading column
+and so takes the shift off the `100vw` and adds it back to the offset. The
+variable defaults to `0px`, so a visitor's page is unchanged. The full-viewport
+modal scrims (`LoginModal`, the header search overlay, the mobile nav) are
+deliberately **not** compensated: they cover the rail with or without a
+displacement, which is what a scrim does.
+
+**Stability.** A mode narrows the moment its threshold is crossed and widens
+again only `RAIL_MODE_HYSTERESIS = 24px` past it. The mode **and the
+displacement** are decided **on activation and on resize (plus the content
+rebuild cadence) only — never on hover, focus, pin, thread write or save.** A
+pointer must not be able to change the page's geometry at all; that, not the
+movement, is what made the first version unusable.
+
+**Nothing is positioned mid-transition.** The page glides 180ms. For its
+duration every positioner returns early and the anchored overlays are hidden
+(`visibility`, so the packing pass still measures real heights); the whole
+re-layout pass then re-runs on `transitionend`/`transitioncancel` of
+`padding-right` on `<body>`, with a timer backstop for
+`prefers-reduced-motion`, where no transition — and therefore no end event —
+exists. `createRelayoutPass` (`rail-layout.ts`) holds the five positioners
+(rail, chip, gutter, draft chips, gaps) so "the same pass" is a thing that
+exists rather than a convention.
+
+**The invariant, pinned by tests** (`displacement-registration.test.ts`):
+*every visible surface — page content, edit-mode overlays and fixed chrome — is
+positioned against the same displacement value at all times; the displacement
+changes only on activation and resize, never on hover, focus, pin or save.*
 
 ### 1.4 Relationship to the existing panel
 
@@ -502,19 +579,23 @@ says so.
 Covered by §1.3's mode table. Restated as behaviour, because the PDF legend
 calls it out explicitly:
 
-- **Wide:** the rail lives in the margin the page already has; the article does
-  not move; text stays at its natural measure.
-- **Narrow (`≥ 900px`, some margin):** the rail narrows to the margin the page
-  has, down to 260px. The article still does not move.
+- **Wide:** the rail lives in the margin the page already has; nothing moves;
+  text stays at its natural measure.
+- **Narrower, but the page can spare a rail (`≥ 1276px`):** the page is
+  displaced by one rail's worth and the rail takes the strip it vacated. The
+  page moves *as a whole* — bands narrow, columns re-centre, fixed chrome is
+  told the same number — which is the PDF legend's "on narrow screens the page
+  slides over to make room", and Wolf's 2026-08-11 revision keeps it.
+- **Narrow (`≥ 900px`, some margin, too narrow to displace):** the rail narrows
+  to the margin the page has, down to 260px. The page does not move.
 - **Narrower (`≥ 900px`, no usable margin):** no rail. Gutter markers carry the
   attention signal, and a marker click opens its bubble as a popover over the
-  page. The article still does not move.
+  page.
 - **Very narrow (`< 900px`):** no rail; the bottom sheet. Gutter badges become
   inline leading markers so the attention signal survives.
 
-Nothing on this ladder moves the page (§1.3, Wolf 2026-08-11). Below `inset`
-the bubble surface does overlay the text — that is the cost of never moving the
-article, and it is the trade Wolf chose.
+Below the `slide` rung the bubble surface overlays the text rather than moving
+it — that is the cost of not narrowing a page that cannot afford it.
 
 ---
 
@@ -677,7 +758,7 @@ Every place this document went past the PDF, in one list:
 | # | The PDF does not specify | Proposed |
 | --- | --- | --- |
 | 1 | Rail x-position on pages with unequal section widths | One rail position per page, from the widest in-viewport content column, navigation and full-bleed bands excluded (§1.2) |
-| 2 | Narrow-screen breakpoint and what replaces the slide | `sheetFloor = 900px`; the inset → compact → markers → sheet ladder, none of which moves the page (§1.3, Wolf 2026-08-11) |
+| 2 | Narrow-screen breakpoint and the ladder around the slide | `sheetFloor = 900px`; inset → slide → compact → markers → sheet, with the slide gated on the page keeping a whole sheet floor for itself (§1.3, Wolf 2026-08-11 revision: "Keep it, fix the registration") |
 | 3 | ~~Whether the existing hover chip survives~~ | ~~Keep it; chip above bubble when both show (§2.1)~~ **RETRACTED 2026-08-11 — the chip is folded into the bubble; see [`marginalia-affordance-model.md`](marginalia-affordance-model.md) §§2–4.** |
 | 4 | Hover reveal/dismiss timings | 120ms reveal, 250ms dismiss (matching `clearChipSoon`) (§2.2) |
 | 5 | Pinning | Click/focus pins; `Esc`/outside-click/another pin unpins; one at a time (§2.3) |

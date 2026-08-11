@@ -86,12 +86,15 @@ import {
   marginaliaAnchorKey,
   packRailEntries,
   partitionRailThreads,
+  createRelayoutPass,
+  railDisplacementFor,
   railLeftFor,
   railWidthFor,
   selectRailLayoutMode,
   type RailLayoutMode,
   type RailMetrics,
   type RailPartition,
+  type RailSurfaceKind,
 } from './rail-layout.js';
 import { listMarginaliaThreads } from '../admin/marginalia-client.js';
 import type { MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
@@ -147,6 +150,10 @@ const RAIL_SHEET_FLOOR = 900;
 const GUTTER_X = 28;
 /** The formatting bubble flips below the selection rather than hide under the bar. */
 const INLINE_TOOLBAR_TOP_GUARD = RAIL_TOP;
+/** How long the page takes to glide to a new displacement — the CSS transition's own duration. */
+const DISPLACE_MS = 180;
+/** Slack on the settle timer: the fallback for a glide that never reports its end. */
+const DISPLACE_SETTLE_SLACK_MS = 60;
 /** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
 const RAIL_REVEAL_MS = 120;
 const RAIL_DISMISS_MS = 250;
@@ -306,6 +313,30 @@ const ownRect = (element: HTMLElement): DOMRect | undefined => {
 };
 
 /**
+ * The children that can define a content column: everything with a box, minus
+ * anything taken out of normal flow.
+ *
+ * `WidgetWrapper.astro` — the wrapper under EVERY widget section, including
+ * every `content_split` — renders `<section>` as a decorative
+ * `absolute inset-0` background band PLUS the `max-w-7xl mx-auto` container.
+ * Two children, so the descent below used to stop at the full-bleed
+ * `<section>` and hand every anchor the band: markers clamped to x=4, and the
+ * section's real column invisible to the geometry. The band is not a column;
+ * it cannot be, because it is out of flow.
+ */
+const contentChildren = (host: HTMLElement): HTMLElement[] => {
+  const boxed = (Array.from(host.children) as HTMLElement[]).filter((child) => {
+    const box = child.getBoundingClientRect();
+    return box.width > 0 || box.height > 0;
+  });
+  if (boxed.length <= 1) return boxed; // the common case: no style lookup at all
+  return boxed.filter((child) => {
+    const position = window.getComputedStyle(child).position;
+    return position !== 'absolute' && position !== 'fixed';
+  });
+};
+
+/**
  * The CONTENT box of an annotated region: `regionRect`'s union is the region's
  * outermost box, which on a full-bleed section is the band spanning the whole
  * viewport rather than the `max-w-*` column inside it. Walk down through
@@ -313,16 +344,21 @@ const ownRect = (element: HTMLElement): DOMRect | undefined => {
  * viewport appears — that is the column the rail hangs off and the one the
  * gutter marker sits beside (without this, a marker on a full-bleed section
  * pins to x=4 because the band's left edge is 0).
+ *
+ * This is also what puts a SPLIT section in register: the descent stops at the
+ * container holding both columns (two in-flow children end it), so the
+ * section's overlays anchor to that block's own content box and stay attached
+ * however the columns reflow — rather than to a page-wide left edge, which is
+ * the wrong place for any section whose column is not the reading column.
+ * EVERY anchor path goes through here: `markerPosition`, `positionChip`,
+ * `desiredTopFor` (the bubbles), the gap "+" x, and `measureColumnRight`.
  */
 const contentRect = (region: HTMLElement): DOMRect | undefined => {
   const limit = viewportWidth() * FULL_BLEED_RATIO;
   let rect = regionRect(region);
   let host = region;
   for (let depth = 0; rect && rect.width >= limit && depth < CONTENT_DESCENT_MAX; depth += 1) {
-    const children = (Array.from(host.children) as HTMLElement[]).filter((child) => {
-      const box = child.getBoundingClientRect();
-      return box.width > 0 || box.height > 0;
-    });
+    const children = contentChildren(host);
     if (children.length !== 1) break;
     host = children[0];
     const inner = ownRect(host);
@@ -1105,6 +1141,9 @@ export const mountEditMode = (options: MountOptions): void => {
       /* ignored */
     }
     if (on) {
+      // Decide the displacement HERE, once, from the page as published — not
+      // when the first bubble happens to appear (spec §1.3).
+      layoutRail(true);
       void refreshPending();
       // Pay the wait up front (B4): warm the record cache for everything on
       // the page so every chip/panel/tool opens from memory.
@@ -1123,6 +1162,7 @@ export const mountEditMode = (options: MountOptions): void => {
       pinnedKey = undefined;
       pinnedRegion = undefined;
       renderRail(); // drops every bubble
+      layoutRail(true); // …and puts the page back exactly where it is published
       for (const objectSession of sessions.values()) void objectSession.checkin();
     }
   };
@@ -1144,15 +1184,21 @@ export const mountEditMode = (options: MountOptions): void => {
       .map((region) => ({
         region,
         target: deriveEditTarget(region.dataset as Record<string, string>),
+        // The band for the vertical boundary between sections, the CONTENT
+        // column for the horizontal centre — a "+" centred on a full-bleed
+        // band sits at the viewport's middle, which is not where the column
+        // it adds to is once the page has moved.
         rect: regionRect(region),
+        content: contentRect(region),
       }))
-      .filter((entry): entry is { region: HTMLElement; target: EditTarget; rect: DOMRect } =>
-        Boolean(entry.target && entry.rect)
+      .filter(
+        (entry): entry is { region: HTMLElement; target: EditTarget; rect: DOMRect; content: DOMRect | undefined } =>
+          Boolean(entry.target && entry.rect)
       );
     const gaps: Gap[] = [];
     const scrollY = window.scrollY;
     for (let i = 0; i < regions.length; i += 1) {
-      const { target, rect } = regions[i];
+      const { target, rect, content } = regions[i];
       // Inserts always land on the HOST page object, anchored by the page
       // instance id — a shared_ref region anchors by its reference on the page.
       const host = target.hostObjectId;
@@ -1161,7 +1207,8 @@ export const mountEditMode = (options: MountOptions): void => {
         : (target.sectionId as string);
       const previous = regions[i - 1];
       const next = regions[i + 1];
-      const x = rect.left + rect.width / 2;
+      const box = content ?? rect;
+      const x = box.left + box.width / 2;
       if (!previous || previous.target.hostObjectId !== host) {
         gaps.push({ kind: 'section', host, anchorId, where: 'before', x, y: rect.top + scrollY - 12 });
       }
@@ -1191,7 +1238,9 @@ export const mountEditMode = (options: MountOptions): void => {
         host,
         anchorId: '',
         where: 'after',
-        x: rect.width > 0 ? rect.left + rect.width / 2 : window.innerWidth / 2,
+        // The PAGE's centre, not the viewport's: the two differ by the
+        // displacement the moment the page has moved over.
+        x: rect.width > 0 ? rect.left + rect.width / 2 : (viewportWidth() - appliedShift) / 2,
         y: rect.top + scrollY,
       });
     }
@@ -1207,7 +1256,7 @@ export const mountEditMode = (options: MountOptions): void => {
       .map((region) => ({
         region,
         target: deriveNodeTarget(region.dataset as Record<string, string>),
-        rect: regionRect(region),
+        rect: contentRect(region),
       }))
       .filter((entry): entry is { region: HTMLElement; target: EditTarget; rect: DOMRect } =>
         Boolean(entry.target && entry.rect)
@@ -1234,9 +1283,6 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   const buildGaps = (): void => {
-    // The rail rides the same rebuild cadence: content heights changed, so
-    // the content column (and therefore the rail's x) may have too.
-    layoutRail(true);
     gapLayer.innerHTML = '';
     if (!document.body.classList.contains('dl-em-on')) return;
     syncRegionFocusability(true); // freshly inserted draft blocks are editable too
@@ -1257,10 +1303,29 @@ export const mountEditMode = (options: MountOptions): void => {
     }
   };
 
+  // ── the re-layout pass (W17 Fix 4) ──────────────────────────────────────
+  // Every surface the canvas positions itself, in one list, run in one order:
+  // the rail first (it remeasures, decides the displacement and publishes the
+  // rail's x), then everything that reads from it. Registration is by name so
+  // a positioner cannot quietly sit outside the pass and keep drawing against
+  // the box the page had before it moved — which is exactly the "everything
+  // must move together" half of Wolf's 2026-08-11 revision.
+  //
+  // The wrappers are lazy on purpose: these consts are initialised further
+  // down this closure, and nothing runs the pass before mounting finishes.
+  const relayout = createRelayoutPass();
+  relayout.register('rail', () => layoutRail(true));
+  relayout.register('chip', () => {
+    if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
+  });
+  relayout.register('gutter', () => positionGutter());
+  relayout.register('draft-chips', () => positionDraftChips());
+  relayout.register('gaps', () => buildGaps());
+
   let gapRebuildTimer: number | undefined;
   const scheduleGapRebuild = (): void => {
     window.clearTimeout(gapRebuildTimer);
-    gapRebuildTimer = window.setTimeout(buildGaps, 250);
+    gapRebuildTimer = window.setTimeout(() => relayout.run(), 250);
   };
   window.addEventListener('resize', scheduleGapRebuild, { signal });
   window.addEventListener('load', scheduleGapRebuild, { signal });
@@ -1278,7 +1343,9 @@ export const mountEditMode = (options: MountOptions): void => {
         .join('');
     const rect = anchor.getBoundingClientRect();
     palette.style.display = 'block';
-    palette.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
+    // Clamp to the PAGE's right edge, not the viewport's: past the
+    // displacement lies the rail, not the page this palette adds to.
+    palette.style.left = `${Math.min(rect.left, viewportWidth() - appliedShift - 260)}px`;
     palette.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 300)}px`;
     palette.querySelectorAll<HTMLButtonElement>('[data-em-pal]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -1445,8 +1512,11 @@ export const mountEditMode = (options: MountOptions): void => {
         : deriveEditTarget(region.dataset as Record<string, string>);
 
   const positionChip = (region: HTMLElement): void => {
-    const rect = regionRect(region);
-    if (!rect) return;
+    // `contentRect`, not `regionRect`: on a full-bleed section the outer band
+    // still ends at the viewport edge however far the page has moved, so a
+    // chip placed from it pins to the clamp instead of following its block.
+    const rect = contentRect(region);
+    if (!rect || displacing) return;
     chip.style.display = 'flex';
     chip.style.visibility = 'hidden';
     const width = chip.offsetWidth;
@@ -1696,10 +1766,21 @@ export const mountEditMode = (options: MountOptions): void => {
   let railMode: RailLayoutMode = 'inset';
   /** False until the first measurement — the cold decision takes no hysteresis. */
   let railMeasured = false;
+  /** Which surface is being annotated — the displacement gate's only input. */
+  let railSurface: RailSurfaceKind = 'other';
+
+  /**
+   * An article canvas is any page rendering article nodes; everything else —
+   * pages, listings, chrome-only surfaces — is `other`. Read from the DOM, so
+   * it is a property of what is on the page and not of what the pointer is
+   * doing, and re-read only on the remeasure passes.
+   */
+  const surfaceKind = (): RailSurfaceKind => (document.querySelector(NODE_SELECTOR) ? 'article' : 'other');
 
   const railMetrics = (): RailMetrics => ({
     viewportWidth: viewportWidth(),
     columnRight: railColumnRight,
+    surface: railSurface,
     railWidth: RAIL_W,
     railMinWidth: RAIL_MIN_W,
     railGap: RAIL_GAP,
@@ -1722,6 +1803,96 @@ export const mountEditMode = (options: MountOptions): void => {
     return target ? marginaliaAnchorKey(marginaliaTargetFor(target)) : undefined;
   };
 
+  // ── the page displacement (W17 Fix 4) ───────────────────────────────────
+  // Wolf, 2026-08-11, revising the morning's retraction: *"i think that text
+  // move the way it is done in canvas is not bad. my only concern is left side
+  // placed objects. so they can't all move the same way but they can move."* —
+  // "Keep it, fix the registration."
+  //
+  // So the page may move to open the rail's margin. ONE value expresses that
+  // move — `--dlem-shift` — and everything that has to stay in register with
+  // the page reads it: `body.dl-em-on`'s padding-right (which is what actually
+  // moves the content), and every `position:fixed` element of the canvas and
+  // the site, which would otherwise ignore the page box entirely.
+  //
+  // The value is decided in `remeasureRail` — activation and resize — and
+  // nowhere else. Hover, focus, pin, thread write and save all re-run the
+  // positioners without ever reaching this writer, which is the property that
+  // made the first version of this feature unusable when it did not hold.
+
+  /** The displacement currently applied, in px. 0 = the page is where it is published. */
+  let appliedShift = 0;
+  /**
+   * True while the page is gliding between two displacements. Nothing may be
+   * positioned during that window: every overlay is anchored to a box that is
+   * still moving, and a single frame drawn against a stale one is what "a lot
+   * of misalignment" looked like. The anchored surfaces are hidden instead,
+   * and the whole pass re-runs the moment the page stops.
+   */
+  let displacing = false;
+  let settleTimer: number | undefined;
+
+  /** The overlays anchored to page boxes — hidden while the page moves. */
+  const anchoredSurfaces = (): HTMLElement[] => [rail, gutter, gapLayer, chip, palette];
+
+  /**
+   * Both belts: the transition is suppressed for the positioners (they do not
+   * run at all while it is in flight) AND the pass re-runs on `transitionend`.
+   * The timer is the third: `prefers-reduced-motion` removes the transition
+   * entirely, so no `transitionend` ever fires, and an interrupted glide can
+   * fire `transitioncancel` instead.
+   */
+  const beginDisplacement = (): void => {
+    displacing = true;
+    for (const surface of anchoredSurfaces()) surface.classList.add('dl-em-settling');
+    window.clearTimeout(settleTimer);
+    settleTimer = window.setTimeout(endDisplacement, DISPLACE_MS + DISPLACE_SETTLE_SLACK_MS);
+  };
+
+  const endDisplacement = (): void => {
+    if (!displacing) return;
+    window.clearTimeout(settleTimer);
+    displacing = false;
+    for (const surface of anchoredSurfaces()) surface.classList.remove('dl-em-settling');
+    relayout.run(); // one pass, every positioner, against the settled page
+  };
+
+  // The transition lives on <body> (`padding-right`), so its end event does
+  // too; a nested element's transition must never be mistaken for the page's.
+  for (const event of ['transitionend', 'transitioncancel'] as const) {
+    document.body.addEventListener(
+      event,
+      (transition) => {
+        if (transition.target !== document.body) return;
+        if ((transition as TransitionEvent).propertyName !== 'padding-right') return;
+        endDisplacement();
+      },
+      { signal }
+    );
+  }
+
+  /**
+   * THE single writer of `--dlem-shift`. Everything else that needs the page
+   * to move — including `measureNaturalColumnRight`'s momentary lift — goes
+   * through here, so "who can move the page?" has exactly one answer.
+   */
+  const writeShift = (px: number): void => {
+    document.documentElement.style.setProperty('--dlem-shift', `${px}px`);
+  };
+
+  /**
+   * Apply a decided displacement. A no-op when the value is unchanged, which
+   * is the overwhelmingly common case: the page glides only when the mode
+   * ladder genuinely changed its mind, never on a re-layout that agrees with
+   * the one before it.
+   */
+  const applyDisplacement = (px: number): void => {
+    if (px === appliedShift) return;
+    appliedShift = px;
+    beginDisplacement();
+    writeShift(px);
+  };
+
   /**
    * The content column the rail hangs off: the widest in-viewport annotated
    * CONTENT column (spec §1.2 — one rail x per page, never a ragged edge).
@@ -1733,9 +1904,9 @@ export const mountEditMode = (options: MountOptions): void => {
    * descended is a full-bleed band, i.e. page chrome. Both are skipped, so
    * what is left is the reading column.
    *
-   * Nothing writes page padding anymore (Wolf, 2026-08-11), so the measurement
-   * can no longer be reading back its own output: the old remove-the-slide /
-   * restore-the-slide dance around this loop went with the slide.
+   * Call it through `measureNaturalColumnRight`, never directly: with a
+   * displacement applied this measures the DISPLACED column, which is the
+   * right answer for anchoring and the wrong one for deciding the ladder.
    */
   const measureColumnRight = (): number => {
     const width = viewportWidth();
@@ -1753,10 +1924,36 @@ export const mountEditMode = (options: MountOptions): void => {
     return inViewport || anywhere || width;
   };
 
+  /**
+   * `measureColumnRight` with any applied displacement LIFTED, so the ladder
+   * is always decided against the page as published rather than against the
+   * page it already moved.
+   *
+   * Without this the decision reads back its own output: a slid page has a
+   * wider margin, which reads as `inset`, which removes the displacement,
+   * which narrows the margin, which reads as `slide` again. Both writes and
+   * the read happen inside one synchronous task, so no intermediate state is
+   * ever painted; `dl-em-measuring` suppresses the padding transition for its
+   * duration so the browser cannot animate to zero and back either.
+   */
+  const measureNaturalColumnRight = (): number => {
+    if (appliedShift === 0) return measureColumnRight();
+    const restore = appliedShift;
+    document.body.classList.add('dl-em-measuring');
+    writeShift(0);
+    const columnRight = measureColumnRight(); // its getBoundingClientRect calls force the reflow
+    writeShift(restore);
+    void document.body.offsetWidth; // commit the restored padding before transitions resume
+    document.body.classList.remove('dl-em-measuring');
+    return columnRight;
+  };
+
   /** Where a bubble wants to sit: its block's top, below the chip when both show. */
   const desiredTopFor = (entry: RailEntry): number => {
     if (!entry.region) return RAIL_TOP;
-    const rect = regionRect(entry.region);
+    // The block's CONTENT top, so a bubble lines up with the copy it annotates
+    // rather than with the top of a full-bleed band's padding.
+    const rect = contentRect(entry.region);
     if (!rect) return RAIL_TOP;
     const chipOffset =
       hotRegion === entry.region && chip.style.display !== 'none' ? chip.offsetHeight + RAIL_STACK_GAP : 0;
@@ -1764,16 +1961,30 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   /**
-   * Re-derive the content column and, from it, the layout mode. Called on
-   * activation, on resize, and on the content-rebuild cadence — and NOWHERE
-   * else. Hover, focus, pinning and thread writes re-run `layoutRail` without
-   * remeasuring, so a pointer cannot change the page's layout at all (Wolf,
-   * 2026-08-11).
+   * Re-derive the surface, the content column, the layout mode and — from the
+   * mode — the page displacement. Called on activation, on resize, and on the
+   * content-rebuild cadence, and NOWHERE else. Hover, focus, pinning and
+   * thread writes re-run `layoutRail` without remeasuring, so a pointer can
+   * change neither the mode nor the displacement (Wolf, 2026-08-11: the page
+   * bouncing under the pointer is the defect that started all of this, and
+   * bringing the movement back must not bring that back with it).
+   *
+   * This is the ONLY caller of `applyDisplacement`.
    */
   const remeasureRail = (): void => {
-    railColumnRight = measureColumnRight();
+    // Never measure a page that is still moving: the numbers would be
+    // half-way values, and lifting the displacement to read the natural
+    // column (below) would cancel the glide in flight. `endDisplacement`
+    // re-runs the whole pass the moment it settles.
+    if (displacing) return;
+    railSurface = surfaceKind();
+    railColumnRight = measureNaturalColumnRight();
     railMode = selectRailLayoutMode(railMetrics(), railMeasured ? railMode : undefined);
     railMeasured = true;
+    // Edit mode off ⇒ no displacement, whatever the ladder says: the page a
+    // visitor sees is never displaced.
+    const editing = document.body.classList.contains('dl-em-on');
+    applyDisplacement(editing ? railDisplacementFor(railMode, railMetrics()) : 0);
   };
 
   /**
@@ -1781,11 +1992,15 @@ export const mountEditMode = (options: MountOptions): void => {
    * column and the mode (activation / resize / the gap layer's rebuild
    * cadence); every other pass reuses both and only re-runs the cheap packing.
    *
-   * NOTHING here writes to `<body>` or `<html>`: the page stays exactly where
-   * it is published at every width, and the rail is what adapts.
+   * Only the `remeasure` path can move the page, and only through
+   * `remeasureRail` → `applyDisplacement`. A pass triggered by a pointer
+   * reuses the applied displacement verbatim and just re-places the overlay.
    */
   const layoutRail = (remeasure = false): void => {
     if (remeasure || !railMeasured) remeasureRail();
+    // remeasureRail may have just started the page moving — in which case
+    // this pass stops here and `endDisplacement` re-runs all of it.
+    if (displacing) return;
     const metrics = railMetrics();
     // `markers`: no rail column at all. The gutter markers are the surface,
     // and an opened marker's bubble shows as a popover anchored to it.
@@ -2265,6 +2480,7 @@ export const mountEditMode = (options: MountOptions): void => {
   const markerRegions = new Map<string, HTMLElement>();
 
   const positionGutter = (): void => {
+    if (displacing) return;
     for (const [key, marker] of gutterMarkers) {
       const region = markerRegions.get(key);
       const at = region ? markerPosition(region) : undefined;
@@ -2363,6 +2579,7 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   const positionDraftChips = (): void => {
+    if (displacing) return;
     const drafts = new Set(
       Array.from(document.querySelectorAll<HTMLElement>(`${REGION_SELECTOR}.dl-em-draft, ${NODE_SELECTOR}.dl-em-draft`))
     );
