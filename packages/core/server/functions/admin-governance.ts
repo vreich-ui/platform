@@ -101,7 +101,9 @@ const committed = () => ({ approval: activeApprovalPolicy(), creation: activeCre
 
 const CMS_AGENT_HEALTH_TTL_MS = 60_000;
 const cmsAgentHealthClient = new CmsAgentClient();
-let cmsAgentHealthCache: { at: number; health: Record<string, unknown> } | undefined;
+/** Keyed by project id: each site is its own Netlify process, but a keyed
+ *  cache removes the whole cross-tenant-staleness class outright. */
+const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string, unknown> }>();
 
 /** Config + effective mode + a memoized live `agent_resolve` probe. Env NAMES
  *  only, never values; the probe is read-only and cached for a minute so the
@@ -117,17 +119,19 @@ const cmsAgentStatus = async (override?: 'off' | 'fallback' | 'required'): Promi
     ...(effective.invalidEnvValue === undefined ? {} : { invalid_env_value: effective.invalidEnvValue }),
   };
   if (missing.length > 0) return status;
+  const projectId = getSiteIdentity().cmsAgentProjectId;
   const now = Date.now();
-  if (!cmsAgentHealthCache || now - cmsAgentHealthCache.at > CMS_AGENT_HEALTH_TTL_MS) {
-    const probe = await cmsAgentHealthClient.resolveAgent({ role: 'client_manager', project_id: getSiteIdentity().cmsAgentProjectId });
-    cmsAgentHealthCache = {
+  const cached = cmsAgentHealthCache.get(projectId);
+  if (!cached || now - cached.at > CMS_AGENT_HEALTH_TTL_MS) {
+    const probe = await cmsAgentHealthClient.resolveAgent({ role: 'client_manager', project_id: projectId });
+    cmsAgentHealthCache.set(projectId, {
       at: now,
       health: probe.ok
         ? { ok: true, agent_ref: probe.data }
         : { ok: false, code: probe.code, message: probe.message },
-    };
+    });
   }
-  return { ...status, health: cmsAgentHealthCache.health };
+  return { ...status, health: cmsAgentHealthCache.get(projectId)!.health };
 };
 
 /** The chat-tool catalog for the guardrails table — the SINGLE source is

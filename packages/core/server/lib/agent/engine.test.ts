@@ -439,3 +439,34 @@ test('humanCopyForCmsAgentError: every named class gets editor-safe copy; unknow
     assert.equal(/gpt|openai|anthropic|claude|agt_|schema/i.test(copy), false, `no internals in copy for ${code}`);
   }
 });
+
+test('buildChatEngine fallback: after one degradation the REST OF THE HOP stays on the provider — one loud event, no repeat probing', async () => {
+  const { adapter, count } = spyAdapter();
+  let cmsAttempts = 0;
+  const client: CmsAgentTurnClient = {
+    async resolveAgent() {
+      cmsAttempts += 1;
+      return { ok: false, code: 'cms_agent_unreachable', message: 'down', retryableWithSameTurnId: true };
+    },
+    async converse() {
+      return { ok: false, code: 'cms_agent_unreachable', message: 'down', retryableWithSameTurnId: true };
+    },
+    invalidateAgentRef() {},
+  };
+  const engine = buildChatEngine({
+    mode: 'fallback',
+    adapter,
+    client,
+    projectId: 'platform',
+    siteId: 'site_platform',
+    nowIso: () => NOW_ISO,
+  });
+  const doc = chatDoc();
+  const run = chatRun();
+  await engine({ doc, run, system: '', tools: [] });
+  await engine({ doc, run, system: '', tools: [] });
+  await engine({ doc, run, system: '', tools: [] });
+  assert.equal(count(), 3, 'every turn is answered by the provider');
+  assert.equal(cmsAttempts, 1, 'the dead service is probed once per hop, not per turn');
+  assert.equal(doc.events.filter((entry) => entry.type === 'engine_fallback').length, 1, 'one loud event, not three');
+});

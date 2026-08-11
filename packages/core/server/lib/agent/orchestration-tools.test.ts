@@ -119,6 +119,27 @@ test('get_workspace_run returns a bounded projection — a huge run record never
     { id: 'draft_writer', status: 'completed' },
     { id: 'article_body', status: 'pending' },
   ]);
+  // The raw mode block names the provider — only the live/mock boolean may pass.
+  assert.equal(payload.live_output, true);
+  assert.equal('mode' in payload, false);
+  assert.equal(result.content.includes('openai'), false, 'no provider names in editor-facing output');
+});
+
+test('list_workspace_nodes caps the projection at 100 nodes and reports the truncation', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const many = Array.from({ length: 150 }, (_, index) => ({
+    id: `node_${index}`,
+    name: `Node ${index}`,
+    kind: 'strategy',
+    riskLevel: 'read',
+    description: 'x',
+  }));
+  const ctx = bridgeCtx(() => ({ nodes: many }), calls);
+  const tool = chatToolByName('list_workspace_nodes')!;
+  const result = await tool.execute(ctx, {});
+  const payload = JSON.parse(result.content) as { nodes: unknown[]; truncated?: number };
+  assert.equal(payload.nodes.length, 100);
+  assert.equal(payload.truncated, 50);
 });
 
 // ─── run_workspace_workflow: start/advance, no `approved`, input-echo dry-run ─

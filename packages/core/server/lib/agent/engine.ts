@@ -290,11 +290,18 @@ export const buildChatEngine = (options: ChatEngineOptions): TurnEngine => {
   const cms = cmsAgentEngine({ client: options.client, projectId: options.projectId, siteId: options.siteId });
   if (options.mode === 'required') return cms;
   const at = options.nowIso ?? (() => new Date().toISOString());
+  // One engine instance serves one background hop. After the first
+  // degradation the REST OF THE HOP stays on the provider path: re-probing a
+  // dead service on every turn would add up to 90s latency per turn and spam
+  // duplicate engine_fallback events. The next hop retries CMS-Agent fresh.
+  let degradedThisHop = false;
   return async (input) => {
+    if (degradedThisHop) return provider(input);
     try {
       return await cms(input);
     } catch (error) {
       if (!(error instanceof CmsAgentEngineError)) throw error;
+      degradedThisHop = true;
       appendChatEvent(input.doc, at(), 'engine_fallback', {
         run_id: input.run.run_id,
         code: error.code,

@@ -590,7 +590,10 @@ const projectWorkspaceNode = (node: Record<string, unknown>): Record<string, unk
 });
 
 /** Bounded run projection — the full run record can approach ~500KB; this
- *  keeps status, per-node states and driver notes and nothing else. */
+ *  keeps status, per-node states and driver notes and nothing else. The
+ *  `mode` block is reduced to a live/mock boolean: its raw form names the
+ *  provider (executionMode: 'openai'), which editor-facing output must
+ *  never carry. `stall` reduces to a boolean for the same reason. */
 const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unknown> => {
   const nodes = Array.isArray(run.nodes)
     ? (run.nodes as Record<string, unknown>[]).slice(0, 64).map((node) => ({
@@ -598,11 +601,13 @@ const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unkno
         status: node.status,
       }))
     : undefined;
+  const mode = run.mode as { live?: boolean; executionMode?: string } | undefined;
+  const stall = run.stall as { stalled?: boolean } | boolean | undefined;
   return {
     run_id: run.runId ?? run.id,
     status: run.status,
-    ...(run.mode !== undefined ? { mode: run.mode } : {}),
-    ...(run.stall !== undefined ? { stall: run.stall } : {}),
+    ...(mode !== undefined ? { live_output: mode.live === true || mode.executionMode === 'openai' } : {}),
+    ...(stall !== undefined ? { stalled: stall === true || (typeof stall === 'object' && stall?.stalled === true) } : {}),
     ...(typeof run.driverNote === 'string' ? { driver_note: truncate(run.driverNote, 500) } : {}),
     ...(nodes ? { nodes } : {}),
   };
@@ -620,8 +625,15 @@ const listWorkspaceNodes: ChatTool = {
     if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
     const result = await ctx.cmsAgent.callTool<{ nodes?: Record<string, unknown>[] }>('workspace_get_nodes', {});
     if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
-    const nodes = (result.data.nodes ?? []).map(projectWorkspaceNode);
-    return { content: json({ nodes }), is_error: false };
+    const all = result.data.nodes ?? [];
+    // Bounded even against a pathological workspace: this projection rides a
+    // PERSISTED tool_result event (discloseResult), and the event-log trim is
+    // count-based, not byte-based.
+    const nodes = all.slice(0, 100).map(projectWorkspaceNode);
+    return {
+      content: json({ nodes, ...(all.length > nodes.length ? { truncated: all.length - nodes.length } : {}) }),
+      is_error: false,
+    };
   },
   describe: () => 'List workspace nodes',
 };
