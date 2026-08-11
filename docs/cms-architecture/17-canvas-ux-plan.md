@@ -1,7 +1,13 @@
 # W17 — Canvas UX: Marginalia concept build + edit-mode chrome modernization
 
-**Status:** Plan, not yet scheduled. T17.0 is a `checkpoint` — it does not start
-until Wolf answers the scope question in §2.
+**Status:** Plan of record, scheduled. §2's scope question is **ANSWERED —
+Wolf chose (a), the full concept**, 2026-08-10
+([`decisions/2026-08-10-canvas-ux-scope-ruling.md`](decisions/2026-08-10-canvas-ux-scope-ruling.md)).
+T17.0 ran on that ruling and produced
+[`../design/marginalia-interaction-model.md`](../design/marginalia-interaction-model.md)
+plus the T17.3–T17.13 briefs; the `queue.tsv` rows exist with resolved
+`briefPath`s. T17.1/T17.2 have landed. §2 below is kept as the record of what
+was asked — it is no longer a gate.
 **Written:** 2026-08-10, from a live verification session driven against
 production (`drluriescience.netlify.app`, signed in, network-traced).
 **Governing target:** [`docs/design/marginalia-concept-b-final.pdf`](../design/marginalia-concept-b-final.pdf)
@@ -26,7 +32,20 @@ wrong with it today, and they are independent problems that got conflated:
 W17 closes both. §3's table is the full task set with per-task model and effort;
 §5 says which of them can share a session and which must not.
 
-## 2. Scope question for Wolf (blocks T17.0, and therefore T17.3–T17.9)
+## 2. Scope question for Wolf — ANSWERED 2026-08-10: **(a), the full concept**
+
+> **Ruling (Wolf, 2026-08-10):** the concept PDF is the target, in full. Run
+> all of T17.0–T17.13. Recorded, with its six consequences, in
+> [`decisions/2026-08-10-canvas-ux-scope-ruling.md`](decisions/2026-08-10-canvas-ux-scope-ruling.md).
+> The rest of this section is the question as it was put; it is history now.
+> One correction the PDF forced once T17.0 read it against the code: **three
+> further elements have no owner in §3's table** — the reduced three-pill
+> toolbar, the inline `· draft` chip, and the `≈ $1.42 · 3 runs` cost chip
+> (which has no data source anywhere in `packages/core`). See
+> [`../design/marginalia-interaction-model.md`](../design/marginalia-interaction-model.md)
+> §10.
+
+
 
 **Correction to what was said earlier in the 2026-08-10 session:** when asked
 "is 9–16 it?", the answer given was yes. That was right about the *deferred
@@ -96,9 +115,11 @@ model or touching layout/anchoring logic with no existing precedent in the file.
 | **T17.12** | Review-decision linking (item 15) — ties threads to `object_review_decide` | auto | `claude-sonnet-5` | medium |
 | **T17.13** | Headless-browser smoke test for the canvas annotation surface (item 16) | auto | `claude-sonnet-5` | medium |
 
-`briefPath` is deliberately omitted: **T17.0 writes the briefs.** Do not paste
-these rows into `queue.tsv` before those brief files exist — the runner resolves
-`briefPath` and will fail or, worse, run a task with no spec.
+~~`briefPath` is deliberately omitted: **T17.0 writes the briefs.**~~ **Done
+2026-08-10:** the T17.3–T17.13 briefs exist in
+`docs/cms-architecture/cms-pipeline/` and the rows are appended to `queue.tsv`
+with resolved `briefPath`s, in execution order (Batch B first). Model column
+there uses `claude-opus-5` / `claude-sonnet-5` as this table specifies.
 
 ## 4. T17.1 and T17.2 are ready now and depend on nothing above
 
