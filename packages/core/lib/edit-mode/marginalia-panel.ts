@@ -37,6 +37,7 @@ import {
   setMarginaliaThreadStatus,
 } from '../admin/marginalia-client.js';
 import type { MarginaliaThreadStatus, MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
+import { ICON_SEND } from './ui-chrome.js';
 import type { GetToken } from './verbs-client.js';
 
 export type MarginaliaPanelTarget = {
@@ -105,6 +106,15 @@ export type MarginaliaPanelOptions = {
   emptyLabel?: string;
   /** Composer placeholder; the accordion's wording by default. */
   composerPlaceholder?: string;
+  /**
+   * T17.14a (affordance-model §2, R2): a BLOCK bubble shows no empty-state
+   * line at rest — the PDF's card has none, and the ghost bubble already
+   * means "nothing here yet". The log element is left empty and hidden, so
+   * the card is identity + composer + footer and nothing else. List mode and
+   * whole-object / orphan groups leave this off: they are lists, and a list
+   * with nothing in it has to say so.
+   */
+  omitEmptyLog?: boolean;
 };
 
 /**
@@ -129,7 +139,9 @@ export const mountMarginaliaPanel = async (
     `<textarea class="dl-em-marg-input" data-em-marg-input placeholder="${escapeHtml(
       options.composerPlaceholder ?? 'Add a comment…'
     )}"></textarea>` +
-    `<button type="button" class="dl-em-btn dl-em-primary dl-em-send dl-em-ico" data-em-marg-send aria-label="Send comment">Send</button>` +
+    // T17.14a: the PDF's filled send glyph, not a "Send" word. The accessible
+    // name is unchanged — the button still announces as "Send comment".
+    `<button type="button" class="dl-em-btn dl-em-primary dl-em-send dl-em-ico" data-em-marg-send aria-label="Send comment">${ICON_SEND}</button>` +
     `</div></div>`;
 
   const logEl = container.querySelector<HTMLElement>('[data-em-marg-log]');
@@ -143,29 +155,53 @@ export const mountMarginaliaPanel = async (
     if (!logEl.isConnected) return;
     const shown = options.selectThreads ? options.selectThreads(threads) : threads;
     if (shown.length === 0) {
-      logEl.innerHTML = `<div class="dl-em-msg dl-em-sys">${escapeHtml(options.emptyLabel ?? 'No comments yet.')}</div>`;
+      // T17.14a: a block bubble at rest is identity + composer + footer, with
+      // no "No comments on this block yet." line — the PDF's card has none.
+      logEl.innerHTML = options.omitEmptyLog
+        ? ''
+        : `<div class="dl-em-msg dl-em-sys">${escapeHtml(options.emptyLabel ?? 'No comments yet.')}</div>`;
+      logEl.hidden = Boolean(options.omitEmptyLog);
       return;
     }
+    logEl.hidden = false;
     logEl.innerHTML = '';
     for (const thread of shown) {
       const threadEl = document.createElement('div');
       threadEl.className = 'dl-em-marg-thread';
       const action = nextMarginaliaResolveAction(thread.status);
-      threadEl.innerHTML =
-        `<div class="dl-em-marg-thread-head">` +
-        `<span class="dl-em-marg-status dl-em-marg-status-${thread.status}">${escapeHtml(marginaliaStatusLabel(thread.status))}</span>` +
-        `<span class="dl-em-marg-scope">${escapeHtml(describeMarginaliaAnchor(thread.anchor))}</span>` +
-        `<button type="button" class="dl-em-btn dl-em-ghost dl-em-marg-toggle" data-em-marg-toggle="${escapeHtml(thread.id)}" data-em-marg-next="${action.next}">${escapeHtml(action.label)}</button>` +
-        `</div>`;
-      for (const comment of thread.comments) {
+      // T17.14a (affordance-model §2, R2): the per-thread status pill survives
+      // only where it is genuine information. `Open` is carried twice already
+      // — by the gutter marker's numeral and by the footer strip — so it is
+      // dropped; `Resolved` / `Dismissed` are not, so they stay. The scope
+      // line (`Section sec_x`) goes with it: the bubble IS the scope.
+      // `describeMarginaliaAnchor` stays exported for surfaces that are lists
+      // rather than block bubbles and genuinely need a "where".
+      if (thread.status !== 'open') {
+        threadEl.innerHTML =
+          `<div class="dl-em-marg-thread-head">` +
+          `<span class="dl-em-marg-status dl-em-marg-status-${thread.status}">${escapeHtml(marginaliaStatusLabel(thread.status))}</span>` +
+          `</div>`;
+      }
+      thread.comments.forEach((comment, index) => {
         const commentEl = document.createElement('div');
         commentEl.className = 'dl-em-msg dl-em-user dl-em-marg-comment';
         commentEl.innerHTML =
           `<div class="dl-em-marg-comment-meta"><strong>${escapeHtml(principalName(comment.author))}</strong> ` +
           `<span class="dl-em-marg-time">${escapeHtml(comment.at)}</span></div>` +
           `<p>${escapeHtml(comment.body)}</p>`;
+        // The resolve/reopen action is a quiet text action on the thread's
+        // LAST comment, revealed on hover/focus-within — and always in the tab
+        // order, because visually quiet must not mean absent from the a11y
+        // tree. Same handler, same `setMarginaliaThreadStatus` call.
+        if (index === thread.comments.length - 1) {
+          commentEl.insertAdjacentHTML(
+            'beforeend',
+            `<button type="button" class="dl-em-marg-resolve" data-em-marg-toggle="${escapeHtml(thread.id)}" ` +
+              `data-em-marg-next="${action.next}">✓ ${escapeHtml(action.label)}</button>`
+          );
+        }
         threadEl.append(commentEl);
-      }
+      });
       logEl.append(threadEl);
     }
     logEl.querySelectorAll<HTMLButtonElement>('[data-em-marg-toggle]').forEach((button) => {
@@ -220,7 +256,11 @@ export const mountMarginaliaPanel = async (
     }
   });
 
-  logEl.innerHTML = `<div class="dl-em-msg dl-em-sys">Loading comments…</div>`;
+  // A block bubble stays quiet while it loads too: preloaded threads resolve
+  // in a microtask, and a "Loading comments…" flash inside the PDF's card
+  // would be the empty state this option exists to remove.
+  logEl.hidden = Boolean(options.omitEmptyLog);
+  logEl.innerHTML = options.omitEmptyLog ? '' : `<div class="dl-em-msg dl-em-sys">Loading comments…</div>`;
   if (preloaded) {
     const result = await preloaded;
     threads = result.threads;

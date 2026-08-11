@@ -136,24 +136,13 @@ body.dl-em-on .dl-em-fab{display:none}
 body.dl-em-on [data-cms-section-id].dl-em-hot>*,body.dl-em-on [data-cms-nav-object].dl-em-hot>*{outline:2px solid color-mix(in srgb,var(--dlem-accent) 60%,transparent);outline-offset:6px;border-radius:2px}
 body.dl-em-on [data-cms-section-id].dl-em-focus>*,body.dl-em-on [data-cms-nav-object].dl-em-focus>*{outline:2px solid var(--dlem-accent);outline-offset:6px}
 body.dl-em-on [data-cms-section-id].dl-em-draft>*,body.dl-em-on [data-cms-nav-object].dl-em-draft>*{outline:2px dashed var(--dlem-draft);outline-offset:6px}
-.dl-em-chip{position:fixed;z-index:99994;display:none;align-items:center;gap:7px;padding:4px 6px 4px 10px;
-  border-radius:9px;border:1px solid color-mix(in srgb,var(--dlem-text) 16%,transparent);
-  background:color-mix(in srgb,var(--dlem-surface) 32%,transparent);
-  -webkit-backdrop-filter:blur(9px) saturate(1.3);backdrop-filter:blur(9px) saturate(1.3);
-  color:var(--dlem-heading);font:700 11.5px var(--dlem-font);
-  box-shadow:0 2px 12px color-mix(in srgb,var(--dlem-text) 12%,transparent)}
-.dl-em-chip .dl-em-id{font:400 10.5px ui-monospace,monospace;color:var(--dlem-muted)}
-.dl-em-chip .dl-em-shared{background:color-mix(in srgb,var(--dlem-text) 12%,transparent);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--dlem-text)}
-.dl-em-chip .dl-em-draftflag{background:var(--dlem-draft);border-radius:4px;padding:1px 6px;font-size:10px;color:#fff}
-.dl-em-chip .dl-em-tools{display:flex;gap:2px;margin-left:2px;padding-left:7px;
-  border-left:1px solid color-mix(in srgb,var(--dlem-text) 18%,transparent)}
-.dl-em-chip .dl-em-tool{display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;
-  border:none;border-radius:5px;background:transparent;color:var(--dlem-text);cursor:pointer;padding:0}
-.dl-em-chip .dl-em-tool:hover{background:color-mix(in srgb,var(--dlem-text) 14%,transparent);color:var(--dlem-heading)}
-.dl-em-chip .dl-em-tool svg{display:block}
-.dl-em-chip .dl-em-ask.dl-em-sel{background:color-mix(in srgb,var(--dlem-spark) 30%,transparent);
-  box-shadow:0 0 0 1.5px var(--dlem-spark)}
-/* Selection-algorithm dropdown (related grids) — a chip-native compact select. */
+/* The W7 hover chip is RETIRED (T17.14a). One block shows one affordance —
+   its margin bubble — so the chip element, its positioning, its decay timer
+   and every rule that styled it are gone; each of its functions has a named
+   home in docs/design/marginalia-affordance-model.md §3. What survives here
+   is only what the BUBBLE'S DRAWER reuses: the compact select and number
+   inputs of a related grid's configuration. */
+/* Selection-algorithm dropdown (related grids) — a compact select. */
 .dl-em-alg{appearance:none;-webkit-appearance:none;height:24px;padding:2px 18px 2px 8px;cursor:pointer;
   border:1px solid color-mix(in srgb,var(--dlem-text) 30%,transparent);border-radius:5px;
   background:color-mix(in srgb,var(--dlem-text) 8%,transparent) url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 6px center;
@@ -320,6 +309,16 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-hint{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--dlem-muted);margin-top:7px}
 .dl-em-hint kbd{font:600 10px ui-monospace,monospace;border:1px solid var(--dlem-border);border-radius:4px;
   padding:0 4px;color:var(--dlem-text)}
+/* The quiet "✓ Resolve" text action on a thread's last comment (T17.14a —
+   affordance-model §2, R2). Opacity, never display:none: it must stay in the
+   tab order and in the accessibility tree at all times — visually quiet is
+   not the same as absent, and resolve is one of the two actions a thread
+   has. It appears on hover or focus anywhere in the thread. */
+.dl-em-marg-resolve{display:block;margin-top:4px;padding:0;border:none;background:transparent;cursor:pointer;
+  color:var(--dlem-accent-ink);font:700 10.5px var(--dlem-font);opacity:0;transition:opacity .12s ease}
+.dl-em-marg-thread:hover .dl-em-marg-resolve,.dl-em-marg-thread:focus-within .dl-em-marg-resolve{opacity:.9}
+.dl-em-marg-resolve:hover,.dl-em-marg-resolve:focus-visible{opacity:1;text-decoration:underline}
+.dl-em-marg-resolve:focus-visible{outline:2px solid var(--dlem-accent-ink);outline-offset:2px;border-radius:4px}
 .dl-em-marg-thread{display:flex;flex-direction:column;gap:6px;padding:8px 0;border-bottom:1px solid var(--dlem-border)}
 .dl-em-marg-thread:last-child{border-bottom:none}
 .dl-em-marg-thread-head{display:flex;align-items:center;gap:8px;font-size:11px}
@@ -353,7 +352,7 @@ body.dl-em-on .dl-em-gaplayer{display:block}
    left edge AND width ui.ts computes from the content column (compact mode
    narrows --dlem-rail-w to the margin the page really has, rather than moving
    the page); bubbles are absolutely positioned inside it at viewport
-   coordinates and repositioned on scroll, exactly as the hover chip is.
+   coordinates and repositioned on scroll.
    Spec: docs/design/marginalia-interaction-model.md §§1–2, 8.1. */
 .dl-em-rail{position:fixed;top:0;left:0;width:var(--dlem-rail-w);height:0;z-index:99991;display:none;
   pointer-events:none;font:13px/1.5 var(--dlem-font)}
@@ -364,16 +363,75 @@ body.dl-em-on .dl-em-rail.dl-em-rail-on{display:block}
   -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
   border:1px solid color-mix(in srgb,var(--aw-color-primary,rgb(20 122 140)) 18%,transparent)}
 .dl-em-bubble.dl-em-pinned{border-color:color-mix(in srgb,var(--dlem-accent) 55%,transparent)}
-.dl-em-bubble-head{display:flex;align-items:center;gap:8px;padding:7px 7px 7px 12px;border-radius:13px 13px 0 0;
+/* ── the bubble's anatomy (T17.14a — affordance-model §2) ───────────────────
+   R1 identity row · R2 thread log · R3 composer · R4 footer strip · R5 the
+   block drawer. The PDF's card exactly: the agent route and "✎ edit directly"
+   on one row, the conversation, the composer, then "{object} · {state}" and a
+   chevron. Everything the retired hover chip carried is either a line here or
+   a labelled row in R5 — deliberately NOT an icon strip, which is the
+   difference between "native in the bubble" and "the chip, relocated". */
+.dl-em-bubble-id{display:flex;align-items:flex-start;gap:8px;padding:8px 10px 7px 11px;border-radius:13px 13px 0 0;
   border-bottom:1px solid var(--dlem-border);
   background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 65%,transparent);
   -webkit-backdrop-filter:blur(12px) saturate(1.3);backdrop-filter:blur(12px) saturate(1.3)}
-.dl-em-bubble-title{flex:1;min-width:0;font:600 12px var(--dlem-font);color:var(--dlem-heading);
+.dl-em-bubble-who{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dl-em-bubble-agent{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font:600 11.5px/1.35 var(--dlem-font);
+  color:var(--dlem-heading)}
+.dl-em-bubble-agent[hidden]{display:none}
+.dl-em-avatar{width:20px;height:20px;flex:none;border-radius:6px;object-fit:cover}
+.dl-em-avatar-initials{display:inline-flex;align-items:center;justify-content:center;
+  background:var(--dlem-accent);color:var(--dlem-accent-ink);font:700 9.5px var(--dlem-font);letter-spacing:.02em}
+.dl-em-agentvia{color:var(--dlem-muted);font-weight:400}
+/* The block's own identity — the string the chip used to print, minus the
+   monospace id, which is provenance and lives in this line's tooltip now. */
+.dl-em-bubble-block{font:500 10.5px/1.4 var(--dlem-font);color:var(--dlem-muted);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dl-em-bubble-open{flex:none;padding:1px 7px;border-radius:9px;background:var(--dlem-draft);color:#fff;
-  font:700 10.5px var(--dlem-font)}
+.dl-em-bubble-shared{margin-left:4px;color:var(--dlem-accent);font-weight:700}
+/* "✎ edit directly" — a text action with a glyph and a dotted underline, per
+   the PDF. Not an icon button: the pencil tool is a sentence now. */
+.dl-em-editlink{flex:none;display:inline-flex;align-items:center;gap:4px;border:none;background:transparent;
+  padding:0;cursor:pointer;color:var(--dlem-muted);font:600 10.5px var(--dlem-font);
+  text-decoration:underline dotted;text-underline-offset:3px}
+.dl-em-editlink:hover{color:var(--dlem-accent)}
+.dl-em-editlink:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:2px;border-radius:4px}
+.dl-em-editlink svg{display:block}
 .dl-em-bubble .dl-em-log{max-height:38vh;min-height:0}
+.dl-em-bubble .dl-em-log[hidden]{display:none}
 .dl-em-bubble .dl-em-composer{border-top:1px solid var(--dlem-border)}
+/* R4 — the footer strip: what object this is and where it stands. */
+.dl-em-bubble-foot{display:flex;align-items:center;gap:7px;padding:6px 6px 6px 11px;
+  border-top:1px solid var(--dlem-border);border-radius:0 0 13px 13px;
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 55%,transparent)}
+.dl-em-foot-title{flex:1;min-width:0;font:600 11px var(--dlem-font);color:var(--dlem-heading);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-em-statepill{flex:none;padding:1px 8px;border-radius:9px;font:700 10px var(--dlem-font);white-space:nowrap}
+.dl-em-statepill[hidden]{display:none}
+.dl-em-statepill.dl-em-state-published{background:color-mix(in srgb,var(--dlem-ok) 18%,transparent);color:var(--dlem-ok)}
+.dl-em-statepill.dl-em-state-draft{background:color-mix(in srgb,var(--dlem-draft) 18%,transparent);color:var(--dlem-draft)}
+.dl-em-statepill.dl-em-state-never{background:color-mix(in srgb,var(--dlem-text) 10%,transparent);color:var(--dlem-muted)}
+.dl-em-drawer-toggle{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:22px;
+  padding:0;border:none;border-radius:6px;background:transparent;color:var(--dlem-muted);cursor:pointer}
+.dl-em-drawer-toggle:hover{background:color-mix(in srgb,var(--dlem-text) 10%,transparent);color:var(--dlem-text)}
+.dl-em-drawer-toggle:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:1px}
+.dl-em-drawer-toggle .dl-em-chev{transition:transform .16s ease}
+.dl-em-bubble.dl-em-drawer-open .dl-em-drawer-toggle .dl-em-chev{transform:rotate(180deg);color:var(--dlem-accent)}
+.dl-em-bubble.dl-em-drawer-open .dl-em-bubble-foot{border-radius:0}
+/* R5 — the block drawer. Labelled text rows with a leading glyph. */
+.dl-em-drawer{display:flex;flex-direction:column;padding:4px;border-top:1px solid var(--dlem-border);
+  border-radius:0 0 13px 13px;background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 45%,transparent)}
+.dl-em-drawer[hidden]{display:none}
+.dl-em-drawer-head{padding:6px 8px 5px;font:600 10px var(--dlem-font);letter-spacing:.04em;text-transform:uppercase;
+  color:var(--dlem-muted)}
+.dl-em-drawer-id{font:400 10px ui-monospace,monospace;text-transform:none;letter-spacing:0}
+.dl-em-drawer-rule{height:1px;margin:4px 6px;background:var(--dlem-border)}
+.dl-em-drawer-row{display:flex;align-items:center;gap:9px;width:100%;padding:7px 8px;border:none;border-radius:7px;
+  background:transparent;color:var(--dlem-text);cursor:pointer;font:600 12px var(--dlem-font);text-align:left}
+.dl-em-drawer-row:hover{background:color-mix(in srgb,var(--dlem-text) 8%,transparent)}
+.dl-em-drawer-row:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:-1px}
+.dl-em-drawer-row svg{display:block;flex:none;color:var(--dlem-muted)}
+.dl-em-drawer-row.dl-em-drawer-danger{color:var(--dlem-danger)}
+.dl-em-drawer-row.dl-em-drawer-danger svg{color:var(--dlem-danger)}
+.dl-em-drawer-row.dl-em-drawer-danger:hover{background:color-mix(in srgb,var(--dlem-danger) 12%,transparent)}
 .dl-em-bubble-more{margin:0 12px 8px;padding:4px 8px;border-radius:7px;border:1px dashed var(--dlem-border);
   background:transparent;color:var(--dlem-muted);font:600 10.5px var(--dlem-font);cursor:pointer;align-self:flex-start}
 .dl-em-bubble-more:hover{border-color:var(--dlem-accent);color:var(--dlem-accent)}
@@ -413,7 +471,16 @@ body.dl-em-on .dl-em-gutter{display:block}
 .dl-em-draftchip{position:absolute;pointer-events:none;white-space:nowrap;border-radius:5px;padding:1px 6px;
   background:color-mix(in srgb,var(--dlem-draft) 16%,transparent);color:var(--dlem-draft);
   font:700 10px var(--dlem-font)}
-/* List mode: every open thread on the page, one row each. */
+/* List mode: every open thread on the page, one row each. Its head is the
+   only survivor of the pre-fold bubble header (T17.14a replaced the block
+   bubble's with the identity row above): a LIST is not a block, so it keeps a
+   title and a close control. */
+.dl-em-bubble-head{display:flex;align-items:center;gap:8px;padding:7px 7px 7px 12px;border-radius:13px 13px 0 0;
+  border-bottom:1px solid var(--dlem-border);
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 65%,transparent);
+  -webkit-backdrop-filter:blur(12px) saturate(1.3);backdrop-filter:blur(12px) saturate(1.3)}
+.dl-em-bubble-title{flex:1;min-width:0;font:600 12px var(--dlem-font);color:var(--dlem-heading);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-em-bubble-list .dl-em-listrows{display:flex;flex-direction:column;max-height:44vh;overflow-y:auto;padding:6px}
 .dl-em-listrow{display:flex;flex-direction:column;gap:2px;text-align:left;width:100%;border:none;border-radius:8px;
   background:transparent;color:var(--dlem-text);padding:7px 9px;cursor:pointer;font:inherit}
@@ -437,7 +504,7 @@ body.dl-em-on .dl-em-gutter{display:block}
    re-layout pass on transitionend; this is the hide. It is deliberately
    visibility, not display: a hidden bubble keeps its measured height, so the
    packing pass that runs on settle is not measuring zero-height boxes.
-   The rail, gutter, chip, gap layer and palette are all positioned by ui.ts in
+   The rail, gutter, gap layer and palette are all positioned by ui.ts in
    viewport coordinates read from live boxes, so they need no --dlem-shift
    compensation of their own — only the fixed chrome above, which is pinned by
    CSS to an edge the page no longer reaches, does. */
@@ -462,8 +529,8 @@ body.dl-em-on .dl-em-gutter{display:block}
    text tools to make simple changes expected in such scenario: bold, italic,
    bullet points and so on." It belongs AT the text, not in the rail bubble
    head, so it is anchored to the selection rect and floats over everything on
-   the canvas — one notch above the chip, below the delete confirmation. Same
-   glass treatment as the chip so it reads as the same surface. */
+   the canvas — one notch above the rail, below the delete confirmation. Same
+   glass treatment as the bubble so it reads as the same surface. */
 .dl-em-fmt{position:fixed;top:0;left:0;z-index:99995;display:flex;align-items:center;gap:2px;padding:4px 5px;
   border-radius:10px;border:1px solid color-mix(in srgb,var(--dlem-text) 16%,transparent);
   background:color-mix(in srgb,var(--dlem-surface) 32%,transparent);
@@ -499,9 +566,9 @@ body.dl-em-on .dl-em-rail.dl-em-rail-sheet.dl-em-rail-on{display:flex;flex-direc
 .dl-em-rail.dl-em-rail-sheet .dl-em-bubble-link{display:none}
 @media (max-width:900px){.dl-em-panel{top:auto;left:10px;right:10px;bottom:10px;width:auto;max-height:62vh}}
 /* Glass treatment (Wolf, 2026-08-10 — docs/design/marginalia-glass-ui-modernization.md
-   §2): extends the blur/tint .dl-em-chip already uses to the rest of the
+   §2): extends the blur/tint the retired hover chip used to the rest of the
    edit-mode chrome so the whole surface reads as one glass layer instead of
-   one glass chip plus several flat opaque cards. Tokens are the same
+   one glass surface plus several flat opaque cards. Tokens are the same
    --aw-color-* brand vars as the rest of the file, so the tint follows
    whatever theme is active. Later in source than each rule's base
    definition above, so these overrides win at equal specificity. */
@@ -523,7 +590,7 @@ body.dl-em-on .dl-em-rail.dl-em-rail-sheet.dl-em-rail-on{display:flex;flex-direc
 // ── inline icons ─────────────────────────────────────────────────────────────
 // The sparkles' stars use --dlem-spark (a brightened site gold) so the AI
 // action reads a notch brighter than the neighboring tools, which stay in the
-// chip's ink color (currentColor).
+// surface's ink color (currentColor).
 export const ICON_SPARKLES =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
   '<path fill="var(--dlem-spark)" d="M12 2.8l2.1 5.6 5.6 2.1-5.6 2.1L12 18.2l-2.1-5.6-5.6-2.1 5.6-2.1z"/>' +
@@ -573,7 +640,7 @@ export const ICON_REDO =
   '<path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>';
 // ── inline formatting toolbar (T17.8 fix 3) ──────────────────────────────────
 // One icon per grammar control. Drawn to the same 24-box, 13px, currentColor
-// convention as the chip's tools so the bubble reads as the same surface.
+// convention as the rest of the canvas so it reads as the same surface.
 export const ICON_BOLD =
   '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +

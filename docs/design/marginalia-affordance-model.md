@@ -3,6 +3,14 @@
 **Status:** Buildable specification, written by T17.14 (2026-08-11). Planning
 artifact — no code changed in the commit that introduced it.
 
+**BUILD STATE (2026-08-11).** §§3 and 4 (the chip's inventory, the single state
+machine) and §2's R1–R4 plus the R5 shell are **BUILT by T17.14a**; the
+deviations that task had to make where this document is silent are listed in
+its build-log entry (`../cms-architecture/17-canvas-ux-plan.md` §7). §2's
+remaining R5 rows, R3's selection strip and §5.1's panel↔rail coexistence are
+T17.14b. §6 shipped early as T17.14c. §7 shipped as T17.6b, with Wolf's Q1
+answered "keep 'exit' visible" — four pills, not three.
+
 **Governing ruling (Wolf, 2026-08-11), verbatim.** Asked whether to retire the
 W7 hover chip, fold it into the margin bubble, or keep both:
 
