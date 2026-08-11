@@ -1,7 +1,19 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { derivePrimaryInlineField, inlineEditOps, isRichTextDocument, shouldCaptureSelection } from './inline-edit.js';
+import {
+  derivePrimaryInlineField,
+  inlineEditOps,
+  inlineToolbarModeFor,
+  inlineValueBlockTexts,
+  isUpgradableBody,
+  normalizePlainBody,
+  upgradableCommitValue,
+  isRichTextDocument,
+  shouldCaptureSelection,
+} from './inline-edit.js';
+import { renderArticleNodes } from '../article-object/render-nodes.js';
+import type { ContentItemBody } from '../../schema/bodies/content-item-v1.js';
 import type { EditTarget } from './targets.js';
 
 const richTextDoc = { nodeType: 'document', data: {}, content: [] };
@@ -90,6 +102,157 @@ describe('derivePrimaryInlineField', () => {
 
   it('does not offer a string ARRAY (a bullet list is not one value)', () => {
     assert.strictEqual(derivePrimaryInlineField({ items: ['one', 'two'] }, 'content_item'), undefined);
+  });
+});
+
+describe('inlineToolbarModeFor', () => {
+  it('gives a rich_text.v1 body the full grammar', () => {
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'doc' }, 'content_item'), 'rich');
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'doc' }, 'page'), 'rich');
+  });
+
+  it('gives a single-line string the muted "Plain text" hint, never buttons', () => {
+    // A <strong> in a heading string is escaped by the renderer and ships as
+    // literal markup — offering the button would be actively harmful.
+    for (const key of ['title', 'heading', 'eyebrow', 'ctaText', 'label']) {
+      assert.strictEqual(inlineToolbarModeFor({ key, kind: 'plain' }, 'content_item'), 'plain', key);
+      assert.strictEqual(inlineToolbarModeFor({ key, kind: 'plain' }, 'page'), 'plain', key);
+    }
+  });
+
+  it('gives a raw HTML section body no toolbar at all (out of scope here)', () => {
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'html' }, 'page'), 'none');
+  });
+
+  it('offers the full bar on an article body string — it may become a document', () => {
+    // Wolf, 2026-08-11: "Yes — upgrade on first format."
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'plain' }, 'content_item'), 'upgrade');
+    assert.strictEqual(isUpgradableBody({ key: 'body', kind: 'plain' }, 'content_item'), true);
+  });
+
+  it('does NOT offer it on a section body string, whose schema has no document shape', () => {
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'plain' }, 'page'), 'plain');
+    assert.strictEqual(isUpgradableBody({ key: 'body', kind: 'plain' }, 'section'), false);
+    assert.strictEqual(isUpgradableBody({ key: 'title', kind: 'plain' }, 'content_item'), false);
+  });
+});
+
+describe('upgradableCommitValue — the shape changes on the first FORMAT, not the first edit', () => {
+  const doc = { nodeType: 'document', data: {}, content: [] };
+
+  it('returns the original string byte for byte when nothing textual changed', () => {
+    // Opening a block and clicking away must never rewrite its whitespace.
+    const before = 'One.\n\n\nTwo.   ';
+    assert.strictEqual(upgradableCommitValue(before, doc, 'One.\n\nTwo.', false), before);
+  });
+
+  it('returns the edited plain string while no formatting has been applied', () => {
+    assert.strictEqual(upgradableCommitValue('One.', doc, 'One, edited.', false), 'One, edited.');
+  });
+
+  it('returns the DOCUMENT the moment formatting appears — one update_node, one way', () => {
+    assert.strictEqual(upgradableCommitValue('One.', doc, 'One.', true), doc);
+  });
+
+  it('upgrades even when the text is untouched: bolding a word IS the change', () => {
+    assert.strictEqual(upgradableCommitValue('One.', doc, 'One.', true), doc);
+  });
+});
+
+describe('normalizePlainBody', () => {
+  it('collapses blank runs and trims paragraphs, exactly as the renderer does', () => {
+    assert.strictEqual(normalizePlainBody('  a  \n\n\n  b\nc  '), 'a\n\nb\nc');
+    assert.strictEqual(normalizePlainBody(''), '');
+  });
+});
+
+describe('inlineValueBlockTexts — the key the editor mounts by', () => {
+  /** The text each rendered <p> actually exposes as `textContent`. */
+  const renderedParagraphTexts = (body: string): string[] => {
+    const { html } = renderArticleNodes('req_a', {
+      nodes: [{ id: 'n_1', kind: 'content', public: { body } }],
+    } as unknown as ContentItemBody);
+    return [...html.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((match) =>
+      match[1]
+        .replace(/<[^>]*>/g, '')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&quot;', '"')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+    );
+  };
+
+  it('splits a plain body exactly where the renderer splits paragraphs', () => {
+    const body = 'First paragraph.\n\nSecond one.\n\n\nThird, after extra blank lines.';
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), [
+      'First paragraph.',
+      'Second one.',
+      'Third, after extra blank lines.',
+    ]);
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), renderedParagraphTexts(body));
+  });
+
+  it('drops single newlines, because the renderer emits them as <br/> (no text)', () => {
+    const body = 'Line one\nline two';
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), ['Line oneline two']);
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), renderedParagraphTexts(body));
+  });
+
+  it('carries an escaped character through as the reader sees it', () => {
+    const body = "Barrier & bounce — it's fine";
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), renderedParagraphTexts(body));
+  });
+
+  it('treats a single-line field as one block', () => {
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'title', kind: 'plain' }, 'A heading'), ['A heading']);
+  });
+
+  it('splits an HTML body on its real block boundaries', () => {
+    assert.deepStrictEqual(
+      inlineValueBlockTexts({ key: 'body', kind: 'html' }, '<p>One <strong>bold</strong>.</p><ul><li>a</li></ul>'),
+      ['One bold.', 'a']
+    );
+  });
+
+  it('reads a rich_text.v1 document block by block, lists concatenated like their <ul>', () => {
+    const doc = {
+      nodeType: 'document',
+      data: {},
+      content: [
+        { nodeType: 'heading-2', data: {}, content: [{ nodeType: 'text', value: 'Title', marks: [], data: {} }] },
+        {
+          nodeType: 'unordered-list',
+          data: {},
+          content: [
+            {
+              nodeType: 'list-item',
+              data: {},
+              content: [
+                { nodeType: 'paragraph', data: {}, content: [{ nodeType: 'text', value: 'one', marks: [], data: {} }] },
+              ],
+            },
+            {
+              nodeType: 'list-item',
+              data: {},
+              content: [
+                { nodeType: 'paragraph', data: {}, content: [{ nodeType: 'text', value: 'two', marks: [], data: {} }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'doc' }, doc), ['Title', 'onetwo']);
+  });
+
+  it('yields nothing for an empty or absent value — the caller falls back to the panel', () => {
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, ''), []);
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, undefined), []);
+    assert.deepStrictEqual(
+      inlineValueBlockTexts({ key: 'body', kind: 'doc' }, { nodeType: 'document', content: [] }),
+      []
+    );
   });
 });
 

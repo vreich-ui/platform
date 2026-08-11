@@ -46,16 +46,25 @@ import {
 import {
   derivePrimaryInlineField,
   inlineEditOps,
+  inlineToolbarModeFor,
+  inlineValueBlockTexts,
+  upgradableCommitValue,
   shouldCaptureSelection,
   NON_COPY_KEY_RE,
   type InlineField,
 } from './inline-edit.js';
-import type { RichTextEditorHandle } from './richtext-editor.js';
+import type { InlineToolbarHandle, RichTextEditorHandle } from './richtext-editor.js';
 import { applyNavChangesToBody, navChangesToOps, navEditFieldsFor, type NavEditField } from './nav-editor.js';
 import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
-import { previewFieldChange, restoreRegion, snapshotRegion, type RegionSnapshot } from './preview.js';
+import {
+  findBlockElements,
+  previewFieldChange,
+  restoreRegion,
+  snapshotRegion,
+  type RegionSnapshot,
+} from './preview.js';
 import { mountMarginaliaPanel, type MarginaliaPanelTarget } from './marginalia-panel.js';
 import {
   blockAttentionCounts,
@@ -129,6 +138,8 @@ const RAIL_TOP = 46;
 const RAIL_SHEET_FLOOR = 900;
 /** Gutter-marker centre, left of the block's leading edge (spec §4.2). */
 const GUTTER_X = 28;
+/** The formatting bubble flips below the selection rather than hide under the bar. */
+const INLINE_TOOLBAR_TOP_GUARD = RAIL_TOP;
 /** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
 const RAIL_REVEAL_MS = 120;
 const RAIL_DISMISS_MS = 250;
@@ -2618,13 +2629,21 @@ export const mountEditMode = (options: MountOptions): void => {
     snapshot: RegionSnapshot;
     host: HTMLElement;
     richText?: RichTextEditorHandle;
+    /** The formatting bubble, when the field takes one. */
+    toolbar?: InlineToolbarHandle;
     committing: boolean;
   };
   let inlineEdit: InlineEditState | undefined;
 
   /** Read the surface back: a rich-text document, or the text the editor holds. */
   const inlineEditValue = (edit: InlineEditState): unknown => {
-    if (edit.field.kind === 'doc') return edit.richText?.getRichTextV1();
+    const rich = edit.richText;
+    if (rich) {
+      if (edit.field.kind === 'doc') return rich.getRichTextV1();
+      // An upgradable plain body: it stays a string until the document
+      // actually carries formatting (Wolf: "upgrade on first format").
+      return upgradableCommitValue(edit.before, rich.getRichTextV1(), rich.getPlainText(), !rich.isPlainText());
+    }
     // innerText keeps line breaks (blank line = new paragraph for article
     // bodies); nbsp from contenteditable normalises back to a plain space.
     return (edit.host.innerText ?? '')
@@ -2644,8 +2663,38 @@ export const mountEditMode = (options: MountOptions): void => {
   /** Leave inline edit, restoring the block's rendered content. */
   const finishInlineEdit = (edit: InlineEditState): void => {
     if (inlineEdit === edit) inlineEdit = undefined;
+    edit.toolbar?.destroy();
     edit.richText?.destroy();
     restoreRegion(edit.snapshot);
+    edit.region.classList.remove('dl-em-editing');
+  };
+
+  /**
+   * Leave inline edit KEEPING what the editor rendered.
+   *
+   * `finishInlineEdit` restores the pre-edit snapshot, which after a saved
+   * rich-text commit put the OLD text back on the page: the only sign anything
+   * had happened was the dashed draft outline. The editor's own DOM is already
+   * the correct rendering of exactly what was saved — the same ProseMirror
+   * document the store now holds — so it stays, minus the editing artifacts.
+   * (Rendering it again from the record would be a second renderer, which this
+   * codebase does not allow.)
+   */
+  const keepInlineEditDom = (edit: InlineEditState): void => {
+    if (inlineEdit === edit) inlineEdit = undefined;
+    edit.toolbar?.destroy();
+    // Clone BEFORE the teardown: destroying the TipTap view removes its DOM.
+    const rendered = edit.host.querySelector('.ProseMirror');
+    const kept = document.createDocumentFragment();
+    for (const child of Array.from(rendered?.childNodes ?? [])) kept.append(child.cloneNode(true));
+    // ProseMirror's own scaffolding (trailing breaks, separators) is not content.
+    for (const artifact of Array.from(kept.querySelectorAll('[class*="ProseMirror"]'))) artifact.remove();
+    for (const editable of Array.from(kept.querySelectorAll('[contenteditable]'))) {
+      editable.removeAttribute('contenteditable');
+    }
+    edit.richText?.destroy();
+    if (kept.childNodes.length > 0) edit.host.replaceWith(kept);
+    else restoreRegion(edit.snapshot);
     edit.region.classList.remove('dl-em-editing');
   };
 
@@ -2691,18 +2740,23 @@ export const mountEditMode = (options: MountOptions): void => {
           );
     attachLearningTrail(edit.target, ops, changed, manualEdits);
     const outcome = await objectSession.patch(ops);
-    finishInlineEdit(edit);
     if (!outcome.ok) {
+      finishInlineEdit(edit);
       const blockers = outcome.blockers?.length ? ` ${outcome.blockers.join(' ')}` : '';
       setStatus(`Not saved: ${outcome.error}${blockers}`);
       return;
     }
+    // A rich-text commit keeps the editor's rendering (it IS what was saved);
+    // a string commit restores the block and re-previews the new value below.
+    const savedRichText = typeof after !== 'string';
+    if (savedRichText) keepInlineEditDom(edit);
+    else finishInlineEdit(edit);
     clearLearningTrail(edit.target);
     invalidateRecord(edit.target.objectType, edit.target.objectId);
     // Show the saved value where it can be located unambiguously; where it
     // can't, the dashed draft outline and the tray remain the honest record —
     // the same contract the panel's saves have always had.
-    if (edit.field.kind !== 'doc' && typeof edit.before === 'string' && typeof after === 'string') {
+    if (!savedRichText && typeof edit.before === 'string' && typeof after === 'string') {
       previewFieldChange(edit.region, edit.field.kind === 'html' ? 'html' : 'string', edit.before, after);
     }
     edit.region.classList.add('dl-em-draft');
@@ -2737,6 +2791,50 @@ export const mountEditMode = (options: MountOptions): void => {
     selection.addRange(end);
   };
 
+  /**
+   * Mount the editing surface IN the block, over the element(s) that actually
+   * render the field — never over the block.
+   *
+   * The first cut swapped the region's whole child list for the host, which on
+   * a `display:contents` article wrapper deleted the node's whole rendering (its
+   * <h2>, eyebrow, <ul>, <figure> and CTA) and on a section deleted the
+   * `<section class="dl-section">` itself, taking its padding, its 72rem
+   * centring and the 720px reading column with it — everything below reflowed
+   * the moment you double-clicked. Wolf, 2026-08-11: "make sure the main
+   * target objects don't move … keep everything like it is published."
+   *
+   * So: locate the rendered element(s) with the SAME finder the in-place
+   * preview uses, and swap in a host of the same tag carrying the same
+   * classes, so the site's `:where(p, ul, h2 …)` typography keeps matching and
+   * the block's siblings and section chrome stay on the page throughout.
+   */
+  const mountInlineHost = (
+    region: HTMLElement,
+    field: InlineField,
+    before: unknown,
+    richHost: boolean
+  ): HTMLElement | undefined => {
+    const elements = findBlockElements(region, inlineValueBlockTexts(field, before));
+    if (!elements) return undefined;
+    const [first] = elements;
+    const parent = first.parentNode;
+    // A run spanning parents is not one box to replace — bail rather than
+    // restructure the block.
+    if (!parent || elements.some((element) => element.parentNode !== parent)) return undefined;
+    // A rich-text surface emits its own <p>/<h2>/<ul> children, so its host is
+    // a bare wrapper (the prose rules are descendant selectors and keep
+    // matching). Every other surface IS the element it replaces.
+    const host = document.createElement(richHost ? 'div' : first.tagName.toLowerCase());
+    if (!richHost && first.className) host.className = first.className;
+    host.classList.add('dl-em-inline');
+    if (richHost) host.classList.add('dl-em-inline-rich');
+    host.setAttribute('role', 'textbox');
+    host.setAttribute('aria-label', `Edit ${field.key}`);
+    first.replaceWith(host);
+    for (const element of elements.slice(1)) element.remove();
+    return host;
+  };
+
   const startInlineEdit = async (region: HTMLElement, at?: { x: number; y: number }): Promise<void> => {
     if (inlineEdit) {
       if (inlineEdit.region === region) return;
@@ -2761,13 +2859,20 @@ export const mountEditMode = (options: MountOptions): void => {
       return;
     }
     const before = unit.currentData[field.key];
+    const toolbarMode = inlineToolbarModeFor(field, target.objectType);
+    // A document surface, or a plain body that may become one: either way the
+    // editor renders its own blocks, so it gets a wrapper host.
+    const richSurface = field.kind === 'doc' || toolbarMode === 'upgrade';
     const snapshot = snapshotRegion(region);
-    const host = document.createElement('div');
-    host.className = field.kind === 'doc' ? 'dl-em-inline dl-em-inline-rich' : 'dl-em-inline';
-    if (field.kind === 'html') host.classList.add('dl-em-inline-code');
-    host.setAttribute('role', 'textbox');
-    host.setAttribute('aria-label', `Edit ${field.key}`);
-    region.replaceChildren(host);
+    const host = mountInlineHost(region, field, before, richSurface);
+    if (!host) {
+      // The field's current value could not be located in the block's own
+      // rendering (an empty value, or copy the component transforms). Editing
+      // in place would mean guessing where to put the surface — and the one
+      // thing this must never do is rebuild the block. The panel takes it.
+      void openPanel(target, region, 'edit');
+      return;
+    }
     region.classList.add('dl-em-editing');
 
     const edit: InlineEditState = {
@@ -2782,21 +2887,32 @@ export const mountEditMode = (options: MountOptions): void => {
     };
     inlineEdit = edit;
 
-    if (field.kind === 'doc') {
+    const toolbarOptions = { anchor: () => edit.host, topGuard: INLINE_TOOLBAR_TOP_GUARD };
+
+    if (richSurface) {
       // The grammar-bound TipTap editor, imported only when one is needed so
       // @tiptap never enters the canvas's base bundle. Allowlist, paste
       // sanitizer and https-only links come with it, unchanged.
-      const { createRichTextEditor } = await import('./richtext-editor.js');
+      const { createRichTextEditor, plainStringToRichTextV1 } = await import('./richtext-editor.js');
       if (inlineEdit !== edit) return; // cancelled while the chunk loaded
-      edit.richText = await createRichTextEditor({
-        element: host,
-        doc: before as Parameters<typeof createRichTextEditor>[0]['doc'],
-      });
+      // An upgradable plain body is loaded as the document it round-trips to;
+      // whether it SAVES as one is decided at commit, by whether formatting
+      // was actually applied.
+      const doc =
+        field.kind === 'doc'
+          ? (before as Parameters<typeof createRichTextEditor>[0]['doc'])
+          : plainStringToRichTextV1(typeof before === 'string' ? before : '');
+      edit.richText = await createRichTextEditor({ element: host, doc });
       if (inlineEdit !== edit) {
         edit.richText.destroy();
         return;
       }
+      edit.toolbar = edit.richText.buildToolbar(toolbarMode, toolbarOptions);
       edit.richText.focus();
+      // Land the caret where the pointer was: ProseMirror adopts a DOM
+      // selection set inside its own editable, so the gesture reads like a
+      // click in text rather than a jump to the top of the block.
+      placeCaret(host, at);
     } else {
       host.setAttribute('contenteditable', 'plaintext-only');
       host.textContent = typeof before === 'string' ? before : '';
@@ -2810,6 +2926,11 @@ export const mountEditMode = (options: MountOptions): void => {
         event.preventDefault();
         document.execCommand('insertText', false, text);
       });
+      if (toolbarMode !== 'none') {
+        const { buildInlineToolbar } = await import('./richtext-editor.js');
+        if (inlineEdit !== edit) return; // cancelled while the chunk loaded
+        edit.toolbar = buildInlineToolbar(undefined, toolbarMode, toolbarOptions);
+      }
     }
 
     host.addEventListener('keydown', (event) => {
@@ -2828,7 +2949,9 @@ export const mountEditMode = (options: MountOptions): void => {
     });
     host.addEventListener('focusout', (event) => {
       const next = event.relatedTarget as Node | null;
-      if (next && host.contains(next)) return;
+      // The formatting bubble is part of the editing surface: focus landing in
+      // it (the link popover's input) must not read as "clicked away, save".
+      if (next && (host.contains(next) || edit.toolbar?.element.contains(next))) return;
       void commitInlineEdit();
     });
 
@@ -2892,7 +3015,15 @@ export const mountEditMode = (options: MountOptions): void => {
     (event) => {
       if (!inlineEdit) return;
       const element = event.target as Node | null;
-      if (element && (inlineEdit.host.contains(element) || panel.contains(element) || rail.contains(element))) return;
+      if (
+        element &&
+        (inlineEdit.host.contains(element) ||
+          inlineEdit.toolbar?.element.contains(element) ||
+          panel.contains(element) ||
+          rail.contains(element))
+      ) {
+        return;
+      }
       void commitInlineEdit();
     },
     { signal }

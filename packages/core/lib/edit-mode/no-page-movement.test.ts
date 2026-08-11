@@ -254,6 +254,20 @@ describe('no edit-mode source may write a box-model property onto the page', () 
     }
   });
 
+  it('never rebuilds an editable region to edit it — the block must survive its own edit', () => {
+    // Double-click used to replace the region's children with the editing
+    // host, which deleted the article node's <h2>/eyebrow/<ul>/<figure>/CTA —
+    // or, on a section, the `<section class="dl-section">` itself with its
+    // padding, its 72rem centring and the 720px reading column. Everything
+    // below it reflowed. The surface now replaces only the element(s) that
+    // render the edited field.
+    const text = readFileSync(join(repoRoot(), EDIT_MODE_DIR, 'ui.ts'), 'utf8');
+    assert.ok(
+      !/\bregion\.replaceChildren\s*\(/.test(text),
+      "ui.ts replaces an edit region's children — entering an edit must not rebuild the block"
+    );
+  });
+
   it('touches document.body.classList only with the allow-listed class', () => {
     const allowed = new Set(['dl-em-on']);
     const text = readFileSync(join(repoRoot(), EDIT_MODE_DIR, 'ui.ts'), 'utf8');

@@ -9,6 +9,8 @@
  *
  * Spec: docs/design/marginalia-interaction-model.md §5.
  */
+import { blockText, richTextToBlocks } from './preview.js';
+import type { InlineToolbarMode } from './richtext-editor.js';
 import { suggestionToOps, type EditTarget } from './targets.js';
 
 /**
@@ -83,6 +85,109 @@ export const derivePrimaryInlineField = (
     if (match) return match;
   }
   return eligible[0];
+};
+
+/**
+ * How much formatting the surface for a field may offer (Wolf, 2026-08-11:
+ * "When editing something that can be edited on the spot, like text it need to
+ * show rich text tools"). Derived from the field's own shape, because that is
+ * what decides which of them can actually be SAVED:
+ *
+ *   - a rich_text.v1 document takes the full grammar;
+ *   - a single-line string (heading, title, eyebrow, ctaText…) takes none —
+ *     the renderer escapes it, so a <strong> would ship as literal markup;
+ *   - a raw HTML section body gets no bubble at all: its surface is the markup
+ *     itself, and formatting it belongs with the section rich-text work.
+ *
+ * The exception is an article node's `body`: `content_item` bodies already
+ * accept EITHER shape (content-item-v1.ts) and render-nodes.ts renders both,
+ * so a plain string there can become a document the moment formatting is
+ * asked for — Wolf, 2026-08-11: "Yes — upgrade on first format."
+ */
+export const inlineToolbarModeFor = (field: InlineField, objectType: string): InlineToolbarMode => {
+  if (field.kind === 'doc') return 'rich';
+  if (field.kind === 'html') return 'none';
+  return isUpgradableBody(field, objectType) ? 'upgrade' : 'plain';
+};
+
+/**
+ * A plain string field whose store shape may become `rich_text.v1`. Only
+ * article-node bodies qualify: they are the one field whose schema is a union
+ * of both shapes, so no migration and no schema change is involved.
+ */
+export const isUpgradableBody = (field: InlineField, objectType: string): boolean =>
+  field.kind === 'plain' && objectType === 'content_item' && field.key === 'body';
+
+/**
+ * A plain body as the renderer normalizes it: blank lines split paragraphs,
+ * each paragraph trimmed, empties dropped. Two strings with the same
+ * normalization render identically, so a round trip through the editor that
+ * lands back here changed nothing.
+ */
+export const normalizePlainBody = (text: string): string =>
+  text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .join('\n\n');
+
+/**
+ * What an upgradable body actually commits, given the state of the surface:
+ *
+ *   - the document, once it carries formatting a string could not hold — this
+ *     IS the upgrade, and it is ONE `update_node` op with no schema change and
+ *     no migration (one-way: nothing downgrades it again);
+ *   - the ORIGINAL string, byte for byte, when nothing textual changed, so
+ *     opening a block and clicking away can never rewrite its whitespace;
+ *   - otherwise the edited plain string, exactly as before this task.
+ */
+export const upgradableCommitValue = (
+  before: unknown,
+  doc: unknown,
+  plain: string,
+  hasFormatting: boolean
+): unknown => {
+  if (hasFormatting) return doc;
+  if (typeof before === 'string' && normalizePlainBody(before) === plain) return before;
+  return plain;
+};
+
+type RichTextNode = { value?: unknown; content?: unknown };
+
+/** A rich_text.v1 node's text, exactly as it lands in the rendered element. */
+const richTextNodeText = (node: RichTextNode): string => {
+  if (typeof node.value === 'string') return node.value;
+  const content = Array.isArray(node.content) ? (node.content as RichTextNode[]) : [];
+  return content.map(richTextNodeText).join('');
+};
+
+/**
+ * The text of each top-level block a field's CURRENT value renders as, in the
+ * order the renderer emits them — the key the inline editor uses to find the
+ * element(s) it must mount over (fix 2). Single newlines are dropped because
+ * both renderers emit them as `<br/>`, which contributes no text.
+ *
+ * Pure: it mirrors the renderers, so it is tested against their rules rather
+ * than against a DOM.
+ *   - plain  → render-nodes.ts's `plainTextParagraphs` (blank lines split);
+ *   - html   → the real rich-text block splitter (preview.ts);
+ *   - doc    → the rich_text.v1 document's own top-level blocks.
+ */
+export const inlineValueBlockTexts = (field: InlineField, value: unknown): string[] => {
+  const strip = (text: string): string => text.replaceAll('\n', '');
+  if (field.kind === 'doc') {
+    const content = (value as { content?: unknown })?.content;
+    if (!Array.isArray(content)) return [];
+    return (content as RichTextNode[]).map((block) => strip(richTextNodeText(block))).filter(Boolean);
+  }
+  if (typeof value !== 'string') return [];
+  if (field.kind === 'html') {
+    return (richTextToBlocks(value) ?? []).map((block) => blockText(block.html)).filter(Boolean);
+  }
+  return value
+    .split(/\n{2,}/)
+    .map((paragraph) => strip(paragraph.trim()))
+    .filter(Boolean);
 };
 
 /**

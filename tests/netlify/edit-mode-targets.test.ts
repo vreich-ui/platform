@@ -94,6 +94,30 @@ test('a structured value change is kind json', () => {
   assert.equal(changes[0].kind, 'json');
 });
 
+test('a plain body upgrading to a rich_text.v1 document is kind json, both directions', () => {
+  // The T17.8 fix-3 transition: `content_item` bodies accept either shape, so
+  // a field's value can flip from string to document (and an Ask-AI reply can
+  // propose the reverse). Neither may be mistaken for a rich-text HTML string,
+  // whose preview path would try to splice it into the page as markup.
+  const doc = {
+    nodeType: 'document',
+    data: {},
+    content: [{ nodeType: 'paragraph', data: {}, content: [{ nodeType: 'text', value: 'Hi', marks: [], data: {} }] }],
+  };
+  const upgrade = summarizeFieldChanges({ body: 'Hi' }, { body: doc });
+  assert.deepEqual(
+    upgrade.map((change) => [change.field, change.kind]),
+    [['body', 'json']]
+  );
+  const downgrade = summarizeFieldChanges({ body: doc }, { body: 'Hi' });
+  assert.deepEqual(
+    downgrade.map((change) => [change.field, change.kind]),
+    [['body', 'json']]
+  );
+  // …and an unchanged document is still dropped by the deep compare.
+  assert.deepEqual(summarizeFieldChanges({ body: doc }, { body: structuredClone(doc) }), []);
+});
+
 // ── rich-text block helpers (built on the REAL splitters) ────────────────────
 
 test('richTextToBlocks splits mixed blocks via the real splitter and tolerates paragraphs-only', () => {
