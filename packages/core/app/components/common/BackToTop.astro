@@ -15,8 +15,18 @@ import { Icon } from 'astro-icon/components';
 </button>
 
 <style is:global>
+  /* Placed against the READING COLUMN, so it has to be placed against the
+     column's real position: the edit-mode canvas may displace the page by
+     --dlem-shift to open the margin the comment rail lives in (W17 Fix 4,
+     Wolf 2026-08-11 — "they can't all move the same way but they can move"),
+     and a position:fixed element is the one thing that gets no say in the
+     page box. Subtracting the displacement from the width the centring is
+     computed from, then adding it back to the offset, puts this button
+     exactly where it would sit if the viewport itself were that much
+     narrower. --dlem-shift defaults to 0px, so a visitor's page is
+     byte-identical to before. */
   .back-to-top {
-    right: max(1rem, calc((100vw - 720px) / 2 - 4.5rem));
+    right: calc(var(--dlem-shift, 0px) + max(1rem, calc((100vw - var(--dlem-shift, 0px) - 720px) / 2 - 4.5rem)));
   }
   .back-to-top.is-visible {
     opacity: 1;

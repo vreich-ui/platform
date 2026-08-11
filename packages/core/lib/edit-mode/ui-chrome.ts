@@ -58,7 +58,7 @@ body.dl-em-on{padding-right:var(--dlem-shift,0px)}
    read the UNDISPLACED column, so lifting and restoring the displacement in
    one task can never animate. */
 body.dl-em-measuring{transition:none!important}
-.dl-em-bar{position:fixed;top:0;left:0;right:0;z-index:99990;display:none;align-items:center;gap:10px;
+.dl-em-bar{position:fixed;top:0;left:0;right:var(--dlem-shift,0px);z-index:99990;display:none;align-items:center;gap:10px;
   padding:6px 14px;background:var(--dlem-surface-2);color:var(--dlem-text);font:600 12.5px/1.4 var(--dlem-font);
   border-bottom:1px solid var(--dlem-border);box-shadow:0 2px 12px rgba(0,0,0,.12)}
 /* The bar OVERLAYS the page vertically — it does not push it down; the old
@@ -82,7 +82,7 @@ body.dl-em-on .dl-em-bar{display:flex}
   margin-left:6px;padding:0 5px;border-radius:9px;background:color-mix(in srgb,var(--dlem-text) 40%,transparent);
   color:var(--dlem-surface);font-size:10.5px}
 .dl-em-count.dl-em-hot{background:var(--dlem-draft);color:#fff}
-.dl-em-fab{position:fixed;right:18px;bottom:18px;z-index:99990;width:44px;height:44px;border-radius:50%;
+.dl-em-fab{position:fixed;right:calc(18px + var(--dlem-shift,0px));bottom:18px;z-index:99990;width:44px;height:44px;border-radius:50%;
   border:none;background:var(--dlem-accent);color:var(--dlem-accent-ink);font:18px var(--dlem-font);cursor:pointer;
   box-shadow:var(--dlem-shadow)}
 body.dl-em-on .dl-em-fab{display:none}
@@ -161,7 +161,7 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 /* A deleted region disappears in place (draft — publish makes it real). */
 .dl-em-removed{display:none!important}
 /* Delete confirmation modal. */
-.dl-em-confirm{position:fixed;inset:0;z-index:99996;display:flex;align-items:center;justify-content:center;
+.dl-em-confirm{position:fixed;inset:0;right:var(--dlem-shift,0px);z-index:99996;display:flex;align-items:center;justify-content:center;
   background:color-mix(in srgb,var(--dlem-text) 26%,transparent)}
 .dl-em-confirmcard{width:340px;max-width:calc(100vw - 40px);background:var(--dlem-surface);color:var(--dlem-text);
   border:1px solid var(--dlem-border);border-radius:12px;box-shadow:var(--dlem-shadow);padding:16px 16px 12px;
@@ -201,7 +201,8 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-formfoot .dl-em-ghost{width:38px;padding:0;flex:none}
 /* Content-sized, never viewport-pinned: the panel grows with what's in it
    (capped), instead of always spanning top bar → bottom of the screen. */
-.dl-em-panel{position:fixed;top:46px;right:12px;width:372px;max-width:calc(100vw - 24px);
+.dl-em-panel{position:fixed;top:46px;right:calc(12px + var(--dlem-shift,0px));width:372px;
+  max-width:calc(100vw - 24px - var(--dlem-shift,0px));
   max-height:calc(100vh - 58px);
   z-index:99992;display:none;flex-direction:column;background:var(--dlem-surface);color:var(--dlem-text);
   border:1px solid var(--dlem-border);border-radius:14px;box-shadow:var(--dlem-shadow);font:13px/1.5 var(--dlem-font);
@@ -285,7 +286,8 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-marg-comment p{margin:0;white-space:pre-wrap}
 .dl-em-marg-input{flex:1;height:44px;resize:none;border:1px solid var(--dlem-border);border-radius:9px;
   padding:8px 10px;font:12.5px/1.45 var(--dlem-font);background:var(--dlem-surface);color:var(--dlem-text)}
-.dl-em-tray{position:fixed;top:44px;right:12px;width:420px;max-width:calc(100vw - 24px);z-index:99992;display:none;
+.dl-em-tray{position:fixed;top:44px;right:calc(12px + var(--dlem-shift,0px));width:420px;
+  max-width:calc(100vw - 24px - var(--dlem-shift,0px));z-index:99992;display:none;
   flex-direction:column;background:var(--dlem-surface);color:var(--dlem-text);border:1px solid var(--dlem-border);
   border-radius:12px;box-shadow:var(--dlem-shadow);font:12.5px/1.5 var(--dlem-font)}
 .dl-em-tray.dl-em-open{display:flex}
@@ -383,6 +385,16 @@ body.dl-em-on .dl-em-gutter{display:block}
    Below the slide rung the rail still adapts instead: compact writes --dlem-rail-w
    on the rail element, markers drops the rail for gutter markers plus a
    popover. */
+/* Nothing is drawn against a page box that is still moving (W17 Fix 4). ui.ts
+   hides the anchored overlays for the length of the glide and re-runs the whole
+   re-layout pass on transitionend; this is the hide. It is deliberately
+   visibility, not display: a hidden bubble keeps its measured height, so the
+   packing pass that runs on settle is not measuring zero-height boxes.
+   The rail, gutter, chip, gap layer and palette are all positioned by ui.ts in
+   viewport coordinates read from live boxes, so they need no --dlem-shift
+   compensation of their own — only the fixed chrome above, which is pinned by
+   CSS to an edge the page no longer reaches, does. */
+.dl-em-settling{visibility:hidden!important}
 /* ── inline editing (T17.8) ─────────────────────────────────────────────────
    Double-click a block and its copy becomes editable IN the page, in the
    block's own box: the host REPLACES the element that renders the field and

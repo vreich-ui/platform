@@ -164,6 +164,51 @@ export const railLeftFor = (mode: RailLayoutMode, metrics: RailMetrics): number 
   return Math.max(metrics.railPad, Math.min(metrics.columnRight + metrics.railGap, pinnedRight));
 };
 
+/**
+ * The re-layout pass (W17 Fix 4): every positioner the canvas owns, held in
+ * one list and run in one order against one displacement value.
+ *
+ * Wolf's complaint was not that the page moves, it is that things do not move
+ * WITH it. The failure mode a registry removes is the quiet one: a positioner
+ * that exists but is not on the pass that runs after the page settles, and is
+ * therefore drawing against the box the page had before it moved.
+ *
+ * A positioner that throws does not cancel the ones after it — a half-run
+ * pass IS the misalignment — but the first error is re-thrown once the pass is
+ * complete, so a broken positioner still surfaces instead of being swallowed.
+ */
+export type RelayoutPass = {
+  register: (name: string, run: () => void) => void;
+  /** Every positioner registered, in the order the pass runs them. */
+  names: () => string[];
+  /** Run all of them; returns the names actually run. */
+  run: () => string[];
+};
+
+export const createRelayoutPass = (): RelayoutPass => {
+  const positioners: Array<{ name: string; run: () => void }> = [];
+  return {
+    register: (name, run) => {
+      positioners.push({ name, run });
+    },
+    names: () => positioners.map((positioner) => positioner.name),
+    run: () => {
+      const ran: string[] = [];
+      let failure: unknown;
+      for (const positioner of positioners) {
+        try {
+          positioner.run();
+        } catch (error) {
+          if (failure === undefined) failure = error;
+        }
+        ran.push(positioner.name);
+      }
+      if (failure !== undefined) throw failure;
+      return ran;
+    },
+  };
+};
+
 export type RailEntryBox = { desiredTop: number; height: number };
 
 /**
