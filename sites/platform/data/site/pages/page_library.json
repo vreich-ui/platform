@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-02T18:40:04.470Z",
+    "at": "2026-08-11T15:09:11.332Z",
     "from": "objects/page/by-id/page_library.json",
-    "record_version": 11
+    "record_version": 17
   },
   "pageType": "listing",
   "route": "/library",
@@ -47,6 +47,14 @@
       },
       "id": "s_librarygrid",
       "type": "content_grid"
+    },
+    {
+      "data": {
+        "formName": "newsletter",
+        "heading": "Get one useful letter a month"
+      },
+      "id": "s_813874b726bb",
+      "type": "newsletter_signup"
     }
   ],
   "seo": {
