@@ -447,7 +447,7 @@ describe('every positioner the canvas owns is on the same pass', () => {
 
   it('suspends all of them while the page is moving', () => {
     const regions = uiRegions();
-    for (const name of ['layoutRail', 'positionChip', 'positionGutter', 'positionDraftChips', 'remeasureRail']) {
+    for (const name of ['layoutRail', 'positionGutter', 'positionDraftChips', 'remeasureRail']) {
       const body = regions.get(name);
       assert.ok(body, `${name} should exist in ui.ts`);
       assert.match(
@@ -472,15 +472,21 @@ describe('every positioner the canvas owns is on the same pass', () => {
 
 // ── 4. no pointer path can reach the displacement ───────────────────────────
 
-/** Everything hover-, focus-, pin- or thread-write-driven in ui.ts. */
+/**
+ * Everything hover-, focus-, pin- or thread-write-driven in ui.ts.
+ *
+ * T17.14a folded the W7 hover chip into the margin bubble, so the chip's
+ * three entries here (`renderChip`, `positionChip`, `clearChipSoon`) and the
+ * rail's two hover timers (`scheduleRailReveal`, `clearRailSoon`) no longer
+ * exist. Their coverage is not lost: every one of those paths now runs
+ * through `dispatchAffordance`, the single machine's only entry point, which
+ * is named below — and the list is self-checking (a name that does not exist
+ * in ui.ts fails the test), so it cannot silently stop guarding anything.
+ */
 const POINTER_DRIVEN = [
-  'renderChip',
-  'positionChip',
-  'clearChipSoon',
-  'scheduleRailReveal',
-  'clearRailSoon',
+  'dispatchAffordance',
   'pinRail',
-  'unpinRail',
+  'buildBubble',
   'setListMode',
   'renderRail',
   'renderGutter',

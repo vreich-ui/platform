@@ -509,6 +509,246 @@ never folded into the `● Editing` popover, a menu, or a hover state.
   is covered headlessly; `npm test` is 2150 + 144 green (was 2138 + 144; 12
   new cases), the never-move/registration suite included.
 
+### T17.14a — one block, one affordance: the chip folded into the bubble (2026-08-11)
+
+**Wolf's ruling, verbatim (2026-08-11):** *"Fold it into the bubble but it has
+to make sense so you need to consider needed functionality for this canvas.
+make it look native in the bubble."* Spec:
+`docs/design/marginalia-affordance-model.md` §§2–4.
+
+The canvas showed a block **two** affordances driven by **two** hover machines
+that shared no state: the W7 chip (`hotRegion`, 0ms reveal, `chipHideTimer`)
+and the T17.3 rail bubble (`revealedRegion`/`pinnedRegion`/`pinnedKey`, 120ms,
+two more timers), coordinating only through `desiredTopFor` reading
+`chip.offsetHeight`. `focusin` drove the rail alone, so a keyboard user got a
+bubble and no chip — no pencil, no image, no role, no delete. The PDF contains
+the bubble and nothing resembling the chip.
+
+- **New:** `packages/core/lib/edit-mode/affordance-state.ts` (+ `.test.ts`, 23
+  cases) — the pure half. `affordanceReduce(state, event, context)` implements
+  §4.3's transition table and returns the next state plus what to do with the
+  two timers and the focus; `revealDelayFor` is §4.2 (pointer 120ms, keyboard
+  and programmatic 0ms — a focus is deliberate, so there is nothing to
+  debounce); `DISMISS_MS` is T17.3's unchanged 250ms;
+  `affordanceInvariantViolations` names §4.1's invariants so a test can say
+  which one broke. ui.ts performs the effects; nothing here touches the DOM.
+- **`ui.ts` — the chip is deleted.** `chip`, `renderChip`, `positionChip`,
+  `clearChipSoon`, `chipHideTimer` and `hotRegion` are gone, and with them
+  `desiredTopFor`'s `chipOffset` term (spec §8.1 declares it void), the two
+  `positionChip` calls inside `layoutRail`, the `chip` entry in
+  `anchoredSurfaces` and on the re-layout pass, `openPanel`'s and
+  `deleteRegion`'s and `startInlineEdit`'s `chip.style.display = 'none'`, and
+  every `chip.contains(...)` guard in the `mouseover` / `mouseup` / `focusin` /
+  outside-click / `dblclick` / `Enter` listeners (now one `onCanvasSurface`
+  helper). `nodeRoles`, `roleOf`, `ALGORITHM_LABELS`, `applyRelated` and
+  `deleteRegion` stay — they are reused, not deleted; the two the drawer does
+  not call yet carry a one-line `eslint-disable` naming T17.14b.
+- **`ui.ts` — one machine.** `affordance` + `revealTimer`/`dismissTimer`
+  replace all seven of the old state variables. `dispatchAffordance` is the
+  single entry point (nothing else writes the state), fed by `mouseover`,
+  `focusin`, click, the gutter marker, the ghost bubble, the footer chevron,
+  the panel and the inline editor alike. Consequences worth naming: at most
+  ONE block bubble exists at a time (the old revealed+pinned pair could paint
+  two cards for two different blocks); the block's `dl-em-hot` outline is
+  driven by the same state, so it can no longer disagree with the bubble; and
+  a pending reveal for the block already being waited on is not restarted by
+  the next `mouseover` on a child element.
+- **`ui.ts` — the bubble's anatomy (§2).** `buildBubble` replaces the old head
+  (title + `N open` + close) with:
+  - **R1 identity row** — line 1 the resolved agent (`avatar` + `→ {name}` +
+    muted `· via CMS Agent`) from `listProfiles` →
+    `assignments.objects[objectId] ?? assignments.types[objectType] ??
+    assignments.site_default`, one read-only cached call per mount that
+    **creates nothing**, omitted entirely when nothing resolves; line 2 the
+    block identity — the article node's kind, replaced by its ROLE
+    (`Proof · educate`) when the record answers, or the section type — plus a
+    `· shared` / `· site-wide` token. The monospace object id is retired from
+    the resting surface to that line's `title` and to the drawer's header.
+    Right slot: **`✎ edit directly`**, a dotted-underlined text action routing
+    into T17.8's `startInlineEdit`, which already falls through to
+    `openPanel(…, 'edit')` for a block with no single primary copy field —
+    there is exactly one edit path, not two.
+  - **R2 thread log** — `marginalia-panel.ts`'s log, with §2's three deletions:
+    the per-thread status pill is kept only for non-open threads, the
+    per-thread scope line is dropped (`describeMarginaliaAnchor` stays
+    exported for list surfaces), and the always-visible `Resolve` button
+    becomes a quiet `✓ Resolve` text action on the thread's LAST comment,
+    revealed on hover/focus-within and **always in the tab order** (opacity,
+    never `display:none`). The whole log is omitted when a block has no
+    comments — the PDF's card has no empty-state line; `emptyLabel` stays in
+    the API for list mode and orphan bubbles, which are lists and do need it.
+  - **R3 composer** — placeholder unchanged; the `Send` word becomes the PDF's
+    filled `ICON_SEND` glyph with the accessible name `Send comment` unchanged.
+  - **R4 footer strip** — `{object title} · ⟨state pill⟩ ⌄`. Title from
+    `trayLabelFor` (one function, two callers — its parameter is now
+    `Pick<PendingObjectRow, 'object_type' | 'object_id'>` so a bubble can call
+    it without inventing a pending row). Pill: `Draft · unpublished` from
+    `PendingObjectRow.unpublished_changes`, else `Published · {date}` from the
+    record's `publication.published_time`, else `Never published` — object
+    level, matching the PDF; re-applied on every render, because a bubble
+    outlives the save that changes it. This closes T17.14c's parked item.
+  - **R5 the drawer shell** — behind the chevron, which pins first and opens
+    second (a drawer on a surface that decays under the pointer is invariant
+    3's violation). Its own header repeats the identity WITH the object id
+    visible; T17.14a ships only `Delete block` (`deleteRegion` unchanged,
+    same confirm modal, `--dlem-danger`), built on first open.
+- **Keyboard parity (§4.4)** — the point of the exercise. `focusin` now feeds
+  the same machine as `mouseover`, so focus reveals exactly what hover
+  reveals. `gutterMarkerState`'s `hovered` input is `key === affordance.key ||
+  focusWithin || markerFocused`: a block whose subtree has focus gets its
+  marker (one `Tab` from the affordance) without every block adding a
+  permanent tab stop, and a marker that has focus stays on screen, so the
+  second `Escape` has something to return focus to. The marker is a real
+  `<button>`, so Enter/Space come free and dispatch `markerActivate`
+  (toggle + composer focus). Focus moves into the composer on an EXPLICIT pin
+  only — marker, ghost bubble — and never on a hover reveal, a click inside
+  the bubble, or the inline editor's own pin.
+- **`ui-chrome.ts`:** the whole `.dl-em-chip` block is deleted; `.dl-em-alg` /
+  `.dl-em-num` survive it because the drawer's `content_grid` group (T17.14b)
+  reuses them. New: `.dl-em-bubble-id` / `-who` / `-agent` / `-block` /
+  `-shared`, `.dl-em-avatar(-initials)`, `.dl-em-editlink`,
+  `.dl-em-bubble-foot`, `.dl-em-foot-title`, `.dl-em-statepill` (+ its three
+  states), `.dl-em-drawer-toggle`, `.dl-em-drawer` and its rows,
+  `.dl-em-marg-resolve`. `.dl-em-bubble-head`/`-title` survive as list mode's
+  only remaining users; `.dl-em-bubble-open` is gone with the head.
+- **Guards:** `displacement-registration.test.ts`'s `POINTER_DRIVEN` list drops
+  the three chip functions and the two rail hover timers and names
+  `dispatchAffordance`, `pinRail` and `buildBubble` instead — the list is
+  self-checking (a name that does not exist in ui.ts fails the test), so the
+  "no pointer path may reach the displacement writer" invariant still covers
+  every hover path. Nothing else about the displacement, the positioner
+  registration or the fixed-rule compensation changed.
+- **Deviations from the spec, and why:**
+  - **`Escape` on a `revealed` bubble hides it.** §4.3 lists Escape only from
+    `pinned`; leaving a focus-revealed bubble un-dismissable by keyboard was
+    the wrong reading of silence.
+  - **A hover on another block while one is PINNED does nothing.** §4.3 has no
+    row for it; invariant 1 ("at most one non-hidden region") decides it.
+    Clicking that block unpins AND reveals it in the same gesture, so the
+    canvas is never left blank waiting for a pointer move.
+  - **The bubble has no close `×`.** §2's anatomy has none and neither does the
+    PDF; Escape, an outside click and the marker toggle all close it. List
+    mode keeps its own close control — a list is not a block.
+  - **The `N open` badge on the bubble head is gone** with the head. The
+    gutter marker's numeral is the same quantity, in the PDF.
+  - **A nav object's identity line reads `Menu`** — §2 says "for a section, the
+    `sectionType`", and a navigation object has none.
+  - **The block's hover outline now appears at 120ms, not 0ms**, because it is
+    part of the one affordance. §4.2 deletes the 0ms reveal explicitly.
+- **Deliberately unreachable for exactly one task:** image swap, role & intent,
+  article settings, Ask AI and the `content_grid` algorithm/tiles/columns
+  controls left with the chip. **T17.14b re-homes every one of them as drawer
+  rows — the wave is not shippable without it.**
+- **Not verified in a browser:** the card's actual look against the PDF (row
+  order, spacing, the glass treatment of the new footer and drawer); whether
+  the agent line wraps to two lines as the render shows; the drawer's push-down
+  on the packer; the `✓ Resolve` action's reveal-on-hover; focus order inside a
+  pinned bubble as experienced. What would verify it: T17.13's smoke test,
+  which T17.14b extends with the fold's assertions. Everything mechanical —
+  the transition table, the timer selection, the invariants, and the whole
+  displacement/registration guard suite — is covered headlessly; `npm test` is
+  2174 + 144 green (was 2151 + 144; 23 new cases).
+
+### T17.14b — the drawer's actions, the selection strip, panel↔rail (2026-08-11)
+
+T17.14a proved the fold: one card, one machine, the chip gone. It deliberately
+left four actions and the `content_grid` configuration homeless so the
+state-machine diff stayed reviewable — **the wave was not shippable at that
+commit.** This task gives them their home and fixes the collision the chip's
+removal exposed. Spec: `docs/design/marginalia-affordance-model.md` §2 (R5,
+R3), §3, §5.1, §10 rows 24–25, 28, 31.
+
+- **New:** `packages/core/lib/edit-mode/block-actions.ts` (+ `.test.ts`, 15
+  cases) — the pure half. `drawerRowsFor({ isNav, isNode, nodeKind,
+  sectionType, hasRelated, objectType })` returns R5's ordered row plan;
+  `blockHasImage` is `renderChip`'s exact `hasImage` predicate, preserved
+  verbatim so `Image…` appears on precisely the blocks the chip showed it on,
+  and `IMAGE_SECTION_TYPES` moved here with it (one definition — `openPanel`'s
+  `dl-em-has-image` toggle now reads the same predicate, so the panel can
+  never offer an image section the drawer has no row for);
+  `selectionStripLabel` is R3's 60-character truncation.
+- **`ui.ts` — R5 filled.** `fillBubbleDrawer` builds the plan's rows as
+  **labelled text rows with a leading glyph**, never an icon strip:
+  `Image…` → `openPanel(…, 'image')`, `Role & intent…` → `'role'`,
+  `Article settings…` → `'meta'`, `Ask AI…` → `'ai'` carrying any armed
+  selection scope, the `Related articles` group, then a hairline and
+  `Delete block`. Every handler is the one the chip's button called — no verb,
+  no request and no confirm modal changed.
+  - **`Article settings` is a fix, not a regression:** `'meta'` had no chip
+    button at all and was reachable only by opening the panel with some other
+    tool and then clicking its accordion head. It is one gesture now.
+  - **`Ask AI…` is explicitly interim** (`interim: true` in the plan) and is
+    **deleted by T17.7**, whose composer modes replace it.
+  - The `content_grid` group carries the same `<select>` + two number inputs
+    the chip did, wired to the **unchanged** `applyRelated`, but with VISIBLE
+    labels (`Selection` / `Tiles` / `Columns`) instead of `title` attributes.
+    `.dl-em-alg` / `.dl-em-num` outlived the chip's CSS block for exactly this.
+- **`ui.ts` — R3's selection strip.** `“…first 60 chars…” ✕` renders above the
+  composer of the bubble whose block owns the selection, and scopes the
+  drawer's `Ask AI…` row to it (same `captureObjectSelection` string, same
+  `openPanel(…, 'ai')` path). It replaces the chip's `.dl-em-ask.dl-em-sel`
+  highlight, which was the ONLY indication a selection was armed. Dismissing
+  it clears `currentSelectionText` / `selectionRegion`. Designed once, here:
+  T17.4 reuses this strip as the span anchor's surface and must not build a
+  second one.
+- **`ui.ts` — panel ↔ rail coexistence (§5.1).** `anchorPanel` was placing the
+  panel at `rect.right + 14` — the rail's exact slot — with no rail awareness
+  at all, so a panel and a bubble could be painted on top of each other. It is
+  rail-aware now: `left = railLeftPx ?? (the clamped beside-the-column
+  fallback)`, `width = Math.min(372, railWidthPx ?? RAIL_W)` so it never
+  exceeds the strip the rail already reserved, `top = max(railTopPx,
+  rect.top)`. **In `slide` mode that strip is padding the page has already
+  given up, so nothing on the page moves when the panel opens** — the
+  no-movement ruling satisfied structurally rather than by care; the
+  displacement writer is not on this path at all. The rail then yields
+  (`dl-em-rail-yield` hides bubbles and ghost bubbles; the gutter markers are
+  a different layer and are untouched — they are how you get back), and since
+  the affordance state stays `pinned(R)`, closing the panel restores exactly
+  the bubble that was there. `closePanel` removes the yield and resets the
+  anchored width; `setEditMode(false)` now closes the panel properly rather
+  than dropping one class, so a remount can never start yielded. The early
+  return moved from `innerWidth <= 720` to `<= RAIL_SHEET_FLOOR` (900), which
+  is exactly where the `max-width:900px` bottom-sheet rule takes over — below
+  it the panel wins and the rail stays collapsed (rule 4), and the two no
+  longer disagree about where the sheet begins.
+- **`ui.ts` — `morphFromTile`'s source.** The chip's rect is gone, so the morph
+  plays out of the **drawer row that was pressed**, falling back to the bubble
+  that row lives in, falling back to no morph (rule 5) — honest, rather than
+  animating out of a rectangle that no longer exists. `openPanel` takes an
+  optional `{ from }` for it; reduced-motion gating unchanged.
+- **`ui-chrome.ts`:** `.dl-em-drawer-group` / `-grouphead` / `-fields` /
+  `-field` for the grid controls, `.dl-em-selstrip` / `.dl-em-selquote` /
+  `.dl-em-selclear` for the strip, and `.dl-em-rail-yield`.
+- **R4's state pill is refreshed by `refreshPending` too**, not only by a
+  render: saving a draft through a drawer row is exactly when `Published`
+  becomes `Draft · unpublished`, and the editor should not have to hover
+  something else to see it.
+- **Docs:** `T17.13-canvas-smoke-test.md` gains four assertions (13–16): no
+  `.dl-em-chip` in the DOM, exactly one card per hovered block, the drawer's
+  row set per block kind, the panel in the rail's column without moving the
+  page, and the selection strip's scope.
+- **Reachability — every chip capability, re-checked row by row against
+  `marginalia-affordance-model.md` §3:** edit text → R1's `✎ edit directly`
+  (T17.8's inline editor, falling through to the panel's Edit section on a
+  block with no single primary copy field); image → drawer `Image…`; role &
+  intent → drawer `Role & intent…`; article settings → drawer
+  `Article settings…` (newly one gesture); Ask AI → drawer `Ask AI…` plus the
+  selection strip for scope; delete → drawer `Delete block`, same confirm
+  modal; `content_grid` algorithm / tiles / columns → the drawer's
+  `Related articles` group. Identity → R1 line 2; `shared` → its `· shared`
+  token; object id → that line's `title` and the drawer header. **Nothing an
+  editor could do before the wave is unreachable after it**, and all of it is
+  now reachable by keyboard, which none of it was.
+- **Not verified in a browser:** the drawer's actual appearance and its
+  push-down on the packing pass; whether the panel and the bubble are visually
+  exclusive at each of the five rail modes; the morph out of a drawer row; the
+  selection strip's position above the composer; that opening the panel really
+  moves nothing in `slide` mode. What would verify it: T17.13's smoke test,
+  whose brief now carries assertions 13–16 for exactly these. Everything
+  mechanical — the row plan per block kind, the strip's truncation, and the
+  whole displacement/registration guard suite — is covered headlessly;
+  `npm test` is 2189 + 144 green (was 2174 + 144; 15 new cases).
+
 ## 8. T17.14 — canvas affordance consolidation (planned 2026-08-11)
 
 **Wolf's ruling, verbatim**, asked whether to retire the W7 hover chip, fold it

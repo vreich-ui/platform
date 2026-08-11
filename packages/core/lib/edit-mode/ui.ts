@@ -1,9 +1,13 @@
 /**
  * Edit-mode canvas — the on-page overlay (admin-only, loaded on demand).
  *
- * The site itself is the editing surface: every annotated section gets a
- * hover chip with "Ask AI"; a request opens a docked panel; the suggestion
- * previews IN PLACE as an amber draft; Accept persists it through the
+ * The site itself is the editing surface: every annotated block gets ONE
+ * affordance — its margin bubble (T17.14a; the W7 hover chip that used to sit
+ * beside it is retired, its every function re-homed per
+ * docs/design/marginalia-affordance-model.md §3). From the bubble: the thread
+ * and its composer, `✎ edit directly`, and — behind the footer chevron — the
+ * block drawer's actions. A drawer action opens the docked panel; the AI
+ * suggestion previews IN PLACE as an amber draft; Accept persists it through the
  * reviewable object_patch path (checkout → patch, EditSession); Publish and
  * Release stay separate, deliberate acts in the pending tray — the same
  * draft → publish → release lifecycle every agent follows, driven by a human
@@ -73,6 +77,16 @@ import {
   type RegionSnapshot,
 } from './preview.js';
 import { mountMarginaliaPanel, type MarginaliaPanelTarget } from './marginalia-panel.js';
+import {
+  affordanceReduce,
+  hiddenAffordance,
+  pinnedAffordanceKey,
+  type AffordanceEvent,
+  type AffordanceState,
+} from './affordance-state.js';
+import { blockHasImage, drawerRowsFor, selectionStripLabel, type BlockActionInput } from './block-actions.js';
+import { listProfiles, type AgentProfileView } from '../admin/chat-client.js';
+import { avatarSrc } from '../admin/users-client.js';
 import {
   blockAttentionCounts,
   gutterMarkerState,
@@ -161,9 +175,6 @@ const GUTTER_X = 28;
 const DISPLACE_MS = 180;
 /** Slack on the settle timer: the fallback for a glide that never reports its end. */
 const DISPLACE_SETTLE_SLACK_MS = 60;
-/** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
-const RAIL_REVEAL_MS = 120;
-const RAIL_DISMISS_MS = 250;
 
 export type MountOptions = { email: string; roles: string[]; getToken: GetToken };
 
@@ -195,9 +206,6 @@ type PanelState = {
   changes?: FieldChange[];
   snapshot?: RegionSnapshot;
 };
-
-/** Section types whose data carries an image the image tool should offer. */
-const IMAGE_SECTION_TYPES = new Set(['bio', 'content_split']);
 
 const isImageValue = (value: unknown): value is { src: string; alt?: string } =>
   Boolean(value) &&
@@ -445,18 +453,14 @@ export const mountEditMode = (options: MountOptions): void => {
   fab.textContent = '✎';
   document.body.append(fab);
 
-  const chip = document.createElement('div');
-  chip.className = 'dl-em-chip';
-  document.body.append(chip);
-
   const panel = document.createElement('div');
   panel.className = 'dl-em-panel';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Edit section');
   // The panel is one accordion: icon-led sections (Ask AI / Edit / Image),
   // one expanded at a time (the expanded one grows; the rest are just a head).
-  // A chip tool opens its section; the heads switch between them; clicking the
-  // open head collapses the body to a compact rail. Identity lives in the
+  // A block-drawer row opens its section; the heads switch between them;
+  // clicking the open head collapses the body. Identity lives in the
   // header as a type + monospace id with tiny shared/draft dots — no prose.
   const accHead = (mode: string, icon: string, label: string): string =>
     `<button class="dl-em-acc-head" data-em-acc-head="${mode}" aria-label="${label}">` +
@@ -902,6 +906,10 @@ export const mountEditMode = (options: MountOptions): void => {
     pendingRows = await fetchPendingObjects(getToken);
     applyToolbarPlan(); // the Editing pill's badge + the popover's Pending row
     renderTray();
+    // R4's state pill reads these rows, and a save through a drawer row is
+    // exactly when it changes — refresh it here rather than making the editor
+    // wait for whatever re-renders the rail next (T17.14a/b).
+    for (const entry of railPlan) if (entry.el) applyBubbleState(entry.el);
     await markDraftRegions();
   };
 
@@ -961,7 +969,10 @@ export const mountEditMode = (options: MountOptions): void => {
   // (HistoryEntry now lives in draft-provenance.ts, shared with markDraftRegions
   // below rather than declared twice — see the T17.14c import above.)
 
-  const trayLabelFor = (row: PendingObjectRow, body: Record<string, unknown> | undefined): string => {
+  const trayLabelFor = (
+    row: Pick<PendingObjectRow, 'object_type' | 'object_id'>,
+    body: Record<string, unknown> | undefined
+  ): string => {
     if (!body) return row.object_id;
     if (row.object_type === 'content_item') return (body.title as string) ?? row.object_id;
     if (row.object_type === 'page') return (body.title as string) ?? (body.route as string) ?? row.object_id;
@@ -1268,7 +1279,7 @@ export const mountEditMode = (options: MountOptions): void => {
       layoutRail(true);
       void refreshPending();
       // Pay the wait up front (B4): warm the record cache for everything on
-      // the page so every chip/panel/tool opens from memory.
+      // the page so every bubble/panel/tool opens from memory.
       preloadRecords();
       scheduleGapRebuild();
       void refreshRailThreads();
@@ -1276,14 +1287,11 @@ export const mountEditMode = (options: MountOptions): void => {
     } else {
       cancelInlineEdit();
       syncRegionFocusability(false);
-      chip.style.display = 'none';
-      panel.classList.remove('dl-em-open');
+      closePanel(); // …and with it the rail's yield, so a remount starts clean
       tray.classList.remove('dl-em-open');
       palette.style.display = 'none';
       setEditingPopoverOpen(false);
-      revealedRegion = undefined;
-      pinnedKey = undefined;
-      pinnedRegion = undefined;
+      dispatchAffordance({ kind: 'reset' }, { render: false });
       renderRail(); // drops every bubble
       layoutRail(true); // …and puts the page back exactly where it is published
       for (const objectSession of sessions.values()) void objectSession.checkin();
@@ -1440,9 +1448,6 @@ export const mountEditMode = (options: MountOptions): void => {
   // down this closure, and nothing runs the pass before mounting finishes.
   const relayout = createRelayoutPass();
   relayout.register('rail', () => layoutRail(true));
-  relayout.register('chip', () => {
-    if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
-  });
   relayout.register('gutter', () => positionGutter());
   relayout.register('draft-chips', () => positionDraftChips());
   relayout.register('gaps', () => buildGaps());
@@ -1613,16 +1618,14 @@ export const mountEditMode = (options: MountOptions): void => {
     }
     invalidateRecord(objectType, objectId);
     region.classList.add('dl-em-removed');
-    chip.style.display = 'none';
+    // The block is gone from the canvas, so its affordance must go with it.
+    dispatchAffordance({ kind: 'reset' });
     if (panelRegion === region) closePanel();
     setStatus('Deleted — saved as a draft. Publish + release to make it real.');
     await refreshPending();
     scheduleGapRebuild();
   };
 
-  // ── hover chip
-  let hotRegion: HTMLElement | undefined;
-  let chipHideTimer: number | undefined;
   /** The margin rail's current left edge (undefined = no rail up); set by layoutRail. */
   let railLeftPx: number | undefined;
   /** The rail's current width — RAIL_W, or the margin's worth in `compact`. */
@@ -1636,32 +1639,11 @@ export const mountEditMode = (options: MountOptions): void => {
         ? deriveNodeTarget(region.dataset as Record<string, string>)
         : deriveEditTarget(region.dataset as Record<string, string>);
 
-  const positionChip = (region: HTMLElement): void => {
-    // `contentRect`, not `regionRect`: on a full-bleed section the outer band
-    // still ends at the viewport edge however far the page has moved, so a
-    // chip placed from it pins to the clamp instead of following its block.
-    const rect = contentRect(region);
-    if (!rect || displacing) return;
-    chip.style.display = 'flex';
-    chip.style.visibility = 'hidden';
-    const width = chip.offsetWidth;
-    // With the margin rail up, the chip right-aligns to the RAIL and sits
-    // above the block's bubble, so the two never collide (spec §2.1).
-    // Otherwise: just past the content column, top aligned with the object's
-    // first line (the heading) — well clear of the centered "+" gap buttons.
-    const gutter = rect.right + 14;
-    const left =
-      railLeftPx !== undefined
-        ? railLeftPx + railWidthPx - width
-        : gutter + width <= window.innerWidth - 8
-          ? gutter
-          : Math.max(8, window.innerWidth - width - 10);
-    chip.style.left = `${Math.max(8, left)}px`;
-    chip.style.top = `${Math.max(railTopPx, rect.top)}px`;
-    chip.style.visibility = 'visible';
-  };
-
-  /** Labels for the related-grid selection algorithms (chip dropdown). */
+  /**
+   * Labels for the related-grid selection algorithms. The chip's dropdown was
+   * their caller until T17.14a retired it; the bubble drawer's
+   * `Related articles` group is their caller now (T17.14b).
+   */
   const ALGORITHM_LABELS: Record<string, string> = {
     tag_similarity: 'Similar',
     same_category: 'Same category',
@@ -1714,98 +1696,8 @@ export const mountEditMode = (options: MountOptions): void => {
     return cached;
   };
 
-  const renderChip = (region: HTMLElement): void => {
-    const isNav = region.dataset.cmsNavObject !== undefined;
-    const isNode = region.dataset.cmsNodeId !== undefined;
-    const target = targetFor(region);
-    if (!target) return;
-    const hasSelection = !isNav && Boolean(currentSelectionText && selectionRegion === region);
-    const isDraft = region.classList.contains('dl-em-draft');
-    // Article content nodes carry an optional media image (public.media).
-    const hasImage = isNode
-      ? region.dataset.cmsNodeKind === 'content'
-      : !isNav && IMAGE_SECTION_TYPES.has(target.sectionType);
-    // A `related` content_grid announces its algorithm — the chip offers the
-    // selection dropdown inline with the AI tool (small footprint, no panel).
-    const algorithm = region.dataset.cmsRelatedAlgorithm;
-    // Article blocks: the ROLE is the identity — no type boilerplate, no
-    // req_* id (worthless to an editor; Hook/Proof/Resolution is the point).
-    const typeSlot = isNode
-      ? `<span data-em-role>${escapeHtml(region.dataset.cmsNodeKind ?? 'block')}</span>`
-      : `<span>${escapeHtml(target.sectionType)}</span>`;
-    const idSlot = isNode ? '' : `<span class="dl-em-id">${escapeHtml(target.objectId)}</span>`;
-    chip.innerHTML =
-      typeSlot +
-      idSlot +
-      (target.shared ? `<span class="dl-em-shared">${isNav ? 'site-wide' : 'shared'}</span>` : '') +
-      (isDraft ? `<span class="dl-em-draftflag">draft</span>` : '') +
-      `<span class="dl-em-tools">` +
-      (algorithm
-        ? `<select class="dl-em-alg" data-em-alg title="Selection algorithm" aria-label="Selection algorithm">` +
-          Object.entries(ALGORITHM_LABELS)
-            .map(
-              ([value, label]) => `<option value="${value}"${value === algorithm ? ' selected' : ''}>${label}</option>`
-            )
-            .join('') +
-          `</select>` +
-          // Tiles (limit) + columns — how many articles, how many per row.
-          `<input class="dl-em-num" data-em-tiles type="number" min="1" max="12" ` +
-          `value="${escapeHtml(region.dataset.cmsRelatedLimit ?? '4')}" title="Tiles" aria-label="Tiles">` +
-          `<input class="dl-em-num" data-em-cols type="number" min="1" max="4" ` +
-          `value="${escapeHtml(region.dataset.cmsRelatedColumns ?? '2')}" title="Columns" aria-label="Columns">`
-        : '') +
-      `<button class="dl-em-tool dl-em-edit" title="Edit text" aria-label="Edit text">${ICON_PENCIL}</button>` +
-      (hasImage
-        ? `<button class="dl-em-tool dl-em-img" title="Image" aria-label="Edit image">${ICON_IMAGE}</button>`
-        : '') +
-      (isNode
-        ? `<button class="dl-em-tool dl-em-role" title="Role & intent" aria-label="Edit role and intent">${ICON_TAG}</button>`
-        : '') +
-      (isNav
-        ? ''
-        : `<button class="dl-em-tool dl-em-ask${hasSelection ? ' dl-em-sel' : ''}" ` +
-          `title="Ask AI${hasSelection ? ' about selection' : ''}" aria-label="Ask AI">${ICON_SPARKLES}</button>`) +
-      // Delete lives on every tile (chrome excepted — a menu is not an
-      // element), rightmost, always behind a confirmation modal.
-      (isNav ? '' : `<button class="dl-em-tool dl-em-del" title="Delete" aria-label="Delete">${ICON_TRASH}</button>`) +
-      `</span>`;
-    chip.querySelector('.dl-em-edit')?.addEventListener('click', () => void openPanel(target, region, 'edit'));
-    chip.querySelector('.dl-em-img')?.addEventListener('click', () => void openPanel(target, region, 'image'));
-    chip.querySelector('.dl-em-role')?.addEventListener('click', () => void openPanel(target, region, 'role'));
-    chip.querySelector('.dl-em-ask')?.addEventListener('click', () => void openPanel(target, region, 'ai'));
-    chip.querySelector('.dl-em-del')?.addEventListener('click', () => void deleteRegion(target, region));
-    chip.querySelector<HTMLSelectElement>('[data-em-alg]')?.addEventListener('change', (event) => {
-      void applyRelated(
-        target,
-        region,
-        { source: { kind: 'related', algorithm: (event.target as HTMLSelectElement).value } },
-        `selection “${ALGORITHM_LABELS[(event.target as HTMLSelectElement).value] ?? 'updated'}”`
-      );
-    });
-    chip.querySelector<HTMLInputElement>('[data-em-tiles]')?.addEventListener('change', (event) => {
-      const limit = Math.max(1, Math.min(12, Number((event.target as HTMLInputElement).value) || 4));
-      region.dataset.cmsRelatedLimit = String(limit);
-      void applyRelated(target, region, { limit }, `${limit} tiles`);
-    });
-    chip.querySelector<HTMLInputElement>('[data-em-cols]')?.addEventListener('change', (event) => {
-      const columns = Math.max(1, Math.min(4, Number((event.target as HTMLInputElement).value) || 2));
-      region.dataset.cmsRelatedColumns = String(columns);
-      void applyRelated(target, region, { columns }, `${columns} columns`);
-    });
-    positionChip(region);
-    if (isNode && target.nodeId) {
-      const nodeId = target.nodeId;
-      void nodeRoles(target.objectId).then((roles) => {
-        if (hotRegion !== region) return; // the hover moved on — stale fill
-        const role = roles.get(nodeId);
-        const roleEl = chip.querySelector('[data-em-role]');
-        if (role && roleEl) roleEl.textContent = role;
-      });
-    }
-  };
-
   /**
-   * Chip control → draft: patch a related grid's config (algorithm / tile
+   * Drawer control → draft: patch a related grid's config (algorithm / tile
    * count / columns) through the normal reviewable path (checkout →
    * update_section_data). Fields deep-merge; `source` always re-sends
    * kind:'related' so the union stays key-stable. Shared grids route to their
@@ -1848,15 +1740,6 @@ export const mountEditMode = (options: MountOptions): void => {
     await refreshPending();
   };
 
-  const clearChipSoon = (): void => {
-    window.clearTimeout(chipHideTimer);
-    chipHideTimer = window.setTimeout(() => {
-      chip.style.display = 'none';
-      hotRegion?.classList.remove('dl-em-hot');
-      hotRegion = undefined;
-    }, RAIL_DISMISS_MS);
-  };
-
   // ── margin rail (T17.3) ─────────────────────────────────────────────────
   // Comments live BESIDE the block they annotate, revealed by hovering it —
   // not behind a panel step. The rail is one fixed, zero-height column of
@@ -1880,13 +1763,8 @@ export const mountEditMode = (options: MountOptions): void => {
   const railNodes = new Map<string, HTMLElement>();
   /** Which anchors are currently rendered — read live by bubble thread filters. */
   const railPresence = { present: new Set<string>(), deleted: new Set<string>() };
-  let revealedRegion: HTMLElement | undefined;
-  let pinnedRegion: HTMLElement | undefined;
-  let pinnedKey: string | undefined;
   /** T17.6: the rail shows every open thread on the page instead of block bubbles. */
   let railListMode = false;
-  let railRevealTimer: number | undefined;
-  let railHideTimer: number | undefined;
   let railColumnRight = 0;
   let railMode: RailLayoutMode = 'inset';
   /** False until the first measurement — the cold decision takes no hysteresis. */
@@ -1900,6 +1778,131 @@ export const mountEditMode = (options: MountOptions): void => {
    * activation/resize cadence that decides everything else about the layout.
    */
   let railTopPx = RAIL_TOP_FALLBACK;
+
+  // ── the single affordance state machine (T17.14a) ────────────────────────
+  // ONE BLOCK SHOWS ONE AFFORDANCE. Until this task the canvas ran two hover
+  // machines — the W7 chip's (`hotRegion`, 0ms reveal, `chipHideTimer`) and
+  // the rail's (`revealedRegion`/`pinnedRegion`/`pinnedKey`, 120ms, two more
+  // timers) — that shared no state, so `focusin` drove one of them and a
+  // keyboard user got a bubble with no pencil, image, role or delete. Both
+  // are replaced by `affordance` + the two timers below, fed by `mouseover`,
+  // `focusin`, click and pin alike.
+  //
+  // affordance-state.ts owns every RULE (the §4.3 transition table, the §4.2
+  // timer selection, the §4.1 invariants) and is unit-tested headlessly; this
+  // owns the DOM effects — the timers, the hover outline, the re-render and
+  // the focus moves.
+  //
+  // Spec: docs/design/marginalia-affordance-model.md §4.
+  let affordance: AffordanceState<HTMLElement> = hiddenAffordance<HTMLElement>();
+  let revealTimer: number | undefined;
+  /** The block a scheduled reveal is waiting on — a re-hover of it must not restart the wait. */
+  let pendingRevealKey: string | undefined;
+  let dismissTimer: number | undefined;
+
+  /** The pinned anchor key, or undefined — "which bubble is sticky right now". */
+  const pinnedKeyNow = (): string | undefined => pinnedAffordanceKey(affordance);
+
+  /**
+   * §4.1 invariant 4: while a block is inline-edited, its own bubble stays and
+   * no other block may leave `hidden`.
+   */
+  const affordanceContext = (): { inlineEditKey?: string } => {
+    const region = inlineEdit?.region;
+    const key = region ? anchorKeyForRegion(region) : undefined;
+    return key ? { inlineEditKey: key } : {};
+  };
+
+  /** The composer inside a pinned bubble — where an explicit pin lands focus (§4.4). */
+  const focusBubbleComposer = (key: string | undefined): void => {
+    if (!key) return;
+    railNodes.get(`block:${key}`)?.querySelector<HTMLTextAreaElement>('[data-em-marg-input]')?.focus();
+  };
+
+  /**
+   * The one entry point. Every pointer, focus, click and programmatic event
+   * goes through here; nothing else may write `affordance`.
+   *
+   * `render: false` is for the teardown path, which re-renders once itself
+   * after clearing several things at a time.
+   */
+  const dispatchAffordance = (event: AffordanceEvent<HTMLElement>, options: { render?: boolean } = {}): void => {
+    const before = affordance;
+    const step = affordanceReduce(before, event, affordanceContext());
+    if (step.dismiss === 'cancel') {
+      window.clearTimeout(dismissTimer);
+      dismissTimer = undefined;
+    } else if (typeof step.dismiss === 'object') {
+      window.clearTimeout(dismissTimer);
+      dismissTimer = window.setTimeout(() => {
+        dismissTimer = undefined;
+        dispatchAffordance({ kind: 'dismissDue' });
+      }, step.dismiss.after);
+    }
+    if (step.reveal === 'cancel') {
+      window.clearTimeout(revealTimer);
+      revealTimer = undefined;
+      pendingRevealKey = undefined;
+    } else if (typeof step.reveal === 'object' && event.kind === 'hover') {
+      const { region, key, source } = event;
+      // `mouseover` fires for every child the pointer crosses. Restarting the
+      // wait on each of them would mean the bubble never appears while the
+      // pointer is still moving inside the block, so a pending reveal for the
+      // SAME block is left alone; only a different block replaces it (§4.3).
+      if (revealTimer !== undefined && pendingRevealKey === key) return;
+      window.clearTimeout(revealTimer);
+      revealTimer = undefined;
+      pendingRevealKey = undefined;
+      // A keyboard focus is deliberate: there is nothing to debounce, so it
+      // commits in the same task rather than through a 0ms timer (§4.2).
+      if (step.reveal.after === 0) {
+        dispatchAffordance({ kind: 'reveal', region, key, source }, options);
+        return;
+      }
+      pendingRevealKey = key;
+      revealTimer = window.setTimeout(() => {
+        revealTimer = undefined;
+        pendingRevealKey = undefined;
+        dispatchAffordance({ kind: 'reveal', region, key, source });
+      }, step.reveal.after);
+    }
+    if (step.state !== before) {
+      affordance = step.state;
+      // The block outline follows the ONE state, so it can never disagree
+      // with the bubble the way the chip's `dl-em-hot` could.
+      if (before.region !== affordance.region) {
+        before.region?.classList.remove('dl-em-hot');
+        affordance.region?.classList.add('dl-em-hot');
+      }
+      // Focus the marker BEFORE the re-render: `renderGutter` keeps a focused
+      // marker alive, so Escape has something to return focus to even on a
+      // block with no threads (§4.4).
+      if (step.focus === 'marker' && before.key) gutterMarkers.get(before.key)?.focus();
+      if (options.render !== false) renderRail();
+    }
+    if (step.focus === 'composer') focusBubbleComposer(affordance.key);
+  };
+
+  /**
+   * Pin a block's bubble. `focus` moves focus into the composer — true for an
+   * EXPLICIT pin (the gutter marker, the ghost bubble) and false for the
+   * incidental ones (a click inside the bubble, the inline editor's own pin),
+   * which must not pull focus away from what the editor is already doing.
+   */
+  const pinRail = (
+    key: string,
+    region: HTMLElement | undefined,
+    options: { focus?: boolean; source?: 'pointer' | 'keyboard' | 'programmatic' } = {}
+  ): void => {
+    if (!region) return; // a block that is not on the page has nothing to pin to
+    dispatchAffordance({
+      kind: 'pin',
+      region,
+      key,
+      source: options.source ?? 'pointer',
+      focusComposer: options.focus === true,
+    });
+  };
 
   /**
    * An article canvas is any page rendering article nodes; everything else —
@@ -1965,7 +1968,7 @@ export const mountEditMode = (options: MountOptions): void => {
   let settleTimer: number | undefined;
 
   /** The overlays anchored to page boxes — hidden while the page moves. */
-  const anchoredSurfaces = (): HTMLElement[] => [rail, gutter, gapLayer, chip, palette];
+  const anchoredSurfaces = (): HTMLElement[] => [rail, gutter, gapLayer, palette];
 
   /**
    * Both belts: the transition is suppressed for the positioners (they do not
@@ -2080,16 +2083,18 @@ export const mountEditMode = (options: MountOptions): void => {
     return columnRight;
   };
 
-  /** Where a bubble wants to sit: its block's top, below the chip when both show. */
+  /**
+   * Where a bubble wants to sit: its block's top. The `chipOffset` term that
+   * used to push it below the hover chip is void with the chip (spec §8.1) —
+   * the bubble IS the affordance now, so nothing stacks above it.
+   */
   const desiredTopFor = (entry: RailEntry): number => {
     if (!entry.region) return railTopPx;
     // The block's CONTENT top, so a bubble lines up with the copy it annotates
     // rather than with the top of a full-bleed band's padding.
     const rect = contentRect(entry.region);
     if (!rect) return railTopPx;
-    const chipOffset =
-      hotRegion === entry.region && chip.style.display !== 'none' ? chip.offsetHeight + RAIL_STACK_GAP : 0;
-    return Math.max(railTopPx, rect.top + chipOffset);
+    return Math.max(railTopPx, rect.top);
   };
 
   /**
@@ -2145,7 +2150,8 @@ export const mountEditMode = (options: MountOptions): void => {
     // `markers`: no rail column at all. The gutter markers are the surface,
     // and an opened marker's bubble shows as a popover anchored to it.
     const popover = railMode === 'markers';
-    const popoverKey = pinnedKey ? `block:${pinnedKey}` : railListMode ? ATTENTION_LIST_KEY : undefined;
+    const pinned = pinnedKeyNow();
+    const popoverKey = pinned ? `block:${pinned}` : railListMode ? ATTENTION_LIST_KEY : undefined;
     const active =
       document.body.classList.contains('dl-em-on') &&
       railPlan.length > 0 &&
@@ -2185,8 +2191,6 @@ export const mountEditMode = (options: MountOptions): void => {
         entry.el.querySelector<HTMLElement>('.dl-em-bubble-link')?.remove();
       }
       positionGutter();
-      // The chip lags the rail by a frame unless it moves in the same pass.
-      if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
       return;
     }
     railLeftPx = railLeftFor(railMode, metrics);
@@ -2217,9 +2221,6 @@ export const mountEditMode = (options: MountOptions): void => {
       }
     });
     positionGutter();
-    // The chip right-aligns to the rail, so it has to move in the SAME pass —
-    // otherwise it lags the rail by a frame on every relayout.
-    if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
   };
 
   /**
@@ -2247,8 +2248,81 @@ export const mountEditMode = (options: MountOptions): void => {
   const threadsAtKey = (key: string): MarginaliaThreadWithComments[] =>
     railRows.filter((row) => row.key === key).map((row) => row.thread);
 
-  const openThreadsOf = (threads: readonly MarginaliaThreadWithComments[]): MarginaliaThreadWithComments[] =>
-    threads.filter((thread) => thread.status === 'open');
+  // ── the bubble's anatomy (T17.14a — affordance-model §2) ─────────────────
+  // R1 identity row · R2 thread log · R3 composer · R4 footer strip · R5 the
+  // block drawer. The PDF's card, top to bottom, and the ONLY affordance a
+  // block shows. Everything the retired hover chip carried lands here (§3):
+  // its identity string is R1's second line, its monospace object id demotes
+  // to that line's tooltip, its `shared` badge becomes a `· shared` token,
+  // its pencil becomes `✎ edit directly`, and its remaining tools are drawer
+  // rows behind the footer chevron.
+
+  /**
+   * R1 line 1 — the agent an ask would go to. `listProfiles` is READ-ONLY and
+   * creates nothing (spec §9): rendering a header must never spin up a chat
+   * object. One call per mount, cached and shared by every bubble; any
+   * failure degrades to NO line, never to a placeholder name.
+   */
+  let profilesPromise: Promise<{ profiles: AgentProfileView[]; assignments: AgentAssignments } | undefined> | undefined;
+  type AgentAssignments = { objects: Record<string, string>; types: Record<string, string>; site_default?: string };
+
+  const agentRouteFor = async (
+    objectType: string,
+    objectId: string
+  ): Promise<{ name: string; avatar?: string } | undefined> => {
+    if (!profilesPromise) profilesPromise = listProfiles(getToken).catch(() => undefined);
+    const view = await profilesPromise;
+    if (!view) return undefined;
+    const assignments = view.assignments;
+    const profileId = assignments?.objects?.[objectId] ?? assignments?.types?.[objectType] ?? assignments?.site_default;
+    const profile = profileId ? view.profiles.find((candidate) => candidate.profile_id === profileId) : undefined;
+    if (!profile) return undefined;
+    return {
+      name: profile.name,
+      ...(avatarSrc(profile.avatar_artifact) ? { avatar: avatarSrc(profile.avatar_artifact) as string } : {}),
+    };
+  };
+
+  /** `DL` — the avatar's fallback when a profile carries no artifact. */
+  const initialsOf = (name: string): string =>
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0]?.toUpperCase() ?? '')
+      .join('') || '·';
+
+  /**
+   * R1 line 2 — the block's identity: the article node's kind (replaced by its
+   * ROLE the moment the record answers) or the section type, plus a
+   * `· shared` / `· site-wide` token, which is a blast-radius warning and is
+   * the one chip badge that must not be lost.
+   */
+  const blockIdentityFor = (region: HTMLElement, target: EditTarget): string => {
+    const isNav = region.dataset.cmsNavObject !== undefined;
+    const isNode = region.dataset.cmsNodeId !== undefined;
+    return isNode ? (region.dataset.cmsNodeKind ?? 'block') : isNav ? 'Menu' : target.sectionType || 'Block';
+  };
+
+  /** R4's state pill — the OBJECT's state, exactly as the PDF shows it. */
+  type ObjectState = { label: string; kind: 'draft' | 'published' | 'never' };
+
+  const objectStateFor = async (objectType: string, objectId: string): Promise<ObjectState> => {
+    if (pendingRows.some((row) => row.object_id === objectId && row.unpublished_changes)) {
+      return { label: 'Draft · unpublished', kind: 'draft' };
+    }
+    const { record } = await cachedRecord(objectType, objectId);
+    const publishedAt = (record?.publication as { published_time?: string | null } | undefined)?.published_time;
+    if (!publishedAt) return { label: 'Never published', kind: 'never' };
+    const when = new Date(publishedAt);
+    const date = Number.isNaN(when.getTime())
+      ? publishedAt
+      : when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return { label: `Published · ${date}`, kind: 'published' };
+  };
+
+  /** Stable ids so a footer chevron's aria-controls can name its own drawer. */
+  let drawerDomIdSeq = 0;
 
   type BubbleSpec = {
     key: string;
@@ -2259,21 +2333,119 @@ export const mountEditMode = (options: MountOptions): void => {
     region?: HTMLElement;
     /** The ANCHOR key this bubble pins under; absent on whole-object/orphan groups, which always show. */
     pinKey?: string;
+    /** The block's edit target — what R1's identity line and R5's rows act on. */
+    editTarget?: EditTarget;
   };
 
   const buildBubble = (spec: BubbleSpec): HTMLElement => {
     const el = document.createElement('div');
     el.className = 'dl-em-bubble';
     el.dataset.emBubble = spec.key;
+    // R4's state pill is re-applied on every render (`applyBubbleState`), and
+    // bubbles are reconciled rather than rebuilt, so the object it is about
+    // travels on the element itself.
+    el.dataset.emObjectType = spec.target.objectType;
+    el.dataset.emObjectId = spec.target.objectId;
     // A block bubble is what its gutter marker's aria-controls points at.
     if (spec.pinKey) el.id = bubbleDomId(spec.pinKey);
+    const region = spec.region;
+    const editTarget = spec.editTarget;
+    const blockBubble = Boolean(region && editTarget);
+    // A whole-object or orphan group has no block, so it has no block actions
+    // and nothing to edit directly; its identity line is its own title.
+    const identity = region && editTarget ? blockIdentityFor(region, editTarget) : spec.title;
+    const sharedToken = editTarget?.shared
+      ? `<span class="dl-em-bubble-shared">· ${editTarget.objectType === 'navigation' ? 'site-wide' : 'shared'}</span>`
+      : '';
+    const drawerId = `dl-em-drawer-${(drawerDomIdSeq += 1)}`;
+    const hasDrawer =
+      blockBubble && drawerRowsFor(blockActionInputFor(region as HTMLElement, editTarget as EditTarget)).length > 0;
     el.innerHTML =
-      `<div class="dl-em-bubble-head">` +
-      `<span class="dl-em-bubble-title">${escapeHtml(spec.title)}</span>` +
-      `<span class="dl-em-bubble-open" hidden></span>` +
-      `<button class="dl-em-close" data-em-bubble-close aria-label="Close">${ICON_CLOSE}</button>` +
-      `</div><div class="dl-em-bubble-body"></div>`;
-    const openEl = el.querySelector<HTMLElement>('.dl-em-bubble-open');
+      // R1 — identity row.
+      `<div class="dl-em-bubble-id">` +
+      `<div class="dl-em-bubble-who">` +
+      `<div class="dl-em-bubble-agent" data-em-agent hidden></div>` +
+      `<div class="dl-em-bubble-block" data-em-block-identity title="${escapeHtml(spec.target.objectId)}">` +
+      `<span data-em-role>${escapeHtml(identity)}</span>${sharedToken}</div>` +
+      `</div>` +
+      (blockBubble
+        ? `<button type="button" class="dl-em-editlink" data-em-edit-directly>` +
+          `${ICON_PENCIL}<span>edit directly</span></button>`
+        : '') +
+      `</div>` +
+      // R2 + R3 — the thread log and the composer (marginalia-panel.ts); the
+      // selection strip is moved into the body, above the composer, on mount.
+      `<div class="dl-em-bubble-body"></div>` +
+      // R4 — footer strip.
+      `<div class="dl-em-bubble-foot">` +
+      `<span class="dl-em-foot-title" data-em-foot-title></span>` +
+      `<span class="dl-em-statepill" data-em-state hidden></span>` +
+      (hasDrawer
+        ? `<button type="button" class="dl-em-drawer-toggle" data-em-drawer-toggle aria-expanded="false" ` +
+          `aria-controls="${drawerId}" aria-label="Block actions" title="Block actions">${ICON_CHEVRON}</button>`
+        : '') +
+      `</div>` +
+      // R5 — the block drawer, built on first open.
+      (hasDrawer ? `<div class="dl-em-drawer" id="${drawerId}" data-em-drawer hidden></div>` : '');
+
+    // R1 line 1: the resolved agent, or nothing at all.
+    const agentEl = el.querySelector<HTMLElement>('[data-em-agent]');
+    void agentRouteFor(spec.target.objectType, spec.target.objectId).then((route) => {
+      if (!route || !agentEl || !agentEl.isConnected) return;
+      agentEl.innerHTML =
+        (route.avatar
+          ? `<img class="dl-em-avatar" src="${escapeHtml(route.avatar)}" alt="">`
+          : `<span class="dl-em-avatar dl-em-avatar-initials">${escapeHtml(initialsOf(route.name))}</span>`) +
+        `<span class="dl-em-agentname">→ ${escapeHtml(route.name)}</span>` +
+        `<span class="dl-em-agentvia">· via CMS Agent</span>`;
+      agentEl.hidden = false;
+    });
+
+    // R1 line 2: an article node's role replaces its kind as soon as the
+    // record answers. The chip's "the hover moved on" guard becomes "this
+    // bubble is still on the page" — the bubble outlives a pointer move.
+    if (editTarget?.objectType === 'content_item' && editTarget.nodeId) {
+      const nodeId = editTarget.nodeId;
+      void nodeRoles(editTarget.objectId).then((roles) => {
+        const roleEl = el.querySelector('[data-em-role]');
+        const role = roles.get(nodeId);
+        if (role && roleEl && el.isConnected) roleEl.textContent = role;
+      });
+    }
+
+    // R1 right slot: the pencil's new home. It enters T17.8's inline editor on
+    // the anchored block — `startInlineEdit` already falls through to
+    // `openPanel(…, 'edit')` for a block with no single primary copy field
+    // (spec §5.1), so there is exactly ONE edit path, not two.
+    el.querySelector('[data-em-edit-directly]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (region) void startInlineEdit(region);
+    });
+
+    // R4: the object's human name (`trayLabelFor` — one function, two callers)
+    // and its publish state.
+    const footTitleEl = el.querySelector<HTMLElement>('[data-em-foot-title]');
+    void cachedRecord(spec.target.objectType, spec.target.objectId).then(({ record }) => {
+      if (!footTitleEl || !footTitleEl.isConnected) return;
+      footTitleEl.textContent = trayLabelFor(
+        { object_type: spec.target.objectType, object_id: spec.target.objectId },
+        record?.body as Record<string, unknown> | undefined
+      );
+    });
+
+    // R5: the chevron pins first and opens second — a drawer on a surface that
+    // decays under the pointer is invariant 3's violation (§4.1).
+    el.querySelector('[data-em-drawer-toggle]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (spec.pinKey && region) pinRail(spec.pinKey, region);
+      dispatchAffordance({ kind: 'toggleDrawer' });
+    });
+
+    const selectionStrip = document.createElement('div');
+    selectionStrip.className = 'dl-em-selstrip';
+    selectionStrip.dataset.emSelstrip = '';
+    selectionStrip.hidden = true;
+
     const moreButton = document.createElement('button');
     moreButton.type = 'button';
     moreButton.className = 'dl-em-bubble-more';
@@ -2286,14 +2458,9 @@ export const mountEditMode = (options: MountOptions): void => {
       remountBubbleBody();
     });
 
-    el.querySelector('[data-em-bubble-close]')?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      unpinRail();
-      revealedRegion = undefined;
-      renderRail();
-    });
     // Click or focus anywhere in a bubble pins it (spec §2.3) — a hover-only
-    // bubble cannot host a composer.
+    // bubble cannot host a composer. Neither moves focus: the pointer or the
+    // Tab key has already put it where the editor wants it (§4.4).
     if (spec.pinKey) {
       const pinKey = spec.pinKey;
       el.addEventListener('mousedown', () => pinRail(pinKey, spec.region));
@@ -2314,11 +2481,6 @@ export const mountEditMode = (options: MountOptions): void => {
         {
           selectThreads: (threads) => {
             const mine = spec.selectThreads(threads);
-            if (openEl) {
-              const open = openThreadsOf(mine).length;
-              openEl.hidden = open === 0;
-              openEl.textContent = `${open} open`;
-            }
             const { visible, hidden } = expanded ? { visible: [...mine], hidden: 0 } : collapseThreadStack(mine);
             moreButton.hidden = hidden === 0;
             moreButton.textContent = `+${hidden} earlier`;
@@ -2326,12 +2488,201 @@ export const mountEditMode = (options: MountOptions): void => {
           },
           emptyLabel: spec.emptyLabel,
           composerPlaceholder: 'Comment — a question, a change, an ask',
+          // The PDF's card has NO empty-state line at rest: a block with no
+          // thread shows identity, composer and footer only, and the ghost
+          // bubble already means "nothing here yet" (§2, R2). Whole-object and
+          // orphan groups DO need their label — they are lists, not blocks.
+          omitEmptyLog: blockBubble,
         }
       );
       body.append(moreButton);
+      // Above the composer, per the PDF's reading order: the scope you are
+      // about to ask about sits over the field you type the ask into.
+      body.querySelector('.dl-em-composer')?.before(selectionStrip);
+      applySelectionStrip(el, region);
     };
     remountBubbleBody();
     return el;
+  };
+
+  /** What `drawerRowsFor` needs to know about a block, read off the DOM once. */
+  const blockActionInputFor = (region: HTMLElement, target: EditTarget): BlockActionInput => ({
+    isNav: region.dataset.cmsNavObject !== undefined,
+    isNode: region.dataset.cmsNodeId !== undefined,
+    ...(region.dataset.cmsNodeKind !== undefined ? { nodeKind: region.dataset.cmsNodeKind } : {}),
+    sectionType: target.sectionType,
+    hasRelated: region.dataset.cmsRelatedAlgorithm !== undefined,
+    objectType: target.objectType,
+  });
+
+  /** The leading glyph for a drawer row. Labelled rows, not an icon strip. */
+  const DRAWER_ROW_ICONS: Record<string, string> = {
+    image: ICON_IMAGE,
+    role: ICON_TAG,
+    meta: ICON_TAG,
+    ai: ICON_SPARKLES,
+    delete: ICON_TRASH,
+  };
+
+  /**
+   * R4's state pill, applied on every render rather than once at build time:
+   * a bubble outlives the save that turns `Published` into `Draft ·
+   * unpublished`, and a stale publish state on the card an editor is looking
+   * at is exactly the sort of thing this strip exists to prevent.
+   */
+  const applyBubbleState = (el: HTMLElement): void => {
+    const stateEl = el.querySelector<HTMLElement>('[data-em-state]');
+    const objectType = el.dataset.emObjectType;
+    const objectId = el.dataset.emObjectId;
+    if (!stateEl || !objectType || !objectId) return;
+    void objectStateFor(objectType, objectId).then((state) => {
+      if (!stateEl.isConnected) return;
+      stateEl.textContent = state.label;
+      stateEl.className = `dl-em-statepill dl-em-state-${state.kind}`;
+      stateEl.hidden = false;
+    });
+  };
+
+  /**
+   * Build R5 from `drawerRowsFor`'s plan (T17.14b). Every row the retired chip
+   * carried is here, as a LABELLED row with a leading glyph — the drawer must
+   * read as rows, not as the chip relocated (affordance-model §2, R5).
+   *
+   * The drawer's own header repeats the block identity WITH the object id
+   * visible: a drawer is where provenance belongs.
+   */
+  const fillBubbleDrawer = (drawer: HTMLElement, region: HTMLElement, target: EditTarget): void => {
+    if (drawer.dataset.emFilled === '1') return;
+    drawer.dataset.emFilled = '1';
+    drawer.innerHTML =
+      `<div class="dl-em-drawer-head">${escapeHtml(blockIdentityFor(region, target))} · ` +
+      `<span class="dl-em-drawer-id">${escapeHtml(target.objectId)}</span></div>`;
+    for (const row of drawerRowsFor(blockActionInputFor(region, target))) {
+      if (row.separatorBefore) {
+        const rule = document.createElement('div');
+        rule.className = 'dl-em-drawer-rule';
+        drawer.append(rule);
+      }
+      if (row.kind === 'related') {
+        drawer.append(buildRelatedGroup(region, target, row.label));
+        continue;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `dl-em-drawer-row${row.kind === 'delete' ? ' dl-em-drawer-danger' : ''}`;
+      button.innerHTML = `${DRAWER_ROW_ICONS[row.kind] ?? ''}<span>${escapeHtml(row.label)}</span>`;
+      const panelMode = row.panelMode;
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        // Delete is the confirm modal, never a panel; everything else opens
+        // the docked panel at the section the chip's button opened, and the
+        // panel morphs out of the row that was pressed (spec §5.1 rule 5).
+        if (row.kind === 'delete') void deleteRegion(target, region);
+        else if (panelMode) void openPanel(target, region, panelMode, { from: button });
+      });
+      drawer.append(button);
+    }
+  };
+
+  /**
+   * The `content_grid` configuration — algorithm, tiles, columns — with
+   * VISIBLE labels instead of the chip's `title` attributes, wired to the
+   * unchanged `applyRelated` (affordance-model §10 row 25).
+   */
+  const buildRelatedGroup = (region: HTMLElement, target: EditTarget, label: string): HTMLElement => {
+    const group = document.createElement('div');
+    group.className = 'dl-em-drawer-group';
+    group.innerHTML =
+      `<div class="dl-em-drawer-grouphead">${escapeHtml(label)}</div>` +
+      `<div class="dl-em-drawer-fields">` +
+      `<label class="dl-em-drawer-field"><span>Selection</span>` +
+      `<select class="dl-em-alg" data-em-alg>` +
+      Object.entries(ALGORITHM_LABELS)
+        .map(
+          ([value, name]) =>
+            `<option value="${value}"${value === region.dataset.cmsRelatedAlgorithm ? ' selected' : ''}>${name}</option>`
+        )
+        .join('') +
+      `</select></label>` +
+      `<label class="dl-em-drawer-field"><span>Tiles</span>` +
+      `<input class="dl-em-num" data-em-tiles type="number" min="1" max="12" ` +
+      `value="${escapeHtml(region.dataset.cmsRelatedLimit ?? '4')}"></label>` +
+      `<label class="dl-em-drawer-field"><span>Columns</span>` +
+      `<input class="dl-em-num" data-em-cols type="number" min="1" max="4" ` +
+      `value="${escapeHtml(region.dataset.cmsRelatedColumns ?? '2')}"></label>` +
+      `</div>`;
+    group.querySelector<HTMLSelectElement>('[data-em-alg]')?.addEventListener('change', (event) => {
+      const algorithm = (event.target as HTMLSelectElement).value;
+      void applyRelated(
+        target,
+        region,
+        { source: { kind: 'related', algorithm } },
+        `selection “${ALGORITHM_LABELS[algorithm] ?? 'updated'}”`
+      );
+    });
+    group.querySelector<HTMLInputElement>('[data-em-tiles]')?.addEventListener('change', (event) => {
+      const limit = Math.max(1, Math.min(12, Number((event.target as HTMLInputElement).value) || 4));
+      region.dataset.cmsRelatedLimit = String(limit);
+      void applyRelated(target, region, { limit }, `${limit} tiles`);
+    });
+    group.querySelector<HTMLInputElement>('[data-em-cols]')?.addEventListener('change', (event) => {
+      const columns = Math.max(1, Math.min(4, Number((event.target as HTMLInputElement).value) || 2));
+      region.dataset.cmsRelatedColumns = String(columns);
+      void applyRelated(target, region, { columns }, `${columns} columns`);
+    });
+    return group;
+  };
+
+  /**
+   * R3's selection strip: `“…” ✕` above the composer while a text selection is
+   * armed inside this bubble's block, scoping the drawer's `Ask AI…` row to
+   * it. It replaces the chip's `.dl-em-ask.dl-em-sel` highlight, which was the
+   * only indication a selection was armed at all. T17.4 reuses this strip as
+   * the span anchor's surface (affordance-model §2 R3, §10 row 28).
+   */
+  const applySelectionStrip = (el: HTMLElement, region: HTMLElement | undefined): void => {
+    const strip = el.querySelector<HTMLElement>('[data-em-selstrip]');
+    if (!strip) return;
+    const armed = region !== undefined && selectionRegion === region && Boolean(currentSelectionText);
+    const label = armed ? selectionStripLabel(currentSelectionText as string) : '';
+    if (strip.dataset.emSel === label) return; // nothing changed — do not re-wire
+    strip.dataset.emSel = label;
+    strip.hidden = !label;
+    if (!label) {
+      strip.innerHTML = '';
+      return;
+    }
+    strip.innerHTML =
+      `<span class="dl-em-selquote">“${escapeHtml(label)}”</span>` +
+      `<button type="button" class="dl-em-selclear" data-em-selclear ` +
+      `aria-label="Clear the selection scope">${ICON_CLOSE}</button>`;
+    strip.querySelector('[data-em-selclear]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      currentSelectionText = undefined;
+      selectionRegion = undefined;
+      refreshSelectionStrips();
+    });
+  };
+
+  /** Re-apply every visible bubble's strip — the selection changed, not the plan. */
+  const refreshSelectionStrips = (): void => {
+    for (const entry of railPlan) if (entry.el) applySelectionStrip(entry.el, entry.region);
+  };
+
+  /**
+   * Reconcile a bubble's drawer against the one state (invariant 3: only a
+   * PINNED bubble can have one open). Bubbles are kept across renders, so the
+   * open/closed state is applied here rather than baked in at build time.
+   */
+  const syncBubbleDrawer = (el: HTMLElement, entry: RailEntry, open: boolean): void => {
+    const drawer = el.querySelector<HTMLElement>('[data-em-drawer]');
+    const toggle = el.querySelector<HTMLElement>('[data-em-drawer-toggle]');
+    if (!drawer || !toggle) return;
+    const target = entry.region ? targetFor(entry.region) : undefined;
+    if (open && entry.region && target) fillBubbleDrawer(drawer, entry.region, target);
+    drawer.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    el.classList.toggle('dl-em-drawer-open', open);
   };
 
   const wholeObjectLabel = (objectType: string): string =>
@@ -2390,16 +2741,15 @@ export const mountEditMode = (options: MountOptions): void => {
     //     bubble; one without gets the concept's ghost speech bubble, which
     //     opens an empty composer on click. A PINNED block always gets the
     //     real bubble — that is what pinning is for.
+    // ONE state, so at most ONE block bubble: the chip-era pair of
+    // independent `revealedRegion` + `pinnedRegion` slots (which could paint
+    // two cards for two different blocks at once) is gone with the chip.
     const blockKeys = new Map<string, HTMLElement>();
-    if (pinnedKey && pinnedRegion && pinnedRegion.isConnected) blockKeys.set(pinnedKey, pinnedRegion);
-    if (revealedRegion?.isConnected) {
-      const key = anchorKeyForRegion(revealedRegion);
-      if (key && !blockKeys.has(key)) blockKeys.set(key, revealedRegion);
-    }
+    if (affordance.region?.isConnected && affordance.key) blockKeys.set(affordance.key, affordance.region);
     for (const [key, region] of blockKeys) {
       const target = targetFor(region);
       if (!target) continue;
-      const pinned = key === pinnedKey;
+      const pinned = affordance.phase === 'pinned';
       if (!pinned && threadsAtKey(key).length === 0) {
         plan.push({ key: `ghost:${key}`, region, build: () => buildGhostBubble(key, region) });
         continue;
@@ -2416,6 +2766,7 @@ export const mountEditMode = (options: MountOptions): void => {
             emptyLabel: 'No comments on this block yet.',
             region,
             pinKey: key,
+            editTarget: target,
           }),
       });
     }
@@ -2471,7 +2822,8 @@ export const mountEditMode = (options: MountOptions): void => {
     button.setAttribute('aria-label', 'Comment on this block');
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      pinRail(key, region);
+      // An explicit "I want to say something here" — the composer takes focus.
+      pinRail(key, region, { focus: true });
     });
     return button;
   };
@@ -2485,7 +2837,8 @@ export const mountEditMode = (options: MountOptions): void => {
       el.remove();
       railNodes.delete(key);
     }
-    const pinnedEntryKey = pinnedKey ? `block:${pinnedKey}` : undefined;
+    const pinned = pinnedKeyNow();
+    const pinnedEntryKey = pinned ? `block:${pinned}` : undefined;
     for (const entry of plan) {
       let el = railNodes.get(entry.key);
       if (!el) {
@@ -2493,7 +2846,11 @@ export const mountEditMode = (options: MountOptions): void => {
         railNodes.set(entry.key, el);
         rail.append(el);
       }
-      el.classList.toggle('dl-em-pinned', entry.key === pinnedEntryKey);
+      const isPinned = entry.key === pinnedEntryKey;
+      el.classList.toggle('dl-em-pinned', isPinned);
+      applyBubbleState(el);
+      applySelectionStrip(el, entry.region);
+      syncBubbleDrawer(el, entry, isPinned && affordance.drawerOpen);
       entry.el = el;
     }
     railPlan = plan;
@@ -2538,44 +2895,6 @@ export const mountEditMode = (options: MountOptions): void => {
     railNodes.get(ATTENTION_LIST_KEY)?.remove();
     railNodes.delete(ATTENTION_LIST_KEY);
     renderRail();
-  };
-
-  const pinRail = (key: string, region: HTMLElement | undefined): void => {
-    if (pinnedKey === key) return;
-    pinnedKey = key;
-    pinnedRegion = region;
-    window.clearTimeout(railHideTimer);
-    renderRail();
-  };
-
-  const unpinRail = (): void => {
-    if (!pinnedKey) return;
-    pinnedKey = undefined;
-    pinnedRegion = undefined;
-    renderRail();
-  };
-
-  const scheduleRailReveal = (region: HTMLElement): void => {
-    window.clearTimeout(railRevealTimer);
-    window.clearTimeout(railHideTimer);
-    // While a block is in inline edit (T17.8), other blocks' hover-reveal is
-    // suppressed — the edited block's own bubble stays pinned (spec §5.3).
-    if (inlineEdit && inlineEdit.region !== region) return;
-    if (revealedRegion === region) return;
-    railRevealTimer = window.setTimeout(() => {
-      revealedRegion = region;
-      renderRail();
-    }, RAIL_REVEAL_MS);
-  };
-
-  const clearRailSoon = (): void => {
-    window.clearTimeout(railRevealTimer);
-    window.clearTimeout(railHideTimer);
-    railHideTimer = window.setTimeout(() => {
-      if (!revealedRegion) return;
-      revealedRegion = undefined;
-      renderRail();
-    }, RAIL_DISMISS_MS);
   };
 
   // ── attention: gutter markers, the toolbar counter, list mode (T17.6) ────
@@ -2648,13 +2967,22 @@ export const mountEditMode = (options: MountOptions): void => {
       return;
     }
     const counts = blockAttentionCounts(railRows);
+    const active = document.activeElement as HTMLElement | null;
     const wanted = new Map<string, { region: HTMLElement; counts: BlockAttention; hovered: boolean }>();
     for (const region of annotatedRegions()) {
       if (region.classList.contains('dl-em-removed')) continue;
       const key = anchorKeyForRegion(region);
       if (!key) continue;
       const blockCounts = counts.get(key) ?? { open: 0, resolved: 0 };
-      const hovered = region === hotRegion || region === revealedRegion || key === pinnedKey;
+      // ONE source for "is this block the one" — the affordance state — so a
+      // marker can never disagree with a bubble (§4.1 invariant 5). Plus two
+      // keyboard cases (§4.4): a block whose SUBTREE has focus gets its
+      // marker, so a Tab landing anywhere inside it is one Tab from the
+      // affordance; and a marker that itself has focus stays on screen, so
+      // Escape has something to return focus to.
+      const focusWithin = Boolean(active && region.contains(active));
+      const markerFocused = gutterMarkers.get(key) === active;
+      const hovered = key === affordance.key || focusWithin || markerFocused;
       if (gutterMarkerState({ ...blockCounts, hovered }) === 'none') continue;
       if (!wanted.has(key)) wanted.set(key, { region, counts: blockCounts, hovered });
     }
@@ -2671,11 +2999,13 @@ export const mountEditMode = (options: MountOptions): void => {
         marker.type = 'button';
         marker.className = 'dl-em-badge';
         marker.dataset.emRegionKey = key;
+        // A real <button>, so Enter and Space come free: the marker is the
+        // keyboard's way into the bubble (§4.4).
         marker.addEventListener('click', (event) => {
           event.stopPropagation();
           const region = markerRegions.get(key);
-          if (pinnedKey === key) unpinRail();
-          else pinRail(key, region);
+          if (!region) return;
+          dispatchAffordance({ kind: 'markerActivate', region, key });
         });
         gutter.append(marker);
         gutterMarkers.set(key, marker);
@@ -2692,7 +3022,7 @@ export const mountEditMode = (options: MountOptions): void => {
         'aria-label',
         markerAriaLabel(state, entry.counts.open, target ? blockLabel(entry.region, target) : 'this block')
       );
-      marker.setAttribute('aria-expanded', String(pinnedKey === key));
+      marker.setAttribute('aria-expanded', String(pinnedKeyNow() === key));
       marker.setAttribute('aria-controls', bubbleDomId(key));
     }
     positionGutter();
@@ -2835,51 +3165,80 @@ export const mountEditMode = (options: MountOptions): void => {
     setListMode(!railListMode);
   });
 
-  // Focus reveals exactly what hover reveals (spec §9) — keyboard users are
-  // not second class.
+  /** The block a DOM element belongs to — nodes innermost, then sections, then chrome. */
+  const regionOf = (element: HTMLElement | null | undefined): HTMLElement | undefined =>
+    element?.closest<HTMLElement>(NODE_SELECTOR) ??
+    element?.closest<HTMLElement>(REGION_SELECTOR) ??
+    element?.closest<HTMLElement>(NAV_SELECTOR) ??
+    undefined;
+
+  /** True while `element` is inside one of the canvas's own surfaces. */
+  const onCanvasSurface = (element: HTMLElement | null | undefined): boolean =>
+    Boolean(element && (rail.contains(element) || gutter.contains(element) || panel.contains(element)));
+
+  // Focus reveals exactly what hover reveals (spec §9). Before the fold that
+  // sentence was true of the rail and false of the chip, and therefore false
+  // of the canvas: a keyboard user got a bubble and no tools. It is true now
+  // because there is one affordance and one machine behind it.
   document.addEventListener(
     'focusin',
     (event) => {
       if (!document.body.classList.contains('dl-em-on')) return;
       const element = event.target as HTMLElement | null;
-      if (!element || rail.contains(element) || chip.contains(element) || panel.contains(element)) return;
-      const region =
-        element.closest<HTMLElement>(NODE_SELECTOR) ??
-        element.closest<HTMLElement>(REGION_SELECTOR) ??
-        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!element) return;
+      if (onCanvasSurface(element)) {
+        dispatchAffordance({ kind: 'hoverSurface' });
+        // A marker taking focus changes which markers are drawn (§4.4).
+        if (gutter.contains(element)) renderGutter();
+        return;
+      }
+      const region = regionOf(element);
       if (!region) return;
-      window.clearTimeout(railHideTimer);
-      if (revealedRegion === region) return;
-      revealedRegion = region;
-      renderRail();
+      const key = anchorKeyForRegion(region);
+      if (!key) return;
+      // A focus is deliberate, so it is not debounced (§4.2) — `source:
+      // 'keyboard'` is what makes the reveal immediate.
+      dispatchAffordance({ kind: 'hover', region, key, source: 'keyboard' });
+      renderGutter();
     },
     { signal }
   );
 
-  // Esc unpins and hands focus back to the block (spec §2.3, §9).
+  // Esc: the first closes the drawer, the second unpins and hands focus back
+  // to the block's GUTTER MARKER — not to the region, which on an article is
+  // a display:contents wrapper that may not be focusable (spec §4.3, §4.4).
   document.addEventListener(
     'keydown',
     (event) => {
-      if (event.key !== 'Escape' || !pinnedKey) return;
-      const returnTo = pinnedRegion;
-      unpinRail();
-      revealedRegion = undefined;
-      renderRail();
-      if (returnTo?.isConnected) returnTo.focus?.();
+      if (event.key !== 'Escape') return;
+      // Inline edit owns the FIRST Escape while it is up: T17.8's rule wins,
+      // the edit reverts, the block stays pinned, and a second Escape unpins
+      // (spec §4.3). The editing surface's own handler stops propagation, so
+      // this only fires when focus has moved off it meanwhile.
+      if (inlineEdit) {
+        cancelInlineEdit();
+        return;
+      }
+      if (affordance.phase === 'hidden') return;
+      dispatchAffordance({ kind: 'escape' });
     },
     { signal }
   );
 
-  // A click outside both the bubble and its own block unpins (spec §2.3).
+  // A click outside both the bubble and its own block unpins (spec §2.3). When
+  // the click landed on ANOTHER block, that block is revealed in the same
+  // gesture rather than leaving the canvas blank until the pointer moves.
   document.addEventListener(
     'click',
     (event) => {
-      if (!pinnedKey) return;
+      if (affordance.phase !== 'pinned') return;
       const element = event.target as HTMLElement | null;
       if (!element) return;
-      if (rail.contains(element) || panel.contains(element) || chip.contains(element)) return;
-      if (pinnedRegion?.contains(element)) return;
-      unpinRail();
+      if (onCanvasSurface(element)) return;
+      if (affordance.region?.contains(element)) return;
+      const region = regionOf(element);
+      const key = region ? anchorKeyForRegion(region) : undefined;
+      dispatchAffordance(region && key ? { kind: 'outsideClick', region, key } : { kind: 'outsideClick' });
     },
     { signal }
   );
@@ -2889,47 +3248,28 @@ export const mountEditMode = (options: MountOptions): void => {
     (event) => {
       if (!document.body.classList.contains('dl-em-on')) return;
       const element = event.target as HTMLElement;
-      if (chip.contains(element)) {
-        window.clearTimeout(chipHideTimer);
-        window.clearTimeout(railHideTimer);
-        return;
-      }
-      // The pointer inside the rail keeps everything up — the same guard
-      // shape the chip has always had (spec §2.2).
-      if (rail.contains(element)) {
-        window.clearTimeout(chipHideTimer);
-        window.clearTimeout(railHideTimer);
-        window.clearTimeout(railRevealTimer);
+      // The pointer on the affordance itself keeps it up (spec §2.2). The
+      // `chip.contains(...)` arm of this guard died with the chip.
+      if (onCanvasSurface(element)) {
+        dispatchAffordance({ kind: 'hoverSurface' });
         return;
       }
       // Article nodes first (innermost, inside the post body), then sections
       // (inside <main>), then chrome (header/footer wrap a nav object) — a
       // hover matches exactly one editable region.
-      const region =
-        element.closest<HTMLElement>(NODE_SELECTOR) ??
-        element.closest<HTMLElement>(REGION_SELECTOR) ??
-        element.closest<HTMLElement>(NAV_SELECTOR);
-      if (!region) {
-        clearChipSoon();
-        clearRailSoon();
+      const region = regionOf(element);
+      const key = region ? anchorKeyForRegion(region) : undefined;
+      if (!region || !key) {
+        dispatchAffordance({ kind: 'hoverAway' });
         return;
       }
-      window.clearTimeout(chipHideTimer);
-      if (region !== hotRegion) {
-        hotRegion?.classList.remove('dl-em-hot');
-        hotRegion = region;
-        region.classList.add('dl-em-hot');
-        renderChip(region);
-        scheduleRailReveal(region);
-        renderGutter(); // the hovered block's marker appears/changes state
-      }
+      dispatchAffordance({ kind: 'hover', region, key, source: 'pointer' });
     },
     { signal }
   );
   document.addEventListener(
     'scroll',
     () => {
-      if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
       if (railPlan.length > 0) scheduleRailFrame();
     },
     { passive: true, signal }
@@ -2942,17 +3282,15 @@ export const mountEditMode = (options: MountOptions): void => {
     'mouseup',
     (event) => {
       if (!document.body.classList.contains('dl-em-on')) return;
-      // A mouseup on the chip itself must not re-render it: the click event
-      // dispatches AFTER mouseup, and re-rendering would replace the Ask-AI
-      // button before its click listener ever fires.
-      if (chip.contains(event.target as Node)) return;
+      // A mouseup on the canvas's own surfaces is not a content selection.
+      if (onCanvasSurface(event.target as HTMLElement | null)) return;
       // A double-click selects a word on its way into the inline editor
       // (T17.8) — that is a gesture, not an Ask-AI scope. Drop any scope that
       // was armed too, so a double-click can never leave one behind (§5.3).
       if (!shouldCaptureSelection(event.detail)) {
         currentSelectionText = undefined;
         selectionRegion = undefined;
-        if (hotRegion) renderChip(hotRegion);
+        refreshSelectionStrips();
         return;
       }
       const selection = window.getSelection();
@@ -2965,7 +3303,9 @@ export const mountEditMode = (options: MountOptions): void => {
         undefined;
       currentSelectionText = region ? captureObjectSelection(region) : undefined;
       selectionRegion = currentSelectionText ? region : undefined;
-      if (hotRegion) renderChip(hotRegion);
+      // The strip above the composer is the ONLY sign a selection is armed
+      // now that the chip's highlighted sparkle is gone (spec §2, R3).
+      refreshSelectionStrips();
     },
     { signal }
   );
@@ -3344,10 +3684,10 @@ export const mountEditMode = (options: MountOptions): void => {
     });
 
     // The block's own bubble stays up while it is edited (§5.3 collision 2) —
-    // comments about the thing you are editing are the point.
+    // comments about the thing you are editing are the point. A programmatic
+    // pin: it must NOT pull focus out of the surface just mounted.
     const anchorKey = anchorKeyForRegion(region);
-    if (anchorKey) pinRail(anchorKey, region);
-    chip.style.display = 'none';
+    if (anchorKey) pinRail(anchorKey, region, { source: 'programmatic' });
     setStatus('Editing in place — ⌘↵ or click away to save, Esc to cancel.');
   };
 
@@ -3357,7 +3697,7 @@ export const mountEditMode = (options: MountOptions): void => {
       if (!document.body.classList.contains('dl-em-on')) return;
       const element = event.target as HTMLElement | null;
       if (!element) return;
-      if (rail.contains(element) || panel.contains(element) || chip.contains(element) || tray.contains(element)) return;
+      if (onCanvasSurface(element) || tray.contains(element)) return;
       if (inlineEdit?.host.contains(element)) return;
       const region =
         element.closest<HTMLElement>(NODE_SELECTOR) ??
@@ -3379,7 +3719,7 @@ export const mountEditMode = (options: MountOptions): void => {
       if (!document.body.classList.contains('dl-em-on') || inlineEdit) return;
       const element = document.activeElement as HTMLElement | null;
       if (!element || element === document.body) return;
-      if (rail.contains(element) || panel.contains(element) || chip.contains(element) || tray.contains(element)) return;
+      if (onCanvasSurface(element) || tray.contains(element)) return;
       if (bar.contains(element) || element.isContentEditable) return;
       if (/^(input|textarea|select|button|a|summary|details)$/i.test(element.tagName)) return;
       const region =
@@ -3445,6 +3785,9 @@ export const mountEditMode = (options: MountOptions): void => {
   let panelRegion: HTMLElement | undefined;
 
   const closePanel = (): void => {
+    // The rail stops yielding: the affordance state never changed, so exactly
+    // the bubble that was open comes back (spec §5.1 rule 2).
+    rail.classList.remove('dl-em-rail-yield');
     panel.classList.remove(
       'dl-em-open',
       'dl-em-mode-edit',
@@ -3457,6 +3800,7 @@ export const mountEditMode = (options: MountOptions): void => {
     );
     panel.style.left = '';
     panel.style.top = '';
+    panel.style.width = '';
     panel.querySelectorAll('.dl-em-acc').forEach((section) => section.classList.remove('dl-em-open'));
     panelState?.region.classList.remove('dl-em-focus');
     panelState = undefined;
@@ -3497,26 +3841,52 @@ export const mountEditMode = (options: MountOptions): void => {
   // material "container transform" idiom; reduced-motion users get an instant
   // open). Universal: every target kind shares this path. Mobile keeps the
   // bottom sheet.
+  /**
+   * Place the docked panel (T17.14b — affordance-model §5.1 rule 1).
+   *
+   * It used to anchor at `rect.right + 14` with NO rail awareness at all —
+   * which is the rail's exact slot, so a panel and a bubble could be painted
+   * on top of each other. The panel now takes the rail's own column: same
+   * left edge, never wider than the strip the rail already reserved. In
+   * `slide` mode that strip is padding the page has ALREADY given up, so
+   * nothing on the page moves when the panel opens — Wolf's no-movement
+   * ruling satisfied structurally rather than by care.
+   *
+   * Below the sheet floor there is no column to take: the `max-width:900px`
+   * rule turns the panel into the bottom sheet and owns its geometry.
+   */
   const anchorPanel = (region: HTMLElement): void => {
-    if (window.innerWidth <= 720) return; // the bottom-sheet media query owns mobile
+    if (window.innerWidth <= RAIL_SHEET_FLOOR) return;
     const rect = regionRect(region);
     if (!rect) return;
     panel.classList.add('dl-em-anchored');
-    const width = 372;
-    const rail = rect.right + 14;
-    const left = rail + width <= window.innerWidth - 8 ? rail : Math.max(8, window.innerWidth - width - 12);
+    const width = Math.min(372, railLeftPx !== undefined ? railWidthPx : RAIL_W);
+    const beside = rect.right + RAIL_GAP - 10;
+    const left =
+      railLeftPx ?? (beside + width <= window.innerWidth - 8 ? beside : Math.max(8, window.innerWidth - width - 12));
     panel.style.left = `${left + window.scrollX}px`;
+    panel.style.width = `${width}px`;
     // T17.6b: the same measured clearance the rail and gutter use
     // (`railTopPx`), translated into this call site's document-absolute
     // coordinates — not a second clearance constant.
     panel.style.top = `${Math.max(railTopPx + window.scrollY, rect.top + window.scrollY)}px`;
   };
 
-  const morphFromTile = (): void => {
+  /**
+   * The container transform that plays the panel out of whatever the editor
+   * pressed. Its source used to be the hover chip's rect; with the chip gone
+   * it is the DRAWER ROW that was pressed, falling back to the bubble that row
+   * lives in, falling back to no morph at all (spec §5.1 rule 5) — which is
+   * honest: with nothing on screen there is nothing for the panel to have
+   * grown out of. Reduced-motion gating unchanged.
+   */
+  const morphFromTile = (from?: HTMLElement): void => {
     if (window.innerWidth <= 720) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    if (chip.style.display === 'none') return;
-    const source = chip.getBoundingClientRect();
+    const bubble = affordance.key ? railNodes.get(`block:${affordance.key}`) : undefined;
+    const origin = from?.isConnected ? from : bubble;
+    if (!origin?.isConnected) return;
+    const source = origin.getBoundingClientRect();
     const dest = panel.getBoundingClientRect();
     if (source.width === 0 || dest.width === 0) return;
     const dx = source.left - dest.left;
@@ -3533,7 +3903,12 @@ export const mountEditMode = (options: MountOptions): void => {
     );
   };
 
-  const openPanel = async (target: EditTarget, region: HTMLElement, mode: PanelMode): Promise<void> => {
+  const openPanel = async (
+    target: EditTarget,
+    region: HTMLElement,
+    mode: PanelMode,
+    options: { from?: HTMLElement } = {}
+  ): Promise<void> => {
     // A tool press while the same tile's accordion is open just switches the
     // section in place — the morph plays only on a fresh open.
     const freshOpen = !panel.classList.contains('dl-em-open') || panelRegion !== region;
@@ -3560,12 +3935,10 @@ export const mountEditMode = (options: MountOptions): void => {
           `<span class="dl-em-iid">${escapeHtml(target.objectId)}</span>`) +
       (target.shared ? `<span class="dl-em-idot dl-em-shd" title="Shared — affects every page using it"></span>` : '') +
       (isDraft ? `<span class="dl-em-idot dl-em-drf" title="Unpublished draft"></span>` : '');
-    panel.classList.toggle(
-      'dl-em-has-image',
-      target.objectType === 'content_item'
-        ? region.dataset.cmsNodeKind === 'content'
-        : IMAGE_SECTION_TYPES.has(target.sectionType)
-    );
+    // The same predicate the drawer's `Image…` row is planned from — one
+    // definition, so the panel can never offer an image section the drawer
+    // does not offer a row for (block-actions.ts).
+    panel.classList.toggle('dl-em-has-image', blockHasImage(blockActionInputFor(region, target)));
     panel.classList.toggle('dl-em-article', target.objectType === 'content_item' && Boolean(target.nodeId));
     // Chrome (navigation objects) is a copy form only: no section grammar for
     // AI scoping, no images — the accordion shows just the Edit section.
@@ -3577,11 +3950,17 @@ export const mountEditMode = (options: MountOptions): void => {
 
     const selected = mode === 'ai' && selectionRegion === region ? currentSelectionText : undefined;
     panel.classList.add('dl-em-open');
+    // The panel opens FOR a block, so the affordance follows it there and
+    // stays pinned — closing the panel restores exactly the bubble that was
+    // open (spec §5.1 rule 2).
+    const panelKey = anchorKeyForRegion(region);
+    if (panelKey) dispatchAffordance({ kind: 'panelOpen', region, key: panelKey });
     anchorPanel(region);
-    if (freshOpen) {
-      morphFromTile();
-      chip.style.display = 'none'; // the accordion replaces the tile
-    }
+    // Precedence (spec §5.1 rule 3): only one of {panel, bubble} is ever
+    // painted in the column. The rail yields its bubbles — the gutter markers
+    // are a different layer and are untouched.
+    rail.classList.add('dl-em-rail-yield');
+    if (freshOpen) morphFromTile(options.from);
     if (mode === 'ai') {
       inputEl.value = '';
       inputEl.focus();

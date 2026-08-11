@@ -3,6 +3,17 @@
 **Status:** Buildable specification, written by T17.14 (2026-08-11). Planning
 artifact — no code changed in the commit that introduced it.
 
+**BUILD STATE (2026-08-11) — the fold is BUILT.** §§2, 3, 4 and 5.1 are shipped:
+§§3–4 and §2's R1–R4 plus the R5 shell by **T17.14a**, §2's remaining R5 rows,
+R3's selection strip and §5.1's panel↔rail coexistence by **T17.14b**. Every
+proposal in §10 rows 21–31 was built as proposed; the places those two tasks
+had to decide something this document leaves silent are listed in their
+build-log entries (`../cms-architecture/17-canvas-ux-plan.md` §7). §6 shipped
+early as T17.14c. §7 shipped as T17.6b, with Wolf's Q1 answered "keep 'exit'
+visible" — four pills, not three. Still ahead: T17.7 deletes R5's interim
+`Ask AI…` row when the composer's modes land, and T17.4 reuses R3's selection
+strip as the span anchor's surface.
+
 **Governing ruling (Wolf, 2026-08-11), verbatim.** Asked whether to retire the
 W7 hover chip, fold it into the margin bubble, or keep both:
 
