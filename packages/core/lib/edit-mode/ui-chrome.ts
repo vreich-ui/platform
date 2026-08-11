@@ -38,14 +38,35 @@ export const STYLES = `
   --dlem-rail-gap:24px;
   --dlem-rail-pad:8px;
   --dlem-gutter-x:28px;
+  /* The page displacement (W17 Fix 4). ui.ts writes this ONE value on
+     <html> when the ladder picks the slide rung; everything that must stay in
+     register with the page reads it from here — the page box itself, and
+     every position:fixed element, which gets no say in the page box at all.
+     0px for a visitor, always. */
+  --dlem-shift:0px;
 }
+/* The page displacement itself. Padding, not a transform: a transform would
+   make <body> the containing block for every position:fixed descendant and
+   would break the site's sticky header, scroll anchoring and view
+   transitions. Padding leaves the page in normal flow — full-bleed bands
+   narrow from the right, centred columns re-centre in what is left, sticky
+   chrome keeps sticking — which is exactly Wolf's "they can't all move the
+   same way but they can move" (2026-08-11). */
+body.dl-em-on{padding-right:var(--dlem-shift,0px)}
+@media (prefers-reduced-motion:no-preference){body.dl-em-on{transition:padding-right .18s ease}}
+/* Held for the single synchronous reflow measureNaturalColumnRight needs to
+   read the UNDISPLACED column, so lifting and restoring the displacement in
+   one task can never animate. */
+body.dl-em-measuring{transition:none!important}
 .dl-em-bar{position:fixed;top:0;left:0;right:0;z-index:99990;display:none;align-items:center;gap:10px;
   padding:6px 14px;background:var(--dlem-surface-2);color:var(--dlem-text);font:600 12.5px/1.4 var(--dlem-font);
   border-bottom:1px solid var(--dlem-border);box-shadow:0 2px 12px rgba(0,0,0,.12)}
-/* The bar OVERLAYS the page — it does not push it down. Nothing edit mode
-   does may change a box-model property on <body> or <html> (Wolf,
-   2026-08-11: "The article must never move"); the old padding-top:38px here
-   shifted every page down 38px the moment edit mode came on. */
+/* The bar OVERLAYS the page vertically — it does not push it down; the old
+   padding-top:38px here shifted every page down 38px the moment edit mode came
+   on. Horizontally it is the opposite: the bar is fixed, so it takes no notice
+   of the page box at all unless told to, and its right edge follows the
+   displacement (W17 Fix 4) — otherwise it is the one thing on screen still
+   spanning the width the page just left. */
 body.dl-em-on .dl-em-bar{display:flex}
 .dl-em-bar .dl-em-dot{width:8px;height:8px;border-radius:50%;background:var(--dlem-accent);flex:none}
 .dl-em-bar .dl-em-who{color:var(--dlem-muted);font-weight:400}
@@ -353,12 +374,15 @@ body.dl-em-on .dl-em-gutter{display:block}
 .dl-em-listbody{font-size:12px;color:var(--dlem-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-em-listhead{padding:8px 9px 4px;font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;
   color:var(--dlem-muted)}
-/* The narrow-screen page-slide is RETRACTED (Wolf, 2026-08-11 — spec §1.3).
-   It re-centred the article column 188px left the first time anything was
-   hovered, and reversed on hover-out. The rail narrows instead: compact mode
-   writes --dlem-rail-w on the rail element, markers mode drops the rail for
-   gutter markers plus a popover. No rule below this line, and no code in
-   ui.ts, touches the page box. */
+/* The page displacement is declared at the top of this sheet, on
+   body.dl-em-on, and gated by the slide rung of the ladder (spec §1.3).
+   What made its first version unusable was not the movement — Wolf's revision
+   of 2026-08-11 keeps that — but that it was decided from a rail plan that
+   only fills on hover, so the page moved under the pointer. It is now a
+   function of the viewport and the surface, decided on activation and resize.
+   Below the slide rung the rail still adapts instead: compact writes --dlem-rail-w
+   on the rail element, markers drops the rail for gutter markers plus a
+   popover. */
 /* ── inline editing (T17.8) ─────────────────────────────────────────────────
    Double-click a block and its copy becomes editable IN the page, in the
    block's own box: the host REPLACES the element that renders the field and

@@ -10,55 +10,71 @@
  *
  * Spec: docs/design/marginalia-interaction-model.md §§1.2, 1.3, 3.1, 8.1, 8.2.
  *
- * §1.2/§1.3 were rewritten by W17 Fix 1 (2026-08-11): the page slide they
- * specified is RETRACTED. Nothing in this module may produce a number that
- * moves the document — see `no-page-movement.test.ts`, which pins that.
+ * §1.2/§1.3 were rewritten twice on 2026-08-11: W17 Fix 1 retracted the page
+ * slide, and Wolf's revision the same day brought it back —
+ *
+ *   "i think that text move the way it is done in canvas is not bad. my only
+ *    concern is left side placed objects. so they can't all move the same way
+ *    but they can move."   → "Keep it, fix the registration."
+ *
+ * So the page MAY move; what may not happen is anything being left behind by
+ * the move. Every number here is a function of the viewport and the surface
+ * only — never of hover, focus, pin or thread state — which is what
+ * `displacement-registration.test.ts` pins.
  */
 
 /**
- * §1.3's mode ladder, after Wolf's 2026-08-11 ruling retired the page slide
- * ("The article must never move. Keep everything like it is published."):
+ * §1.3's mode ladder:
  * - `inset`   — the margin already fits the full rail; the rail floats in it.
- * - `compact` — the rail narrows to the margin the page actually has (floor
- *               `railMinWidth`) and sits at `right: railPad`.
+ * - `slide`   — the margin does not fit it, but the viewport can afford to
+ *               give one up: the page is displaced by exactly one rail's
+ *               worth (`railDisplacementFor`) and the rail sits in the strip
+ *               the page vacated. Gated on `railMayDisplaceContent`.
+ * - `compact` — no displacement available: the rail narrows to the margin the
+ *               page actually has (floor `railMinWidth`) at `right: railPad`.
  * - `markers` — below that floor there is no rail: gutter markers only, and a
  *               marker click opens its bubble as a popover anchored to it.
  * - `sheet`   — too narrow for any of it; the bottom sheet serves.
  *
- * NOT ONE OF THEM MOVES THE PAGE. The reading column and the block being
- * worked on hold still at every width; the rail is what adapts.
+ * Only `slide` moves the page, and it moves it by a value that depends on
+ * nothing but the tokens: the displacement is decided when edit mode activates
+ * and on resize, never on a pointer event.
  */
-export type RailLayoutMode = 'inset' | 'compact' | 'markers' | 'sheet';
+export type RailLayoutMode = 'inset' | 'slide' | 'compact' | 'markers' | 'sheet';
 
 /** Widest first — how much rail a mode gets. Used for the hysteresis compare. */
-const MODE_RANK: Record<RailLayoutMode, number> = { sheet: 0, markers: 1, compact: 2, inset: 3 };
+const MODE_RANK: Record<RailLayoutMode, number> = { sheet: 0, markers: 1, compact: 2, slide: 3, inset: 4 };
 
 /**
- * Wolf's ruling applies to ARTICLE surfaces without exception ("let's keep
- * this rule for articles only. if it doesn't fit move other objects") — so
- * this is the one seam where "may this surface displace page content to make
- * room?" is answered, rather than a conditional scattered through the layout
- * code.
+ * The one seam where "may this surface displace page content to make room?" is
+ * answered, rather than a conditional scattered through the layout code.
  *
- * It answers `false` for every surface today: no mode in the ladder above
- * displaces anything, on any surface, so the non-article half of the ruling
- * has no implementation to gate yet. When a displacement behaviour is built
- * for non-article surfaces it is gated HERE and nowhere else, and the
- * never-move invariant test in `no-page-movement.test.ts` is what stops it
- * from leaking onto articles.
+ * Wolf's first 2026-08-11 ruling exempted articles ("let's keep this rule for
+ * articles only") and this answered `false` everywhere. His revision the same
+ * day — *"i think that text move the way it is done in canvas is not bad"*,
+ * about the article canvas itself — supersedes that: the movement stays, on
+ * every surface, and what he asked for instead is that everything move
+ * together. Both surfaces are listed explicitly rather than collapsed into
+ * `true`, because this is still the only place a future exemption goes.
  */
 export type RailSurfaceKind = 'article' | 'other';
-export const railMayDisplaceContent = (_surface: RailSurfaceKind): boolean => false;
+const SURFACE_MAY_DISPLACE: Record<RailSurfaceKind, boolean> = { article: true, other: true };
+export const railMayDisplaceContent = (surface: RailSurfaceKind): boolean => SURFACE_MAY_DISPLACE[surface] === true;
 
 export type RailMetrics = {
   /** The LAYOUT viewport (documentElement.clientWidth) — scrollbar excluded. */
   viewportWidth: number;
   /**
    * Right edge of the widest in-viewport annotated CONTENT column, in
-   * viewport px. Navigation regions and full-bleed bands are not columns and
-   * ui.ts does not measure them.
+   * viewport px, measured with any applied displacement LIFTED. Feeding this
+   * the displaced edge would make the ladder read back its own output and
+   * oscillate; ui.ts's `measureNaturalColumnRight` is what guarantees it.
+   * Navigation regions and full-bleed bands are not columns and are not
+   * measured.
    */
   columnRight: number;
+  /** Which surface is being annotated — the displacement gate's only input. */
+  surface: RailSurfaceKind;
   /** The rail at full width (the concept's 344px). */
   railWidth: number;
   /** The narrowest a `compact` rail is allowed to get before `markers` wins. */
@@ -77,12 +93,30 @@ export type RailMetrics = {
  */
 export const RAIL_MODE_HYSTERESIS = 24;
 
+/**
+ * What a `slide` costs the page: one rail's worth of margin, the same number
+ * the `inset` test uses, so a slid page is exactly an `inset` page whose
+ * margin was bought rather than found. It is a function of the TOKENS alone —
+ * not of the column, not of the plan, not of anything a pointer can touch —
+ * which is what makes the displacement stable across every re-layout.
+ */
+export const railDisplacementFor = (mode: RailLayoutMode, metrics: RailMetrics): number =>
+  mode === 'slide' ? metrics.railWidth + metrics.railGap + metrics.railPad : 0;
+
 /** The mode the metrics imply cold, with every threshold raised by `slack`. */
 const modeAt = (metrics: RailMetrics, slack: number): RailLayoutMode => {
   if (metrics.viewportWidth < metrics.sheetFloor + slack) return 'sheet';
   const naturalMargin = metrics.viewportWidth - metrics.columnRight;
   const chrome = metrics.railGap + metrics.railPad;
   if (naturalMargin >= metrics.railWidth + chrome + slack) return 'inset';
+  // Displace only while the page keeps a whole sheet-floor's worth of width
+  // for itself: opening a margin must not cost more than the page can spare.
+  if (
+    railMayDisplaceContent(metrics.surface) &&
+    metrics.viewportWidth - (metrics.railWidth + chrome) >= metrics.sheetFloor + slack
+  ) {
+    return 'slide';
+  }
   if (naturalMargin >= metrics.railMinWidth + chrome + slack) return 'compact';
   return 'markers';
 };
@@ -94,7 +128,7 @@ const modeAt = (metrics: RailMetrics, slack: number): RailLayoutMode => {
  *
  * ui.ts calls this on resize (and on the content-rebuild cadence) and NEVER
  * on hover, focus, pin or thread write — a pointer must not be able to change
- * the layout at all.
+ * the layout, and above all not the displacement, at all.
  */
 export const selectRailLayoutMode = (metrics: RailMetrics, previous?: RailLayoutMode): RailLayoutMode => {
   const cold = modeAt(metrics, 0);
@@ -109,21 +143,24 @@ export const selectRailLayoutMode = (metrics: RailMetrics, previous?: RailLayout
  * variable write. `undefined` where there is no rail column to size.
  */
 export const railWidthFor = (mode: RailLayoutMode, metrics: RailMetrics): number | undefined => {
-  if (mode === 'inset') return metrics.railWidth;
+  if (mode === 'inset' || mode === 'slide') return metrics.railWidth;
   if (mode !== 'compact') return undefined;
   const available = metrics.viewportWidth - metrics.columnRight - metrics.railGap - metrics.railPad;
   return Math.min(metrics.railWidth, Math.max(metrics.railMinWidth, available));
 };
 
 /**
- * The rail's left edge in viewport px — derived from the CONTENT COLUMN
- * (§1.2), never from a displaced page. `undefined` in `markers` / `sheet`
- * mode: there is no rail column to place.
+ * The rail's left edge in viewport px. `inset` / `compact` derive it from the
+ * CONTENT COLUMN (§1.2); `slide` pins it to the right, because the strip it
+ * occupies is exactly the one the page vacated — deriving it from the column
+ * there would mean reading back the displacement's own effect. `undefined` in
+ * `markers` / `sheet` mode: there is no rail column to place.
  */
 export const railLeftFor = (mode: RailLayoutMode, metrics: RailMetrics): number | undefined => {
   const width = railWidthFor(mode, metrics);
   if (width === undefined) return undefined;
   const pinnedRight = metrics.viewportWidth - metrics.railPad - width;
+  if (mode === 'slide') return Math.max(metrics.railPad, pinnedRight);
   return Math.max(metrics.railPad, Math.min(metrics.columnRight + metrics.railGap, pinnedRight));
 };
 

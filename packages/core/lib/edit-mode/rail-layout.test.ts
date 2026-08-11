@@ -7,7 +7,9 @@ import {
   marginaliaAnchorKey,
   packRailEntries,
   partitionRailThreads,
+  railDisplacementFor,
   railLeftFor,
+  railMayDisplaceContent,
   railWidthFor,
   selectRailLayoutMode,
   type RailMetrics,
@@ -17,6 +19,7 @@ import {
 const metrics = (overrides: Partial<RailMetrics>): RailMetrics => ({
   viewportWidth: 1440,
   columnRight: 1080,
+  surface: 'article',
   railWidth: 344,
   railMinWidth: 260,
   railGap: 24,
@@ -27,24 +30,35 @@ const metrics = (overrides: Partial<RailMetrics>): RailMetrics => ({
 
 describe('selectRailLayoutMode', () => {
   it('insets when the natural margin already fits rail + gap + pad', () => {
-    // 1440 - 1080 = 360 margin; the full rail needs 344 + 24 + 8 = 376 → compact.
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1080 })), 'compact');
+    // 1440 - 1080 = 360 margin; the full rail needs 344 + 24 + 8 = 376 → the
+    // page has to move over to make room, and can afford to (1440 - 376 ≥ 900).
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1080 })), 'slide');
     // A wider viewport with the same column: 1600 - 1080 = 520 ≥ 376.
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1600, columnRight: 1080 })), 'inset');
   });
 
   it('insets exactly at the boundary (margin === rail + gap + pad)', () => {
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1456, columnRight: 1080 })), 'inset');
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1455, columnRight: 1080 })), 'compact');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1455, columnRight: 1080 })), 'slide');
   });
 
-  it('stays compact down to the 260px rail floor, then shows markers only', () => {
-    // margin 292 === 260 + 24 + 8.
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1148 })), 'compact');
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1149 })), 'markers');
+  it('slides on both surfaces — Wolf kept the movement (2026-08-11)', () => {
+    for (const surface of ['article', 'other'] as const) {
+      assert.strictEqual(railMayDisplaceContent(surface), true, surface);
+      assert.strictEqual(selectRailLayoutMode(metrics({ surface })), 'slide', surface);
+    }
   });
 
-  it('shows markers, never a page slide, on a wide viewport with no margin', () => {
+  it('narrows the rail instead of the page when the page cannot spare the width', () => {
+    // 1200 - 376 = 824 < the 900px sheet floor: displacing would leave a page
+    // narrower than the surface supports, so the rail gives way instead.
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1200, columnRight: 880 })), 'compact');
+    // margin 292 === 260 + 24 + 8 — the compact floor, exactly.
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1200, columnRight: 908 })), 'compact');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1200, columnRight: 909 })), 'markers');
+  });
+
+  it('shows markers on a wide-enough-for-a-rail viewport with no margin to give', () => {
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 900, columnRight: 820 })), 'markers');
   });
 
@@ -55,17 +69,34 @@ describe('selectRailLayoutMode', () => {
 
   it('narrows at the threshold but widens only 24px past it', () => {
     const atBoundary = metrics({ viewportWidth: 1455, columnRight: 1080 }); // margin 375
-    assert.strictEqual(selectRailLayoutMode(atBoundary, 'inset'), 'compact');
-    // Coming back up: 376 is enough cold, but not while compact is applied.
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1456, columnRight: 1080 }), 'compact'), 'compact');
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1479, columnRight: 1080 }), 'compact'), 'compact');
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1480, columnRight: 1080 }), 'compact'), 'inset');
+    assert.strictEqual(selectRailLayoutMode(atBoundary, 'inset'), 'slide');
+    // Coming back up: 376 is enough cold, but not while the slide is applied.
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1456, columnRight: 1080 }), 'slide'), 'slide');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1479, columnRight: 1080 }), 'slide'), 'slide');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1480, columnRight: 1080 }), 'slide'), 'inset');
+  });
+});
+
+describe('railDisplacementFor', () => {
+  it('moves the page by exactly one rail + gap + pad, and only when sliding', () => {
+    assert.strictEqual(railDisplacementFor('slide', metrics({})), 376);
+    for (const mode of ['inset', 'compact', 'markers', 'sheet'] as const) {
+      assert.strictEqual(railDisplacementFor(mode, metrics({})), 0, mode);
+    }
+  });
+
+  it('depends on the tokens alone — not on the column the page happens to have', () => {
+    assert.strictEqual(
+      railDisplacementFor('slide', metrics({ columnRight: 300 })),
+      railDisplacementFor('slide', metrics({ columnRight: 1400 }))
+    );
   });
 });
 
 describe('railWidthFor', () => {
-  it('gives the full rail when inset and the real margin when compact', () => {
+  it('gives the full rail when inset or slid, and the real margin when compact', () => {
     assert.strictEqual(railWidthFor('inset', metrics({})), 344);
+    assert.strictEqual(railWidthFor('slide', metrics({})), 344);
     // margin 360 - gap 24 - pad 8 = 328.
     assert.strictEqual(railWidthFor('compact', metrics({})), 328);
   });
@@ -95,6 +126,13 @@ describe('railLeftFor', () => {
     const compact = metrics({ viewportWidth: 1440, columnRight: 1080 });
     assert.strictEqual(railLeftFor('compact', compact), 1104);
     assert.strictEqual((railLeftFor('compact', compact) ?? 0) + (railWidthFor('compact', compact) ?? 0), 1432);
+  });
+
+  it('pins a slid rail to the strip the page vacated, not to the moved column', () => {
+    // 1440 - 8 - 344: the same box whatever the column underneath does, so a
+    // page that re-centres by half the shift cannot drag the rail with it.
+    assert.strictEqual(railLeftFor('slide', metrics({ viewportWidth: 1440, columnRight: 1080 })), 1088);
+    assert.strictEqual(railLeftFor('slide', metrics({ viewportWidth: 1440, columnRight: 400 })), 1088);
   });
 
   it('has no position in markers or sheet mode', () => {

@@ -86,12 +86,14 @@ import {
   marginaliaAnchorKey,
   packRailEntries,
   partitionRailThreads,
+  railDisplacementFor,
   railLeftFor,
   railWidthFor,
   selectRailLayoutMode,
   type RailLayoutMode,
   type RailMetrics,
   type RailPartition,
+  type RailSurfaceKind,
 } from './rail-layout.js';
 import { listMarginaliaThreads } from '../admin/marginalia-client.js';
 import type { MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
@@ -1105,6 +1107,9 @@ export const mountEditMode = (options: MountOptions): void => {
       /* ignored */
     }
     if (on) {
+      // Decide the displacement HERE, once, from the page as published — not
+      // when the first bubble happens to appear (spec §1.3).
+      layoutRail(true);
       void refreshPending();
       // Pay the wait up front (B4): warm the record cache for everything on
       // the page so every chip/panel/tool opens from memory.
@@ -1123,6 +1128,7 @@ export const mountEditMode = (options: MountOptions): void => {
       pinnedKey = undefined;
       pinnedRegion = undefined;
       renderRail(); // drops every bubble
+      layoutRail(true); // …and puts the page back exactly where it is published
       for (const objectSession of sessions.values()) void objectSession.checkin();
     }
   };
@@ -1696,10 +1702,21 @@ export const mountEditMode = (options: MountOptions): void => {
   let railMode: RailLayoutMode = 'inset';
   /** False until the first measurement — the cold decision takes no hysteresis. */
   let railMeasured = false;
+  /** Which surface is being annotated — the displacement gate's only input. */
+  let railSurface: RailSurfaceKind = 'other';
+
+  /**
+   * An article canvas is any page rendering article nodes; everything else —
+   * pages, listings, chrome-only surfaces — is `other`. Read from the DOM, so
+   * it is a property of what is on the page and not of what the pointer is
+   * doing, and re-read only on the remeasure passes.
+   */
+  const surfaceKind = (): RailSurfaceKind => (document.querySelector(NODE_SELECTOR) ? 'article' : 'other');
 
   const railMetrics = (): RailMetrics => ({
     viewportWidth: viewportWidth(),
     columnRight: railColumnRight,
+    surface: railSurface,
     railWidth: RAIL_W,
     railMinWidth: RAIL_MIN_W,
     railGap: RAIL_GAP,
@@ -1722,6 +1739,47 @@ export const mountEditMode = (options: MountOptions): void => {
     return target ? marginaliaAnchorKey(marginaliaTargetFor(target)) : undefined;
   };
 
+  // ── the page displacement (W17 Fix 4) ───────────────────────────────────
+  // Wolf, 2026-08-11, revising the morning's retraction: *"i think that text
+  // move the way it is done in canvas is not bad. my only concern is left side
+  // placed objects. so they can't all move the same way but they can move."* —
+  // "Keep it, fix the registration."
+  //
+  // So the page may move to open the rail's margin. ONE value expresses that
+  // move — `--dlem-shift` — and everything that has to stay in register with
+  // the page reads it: `body.dl-em-on`'s padding-right (which is what actually
+  // moves the content), and every `position:fixed` element of the canvas and
+  // the site, which would otherwise ignore the page box entirely.
+  //
+  // The value is decided in `remeasureRail` — activation and resize — and
+  // nowhere else. Hover, focus, pin, thread write and save all re-run the
+  // positioners without ever reaching this writer, which is the property that
+  // made the first version of this feature unusable when it did not hold.
+
+  /** The displacement currently applied, in px. 0 = the page is where it is published. */
+  let appliedShift = 0;
+
+  /**
+   * THE single writer of `--dlem-shift`. Everything else that needs the page
+   * to move — including `measureNaturalColumnRight`'s momentary lift — goes
+   * through here, so "who can move the page?" has exactly one answer.
+   */
+  const writeShift = (px: number): void => {
+    document.documentElement.style.setProperty('--dlem-shift', `${px}px`);
+  };
+
+  /**
+   * Apply a decided displacement. A no-op when the value is unchanged, which
+   * is the overwhelmingly common case: the page glides only when the mode
+   * ladder genuinely changed its mind, never on a re-layout that agrees with
+   * the one before it.
+   */
+  const applyDisplacement = (px: number): void => {
+    if (px === appliedShift) return;
+    appliedShift = px;
+    writeShift(px);
+  };
+
   /**
    * The content column the rail hangs off: the widest in-viewport annotated
    * CONTENT column (spec §1.2 — one rail x per page, never a ragged edge).
@@ -1733,9 +1791,9 @@ export const mountEditMode = (options: MountOptions): void => {
    * descended is a full-bleed band, i.e. page chrome. Both are skipped, so
    * what is left is the reading column.
    *
-   * Nothing writes page padding anymore (Wolf, 2026-08-11), so the measurement
-   * can no longer be reading back its own output: the old remove-the-slide /
-   * restore-the-slide dance around this loop went with the slide.
+   * Call it through `measureNaturalColumnRight`, never directly: with a
+   * displacement applied this measures the DISPLACED column, which is the
+   * right answer for anchoring and the wrong one for deciding the ladder.
    */
   const measureColumnRight = (): number => {
     const width = viewportWidth();
@@ -1753,6 +1811,30 @@ export const mountEditMode = (options: MountOptions): void => {
     return inViewport || anywhere || width;
   };
 
+  /**
+   * `measureColumnRight` with any applied displacement LIFTED, so the ladder
+   * is always decided against the page as published rather than against the
+   * page it already moved.
+   *
+   * Without this the decision reads back its own output: a slid page has a
+   * wider margin, which reads as `inset`, which removes the displacement,
+   * which narrows the margin, which reads as `slide` again. Both writes and
+   * the read happen inside one synchronous task, so no intermediate state is
+   * ever painted; `dl-em-measuring` suppresses the padding transition for its
+   * duration so the browser cannot animate to zero and back either.
+   */
+  const measureNaturalColumnRight = (): number => {
+    if (appliedShift === 0) return measureColumnRight();
+    const restore = appliedShift;
+    document.body.classList.add('dl-em-measuring');
+    writeShift(0);
+    const columnRight = measureColumnRight(); // its getBoundingClientRect calls force the reflow
+    writeShift(restore);
+    void document.body.offsetWidth; // commit the restored padding before transitions resume
+    document.body.classList.remove('dl-em-measuring');
+    return columnRight;
+  };
+
   /** Where a bubble wants to sit: its block's top, below the chip when both show. */
   const desiredTopFor = (entry: RailEntry): number => {
     if (!entry.region) return RAIL_TOP;
@@ -1764,16 +1846,25 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   /**
-   * Re-derive the content column and, from it, the layout mode. Called on
-   * activation, on resize, and on the content-rebuild cadence — and NOWHERE
-   * else. Hover, focus, pinning and thread writes re-run `layoutRail` without
-   * remeasuring, so a pointer cannot change the page's layout at all (Wolf,
-   * 2026-08-11).
+   * Re-derive the surface, the content column, the layout mode and — from the
+   * mode — the page displacement. Called on activation, on resize, and on the
+   * content-rebuild cadence, and NOWHERE else. Hover, focus, pinning and
+   * thread writes re-run `layoutRail` without remeasuring, so a pointer can
+   * change neither the mode nor the displacement (Wolf, 2026-08-11: the page
+   * bouncing under the pointer is the defect that started all of this, and
+   * bringing the movement back must not bring that back with it).
+   *
+   * This is the ONLY caller of `applyDisplacement`.
    */
   const remeasureRail = (): void => {
-    railColumnRight = measureColumnRight();
+    railSurface = surfaceKind();
+    railColumnRight = measureNaturalColumnRight();
     railMode = selectRailLayoutMode(railMetrics(), railMeasured ? railMode : undefined);
     railMeasured = true;
+    // Edit mode off ⇒ no displacement, whatever the ladder says: the page a
+    // visitor sees is never displaced.
+    const editing = document.body.classList.contains('dl-em-on');
+    applyDisplacement(editing ? railDisplacementFor(railMode, railMetrics()) : 0);
   };
 
   /**
@@ -1781,8 +1872,9 @@ export const mountEditMode = (options: MountOptions): void => {
    * column and the mode (activation / resize / the gap layer's rebuild
    * cadence); every other pass reuses both and only re-runs the cheap packing.
    *
-   * NOTHING here writes to `<body>` or `<html>`: the page stays exactly where
-   * it is published at every width, and the rail is what adapts.
+   * Only the `remeasure` path can move the page, and only through
+   * `remeasureRail` → `applyDisplacement`. A pass triggered by a pointer
+   * reuses the applied displacement verbatim and just re-places the overlay.
    */
   const layoutRail = (remeasure = false): void => {
     if (remeasure || !railMeasured) remeasureRail();
