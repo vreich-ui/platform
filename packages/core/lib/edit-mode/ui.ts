@@ -2669,6 +2669,35 @@ export const mountEditMode = (options: MountOptions): void => {
     edit.region.classList.remove('dl-em-editing');
   };
 
+  /**
+   * Leave inline edit KEEPING what the editor rendered.
+   *
+   * `finishInlineEdit` restores the pre-edit snapshot, which after a saved
+   * rich-text commit put the OLD text back on the page: the only sign anything
+   * had happened was the dashed draft outline. The editor's own DOM is already
+   * the correct rendering of exactly what was saved — the same ProseMirror
+   * document the store now holds — so it stays, minus the editing artifacts.
+   * (Rendering it again from the record would be a second renderer, which this
+   * codebase does not allow.)
+   */
+  const keepInlineEditDom = (edit: InlineEditState): void => {
+    if (inlineEdit === edit) inlineEdit = undefined;
+    edit.toolbar?.destroy();
+    // Clone BEFORE the teardown: destroying the TipTap view removes its DOM.
+    const rendered = edit.host.querySelector('.ProseMirror');
+    const kept = document.createDocumentFragment();
+    for (const child of Array.from(rendered?.childNodes ?? [])) kept.append(child.cloneNode(true));
+    // ProseMirror's own scaffolding (trailing breaks, separators) is not content.
+    for (const artifact of Array.from(kept.querySelectorAll('[class*="ProseMirror"]'))) artifact.remove();
+    for (const editable of Array.from(kept.querySelectorAll('[contenteditable]'))) {
+      editable.removeAttribute('contenteditable');
+    }
+    edit.richText?.destroy();
+    if (kept.childNodes.length > 0) edit.host.replaceWith(kept);
+    else restoreRegion(edit.snapshot);
+    edit.region.classList.remove('dl-em-editing');
+  };
+
   const cancelInlineEdit = (): void => {
     const edit = inlineEdit;
     if (!edit) return;
@@ -2711,18 +2740,23 @@ export const mountEditMode = (options: MountOptions): void => {
           );
     attachLearningTrail(edit.target, ops, changed, manualEdits);
     const outcome = await objectSession.patch(ops);
-    finishInlineEdit(edit);
     if (!outcome.ok) {
+      finishInlineEdit(edit);
       const blockers = outcome.blockers?.length ? ` ${outcome.blockers.join(' ')}` : '';
       setStatus(`Not saved: ${outcome.error}${blockers}`);
       return;
     }
+    // A rich-text commit keeps the editor's rendering (it IS what was saved);
+    // a string commit restores the block and re-previews the new value below.
+    const savedRichText = typeof after !== 'string';
+    if (savedRichText) keepInlineEditDom(edit);
+    else finishInlineEdit(edit);
     clearLearningTrail(edit.target);
     invalidateRecord(edit.target.objectType, edit.target.objectId);
     // Show the saved value where it can be located unambiguously; where it
     // can't, the dashed draft outline and the tray remain the honest record —
     // the same contract the panel's saves have always had.
-    if (edit.field.kind !== 'doc' && typeof edit.before === 'string' && typeof after === 'string') {
+    if (!savedRichText && typeof edit.before === 'string' && typeof after === 'string') {
       previewFieldChange(edit.region, edit.field.kind === 'html' ? 'html' : 'string', edit.before, after);
     }
     edit.region.classList.add('dl-em-draft');
