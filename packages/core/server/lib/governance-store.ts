@@ -37,6 +37,10 @@ export const governanceDocSchema = z.object({
   chat_tools: chatToolAutonomySchema.optional(),
   /** M2b: expensive candidate generation is explicitly Owner-governed and off by default. */
   learning_mode: z.boolean().optional(),
+  /** PF2 (schema-additive): runtime override for the chat TurnEngine mode —
+   *  `governance override ?? CMS_AGENT_CHAT_MODE env ?? 'off'`. Rollback to
+   *  the provider path is this one field → 'off', no deploy. */
+  cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
   updated_by: z.string(),
   updated_at: z.string(),
   history: z.array(governanceHistoryEntrySchema),

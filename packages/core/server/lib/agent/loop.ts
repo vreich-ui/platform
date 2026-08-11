@@ -31,7 +31,8 @@ import {
   type ToolAutonomy,
 } from './chat-store.js';
 import { chatToolByName, CHAT_TOOLS, type ToolContext } from './tools.js';
-import type { ProviderAdapter, WireTool } from './provider.js';
+import type { TurnEngine } from './engine.js';
+import type { WireTool } from './provider.js';
 import {
   candidateSetView,
   isPresentCandidatesCall,
@@ -63,7 +64,8 @@ export const argsHash = (args: Record<string, unknown>): string =>
 export interface LoopDeps {
   chatStore: AgentChatStore;
   toolContext: ToolContext;
-  adapter: ProviderAdapter;
+  /** PF2: the TurnEngine seam — providerEngine (legacy adapters) or cmsAgentEngine. */
+  engine: TurnEngine;
   nowIso?: () => string;
   /** Remaining invocation budget (context.getRemainingTimeInMillis); absent locally. */
   remainingMs?: () => number;
@@ -389,7 +391,7 @@ export const runAgentLoop = async (
 
       // One provider turn.
       run.provider_turns += 1;
-      const turn = await deps.adapter({ system, transcript: run.transcript, tools });
+      const turn = await deps.engine({ doc, run, system, tools });
       run.output_tokens_used += turn.outputTokens;
       run.transcript.push({
         role: 'assistant',
@@ -606,6 +608,7 @@ export const startRun = async (
     learning_mode: learningMode,
     ...(focus ? { focus } : {}),
     diagnostics_requested: editorIsOwner && asksForDiagnostics(text),
+    engine: 'provider',
     trigger_token: triggerToken,
     transcript: [...priorTranscript, { role: 'user', text }],
     call_queue: [],
