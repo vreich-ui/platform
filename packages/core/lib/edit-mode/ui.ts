@@ -43,12 +43,40 @@ import {
   type EditTarget,
   type FieldChange,
 } from './targets.js';
+import {
+  derivePrimaryInlineField,
+  inlineEditOps,
+  shouldCaptureSelection,
+  NON_COPY_KEY_RE,
+  type InlineField,
+} from './inline-edit.js';
+import type { RichTextEditorHandle } from './richtext-editor.js';
 import { applyNavChangesToBody, navChangesToOps, navEditFieldsFor, type NavEditField } from './nav-editor.js';
 import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { previewFieldChange, restoreRegion, snapshotRegion, type RegionSnapshot } from './preview.js';
-import { mountMarginaliaPanel } from './marginalia-panel.js';
+import { mountMarginaliaPanel, type MarginaliaPanelTarget } from './marginalia-panel.js';
+import {
+  blockAttentionCounts,
+  gutterMarkerState,
+  markerAriaLabel,
+  pageAttentionTotal,
+  type BlockAttention,
+} from './attention.js';
+import {
+  collapseThreadStack,
+  isBlockAnchor,
+  marginaliaAnchorKey,
+  packRailEntries,
+  partitionRailThreads,
+  railLeftFor,
+  railSlidePadding,
+  selectRailLayoutMode,
+  type RailLayoutMode,
+  type RailMetrics,
+  type RailPartition,
+} from './rail-layout.js';
 import { listMarginaliaThreads } from '../admin/marginalia-client.js';
 import type { MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
 import {
@@ -87,10 +115,30 @@ const NODE_SELECTOR = '[data-cms-node-id]';
 const EMPTY_OBJECT_SELECTOR = '[data-cms-empty-object]';
 const MODE_KEY = 'dl-edit-mode';
 
+// Margin-rail geometry (T17.3) — the same numbers ui-chrome.ts declares as
+// --dlem-rail-* tokens; the CSS paints with them, this module does the math.
+const RAIL_W = 344;
+const RAIL_GAP = 24;
+const RAIL_PAD = 8;
+/** Vertical gap between packed bubbles, and the rail's top clearance under the bar. */
+const RAIL_STACK_GAP = 8;
+const RAIL_TOP = 46;
+/** Below this viewport width there is no rail — the bottom sheet serves (spec §1.3). */
+const RAIL_SLIDE_FLOOR = 900;
+/** Gutter-marker centre, left of the block's leading edge (spec §4.2). */
+const GUTTER_X = 28;
+/** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
+const RAIL_REVEAL_MS = 120;
+const RAIL_DISMISS_MS = 250;
+
 export type MountOptions = { email: string; roles: string[]; getToken: GetToken };
 
-/** What the panel is doing: AI chat, manual text form, the image tool, the role/annotation editor, or comments. */
-type PanelMode = 'ai' | 'edit' | 'image' | 'role' | 'meta' | 'comments';
+/**
+ * What the panel is doing: AI chat, manual text form, the image tool, or the
+ * role/annotation and article-settings editors. Comments left the panel in
+ * T17.3 — they live in the margin rail now, not in an accordion section.
+ */
+type PanelMode = 'ai' | 'edit' | 'image' | 'role' | 'meta';
 
 type PanelState = {
   target: EditTarget;
@@ -116,14 +164,6 @@ type PanelState = {
 
 /** Section types whose data carries an image the image tool should offer. */
 const IMAGE_SECTION_TYPES = new Set(['bio', 'content_split']);
-
-/**
- * Manual-edit field selection (client-side heuristic): copy fields only.
- * Media/asset/link/binding keys are excluded here for the same reason the AI
- * schema strips them — except the image tool, which edits image fields
- * DELIBERATELY through its own dedicated form.
- */
-const NON_COPY_KEY_RE = /asset|image|portrait|logo|icon|src|url|href|route|anchor|formname|ogimage/i;
 
 const isImageValue = (value: unknown): value is { src: string; alt?: string } =>
   Boolean(value) &&
@@ -247,6 +287,11 @@ export const mountEditMode = (options: MountOptions): void => {
     `<span class="dl-em-who">${escapeHtml(email)}</span>` +
     `<span class="dl-em-status" data-em-status></span>` +
     `<button class="dl-em-btn" data-em-tray-toggle>Pending<span class="dl-em-count" data-em-count>0</span></button>` +
+    // Attention ≠ Pending: open comment threads on THIS page, versus objects
+    // with unpublished changes anywhere. Both quantities, both controls
+    // (spec §4.3; the toolbar's reduction to three pills is T17.6b, not this).
+    `<button class="dl-em-btn" data-em-attention aria-pressed="false" title="Open comments on this page">` +
+    `Attention<span class="dl-em-count" data-em-attention-count>0</span></button>` +
     `<button class="dl-em-btn dl-em-primary" data-em-release ${allowPublish ? '' : 'disabled title="Requires publisher role"'}>Release to production</button>` +
     `<button class="dl-em-btn" data-em-exit>Exit</button>`;
   document.body.append(bar);
@@ -297,8 +342,6 @@ export const mountEditMode = (options: MountOptions): void => {
     `<div class="dl-em-acc-body" data-em-acc-body="role"></div></section>` +
     `<section class="dl-em-acc" data-em-acc="meta">${accHead('meta', ICON_TAG, 'Article settings')}` +
     `<div class="dl-em-acc-body" data-em-acc-body="meta"></div></section>` +
-    `<section class="dl-em-acc" data-em-acc="comments">${accHead('comments', ICON_COMMENT, 'Comments')}` +
-    `<div class="dl-em-acc-body" data-em-acc-body="comments"></div></section>` +
     `</div>`;
   document.body.append(panel);
   // Single reusable form node, moved into whichever section (edit/image) is open.
@@ -318,6 +361,23 @@ export const mountEditMode = (options: MountOptions): void => {
   palette.className = 'dl-em-pal';
   palette.style.display = 'none';
   document.body.append(palette);
+
+  // The margin rail (T17.3): the concept's annotation surface. Appended after
+  // the page content in DOM order so a screen reader reaches the article
+  // first (spec §9); positioned against the content column, not the viewport.
+  const rail = document.createElement('aside');
+  rail.className = 'dl-em-rail';
+  rail.setAttribute('role', 'complementary');
+  rail.setAttribute('aria-label', 'Comments');
+  document.body.append(rail);
+
+  // The left gutter (T17.6): one marker per annotated block that has
+  // something to say — the numeral badge the concept puts beside a block that
+  // needs you. Fixed and pointer-transparent like the rail; the buttons
+  // inside take pointer events.
+  const gutter = document.createElement('div');
+  gutter.className = 'dl-em-gutter';
+  document.body.append(gutter);
 
   const tray = document.createElement('div');
   tray.className = 'dl-em-tray';
@@ -572,8 +632,9 @@ export const mountEditMode = (options: MountOptions): void => {
   // ── marginalia cache: same B4 discipline as the record cache above, applied
   // to comment threads — entering edit mode also warms every visible
   // object's threads, one list per distinct object, in parallel, so the
-  // Comments accordion opens from memory instead of paying a cold fetch.
-  // A write through the panel invalidates its own entry (mountMarginaliaPanel's
+  // margin rail's first paint (and every bubble it opens) comes from memory
+  // instead of paying a cold fetch.
+  // A write through a bubble invalidates its own entry (mountMarginaliaPanel's
   // onWrite callback), the same way object writes invalidate recordCache.
   type MarginaliaThreadsResult = { threads: MarginaliaThreadWithComments[] };
   const marginaliaCache = new Map<string, Promise<MarginaliaThreadsResult>>();
@@ -652,6 +713,7 @@ export const mountEditMode = (options: MountOptions): void => {
       const objectId = targetObjectIdOf(region);
       region.classList.toggle('dl-em-draft', Boolean(objectId && draftIds.has(objectId)));
     });
+    positionDraftChips(); // the inline "· draft" chip follows the same set (spec §10.2)
   };
 
   // ── tray (B5): rows say WHAT changed WHERE, not a req_* id
@@ -954,11 +1016,19 @@ export const mountEditMode = (options: MountOptions): void => {
       // the page so every chip/panel/tool opens from memory.
       preloadRecords();
       scheduleGapRebuild();
+      void refreshRailThreads();
+      syncRegionFocusability(true);
     } else {
+      cancelInlineEdit();
+      syncRegionFocusability(false);
       chip.style.display = 'none';
       panel.classList.remove('dl-em-open');
       tray.classList.remove('dl-em-open');
       palette.style.display = 'none';
+      revealedRegion = undefined;
+      pinnedKey = undefined;
+      pinnedRegion = undefined;
+      renderRail(); // drops every bubble and releases the page slide
       for (const objectSession of sessions.values()) void objectSession.checkin();
     }
   };
@@ -1070,8 +1140,12 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   const buildGaps = (): void => {
+    // The rail rides the same rebuild cadence: content heights changed, so
+    // the content column (and therefore the rail's x) may have too.
+    layoutRail(true);
     gapLayer.innerHTML = '';
     if (!document.body.classList.contains('dl-em-on')) return;
+    syncRegionFocusability(true); // freshly inserted draft blocks are editable too
     for (const gap of [...gapsFromRegions(), ...nodeGapsFromRegions()]) {
       const button = document.createElement('button');
       button.className = 'dl-em-gap';
@@ -1263,19 +1337,36 @@ export const mountEditMode = (options: MountOptions): void => {
   // ── hover chip
   let hotRegion: HTMLElement | undefined;
   let chipHideTimer: number | undefined;
+  /** The margin rail's current left edge (undefined = no rail up); set by layoutRail. */
+  let railLeftPx: number | undefined;
+
+  /** The edit target a region addresses — nodes innermost, then sections, then chrome. */
+  const targetFor = (region: HTMLElement): EditTarget | undefined =>
+    region.dataset.cmsNavObject !== undefined
+      ? deriveNavTarget(region.dataset as Record<string, string>)
+      : region.dataset.cmsNodeId !== undefined
+        ? deriveNodeTarget(region.dataset as Record<string, string>)
+        : deriveEditTarget(region.dataset as Record<string, string>);
 
   const positionChip = (region: HTMLElement): void => {
     const rect = regionRect(region);
     if (!rect) return;
-    // Right rail: just past the content column, top aligned with the object's
-    // first line (the heading) — well clear of the centered "+" gap buttons.
     chip.style.display = 'flex';
     chip.style.visibility = 'hidden';
     const width = chip.offsetWidth;
-    const rail = rect.right + 14;
-    const left = rail + width <= window.innerWidth - 8 ? rail : Math.max(8, window.innerWidth - width - 10);
-    chip.style.left = `${left}px`;
-    chip.style.top = `${Math.max(46, rect.top)}px`;
+    // With the margin rail up, the chip right-aligns to the RAIL and sits
+    // above the block's bubble, so the two never collide (spec §2.1).
+    // Otherwise: just past the content column, top aligned with the object's
+    // first line (the heading) — well clear of the centered "+" gap buttons.
+    const gutter = rect.right + 14;
+    const left =
+      railLeftPx !== undefined
+        ? railLeftPx + RAIL_W - width
+        : gutter + width <= window.innerWidth - 8
+          ? gutter
+          : Math.max(8, window.innerWidth - width - 10);
+    chip.style.left = `${Math.max(8, left)}px`;
+    chip.style.top = `${Math.max(RAIL_TOP, rect.top)}px`;
     chip.style.visibility = 'visible';
   };
 
@@ -1335,11 +1426,7 @@ export const mountEditMode = (options: MountOptions): void => {
   const renderChip = (region: HTMLElement): void => {
     const isNav = region.dataset.cmsNavObject !== undefined;
     const isNode = region.dataset.cmsNodeId !== undefined;
-    const target = isNav
-      ? deriveNavTarget(region.dataset as Record<string, string>)
-      : isNode
-        ? deriveNodeTarget(region.dataset as Record<string, string>)
-        : deriveEditTarget(region.dataset as Record<string, string>);
+    const target = targetFor(region);
     if (!target) return;
     const hasSelection = !isNav && Boolean(currentSelectionText && selectionRegion === region);
     const isDraft = region.classList.contains('dl-em-draft');
@@ -1476,8 +1563,832 @@ export const mountEditMode = (options: MountOptions): void => {
       chip.style.display = 'none';
       hotRegion?.classList.remove('dl-em-hot');
       hotRegion = undefined;
-    }, 250);
+    }, RAIL_DISMISS_MS);
   };
+
+  // ── margin rail (T17.3) ─────────────────────────────────────────────────
+  // Comments live BESIDE the block they annotate, revealed by hovering it —
+  // not behind a panel step. The rail is one fixed, zero-height column of
+  // absolutely-positioned bubbles; ui.ts owns the DOM, rail-layout.ts owns
+  // every rule (mode selection, packing, thread bucketing) so those are
+  // unit-tested headlessly. Spec: docs/design/marginalia-interaction-model.md
+  // §§1, 2, 8.1, 8.2, 9.
+
+  type RailThreadRow = { key: string; blockAnchored: boolean; thread: MarginaliaThreadWithComments };
+  type RailEntry = {
+    key: string;
+    /** The block this entry annotates, when it has one. */
+    region?: HTMLElement;
+    el?: HTMLElement;
+    build: () => HTMLElement;
+  };
+
+  /** Every thread on every object rendered on this page, keyed by anchor. */
+  let railRows: RailThreadRow[] = [];
+  let railPlan: RailEntry[] = [];
+  const railNodes = new Map<string, HTMLElement>();
+  /** Which anchors are currently rendered — read live by bubble thread filters. */
+  const railPresence = { present: new Set<string>(), deleted: new Set<string>() };
+  let revealedRegion: HTMLElement | undefined;
+  let pinnedRegion: HTMLElement | undefined;
+  let pinnedKey: string | undefined;
+  /** T17.6: the rail shows every open thread on the page instead of block bubbles. */
+  let railListMode = false;
+  let railRevealTimer: number | undefined;
+  let railHideTimer: number | undefined;
+  let railColumnRight = 0;
+  let railMode: RailLayoutMode = 'inset';
+
+  const railMetrics = (): RailMetrics => ({
+    viewportWidth: window.innerWidth,
+    columnRight: railColumnRight,
+    railWidth: RAIL_W,
+    railGap: RAIL_GAP,
+    railPad: RAIL_PAD,
+    slideFloor: RAIL_SLIDE_FLOOR,
+  });
+
+  const annotatedRegions = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>(`${NODE_SELECTOR}, ${REGION_SELECTOR}, ${NAV_SELECTOR}`));
+
+  const marginaliaTargetFor = (target: EditTarget): MarginaliaPanelTarget => ({
+    objectType: target.objectType,
+    objectId: target.objectId,
+    ...(target.sectionId !== undefined ? { sectionId: target.sectionId } : {}),
+    ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
+  });
+
+  const anchorKeyForRegion = (region: HTMLElement): string | undefined => {
+    const target = targetFor(region);
+    return target ? marginaliaAnchorKey(marginaliaTargetFor(target)) : undefined;
+  };
+
+  /**
+   * The content column the rail hangs off: the widest in-viewport annotated
+   * region (spec §1.2 — one rail x per page, never a ragged edge). Measured
+   * with the slide REMOVED, because measuring it while slid would feed the
+   * mode decision its own output and oscillate; the class is off for a single
+   * synchronous reflow, with transitions suppressed so nothing animates.
+   */
+  const measureColumnRight = (): number => {
+    const slid = document.body.classList.contains('dl-em-slide');
+    if (slid) {
+      document.body.classList.add('dl-em-measuring');
+      document.body.classList.remove('dl-em-slide');
+    }
+    let inViewport = 0;
+    let anywhere = 0;
+    for (const region of annotatedRegions()) {
+      const rect = regionRect(region);
+      if (!rect || rect.width === 0) continue;
+      anywhere = Math.max(anywhere, rect.right);
+      if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+      inViewport = Math.max(inViewport, rect.right);
+    }
+    if (slid) {
+      document.body.classList.add('dl-em-slide');
+      // Re-read one property so the restored padding is committed before the
+      // transition suppression lifts (otherwise the browser may animate back).
+      void document.body.offsetWidth;
+      document.body.classList.remove('dl-em-measuring');
+    }
+    return inViewport || anywhere || window.innerWidth;
+  };
+
+  const applySlide = (pad: number): void => {
+    if (pad > 0) {
+      document.body.style.setProperty('--dlem-slide-pad', `${pad}px`);
+      document.body.classList.add('dl-em-slide');
+    } else {
+      document.body.classList.remove('dl-em-slide');
+      document.body.style.removeProperty('--dlem-slide-pad');
+    }
+  };
+
+  /** Where a bubble wants to sit: its block's top, below the chip when both show. */
+  const desiredTopFor = (entry: RailEntry): number => {
+    if (!entry.region) return RAIL_TOP;
+    const rect = regionRect(entry.region);
+    if (!rect) return RAIL_TOP;
+    const chipOffset =
+      hotRegion === entry.region && chip.style.display !== 'none' ? chip.offsetHeight + RAIL_STACK_GAP : 0;
+    return Math.max(RAIL_TOP, rect.top + chipOffset);
+  };
+
+  /**
+   * Place the rail and pack its bubbles. `remeasure` re-derives the content
+   * column (activation / resize / the gap layer's rebuild cadence); scroll
+   * passes skip it and only re-run the cheap packing.
+   */
+  const layoutRail = (remeasure = false): void => {
+    const active = document.body.classList.contains('dl-em-on') && railPlan.length > 0;
+    rail.classList.toggle('dl-em-rail-on', active);
+    if (!active) {
+      applySlide(0);
+      railLeftPx = undefined;
+      return;
+    }
+    if (remeasure || railColumnRight === 0) railColumnRight = measureColumnRight();
+    const metrics = railMetrics();
+    railMode = selectRailLayoutMode(metrics);
+    rail.classList.toggle('dl-em-rail-sheet', railMode === 'sheet');
+    applySlide(railSlidePadding(railMode, metrics));
+    railLeftPx = railLeftFor(railMode, metrics);
+    if (railMode === 'sheet') {
+      // The sheet is normal flow: no absolute tops, no rail x, no connectors.
+      rail.style.left = '';
+      for (const entry of railPlan) {
+        if (!entry.el) continue;
+        entry.el.style.top = '';
+        entry.el.querySelector<HTMLElement>('.dl-em-bubble-link')?.remove();
+      }
+      positionGutter();
+      return;
+    }
+    rail.style.left = `${railLeftPx ?? 0}px`;
+    const ordered = [...railPlan].sort((a, b) => railOrder(a) - railOrder(b));
+    const boxes = ordered.map((entry) => ({
+      desiredTop: desiredTopFor(entry),
+      height: entry.el?.offsetHeight ?? 0,
+    }));
+    const tops = packRailEntries(boxes, RAIL_STACK_GAP);
+    ordered.forEach((entry, index) => {
+      const el = entry.el;
+      if (!el) return;
+      el.style.top = `${tops[index]}px`;
+      // A bubble the packer displaced draws a 1px line back to its block.
+      const drop = tops[index] - boxes[index].desiredTop;
+      let link = el.querySelector<HTMLElement>('.dl-em-bubble-link');
+      if (entry.region && drop > 2) {
+        if (!link) {
+          link = document.createElement('div');
+          link.className = 'dl-em-bubble-link';
+          el.append(link);
+        }
+        link.style.top = `${-drop}px`;
+        link.style.height = `${drop}px`;
+      } else {
+        link?.remove();
+      }
+    });
+    positionGutter();
+  };
+
+  /**
+   * Scroll repositioning runs once per frame: layoutRail reads offsetHeight,
+   * and doing that synchronously inside a scroll event forces a reflow per
+   * event. rAF batches it to one read just before paint.
+   */
+  let railFrame: number | undefined;
+  const scheduleRailFrame = (): void => {
+    if (railFrame !== undefined) return;
+    railFrame = window.requestAnimationFrame(() => {
+      railFrame = undefined;
+      layoutRail();
+    });
+  };
+
+  /** Rail order: the attention list, whole-object groups, blocks in document order, orphans. */
+  const railOrder = (entry: RailEntry): number => {
+    if (entry.key === ATTENTION_LIST_KEY) return -2;
+    if (entry.key.startsWith('whole:')) return -1;
+    if (entry.key.startsWith('orphan:')) return Number.MAX_SAFE_INTEGER;
+    return desiredTopFor(entry);
+  };
+
+  const threadsAtKey = (key: string): MarginaliaThreadWithComments[] =>
+    railRows.filter((row) => row.key === key).map((row) => row.thread);
+
+  const openThreadsOf = (threads: readonly MarginaliaThreadWithComments[]): MarginaliaThreadWithComments[] =>
+    threads.filter((thread) => thread.status === 'open');
+
+  type BubbleSpec = {
+    key: string;
+    title: string;
+    target: MarginaliaPanelTarget;
+    selectThreads: (threads: readonly MarginaliaThreadWithComments[]) => MarginaliaThreadWithComments[];
+    emptyLabel: string;
+    region?: HTMLElement;
+    /** The ANCHOR key this bubble pins under; absent on whole-object/orphan groups, which always show. */
+    pinKey?: string;
+  };
+
+  const buildBubble = (spec: BubbleSpec): HTMLElement => {
+    const el = document.createElement('div');
+    el.className = 'dl-em-bubble';
+    el.dataset.emBubble = spec.key;
+    // A block bubble is what its gutter marker's aria-controls points at.
+    if (spec.pinKey) el.id = bubbleDomId(spec.pinKey);
+    el.innerHTML =
+      `<div class="dl-em-bubble-head">` +
+      `<span class="dl-em-bubble-title">${escapeHtml(spec.title)}</span>` +
+      `<span class="dl-em-bubble-open" hidden></span>` +
+      `<button class="dl-em-close" data-em-bubble-close aria-label="Close">${ICON_CLOSE}</button>` +
+      `</div><div class="dl-em-bubble-body"></div>`;
+    const openEl = el.querySelector<HTMLElement>('.dl-em-bubble-open');
+    const moreButton = document.createElement('button');
+    moreButton.type = 'button';
+    moreButton.className = 'dl-em-bubble-more';
+    moreButton.hidden = true;
+    let expanded = false;
+    moreButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      expanded = true;
+      moreButton.hidden = true;
+      remountBubbleBody();
+    });
+
+    el.querySelector('[data-em-bubble-close]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      unpinRail();
+      revealedRegion = undefined;
+      renderRail();
+    });
+    // Click or focus anywhere in a bubble pins it (spec §2.3) — a hover-only
+    // bubble cannot host a composer.
+    if (spec.pinKey) {
+      const pinKey = spec.pinKey;
+      el.addEventListener('mousedown', () => pinRail(pinKey, spec.region));
+      el.addEventListener('focusin', () => pinRail(pinKey, spec.region));
+    }
+
+    const body = el.querySelector<HTMLElement>('.dl-em-bubble-body') as HTMLElement;
+    const remountBubbleBody = (): void => {
+      void mountMarginaliaPanel(
+        body,
+        getToken,
+        spec.target,
+        cachedMarginaliaThreads(spec.target.objectType, spec.target.objectId),
+        () => {
+          invalidateMarginaliaThreads(spec.target.objectType, spec.target.objectId);
+          void refreshRailThreads();
+        },
+        {
+          selectThreads: (threads) => {
+            const mine = spec.selectThreads(threads);
+            if (openEl) {
+              const open = openThreadsOf(mine).length;
+              openEl.hidden = open === 0;
+              openEl.textContent = `${open} open`;
+            }
+            const { visible, hidden } = expanded ? { visible: [...mine], hidden: 0 } : collapseThreadStack(mine);
+            moreButton.hidden = hidden === 0;
+            moreButton.textContent = `+${hidden} earlier`;
+            return visible;
+          },
+          emptyLabel: spec.emptyLabel,
+          composerPlaceholder: 'Comment — a question, a change, an ask',
+        }
+      );
+      body.append(moreButton);
+    };
+    remountBubbleBody();
+    return el;
+  };
+
+  const wholeObjectLabel = (objectType: string): string =>
+    objectType === 'content_item' ? 'Whole article' : objectType === 'page' ? 'Whole page' : 'Whole object';
+
+  /** The set of bubbles the rail should be showing right now. */
+  const railEntryPlan = (): RailEntry[] => {
+    railPresence.present = new Set<string>();
+    railPresence.deleted = new Set<string>();
+    const regionByKey = new Map<string, HTMLElement>();
+    for (const region of annotatedRegions()) {
+      const key = anchorKeyForRegion(region);
+      if (!key) continue;
+      if (region.classList.contains('dl-em-removed')) {
+        railPresence.deleted.add(key);
+        continue;
+      }
+      railPresence.present.add(key);
+      if (!regionByKey.has(key)) regionByKey.set(key, region);
+    }
+
+    const partition = partitionRailThreads<RailThreadRow>(
+      railRows.map((row) => ({ key: row.key, blockAnchored: row.blockAnchored, thread: row })),
+      railPresence.present
+    );
+    const plan: RailEntry[] = [];
+
+    // 1 — whole-object threads pin to the rail top, one bubble per object (§3.1).
+    const wholeByObject = new Map<string, { objectType: string; objectId: string }>();
+    for (const row of partition.wholeObject) {
+      wholeByObject.set(`${row.thread.anchor.objectType}:${row.thread.anchor.objectId}`, {
+        objectType: row.thread.anchor.objectType,
+        objectId: row.thread.anchor.objectId,
+      });
+    }
+    for (const [id, object] of wholeByObject) {
+      const key = `whole:${id}`;
+      plan.push({
+        key,
+        build: () =>
+          buildBubble({
+            key,
+            title: wholeObjectLabel(object.objectType),
+            target: { objectType: object.objectType, objectId: object.objectId },
+            selectThreads: (threads) => threads.filter((thread) => !isBlockAnchor(thread.anchor)),
+            emptyLabel: 'No comments on the whole object yet.',
+          }),
+      });
+    }
+
+    // 1b — list mode (the `Attention N` control): every open thread on the
+    //      page in one card, document order, orphans last (§4.3).
+    if (railListMode) plan.push(attentionListEntry(partition, regionByKey));
+
+    // 2 — the revealed and/or pinned block. A block with threads gets its
+    //     bubble; one without gets the concept's ghost speech bubble, which
+    //     opens an empty composer on click. A PINNED block always gets the
+    //     real bubble — that is what pinning is for.
+    const blockKeys = new Map<string, HTMLElement>();
+    if (pinnedKey && pinnedRegion && pinnedRegion.isConnected) blockKeys.set(pinnedKey, pinnedRegion);
+    if (revealedRegion?.isConnected) {
+      const key = anchorKeyForRegion(revealedRegion);
+      if (key && !blockKeys.has(key)) blockKeys.set(key, revealedRegion);
+    }
+    for (const [key, region] of blockKeys) {
+      const target = targetFor(region);
+      if (!target) continue;
+      const pinned = key === pinnedKey;
+      if (!pinned && threadsAtKey(key).length === 0) {
+        plan.push({ key: `ghost:${key}`, region, build: () => buildGhostBubble(key, region) });
+        continue;
+      }
+      plan.push({
+        key: `block:${key}`,
+        region,
+        build: () =>
+          buildBubble({
+            key: `block:${key}`,
+            title: blockLabel(region, target),
+            target: marginaliaTargetFor(target),
+            selectThreads: (threads) => threads.filter((thread) => marginaliaAnchorKey(thread.anchor) === key),
+            emptyLabel: 'No comments on this block yet.',
+            region,
+            pinKey: key,
+          }),
+      });
+    }
+
+    // 3 — orphans: never dropped, never auto-resolved (§8.2). A draft-deleted
+    //     block's threads are labelled separately, because the block comes
+    //     back if the draft is discarded.
+    const orphanObjects = new Map<string, { objectType: string; objectId: string; draftDeleted: boolean }>();
+    for (const row of partition.orphans) {
+      const draftDeleted = railPresence.deleted.has(row.key);
+      const id = `${row.thread.anchor.objectType}:${row.thread.anchor.objectId}:${draftDeleted ? 'draft' : 'gone'}`;
+      orphanObjects.set(id, {
+        objectType: row.thread.anchor.objectType,
+        objectId: row.thread.anchor.objectId,
+        draftDeleted,
+      });
+    }
+    for (const [id, object] of orphanObjects) {
+      const key = `orphan:${id}`;
+      plan.push({
+        key,
+        build: () =>
+          buildBubble({
+            key,
+            title: object.draftDeleted ? 'Block deleted in a draft' : 'Not on this page anymore',
+            target: { objectType: object.objectType, objectId: object.objectId },
+            selectThreads: (threads) =>
+              threads.filter((thread) => {
+                if (!isBlockAnchor(thread.anchor)) return false;
+                const anchorKey = marginaliaAnchorKey(thread.anchor);
+                if (railPresence.present.has(anchorKey)) return false;
+                return railPresence.deleted.has(anchorKey) === object.draftDeleted;
+              }),
+            emptyLabel: 'Nothing here anymore.',
+          }),
+      });
+    }
+    return plan;
+  };
+
+  /** A short, human name for the block a bubble annotates. */
+  const blockLabel = (region: HTMLElement, target: EditTarget): string =>
+    target.objectType === 'content_item'
+      ? `Article ${region.dataset.cmsNodeKind ?? 'block'}`
+      : target.sectionType || 'Block';
+
+  const buildGhostBubble = (key: string, region: HTMLElement): HTMLElement => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dl-em-ghostbubble';
+    button.innerHTML = ICON_COMMENT;
+    button.title = 'Comment on this block';
+    button.setAttribute('aria-label', 'Comment on this block');
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      pinRail(key, region);
+    });
+    return button;
+  };
+
+  /** Reconcile the rail's DOM against the plan — existing bubbles are kept, never rebuilt. */
+  const renderRail = (): void => {
+    const plan = document.body.classList.contains('dl-em-on') ? railEntryPlan() : [];
+    const wanted = new Set(plan.map((entry) => entry.key));
+    for (const [key, el] of railNodes) {
+      if (wanted.has(key)) continue;
+      el.remove();
+      railNodes.delete(key);
+    }
+    const pinnedEntryKey = pinnedKey ? `block:${pinnedKey}` : undefined;
+    for (const entry of plan) {
+      let el = railNodes.get(entry.key);
+      if (!el) {
+        el = entry.build();
+        railNodes.set(entry.key, el);
+        rail.append(el);
+      }
+      el.classList.toggle('dl-em-pinned', entry.key === pinnedEntryKey);
+      entry.el = el;
+    }
+    railPlan = plan;
+    layoutRail();
+    renderGutter();
+  };
+
+  /** Every object rendered on this page, deduplicated — the rail's fetch set. */
+  const pageObjects = (): Array<{ type: string; id: string }> => {
+    const objects = new Map<string, { type: string; id: string }>();
+    for (const region of annotatedRegions()) {
+      const target = targetFor(region);
+      if (target)
+        objects.set(recordKey(target.objectType, target.objectId), { type: target.objectType, id: target.objectId });
+    }
+    return [...objects.values()];
+  };
+
+  /**
+   * Re-read every page object's threads from the (preloaded) marginalia cache
+   * and re-render. Called on activation and after every thread write — never
+   * on a timer: there is no background polling in V1 (spec §8.5).
+   */
+  const refreshRailThreads = async (): Promise<void> => {
+    const results = await Promise.all(
+      pageObjects().map(async (object) => {
+        try {
+          return (await cachedMarginaliaThreads(object.type, object.id)).threads;
+        } catch {
+          return [] as MarginaliaThreadWithComments[];
+        }
+      })
+    );
+    railRows = results.flat().map((thread) => ({
+      key: marginaliaAnchorKey(thread.anchor),
+      blockAnchored: isBlockAnchor(thread.anchor),
+      thread,
+    }));
+    updateAttentionCount();
+    // List mode's rows are a snapshot of the plan, so a write has to rebuild
+    // the card rather than keep it (reconciliation would preserve it by key).
+    railNodes.get(ATTENTION_LIST_KEY)?.remove();
+    railNodes.delete(ATTENTION_LIST_KEY);
+    renderRail();
+  };
+
+  const pinRail = (key: string, region: HTMLElement | undefined): void => {
+    if (pinnedKey === key) return;
+    pinnedKey = key;
+    pinnedRegion = region;
+    window.clearTimeout(railHideTimer);
+    renderRail();
+  };
+
+  const unpinRail = (): void => {
+    if (!pinnedKey) return;
+    pinnedKey = undefined;
+    pinnedRegion = undefined;
+    renderRail();
+  };
+
+  const scheduleRailReveal = (region: HTMLElement): void => {
+    window.clearTimeout(railRevealTimer);
+    window.clearTimeout(railHideTimer);
+    // While a block is in inline edit (T17.8), other blocks' hover-reveal is
+    // suppressed — the edited block's own bubble stays pinned (spec §5.3).
+    if (inlineEdit && inlineEdit.region !== region) return;
+    if (revealedRegion === region) return;
+    railRevealTimer = window.setTimeout(() => {
+      revealedRegion = region;
+      renderRail();
+    }, RAIL_REVEAL_MS);
+  };
+
+  const clearRailSoon = (): void => {
+    window.clearTimeout(railRevealTimer);
+    window.clearTimeout(railHideTimer);
+    railHideTimer = window.setTimeout(() => {
+      if (!revealedRegion) return;
+      revealedRegion = undefined;
+      renderRail();
+    }, RAIL_DISMISS_MS);
+  };
+
+  // ── attention: gutter markers, the toolbar counter, list mode (T17.6) ────
+  // The surface has to answer the question an editor actually has — what
+  // needs me? — without opening anything. Every number here means ONE thing:
+  // an open thread (attention.ts owns that definition and its tests).
+  // Spec §4, §9, §10.2.
+
+  const ATTENTION_LIST_KEY = 'list:attention';
+  const attentionCountEl = q<HTMLElement>(bar, '[data-em-attention-count]');
+  const attentionButton = q<HTMLButtonElement>(bar, '[data-em-attention]');
+  const gutterMarkers = new Map<string, HTMLButtonElement>();
+  /** Stable element ids so a marker's aria-controls can name its bubble. */
+  const bubbleDomIds = new Map<string, string>();
+
+  const bubbleDomId = (anchorKey: string): string => {
+    let id = bubbleDomIds.get(anchorKey);
+    if (!id) {
+      id = `dl-em-bubble-${bubbleDomIds.size + 1}`;
+      bubbleDomIds.set(anchorKey, id);
+    }
+    return id;
+  };
+
+  const updateAttentionCount = (): void => {
+    const total = pageAttentionTotal(railRows);
+    attentionCountEl.textContent = String(total);
+    attentionCountEl.classList.toggle('dl-em-hot', total > 0);
+  };
+
+  /** Where a marker sits: the block's own leading edge, one gutter step left. */
+  const markerPosition = (region: HTMLElement): { left: number; top: number } | undefined => {
+    const rect = regionRect(region);
+    if (!rect) return undefined;
+    return { left: Math.max(4, rect.left - GUTTER_X), top: Math.max(RAIL_TOP, rect.top) };
+  };
+
+  const markerRegions = new Map<string, HTMLElement>();
+
+  const positionGutter = (): void => {
+    for (const [key, marker] of gutterMarkers) {
+      const region = markerRegions.get(key);
+      const at = region ? markerPosition(region) : undefined;
+      if (!at) {
+        marker.style.display = 'none';
+        continue;
+      }
+      marker.style.display = '';
+      marker.style.left = `${at.left}px`;
+      marker.style.top = `${at.top}px`;
+    }
+    positionDraftChips();
+  };
+
+  /**
+   * One marker per annotated block that has something to show: any block with
+   * threads, plus the hovered block (which gets the concept's accent dot as
+   * its "you can comment here" affordance). Everything else draws nothing.
+   */
+  const renderGutter = (): void => {
+    if (!document.body.classList.contains('dl-em-on')) {
+      gutter.replaceChildren();
+      gutterMarkers.clear();
+      markerRegions.clear();
+      return;
+    }
+    const counts = blockAttentionCounts(railRows);
+    const wanted = new Map<string, { region: HTMLElement; counts: BlockAttention; hovered: boolean }>();
+    for (const region of annotatedRegions()) {
+      if (region.classList.contains('dl-em-removed')) continue;
+      const key = anchorKeyForRegion(region);
+      if (!key) continue;
+      const blockCounts = counts.get(key) ?? { open: 0, resolved: 0 };
+      const hovered = region === hotRegion || region === revealedRegion || key === pinnedKey;
+      if (gutterMarkerState({ ...blockCounts, hovered }) === 'none') continue;
+      if (!wanted.has(key)) wanted.set(key, { region, counts: blockCounts, hovered });
+    }
+    for (const [key, marker] of gutterMarkers) {
+      if (wanted.has(key)) continue;
+      marker.remove();
+      gutterMarkers.delete(key);
+      markerRegions.delete(key);
+    }
+    for (const [key, entry] of wanted) {
+      let marker = gutterMarkers.get(key);
+      if (!marker) {
+        marker = document.createElement('button');
+        marker.type = 'button';
+        marker.className = 'dl-em-badge';
+        marker.dataset.emRegionKey = key;
+        marker.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const region = markerRegions.get(key);
+          if (pinnedKey === key) unpinRail();
+          else pinRail(key, region);
+        });
+        gutter.append(marker);
+        gutterMarkers.set(key, marker);
+      }
+      markerRegions.set(key, entry.region);
+      const target = targetFor(entry.region);
+      const state = gutterMarkerState({ ...entry.counts, hovered: entry.hovered });
+      marker.classList.toggle('dl-em-badge-open', state === 'count');
+      marker.classList.toggle('dl-em-badge-muted', state === 'muted');
+      marker.classList.toggle('dl-em-badge-accent', state === 'accent');
+      // Colour is never the only carrier of "needs attention" — the numeral is.
+      marker.textContent = state === 'count' ? String(entry.counts.open) : '';
+      marker.setAttribute(
+        'aria-label',
+        markerAriaLabel(state, entry.counts.open, target ? blockLabel(entry.region, target) : 'this block')
+      );
+      marker.setAttribute('aria-expanded', String(pinnedKey === key));
+      marker.setAttribute('aria-controls', bubbleDomId(key));
+    }
+    positionGutter();
+  };
+
+  // The inline "· draft" chip (spec §10.2, folded in here): the PDF shows
+  // draft state beside the block's heading, in the flow. It is drawn in the
+  // gutter layer rather than injected into the heading, because inserting a
+  // node into rendered copy would break previewFieldChange's exact-text match
+  // — and the dashed .dl-em-draft outline stays exactly as it was.
+  const draftChips = new Map<HTMLElement, HTMLElement>();
+
+  /** The end of the block's title line, in viewport coordinates. */
+  const draftChipAnchor = (region: HTMLElement): { left: number; top: number } | undefined => {
+    const heading = region.querySelector<HTMLElement>('h1,h2,h3,h4,h5,h6') ?? undefined;
+    const host = heading ?? (region.firstElementChild as HTMLElement | null) ?? undefined;
+    if (!host) return undefined;
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    const rects = Array.from(range.getClientRects());
+    const last = rects[rects.length - 1];
+    if (!last || last.width === 0) return undefined;
+    return { left: last.right + 8, top: last.top + last.height / 2 - 8 };
+  };
+
+  const positionDraftChips = (): void => {
+    const drafts = new Set(
+      Array.from(document.querySelectorAll<HTMLElement>(`${REGION_SELECTOR}.dl-em-draft, ${NODE_SELECTOR}.dl-em-draft`))
+    );
+    for (const [region, chipEl] of draftChips) {
+      if (drafts.has(region) && region.isConnected) continue;
+      chipEl.remove();
+      draftChips.delete(region);
+    }
+    for (const region of drafts) {
+      const at = draftChipAnchor(region);
+      let chipEl = draftChips.get(region);
+      if (!at) {
+        chipEl?.remove();
+        draftChips.delete(region);
+        continue;
+      }
+      if (!chipEl) {
+        chipEl = document.createElement('span');
+        chipEl.className = 'dl-em-draftchip';
+        chipEl.textContent = '· draft';
+        chipEl.title = 'Unpublished draft';
+        gutter.append(chipEl);
+        draftChips.set(region, chipEl);
+      }
+      chipEl.style.left = `${at.left}px`;
+      chipEl.style.top = `${at.top}px`;
+    }
+  };
+
+  /**
+   * List mode: every OPEN thread on the page in document order, whole-object
+   * first, orphans last under their own heading. A row scrolls its block into
+   * view and pins its bubble (§4.3).
+   */
+  const attentionListEntry = (
+    partition: RailPartition<RailThreadRow>,
+    regionByKey: Map<string, HTMLElement>
+  ): RailEntry => ({
+    key: ATTENTION_LIST_KEY,
+    build: () => {
+      const el = document.createElement('div');
+      el.className = 'dl-em-bubble dl-em-bubble-list';
+      el.innerHTML =
+        `<div class="dl-em-bubble-head"><span class="dl-em-bubble-title">Needs you</span>` +
+        `<button class="dl-em-close" data-em-list-close aria-label="Close">${ICON_CLOSE}</button></div>` +
+        `<div class="dl-em-listrows"></div>`;
+      el.querySelector('[data-em-list-close]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setListMode(false);
+      });
+      const rows = el.querySelector<HTMLElement>('.dl-em-listrows') as HTMLElement;
+      const addRow = (label: string, thread: MarginaliaThreadWithComments, key?: string): void => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'dl-em-listrow';
+        const first = thread.comments[0]?.body ?? '';
+        button.innerHTML =
+          `<span class="dl-em-listwhere">${escapeHtml(label)}</span>` +
+          `<span class="dl-em-listbody">${escapeHtml(shortValue(first))}</span>`;
+        if (key) {
+          button.addEventListener('click', () => {
+            const region = regionByKey.get(key);
+            region?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            pinRail(key, region);
+          });
+        } else {
+          button.disabled = true;
+        }
+        rows.append(button);
+      };
+      const openOnly = (list: readonly RailThreadRow[]): RailThreadRow[] =>
+        list.filter((entry) => entry.thread.status === 'open');
+      for (const entry of openOnly(partition.wholeObject)) addRow('Whole object', entry.thread);
+      // Document order: walk the DOM, not the thread list.
+      for (const region of annotatedRegions()) {
+        const key = anchorKeyForRegion(region);
+        if (!key) continue;
+        const target = targetFor(region);
+        for (const entry of openOnly(partition.blocks.get(key) ?? [])) {
+          addRow(target ? blockLabel(region, target) : 'Block', entry.thread, key);
+        }
+      }
+      const orphans = openOnly(partition.orphans);
+      if (orphans.length > 0) {
+        const heading = document.createElement('div');
+        heading.className = 'dl-em-listhead';
+        heading.textContent = 'Not on this page anymore';
+        rows.append(heading);
+        for (const entry of orphans) addRow('Orphaned', entry.thread);
+      }
+      if (rows.children.length === 0) {
+        rows.innerHTML = `<div class="dl-em-msg dl-em-sys">Nothing open on this page.</div>`;
+      }
+      return el;
+    },
+  });
+
+  const setListMode = (on: boolean): void => {
+    if (railListMode === on) return;
+    railListMode = on;
+    attentionButton.setAttribute('aria-pressed', String(on));
+    attentionButton.classList.toggle('dl-em-primary', on);
+    // The list is rebuilt from scratch: its rows are a snapshot of the plan.
+    railNodes.get(ATTENTION_LIST_KEY)?.remove();
+    railNodes.delete(ATTENTION_LIST_KEY);
+    renderRail();
+  };
+
+  attentionButton.addEventListener('click', () => {
+    // Counts can be stale between actions — there is no background polling
+    // (spec §8.5), so this click is one of the three refresh points.
+    void refreshRailThreads();
+    setListMode(!railListMode);
+  });
+
+  // Focus reveals exactly what hover reveals (spec §9) — keyboard users are
+  // not second class.
+  document.addEventListener(
+    'focusin',
+    (event) => {
+      if (!document.body.classList.contains('dl-em-on')) return;
+      const element = event.target as HTMLElement | null;
+      if (!element || rail.contains(element) || chip.contains(element) || panel.contains(element)) return;
+      const region =
+        element.closest<HTMLElement>(NODE_SELECTOR) ??
+        element.closest<HTMLElement>(REGION_SELECTOR) ??
+        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!region) return;
+      window.clearTimeout(railHideTimer);
+      if (revealedRegion === region) return;
+      revealedRegion = region;
+      renderRail();
+    },
+    { signal }
+  );
+
+  // Esc unpins and hands focus back to the block (spec §2.3, §9).
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Escape' || !pinnedKey) return;
+      const returnTo = pinnedRegion;
+      unpinRail();
+      revealedRegion = undefined;
+      renderRail();
+      if (returnTo?.isConnected) returnTo.focus?.();
+    },
+    { signal }
+  );
+
+  // A click outside both the bubble and its own block unpins (spec §2.3).
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!pinnedKey) return;
+      const element = event.target as HTMLElement | null;
+      if (!element) return;
+      if (rail.contains(element) || panel.contains(element) || chip.contains(element)) return;
+      if (pinnedRegion?.contains(element)) return;
+      unpinRail();
+    },
+    { signal }
+  );
 
   document.addEventListener(
     'mouseover',
@@ -1486,6 +2397,15 @@ export const mountEditMode = (options: MountOptions): void => {
       const element = event.target as HTMLElement;
       if (chip.contains(element)) {
         window.clearTimeout(chipHideTimer);
+        window.clearTimeout(railHideTimer);
+        return;
+      }
+      // The pointer inside the rail keeps everything up — the same guard
+      // shape the chip has always had (spec §2.2).
+      if (rail.contains(element)) {
+        window.clearTimeout(chipHideTimer);
+        window.clearTimeout(railHideTimer);
+        window.clearTimeout(railRevealTimer);
         return;
       }
       // Article nodes first (innermost, inside the post body), then sections
@@ -1497,6 +2417,7 @@ export const mountEditMode = (options: MountOptions): void => {
         element.closest<HTMLElement>(NAV_SELECTOR);
       if (!region) {
         clearChipSoon();
+        clearRailSoon();
         return;
       }
       window.clearTimeout(chipHideTimer);
@@ -1505,6 +2426,8 @@ export const mountEditMode = (options: MountOptions): void => {
         hotRegion = region;
         region.classList.add('dl-em-hot');
         renderChip(region);
+        scheduleRailReveal(region);
+        renderGutter(); // the hovered block's marker appears/changes state
       }
     },
     { signal }
@@ -1513,6 +2436,7 @@ export const mountEditMode = (options: MountOptions): void => {
     'scroll',
     () => {
       if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
+      if (railPlan.length > 0) scheduleRailFrame();
     },
     { passive: true, signal }
   );
@@ -1528,6 +2452,15 @@ export const mountEditMode = (options: MountOptions): void => {
       // dispatches AFTER mouseup, and re-rendering would replace the Ask-AI
       // button before its click listener ever fires.
       if (chip.contains(event.target as Node)) return;
+      // A double-click selects a word on its way into the inline editor
+      // (T17.8) — that is a gesture, not an Ask-AI scope. Drop any scope that
+      // was armed too, so a double-click can never leave one behind (§5.3).
+      if (!shouldCaptureSelection(event.detail)) {
+        currentSelectionText = undefined;
+        selectionRegion = undefined;
+        if (hotRegion) renderChip(hotRegion);
+        return;
+      }
       const selection = window.getSelection();
       const anchor = selection?.anchorNode;
       const anchorElement =
@@ -1542,6 +2475,355 @@ export const mountEditMode = (options: MountOptions): void => {
     },
     { signal }
   );
+
+  // ── the editable unit inside a record body
+  // A region addresses one section instance or one article node. Both the
+  // panel and the inline editor (T17.8) need the same resolution, and they
+  // must not drift: one function, two callers.
+  type ArticleNode = {
+    id: string;
+    public?: Record<string, unknown>;
+    private?: { strategy?: string; intent?: string; agentNotes?: string };
+  };
+  type EditableUnit = { currentData: Record<string, unknown>; patchSectionId: string; node?: ArticleNode };
+
+  const editableUnitFor = (target: EditTarget, body: Record<string, unknown>): EditableUnit | undefined => {
+    if (target.objectType === 'page') {
+      const sectionList = (body.sections as Array<{ id: string; data: Record<string, unknown> }> | undefined) ?? [];
+      const instance = sectionList.find((entry) => entry.id === target.sectionId);
+      return instance?.data && instance.id ? { currentData: instance.data, patchSectionId: instance.id } : undefined;
+    }
+    if (target.objectType === 'content_item') {
+      // Article node (W7.8): the editable unit is the node's PUBLIC fields —
+      // update_node scopes by target.nodeId (patchSectionId is unused there
+      // but kept non-empty for the shared panel state shape).
+      const nodes = (body.nodes as ArticleNode[] | undefined) ?? [];
+      const node = nodes.find((entry) => entry.id === target.nodeId);
+      return node?.public && node.id ? { currentData: node.public, patchSectionId: node.id, node } : undefined;
+    }
+    if (target.objectType === 'section') {
+      const inner = body.section as { id: string; data: Record<string, unknown> } | undefined;
+      return inner?.data && inner.id ? { currentData: inner.data, patchSectionId: inner.id } : undefined;
+    }
+    return undefined; // navigation edits through the nav grammar, never a data blob
+  };
+
+  // ── double-click to edit, inline (T17.8) ────────────────────────────────
+  // Changing a word used to cost hover → chip → pencil → panel → field →
+  // save. The concept removes all of it for the common case: double-click the
+  // block, type, commit. The write is the SAME EditSession checkout → patch
+  // the panel uses — there is deliberately no second write path (spec §5.2).
+  type InlineEditState = {
+    region: HTMLElement;
+    target: EditTarget;
+    field: InlineField;
+    patchSectionId: string;
+    /** The value at entry — what Esc reverts to and what a commit diffs against. */
+    before: unknown;
+    snapshot: RegionSnapshot;
+    host: HTMLElement;
+    richText?: RichTextEditorHandle;
+    committing: boolean;
+  };
+  let inlineEdit: InlineEditState | undefined;
+
+  /** Read the surface back: a rich-text document, or the text the editor holds. */
+  const inlineEditValue = (edit: InlineEditState): unknown => {
+    if (edit.field.kind === 'doc') return edit.richText?.getRichTextV1();
+    // innerText keeps line breaks (blank line = new paragraph for article
+    // bodies); nbsp from contenteditable normalises back to a plain space.
+    return (edit.host.innerText ?? '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\t ]+$/gm, '')
+      .replace(/\n+$/, '');
+  };
+
+  /**
+   * A commit is a round trip, so the surface outlives the keystroke that ends
+   * it. Anything that would start a NEW edit waits on this, and every teardown
+   * names the edit it tears down — otherwise a slow save could restore its own
+   * snapshot over whatever the editor is doing by then.
+   */
+  let inlineCommitInFlight: Promise<void> = Promise.resolve();
+
+  /** Leave inline edit, restoring the block's rendered content. */
+  const finishInlineEdit = (edit: InlineEditState): void => {
+    if (inlineEdit === edit) inlineEdit = undefined;
+    edit.richText?.destroy();
+    restoreRegion(edit.snapshot);
+    edit.region.classList.remove('dl-em-editing');
+  };
+
+  const cancelInlineEdit = (): void => {
+    const edit = inlineEdit;
+    if (!edit) return;
+    edit.committing = true; // a late blur must not then save it
+    finishInlineEdit(edit);
+    setStatus('Edit cancelled — nothing saved.');
+  };
+
+  /**
+   * Commit through the reviewable path: checkout → patch → invalidate → mark
+   * the block a draft → refresh the pending tray. A held lock refuses with the
+   * existing message and the block goes back to read-only, unwritten.
+   */
+  const runInlineCommit = async (edit: InlineEditState): Promise<void> => {
+    const after = inlineEditValue(edit);
+    if (after === undefined || JSON.stringify(after) === JSON.stringify(edit.before)) {
+      finishInlineEdit(edit);
+      return;
+    }
+    const objectSession = session(edit.target.objectType, edit.target.objectId);
+    setStatus('Saving…');
+    const checkout = await objectSession.ensureCheckout();
+    if (!checkout.ok) {
+      // Refuse, keep nothing, hand the block back read-only.
+      finishInlineEdit(edit);
+      setStatus(`Locked by ${checkout.heldBy ?? 'another editor'} — try again when the lock frees.`);
+      return;
+    }
+    const ops = inlineEditOps(edit.target, edit.field, after, edit.patchSectionId);
+    const changed = { [edit.field.key]: after };
+    const manualEdits =
+      edit.field.kind === 'doc'
+        ? []
+        : buildManualRichTextEdits(
+            edit.target,
+            { [edit.field.key]: edit.before },
+            changed,
+            [edit.field.key],
+            new Date().toISOString()
+          );
+    attachLearningTrail(edit.target, ops, changed, manualEdits);
+    const outcome = await objectSession.patch(ops);
+    finishInlineEdit(edit);
+    if (!outcome.ok) {
+      const blockers = outcome.blockers?.length ? ` ${outcome.blockers.join(' ')}` : '';
+      setStatus(`Not saved: ${outcome.error}${blockers}`);
+      return;
+    }
+    clearLearningTrail(edit.target);
+    invalidateRecord(edit.target.objectType, edit.target.objectId);
+    // Show the saved value where it can be located unambiguously; where it
+    // can't, the dashed draft outline and the tray remain the honest record —
+    // the same contract the panel's saves have always had.
+    if (edit.field.kind !== 'doc' && typeof edit.before === 'string' && typeof after === 'string') {
+      previewFieldChange(edit.region, edit.field.kind === 'html' ? 'html' : 'string', edit.before, after);
+    }
+    edit.region.classList.add('dl-em-draft');
+    setStatus(`${edit.target.objectId}: draft saved — not published.`);
+    await refreshPending();
+    scheduleGapRebuild();
+  };
+
+  const commitInlineEdit = (): Promise<void> => {
+    const edit = inlineEdit;
+    if (!edit || edit.committing) return inlineCommitInFlight;
+    edit.committing = true;
+    inlineCommitInFlight = runInlineCommit(edit);
+    return inlineCommitInFlight;
+  };
+
+  /** Put the caret where the pointer was, so the gesture lands like a click in text. */
+  const placeCaret = (host: HTMLElement, at?: { x: number; y: number }): void => {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range =
+      at && typeof document.caretRangeFromPoint === 'function' ? document.caretRangeFromPoint(at.x, at.y) : undefined;
+    if (range && host.contains(range.startContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
+    const end = document.createRange();
+    end.selectNodeContents(host);
+    end.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(end);
+  };
+
+  const startInlineEdit = async (region: HTMLElement, at?: { x: number; y: number }): Promise<void> => {
+    if (inlineEdit) {
+      if (inlineEdit.region === region) return;
+      void commitInlineEdit();
+    }
+    // Never start on top of a save still in flight: its teardown restores the
+    // block's pre-edit HTML, which would wipe a surface mounted meanwhile.
+    await inlineCommitInFlight;
+    const target = targetFor(region);
+    if (!target) return;
+    const { status, record } = await cachedRecord(target.objectType, target.objectId);
+    if (status !== 200 || !record) {
+      setStatus(`Could not load ${target.objectId} (HTTP ${status}).`);
+      return;
+    }
+    const unit = editableUnitFor(target, record.body as Record<string, unknown>);
+    const field = unit ? derivePrimaryInlineField(unit.currentData, target.objectType) : undefined;
+    if (!unit || !field) {
+      // No single primary copy field (image node, grid, navigation chrome):
+      // the double-click opens the panel it would have opened anyway (§5.1).
+      void openPanel(target, region, 'edit');
+      return;
+    }
+    const before = unit.currentData[field.key];
+    const snapshot = snapshotRegion(region);
+    const host = document.createElement('div');
+    host.className = field.kind === 'doc' ? 'dl-em-inline dl-em-inline-rich' : 'dl-em-inline';
+    if (field.kind === 'html') host.classList.add('dl-em-inline-code');
+    host.setAttribute('role', 'textbox');
+    host.setAttribute('aria-label', `Edit ${field.key}`);
+    region.replaceChildren(host);
+    region.classList.add('dl-em-editing');
+
+    const edit: InlineEditState = {
+      region,
+      target,
+      field,
+      patchSectionId: unit.patchSectionId,
+      before,
+      snapshot,
+      host,
+      committing: false,
+    };
+    inlineEdit = edit;
+
+    if (field.kind === 'doc') {
+      // The grammar-bound TipTap editor, imported only when one is needed so
+      // @tiptap never enters the canvas's base bundle. Allowlist, paste
+      // sanitizer and https-only links come with it, unchanged.
+      const { createRichTextEditor } = await import('./richtext-editor.js');
+      if (inlineEdit !== edit) return; // cancelled while the chunk loaded
+      edit.richText = await createRichTextEditor({
+        element: host,
+        doc: before as Parameters<typeof createRichTextEditor>[0]['doc'],
+      });
+      if (inlineEdit !== edit) {
+        edit.richText.destroy();
+        return;
+      }
+      edit.richText.focus();
+    } else {
+      host.setAttribute('contenteditable', 'plaintext-only');
+      host.textContent = typeof before === 'string' ? before : '';
+      host.focus();
+      placeCaret(host, at);
+      // Belt and braces where contenteditable="plaintext-only" is not honoured:
+      // a paste still lands as text, never as foreign markup.
+      host.addEventListener('paste', (event) => {
+        const text = event.clipboardData?.getData('text/plain');
+        if (text === undefined) return;
+        event.preventDefault();
+        document.execCommand('insertText', false, text);
+      });
+    }
+
+    host.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelInlineEdit();
+        region.focus?.();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        void commitInlineEdit();
+      }
+    });
+    host.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && host.contains(next)) return;
+      void commitInlineEdit();
+    });
+
+    // The block's own bubble stays up while it is edited (§5.3 collision 2) —
+    // comments about the thing you are editing are the point.
+    const anchorKey = anchorKeyForRegion(region);
+    if (anchorKey) pinRail(anchorKey, region);
+    chip.style.display = 'none';
+    setStatus('Editing in place — ⌘↵ or click away to save, Esc to cancel.');
+  };
+
+  document.addEventListener(
+    'dblclick',
+    (event) => {
+      if (!document.body.classList.contains('dl-em-on')) return;
+      const element = event.target as HTMLElement | null;
+      if (!element) return;
+      if (rail.contains(element) || panel.contains(element) || chip.contains(element) || tray.contains(element)) return;
+      if (inlineEdit?.host.contains(element)) return;
+      const region =
+        element.closest<HTMLElement>(NODE_SELECTOR) ??
+        element.closest<HTMLElement>(REGION_SELECTOR) ??
+        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!region) return;
+      event.preventDefault();
+      void startInlineEdit(region, { x: event.clientX, y: event.clientY });
+    },
+    { signal }
+  );
+
+  // Keyboard equivalent (spec §9): Enter on a focused block edits it. A
+  // mouse-only editing gesture would be the only one on the canvas.
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!document.body.classList.contains('dl-em-on') || inlineEdit) return;
+      const element = document.activeElement as HTMLElement | null;
+      if (!element || element === document.body) return;
+      if (rail.contains(element) || panel.contains(element) || chip.contains(element) || tray.contains(element)) return;
+      if (bar.contains(element) || element.isContentEditable) return;
+      if (/^(input|textarea|select|button|a|summary|details)$/i.test(element.tagName)) return;
+      const region =
+        element.closest<HTMLElement>(NODE_SELECTOR) ??
+        element.closest<HTMLElement>(REGION_SELECTOR) ??
+        element.closest<HTMLElement>(NAV_SELECTOR);
+      if (!region) return;
+      event.preventDefault();
+      void startInlineEdit(region);
+    },
+    { signal }
+  );
+
+  // A click outside the surface commits it (§5.3 — every other autosaving
+  // inline editor behaves this way), and an in-content link never navigates:
+  // in edit mode a click on one almost always meant "put a cursor here".
+  // Chrome (navigation objects) is exempt — an editor must still be able to
+  // move around the site while edit mode is on.
+  document.addEventListener(
+    'mousedown',
+    (event) => {
+      if (!inlineEdit) return;
+      const element = event.target as Node | null;
+      if (element && (inlineEdit.host.contains(element) || panel.contains(element) || rail.contains(element))) return;
+      void commitInlineEdit();
+    },
+    { signal }
+  );
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!document.body.classList.contains('dl-em-on')) return;
+      const anchor = (event.target as HTMLElement | null)?.closest?.<HTMLAnchorElement>('a[href]');
+      if (!anchor || anchor.closest(NAV_SELECTOR)) return;
+      if (!anchor.closest(`${NODE_SELECTOR}, ${REGION_SELECTOR}`)) return;
+      event.preventDefault();
+    },
+    { signal }
+  );
+
+  /** Annotated blocks are focusable in edit mode only — never for a visitor. */
+  const syncRegionFocusability = (on: boolean): void => {
+    for (const region of annotatedRegions()) {
+      if (on) {
+        if (!region.hasAttribute('tabindex')) region.setAttribute('tabindex', '0');
+      } else if (region.getAttribute('tabindex') === '0') {
+        region.removeAttribute('tabindex');
+      }
+    }
+  };
 
   // ── panel
   let panelState: PanelState | undefined;
@@ -1672,12 +2954,9 @@ export const mountEditMode = (options: MountOptions): void => {
     // AI scoping, no images — the accordion shows just the Edit section.
     const isNav = target.objectType === 'navigation';
     panel.classList.toggle('dl-em-nav', isNav);
-    // Comments is the one accordion section every target kind reaches
-    // (including nav chrome, which otherwise forces edit mode below) — it
-    // never routes through the shared formEl.
-    if (isNav && mode !== 'comments') mode = 'edit';
+    if (isNav) mode = 'edit';
     setActiveSection(mode);
-    if (mode !== 'ai' && mode !== 'comments') panel.querySelector(`[data-em-acc-body="${mode}"]`)?.append(formEl);
+    if (mode !== 'ai') panel.querySelector(`[data-em-acc-body="${mode}"]`)?.append(formEl);
 
     const selected = mode === 'ai' && selectionRegion === region ? currentSelectionText : undefined;
     panel.classList.add('dl-em-open');
@@ -1699,30 +2978,6 @@ export const mountEditMode = (options: MountOptions): void => {
       return;
     }
     const body = record.body as Record<string, unknown>;
-    // Comments never needs the section/node's DRAFT data — only the anchor
-    // tuple `target` already carries — so it short-circuits before the
-    // per-type currentData resolution below (which can legitimately fail to
-    // find a section/node and would otherwise block comments on it too).
-    if (mode === 'comments') {
-      panelState = { target, region, mode: 'comments', currentData: {}, patchSectionId: '' };
-      logEl.innerHTML = '';
-      const commentsBody = panel.querySelector<HTMLElement>('[data-em-acc-body="comments"]');
-      if (commentsBody) {
-        void mountMarginaliaPanel(
-          commentsBody,
-          getToken,
-          {
-            objectType: target.objectType,
-            objectId: target.objectId,
-            ...(target.sectionId !== undefined ? { sectionId: target.sectionId } : {}),
-            ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
-          },
-          cachedMarginaliaThreads(target.objectType, target.objectId),
-          () => invalidateMarginaliaThreads(target.objectType, target.objectId)
-        );
-      }
-      return;
-    }
     if (isNav) {
       panelState = {
         target,
@@ -1735,31 +2990,13 @@ export const mountEditMode = (options: MountOptions): void => {
       renderNavForm(panelState);
       return;
     }
-    let currentData: Record<string, unknown> | undefined;
-    let patchSectionId: string | undefined;
+    const unit = editableUnitFor(target, body);
+    const currentData = unit?.currentData;
+    const patchSectionId = unit?.patchSectionId;
     let nodePrivate: PanelState['nodePrivate'];
     let articleMeta: PanelState['articleMeta'];
-    if (target.objectType === 'page') {
-      const sectionList = (body.sections as Array<{ id: string; data: Record<string, unknown> }> | undefined) ?? [];
-      const instance = sectionList.find((entry) => entry.id === target.sectionId);
-      currentData = instance?.data;
-      patchSectionId = instance?.id;
-    } else if (target.objectType === 'content_item') {
-      // Article node (W7.8): the editable unit is the node's PUBLIC fields —
-      // update_node scopes by target.nodeId (patchSectionId is unused there
-      // but kept non-empty for the shared panel state shape).
-      const nodes =
-        (body.nodes as
-          | Array<{
-              id: string;
-              public?: Record<string, unknown>;
-              private?: { strategy?: string; intent?: string; agentNotes?: string };
-            }>
-          | undefined) ?? [];
-      const node = nodes.find((entry) => entry.id === target.nodeId);
-      currentData = node?.public;
-      patchSectionId = node?.id;
-      nodePrivate = node?.private;
+    if (target.objectType === 'content_item') {
+      nodePrivate = unit?.node?.private;
       articleMeta = {
         slug: body.slug,
         author: body.author,
@@ -1768,13 +3005,9 @@ export const mountEditMode = (options: MountOptions): void => {
         seo: body.seo,
       };
       // The record is in hand — fill the header role synchronously.
-      const role = roleOf(node);
+      const role = roleOf(unit?.node);
       const roleEl = identEl.querySelector('[data-em-role]');
       if (role && roleEl) roleEl.textContent = role;
-    } else {
-      const inner = body.section as { id: string; data: Record<string, unknown> } | undefined;
-      currentData = inner?.data;
-      patchSectionId = inner?.id;
     }
     if (!currentData || !patchSectionId) {
       log('sys', `Not in the draft record yet — edit via /admin/content/${escapeHtml(target.objectId)}.`);

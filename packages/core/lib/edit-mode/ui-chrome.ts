@@ -30,6 +30,14 @@ export const STYLES = `
   /* The sparkle stars: deliberately brighter than the rest of the toolbar so
      the AI action reads first (Wolf, 2026-07-12). Gold, lifted toward white. */
   --dlem-spark:color-mix(in srgb,var(--aw-color-gold,#e8be70) 78%,#fff);
+  /* Margin rail (T17.3) — the measured proportions of the approved concept
+     (docs/design/marginalia-interaction-model.md §1.1), expressed as tokens so
+     the geometry has exactly one source shared by the CSS and ui.ts's layout
+     math (which reads these same numbers from RAIL_* constants). */
+  --dlem-rail-w:344px;
+  --dlem-rail-gap:24px;
+  --dlem-rail-pad:8px;
+  --dlem-gutter-x:28px;
 }
 .dl-em-bar{position:fixed;top:0;left:0;right:0;z-index:99990;display:none;align-items:center;gap:10px;
   padding:6px 14px;background:var(--dlem-surface-2);color:var(--dlem-text);font:600 12.5px/1.4 var(--dlem-font);
@@ -266,7 +274,109 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 .dl-em-tray footer{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--dlem-border)}
 .dl-em-tray footer .dl-em-deploy{flex:1;font-size:11px;color:var(--dlem-muted)}
 .dl-em-tray .dl-em-btn.dl-em-primary{background:var(--dlem-accent);border-color:var(--dlem-accent);color:var(--dlem-accent-ink)}
-@media (max-width:720px){.dl-em-panel{top:auto;left:10px;right:10px;bottom:10px;width:auto;max-height:62vh}}
+/* ── margin rail (T17.3) ────────────────────────────────────────────────────
+   The concept's annotation surface: block-aligned bubbles in the page margin,
+   NOT a docked panel. One fixed, zero-height, pointer-transparent column whose
+   left edge ui.ts computes from the content column (inset) or the viewport
+   edge (slide); bubbles are absolutely positioned inside it at viewport
+   coordinates and repositioned on scroll, exactly as the hover chip is.
+   Spec: docs/design/marginalia-interaction-model.md §§1–2, 8.1. */
+.dl-em-rail{position:fixed;top:0;left:0;width:var(--dlem-rail-w);height:0;z-index:99991;display:none;
+  pointer-events:none;font:13px/1.5 var(--dlem-font)}
+body.dl-em-on .dl-em-rail.dl-em-rail-on{display:block}
+.dl-em-bubble{position:absolute;left:0;width:100%;pointer-events:auto;display:flex;flex-direction:column;
+  color:var(--dlem-text);border-radius:14px;overflow:visible;box-shadow:var(--dlem-shadow);
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 78%,transparent);
+  -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
+  border:1px solid color-mix(in srgb,var(--aw-color-primary,rgb(20 122 140)) 18%,transparent)}
+.dl-em-bubble.dl-em-pinned{border-color:color-mix(in srgb,var(--dlem-accent) 55%,transparent)}
+.dl-em-bubble-head{display:flex;align-items:center;gap:8px;padding:7px 7px 7px 12px;border-radius:13px 13px 0 0;
+  border-bottom:1px solid var(--dlem-border);
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 65%,transparent);
+  -webkit-backdrop-filter:blur(12px) saturate(1.3);backdrop-filter:blur(12px) saturate(1.3)}
+.dl-em-bubble-title{flex:1;min-width:0;font:600 12px var(--dlem-font);color:var(--dlem-heading);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-em-bubble-open{flex:none;padding:1px 7px;border-radius:9px;background:var(--dlem-draft);color:#fff;
+  font:700 10.5px var(--dlem-font)}
+.dl-em-bubble .dl-em-log{max-height:38vh;min-height:0}
+.dl-em-bubble .dl-em-composer{border-top:1px solid var(--dlem-border)}
+.dl-em-bubble-more{margin:0 12px 8px;padding:4px 8px;border-radius:7px;border:1px dashed var(--dlem-border);
+  background:transparent;color:var(--dlem-muted);font:600 10.5px var(--dlem-font);cursor:pointer;align-self:flex-start}
+.dl-em-bubble-more:hover{border-color:var(--dlem-accent);color:var(--dlem-accent)}
+/* A bubble the packer pushed down draws a 1px line back to its block (§8.1). */
+.dl-em-bubble-link{position:absolute;left:calc(-1 * var(--dlem-rail-gap));width:var(--dlem-rail-gap);
+  border-left:1px solid color-mix(in srgb,var(--dlem-accent) 45%,transparent);
+  border-bottom:1px solid color-mix(in srgb,var(--dlem-accent) 45%,transparent);
+  border-bottom-left-radius:6px;pointer-events:none}
+/* A hovered block with NO thread yet: the concept's 💬 affordance. */
+.dl-em-ghostbubble{position:absolute;left:0;width:30px;height:30px;padding:0;pointer-events:auto;
+  display:inline-flex;align-items:center;justify-content:center;border-radius:50%;cursor:pointer;
+  color:var(--dlem-muted);border:1px solid var(--dlem-border);
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 72%,transparent);
+  -webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2)}
+.dl-em-ghostbubble:hover,.dl-em-ghostbubble:focus-visible{color:var(--dlem-accent);border-color:var(--dlem-accent)}
+/* ── attention markers + the inline draft chip (T17.6) ──────────────────────
+   One marker per block that has something to say, in the LEFT gutter at the
+   block's leading edge minus --dlem-gutter-x. A block needing attention shows
+   a filled dot carrying the NUMERAL — colour is never the only carrier. The
+   attention token is --dlem-draft (the gold); --dlem-danger is reserved for
+   destruction and must not appear here. Spec §4.2. */
+.dl-em-gutter{position:fixed;top:0;left:0;width:100%;height:0;z-index:99988;display:none;pointer-events:none}
+body.dl-em-on .dl-em-gutter{display:block}
+.dl-em-badge{position:absolute;width:18px;height:18px;padding:0;border-radius:50%;pointer-events:auto;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;
+  font:700 10.5px var(--dlem-font);line-height:1;transition:transform .12s ease}
+.dl-em-badge:hover{transform:scale(1.15)}
+.dl-em-badge:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:2px}
+.dl-em-badge.dl-em-badge-open{background:var(--dlem-draft);border-color:var(--dlem-draft);color:#fff}
+.dl-em-badge.dl-em-badge-muted{width:9px;height:9px;background:transparent;
+  border-color:color-mix(in srgb,var(--dlem-muted) 60%,transparent)}
+.dl-em-badge.dl-em-badge-accent{width:9px;height:9px;background:var(--dlem-accent);border-color:var(--dlem-accent)}
+/* The PDF's "The two-night rule · draft": drawn beside the block's title line
+   rather than injected into it, so rendered copy stays byte-identical (the
+   in-place preview matches on exact text). The dashed .dl-em-draft outline
+   stays as well — this is an addition, not a replacement. */
+.dl-em-draftchip{position:absolute;pointer-events:none;white-space:nowrap;border-radius:5px;padding:1px 6px;
+  background:color-mix(in srgb,var(--dlem-draft) 16%,transparent);color:var(--dlem-draft);
+  font:700 10px var(--dlem-font)}
+/* List mode: every open thread on the page, one row each. */
+.dl-em-bubble-list .dl-em-listrows{display:flex;flex-direction:column;max-height:44vh;overflow-y:auto;padding:6px}
+.dl-em-listrow{display:flex;flex-direction:column;gap:2px;text-align:left;width:100%;border:none;border-radius:8px;
+  background:transparent;color:var(--dlem-text);padding:7px 9px;cursor:pointer;font:inherit}
+.dl-em-listrow:hover{background:color-mix(in srgb,var(--dlem-text) 8%,transparent)}
+.dl-em-listrow:disabled{cursor:default;opacity:.75}
+.dl-em-listwhere{font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;color:var(--dlem-muted)}
+.dl-em-listbody{font-size:12px;color:var(--dlem-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-em-listhead{padding:8px 9px 4px;font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;
+  color:var(--dlem-muted)}
+/* The narrow-screen page-slide: padding on the page box (never a transform, so
+   fixed chrome, scrollbars and scrollIntoView all keep working). */
+body.dl-em-slide{padding-right:var(--dlem-slide-pad,0px)}
+@media (prefers-reduced-motion:no-preference){body.dl-em-on{transition:padding-right .18s ease}}
+/* Held for the one synchronous reflow the rail needs to measure the UNSLID
+   content column, so the slide it removes and restores never animates. */
+body.dl-em-measuring{transition:none!important}
+/* ── inline editing (T17.8) ─────────────────────────────────────────────────
+   Double-click a block and its copy becomes editable IN the page, in the
+   block's own box: the surface inherits the site's typography (it renders
+   inside the article's prose wrapper), so what you type looks like what will
+   publish. pre-wrap keeps the blank-line-is-a-new-paragraph rule article
+   bodies use visible while editing. */
+.dl-em-inline{white-space:pre-wrap;outline:2px solid var(--dlem-accent);outline-offset:6px;border-radius:2px;
+  min-height:1.4em;caret-color:var(--dlem-accent)}
+.dl-em-inline:focus,.dl-em-inline .ProseMirror:focus{outline:2px solid var(--dlem-accent);outline-offset:6px}
+.dl-em-inline-code{font:12.5px/1.6 ui-monospace,monospace;color:var(--dlem-text)}
+.dl-em-inline-rich{white-space:normal}
+/* The hover outline would double up on the block being edited. */
+body.dl-em-on [data-cms-section-id].dl-em-editing>*,body.dl-em-on [data-cms-nav-object].dl-em-editing>*{outline:none}
+/* Sheet mode (< 900px): no rail column — the bubbles become the bottom sheet. */
+.dl-em-rail.dl-em-rail-sheet{top:auto;left:10px;right:10px;bottom:10px;width:auto;height:auto;max-height:62vh;
+  overflow-y:auto;pointer-events:auto}
+body.dl-em-on .dl-em-rail.dl-em-rail-sheet.dl-em-rail-on{display:flex;flex-direction:column;gap:8px}
+.dl-em-rail.dl-em-rail-sheet .dl-em-bubble{position:static;width:auto}
+.dl-em-rail.dl-em-rail-sheet .dl-em-ghostbubble{position:static}
+.dl-em-rail.dl-em-rail-sheet .dl-em-bubble-link{display:none}
+@media (max-width:900px){.dl-em-panel{top:auto;left:10px;right:10px;bottom:10px;width:auto;max-height:62vh}}
 /* Glass treatment (Wolf, 2026-08-10 — docs/design/marginalia-glass-ui-modernization.md
    §2): extends the blur/tint .dl-em-chip already uses to the rest of the
    edit-mode chrome so the whole surface reads as one glass layer instead of

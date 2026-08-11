@@ -1,0 +1,105 @@
+/**
+ * Double-click-to-edit (T17.8) — the pure half.
+ *
+ * The concept's cheapest interaction: double-click a block, type, done. No
+ * chip, no panel, no form. ui.ts owns the editing surface and the commit;
+ * everything decidable from data alone lives here so it is unit-tested without
+ * a DOM — which field a block's copy actually is, whether a mouse event should
+ * still arm an Ask-AI selection, and the ops a committed value becomes.
+ *
+ * Spec: docs/design/marginalia-interaction-model.md §5.
+ */
+import { suggestionToOps, type EditTarget } from './targets.js';
+
+/**
+ * Manual-edit field selection (client-side heuristic): copy fields only.
+ * Media/asset/link/binding keys are excluded here for the same reason the AI
+ * schema strips them — except the image tool, which edits image fields
+ * DELIBERATELY through its own dedicated form. Shared with ui.ts's
+ * `formFieldsFor`, which is the same rule applied to the panel's forms.
+ */
+export const NON_COPY_KEY_RE = /asset|image|portrait|logo|icon|src|url|href|route|anchor|formname|ogimage/i;
+
+const LOOKS_LIKE_HTML = /<[a-z][\s\S]*>/i;
+
+/** How a field's value is edited, which fixes both the surface and the commit shape. */
+export type InlineFieldKind =
+  /** A plain string: edited as text, committed as text. */
+  | 'plain'
+  /** A rich-text HTML string (section bodies): edited as its raw markup, as the panel's textarea does. */
+  | 'html'
+  /** A rich_text.v1 document: edited with the grammar-bound TipTap editor. */
+  | 'doc';
+
+export type InlineField = { key: string; kind: InlineFieldKind };
+
+/** A rich_text.v1 document as it sits in a record body (Contentful's document node). */
+export const isRichTextDocument = (value: unknown): boolean =>
+  Boolean(value) &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  (value as { nodeType?: unknown }).nodeType === 'document' &&
+  Array.isArray((value as { content?: unknown }).content);
+
+/**
+ * Keys that ARE the block's copy when a block has several. Object key order in
+ * a stored record is incidental, and "the first key that happens to be a
+ * string" would make double-clicking a paragraph edit the block's heading.
+ * Anything not listed falls back to first-eligible-in-order.
+ */
+const PRIMARY_KEYS = ['body', 'text', 'title', 'heading'];
+
+const inlineKindFor = (key: string, value: unknown, objectType: string): InlineFieldKind | undefined => {
+  if (isRichTextDocument(value)) return 'doc';
+  if (typeof value !== 'string') return undefined;
+  // Article node bodies are PLAIN TEXT (render-nodes.ts escapes them and
+  // splits paragraphs on blank lines) — never markup, whatever they contain.
+  if (objectType === 'content_item') return 'plain';
+  return LOOKS_LIKE_HTML.test(value) || key === 'body' ? 'html' : 'plain';
+};
+
+/**
+ * The one field a double-click edits, derived from the block's own data — not
+ * a hardcoded per-type map. `undefined` means this block has no single primary
+ * copy field (an image node, a grid, most navigation targets) and the
+ * double-click falls through to the panel instead (§5.1).
+ *
+ * String arrays (`items`) are deliberately NOT eligible: a bullet list is not
+ * one value, and inline-editing it would need the panel's multi-line form.
+ */
+export const derivePrimaryInlineField = (
+  data: Record<string, unknown>,
+  objectType: string
+): InlineField | undefined => {
+  const eligible: InlineField[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (NON_COPY_KEY_RE.test(key)) continue;
+    const kind = inlineKindFor(key, value, objectType);
+    if (kind) eligible.push({ key, kind });
+  }
+  if (eligible.length === 0) return undefined;
+  for (const preferred of PRIMARY_KEYS) {
+    const match = eligible.find((field) => field.key === preferred);
+    if (match) return match;
+  }
+  return eligible[0];
+};
+
+/**
+ * §5.3 collision 1: a double-click selects a word, and the canvas's `mouseup`
+ * listener would arm that as an Ask-AI scope. `event.detail` counts clicks in
+ * the sequence, so anything ≥ 2 is a multi-click and must not capture.
+ */
+export const shouldCaptureSelection = (detail: number): boolean => detail < 2;
+
+/**
+ * The reviewable ops an inline commit becomes — the SAME `update_node` /
+ * `update_section_data` shapes a panel save produces, through the same
+ * function. There is deliberately no second write path (§5.2).
+ */
+export const inlineEditOps = (
+  target: EditTarget,
+  field: InlineField,
+  value: unknown,
+  patchSectionId?: string
+): Array<Record<string, unknown>> => suggestionToOps(target, { [field.key]: value }, patchSectionId);

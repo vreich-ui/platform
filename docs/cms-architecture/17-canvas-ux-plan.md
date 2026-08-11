@@ -103,12 +103,12 @@ model or touching layout/anchoring logic with no existing precedent in the file.
 | **T17.1** | `--dlem-danger` colour-chain bug fix — resolves to the site's blue secondary, and the delete button doesn't even use it (§4) | auto | `claude-sonnet-5` | low |
 | **T17.2** | Glass treatment for panel / accordion heads / confirm modal / tray / message bubbles, per the spec doc | auto | `claude-sonnet-5` | medium |
 | **T17.0** | Concept-to-brief decomposition: read the PDF, write the interaction-model spec + per-task briefs for everything below | checkpoint | `claude-opus-5` | high |
-| **T17.3** | Margin rail layout + hover-reveal bubbles + narrow-screen page-slide — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
+| **T17.3** | Margin rail layout + hover-reveal bubbles + narrow-screen page-slide — *PDF, not in items 9–16* — **DONE 2026-08-10 (§7)** | auto | `claude-opus-5` | high |
 | **T17.4** | Selected-text span anchoring (item 9) — schema fields already reserved in `marginalia-v1.ts` | auto | `claude-opus-5` | high |
 | **T17.5** | Reply-threading UI (item 10) — `parentCommentId` already reserved, client renders flat today | auto | `claude-sonnet-5` | medium |
-| **T17.6** | Gutter badges / dot counters + the global "Attention N" toolbar counter (item 11 + PDF) | auto | `claude-sonnet-5` | medium |
+| **T17.6** | Gutter badges / dot counters + the global "Attention N" toolbar counter (item 11 + PDF) — **DONE 2026-08-10 (§7)** | auto | `claude-sonnet-5` | medium |
 | **T17.7** | Agent-routed composer: note / change-request / question → CMS Agent — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
-| **T17.8** | Double-click-to-edit block inline, no panel step — *PDF, not in items 9–16* | auto | `claude-opus-5` | high |
+| **T17.8** | Double-click-to-edit block inline, no panel step — *PDF, not in items 9–16* — **DONE 2026-08-10 (§7)** | auto | `claude-opus-5` | high |
 | **T17.9** | Image-ref-specific comments (item 12) | auto | `claude-sonnet-5` | medium |
 | **T17.10** | Notifications / digests (item 13) — delivery channel is a product decision, not an agent one | checkpoint | `claude-sonnet-5` | medium |
 | **T17.11** | Per-role comment-visibility policy (item 14) — follows the existing `isOwner`/`resolveRolesFromEvent` pattern | auto | `claude-sonnet-5` | medium |
@@ -188,3 +188,137 @@ item here with no obvious default.
   — the pre-existing W7 chip UI. Marginalia's Comments accordion sits one level
   deeper inside the panel it opens. Not a regression, not a missing feature;
   it's the layer the concept PDF replaces (T17.3).
+
+## 7. Build log — what has actually landed
+
+One entry per task, added in the same commit as the work (repo law: no record,
+not done). Machine truth for the code is the files named; this section says
+what changed and where a later task should look first.
+
+### T17.3 — margin rail + hover-reveal bubbles + page-slide (2026-08-10)
+
+- **New:** `packages/core/lib/edit-mode/rail-layout.ts` (+ `.test.ts`, 25
+  cases) — the pure half: layout-mode selection, slide padding, rail x,
+  the §8.1 top-down packer, anchor keys, thread bucketing
+  (blocks / whole-object / orphans), stack collapsing.
+- **`ui.ts`:** a `.dl-em-rail` `<aside role="complementary">` singleton beside
+  the existing chip/panel/tray; hover-reveal at 120ms with the existing 250ms
+  dismissal; click-or-focus pinning, one pinned bubble at a time, `Esc` /
+  outside-click / close-control unpin; whole-object bubbles at the rail top,
+  orphan bubbles at the bottom (split into "not on this page anymore" and
+  "block deleted in a draft"); rail x from the widest **in-viewport**
+  annotated region, remeasured with the slide off so the mode decision can
+  never oscillate.
+- **`ui-chrome.ts`:** `--dlem-rail-w/-gap/-pad`, `--dlem-gutter-x`, the rail /
+  bubble / ghost-bubble / connector CSS, `body.dl-em-slide`'s
+  `padding-right` (transitioned 180ms, skipped under reduced motion), and the
+  sheet-mode rail. The panel's bottom-sheet breakpoint moved 720px → 900px to
+  match `slideFloor` (brief's instruction).
+- **Retired:** the panel's `comments` accordion section, `PanelMode`'s
+  `'comments'` member and `openPanel`'s `isNav && mode !== 'comments'` special
+  case. `mountMarginaliaPanel` was **moved, not rewritten** — it now mounts per
+  bubble and gained one optional `selectThreads` list-transform so a bubble can
+  show only its own anchor's threads (and collapse a stack); omitting it
+  reproduces the accordion's behaviour exactly. The marginalia cache,
+  `preloadRecords` warm-up and `invalidateMarginaliaThreads` are unchanged.
+- **Not verified in a browser** (no browser in the build environment): the
+  three layout modes at real viewport widths, the reveal/dismiss feel, and
+  whether the chip/bubble stacking reads as intended. Everything mechanical is
+  covered by the pure tests; the rest wants T17.13's smoke test or a human.
+
+### T17.8 — double-click to edit a block inline (2026-08-10)
+
+- **New:** `packages/core/lib/edit-mode/inline-edit.ts` (+ `.test.ts`, 20
+  cases) — primary-field derivation from a block's own data (never a per-type
+  map), the `event.detail >= 2` selection-suppression predicate, and the
+  value→ops mapping, which is `suggestionToOps` and nothing else.
+- **`ui.ts`:** a `dblclick` (and `Enter`-on-focused-block) handler mounts an
+  editing surface in the block's own box — the grammar-bound TipTap editor for
+  a `rich_text.v1` document (dynamically imported, so @tiptap stays out of the
+  canvas's base chunk), a plain-text `contenteditable` otherwise. `⌘/Ctrl+↵`,
+  blur or an outside click commit; `Esc` reverts. The commit is
+  `EditSession.ensureCheckout()` → `patch` → `invalidateRecord` →
+  `dl-em-draft` → `refreshPending()` — the panel's own path, with the same
+  lock-refusal message and the same learning-trail attachment.
+- **The three collisions (spec §5.3):** the `mouseup` selection capture skips
+  (and *clears*) on `event.detail >= 2`, so a double-click can never leave an
+  Ask-AI scope armed; other blocks' hover-reveal is suppressed while a block
+  is being edited, and the edited block's own bubble is pinned; in-content
+  anchors are `preventDefault`-ed.
+- **Also extracted:** `editableUnitFor(target, body)` — the section/node
+  resolution `openPanel` used to inline. One function, two callers, so the
+  panel and the inline editor can never disagree about what a region edits.
+
+Deviations, and why:
+
+- **Preferred-key ordering.** The spec says "the first field `formFieldsFor`
+  would render". Object key order in a stored record is incidental, so that
+  rule makes double-clicking a paragraph edit the block's *heading* whenever
+  `title` happens to be serialised first. The derivation prefers
+  `body`/`text`/`title`/`heading` and only then falls back to first-eligible.
+- **String arrays are not eligible.** A bullet list is not one value; a block
+  whose only copy is `items` falls through to the panel, like an image node.
+- **The surface replaces the block's rendered content** rather than making the
+  rendered element itself `contenteditable`. The value then round-trips
+  exactly (what goes in is what comes back), which matters more than caret
+  fidelity given none of this could be driven in a browser here; the caret is
+  still placed at the pointer via `caretRangeFromPoint`.
+- **Navigation chrome is exempt from the link `preventDefault`.** Trapping an
+  editor on one page for the duration of edit mode is not what §5.3 is for.
+- **A committed `rich_text.v1` document is not previewed in place** — it is
+  saved, the block is marked draft, and the pre-edit rendering stays until
+  publish + release. Re-rendering it here would mean a second renderer beside
+  `render-nodes.ts`, which the repo forbids. Plain and HTML fields DO preview,
+  through the existing `previewFieldChange`.
+- **Not verified in a browser:** the caret placement, the feel of the editing
+  surface, whether `contenteditable="plaintext-only"` is honoured in Wolf's
+  browser (a paste handler backstops it), and whether `tabindex` on a
+  `display:contents` article-node wrapper is focusable at all — if it is not,
+  the `Enter` path still works from any focusable descendant, and T17.6's
+  gutter buttons give every block a real focus target.
+
+### T17.6 — attention badges + the `Attention N` counter (2026-08-10)
+
+- **New:** `packages/core/lib/edit-mode/attention.ts` (+ `.test.ts`, 13 cases)
+  — the one definition of "needs attention" (`status === 'open'`, nothing
+  else), per-block tallies, the page total, the §4.2 marker-state table and
+  the markers' accessible names.
+- **`ui.ts`:** a `.dl-em-gutter` layer of `<button>` markers at
+  `blockLeft - var(--dlem-gutter-x)`, aligned to the block's top and
+  repositioned on the same pass as the rail's bubbles; `Attention N` in
+  `.dl-em-bar` next to `Pending N`; rail **list mode** (whole-object first,
+  block threads in DOM order, orphans last under "Not on this page anymore",
+  a row scrolls its block into view and pins its bubble); and the inline
+  `· draft` chip.
+- **`ui-chrome.ts`:** the gutter, marker states (open = filled
+  `--dlem-draft` dot with the numeral; resolved-only = hollow, on hover only;
+  no threads + hovered = accent dot), the draft chip and the list rows.
+  `--dlem-danger` is deliberately untouched — T17.1 repointed it to the
+  destructive rust and it stays reserved for destruction.
+- **Counts refresh** on edit-mode activation, after every thread write, and on
+  an `Attention` click. No background polling: spec §8.5 makes that a cost
+  decision, not a UI one.
+
+Deviations, and why:
+
+- **The `· draft` chip is drawn in the gutter layer**, positioned at the end
+  of the block's title line via a `Range`, rather than injected into the
+  heading. Injecting a node into rendered copy would change the heading's text
+  content and break `previewFieldChange`'s exact-text match — the in-place
+  preview both the panel and T17.8 rely on. Visually the same; the dashed
+  `.dl-em-draft` outline is untouched, as the brief requires.
+- **Markers use each block's own leading edge**, clamped to ≥ 4px, rather than
+  one page-wide `columnLeft`: full-bleed sections start at x = 0 and a single
+  shared column would push their marker off-screen. In `sheet` mode the clamp
+  is what puts the marker inline at the block's leading edge.
+- **`aria-controls` can name a bubble that is not mounted yet** (a bubble only
+  exists while revealed or pinned). The alternative was no `aria-controls` at
+  all; the id is stable and correct the moment the bubble appears.
+- **Explicitly NOT done:** the toolbar reduction to three pills (T17.6b —
+  spec §10.1 — needs Wolf's call on where `Pending`, `Exit`, identity and the
+  status line go; nothing was dropped or re-homed here), and the
+  `≈ $1.42 · 3 runs` chip (spec §10.3 — no data source exists in core).
+- **Not verified in a browser:** marker alignment against real first-line
+  boxes, the draft chip's placement at the end of a wrapped heading, and the
+  screen-reader path. The counts, states and labels behind all of it are
+  covered by the pure tests.
