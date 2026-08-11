@@ -8,50 +8,76 @@ import {
   packRailEntries,
   partitionRailThreads,
   railLeftFor,
-  railSlidePadding,
+  railWidthFor,
   selectRailLayoutMode,
   type RailMetrics,
 } from './rail-layout.js';
 
-/** The spec's tokens: 344px rail, 24px gap, 8px pad, 900px slide floor. */
+/** The spec's tokens: 344px rail (260px floor), 24px gap, 8px pad, 900px sheet floor. */
 const metrics = (overrides: Partial<RailMetrics>): RailMetrics => ({
   viewportWidth: 1440,
   columnRight: 1080,
   railWidth: 344,
+  railMinWidth: 260,
   railGap: 24,
   railPad: 8,
-  slideFloor: 900,
+  sheetFloor: 900,
   ...overrides,
 });
 
 describe('selectRailLayoutMode', () => {
   it('insets when the natural margin already fits rail + gap + pad', () => {
-    // 1440 - 1080 = 360 margin; needs 344 + 24 + 8 = 376 → not quite.
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1080 })), 'slide');
+    // 1440 - 1080 = 360 margin; the full rail needs 344 + 24 + 8 = 376 → compact.
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1080 })), 'compact');
     // A wider viewport with the same column: 1600 - 1080 = 520 ≥ 376.
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1600, columnRight: 1080 })), 'inset');
   });
 
   it('insets exactly at the boundary (margin === rail + gap + pad)', () => {
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1456, columnRight: 1080 })), 'inset');
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1455, columnRight: 1080 })), 'slide');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1455, columnRight: 1080 })), 'compact');
   });
 
-  it('slides on a viewport at or above the slide floor that cannot inset', () => {
-    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 900, columnRight: 820 })), 'slide');
+  it('stays compact down to the 260px rail floor, then shows markers only', () => {
+    // margin 292 === 260 + 24 + 8.
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1148 })), 'compact');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1440, columnRight: 1149 })), 'markers');
   });
 
-  it('drops to the sheet below the slide floor, however narrow the column', () => {
+  it('shows markers, never a page slide, on a wide viewport with no margin', () => {
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 900, columnRight: 820 })), 'markers');
+  });
+
+  it('drops to the sheet below the sheet floor, however narrow the column', () => {
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 899, columnRight: 300 })), 'sheet');
     assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 375, columnRight: 360 })), 'sheet');
   });
+
+  it('narrows at the threshold but widens only 24px past it', () => {
+    const atBoundary = metrics({ viewportWidth: 1455, columnRight: 1080 }); // margin 375
+    assert.strictEqual(selectRailLayoutMode(atBoundary, 'inset'), 'compact');
+    // Coming back up: 376 is enough cold, but not while compact is applied.
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1456, columnRight: 1080 }), 'compact'), 'compact');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1479, columnRight: 1080 }), 'compact'), 'compact');
+    assert.strictEqual(selectRailLayoutMode(metrics({ viewportWidth: 1480, columnRight: 1080 }), 'compact'), 'inset');
+  });
 });
 
-describe('railSlidePadding', () => {
-  it('is rail + gap + pad while sliding and zero otherwise', () => {
-    assert.strictEqual(railSlidePadding('slide', metrics({})), 376);
-    assert.strictEqual(railSlidePadding('inset', metrics({})), 0);
-    assert.strictEqual(railSlidePadding('sheet', metrics({})), 0);
+describe('railWidthFor', () => {
+  it('gives the full rail when inset and the real margin when compact', () => {
+    assert.strictEqual(railWidthFor('inset', metrics({})), 344);
+    // margin 360 - gap 24 - pad 8 = 328.
+    assert.strictEqual(railWidthFor('compact', metrics({})), 328);
+  });
+
+  it('never narrows past the floor and never exceeds the full rail', () => {
+    assert.strictEqual(railWidthFor('compact', metrics({ viewportWidth: 1440, columnRight: 1180 })), 260);
+    assert.strictEqual(railWidthFor('compact', metrics({ viewportWidth: 2000, columnRight: 1080 })), 344);
+  });
+
+  it('has no width where there is no rail column', () => {
+    assert.strictEqual(railWidthFor('markers', metrics({})), undefined);
+    assert.strictEqual(railWidthFor('sheet', metrics({})), undefined);
   });
 });
 
@@ -65,11 +91,14 @@ describe('railLeftFor', () => {
     assert.strictEqual(railLeftFor('inset', metrics({ viewportWidth: 1600, columnRight: 1476 })), 1248);
   });
 
-  it('pins to the viewport right edge while sliding', () => {
-    assert.strictEqual(railLeftFor('slide', metrics({ viewportWidth: 1440 })), 1088);
+  it('sits a compact rail at right: railPad, its narrowed width against the column', () => {
+    const compact = metrics({ viewportWidth: 1440, columnRight: 1080 });
+    assert.strictEqual(railLeftFor('compact', compact), 1104);
+    assert.strictEqual((railLeftFor('compact', compact) ?? 0) + (railWidthFor('compact', compact) ?? 0), 1432);
   });
 
-  it('has no position in sheet mode', () => {
+  it('has no position in markers or sheet mode', () => {
+    assert.strictEqual(railLeftFor('markers', metrics({ viewportWidth: 1000, columnRight: 990 })), undefined);
     assert.strictEqual(railLeftFor('sheet', metrics({ viewportWidth: 600 })), undefined);
   });
 });

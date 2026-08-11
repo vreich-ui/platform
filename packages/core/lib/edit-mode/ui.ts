@@ -71,7 +71,7 @@ import {
   packRailEntries,
   partitionRailThreads,
   railLeftFor,
-  railSlidePadding,
+  railWidthFor,
   selectRailLayoutMode,
   type RailLayoutMode,
   type RailMetrics,
@@ -118,13 +118,15 @@ const MODE_KEY = 'dl-edit-mode';
 // Margin-rail geometry (T17.3) — the same numbers ui-chrome.ts declares as
 // --dlem-rail-* tokens; the CSS paints with them, this module does the math.
 const RAIL_W = 344;
+/** The narrowest a `compact` rail gets before the ladder drops to markers-only. */
+const RAIL_MIN_W = 260;
 const RAIL_GAP = 24;
 const RAIL_PAD = 8;
 /** Vertical gap between packed bubbles, and the rail's top clearance under the bar. */
 const RAIL_STACK_GAP = 8;
 const RAIL_TOP = 46;
 /** Below this viewport width there is no rail — the bottom sheet serves (spec §1.3). */
-const RAIL_SLIDE_FLOOR = 900;
+const RAIL_SHEET_FLOOR = 900;
 /** Gutter-marker centre, left of the block's leading edge (spec §4.2). */
 const GUTTER_X = 28;
 /** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
@@ -258,6 +260,56 @@ const regionRect = (region: HTMLElement): DOMRect | undefined => {
     const right = Math.max(rect.right, box.right);
     const bottom = Math.max(rect.bottom, box.bottom);
     rect = new DOMRect(left, top, right - left, bottom - top);
+  }
+  return rect;
+};
+
+/**
+ * The layout viewport. `window.innerWidth` includes the classic scrollbar, so
+ * every geometry decision made against it is off by the scrollbar's width —
+ * enough, on a page whose only wide box is a full-bleed header, to read a
+ * ~15px margin where the real one is hundreds of px.
+ */
+const viewportWidth = (): number => document.documentElement.clientWidth || window.innerWidth;
+
+/**
+ * A box at (or near) the viewport's own width is PAGE CHROME — a sticky
+ * header, a full-bleed section band — not a content column. 0.9 leaves room
+ * for a genuinely wide container to still count as a column.
+ */
+const FULL_BLEED_RATIO = 0.9;
+/** How far `contentRect` descends before giving up and keeping what it has. */
+const CONTENT_DESCENT_MAX = 6;
+
+/** A box the element generates itself, falling back to its children's union. */
+const ownRect = (element: HTMLElement): DOMRect | undefined => {
+  const box = element.getBoundingClientRect();
+  return box.width === 0 && box.height === 0 ? regionRect(element) : box;
+};
+
+/**
+ * The CONTENT box of an annotated region: `regionRect`'s union is the region's
+ * outermost box, which on a full-bleed section is the band spanning the whole
+ * viewport rather than the `max-w-*` column inside it. Walk down through
+ * single-child full-bleed wrappers until a box narrower than 90% of the
+ * viewport appears — that is the column the rail hangs off and the one the
+ * gutter marker sits beside (without this, a marker on a full-bleed section
+ * pins to x=4 because the band's left edge is 0).
+ */
+const contentRect = (region: HTMLElement): DOMRect | undefined => {
+  const limit = viewportWidth() * FULL_BLEED_RATIO;
+  let rect = regionRect(region);
+  let host = region;
+  for (let depth = 0; rect && rect.width >= limit && depth < CONTENT_DESCENT_MAX; depth += 1) {
+    const children = (Array.from(host.children) as HTMLElement[]).filter((child) => {
+      const box = child.getBoundingClientRect();
+      return box.width > 0 || box.height > 0;
+    });
+    if (children.length !== 1) break;
+    host = children[0];
+    const inner = ownRect(host);
+    if (!inner || inner.width === 0) break;
+    rect = inner;
   }
   return rect;
 };
@@ -1028,7 +1080,7 @@ export const mountEditMode = (options: MountOptions): void => {
       revealedRegion = undefined;
       pinnedKey = undefined;
       pinnedRegion = undefined;
-      renderRail(); // drops every bubble and releases the page slide
+      renderRail(); // drops every bubble
       for (const objectSession of sessions.values()) void objectSession.checkin();
     }
   };
@@ -1339,6 +1391,8 @@ export const mountEditMode = (options: MountOptions): void => {
   let chipHideTimer: number | undefined;
   /** The margin rail's current left edge (undefined = no rail up); set by layoutRail. */
   let railLeftPx: number | undefined;
+  /** The rail's current width — RAIL_W, or the margin's worth in `compact`. */
+  let railWidthPx = RAIL_W;
 
   /** The edit target a region addresses — nodes innermost, then sections, then chrome. */
   const targetFor = (region: HTMLElement): EditTarget | undefined =>
@@ -1361,7 +1415,7 @@ export const mountEditMode = (options: MountOptions): void => {
     const gutter = rect.right + 14;
     const left =
       railLeftPx !== undefined
-        ? railLeftPx + RAIL_W - width
+        ? railLeftPx + railWidthPx - width
         : gutter + width <= window.innerWidth - 8
           ? gutter
           : Math.max(8, window.innerWidth - width - 10);
@@ -1598,14 +1652,17 @@ export const mountEditMode = (options: MountOptions): void => {
   let railHideTimer: number | undefined;
   let railColumnRight = 0;
   let railMode: RailLayoutMode = 'inset';
+  /** False until the first measurement — the cold decision takes no hysteresis. */
+  let railMeasured = false;
 
   const railMetrics = (): RailMetrics => ({
-    viewportWidth: window.innerWidth,
+    viewportWidth: viewportWidth(),
     columnRight: railColumnRight,
     railWidth: RAIL_W,
+    railMinWidth: RAIL_MIN_W,
     railGap: RAIL_GAP,
     railPad: RAIL_PAD,
-    slideFloor: RAIL_SLIDE_FLOOR,
+    sheetFloor: RAIL_SHEET_FLOOR,
   });
 
   const annotatedRegions = (): HTMLElement[] =>
@@ -1625,44 +1682,33 @@ export const mountEditMode = (options: MountOptions): void => {
 
   /**
    * The content column the rail hangs off: the widest in-viewport annotated
-   * region (spec §1.2 — one rail x per page, never a ragged edge). Measured
-   * with the slide REMOVED, because measuring it while slid would feed the
-   * mode decision its own output and oscillate; the class is off for a single
-   * synchronous reflow, with transitions suppressed so nothing animates.
+   * CONTENT column (spec §1.2 — one rail x per page, never a ragged edge).
+   *
+   * Two things are deliberately not columns. The navigation object wraps the
+   * sticky, full-bleed site header, which is in the viewport at every scroll
+   * position — measuring it made `columnRight` the viewport width on every
+   * page. And any box still spanning the viewport after `contentRect` has
+   * descended is a full-bleed band, i.e. page chrome. Both are skipped, so
+   * what is left is the reading column.
+   *
+   * Nothing writes page padding anymore (Wolf, 2026-08-11), so the measurement
+   * can no longer be reading back its own output: the old remove-the-slide /
+   * restore-the-slide dance around this loop went with the slide.
    */
   const measureColumnRight = (): number => {
-    const slid = document.body.classList.contains('dl-em-slide');
-    if (slid) {
-      document.body.classList.add('dl-em-measuring');
-      document.body.classList.remove('dl-em-slide');
-    }
+    const width = viewportWidth();
+    const limit = width * FULL_BLEED_RATIO;
     let inViewport = 0;
     let anywhere = 0;
     for (const region of annotatedRegions()) {
-      const rect = regionRect(region);
-      if (!rect || rect.width === 0) continue;
+      if (region.matches(NAV_SELECTOR) || region.closest(NAV_SELECTOR)) continue;
+      const rect = contentRect(region);
+      if (!rect || rect.width === 0 || rect.width >= limit) continue;
       anywhere = Math.max(anywhere, rect.right);
       if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
       inViewport = Math.max(inViewport, rect.right);
     }
-    if (slid) {
-      document.body.classList.add('dl-em-slide');
-      // Re-read one property so the restored padding is committed before the
-      // transition suppression lifts (otherwise the browser may animate back).
-      void document.body.offsetWidth;
-      document.body.classList.remove('dl-em-measuring');
-    }
-    return inViewport || anywhere || window.innerWidth;
-  };
-
-  const applySlide = (pad: number): void => {
-    if (pad > 0) {
-      document.body.style.setProperty('--dlem-slide-pad', `${pad}px`);
-      document.body.classList.add('dl-em-slide');
-    } else {
-      document.body.classList.remove('dl-em-slide');
-      document.body.style.removeProperty('--dlem-slide-pad');
-    }
+    return inViewport || anywhere || width;
   };
 
   /** Where a bubble wants to sit: its block's top, below the chip when both show. */
@@ -1676,24 +1722,51 @@ export const mountEditMode = (options: MountOptions): void => {
   };
 
   /**
+   * Re-derive the content column and, from it, the layout mode. Called on
+   * activation, on resize, and on the content-rebuild cadence — and NOWHERE
+   * else. Hover, focus, pinning and thread writes re-run `layoutRail` without
+   * remeasuring, so a pointer cannot change the page's layout at all (Wolf,
+   * 2026-08-11).
+   */
+  const remeasureRail = (): void => {
+    railColumnRight = measureColumnRight();
+    railMode = selectRailLayoutMode(railMetrics(), railMeasured ? railMode : undefined);
+    railMeasured = true;
+  };
+
+  /**
    * Place the rail and pack its bubbles. `remeasure` re-derives the content
-   * column (activation / resize / the gap layer's rebuild cadence); scroll
-   * passes skip it and only re-run the cheap packing.
+   * column and the mode (activation / resize / the gap layer's rebuild
+   * cadence); every other pass reuses both and only re-runs the cheap packing.
+   *
+   * NOTHING here writes to `<body>` or `<html>`: the page stays exactly where
+   * it is published at every width, and the rail is what adapts.
    */
   const layoutRail = (remeasure = false): void => {
-    const active = document.body.classList.contains('dl-em-on') && railPlan.length > 0;
+    if (remeasure || !railMeasured) remeasureRail();
+    const metrics = railMetrics();
+    // `markers`: no rail column at all. The gutter markers are the surface,
+    // and an opened marker's bubble shows as a popover anchored to it.
+    const popover = railMode === 'markers';
+    const popoverKey = pinnedKey ? `block:${pinnedKey}` : railListMode ? ATTENTION_LIST_KEY : undefined;
+    const active =
+      document.body.classList.contains('dl-em-on') &&
+      railPlan.length > 0 &&
+      (!popover || railPlan.some((entry) => entry.key === popoverKey));
     rail.classList.toggle('dl-em-rail-on', active);
+    rail.classList.toggle('dl-em-rail-sheet', railMode === 'sheet');
+    railLeftPx = undefined;
     if (!active) {
-      applySlide(0);
-      railLeftPx = undefined;
+      rail.style.left = '';
       return;
     }
-    if (remeasure || railColumnRight === 0) railColumnRight = measureColumnRight();
-    const metrics = railMetrics();
-    railMode = selectRailLayoutMode(metrics);
-    rail.classList.toggle('dl-em-rail-sheet', railMode === 'sheet');
-    applySlide(railSlidePadding(railMode, metrics));
-    railLeftPx = railLeftFor(railMode, metrics);
+    // `compact` narrows the rail to the margin the page really has — a single
+    // custom-property write, because .dl-em-rail is sized by --dlem-rail-w.
+    railWidthPx = railWidthFor(railMode, metrics) ?? Math.min(RAIL_W, metrics.viewportWidth - 2 * RAIL_PAD);
+    rail.style.setProperty('--dlem-rail-w', `${railWidthPx}px`);
+    for (const entry of railPlan) {
+      if (entry.el) entry.el.style.display = !popover || entry.key === popoverKey ? '' : 'none';
+    }
     if (railMode === 'sheet') {
       // The sheet is normal flow: no absolute tops, no rail x, no connectors.
       rail.style.left = '';
@@ -1705,6 +1778,21 @@ export const mountEditMode = (options: MountOptions): void => {
       positionGutter();
       return;
     }
+    if (popover) {
+      const entry = railPlan.find((candidate) => candidate.key === popoverKey);
+      const at = entry?.region ? markerPosition(entry.region) : undefined;
+      const rightLimit = Math.max(RAIL_PAD, metrics.viewportWidth - RAIL_PAD - railWidthPx);
+      rail.style.left = `${Math.max(RAIL_PAD, Math.min(at?.left ?? rightLimit, rightLimit))}px`;
+      if (entry?.el) {
+        entry.el.style.top = `${Math.max(RAIL_TOP, at?.top ?? RAIL_TOP)}px`;
+        entry.el.querySelector<HTMLElement>('.dl-em-bubble-link')?.remove();
+      }
+      positionGutter();
+      // The chip lags the rail by a frame unless it moves in the same pass.
+      if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
+      return;
+    }
+    railLeftPx = railLeftFor(railMode, metrics);
     rail.style.left = `${railLeftPx ?? 0}px`;
     const ordered = [...railPlan].sort((a, b) => railOrder(a) - railOrder(b));
     const boxes = ordered.map((entry) => ({
@@ -1732,6 +1820,9 @@ export const mountEditMode = (options: MountOptions): void => {
       }
     });
     positionGutter();
+    // The chip right-aligns to the rail, so it has to move in the SAME pass —
+    // otherwise it lags the rail by a frame on every relayout.
+    if (hotRegion && chip.style.display !== 'none') positionChip(hotRegion);
   };
 
   /**
@@ -2118,9 +2209,13 @@ export const mountEditMode = (options: MountOptions): void => {
     attentionCountEl.classList.toggle('dl-em-hot', total > 0);
   };
 
-  /** Where a marker sits: the block's own leading edge, one gutter step left. */
+  /**
+   * Where a marker sits: the block's own leading edge, one gutter step left.
+   * `contentRect`, not `regionRect` — a full-bleed section's band starts at
+   * x=0, which pinned every marker on such a block to the clamp at x=4.
+   */
   const markerPosition = (region: HTMLElement): { left: number; top: number } | undefined => {
-    const rect = regionRect(region);
+    const rect = contentRect(region);
     if (!rect) return undefined;
     return { left: Math.max(4, rect.left - GUTTER_X), top: Math.max(RAIL_TOP, rect.top) };
   };

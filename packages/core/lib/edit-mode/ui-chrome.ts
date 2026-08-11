@@ -42,8 +42,11 @@ export const STYLES = `
 .dl-em-bar{position:fixed;top:0;left:0;right:0;z-index:99990;display:none;align-items:center;gap:10px;
   padding:6px 14px;background:var(--dlem-surface-2);color:var(--dlem-text);font:600 12.5px/1.4 var(--dlem-font);
   border-bottom:1px solid var(--dlem-border);box-shadow:0 2px 12px rgba(0,0,0,.12)}
+/* The bar OVERLAYS the page — it does not push it down. Nothing edit mode
+   does may change a box-model property on <body> or <html> (Wolf,
+   2026-08-11: "The article must never move"); the old padding-top:38px here
+   shifted every page down 38px the moment edit mode came on. */
 body.dl-em-on .dl-em-bar{display:flex}
-body.dl-em-on{padding-top:38px}
 .dl-em-bar .dl-em-dot{width:8px;height:8px;border-radius:50%;background:var(--dlem-accent);flex:none}
 .dl-em-bar .dl-em-who{color:var(--dlem-muted);font-weight:400}
 .dl-em-bar .dl-em-status{flex:1;text-align:center;color:var(--dlem-muted);font-weight:400;white-space:nowrap;
@@ -277,8 +280,9 @@ body.dl-em-on .dl-em-gaplayer{display:block}
 /* ── margin rail (T17.3) ────────────────────────────────────────────────────
    The concept's annotation surface: block-aligned bubbles in the page margin,
    NOT a docked panel. One fixed, zero-height, pointer-transparent column whose
-   left edge ui.ts computes from the content column (inset) or the viewport
-   edge (slide); bubbles are absolutely positioned inside it at viewport
+   left edge AND width ui.ts computes from the content column (compact mode
+   narrows --dlem-rail-w to the margin the page really has, rather than moving
+   the page); bubbles are absolutely positioned inside it at viewport
    coordinates and repositioned on scroll, exactly as the hover chip is.
    Spec: docs/design/marginalia-interaction-model.md §§1–2, 8.1. */
 .dl-em-rail{position:fixed;top:0;left:0;width:var(--dlem-rail-w);height:0;z-index:99991;display:none;
@@ -349,13 +353,12 @@ body.dl-em-on .dl-em-gutter{display:block}
 .dl-em-listbody{font-size:12px;color:var(--dlem-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-em-listhead{padding:8px 9px 4px;font:700 10px var(--dlem-font);text-transform:uppercase;letter-spacing:.05em;
   color:var(--dlem-muted)}
-/* The narrow-screen page-slide: padding on the page box (never a transform, so
-   fixed chrome, scrollbars and scrollIntoView all keep working). */
-body.dl-em-slide{padding-right:var(--dlem-slide-pad,0px)}
-@media (prefers-reduced-motion:no-preference){body.dl-em-on{transition:padding-right .18s ease}}
-/* Held for the one synchronous reflow the rail needs to measure the UNSLID
-   content column, so the slide it removes and restores never animates. */
-body.dl-em-measuring{transition:none!important}
+/* The narrow-screen page-slide is RETRACTED (Wolf, 2026-08-11 — spec §1.3).
+   It re-centred the article column 188px left the first time anything was
+   hovered, and reversed on hover-out. The rail narrows instead: compact mode
+   writes --dlem-rail-w on the rail element, markers mode drops the rail for
+   gutter markers plus a popover. No rule below this line, and no code in
+   ui.ts, touches the page box. */
 /* ── inline editing (T17.8) ─────────────────────────────────────────────────
    Double-click a block and its copy becomes editable IN the page, in the
    block's own box: the surface inherits the site's typography (it renders
