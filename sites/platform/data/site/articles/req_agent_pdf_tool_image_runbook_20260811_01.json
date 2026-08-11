@@ -1,12 +1,12 @@
 {
   "__generated": {
-    "at": "2026-08-11T11:21:20.245Z",
+    "at": "2026-08-11T12:37:40.743Z",
     "from": "objects/content_item/by-id/req_agent_pdf_tool_image_runbook_20260811_01.json",
-    "record_version": 8
+    "record_version": 19
   },
   "author": "Platform Documentation",
-  "deck": "Chromium can now embed a real image inside a rendered PDF, and typst rendered its first document end to end -- but both tests turned up a hard limit worth knowing before you rely on either.",
-  "description": "An operational runbook for embedding a real image in a chromium-rendered PDF: the working mechanism, the safe sequence, how the team verified it, and a narrow, previously-undocumented size limit found along the way. Also covers the first proven end-to-end typst render and the current state of image support there.",
+  "deck": "The render service carries binary image bytes into a PDF through a dedicated asset channel, on both the chromium and typst renderers. Here is the supported path, how to verify it, and a correction to earlier guidance.",
+  "description": "An operational runbook for embedding a real image in a generated PDF: the supported asset channel, the safe sequence for both chromium and typst, how to verify byte fidelity, and what to do when an image comes back wrong.",
   "editorial": {
     "framework": "fw_runbook",
     "writer_notes": "Documents session-11 testing: chromium image-embedding data-URI corruption threshold (safe below ~172 base64 chars, corrupted at 292+) and the first proven typst validate-publish-render cycle (text only; image embedding not yet supported)."
@@ -20,7 +20,7 @@
         "strategy": "hook"
       },
       "public": {
-        "body": "This session tested two things the render service had not proven before: embedding a real (non-CSS) image inside a chromium-rendered PDF, and running the typst renderer through a complete validate-publish-render cycle for the first time on this deployment.\n\nBoth tests produced a real capability. Both also produced a real limit. This runbook documents the working path for each, states the limit precisely, and gives the safe sequence to follow until the underlying issues are fixed.",
+        "body": "Two things needed proving on the render service: embedding a real, non-CSS image inside a generated PDF, and running the typst renderer end to end.\n\nBoth now work, on both engines, through one supported mechanism. This runbook documents that mechanism, the sequence to follow, and how to verify the result.\n\nIt also corrects an earlier version of this page. That version described a different, unsupported approach and reported a severe size limit for it. The limit was real for that approach, but the approach itself was the wrong one, and the guidance drawn from it was wrong. The correction is at the end.",
         "title": "Why this runbook exists"
       },
       "visibility": "public"
@@ -33,7 +33,7 @@
         "strategy": "context"
       },
       "public": {
-        "body": "There is no template-level field for attaching binary image bytes on either renderer. A pdf_template's templateJson does not carry an assets array of embedded files -- that mechanism does not exist on this bridge, whichever renderer you use.\n\nThe working mechanism is different: binary data travels through the artifact job's own data payload, the same payload validate_pdf_template and create_agent_artifact_job already require. On chromium, the template's html field is Liquid-templated, so a tag like {{ field_name }} pulls its value from data.field_name at render time -- including a full data:image/png;base64,... URI. On typst, the data payload reaches the template as sys.inputs.data, decoded with #let data = json(bytes(sys.inputs.data)).\n\nTypst has no equivalent image path yet. There is no assets field to declare, and the one alternative available in this typst version -- calling image.decode on raw bytes -- does not exist; the function errors with does not contain field \"decode\". Until one of those lands, typst templates on this deployment render text, tables, and vector shapes only.",
+        "body": "Binary image bytes do not travel in the template. A published template holds layout only -- Liquid HTML and CSS for chromium, typst source for typst -- and neither carries an images field.\n\nThe bytes travel with the render job instead, in its assets payload. Every artifact job accepts an assets object alongside its data payload, of the form assets.images, where each entry names itself with an assetId.\n\nEach entry supplies its bytes one of three ways: an inline dataUri, a blobKey pointing at a stored artifact, or a full artifactReference. Referencing a stored artifact is the one to prefer, because the bytes are resolved server-side and never pass through the caller at all.\n\nThe render service then makes those bytes available to the template under the assetId, and each engine reads them its own way:\n\nOn chromium, the asset is served from a virtual origin that exists only for the life of the render. The template references it as an ordinary image source at render.assets.invalid, followed by the assetId.\n\nOn typst, the asset is written into the render sandbox and loaded by path, as image of assets slash the assetId.\n\nThe network is otherwise closed. That virtual origin is one of only two hosts the renderer will serve, which is why this channel works while an ordinary remote image URL does not.",
         "title": "Prerequisites"
       },
       "visibility": "public"
@@ -46,7 +46,7 @@
         "strategy": "step"
       },
       "public": {
-        "body": "For a chromium template that needs an embedded image:\n\n1. Author the template's html with an image tag pointing at a Liquid variable, for example src=\"data:image/png;base64,{{ photo_b64 }}\". Do not add an assets field -- it will be rejected.\n\n2. Run validate_pdf_template and poll get_pdf_template_validation until it reaches a terminal PASSED report.\n\n3. Publish the template.\n\n4. Call create_agent_artifact_job with data.photo_b64 set to the full base64 string of the image.\n\n5. Before treating the result as correct, verify it -- a completed job with verified: true does not mean the image survived intact.",
+        "body": "1. Create or locate the image artifact. A generated or imported image already stored against the article gives you a blobKey and a verified public path.\n\n2. Author the template to reference the asset by name -- the virtual origin plus the assetId on chromium, or the assets path on typst. Do not add an images field to the template itself; only Liquid partials are recognised there.\n\n3. Validate the template and poll until the report reaches a terminal PASSED state. The validation render has no assets attached, so the image will be absent from that proof -- an absent image does not fail validation, and should not be read as one.\n\n4. Publish the template version. Chromium and typst both refuse to publish without a PASSED report for that exact version.\n\n5. Create the render job with both payloads: data for the text bindings, assets.images for the bytes.\n\n6. Verify the output before you rely on it.",
         "title": "Safe sequence"
       },
       "visibility": "public"
@@ -59,7 +59,7 @@
         "strategy": "proof"
       },
       "public": {
-        "body": "Verification means extracting the embedded image from the rendered PDF with pdfimages -png and comparing it, pixel by pixel, against the source file -- not trusting the job status or the output file size.\n\nFive base64 lengths were tested this way against the same chromium template and pipeline:\n\n108 characters, an 8x8 swatch -- byte-perfect, zero pixel difference.\n\n172 characters, a 60x40 two-color image -- byte-perfect, zero pixel difference.\n\n292 characters, a 120x80 four-color image -- corrupted. The bottom half of the image rendered solid black.\n\n7,048 characters, a 320x213 photo -- corrupted the same way.\n\n18,096 characters, a 480x320 photo -- corrupted the same way.\n\nThe corruption pattern is consistent across all three failing sizes: a clean horizontal split, correct pixels above the line, solid black below it -- consistent with truncation at a fixed byte offset, not random data loss. The job itself reports success in every case; nothing in the response signals that the image is wrong.",
+        "body": "A completed job reporting verified does not tell you the image inside the document is correct. Verification confirms the artifact was stored and is retrievable; it says nothing about what the renderer painted.\n\nCheck two things.\n\nFirst, the output size. A render carrying a real image is dramatically larger than the same template without one. The reference render for this page went from about 13 KB at validation, with no asset attached, to about 632 KB once a 64 KB image was supplied. A render that did not grow did not embed anything.\n\nSecond, the pixels. Extract the embedded raster from the finished PDF and compare it against the source file directly, rather than looking at a preview. A partially decoded image is entirely capable of looking plausible at a glance and being wrong in its lower half.\n\nThat second check is not hypothetical. It is what caught the failure described in the correction below, and it is the only reason that failure was noticed at all.",
         "title": "Verification"
       },
       "visibility": "public"
@@ -72,7 +72,7 @@
         "strategy": "recommendation"
       },
       "public": {
-        "body": "The safe boundary on this pathway sits somewhere between 172 and 292 base64 characters -- roughly two orders of magnitude tighter than the pdfme renderer's separately documented ~14,200-character boundary. That is enough for a small icon or a solid-color swatch. It is not enough for a photo.\n\nUntil this is fixed, keep any base64 image data URI passed through a chromium template's Liquid substitution under about 170 characters. For anything larger, use the pdfme renderer instead -- its image field takes the same base64 data through its own data payload, verified separately to hold up to roughly 14,200 characters.\n\nDo not treat a successful create_agent_artifact_job call as proof an embedded image is correct. Extract and pixel-diff it first, every time, at every new size -- this is the same practice that caught this bug in the first place.",
+        "body": "The image is missing entirely. The template's asset name and the job's assetId must match exactly. A mismatch is silent: the request for the missing name is refused by the closed network, the page renders without it, and the job still succeeds.\n\nThe image is present but visibly wrong -- truncated, or correct at the top and dark below. Stop using it and re-render through the asset channel. Do not compensate by shrinking the image.\n\nThe image bytes are rejected before rendering. The service decodes and checks image bytes before dispatching them, so a corrupt or truncated source fails fast and names the offending asset rather than producing a damaged document.\n\nThe render is larger than expected. Images are embedded at their natural resolution regardless of the size they are displayed at. Resize the source rather than scaling it down in CSS.\n\nOne standing rule underneath all of these: never embed an image by pasting base64 into a template binding. That path is not the supported channel, and it is where the failure below came from.",
         "title": "Failure recovery"
       },
       "visibility": "public"
@@ -85,8 +85,8 @@
         "strategy": "summary"
       },
       "public": {
-        "body": "Chromium image embedding works, proven with a byte-perfect render, but only below a threshold narrow enough that it does not yet cover ordinary product photography. That is a real, narrow capability -- not the full fix a reader might assume from the word proven.\n\nTypst is proven end to end for the first time on this deployment: create, validate, publish, render, all the way to a correct one-page PDF. Text, brand color, and layout all came from the typst template's own engine. Image embedding on typst is not supported yet, for the two specific reasons above -- this is a confirmed gap, not something a different prompt or template will work around.\n\nNeither finding changes anything already live. Both are documented here so the next person who reaches for either capability starts from what was actually verified, not from what seemed likely to work.",
-        "title": "What this proves, and what's still open"
+        "body": "An earlier version of this page described embedding images by substituting a base64 data URI into a chromium template's HTML through its data payload, and reported that the result corrupted above roughly 172 base64 characters -- concluding that images had to be kept smaller than a postage stamp.\n\nThe corruption was real and is still reproducible in the affected documents: the lower two thirds of the test image is black in the stored PDF, and the source file it was built from is byte-identical to what was sent. That part of the earlier report stands.\n\nThe conclusion drawn from it did not. Data-URI substitution is not the supported mechanism for embedding an image, and the limit it appeared to impose is not a property of the renderer. The asset channel described above carries a 64 KB image through the same engine, in the same document, with no difficulty -- several hundred times past the ceiling the earlier guidance described.\n\nThe same correction applies to typst, which the earlier version reported as having no image support at all. It does, by the same asset channel.\n\nThe data-URI defect remains open and is worth fixing on its own merits, because it fails silently. It does not, however, constrain what any template can do today.",
+        "title": "Correction to earlier guidance"
       },
       "visibility": "public"
     },
@@ -98,10 +98,10 @@
         "strategy": "resolution"
       },
       "public": {
-        "body": "This runbook's chromium proof: a one-page render with a 60x40 two-color image embedded via Liquid data-URI substitution, pixel-diffed against its source and confirmed byte-perfect. Held in this session's artifact store; ask Platform Documentation for a copy if the download link above is not yet live.",
+        "body": "Two documents were produced while writing this runbook. The first is a one-page chromium render carrying a real 64 KB image through the asset channel: about 13 KB at validation with no asset attached, about 632 KB once the image was supplied. The second is a typst render of the same pipeline, with page geometry, colour and text all produced by typst's own layout engine.\n\nBoth are stored against this article. Download links are not attached yet: the publish gate checks a request-scoped artifact index that does not yet list them, and linking an artifact it cannot see would block this correction from shipping. The links will be added once that index resolves.",
         "ctaLink": "",
         "ctaText": "",
-        "title": "The image-embedding test PDF"
+        "title": "The reference renders behind this page"
       },
       "visibility": "public"
     },
@@ -118,7 +118,7 @@
         "ctaText": "",
         "title": "The typst end-to-end test PDF"
       },
-      "visibility": "public"
+      "visibility": "hidden"
     }
   ],
   "publication_context": {
@@ -127,8 +127,8 @@
     "topic_scope": "CMS artifact generation"
   },
   "seo": {
-    "meta_description": "How to safely embed a real image in a chromium-rendered PDF, the size limit the team found by pixel-diffing test renders, and the first proven end-to-end typst render on this deployment.",
-    "meta_title": "PDF-Tool Runbook: Embedding Images and the Typst Renderer, Verified"
+    "meta_description": "The supported asset channel for embedding binary images in chromium- and typst-rendered PDFs, how to verify byte fidelity, and a correction to earlier data-URI guidance.",
+    "meta_title": "PDF-Tool Runbook: Embedding Real Images in Generated PDFs"
   },
   "slug": "pdf-tool-image-embedding-runbook",
   "taxonomy": {
