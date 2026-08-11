@@ -169,6 +169,8 @@ Env checklist:
       Shop webhook signing secret.
     STRIPE_WEBHOOK_SECRET_TEST       [per-site, optional]  ☐ human-supplied — see the provisioning runbook
       Shop test webhook secret.
+    PURCHASE_TOKEN_SECRET            [per-site, optional]  ☐ human-supplied — see the provisioning runbook
+      Signs the expiring bearer download token (purchase-tokens.ts) that gates digital-goods delivery — get-purchase/order_reissue/stripe-webhook/claim-free all read it (free claims too, not only paid Stripe orders). Needed only if this client's shop module delivers downloads. Unset (or <16 chars): those endpoints 503 with a plain message, not a catalogued errorCode. Covered by the T16.5 capability probe (purchase_token family).
   Transitional site-identity env overrides (escape hatch only; prefer the config file):
     SITE_OBJECT_ID, SITE_SLUG, SITE_BRAND_NAME, SITE_TAXONOMY_ID, SITE_TRACKING_PROJECT_ID, MCP_SERVER_NAME, MCP_SERVER_DIAGNOSTIC_NAME, SITE_ASSET_HOST, SITE_ASSET_FOLDER, PDF_TOOL_PROJECT_ID
 
