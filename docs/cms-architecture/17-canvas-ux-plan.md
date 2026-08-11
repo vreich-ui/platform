@@ -322,3 +322,50 @@ Deviations, and why:
   boxes, the draft chip's placement at the end of a wrapped heading, and the
   screen-reader path. The counts, states and labels behind all of it are
   covered by the pure tests.
+
+### T17.14c — per-block draft provenance (2026-08-11)
+
+`markDraftRegions` used to mark by OBJECT id: one unpublished node edit on an
+article dashed-outlined and `· draft`-chipped **every** block sharing that id
+(every block in the article), because every node in a `content_item` shares
+its object id. `docs/design/marginalia-concept-b-final.pdf` shows exactly one
+block carrying the chip.
+
+- **New:** `packages/core/lib/edit-mode/draft-provenance.ts` (+
+  `.test.ts`, 17 cases) — `changedUnitsSince(history)`, the SAME backwards
+  walk `summarizeUnpublished` (the Pending tray) already does — stop at the
+  last `publish`, skip `checkout`/`checkin`/`refresh_lock`, `create` ⇒
+  whole-object — generalised from a phrase to a `{ wholeObject, nodeIds,
+  sectionIds, resolved }` set; `provenanceUnitFor(target, record)`, which
+  unit (node/section id) a rendered region corresponds to, including a shared
+  section's own inner `record.body.section.id` (the region's page-side
+  `data-cms-section-id` is the PAGE's reference id, not useful for matching
+  the shared object's own history); and `regionIsDraft(pending, changed,
+  unit)`, the per-region decision, composing the two.
+- **`ui.ts`:** `markDraftRegions` now marks a region iff its object is
+  pending AND (the change is whole-object OR the region's own node/section id
+  is in the changed set); it reads records from the existing `cachedRecord` —
+  the tray already warms every visible object's record on activation, so this
+  is no new fetch. It is now `async` (one `cachedRecord` read per distinct
+  pending object, not per region); its two call sites already `await` or
+  `void` it correctly.
+- **Fallback, explicit and tested:** whenever provenance can't be narrowed —
+  unresolved history (none/empty), an unrecognised op shape, a whole-object
+  op (`set_page_meta`, `create`, nav/site/product/term ops, …), or a region
+  whose own unit couldn't be read (e.g. a shared section with no readable
+  inner id) — the WHOLE OBJECT is marked, i.e. exactly the pre-fix behaviour.
+  The fix can only ever be more precise than that; it never marks less than
+  an honest "don't know" would.
+- **R4's footer state pill is NOT wired here.** The brief
+  (`T17.14c-per-block-draft-provenance.md`) depends on T17.14a for that row's
+  DOM stub; T17.14a has not landed on any branch as of this commit (only its
+  planning doc, `marginalia-affordance-model.md`, exists). Per `CLAUDE.md`'s
+  own rule — an unmet `depends_on` is a stop-and-say-so, not an
+  assume-it-exists — this task ships only the part that does not depend on
+  it: the provenance module and `markDraftRegions`. The state pill is left
+  for whichever task lands T17.14a's R4 stub.
+- **Not verified in a browser:** the fix's own acceptance render (one node
+  edit → one chip, on the PDF's article) and the discard-preview repaint at
+  the second `markDraftRegions` call site. The provenance logic itself —
+  `changedUnitsSince`, `provenanceUnitFor`, `regionIsDraft` — is covered
+  headlessly.

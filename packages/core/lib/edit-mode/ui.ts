@@ -44,6 +44,13 @@ import {
   type FieldChange,
 } from './targets.js';
 import {
+  changedUnitsSince,
+  provenanceUnitFor,
+  regionIsDraft,
+  type ChangedUnits,
+  type HistoryEntry,
+} from './draft-provenance.js';
+import {
   derivePrimaryInlineField,
   inlineEditOps,
   inlineToolbarModeFor,
@@ -761,21 +768,55 @@ export const mountEditMode = (options: MountOptions): void => {
     countEl.textContent = String(pendingRows.length);
     countEl.classList.toggle('dl-em-hot', pendingRows.length > 0);
     renderTray();
-    markDraftRegions();
+    await markDraftRegions();
   };
 
-  const targetObjectIdOf = (region: HTMLElement): string | undefined =>
-    (region.dataset.cmsNodeId !== undefined
+  const targetOf = (region: HTMLElement): EditTarget | undefined =>
+    region.dataset.cmsNodeId !== undefined
       ? deriveNodeTarget(region.dataset as Record<string, string>)
-      : deriveEditTarget(region.dataset as Record<string, string>)
-    )?.objectId;
+      : deriveEditTarget(region.dataset as Record<string, string>);
 
-  const markDraftRegions = (): void => {
-    const draftIds = new Set(pendingRows.filter((row) => row.unpublished_changes).map((row) => row.object_id));
-    document.querySelectorAll<HTMLElement>(`${REGION_SELECTOR}, ${NODE_SELECTOR}`).forEach((region) => {
-      const objectId = targetObjectIdOf(region);
-      region.classList.toggle('dl-em-draft', Boolean(objectId && draftIds.has(objectId)));
-    });
+  /**
+   * T17.14c — per-block draft provenance (spec §6). `markDraftRegions` used to
+   * mark by OBJECT id alone, so one unpublished node edit on an article
+   * dashed-outlined and `· draft`-chipped every block sharing that id (i.e.
+   * every block in it). `changedUnitsSince` (draft-provenance.ts) walks the
+   * SAME history the Pending tray already reads (`summarizeUnpublished`) to
+   * find which node/section actually changed; a region is marked iff its
+   * object is pending AND (the change is whole-object OR its own node/section
+   * id is in the changed set).
+   *
+   * Fallback, explicit: whenever provenance can't be narrowed — no history,
+   * an unrecognised op shape, a section/whole-object change, or (for a
+   * shared-section region) an unreadable inner section id — the whole object
+   * is marked, i.e. exactly today's behaviour. The fix can only ever be MORE
+   * precise than that; it never marks less than an honest "don't know" would.
+   * Records are already warm (`preloadRecords`/`fillTrayRow` share this same
+   * `cachedRecord`), so this reads no new request.
+   */
+  const markDraftRegions = async (): Promise<void> => {
+    const draftRows = new Map(pendingRows.filter((row) => row.unpublished_changes).map((row) => [row.object_id, row]));
+    const regions = Array.from(document.querySelectorAll<HTMLElement>(`${REGION_SELECTOR}, ${NODE_SELECTOR}`));
+
+    // Resolve provenance once per distinct pending object, not once per region.
+    const changedByObject = new Map<string, ChangedUnits>();
+    const recordByObject = new Map<string, Record<string, unknown> | undefined>();
+    await Promise.all(
+      Array.from(draftRows.values()).map(async (row) => {
+        const { record } = await cachedRecord(row.object_type, row.object_id);
+        recordByObject.set(row.object_id, record);
+        const history = (record?.history ?? []) as HistoryEntry[];
+        changedByObject.set(row.object_id, changedUnitsSince(history));
+      })
+    );
+
+    for (const region of regions) {
+      const target = targetOf(region);
+      const pending = Boolean(target && draftRows.has(target.objectId));
+      const changed = target ? changedByObject.get(target.objectId) : undefined;
+      const unit = target ? provenanceUnitFor(target, recordByObject.get(target.objectId)) : undefined;
+      region.classList.toggle('dl-em-draft', regionIsDraft(pending, changed, unit));
+    }
     positionDraftChips(); // the inline "· draft" chip follows the same set (spec §10.2)
   };
 
@@ -783,18 +824,8 @@ export const mountEditMode = (options: MountOptions): void => {
   // "object · verb · location": the label is the object's human name (title/
   // route/type) and the note summarizes the unpublished ops from the record's
   // history — "Image added to Resolution", "Text edited in Hook · +2 more".
-  type HistoryEntry = {
-    action?: string;
-    details?: {
-      op?: Record<string, unknown> & {
-        node_id?: string;
-        section_id?: string;
-        fields?: Record<string, unknown>;
-        node?: { kind?: string; private?: { strategy?: string } };
-      };
-      capture?: { before?: { value?: { private?: { strategy?: string }; kind?: string } } };
-    };
-  };
+  // (HistoryEntry now lives in draft-provenance.ts, shared with markDraftRegions
+  // below rather than declared twice — see the T17.14c import above.)
 
   const trayLabelFor = (row: PendingObjectRow, body: Record<string, unknown> | undefined): string => {
     if (!body) return row.object_id;
@@ -4264,7 +4295,7 @@ export const mountEditMode = (options: MountOptions): void => {
     state.snapshot = undefined;
     state.suggestion = undefined;
     state.changes = undefined;
-    markDraftRegions(); // restore the true draft flags after the preview styling
+    void markDraftRegions(); // restore the true draft flags after the preview styling
     suggestionActions.hidden = true;
     log('sys', 'Discarded — nothing saved.');
   });
