@@ -374,6 +374,71 @@ block carrying the chip.
   `changedUnitsSince`, `provenanceUnitFor`, `regionIsDraft` — is covered
   headlessly.
 
+### W17 Fix 4 — the page moves again, in register (2026-08-11)
+
+**Wolf's revision, verbatim**, on the displacement W17 Fix 1 had retracted that
+morning:
+
+> *"i think that text move the way it is done in canvas is not bad. my only
+> concern is left side placed objects. so they can't all move the same way but
+> they can move."*
+
+Asked which "left side placed objects", he selected all three — left-aligned /
+full-bleed page content, two-column / split sections, and the top bar and its
+controls — and chose **"Keep it, fix the registration."** That supersedes the
+morning's *"The article must never move"* and its articles-only carve-out. The
+requirement is now: **the page may move to open the rail's margin; everything
+must move with it.**
+
+- **`rail-layout.ts`:** the `slide` rung is back, between `compact` and
+  `inset`, gated on `railMayDisplaceContent(surface)` — the seam Fix 1 left
+  behind, now `true` for both surfaces, still the only place an exemption
+  would go. `railDisplacementFor(mode, metrics)` is the displacement: one
+  rail + gap + pad (376px) or nothing, a function of the TOKENS alone.
+  `slide` applies only while the page keeps a whole `sheetFloor` (900px) for
+  itself, so `compact`/`markers` still serve genuinely narrow windows. Also
+  new: `createRelayoutPass`, the named registry of positioners.
+- **`ui.ts`:** `--dlem-shift` has exactly one writer; `applyDisplacement` has
+  exactly one caller (`remeasureRail`, i.e. activation and resize).
+  `measureNaturalColumnRight` lifts the displacement for the one synchronous
+  reflow the measurement needs — without it the ladder reads back its own
+  output and oscillates, and the test proves that loop is real.
+  `contentChildren` skips out-of-flow children, which is what finally makes
+  `contentRect` reach the content column on widget sections (`WidgetWrapper`
+  renders an `absolute inset-0` background band as a second child, so the
+  descent used to stop at the full-bleed `<section>`); `positionChip` and
+  `desiredTopFor` now use `contentRect` like `markerPosition` already did, and
+  the gap `+` takes its x from the content column.
+- **`ui-chrome.ts`:** `body.dl-em-on{padding-right:var(--dlem-shift,0px)}` with
+  a 180ms transition and the `dl-em-measuring` suppression; `--dlem-shift`
+  compensation on every fixed surface that pins to the right edge (bar, fab,
+  panel, tray, confirm — offsets and max-widths); `.dl-em-settling`, the hide
+  used while the page is in flight.
+- **`BackToTop.astro`:** the known straggler — `position:fixed` AND centred on
+  the 720px column via `100vw`. The shift comes off the width the centring is
+  computed from and back onto the offset; the variable defaults to `0px`, so a
+  visitor's page is unchanged.
+- **Nothing is positioned mid-transition**, both ways: every positioner returns
+  early while the page is moving and the anchored overlays are hidden, AND the
+  whole pass re-runs on `transitionend`/`transitioncancel`, with a timer
+  backstop for `prefers-reduced-motion` (no transition, so no end event).
+- **The invariant test was rewritten, not deleted:**
+  `no-page-movement.test.ts` → `displacement-registration.test.ts`. It pins the
+  new invariant — one displacement value, decided by geometry, written in one
+  place, consumed by page, overlays and fixed chrome alike, unreachable from
+  any hover/focus/pin/thread-write path, and every registered positioner run on
+  one pass. Each assertion was mutation-checked (break the code, watch the
+  named assertion fail, restore).
+
+**Not verified in a browser** (there is none in this environment): the glide
+itself at real viewport widths; whether the settle's hide-and-replace reads as
+clean or as a flicker; the actual alignment of markers, bubbles, chips and gap
+`+`s against real boxes after the page has moved; whether `transitionend` fires
+where expected in Wolf's browser (the timer backstop covers it if not); and the
+one-reflow cost of `measureNaturalColumnRight` on a large page. Everything
+mechanical — the ladder, the displacement value, the writer's reachability, the
+pass — is covered headlessly; the rest wants T17.13's smoke test or a human.
+
 ## 8. T17.14 — canvas affordance consolidation (planned 2026-08-11)
 
 **Wolf's ruling, verbatim**, asked whether to retire the W7 hover chip, fold it

@@ -27,6 +27,7 @@ import { describe, it } from 'node:test';
 
 import { STYLES } from './ui-chrome.js';
 import {
+  createRelayoutPass,
   RAIL_MODE_HYSTERESIS,
   railDisplacementFor,
   railLeftFor,
@@ -375,5 +376,192 @@ describe('the page box is written in exactly one way', () => {
       !/\bregion\.replaceChildren\s*\(/.test(readEditModeSource('ui.ts')),
       "ui.ts replaces an edit region's children — entering an edit must not rebuild the block"
     );
+  });
+});
+
+// ── 3. one re-layout pass, every positioner on it ───────────────────────────
+
+describe('the re-layout pass', () => {
+  it('runs every registered positioner, in registration order', () => {
+    const ran: string[] = [];
+    const pass = createRelayoutPass();
+    for (const name of ['rail', 'chip', 'gutter']) pass.register(name, () => ran.push(name));
+    assert.deepEqual(pass.names(), ['rail', 'chip', 'gutter']);
+    assert.deepEqual(pass.run(), ['rail', 'chip', 'gutter']);
+    assert.deepEqual(ran, ['rail', 'chip', 'gutter'], 'the pass must run them all, in order');
+  });
+
+  it('does not let one broken positioner cancel the rest, and still surfaces the error', () => {
+    const ran: string[] = [];
+    const pass = createRelayoutPass();
+    pass.register('rail', () => ran.push('rail'));
+    pass.register('chip', () => {
+      throw new Error('boom');
+    });
+    pass.register('gutter', () => ran.push('gutter'));
+    // A half-run pass IS the misalignment, so the later positioners still run…
+    assert.throws(() => pass.run(), /boom/);
+    assert.deepEqual(ran, ['rail', 'gutter'], 'a throwing positioner must not strand the ones after it');
+  });
+});
+
+/**
+ * ui.ts is one closure, so its functions are `const name = …` at a two-space
+ * indent. Slicing the file at those declarations gives a good-enough "which
+ * function is this line in?" without a parser — good enough because the
+ * assertions below only ask whether a CALL appears inside a named function.
+ */
+const uiRegions = (): Map<string, string> => {
+  const lines = readEditModeSource('ui.ts').split('\n');
+  const starts: Array<[number, string]> = [];
+  lines.forEach((line, index) => {
+    const match = /^ {2}(?:const|let|function|async function) ([A-Za-z_$][\w$]*)/.exec(line);
+    if (match) starts.push([index, match[1]]);
+  });
+  const regions = new Map<string, string>();
+  starts.forEach(([start, name], index) => {
+    const end = index + 1 < starts.length ? starts[index + 1][0] : lines.length;
+    regions.set(name, (regions.get(name) ?? '') + lines.slice(start, end).join('\n'));
+  });
+  return regions;
+};
+
+/** Every function in ui.ts whose job is to place something on the page. */
+const POSITIONER_DECLARATION = /^ {2}const (layoutRail|buildGaps|position[A-Z]\w*) = /gm;
+
+describe('every positioner the canvas owns is on the same pass', () => {
+  it('registers each of them by name', () => {
+    const source = readEditModeSource('ui.ts');
+    const declared = [...source.matchAll(POSITIONER_DECLARATION)].map((match) => match[1]);
+    assert.ok(declared.length >= 4, `expected ui.ts to declare positioners, found ${declared.join(', ')}`);
+    const registration = uiRegions().get('relayout') ?? '';
+    assert.match(registration, /createRelayoutPass\(\)/, 'ui.ts must build the pass');
+    for (const name of declared) {
+      assert.ok(
+        registration.includes(`${name}(`),
+        `${name} places something on the page but is not on the re-layout pass — ` +
+          'it will keep drawing against the box the page had before it moved'
+      );
+    }
+  });
+
+  it('suspends all of them while the page is moving', () => {
+    const regions = uiRegions();
+    for (const name of ['layoutRail', 'positionChip', 'positionGutter', 'positionDraftChips', 'remeasureRail']) {
+      const body = regions.get(name);
+      assert.ok(body, `${name} should exist in ui.ts`);
+      assert.match(
+        body,
+        /\bdisplacing\b/,
+        `${name} does not check the in-flight flag — one frame drawn mid-glide is the whole defect`
+      );
+    }
+  });
+
+  it('re-runs the pass the moment the page stops', () => {
+    const source = readEditModeSource('ui.ts');
+    for (const listener of ['transitionend', 'transitioncancel']) {
+      assert.ok(source.includes(`'${listener}'`), `ui.ts must listen for ${listener}`);
+    }
+    assert.match(source, /propertyName !== 'padding-right'/, 'only the page displacement may end the settle');
+    const settle = uiRegions().get('endDisplacement') ?? '';
+    assert.match(settle, /relayout\.run\(\)/, 'settling must re-run the whole pass, not one positioner');
+    assert.match(settle, /clearTimeout\(settleTimer\)/, 'the fallback timer must be cleared once the page settles');
+  });
+});
+
+// ── 4. no pointer path can reach the displacement ───────────────────────────
+
+/** Everything hover-, focus-, pin- or thread-write-driven in ui.ts. */
+const POINTER_DRIVEN = [
+  'renderChip',
+  'positionChip',
+  'clearChipSoon',
+  'scheduleRailReveal',
+  'clearRailSoon',
+  'pinRail',
+  'unpinRail',
+  'setListMode',
+  'renderRail',
+  'renderGutter',
+  'refreshRailThreads',
+  'scheduleRailFrame',
+];
+
+/** Everything that can change where the page sits. */
+const DISPLACEMENT_ENTRY_POINTS = ['applyDisplacement(', 'writeShift(', 'remeasureRail(', 'layoutRail(true'];
+
+describe('nothing hover-, focus-, pin- or write-driven can move the page', () => {
+  it('reaches the displacement writer from remeasureRail and nowhere else', () => {
+    const regions = uiRegions();
+    const callersOf = (call: string): string[] =>
+      [...regions].filter(([, body]) => body.includes(call)).map(([name]) => name);
+    assert.deepEqual(callersOf('applyDisplacement('), ['remeasureRail'], 'only the remeasure pass may displace');
+    assert.deepEqual(
+      callersOf('writeShift(').sort(),
+      ['applyDisplacement', 'measureNaturalColumnRight'],
+      'the variable is written by the applier and by the measurement that lifts it, nothing else'
+    );
+    assert.deepEqual(callersOf('remeasureRail('), ['layoutRail'], 'remeasuring happens on the layout path only');
+    assert.deepEqual(
+      callersOf('layoutRail(true').sort(),
+      ['relayout', 'setEditMode'],
+      'a remeasuring layout runs on activation and on the re-layout pass — not from an event handler'
+    );
+  });
+
+  it('keeps every pointer path free of every displacement entry point', () => {
+    const regions = uiRegions();
+    for (const name of POINTER_DRIVEN) {
+      const body = regions.get(name);
+      assert.ok(body, `${name} should exist in ui.ts — this guard is worthless if it names nothing`);
+      for (const call of DISPLACEMENT_ENTRY_POINTS) {
+        assert.ok(
+          !body.includes(call),
+          `${name} calls ${call} — hovering, pinning or saving must never change the page's geometry ` +
+            '(that, not the movement, is the defect Wolf reported)'
+        );
+      }
+    }
+  });
+});
+
+// ── 5. the fixed chrome follows the same value ──────────────────────────────
+
+describe('every fixed surface is placed against the same displacement', () => {
+  it('compensates every fixed rule that pins itself to the right edge', () => {
+    for (const rule of cssRules(STYLES)) {
+      const declarations = declarationsOf(rule);
+      if (!declarations.some(([property, value]) => property === 'position' && value === 'fixed')) continue;
+      for (const [property, value] of declarations) {
+        if (property !== 'right' && property !== 'inset') continue;
+        // `inset:0` pins the right edge too; the rule must then override it.
+        const right =
+          property === 'inset' ? (declarations.find(([candidate]) => candidate === 'right')?.[1] ?? value) : value;
+        assert.match(
+          right,
+          DISPLACEMENT_VALUE,
+          `${rule.selector.trim()} pins to right:${right} — fixed chrome sees no page box, so it must ` +
+            'be told the displacement explicitly or it stays behind when the page moves'
+        );
+      }
+    }
+  });
+
+  it('keeps the site BackToTop button on the reading column', () => {
+    // The known straggler: position:fixed AND centred on the 720px column via
+    // 100vw, i.e. wrong by the whole displacement in both terms.
+    const source = readFileSync(
+      join(repoRoot(), 'packages', 'core', 'app', 'components', 'common', 'BackToTop.astro'),
+      'utf8'
+    );
+    const right = /\.back-to-top\s*\{[^}]*?right:\s*([^;]+);/s.exec(source)?.[1];
+    assert.ok(right, 'BackToTop must still place itself horizontally');
+    assert.equal(
+      [...right.matchAll(/var\(\s*--dlem-shift/g)].length,
+      2,
+      'both terms — the width the centring is computed from and the offset itself — must know the displacement'
+    );
+    assert.match(right, /--dlem-shift,\s*0px/, 'and must fall back to 0px, so a visitor sees the published page');
   });
 });
