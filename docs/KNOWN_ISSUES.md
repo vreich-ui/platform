@@ -162,7 +162,9 @@ regardless of how parallel or well-cached the request pattern is.
   a one-off script under `scripts/` that reports, per object: body bytes,
   history entry count, history bytes, total record bytes. Quantify the win
   before assuming one is needed at the current object count (~70); this
-  matters more as the fleet's per-site object counts grow.
+  matters more as the fleet's per-site object counts grow. **Delivered:**
+  `scripts/measure-object-history.mjs` (see Findings below) — the fix itself
+  remains deferred pending a credentialed run.
 - If the numbers justify it: cap live `history[]` at N most-recent entries
   (50 is a reasonable starting point) and spill the older tail to a sidecar
   blob (e.g. `objects/<type>/history/<object_id>.json`), written on the same
@@ -184,6 +186,81 @@ regardless of how parallel or well-cached the request pattern is.
 history out of the live record) rather than a pure query-path fix, it needs
 production data to size correctly, and #527/#528/#530 already deliver most
 of the near-term latency win — this is follow-up work, not a blocker.
+
+**Findings (2026-08-10):** `scripts/measure-object-history.mjs` was written
+this session and run in its offline mode (its `--live` mode was also
+invoked, but this sandbox had no `MCP_HTTP_AUTH_TOKEN__<SLUG>` set, so it
+only exercised the token-missing skip path — see below). A few real
+production reads were separately gathered by hand in this same session, via
+the MCP tools already connected to it (not via the script — noted
+explicitly so the two sources are never confused).
+
+*How to run:*
+- Offline (always safe, no credentials, reads the committed exports):
+  `node scripts/measure-object-history.mjs [--site sites/<slug>] [--json <path>]`
+- Live (needs `MCP_HTTP_AUTH_TOKEN__<SLUG>` per site, same convention as
+  `fleet-capability-probe.mjs`): `node scripts/measure-object-history.mjs
+  --live --all [--limit N] [--all-objects] [--json <path>]`
+
+*Offline run, this session (committed exports, all three sites, 138 objects):*
+- history entry-count distribution — exact, taken from each export's
+  `__generated.record_version`, which is a proven 1:1 proxy for
+  `history.length` (every code path that appends a history entry bumps
+  `version` by the same count in the same write; see the script header for
+  the exact source citations, e.g. `review-state.ts`'s own comment "it bumps
+  `version` (every write does)"): min=2, median=6, p90=27, max=108.
+- worst offenders by entry count: `page_home` 108, `nav_header` 94,
+  `nav_footer` 88, `sec_about_intro` 48, `nav_footer_home` 39, `tpl_interior`
+  33, `tpl_landing` 32.
+- total committed export bytes across all 138 objects: 397,203 B; total
+  lifetime history-entry count summed across all objects: 1,581.
+- offline mode cannot report history byte size, the history/total-bytes
+  fraction, or real sweep timing — committed exports never carry
+  `history[]` (documented limitation, not a bug in the script).
+
+*Live spot-check, this session, 2026-08-10 (two real production objects read
+in full via the connected MCP tool, saved and measured exactly — NOT via the
+script, since the script itself had no token in this sandbox):*
+- `page_home` (version/entry_count 120): total record 93,546 B, history
+  88,756 B (**94.9%** of the record), body 3,879 B → ~740 B/history entry.
+- `site_drlurie` (version/entry_count 30): total record 24,500 B, history
+  22,351 B (**91.2%** of the record), body 1,496 B → ~745 B/history entry.
+- (A third read, `nav_header` at version 96, was also fetched live and
+  visibly matched the same order of magnitude, but wasn't saved to a file
+  for exact byte counting in this pass.)
+- Two independent samples landing in the same ~740 B/entry range, both
+  showing history at ~91–95% of total record bytes at their current version
+  counts, is the first REAL (not inferred) confirmation of this issue's
+  premise on the live store.
+- A full unfiltered `object_inventory` sweep (the same call `/admin/content`
+  makes, and the same one this script's `--live` mode issues first) was
+  attempted live by hand and did not return within the tool's 60s timeout;
+  this session also saw one unrelated transient 502 from a different site's
+  MCP endpoint. Neither is reported as a real sweep-latency number — both
+  conflate connector/transport overhead with actual blob-store latency, and
+  no isolated retry was run before writing this down.
+- Order-of-magnitude only, extrapolating the ~740 B/entry ratio onto the
+  offline distribution's max (108 entries) and p90 (27 entries) puts those
+  records around 80 KB and 20 KB of history respectively — not a
+  measurement, and not something to design a spill threshold from; bytes/
+  entry plainly varies by object type (a `nav_header` op captures a whole
+  `{before, after}` group/brandTokens-shaped payload; a plain single-field
+  patch is much smaller).
+
+**What still needs a credentialed run before #4 (maintained inventory index)
+can be decided:**
+- The real per-object `history_bytes`/`total_bytes` for every object in the
+  store, via `node scripts/measure-object-history.mjs --live --all
+  --all-objects` run end-to-end with real tokens — this session's own
+  `--live` invocation only reached the token-missing skip path and was never
+  exercised for real.
+- A real full-inventory-sweep wall-clock + bytes-fetched number from one
+  clean run (the 60s timeout hit by hand above cannot stand in for it).
+- Confirmation the ~740 B/entry ratio (n=2: one page, one site singleton)
+  holds across object types with much larger or smaller per-op captures
+  (`content_item` node ops, `nav_header` group/item patches, a plain
+  single-field `set_*_fields` patch) before it's used for anything beyond
+  order-of-magnitude framing.
 
 ## 4. Admin-content perf follow-up: inventory sweep could become a maintained index instead of a live sweep
 
