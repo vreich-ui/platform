@@ -368,6 +368,9 @@ export const runAgentLoop = async (
           tool: call.name,
           is_error: result.is_error,
           ...(created ?? {}),
+          // PF4: bounded orchestration output rides the event so the UI can
+          // offer a collapsed raw-output disclosure.
+          ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),
         });
         await persist();
         if (await cancelledCheck()) return { ok: true, status: doc.status };
@@ -507,6 +510,7 @@ export const approvePendingTool = async (
     tool: pending.tool,
     is_error: result.is_error,
     ...(created ?? {}),
+    ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),
   });
   if (!result.is_error && edited && deps.learningStore && doc.run.preference_context?.target_call_id === callId) {
     await addPostEditDelta(

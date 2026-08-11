@@ -19,7 +19,7 @@ import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { getAgentChatBlobStore, loadChatDoc } from '../lib/agent/chat-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
-import { CmsAgentClient } from '../lib/agent/cms-agent-client.js';
+import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { buildChatEngine, resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { runAgentLoop } from '../lib/agent/loop.js';
 import { adapterForProfile } from '../lib/agent/provider.js';
@@ -62,9 +62,18 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
   });
   const governanceStore = await getGovernanceBlobStore(event);
+  // PF4: the workspace orchestration tools reach CMS-Agent through the same
+  // module-level client; absent config → the tools answer with a clear error.
+  const cmsAgentBridge = isCmsAgentConfigured()
+    ? {
+        callTool: <T,>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
+        projectId: getSiteIdentity().cmsAgentProjectId,
+      }
+    : undefined;
   const toolContext = buildToolContext({
     objectStore: (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore,
     governanceStore,
+    ...(cmsAgentBridge ? { cmsAgent: cmsAgentBridge } : {}),
     artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
       | ArtifactIndexStore
       | undefined,

@@ -832,3 +832,56 @@ test('PF3: the send path gates required mode on configuration (source-level asse
   assert.match(source, /humanCopyForCmsAgentError\('cms_agent_not_configured'\)/);
   assert.ok(source.indexOf("!isCmsAgentConfigured()") < source.indexOf('await startRun('));
 });
+
+// ─── PF4: orchestration disclosure through the loop ─────────────────────────
+
+test('PF4: an auto list_workspace_nodes run attaches bounded output to the tool_result event for the collapsed disclosure', async () => {
+  const store = createMemoryStore();
+  const toolContext = buildToolContext({
+    objectStore: store as unknown as ObjectVerbStore,
+    principal: { kind: 'human', ...HUMAN },
+    roles: ['admin'],
+    nowMs: () => NOW,
+    cmsAgent: {
+      projectId: 'dr-lurie',
+      callTool: async <T,>() => ({
+        ok: true as const,
+        data: {
+          nodes: [{ id: 'draft_writer', name: 'Draft Writer', kind: 'drafting', riskLevel: 'read', description: 'Writes.' }],
+        } as unknown as T,
+      }),
+    },
+  });
+  const deps = {
+    chatStore: store as unknown as AgentChatStore,
+    toolContext,
+    engine: providerEngine(
+      scripted([
+        { toolCalls: [{ id: 'wn1', name: 'list_workspace_nodes', args: {} }], outputTokens: 1 },
+        { text: 'Here are the nodes.', toolCalls: [], outputTokens: 1 },
+      ])
+    ),
+    nowIso: () => new Date(NOW).toISOString(),
+  };
+  const doc = newChatDoc('obj:page_chat');
+  await saveChatDoc(deps.chatStore, doc);
+  const sent = await startRun(
+    { chatStore: deps.chatStore, toolContext, nowIso: deps.nowIso, nowMs: () => NOW },
+    (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!,
+    'What can the workspace do?',
+    HUMAN,
+    PROFILE,
+    resolveAutonomy(undefined, undefined)
+  );
+  const hop = await runAgentLoop(deps, 'obj:page_chat', sent.resume!.triggerToken);
+  assert.equal(hop.status, 'idle');
+  const final = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  const event = final.events.find(
+    (entry) => entry.type === 'tool_result' && entry.detail?.tool === 'list_workspace_nodes'
+  )!;
+  assert.equal(event.detail!.is_error, false);
+  const output = String(event.detail!.output);
+  assert.ok(output.length > 0 && output.length < 2_000, 'bounded output rides the event');
+  assert.match(output, /draft_writer/);
+  assert.equal(output.includes('prompt'), false);
+});
