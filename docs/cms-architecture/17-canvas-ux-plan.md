@@ -439,6 +439,76 @@ one-reflow cost of `measureNaturalColumnRight` on a large page. Everything
 mechanical — the ladder, the displacement value, the writer's reachability, the
 pass — is covered headlessly; the rest wants T17.13's smoke test or a human.
 
+### T17.6b — the toolbar's reduction to floating pills (2026-08-11)
+
+The PDF draws three pills at the viewport's top right — `● Editing`,
+`Attention N`, `Release` — over the page. Today's `.dl-em-bar` was a
+full-width sticky strip carrying seven things and pushing the page down
+(`body.dl-em-on{padding-top:38px}`); W17 Fix 1 dropped that padding, which
+turned the strip into an overlay covering the top of the article — the layout
+defect that made this task urgent rather than cosmetic (spec:
+`docs/design/marginalia-affordance-model.md` §7). **Wolf's ruling on the
+brief's Q1, 2026-08-11: "keep 'exit' visible."** So the built toolbar is the
+four-pill variant, not the PDF's three: `Exit` is its own always-visible pill,
+never folded into the `● Editing` popover, a menu, or a hover state.
+
+- **New:** `packages/core/lib/edit-mode/toolbar-layout.ts` (+ `.test.ts`, 12
+  cases) — the pure half. `toolbarLayout({ pendingCount, attentionCount,
+  canPublish })` returns the pill/popover row plan (`● Editing` ·
+  `Attention N` · `Release` · `Exit`, in that order); `Release`'s disabled
+  state and `title` (`Release to production` enabled, `Requires publisher
+  role` disabled) come from `canPublish`, unchanged from today's role gate.
+  `postStatus`/`fadeToast` are the toast's timing model: fading only ever
+  flips `visible`, the `message` is never cleared — the retention rule a
+  missed confirmation depends on.
+- **`ui.ts`:** `.dl-em-bar`'s markup is now four `.dl-em-pill` buttons.
+  Displaced controls' new homes — **nothing is deleted**:
+  - **`Pending N`** → a row in the `● Editing` popover (`[data-em-tray-toggle]`,
+    same tray, same behaviour), plus a numeral on the `● Editing` pill itself
+    when the count is non-zero (Q2, built as proposed) — never hidden without
+    opening anything.
+  - **The signed-in email** → the popover's first row.
+  - **The status line** → a transient toast (`role="status"
+    aria-live="polite"`, `TOAST_VISIBLE_MS` = 4s), created once and never
+    removed from the DOM so a screen reader announces every text change
+    (Q3, built as proposed); the popover's status row keeps the same text
+    unfaded, so a missed confirmation stays readable. `setStatus`'s
+    signature is unchanged — only its sink is.
+  - **`Exit`** → its own pill (Q1, Wolf's ruling above).
+  - `Attention N` and `Release`'s role gate / confirm / release path are
+    untouched.
+  - The popover opens on the `● Editing` pill (`aria-haspopup="menu"
+    aria-expanded`) and closes on `Escape`, an outside click, or activating
+    the Pending row.
+  - `RAIL_TOP` (the 46px constant) is now `railTopPx`, MEASURED off the pill
+    cluster's `getBoundingClientRect().bottom + 8` inside `remeasureRail` —
+    the same activation/resize cadence that decides everything else about the
+    rail's layout — so it moves with the cluster instead of assuming its
+    height. Fed through the existing `desiredTopFor` / `markerPosition` /
+    `positionChip` / `anchorPanel` call sites; no second clearance constant
+    was added.
+- **`ui-chrome.ts`:** `.dl-em-bar` is now just the fixed positioning cluster
+  (`top:10px;right:calc(10px + var(--dlem-shift,0px))`) — no background, no
+  border, no padding of its own; every visible surface is a `.dl-em-pill`
+  (glass-treated with the T17.2 tokens) or the `.dl-em-popover`/`.dl-em-toast`
+  hung off it. Both the popover and the toast are children of `.dl-em-bar`
+  and positioned `position:absolute`, so they inherit the cluster's fixed
+  positioning — and its `--dlem-shift` compensation — for free, with no
+  second `position:fixed` rule for `displacement-registration.test.ts`'s
+  "every fixed surface is placed against the same displacement" guard to
+  check. `.dl-em-panel`/`.dl-em-tray`'s own top offsets are untouched — out of
+  this task's scope (`.dl-em-bar` and `RAIL_TOP` only).
+- **Docs:** this entry; `marginalia-interaction-model.md` §10.1's banner moves
+  from DESIGNED to BUILT.
+- **Not verified in a browser:** the pills' actual visual placement and
+  spacing; whether the cluster clears the site header at every viewport
+  width; the popover's and toast's alignment under the cluster; the toast's
+  fade timing as experienced, versus as tested. Everything mechanical — the
+  plan `toolbarLayout` produces, the toast's retention rule, the
+  `--dlem-shift` consumption, and the never-move/registration guard suite —
+  is covered headlessly; `npm test` is 2150 + 144 green (was 2138 + 144; 12
+  new cases), the never-move/registration suite included.
+
 ## 8. T17.14 — canvas affordance consolidation (planned 2026-08-11)
 
 **Wolf's ruling, verbatim**, asked whether to retire the W7 hover chip, fold it

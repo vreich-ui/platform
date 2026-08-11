@@ -719,14 +719,21 @@ separate task (T17.6b) for the toolbar reduction**, with `Pending`, `Exit`,
 identity and status re-homed rather than deleted (an editor cannot leave edit
 mode without `Exit`).
 
-> **DESIGNED 2026-08-11 (T17.14).** The reduction is specified in
+> **BUILT 2026-08-11 (T17.6b).** The reduction is specified in
 > [`marginalia-affordance-model.md`](marginalia-affordance-model.md) §7 and
-> briefed as [`T17.6b`](../cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md).
-> It became **urgent** rather than cosmetic: the in-flight no-movement change
-> (branch `w17/fix1-no-move`) drops `body.dl-em-on { padding-top: 38px }`, so
-> the full-width bar starts overlaying the page. T17.6b is queued as
-> `checkpoint` on one question only — whether `Exit` lives in the `● Editing`
-> popover (three pills, as the PDF shows) or as a fourth always-visible pill.
+> shipped per its brief,
+> [`T17.6b`](../cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md).
+> It became **urgent** rather than cosmetic: `w17/fix1-no-move` dropped
+> `body.dl-em-on { padding-top: 38px }`, so the full-width bar started
+> overlaying the page. Q1 — whether `Exit` lives in the `● Editing` popover
+> (three pills, as the PDF shows) or as a fourth always-visible pill — was the
+> task's one checkpoint. **Wolf's ruling: "keep 'exit' visible."** The built
+> toolbar is the four-pill variant: `Exit` is its own always-visible pill,
+> never folded into the popover, a menu, or a hover state. `Pending N` and the
+> signed-in email are in the `● Editing` popover; the status line is a
+> transient toast (`role="status" aria-live="polite"`). Build log:
+> [`17-canvas-ux-plan.md`](../cms-architecture/17-canvas-ux-plan.md) §7,
+> "T17.6b — the toolbar's reduction to floating pills".
 
 ### 10.2 The inline `· draft` chip
 

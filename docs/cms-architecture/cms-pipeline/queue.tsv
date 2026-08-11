@@ -265,4 +265,7 @@ T17.13	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.13-can
 T17.14a	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14a-affordance-state-machine.md
 T17.14b	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14b-block-actions-panel-coexistence.md
 T17.14c	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.14c-per-block-draft-provenance.md
-T17.6b	checkpoint	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md
+# T17.6b DONE 2026-08-11 — the toolbar reduced to floating pills (four, not the
+# PDF's three: Wolf's ruling on Q1 keeps Exit always visible); record in
+# 17-canvas-ux-plan.md §7. Row kept, commented, for the audit trail.
+#T17.6b	checkpoint	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md
