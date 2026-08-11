@@ -9,6 +9,7 @@
  *
  * Spec: docs/design/marginalia-interaction-model.md §5.
  */
+import { blockText, richTextToBlocks } from './preview.js';
 import { suggestionToOps, type EditTarget } from './targets.js';
 
 /**
@@ -83,6 +84,44 @@ export const derivePrimaryInlineField = (
     if (match) return match;
   }
   return eligible[0];
+};
+
+type RichTextNode = { value?: unknown; content?: unknown };
+
+/** A rich_text.v1 node's text, exactly as it lands in the rendered element. */
+const richTextNodeText = (node: RichTextNode): string => {
+  if (typeof node.value === 'string') return node.value;
+  const content = Array.isArray(node.content) ? (node.content as RichTextNode[]) : [];
+  return content.map(richTextNodeText).join('');
+};
+
+/**
+ * The text of each top-level block a field's CURRENT value renders as, in the
+ * order the renderer emits them — the key the inline editor uses to find the
+ * element(s) it must mount over (fix 2). Single newlines are dropped because
+ * both renderers emit them as `<br/>`, which contributes no text.
+ *
+ * Pure: it mirrors the renderers, so it is tested against their rules rather
+ * than against a DOM.
+ *   - plain  → render-nodes.ts's `plainTextParagraphs` (blank lines split);
+ *   - html   → the real rich-text block splitter (preview.ts);
+ *   - doc    → the rich_text.v1 document's own top-level blocks.
+ */
+export const inlineValueBlockTexts = (field: InlineField, value: unknown): string[] => {
+  const strip = (text: string): string => text.replaceAll('\n', '');
+  if (field.kind === 'doc') {
+    const content = (value as { content?: unknown })?.content;
+    if (!Array.isArray(content)) return [];
+    return (content as RichTextNode[]).map((block) => strip(richTextNodeText(block))).filter(Boolean);
+  }
+  if (typeof value !== 'string') return [];
+  if (field.kind === 'html') {
+    return (richTextToBlocks(value) ?? []).map((block) => blockText(block.html)).filter(Boolean);
+  }
+  return value
+    .split(/\n{2,}/)
+    .map((paragraph) => strip(paragraph.trim()))
+    .filter(Boolean);
 };
 
 /**

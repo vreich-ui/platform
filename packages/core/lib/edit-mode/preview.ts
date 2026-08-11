@@ -17,11 +17,7 @@
  * editor and validator enforce. This guards only the admin's own viewport —
  * the server-side validator at patch time is the real gate.
  */
-import {
-  splitRichTextBlocks,
-  splitRichTextParagraphs,
-  type RichTextBlock,
-} from '../../lib/richtext/paragraphs.js';
+import { splitRichTextBlocks, splitRichTextParagraphs, type RichTextBlock } from '../../lib/richtext/paragraphs.js';
 
 const ALLOWED_TAGS = new Set(['p', 'br', 'strong', 'em', 'a', 'ul', 'ol', 'li', 'h2', 'h3']);
 
@@ -88,8 +84,13 @@ export const restoreRegion = (snapshot: RegionSnapshot): void => {
 
 const normalizeText = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
-/** The deepest element whose text content equals `text` (normalized), or undefined. */
-const findElementByText = (region: HTMLElement, text: string): HTMLElement | undefined => {
+/**
+ * The deepest element whose text content equals `text` (normalized), or
+ * undefined. Shared with the inline editor (T17.8 fix 2), which mounts its
+ * surface over exactly the element this finds — there is one lookup for
+ * "which element renders this value", never two that can drift.
+ */
+export const findElementByText = (region: HTMLElement, text: string): HTMLElement | undefined => {
   const wanted = normalizeText(text);
   if (!wanted) return undefined;
   let match: HTMLElement | undefined;
@@ -99,6 +100,23 @@ const findElementByText = (region: HTMLElement, text: string): HTMLElement | und
     if (normalizeText(element.textContent ?? '') === wanted) match = element; // keep walking: deepest wins
   }
   return match;
+};
+
+/**
+ * The elements rendering each of `texts`, in order — or undefined when any is
+ * missing or two texts resolve to the same element (an ambiguous match is not
+ * a match). The one multi-block locator: the rich-text preview below and the
+ * inline editor's mount both go through it.
+ */
+export const findBlockElements = (region: HTMLElement, texts: string[]): HTMLElement[] | undefined => {
+  if (texts.length === 0) return undefined;
+  const found: HTMLElement[] = [];
+  for (const text of texts) {
+    const element = findElementByText(region, text);
+    if (!element || found.includes(element)) return undefined;
+    found.push(element);
+  }
+  return found;
 };
 
 /** Preview a plain-string change: swap the element whose text is exactly `before`. */
@@ -121,12 +139,11 @@ const previewRichTextChange = (region: HTMLElement, before: string, after: strin
   if (!beforeBlocks || !afterBlocks || beforeBlocks.length === 0) return false;
   if (beforeBlocks.length !== afterBlocks.length) return false;
 
-  const targets: HTMLElement[] = [];
-  for (const block of beforeBlocks) {
-    const element = findElementByText(region, blockText(block.html));
-    if (!element || targets.includes(element)) return false;
-    targets.push(element);
-  }
+  const targets = findBlockElements(
+    region,
+    beforeBlocks.map((block) => blockText(block.html))
+  );
+  if (!targets) return false;
   targets.forEach((element, index) => {
     element.replaceChildren(sanitizeRichTextFragment(afterBlocks[index].html));
   });

@@ -1,7 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { derivePrimaryInlineField, inlineEditOps, isRichTextDocument, shouldCaptureSelection } from './inline-edit.js';
+import {
+  derivePrimaryInlineField,
+  inlineEditOps,
+  inlineValueBlockTexts,
+  isRichTextDocument,
+  shouldCaptureSelection,
+} from './inline-edit.js';
+import { renderArticleNodes } from '../article-object/render-nodes.js';
+import type { ContentItemBody } from '../../schema/bodies/content-item-v1.js';
 import type { EditTarget } from './targets.js';
 
 const richTextDoc = { nodeType: 'document', data: {}, content: [] };
@@ -90,6 +98,96 @@ describe('derivePrimaryInlineField', () => {
 
   it('does not offer a string ARRAY (a bullet list is not one value)', () => {
     assert.strictEqual(derivePrimaryInlineField({ items: ['one', 'two'] }, 'content_item'), undefined);
+  });
+});
+
+describe('inlineValueBlockTexts — the key the editor mounts by', () => {
+  /** The text each rendered <p> actually exposes as `textContent`. */
+  const renderedParagraphTexts = (body: string): string[] => {
+    const { html } = renderArticleNodes('req_a', {
+      nodes: [{ id: 'n_1', kind: 'content', public: { body } }],
+    } as unknown as ContentItemBody);
+    return [...html.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((match) =>
+      match[1]
+        .replace(/<[^>]*>/g, '')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&quot;', '"')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+    );
+  };
+
+  it('splits a plain body exactly where the renderer splits paragraphs', () => {
+    const body = 'First paragraph.\n\nSecond one.\n\n\nThird, after extra blank lines.';
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), [
+      'First paragraph.',
+      'Second one.',
+      'Third, after extra blank lines.',
+    ]);
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), renderedParagraphTexts(body));
+  });
+
+  it('drops single newlines, because the renderer emits them as <br/> (no text)', () => {
+    const body = 'Line one\nline two';
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), ['Line oneline two']);
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), renderedParagraphTexts(body));
+  });
+
+  it('carries an escaped character through as the reader sees it', () => {
+    const body = "Barrier & bounce — it's fine";
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, body), renderedParagraphTexts(body));
+  });
+
+  it('treats a single-line field as one block', () => {
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'title', kind: 'plain' }, 'A heading'), ['A heading']);
+  });
+
+  it('splits an HTML body on its real block boundaries', () => {
+    assert.deepStrictEqual(
+      inlineValueBlockTexts({ key: 'body', kind: 'html' }, '<p>One <strong>bold</strong>.</p><ul><li>a</li></ul>'),
+      ['One bold.', 'a']
+    );
+  });
+
+  it('reads a rich_text.v1 document block by block, lists concatenated like their <ul>', () => {
+    const doc = {
+      nodeType: 'document',
+      data: {},
+      content: [
+        { nodeType: 'heading-2', data: {}, content: [{ nodeType: 'text', value: 'Title', marks: [], data: {} }] },
+        {
+          nodeType: 'unordered-list',
+          data: {},
+          content: [
+            {
+              nodeType: 'list-item',
+              data: {},
+              content: [
+                { nodeType: 'paragraph', data: {}, content: [{ nodeType: 'text', value: 'one', marks: [], data: {} }] },
+              ],
+            },
+            {
+              nodeType: 'list-item',
+              data: {},
+              content: [
+                { nodeType: 'paragraph', data: {}, content: [{ nodeType: 'text', value: 'two', marks: [], data: {} }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'doc' }, doc), ['Title', 'onetwo']);
+  });
+
+  it('yields nothing for an empty or absent value — the caller falls back to the panel', () => {
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, ''), []);
+    assert.deepStrictEqual(inlineValueBlockTexts({ key: 'body', kind: 'plain' }, undefined), []);
+    assert.deepStrictEqual(
+      inlineValueBlockTexts({ key: 'body', kind: 'doc' }, { nodeType: 'document', content: [] }),
+      []
+    );
   });
 });
 

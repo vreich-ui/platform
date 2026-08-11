@@ -46,6 +46,7 @@ import {
 import {
   derivePrimaryInlineField,
   inlineEditOps,
+  inlineValueBlockTexts,
   shouldCaptureSelection,
   NON_COPY_KEY_RE,
   type InlineField,
@@ -55,7 +56,13 @@ import { applyNavChangesToBody, navChangesToOps, navEditFieldsFor, type NavEditF
 import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
-import { previewFieldChange, restoreRegion, snapshotRegion, type RegionSnapshot } from './preview.js';
+import {
+  findBlockElements,
+  previewFieldChange,
+  restoreRegion,
+  snapshotRegion,
+  type RegionSnapshot,
+} from './preview.js';
 import { mountMarginaliaPanel, type MarginaliaPanelTarget } from './marginalia-panel.js';
 import {
   blockAttentionCounts,
@@ -2737,6 +2744,46 @@ export const mountEditMode = (options: MountOptions): void => {
     selection.addRange(end);
   };
 
+  /**
+   * Mount the editing surface IN the block, over the element(s) that actually
+   * render the field — never over the block.
+   *
+   * The first cut swapped the region's whole child list for the host, which on
+   * a `display:contents` article wrapper deleted the node's whole rendering (its
+   * <h2>, eyebrow, <ul>, <figure> and CTA) and on a section deleted the
+   * `<section class="dl-section">` itself, taking its padding, its 72rem
+   * centring and the 720px reading column with it — everything below reflowed
+   * the moment you double-clicked. Wolf, 2026-08-11: "make sure the main
+   * target objects don't move … keep everything like it is published."
+   *
+   * So: locate the rendered element(s) with the SAME finder the in-place
+   * preview uses, and swap in a host of the same tag carrying the same
+   * classes, so the site's `:where(p, ul, h2 …)` typography keeps matching and
+   * the block's siblings and section chrome stay on the page throughout.
+   */
+  const mountInlineHost = (region: HTMLElement, field: InlineField, before: unknown): HTMLElement | undefined => {
+    const elements = findBlockElements(region, inlineValueBlockTexts(field, before));
+    if (!elements) return undefined;
+    const [first] = elements;
+    const parent = first.parentNode;
+    // A run spanning parents is not one box to replace — bail rather than
+    // restructure the block.
+    if (!parent || elements.some((element) => element.parentNode !== parent)) return undefined;
+    // A rich_text.v1 surface emits its own <p>/<h2>/<ul> children, so its host
+    // is a bare wrapper (the prose rules are descendant selectors and keep
+    // matching). Every other surface IS the element it replaces.
+    const richHost = field.kind === 'doc';
+    const host = document.createElement(richHost ? 'div' : first.tagName.toLowerCase());
+    if (!richHost && first.className) host.className = first.className;
+    host.classList.add('dl-em-inline');
+    if (richHost) host.classList.add('dl-em-inline-rich');
+    host.setAttribute('role', 'textbox');
+    host.setAttribute('aria-label', `Edit ${field.key}`);
+    first.replaceWith(host);
+    for (const element of elements.slice(1)) element.remove();
+    return host;
+  };
+
   const startInlineEdit = async (region: HTMLElement, at?: { x: number; y: number }): Promise<void> => {
     if (inlineEdit) {
       if (inlineEdit.region === region) return;
@@ -2762,12 +2809,15 @@ export const mountEditMode = (options: MountOptions): void => {
     }
     const before = unit.currentData[field.key];
     const snapshot = snapshotRegion(region);
-    const host = document.createElement('div');
-    host.className = field.kind === 'doc' ? 'dl-em-inline dl-em-inline-rich' : 'dl-em-inline';
-    if (field.kind === 'html') host.classList.add('dl-em-inline-code');
-    host.setAttribute('role', 'textbox');
-    host.setAttribute('aria-label', `Edit ${field.key}`);
-    region.replaceChildren(host);
+    const host = mountInlineHost(region, field, before);
+    if (!host) {
+      // The field's current value could not be located in the block's own
+      // rendering (an empty value, or copy the component transforms). Editing
+      // in place would mean guessing where to put the surface — and the one
+      // thing this must never do is rebuild the block. The panel takes it.
+      void openPanel(target, region, 'edit');
+      return;
+    }
     region.classList.add('dl-em-editing');
 
     const edit: InlineEditState = {

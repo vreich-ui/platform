@@ -361,14 +361,18 @@ body.dl-em-on .dl-em-gutter{display:block}
    ui.ts, touches the page box. */
 /* ── inline editing (T17.8) ─────────────────────────────────────────────────
    Double-click a block and its copy becomes editable IN the page, in the
-   block's own box: the surface inherits the site's typography (it renders
-   inside the article's prose wrapper), so what you type looks like what will
-   publish. pre-wrap keeps the blank-line-is-a-new-paragraph rule article
-   bodies use visible while editing. */
+   block's own box: the host REPLACES the element that renders the field and
+   carries its tag and classes, so the site's own typography selectors keep
+   matching and nothing on the page moves (Wolf, 2026-08-11 — the never-move
+   invariant). pre-wrap keeps the blank-line-is-a-new-paragraph rule article
+   bodies use visible while editing.
+
+   There is deliberately no monospace variant: the old .dl-em-inline-code
+   dropped an HTML-bodied section to 12.5px mono across the full bleed the
+   instant it was double-clicked. */
 .dl-em-inline{white-space:pre-wrap;outline:2px solid var(--dlem-accent);outline-offset:6px;border-radius:2px;
   min-height:1.4em;caret-color:var(--dlem-accent)}
 .dl-em-inline:focus,.dl-em-inline .ProseMirror:focus{outline:2px solid var(--dlem-accent);outline-offset:6px}
-.dl-em-inline-code{font:12.5px/1.6 ui-monospace,monospace;color:var(--dlem-text)}
 .dl-em-inline-rich{white-space:normal}
 /* The hover outline would double up on the block being edited. */
 body.dl-em-on [data-cms-section-id].dl-em-editing>*,body.dl-em-on [data-cms-nav-object].dl-em-editing>*{outline:none}
