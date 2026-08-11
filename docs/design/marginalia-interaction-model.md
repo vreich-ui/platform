@@ -15,6 +15,15 @@ when the PDF is silent.
 [`../cms-architecture/17-canvas-ux-plan.md`](../cms-architecture/17-canvas-ux-plan.md)
 (the plan of record: task table §3, sequencing §5).
 
+> **PARTIALLY SUPERSEDED 2026-08-11 by
+> [`marginalia-affordance-model.md`](marginalia-affordance-model.md) (T17.14),
+> on Wolf's ruling that the W7 hover chip is folded into the margin bubble.**
+> **§2.1 and §11 row 3 are RETRACTED** — the chip does not survive; one block
+> shows one affordance. **§10.1 (the toolbar) is now designed** in that
+> document's §7 and its one open question is a checkpoint on T17.6b.
+> Everything else here — the rail, anchoring, attention, inline edit, narrow
+> screens, accessibility — still governs.
+
 **Convention used throughout:** where the PDF does not settle something, the
 text says **"the PDF does not specify X; proposed: Y"** in bold and the
 proposal is the thing an implementing task builds. There are no silent
@@ -219,7 +228,7 @@ then `[data-cms-nav-object]` — the exact innermost-first resolution order
   💬 beside the hovered checklist) that opens an empty composer for that block
   on click.
 
-The existing hover chip (pencil / image / role / Ask-AI / delete) is
+~~The existing hover chip (pencil / image / role / Ask-AI / delete) is
 **unchanged** and continues to appear at the block's right. **The PDF does not
 show the hover chip at all;** it shows only the bubble. **Proposed: keep the
 chip.** It is the entry point for every non-comment canvas action and nothing
@@ -227,7 +236,21 @@ in the concept replaces those. The two are laid out so they never collide: the
 chip keeps its current position (`rect.right + 14`, i.e. inside the rail gap),
 the rail bubble starts at `railLeft` — with a 344px rail and a 24px gap that is
 tight, so **the chip renders above the bubble, right-aligned to the rail, when
-both are visible for the same block.**
+both are visible for the same block.**~~
+
+> **RETRACTED 2026-08-11 by Wolf's ruling: the chip is folded into the bubble**
+> — *"Fold it into the bubble but it has to make sense so you need to consider
+> needed functionality for this canvas. make it look native in the bubble."*
+> The PDF shows one affordance per block and that is now the rule. The hover
+> chip, its positioning, its decay timer and its five tools are retired; every
+> function it carried has a named home in
+> [`marginalia-affordance-model.md`](marginalia-affordance-model.md) §3, and the
+> two hover state machines this section tried to lay out around each other
+> become the single machine in that document's §4. This section's chip/bubble
+> stacking rule, and the `chipOffset` term it produced in `desiredTopFor`, are
+> void. What survives here unchanged: what reveals (the gutter badge, the
+> thread bubble, the ghost bubble) and the resolution order that decides which
+> block a pointer is over.
 
 ### 2.2 Timing
 
@@ -615,6 +638,15 @@ separate task (T17.6b) for the toolbar reduction**, with `Pending`, `Exit`,
 identity and status re-homed rather than deleted (an editor cannot leave edit
 mode without `Exit`).
 
+> **DESIGNED 2026-08-11 (T17.14).** The reduction is specified in
+> [`marginalia-affordance-model.md`](marginalia-affordance-model.md) §7 and
+> briefed as [`T17.6b`](../cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md).
+> It became **urgent** rather than cosmetic: the in-flight no-movement change
+> (branch `w17/fix1-no-move`) drops `body.dl-em-on { padding-top: 38px }`, so
+> the full-width bar starts overlaying the page. T17.6b is queued as
+> `checkpoint` on one question only — whether `Exit` lives in the `● Editing`
+> popover (three pills, as the PDF shows) or as a fourth always-visible pill.
+
 ### 10.2 The inline `· draft` chip
 
 The PDF shows `The two-night rule · draft` — an unpublished-draft marker
@@ -646,7 +678,7 @@ Every place this document went past the PDF, in one list:
 | --- | --- | --- |
 | 1 | Rail x-position on pages with unequal section widths | One rail position per page, from the widest in-viewport content column, navigation and full-bleed bands excluded (§1.2) |
 | 2 | Narrow-screen breakpoint and what replaces the slide | `sheetFloor = 900px`; the inset → compact → markers → sheet ladder, none of which moves the page (§1.3, Wolf 2026-08-11) |
-| 3 | Whether the existing hover chip survives | Keep it; chip above bubble when both show (§2.1) |
+| 3 | ~~Whether the existing hover chip survives~~ | ~~Keep it; chip above bubble when both show (§2.1)~~ **RETRACTED 2026-08-11 — the chip is folded into the bubble; see [`marginalia-affordance-model.md`](marginalia-affordance-model.md) §§2–4.** |
 | 4 | Hover reveal/dismiss timings | 120ms reveal, 250ms dismiss (matching `clearChipSoon`) (§2.2) |
 | 5 | Pinning | Click/focus pins; `Esc`/outside-click/another pin unpins; one at a time (§2.3) |
 | 6 | Span rehydration when text changed or repeats | `field` + new optional `selectionOccurrence`; four-step resolution; drift state (§3.2, §8.3) |

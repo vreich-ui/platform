@@ -241,3 +241,28 @@ T17.12	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.12-rev
 T17.7	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.7-agent-routed-composer.md
 T17.10	checkpoint	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.10-notifications-digests.md
 T17.13	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.13-canvas-smoke-test.md
+#
+# W17 (cont.) — CANVAS AFFORDANCE CONSOLIDATION (T17.14 wave).
+# Wolf's ruling 2026-08-11, on whether to retire the W7 hover chip, fold it into
+# the margin bubble, or keep both: "Fold it into the bubble but it has to make
+# sense so you need to consider needed functionality for this canvas. make it
+# look native in the bubble. this might be a bigger task for one single chat
+# too, so evaluate if it needs to be planned first."
+# Spec: docs/design/marginalia-affordance-model.md (the one-affordance rule, the
+# bubble anatomy, the single state machine, the toolbar design). It supersedes
+# marginalia-interaction-model.md §2.1 and §11 row 3, and settles §10.1.
+# T17.14 (the planning task) DONE 2026-08-11 — spec + these four briefs; row
+# kept, commented, for the audit trail (the W15 convention).
+#T17.14	notify	claude-opus-5	high	docs/design/marginalia-affordance-model.md
+# Sequencing: T17.14a -> T17.14b are STRICTLY SEQUENTIAL, one session each, same
+# agent (they rewrite the same hunks of ui.ts / ui-chrome.ts). T17.14c may run
+# in PARALLEL with T17.14b in a separate worktree (disjoint ui.ts hunks) but not
+# before T17.14a. THE WAVE IS NOT SHIPPABLE WITHOUT T17.14b — T17.14a removes the
+# chip's image / role / article-settings / Ask-AI / grid controls and T17.14b is
+# what gives them a home. T17.6b is independent of all three, must land AFTER the
+# w17/fix1-no-move change (which drops body{padding-top:38px} and turns the bar
+# into an overlay), and is a checkpoint on ONE question: where Exit lives.
+T17.14a	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14a-affordance-state-machine.md
+T17.14b	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14b-block-actions-panel-coexistence.md
+T17.14c	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.14c-per-block-draft-provenance.md
+T17.6b	checkpoint	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md

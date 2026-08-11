@@ -114,6 +114,10 @@ model or touching layout/anchoring logic with no existing precedent in the file.
 | **T17.11** | Per-role comment-visibility policy (item 14) — follows the existing `isOwner`/`resolveRolesFromEvent` pattern | auto | `claude-sonnet-5` | medium |
 | **T17.12** | Review-decision linking (item 15) — ties threads to `object_review_decide` | auto | `claude-sonnet-5` | medium |
 | **T17.13** | Headless-browser smoke test for the canvas annotation surface (item 16) | auto | `claude-sonnet-5` | medium |
+| **T17.14a** | Canvas affordance consolidation: the single hover/focus state machine + the bubble's anatomy, chip deleted — *Wolf's 2026-08-11 fold ruling; see §8* | auto | `claude-opus-5` | high |
+| **T17.14b** | The block drawer's actions, the selection strip, panel↔rail coexistence — *the wave is not shippable without it* | auto | `claude-opus-5` | high |
+| **T17.14c** | Per-block draft provenance — `· draft` on the block that actually changed | auto | `claude-sonnet-5` | medium |
+| **T17.6b** | Toolbar reduction to the concept's three floating pills (spec §10.1, now urgent) | checkpoint | `claude-sonnet-5` | medium |
 
 ~~`briefPath` is deliberately omitted: **T17.0 writes the briefs.**~~ **Done
 2026-08-10:** the T17.3–T17.13 briefs exist in
@@ -369,3 +373,48 @@ block carrying the chip.
   the second `markDraftRegions` call site. The provenance logic itself —
   `changedUnitsSince`, `provenanceUnitFor`, `regionIsDraft` — is covered
   headlessly.
+
+## 8. T17.14 — canvas affordance consolidation (planned 2026-08-11)
+
+**Wolf's ruling, verbatim**, asked whether to retire the W7 hover chip, fold it
+into the margin bubble, or keep both:
+
+> *"Fold it into the bubble but it has to make sense so you need to consider
+> needed functionality for this canvas. make it look native in the bubble. this
+> might be a bigger task for one single chat too, so evaluate if it needs to be
+> planned first."*
+
+And, of the canvas generally, the same day: *"make sure the main target objects
+don't move. the idea is to keep everything like it is published."*
+
+The design is [`../design/marginalia-affordance-model.md`](../design/marginalia-affordance-model.md).
+It establishes **one block, one affordance**, specifies the bubble that can
+carry the fold (identity row / thread / composer / footer strip / block
+drawer), replaces the canvas's **two** independent hover state machines with
+one, fixes per-block draft provenance, and designs the toolbar reduction. It
+**supersedes [`../design/marginalia-interaction-model.md`](../design/marginalia-interaction-model.md)
+§2.1 and §11 row 3** (which proposed keeping the chip) and **settles its
+§10.1**.
+
+**Sequencing (binding, same shape of argument as §5's Batch B).** T17.14a →
+T17.14b are **strictly sequential, one session each, same agent** — they
+rewrite the same hunks of `ui.ts` / `ui-chrome.ts`. **T17.14c may run in
+parallel with T17.14b** in a separate worktree (disjoint hunks: `markDraftRegions`
+/ `refreshPending` / `positionDraftChips` versus the drawer, `anchorPanel` and
+`morphFromTile`), never before T17.14a. **The wave is not shippable without
+T17.14b** — T17.14a removes the chip's image / role & intent / article-settings
+/ Ask-AI / `content_grid` controls and T17.14b is what re-homes them. **T17.6b**
+is independent of all three, must land **after** the `w17/fix1-no-move` change
+(which drops `body.dl-em-on { padding-top: 38px }` and turns the full-width bar
+into a page overlay), and is a `checkpoint` on **one** question: whether `Exit`
+lives in the `● Editing` popover (three pills, as the PDF draws) or as a fourth
+always-visible pill. T17.13 still runs last and gains the wave's assertions.
+
+Honest sizing: **three sessions of work plus one checkpoint** — one full session
+each for T17.14a and T17.14b, half a session for T17.14c, half for T17.6b once
+unblocked. Running the wave **before** T17.7 is preferable (T17.7 then builds
+its composer modes into the finished card), but it is not a hard dependency in
+either direction; T17.7's brief gains two consequential edits either way — its
+agent-identity bullet becomes "verify, don't rebuild" (T17.14a renders the
+resolved agent already) and it **deletes** T17.14b's interim `Ask AI…` drawer
+row.
