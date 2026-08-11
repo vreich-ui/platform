@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-10T18:56:51.003Z",
+    "at": "2026-08-11T09:34:58.666Z",
     "from": "objects/content_item/by-id/req_agent_pdf_tool_whats_new_20260810_01.json",
-    "record_version": 5
+    "record_version": 10
   },
   "author": "Platform Documentation",
   "deck": "The document generator behind this platform just got three real upgrades: you can now see what every generation costs, set a hard spending limit, and lock AI-generated images to a consistent brand look.",
@@ -81,8 +81,8 @@
         "strategy": "summary"
       },
       "public": {
-        "body": "In the spirit of this site's own documentation standard, here's what this update does not yet prove. Longer, web-page-style PDFs (built from real HTML and CSS rather than a fixed template) are one step closer to publishable this update, but nobody has taken one all the way through a real validate-and-publish cycle yet -- so treat that path as unlocked, not proven. Searching stock photo libraries from directly inside the platform is fully built behind the scenes but still isn't reachable from here; for now, image generation is the supported path. Neither gap affects anything described above, which is confirmed working today.",
-        "title": "What's still catching up"
+        "body": "In the spirit of this site's own documentation standard, here's an honest look at what has and hasn't been proven. Update, same day: the longer, web-page-style PDF path (real HTML and CSS instead of a fixed template) has now been taken all the way through a real validate-and-publish cycle for the first time -- see the rendering-engines deep dive linked below, an 8-page document that is itself the proof. Searching stock photo libraries from directly inside the platform is still fully built behind the scenes but still isn't reachable from here; for now, image generation remains the supported path. Neither gap affects anything described above, which is confirmed working today.",
+        "title": "What's still catching up -- and what just got proven"
       },
       "visibility": "public"
     },
@@ -98,6 +98,21 @@
         "ctaLink": "https://kugel-platform.netlify.app/pdf/req_agent_pdf_tool_whats_new_20260810_01/d01fd8d3a8fbaeba1ef3260516701e83e2a6ef8e5f315cf50f1cf570ad371673.pdf",
         "ctaText": "Download the PDF catalog",
         "title": "Get the Full Feature Catalog"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_upd08",
+      "kind": "action",
+      "private": {
+        "intent": "convert",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "An 8-page companion document exploring how pdfme, chromium, and typst compare -- gradients, shadows, and real typography, rendered through chromium's newly-proven HTML/CSS pipeline rather than pdfme's fixed template schema.",
+        "ctaLink": "https://kugel-platform.netlify.app/pdf/req_agent_pdf_tool_whats_new_20260810_01/a1f1aea2431cc7d4b5fb7194c5940d6446db826a4df01f3e34e7ea81a2efee8d.pdf",
+        "ctaText": "Download the rendering deep dive (PDF)",
+        "title": "Read the Rendering Engines Deep Dive"
       },
       "visibility": "public"
     }
