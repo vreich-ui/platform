@@ -74,6 +74,9 @@ export const chatEventTypeSchema = z.enum([
   'run_finished',
   'run_error',
   'run_cancelled',
+  /** PF3: emitted when fallback mode degrades a turn from the CMS-Agent
+   *  engine to the provider path — loud by design, never silent. */
+  'engine_fallback',
   'events_trimmed',
 ]);
 export const chatEventSchema = z.object({

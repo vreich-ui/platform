@@ -20,7 +20,7 @@ import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { getAgentChatBlobStore, loadChatDoc } from '../lib/agent/chat-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
 import { CmsAgentClient } from '../lib/agent/cms-agent-client.js';
-import { cmsAgentEngine, providerEngine, resolveEffectiveChatMode, type TurnEngine } from '../lib/agent/engine.js';
+import { buildChatEngine, resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { runAgentLoop } from '../lib/agent/loop.js';
 import { adapterForProfile } from '../lib/agent/provider.js';
 import { z } from 'zod';
@@ -73,24 +73,24 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     exportRoot: binding.dataRoot,
   });
 
-  // PF2 — TurnEngine selection: governance override ?? CMS_AGENT_CHAT_MODE ?? 'off'.
-  // 'off' is the byte-identical legacy path; 'fallback' and 'required' both run
-  // the CMS-Agent engine here (fallback-on-error semantics land in PF3).
-  // Resolved PER HOP deliberately: the PF5 rollback lever (override → 'off') must
-  // take effect instantly, including for a run paused behind an approval card —
-  // safe because the transcript is provider-neutral, so either engine can
-  // continue any run. A failed governance read degrades to the env default,
-  // the same never-brick doctrine as resolveActivePolicies.
+  // PF2/PF3 — TurnEngine selection: governance override ?? CMS_AGENT_CHAT_MODE ?? 'off'.
+  // 'off' is the byte-identical legacy path; 'required' is CMS-Agent-only
+  // fail-fast; 'fallback' degrades to the provider path with a loud
+  // engine_fallback event (buildChatEngine). Resolved PER HOP deliberately:
+  // the PF5 rollback lever (override → 'off') must take effect instantly,
+  // including for a run paused behind an approval card — safe because the
+  // transcript is provider-neutral, so either engine can continue any run.
+  // A failed governance read degrades to the env default, the same
+  // never-brick doctrine as resolveActivePolicies.
   const governanceDoc = await getGovernanceDoc(governanceStore).catch(() => null);
   const { mode } = resolveEffectiveChatMode(governanceDoc?.cms_agent_chat_mode);
-  const engine: TurnEngine =
-    mode === 'off'
-      ? providerEngine(adapterForProfile(doc.run.profile))
-      : cmsAgentEngine({
-          client: cmsAgentClient,
-          projectId: getSiteIdentity().cmsAgentProjectId,
-          siteId: binding.siteId,
-        });
+  const engine = buildChatEngine({
+    mode,
+    adapter: adapterForProfile(doc.run.profile),
+    client: cmsAgentClient,
+    projectId: getSiteIdentity().cmsAgentProjectId,
+    siteId: binding.siteId,
+  });
 
   const result = await runAgentLoop(
     {

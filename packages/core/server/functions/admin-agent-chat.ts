@@ -25,6 +25,8 @@ import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
+import { isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
+import { humanCopyForCmsAgentError, resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import {
   approvePendingTool,
   cancelRun,
@@ -330,7 +332,18 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           objectId: doc.object_id,
           objectType: doc.object_type,
         });
-        const { chat_tools, learning_mode } = await resolveActivePolicies(await getGovernanceBlobStore(event));
+        const policies = await resolveActivePolicies(await getGovernanceBlobStore(event));
+        const { chat_tools, learning_mode } = policies;
+
+        // PF3: in required mode a missing bridge config fails AT SEND with a
+        // clear error instead of queueing a run that can only die in the hop.
+        const { mode: chatEngineMode } = resolveEffectiveChatMode(policies.cms_agent_chat_mode);
+        if (chatEngineMode === 'required' && !isCmsAgentConfigured()) {
+          return jsonResponse(503, {
+            error: humanCopyForCmsAgentError('cms_agent_not_configured'),
+            code: 'cms_agent_not_configured',
+          });
+        }
         const autonomy = resolveAutonomy(
           chat_tools as Record<string, ToolAutonomy> | undefined,
           profile.tool_autonomy_overrides

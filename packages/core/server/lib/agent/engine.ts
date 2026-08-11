@@ -19,7 +19,7 @@
  * error typing and the `retryableWithSameTurnId` rule — none of that is
  * re-derived here.
  */
-import type { ChatDoc, ChatMsg, ChatRun } from './chat-store.js';
+import { appendChatEvent, type ChatDoc, type ChatMsg, type ChatRun } from './chat-store.js';
 import type { ProviderAdapter, ProviderTurnResult, WireTool } from './provider.js';
 import {
   CMS_AGENT_BOUNDS,
@@ -94,6 +94,32 @@ export class CmsAgentEngineError extends Error {
 /** Wire codes become `cms_agent_<reason>` (plan §5.5); transport codes already carry the prefix. */
 const engineFailure = (failure: CmsAgentError): CmsAgentEngineError =>
   new CmsAgentEngineError(failure.code.startsWith('cms_agent_') ? failure.code : `cms_agent_${failure.code}`, failure.message);
+
+/**
+ * PF3 — the editor-facing sentence for each failure class. Editor-safe by the
+ * house rule: no raw ids, schemas, providers or internals; "nothing was
+ * changed" is literally true because the engine fails before any tool
+ * executes on this turn.
+ */
+export const humanCopyForCmsAgentError = (code: string): string => {
+  switch (code) {
+    case 'cms_agent_not_configured':
+      return 'The Publishing Agent service is not configured for this site — nothing was changed. Contact the owner.';
+    case 'cms_agent_auth_failed':
+      return 'The Publishing Agent service rejected this site’s credentials — nothing was changed. Contact the owner.';
+    case 'cms_agent_timeout':
+    case 'cms_agent_model_timeout':
+      return 'The Publishing Agent service took too long to respond — nothing was changed. Try again.';
+    case 'cms_agent_transcript_too_large':
+      return 'This conversation has grown too long for the Publishing Agent — start a new conversation to continue.';
+    case 'cms_agent_budget_exceeded':
+      return 'The Publishing Agent service declined this turn for budget reasons — nothing was changed. Contact the owner.';
+    case 'cms_agent_invalid_actor':
+      return 'This session could not be attributed to a signed-in editor — nothing was changed. Sign out and back in, then try again.';
+    default:
+      return 'The Publishing Agent service is unavailable — nothing was changed. Try again or contact the owner.';
+  }
+};
 
 // ─── transcript trim (constraints 4 + 5) ─────────────────────────────────────
 
@@ -229,6 +255,55 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
         continue;
       }
       throw engineFailure(result);
+    }
+  };
+};
+
+// ─── PF3 — mode-aware engine assembly ────────────────────────────────────────
+
+export type ChatEngineOptions = {
+  mode: CmsAgentChatMode;
+  /** The run's stamped profile adapter — the legacy path and the fallback target. */
+  adapter: ProviderAdapter;
+  client: CmsAgentTurnClient;
+  projectId: string;
+  siteId: string;
+  nowIso?: () => string;
+};
+
+/**
+ * The one place a mode becomes an engine:
+ *
+ *   off      → providerEngine only; the CMS-Agent client is never touched.
+ *   required → cmsAgentEngine only; a failure throws and the run errors —
+ *              by construction no code path can reach the provider adapter,
+ *              which is done-criteria E3's "provably never invoked".
+ *   fallback → cmsAgentEngine first; an engine-class failure appends a LOUD
+ *              `engine_fallback` event (code + human copy) to the doc and
+ *              retries the same turn on the provider path, restamping
+ *              run.engine. A non-engine error (a bug) still throws — only
+ *              known CMS-Agent failures may degrade.
+ */
+export const buildChatEngine = (options: ChatEngineOptions): TurnEngine => {
+  const provider = providerEngine(options.adapter);
+  if (options.mode === 'off') return provider;
+  const cms = cmsAgentEngine({ client: options.client, projectId: options.projectId, siteId: options.siteId });
+  if (options.mode === 'required') return cms;
+  const at = options.nowIso ?? (() => new Date().toISOString());
+  return async (input) => {
+    try {
+      return await cms(input);
+    } catch (error) {
+      if (!(error instanceof CmsAgentEngineError)) throw error;
+      appendChatEvent(input.doc, at(), 'engine_fallback', {
+        run_id: input.run.run_id,
+        code: error.code,
+        message: humanCopyForCmsAgentError(error.code),
+      });
+      const turn = await provider(input);
+      // The provider answered this turn — record what actually reasoned it.
+      input.run.engine = 'provider';
+      return turn;
     }
   };
 };

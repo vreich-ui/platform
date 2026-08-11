@@ -31,7 +31,7 @@ import {
   type ToolAutonomy,
 } from './chat-store.js';
 import { chatToolByName, CHAT_TOOLS, type ToolContext } from './tools.js';
-import type { TurnEngine } from './engine.js';
+import { CmsAgentEngineError, humanCopyForCmsAgentError, type TurnEngine } from './engine.js';
 import type { WireTool } from './provider.js';
 import {
   candidateSetView,
@@ -414,10 +414,16 @@ export const runAgentLoop = async (
       await persist();
     }
   } catch (error) {
-    appendChatEvent(doc, now(deps), 'run_error', {
-      run_id: run.run_id,
-      message: error instanceof Error ? error.message : String(error),
-    });
+    // PF3: a CMS-Agent engine failure carries a stable machine code plus
+    // editor-safe human copy; anything else keeps the raw message as before.
+    appendChatEvent(
+      doc,
+      now(deps),
+      'run_error',
+      error instanceof CmsAgentEngineError
+        ? { run_id: run.run_id, code: error.code, message: humanCopyForCmsAgentError(error.code) }
+        : { run_id: run.run_id, message: error instanceof Error ? error.message : String(error) }
+    );
     finishRun(doc, now(deps), 'error', runChips(doc, run));
     await persist();
     return { ok: false, status: doc.status, error: 'run failed' };

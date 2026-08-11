@@ -10,7 +10,11 @@
  */
 import '../../sites/drlurie/config/policy-bindings.js'; // W11: register site providers (tests exercise the drlurie-bound core)
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 process.env.ADMIN_EMAILS = process.env.ADMIN_EMAILS ?? 'wolf@example.com';
 
@@ -36,6 +40,7 @@ import {
 } from '../../packages/core/server/lib/agent/loop.js';
 import {
   cmsAgentEngine,
+  CmsAgentEngineError,
   providerEngine,
   type CmsAgentTurnClient,
 } from '../../packages/core/server/lib/agent/engine.js';
@@ -780,4 +785,50 @@ test('PF2: cmsAgentEngine drives an ask→approve→resume cycle with an event s
   const lastTwo = second.messages.slice(-2);
   assert.equal(lastTwo[0]!.role, 'assistant');
   assert.equal(lastTwo[1]!.role, 'tool');
+});
+
+// ─── PF3: failure semantics ─────────────────────────────────────────────────
+
+test('PF3: a CMS-Agent engine failure produces a coded run_error with human copy, the chat stays usable, and a healthy retry succeeds', async () => {
+  const { deps, send } = await setup([]);
+  deps.engine = async () => {
+    throw new CmsAgentEngineError('cms_agent_unreachable', 'CMS-Agent is unreachable from Platform.');
+  };
+  const sent = await send('Hello?');
+  const hop = await runAgentLoop(deps, 'obj:page_chat', sent.resume!.triggerToken);
+  assert.equal(hop.ok, false);
+
+  let doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.equal(doc.status, 'error');
+  const errorEvent = doc.events.find((event) => event.type === 'run_error')!;
+  assert.equal(errorEvent.detail!.code, 'cms_agent_unreachable');
+  assert.match(String(errorEvent.detail!.message), /Publishing Agent service is unavailable — nothing was changed/);
+  // Editor-facing copy carries no internals and no raw technical message.
+  assert.equal(/unreachable from Platform/i.test(String(errorEvent.detail!.message)), false);
+
+  // The service "recovers": the same chat accepts a new send and completes.
+  deps.engine = providerEngine(async () => ({ text: 'Recovered.', toolCalls: [], outputTokens: 1 }));
+  const retry = await send('Try again.');
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  const hop2 = await runAgentLoop(deps, 'obj:page_chat', retry.resume!.triggerToken);
+  assert.equal(hop2.status, 'idle');
+  doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.equal(doc.runs[doc.runs.length - 1]!.outcome, 'completed');
+});
+
+test('PF3: the send path gates required mode on configuration (source-level assertion, house pattern)', async () => {
+  // Walk up to the repo root — the compiled test runs from .tmp, where only
+  // .js exists (the admin-governance.test.ts pattern for source assertions).
+  let root = path.dirname(fileURLToPath(import.meta.url));
+  while (root !== path.dirname(root)) {
+    if (existsSync(path.join(root, 'netlify.toml')) && existsSync(path.join(root, 'packages/core/admin'))) break;
+    root = path.dirname(root);
+  }
+  const source = await readFile(path.join(root, 'packages/core/server/functions/admin-agent-chat.ts'), 'utf8');
+  // The gate must check the effective mode, the configuration predicate, and
+  // answer 503 with the stable code BEFORE startRun can mint a doomed run.
+  assert.match(source, /resolveEffectiveChatMode\(policies\.cms_agent_chat_mode\)/);
+  assert.match(source, /chatEngineMode === 'required' && !isCmsAgentConfigured\(\)/);
+  assert.match(source, /humanCopyForCmsAgentError\('cms_agent_not_configured'\)/);
+  assert.ok(source.indexOf("!isCmsAgentConfigured()") < source.indexOf('await startRun('));
 });
