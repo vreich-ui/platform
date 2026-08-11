@@ -32,6 +32,7 @@ import {
   type ProseMirrorMark,
 } from '../richtext/prosemirror.js';
 import type { RichTextV1Document } from '../../lib/richtext/rich-text-v1.js';
+import { BLOCKS } from '@contentful/rich-text-types';
 import {
   ICON_BOLD,
   ICON_CODE,
@@ -151,6 +152,66 @@ export const serializeToRichTextV1 = (pmDoc: ProseMirrorNode): RichTextV1Documen
 
 /** rich_text.v1 → TipTap/ProseMirror JSON for loading into the editor. */
 export const deserializeFromRichTextV1 = (doc: RichTextV1Document): ProseMirrorNode => richTextV1ToProseMirror(doc);
+
+// ─── plain string ↔ rich_text.v1 (the fix-3 upgrade) ───────────────────────────
+
+/**
+ * A plain-text body as a rich_text.v1 document — the exact inverse of
+ * render-nodes.ts's `plainTextParagraphs`: blank lines split paragraphs, a
+ * single '\n' stays inside the text value (which is how rich_text.v1 encodes a
+ * hard break, and what the renderer emits as `<br/>`). So the upgraded
+ * document renders byte-identically to the string it replaces — pinned by a
+ * test against the real renderer.
+ *
+ * The one divergence: an EMPTY body becomes one empty paragraph rather than
+ * nothing, because the editor needs somewhere to put the caret.
+ */
+export const plainStringToRichTextV1 = (text: string): RichTextV1Document => {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  return {
+    nodeType: BLOCKS.DOCUMENT,
+    data: {},
+    content: (paragraphs.length ? paragraphs : ['']).map((value) => ({
+      nodeType: BLOCKS.PARAGRAPH,
+      data: {},
+      content: value ? [{ nodeType: 'text' as const, value, marks: [], data: {} }] : [],
+    })),
+  };
+};
+
+type RichTextV1Block = RichTextV1Document['content'][number];
+
+/**
+ * Does this document carry anything a plain string could NOT hold? Any mark,
+ * any link, any block that is not a paragraph. This is what decides whether an
+ * edit upgrades the field's shape — Wolf, 2026-08-11: "upgrade on first
+ * format", not on first edit.
+ */
+export const richTextV1HasFormatting = (doc: RichTextV1Document): boolean =>
+  doc.content.some((block: RichTextV1Block) => {
+    if (block.nodeType !== BLOCKS.PARAGRAPH) return true;
+    return block.content.some((inline) => inline.nodeType !== 'text' || inline.marks.length > 0);
+  });
+
+/**
+ * The document back as the plain string it round-trips to (paragraphs joined
+ * by a blank line). Only meaningful when `richTextV1HasFormatting` is false;
+ * total anyway, so a caller can never get an exception instead of text.
+ */
+export const richTextV1ToPlainString = (doc: RichTextV1Document): string => {
+  const blockText = (node: { value?: unknown; content?: unknown }): string => {
+    if (typeof node.value === 'string') return node.value;
+    const content = Array.isArray(node.content) ? (node.content as Array<{ value?: unknown; content?: unknown }>) : [];
+    return content.map(blockText).join('');
+  };
+  return doc.content
+    .map((block) => blockText(block))
+    .filter(Boolean)
+    .join('\n\n');
+};
 
 // ─── the inline formatting toolbar ─────────────────────────────────────────────
 
@@ -626,6 +687,10 @@ export const buildInlineToolbar = (
 export interface RichTextEditorHandle {
   /** Current document as rich_text.v1 (already sanitized to grammar). */
   getRichTextV1(): RichTextV1Document;
+  /** True while the document carries no formatting a plain string could not hold. */
+  isPlainText(): boolean;
+  /** The document as the plain string it round-trips to (the fix-3 downgrade). */
+  getPlainText(): string;
   /** Focus the editable surface. */
   focus(): void;
   /** Tear down the TipTap instance (call on panel close — avoids leaks). */
@@ -700,6 +765,8 @@ export const createRichTextEditor = async (options: CreateRichTextEditorOptions)
 
   return {
     getRichTextV1,
+    isPlainText: () => !richTextV1HasFormatting(getRichTextV1()),
+    getPlainText: () => richTextV1ToPlainString(getRichTextV1()),
     focus: () => editor.commands.focus(),
     destroy: () => editor.destroy(),
     buildToolbar: (mode, toolbarOptions) =>

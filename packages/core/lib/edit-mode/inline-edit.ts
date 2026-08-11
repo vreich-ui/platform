@@ -98,11 +98,58 @@ export const derivePrimaryInlineField = (
  *     the renderer escapes it, so a <strong> would ship as literal markup;
  *   - a raw HTML section body gets no bubble at all: its surface is the markup
  *     itself, and formatting it belongs with the section rich-text work.
+ *
+ * The exception is an article node's `body`: `content_item` bodies already
+ * accept EITHER shape (content-item-v1.ts) and render-nodes.ts renders both,
+ * so a plain string there can become a document the moment formatting is
+ * asked for — Wolf, 2026-08-11: "Yes — upgrade on first format."
  */
-export const inlineToolbarModeFor = (field: InlineField): InlineToolbarMode => {
+export const inlineToolbarModeFor = (field: InlineField, objectType: string): InlineToolbarMode => {
   if (field.kind === 'doc') return 'rich';
   if (field.kind === 'html') return 'none';
-  return 'plain';
+  return isUpgradableBody(field, objectType) ? 'upgrade' : 'plain';
+};
+
+/**
+ * A plain string field whose store shape may become `rich_text.v1`. Only
+ * article-node bodies qualify: they are the one field whose schema is a union
+ * of both shapes, so no migration and no schema change is involved.
+ */
+export const isUpgradableBody = (field: InlineField, objectType: string): boolean =>
+  field.kind === 'plain' && objectType === 'content_item' && field.key === 'body';
+
+/**
+ * A plain body as the renderer normalizes it: blank lines split paragraphs,
+ * each paragraph trimmed, empties dropped. Two strings with the same
+ * normalization render identically, so a round trip through the editor that
+ * lands back here changed nothing.
+ */
+export const normalizePlainBody = (text: string): string =>
+  text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .join('\n\n');
+
+/**
+ * What an upgradable body actually commits, given the state of the surface:
+ *
+ *   - the document, once it carries formatting a string could not hold — this
+ *     IS the upgrade, and it is ONE `update_node` op with no schema change and
+ *     no migration (one-way: nothing downgrades it again);
+ *   - the ORIGINAL string, byte for byte, when nothing textual changed, so
+ *     opening a block and clicking away can never rewrite its whitespace;
+ *   - otherwise the edited plain string, exactly as before this task.
+ */
+export const upgradableCommitValue = (
+  before: unknown,
+  doc: unknown,
+  plain: string,
+  hasFormatting: boolean
+): unknown => {
+  if (hasFormatting) return doc;
+  if (typeof before === 'string' && normalizePlainBody(before) === plain) return before;
+  return plain;
 };
 
 type RichTextNode = { value?: unknown; content?: unknown };

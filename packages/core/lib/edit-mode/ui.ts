@@ -48,6 +48,7 @@ import {
   inlineEditOps,
   inlineToolbarModeFor,
   inlineValueBlockTexts,
+  upgradableCommitValue,
   shouldCaptureSelection,
   NON_COPY_KEY_RE,
   type InlineField,
@@ -2636,7 +2637,13 @@ export const mountEditMode = (options: MountOptions): void => {
 
   /** Read the surface back: a rich-text document, or the text the editor holds. */
   const inlineEditValue = (edit: InlineEditState): unknown => {
-    if (edit.field.kind === 'doc') return edit.richText?.getRichTextV1();
+    const rich = edit.richText;
+    if (rich) {
+      if (edit.field.kind === 'doc') return rich.getRichTextV1();
+      // An upgradable plain body: it stays a string until the document
+      // actually carries formatting (Wolf: "upgrade on first format").
+      return upgradableCommitValue(edit.before, rich.getRichTextV1(), rich.getPlainText(), !rich.isPlainText());
+    }
     // innerText keeps line breaks (blank line = new paragraph for article
     // bodies); nbsp from contenteditable normalises back to a plain space.
     return (edit.host.innerText ?? '')
@@ -2767,7 +2774,12 @@ export const mountEditMode = (options: MountOptions): void => {
    * classes, so the site's `:where(p, ul, h2 …)` typography keeps matching and
    * the block's siblings and section chrome stay on the page throughout.
    */
-  const mountInlineHost = (region: HTMLElement, field: InlineField, before: unknown): HTMLElement | undefined => {
+  const mountInlineHost = (
+    region: HTMLElement,
+    field: InlineField,
+    before: unknown,
+    richHost: boolean
+  ): HTMLElement | undefined => {
     const elements = findBlockElements(region, inlineValueBlockTexts(field, before));
     if (!elements) return undefined;
     const [first] = elements;
@@ -2775,10 +2787,9 @@ export const mountEditMode = (options: MountOptions): void => {
     // A run spanning parents is not one box to replace — bail rather than
     // restructure the block.
     if (!parent || elements.some((element) => element.parentNode !== parent)) return undefined;
-    // A rich_text.v1 surface emits its own <p>/<h2>/<ul> children, so its host
-    // is a bare wrapper (the prose rules are descendant selectors and keep
+    // A rich-text surface emits its own <p>/<h2>/<ul> children, so its host is
+    // a bare wrapper (the prose rules are descendant selectors and keep
     // matching). Every other surface IS the element it replaces.
-    const richHost = field.kind === 'doc';
     const host = document.createElement(richHost ? 'div' : first.tagName.toLowerCase());
     if (!richHost && first.className) host.className = first.className;
     host.classList.add('dl-em-inline');
@@ -2814,8 +2825,12 @@ export const mountEditMode = (options: MountOptions): void => {
       return;
     }
     const before = unit.currentData[field.key];
+    const toolbarMode = inlineToolbarModeFor(field, target.objectType);
+    // A document surface, or a plain body that may become one: either way the
+    // editor renders its own blocks, so it gets a wrapper host.
+    const richSurface = field.kind === 'doc' || toolbarMode === 'upgrade';
     const snapshot = snapshotRegion(region);
-    const host = mountInlineHost(region, field, before);
+    const host = mountInlineHost(region, field, before, richSurface);
     if (!host) {
       // The field's current value could not be located in the block's own
       // rendering (an empty value, or copy the component transforms). Editing
@@ -2838,25 +2853,32 @@ export const mountEditMode = (options: MountOptions): void => {
     };
     inlineEdit = edit;
 
-    const toolbarMode = inlineToolbarModeFor(field);
     const toolbarOptions = { anchor: () => edit.host, topGuard: INLINE_TOOLBAR_TOP_GUARD };
 
-    if (field.kind === 'doc') {
+    if (richSurface) {
       // The grammar-bound TipTap editor, imported only when one is needed so
       // @tiptap never enters the canvas's base bundle. Allowlist, paste
       // sanitizer and https-only links come with it, unchanged.
-      const { createRichTextEditor } = await import('./richtext-editor.js');
+      const { createRichTextEditor, plainStringToRichTextV1 } = await import('./richtext-editor.js');
       if (inlineEdit !== edit) return; // cancelled while the chunk loaded
-      edit.richText = await createRichTextEditor({
-        element: host,
-        doc: before as Parameters<typeof createRichTextEditor>[0]['doc'],
-      });
+      // An upgradable plain body is loaded as the document it round-trips to;
+      // whether it SAVES as one is decided at commit, by whether formatting
+      // was actually applied.
+      const doc =
+        field.kind === 'doc'
+          ? (before as Parameters<typeof createRichTextEditor>[0]['doc'])
+          : plainStringToRichTextV1(typeof before === 'string' ? before : '');
+      edit.richText = await createRichTextEditor({ element: host, doc });
       if (inlineEdit !== edit) {
         edit.richText.destroy();
         return;
       }
       edit.toolbar = edit.richText.buildToolbar(toolbarMode, toolbarOptions);
       edit.richText.focus();
+      // Land the caret where the pointer was: ProseMirror adopts a DOM
+      // selection set inside its own editable, so the gesture reads like a
+      // click in text rather than a jump to the top of the block.
+      placeCaret(host, at);
     } else {
       host.setAttribute('contenteditable', 'plaintext-only');
       host.textContent = typeof before === 'string' ? before : '';

@@ -21,7 +21,12 @@ import {
   INLINE_FORMAT_COMMANDS,
   INLINE_TOOLBAR_BUTTONS,
   inlineToolbarPlacement,
+  plainStringToRichTextV1,
+  richTextV1HasFormatting,
+  richTextV1ToPlainString,
 } from './richtext-editor.js';
+import { renderArticleNodes } from '../article-object/render-nodes.js';
+import type { ContentItemBody } from '../../schema/bodies/content-item-v1.js';
 import { richTextV1Schema } from '../../lib/richtext/rich-text-v1.js';
 import type { ProseMirrorNode } from '../richtext/prosemirror.js';
 import { BLOCKS, INLINES, MARKS } from '@contentful/rich-text-types';
@@ -285,5 +290,87 @@ describe('inlineToolbarPlacement', () => {
     const tiny = inlineToolbarPlacement({ top: 20, bottom: 40, left: 5, width: 10 }, size, viewportTiny, 46);
     assert.strictEqual(tiny.left, 8, 'wider than the viewport: pinned to the left edge, never negative');
     assert.ok(tiny.top >= 46 && tiny.top + size.height <= viewportTiny.height, `top ${tiny.top} stays in the band`);
+  });
+});
+
+// ── plain string → rich_text.v1 (the fix-3 upgrade, Wolf: "upgrade on first format")
+
+describe('plainStringToRichTextV1 is the exact inverse of the plain-text renderer', () => {
+  const asArticleHtml = (body: unknown): string =>
+    renderArticleNodes('req_a', {
+      nodes: [{ id: 'n_1', kind: 'content', public: { body } }],
+    } as unknown as ContentItemBody).html;
+
+  const bodies = [
+    'One paragraph.',
+    'First.\n\nSecond.',
+    'Line one\nline two',
+    'First.\n\n\n  Padded second.  ',
+    "Ampersands & angle <brackets> and 'quotes'.",
+    'Trailing break\n\nlast.',
+  ];
+
+  for (const body of bodies) {
+    it(`renders identically to the string it replaces: ${JSON.stringify(body)}`, () => {
+      const doc = plainStringToRichTextV1(body);
+      // The document validates against the store schema…
+      assert.doesNotThrow(() => richTextV1Schema.parse(doc));
+      // …and the article renders byte-identically either way, which is what
+      // makes the upgrade invisible to a reader.
+      assert.strictEqual(asArticleHtml(doc), asArticleHtml(body));
+    });
+  }
+
+  it('gives an empty body one empty paragraph, so the editor has a caret home', () => {
+    assert.deepStrictEqual(plainStringToRichTextV1(''), {
+      nodeType: 'document',
+      data: {},
+      content: [{ nodeType: 'paragraph', data: {}, content: [] }],
+    });
+  });
+
+  it('round-trips back to the normalized plain string', () => {
+    assert.strictEqual(richTextV1ToPlainString(plainStringToRichTextV1('a\n\n\n b ')), 'a\n\nb');
+    assert.strictEqual(richTextV1ToPlainString(plainStringToRichTextV1('one\ntwo')), 'one\ntwo');
+  });
+});
+
+describe('richTextV1HasFormatting — what decides the shape upgrade', () => {
+  const para = (...content: unknown[]) => ({ nodeType: 'paragraph', data: {}, content });
+  const text = (value: string, marks: Array<{ type: string }> = []) => ({
+    nodeType: 'text',
+    value,
+    marks,
+    data: {},
+  });
+  const doc = (...content: unknown[]) => ({ nodeType: 'document', data: {}, content }) as never;
+
+  it('is false for paragraphs of unmarked text — including hard breaks', () => {
+    assert.strictEqual(richTextV1HasFormatting(doc(para(text('a\nb')), para(text('c')))), false);
+    assert.strictEqual(richTextV1HasFormatting(doc()), false);
+  });
+
+  it('is true for a mark', () => {
+    assert.strictEqual(richTextV1HasFormatting(doc(para(text('a', [{ type: 'bold' }])))), true);
+    assert.strictEqual(richTextV1HasFormatting(doc(para(text('a', [{ type: 'code' }])))), true);
+  });
+
+  it('is true for a link', () => {
+    const link = { nodeType: 'hyperlink', data: { uri: 'https://example.com' }, content: [text('a')] };
+    assert.strictEqual(richTextV1HasFormatting(doc(para(link))), true);
+  });
+
+  it('is true for a heading or a list', () => {
+    assert.strictEqual(richTextV1HasFormatting(doc({ nodeType: 'heading-2', data: {}, content: [text('a')] })), true);
+    assert.strictEqual(
+      richTextV1HasFormatting(
+        doc({
+          nodeType: 'unordered-list',
+          data: {},
+          content: [{ nodeType: 'list-item', data: {}, content: [para(text('a'))] }],
+        })
+      ),
+      true
+    );
   });
 });
