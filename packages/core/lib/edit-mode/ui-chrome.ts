@@ -58,20 +58,34 @@ body.dl-em-on{padding-right:var(--dlem-shift,0px)}
    read the UNDISPLACED column, so lifting and restoring the displacement in
    one task can never animate. */
 body.dl-em-measuring{transition:none!important}
-.dl-em-bar{position:fixed;top:0;left:0;right:var(--dlem-shift,0px);z-index:99990;display:none;align-items:center;gap:10px;
-  padding:6px 14px;background:var(--dlem-surface-2);color:var(--dlem-text);font:600 12.5px/1.4 var(--dlem-font);
-  border-bottom:1px solid var(--dlem-border);box-shadow:0 2px 12px rgba(0,0,0,.12)}
-/* The bar OVERLAYS the page vertically — it does not push it down; the old
-   padding-top:38px here shifted every page down 38px the moment edit mode came
-   on. Horizontally it is the opposite: the bar is fixed, so it takes no notice
-   of the page box at all unless told to, and its right edge follows the
-   displacement (W17 Fix 4) — otherwise it is the one thing on screen still
-   spanning the width the page just left. */
+/* ── the toolbar (T17.6b) ────────────────────────────────────────────────────
+   The PDF draws three floating pills at the viewport's top right — "Editing"
+   "Attention N" "Release" — over the page, not a full-width strip pushing it
+   down. Wolf's 2026-08-11 ruling on the brief's Q1 ("keep 'exit' visible")
+   keeps "Exit" as a fourth always-visible pill rather than folding it into the
+   "Editing" popover. .dl-em-bar is now just the positioning cluster: it
+   carries no background, no border, no padding of its own — every visible
+   surface is a .dl-em-pill (or the popover / toast hung off it). */
+.dl-em-bar{position:fixed;top:10px;right:calc(10px + var(--dlem-shift,0px));z-index:99990;display:none;
+  align-items:flex-start;gap:8px;font:600 12.5px/1.4 var(--dlem-font)}
+/* The bar overlays the page — it never claims a box-model property on <body>
+   (guarded by displacement-registration.test.ts) — and its right edge follows
+   the page displacement (W17 Fix 4) the same way every other fixed edit-mode
+   surface does, so it is never the one thing left behind when the page moves. */
 body.dl-em-on .dl-em-bar{display:flex}
-.dl-em-bar .dl-em-dot{width:8px;height:8px;border-radius:50%;background:var(--dlem-accent);flex:none}
-.dl-em-bar .dl-em-who{color:var(--dlem-muted);font-weight:400}
-.dl-em-bar .dl-em-status{flex:1;text-align:center;color:var(--dlem-muted);font-weight:400;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
+.dl-em-pill{position:relative;display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;
+  border-radius:999px;padding:7px 14px;font:inherit;color:var(--dlem-heading);
+  background:color-mix(in srgb,var(--dlem-surface) 32%,transparent);
+  -webkit-backdrop-filter:blur(9px) saturate(1.3);backdrop-filter:blur(9px) saturate(1.3);
+  box-shadow:0 2px 12px color-mix(in srgb,var(--dlem-text) 12%,transparent);
+  outline:1px solid color-mix(in srgb,var(--dlem-text) 16%,transparent);outline-offset:-1px}
+.dl-em-pill:hover{outline-color:var(--dlem-accent);color:var(--dlem-accent)}
+.dl-em-pill:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:2px}
+.dl-em-pill[aria-expanded="true"]{outline-color:var(--dlem-accent);color:var(--dlem-accent)}
+.dl-em-pill.dl-em-primary{background:var(--dlem-accent);outline-color:var(--dlem-accent);color:var(--dlem-accent-ink)}
+.dl-em-pill.dl-em-primary:hover{filter:brightness(1.08);color:var(--dlem-accent-ink)}
+.dl-em-pill:disabled{opacity:.5;cursor:not-allowed}
+.dl-em-pill .dl-em-dot{width:8px;height:8px;border-radius:50%;background:var(--dlem-accent);flex:none}
 .dl-em-btn{border:1px solid var(--dlem-border);border-radius:6px;background:transparent;color:var(--dlem-text);
   padding:4px 10px;font:600 12px var(--dlem-font);cursor:pointer}
 .dl-em-btn:hover{border-color:var(--dlem-accent);color:var(--dlem-accent)}
@@ -79,9 +93,42 @@ body.dl-em-on .dl-em-bar{display:flex}
 .dl-em-btn.dl-em-primary:hover{filter:brightness(1.08);color:var(--dlem-accent-ink)}
 .dl-em-btn:disabled{opacity:.5;cursor:not-allowed}
 .dl-em-count{display:inline-flex;min-width:17px;height:17px;align-items:center;justify-content:center;
-  margin-left:6px;padding:0 5px;border-radius:9px;background:color-mix(in srgb,var(--dlem-text) 40%,transparent);
+  margin-left:2px;padding:0 5px;border-radius:9px;background:color-mix(in srgb,var(--dlem-text) 40%,transparent);
   color:var(--dlem-surface);font-size:10.5px}
+.dl-em-count[hidden]{display:none}
 .dl-em-count.dl-em-hot{background:var(--dlem-draft);color:#fff}
+/* The "Editing" popover (T17.6b): Pending, the signed-in email and the last
+   status line (Q2/Q3, built as proposed). A child of the pill so it needs no
+   --dlem-shift compensation of its own — it inherits the pill's fixed
+   positioning context and simply hangs off it. */
+.dl-em-popover{position:absolute;top:100%;left:0;margin-top:8px;display:none;flex-direction:column;gap:2px;
+  min-width:220px;padding:6px;border-radius:12px;
+  background:color-mix(in srgb,var(--aw-color-bg-surface,#f1f5f4) 78%,transparent);
+  -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
+  border:1px solid color-mix(in srgb,var(--aw-color-primary,rgb(20 122 140)) 18%,transparent);
+  box-shadow:var(--dlem-shadow);color:var(--dlem-text);font:12.5px/1.5 var(--dlem-font)}
+.dl-em-popover.dl-em-open{display:flex}
+.dl-em-popover-row{padding:7px 9px;border-radius:8px}
+.dl-em-popover-static{color:var(--dlem-muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl-em-popover-btn{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:none;
+  background:transparent;color:var(--dlem-text);cursor:pointer;font:600 12px var(--dlem-font);text-align:left}
+.dl-em-popover-btn:hover{background:color-mix(in srgb,var(--dlem-text) 8%,transparent)}
+.dl-em-popover-btn .dl-em-count{margin-left:0}
+/* The status line's toast (T17.6b, spec §9): a transient role="status"
+   region under the cluster, fading after TOAST_VISIBLE_MS. Opacity only —
+   never display:none — so the live region stays in the accessibility tree
+   the whole time and a screen reader can announce a text change at any
+   point, faded or not. A child of the bar for the same reason the popover
+   is: it inherits the fixed positioning (and the shift compensation) for
+   free. */
+.dl-em-toast{position:absolute;top:100%;right:0;margin-top:8px;max-width:320px;padding:7px 12px;border-radius:10px;
+  background:color-mix(in srgb,var(--dlem-surface) 32%,transparent);
+  -webkit-backdrop-filter:blur(9px) saturate(1.3);backdrop-filter:blur(9px) saturate(1.3);
+  outline:1px solid color-mix(in srgb,var(--dlem-text) 16%,transparent);outline-offset:-1px;
+  color:var(--dlem-heading);font:600 11.5px var(--dlem-font);
+  box-shadow:0 2px 12px color-mix(in srgb,var(--dlem-text) 12%,transparent);
+  opacity:0;pointer-events:none;transition:opacity .2s ease}
+.dl-em-toast.dl-em-toast-visible{opacity:1}
 .dl-em-fab{position:fixed;right:calc(18px + var(--dlem-shift,0px));bottom:18px;z-index:99990;width:44px;height:44px;border-radius:50%;
   border:none;background:var(--dlem-accent);color:var(--dlem-accent-ink);font:18px var(--dlem-font);cursor:pointer;
   box-shadow:var(--dlem-shadow)}

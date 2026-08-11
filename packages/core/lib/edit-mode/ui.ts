@@ -97,6 +97,7 @@ import {
   type RailSurfaceKind,
 } from './rail-layout.js';
 import { listMarginaliaThreads } from '../admin/marginalia-client.js';
+import { fadeToast, postStatus, toolbarLayout, TOAST_VISIBLE_MS, type ToastState } from './toolbar-layout.js';
 import type { MarginaliaThreadWithComments } from '../../schema/marginalia-v1.js';
 import {
   STYLES,
@@ -141,15 +142,21 @@ const RAIL_W = 344;
 const RAIL_MIN_W = 260;
 const RAIL_GAP = 24;
 const RAIL_PAD = 8;
-/** Vertical gap between packed bubbles, and the rail's top clearance under the bar. */
+/** Vertical gap between packed bubbles, and the rail's top clearance under the pill cluster. */
 const RAIL_STACK_GAP = 8;
-const RAIL_TOP = 46;
+/**
+ * T17.6b: the rail's top clearance is no longer a 46px constant — the bar is
+ * a floating pill cluster now, not a full-width strip whose height never
+ * changed, so the real clearance is MEASURED off it (`railTopPx`, set inside
+ * `remeasureRail`). This is only the value used before the first measurement
+ * (and if the bar is ever unmeasurable) — close to the old constant on
+ * purpose, so a page painted before the first layout pass looks unchanged.
+ */
+const RAIL_TOP_FALLBACK = 46;
 /** Below this viewport width there is no rail — the bottom sheet serves (spec §1.3). */
 const RAIL_SHEET_FLOOR = 900;
 /** Gutter-marker centre, left of the block's leading edge (spec §4.2). */
 const GUTTER_X = 28;
-/** The formatting bubble flips below the selection rather than hide under the bar. */
-const INLINE_TOOLBAR_TOP_GUARD = RAIL_TOP;
 /** How long the page takes to glide to a new displacement — the CSS transition's own duration. */
 const DISPLACE_MS = 180;
 /** Slack on the settle timer: the fallback for a glide that never reports its end. */
@@ -385,22 +392,51 @@ export const mountEditMode = (options: MountOptions): void => {
     document.head.append(style);
   }
 
-  // ── chrome
+  // ── chrome: the toolbar's floating pills (T17.6b) ────────────────────────
+  // The PDF draws three — `● Editing`, `Attention N`, `Release` — at the
+  // viewport's top right, over the page, not pushing it down. Wolf's
+  // 2026-08-11 ruling on the brief's Q1 — "keep 'exit' visible" — keeps
+  // `Exit` as its own always-visible pill rather than folding it into the
+  // `● Editing` popover, so this is the four-pill variant: Exit is never
+  // hidden behind a popover, a menu, or a hover state. `Pending N` and the
+  // signed-in email move into the `● Editing` popover (Q2, built as
+  // proposed); the status line becomes a transient toast below (Q3, built as
+  // proposed) — see `setStatus`. `toolbarLayout` (toolbar-layout.ts) is the
+  // pure plan this markup renders and `applyToolbarPlan` keeps in sync.
   const bar = document.createElement('div');
   bar.className = 'dl-em-bar';
   bar.innerHTML =
-    `<span class="dl-em-dot"></span><span>Edit mode</span>` +
-    `<span class="dl-em-who">${escapeHtml(email)}</span>` +
-    `<span class="dl-em-status" data-em-status></span>` +
-    `<button class="dl-em-btn" data-em-tray-toggle>Pending<span class="dl-em-count" data-em-count>0</span></button>` +
+    `<button class="dl-em-pill" data-em-editing-toggle aria-haspopup="menu" aria-expanded="false">` +
+    `<span class="dl-em-dot"></span><span>Editing</span>` +
+    `<span class="dl-em-count" data-em-count hidden></span></button>` +
+    `<div class="dl-em-popover" data-em-popover>` +
+    `<div class="dl-em-popover-row dl-em-popover-static" data-em-who>${escapeHtml(email)}</div>` +
+    `<div class="dl-em-popover-row dl-em-popover-static" data-em-popover-status>No recent activity.</div>` +
+    `<button class="dl-em-popover-row dl-em-popover-btn" data-em-tray-toggle>Pending` +
+    `<span class="dl-em-count" data-em-count-pop>0</span></button>` +
+    `</div>` +
     // Attention ≠ Pending: open comment threads on THIS page, versus objects
     // with unpublished changes anywhere. Both quantities, both controls
-    // (spec §4.3; the toolbar's reduction to three pills is T17.6b, not this).
-    `<button class="dl-em-btn" data-em-attention aria-pressed="false" title="Open comments on this page">` +
+    // (spec §4.3 — behaviour unchanged by this task).
+    `<button class="dl-em-pill" data-em-attention aria-pressed="false" title="Open comments on this page">` +
     `Attention<span class="dl-em-count" data-em-attention-count>0</span></button>` +
-    `<button class="dl-em-btn dl-em-primary" data-em-release ${allowPublish ? '' : 'disabled title="Requires publisher role"'}>Release to production</button>` +
-    `<button class="dl-em-btn" data-em-exit>Exit</button>`;
+    `<button class="dl-em-pill dl-em-primary" data-em-release ${allowPublish ? '' : 'disabled'}>Release</button>` +
+    `<button class="dl-em-pill" data-em-exit>Exit</button>`;
   document.body.append(bar);
+
+  // The status line's toast: `role="status"`/`aria-live="polite"`, created
+  // ONCE and never removed — a screen reader only announces a live region
+  // that already existed when its text changed (spec §9). A child of `bar`
+  // (not the popover) so it inherits the cluster's own fixed position —
+  // including its `--dlem-shift` compensation — for free, with no second
+  // position:fixed rule to keep in register. It fades after ~4s; the
+  // popover's status row above keeps the same text so a missed confirmation
+  // is still readable after the fade.
+  const toast = document.createElement('div');
+  toast.className = 'dl-em-toast';
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+  bar.append(toast);
 
   const fab = document.createElement('button');
   fab.className = 'dl-em-fab';
@@ -495,8 +531,12 @@ export const mountEditMode = (options: MountOptions): void => {
   document.body.append(tray);
 
   const q = <T extends HTMLElement>(root: ParentNode, selector: string): T => root.querySelector(selector) as T;
-  const statusEl = q<HTMLElement>(bar, '[data-em-status]');
+  const editingToggle = q<HTMLButtonElement>(bar, '[data-em-editing-toggle]');
+  const editingPopover = q<HTMLElement>(bar, '[data-em-popover]');
+  const popoverStatusEl = q<HTMLElement>(bar, '[data-em-popover-status]');
   const countEl = q<HTMLElement>(bar, '[data-em-count]');
+  const popoverCountEl = q<HTMLElement>(bar, '[data-em-count-pop]');
+  const releaseButton = q<HTMLButtonElement>(bar, '[data-em-release]');
   const identEl = q<HTMLElement>(panel, '[data-em-ident]');
   const logEl = q<HTMLElement>(panel, '[data-em-log]');
   const inputEl = q<HTMLTextAreaElement>(panel, '[data-em-input]');
@@ -504,8 +544,67 @@ export const mountEditMode = (options: MountOptions): void => {
   const rowsEl = q<HTMLElement>(tray, '[data-em-rows]');
   const deployEl = q<HTMLElement>(tray, '[data-em-deploy]');
 
+  /**
+   * The `● Editing` popover, open/closed. Opens on the pill; closes on
+   * Escape, an outside click, or activating a row (spec: T17.6b brief) — the
+   * listeners for those live near the pill's own click handler, below.
+   */
+  let editingPopoverOpen = false;
+  const setEditingPopoverOpen = (open: boolean): void => {
+    editingPopoverOpen = open;
+    editingPopover.classList.toggle('dl-em-open', open);
+    editingToggle.setAttribute('aria-expanded', String(open));
+  };
+
+  /**
+   * T17.6b: render the toolbar from `toolbarLayout`'s plan rather than
+   * scattering `pendingCount > 0` / `canPublish` checks through the DOM code.
+   * Called whenever `pendingRows` changes (`refreshPending`) and once at
+   * mount so Release starts in the right state.
+   */
+  const applyToolbarPlan = (): void => {
+    const plan = toolbarLayout({
+      pendingCount: pendingRows.length,
+      attentionCount: pageAttentionTotal(railRows),
+      canPublish: allowPublish,
+    });
+    const editing = plan.pills.find((pill) => pill.key === 'editing');
+    countEl.hidden = editing?.badge === undefined;
+    countEl.textContent = String(editing?.badge ?? '');
+    countEl.classList.toggle('dl-em-hot', editing?.badge !== undefined);
+    const release = plan.pills.find((pill) => pill.key === 'release');
+    releaseButton.disabled = release?.disabled ?? !allowPublish;
+    releaseButton.title = release?.title ?? '';
+    const pending = plan.popoverRows.find((row) => row.key === 'pending');
+    popoverCountEl.textContent = String(pending?.badge ?? 0);
+  };
+
+  /**
+   * The status line, re-homed (T17.6b): a transient toast (`role="status"
+   * aria-live="polite"`, spec §9) that fades after `TOAST_VISIBLE_MS`, with
+   * the SAME text kept, unfaded, in the `● Editing` popover — a missed
+   * confirmation is still readable there. `postStatus`/`fadeToast`
+   * (toolbar-layout.ts) are the pure model: fading only ever flips
+   * `visible`, never clears `message`. `setStatus`'s signature is unchanged;
+   * only its sink is.
+   */
+  let toastState: ToastState = postStatus('');
+  let toastTimer: number | undefined;
+  const applyToastState = (): void => {
+    toast.textContent = toastState.message;
+    toast.classList.toggle('dl-em-toast-visible', toastState.visible);
+  };
   const setStatus = (text: string): void => {
-    statusEl.textContent = text;
+    popoverStatusEl.textContent = text || 'No recent activity.';
+    toastState = postStatus(text);
+    applyToastState();
+    window.clearTimeout(toastTimer);
+    if (toastState.visible) {
+      toastTimer = window.setTimeout(() => {
+        toastState = fadeToast(toastState);
+        applyToastState();
+      }, TOAST_VISIBLE_MS);
+    }
   };
 
   const log = (kind: 'user' | 'ai' | 'sys', html: string): HTMLElement => {
@@ -801,8 +900,7 @@ export const mountEditMode = (options: MountOptions): void => {
   let pendingRows: PendingObjectRow[] = [];
   const refreshPending = async (): Promise<void> => {
     pendingRows = await fetchPendingObjects(getToken);
-    countEl.textContent = String(pendingRows.length);
-    countEl.classList.toggle('dl-em-hot', pendingRows.length > 0);
+    applyToolbarPlan(); // the Editing pill's badge + the popover's Pending row
     renderTray();
     await markDraftRegions();
   };
@@ -1123,14 +1221,38 @@ export const mountEditMode = (options: MountOptions): void => {
   q<HTMLButtonElement>(tray, '[data-em-tray-release]').addEventListener('click', (event) =>
     doRelease(event.currentTarget as HTMLButtonElement)
   );
-  q<HTMLButtonElement>(bar, '[data-em-release]').addEventListener('click', (event) => {
+  releaseButton.addEventListener('click', (event) => {
     tray.classList.add('dl-em-open');
     void doRelease(event.currentTarget as HTMLButtonElement);
   });
+  // The Pending row lives in the `● Editing` popover now (T17.6b) — same
+  // tray, same toggle behaviour; activating it also closes the popover
+  // (spec: "closes on Escape, on outside click, and on activating any row").
   q<HTMLButtonElement>(bar, '[data-em-tray-toggle]').addEventListener('click', () => {
     tray.classList.toggle('dl-em-open');
     panel.classList.remove('dl-em-open');
+    setEditingPopoverOpen(false);
   });
+
+  // ── the `● Editing` popover (T17.6b) ──────────────────────────────────────
+  editingToggle.addEventListener('click', () => setEditingPopoverOpen(!editingPopoverOpen));
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!editingPopoverOpen) return;
+      const element = event.target as Node | null;
+      if (element && (editingPopover.contains(element) || editingToggle.contains(element))) return;
+      setEditingPopoverOpen(false);
+    },
+    { signal }
+  );
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Escape' && editingPopoverOpen) setEditingPopoverOpen(false);
+    },
+    { signal }
+  );
 
   // ── edit-mode toggling
   const setEditMode = (on: boolean): void => {
@@ -1158,6 +1280,7 @@ export const mountEditMode = (options: MountOptions): void => {
       panel.classList.remove('dl-em-open');
       tray.classList.remove('dl-em-open');
       palette.style.display = 'none';
+      setEditingPopoverOpen(false);
       revealedRegion = undefined;
       pinnedKey = undefined;
       pinnedRegion = undefined;
@@ -1167,6 +1290,8 @@ export const mountEditMode = (options: MountOptions): void => {
     }
   };
   fab.addEventListener('click', () => setEditMode(true));
+  // `Exit` is its own always-visible pill (Wolf, 2026-08-11 — T17.6b Q1: "keep
+  // 'exit' visible"), never behind the `● Editing` popover: one click, always.
   q<HTMLButtonElement>(bar, '[data-em-exit]').addEventListener('click', () => setEditMode(false));
 
   // ── gap "+" affordances: add a section (pages) or a block (articles)
@@ -1532,7 +1657,7 @@ export const mountEditMode = (options: MountOptions): void => {
           ? gutter
           : Math.max(8, window.innerWidth - width - 10);
     chip.style.left = `${Math.max(8, left)}px`;
-    chip.style.top = `${Math.max(RAIL_TOP, rect.top)}px`;
+    chip.style.top = `${Math.max(railTopPx, rect.top)}px`;
     chip.style.visibility = 'visible';
   };
 
@@ -1768,6 +1893,13 @@ export const mountEditMode = (options: MountOptions): void => {
   let railMeasured = false;
   /** Which surface is being annotated — the displacement gate's only input. */
   let railSurface: RailSurfaceKind = 'other';
+  /**
+   * T17.6b: the rail's (and the inline formatting toolbar's) top clearance,
+   * measured off the pill cluster rather than a constant — see
+   * `RAIL_TOP_FALLBACK`. Updated only inside `remeasureRail`, the same
+   * activation/resize cadence that decides everything else about the layout.
+   */
+  let railTopPx = RAIL_TOP_FALLBACK;
 
   /**
    * An article canvas is any page rendering article nodes; everything else —
@@ -1950,14 +2082,14 @@ export const mountEditMode = (options: MountOptions): void => {
 
   /** Where a bubble wants to sit: its block's top, below the chip when both show. */
   const desiredTopFor = (entry: RailEntry): number => {
-    if (!entry.region) return RAIL_TOP;
+    if (!entry.region) return railTopPx;
     // The block's CONTENT top, so a bubble lines up with the copy it annotates
     // rather than with the top of a full-bleed band's padding.
     const rect = contentRect(entry.region);
-    if (!rect) return RAIL_TOP;
+    if (!rect) return railTopPx;
     const chipOffset =
       hotRegion === entry.region && chip.style.display !== 'none' ? chip.offsetHeight + RAIL_STACK_GAP : 0;
-    return Math.max(RAIL_TOP, rect.top + chipOffset);
+    return Math.max(railTopPx, rect.top + chipOffset);
   };
 
   /**
@@ -1977,6 +2109,14 @@ export const mountEditMode = (options: MountOptions): void => {
     // column (below) would cancel the glide in flight. `endDisplacement`
     // re-runs the whole pass the moment it settles.
     if (displacing) return;
+    // T17.6b: the rail's top clearance, measured off the pill cluster itself
+    // rather than a constant — `RAIL_STACK_GAP` is the SAME 8px gap the rail
+    // already uses between packed bubbles, so there is exactly one clearance
+    // concept in the file, not two. Skipped while the bar is `display:none`
+    // (a zero rect, e.g. a resize firing before edit mode ever activates) —
+    // `railTopPx` keeps whatever it last measured, or the fallback.
+    const barRect = bar.getBoundingClientRect();
+    if (barRect.height > 0) railTopPx = Math.round(barRect.bottom) + RAIL_STACK_GAP;
     railSurface = surfaceKind();
     railColumnRight = measureNaturalColumnRight();
     railMode = selectRailLayoutMode(railMetrics(), railMeasured ? railMode : undefined);
@@ -2041,7 +2181,7 @@ export const mountEditMode = (options: MountOptions): void => {
       const rightLimit = Math.max(RAIL_PAD, metrics.viewportWidth - RAIL_PAD - railWidthPx);
       rail.style.left = `${Math.max(RAIL_PAD, Math.min(at?.left ?? rightLimit, rightLimit))}px`;
       if (entry?.el) {
-        entry.el.style.top = `${Math.max(RAIL_TOP, at?.top ?? RAIL_TOP)}px`;
+        entry.el.style.top = `${Math.max(railTopPx, at?.top ?? railTopPx)}px`;
         entry.el.querySelector<HTMLElement>('.dl-em-bubble-link')?.remove();
       }
       positionGutter();
@@ -2474,7 +2614,7 @@ export const mountEditMode = (options: MountOptions): void => {
   const markerPosition = (region: HTMLElement): { left: number; top: number } | undefined => {
     const rect = contentRect(region);
     if (!rect) return undefined;
-    return { left: Math.max(4, rect.left - GUTTER_X), top: Math.max(RAIL_TOP, rect.top) };
+    return { left: Math.max(4, rect.left - GUTTER_X), top: Math.max(railTopPx, rect.top) };
   };
 
   const markerRegions = new Map<string, HTMLElement>();
@@ -3135,7 +3275,7 @@ export const mountEditMode = (options: MountOptions): void => {
     };
     inlineEdit = edit;
 
-    const toolbarOptions = { anchor: () => edit.host, topGuard: INLINE_TOOLBAR_TOP_GUARD };
+    const toolbarOptions = { anchor: () => edit.host, topGuard: railTopPx };
 
     if (richSurface) {
       // The grammar-bound TipTap editor, imported only when one is needed so
@@ -3366,7 +3506,10 @@ export const mountEditMode = (options: MountOptions): void => {
     const rail = rect.right + 14;
     const left = rail + width <= window.innerWidth - 8 ? rail : Math.max(8, window.innerWidth - width - 12);
     panel.style.left = `${left + window.scrollX}px`;
-    panel.style.top = `${Math.max(50, rect.top + window.scrollY)}px`;
+    // T17.6b: the same measured clearance the rail and gutter use
+    // (`railTopPx`), translated into this call site's document-absolute
+    // coordinates — not a second clearance constant.
+    panel.style.top = `${Math.max(railTopPx + window.scrollY, rect.top + window.scrollY)}px`;
   };
 
   const morphFromTile = (): void => {
