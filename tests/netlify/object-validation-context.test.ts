@@ -52,7 +52,21 @@ const makeArtifactIndexStore = (references: Array<Record<string, unknown>>) => {
   } as never;
 };
 
-test('resolveArtifactRef: refs from the request payload and record bodies pre-resolve against the artifact index', async () => {
+test('resolveArtifactRef: refs from the request payload and record bodies pre-resolve against the artifact index', async (t) => {
+  // Explicit-API credentials present => blob reads really are strongly
+  // consistent, so an absence observed here is conclusive. Without them the
+  // read is silently eventual and a miss must stay unanswered instead (see the
+  // eventual-consistency case below).
+  const previous = { siteId: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN };
+  process.env.NETLIFY_SITE_ID = 'test-site';
+  process.env.NETLIFY_BLOBS_TOKEN = 'test-token';
+  t.after(() => {
+    if (previous.siteId === undefined) delete process.env.NETLIFY_SITE_ID;
+    else process.env.NETLIFY_SITE_ID = previous.siteId;
+    if (previous.token === undefined) delete process.env.NETLIFY_BLOBS_TOKEN;
+    else process.env.NETLIFY_BLOBS_TOKEN = previous.token;
+  });
+
   const missingKey = `image/${REF_REQUEST}/${'d'.repeat(64)}.png`;
   const indexStore = makeArtifactIndexStore([
     {
@@ -87,6 +101,52 @@ test('resolveArtifactRef: refs from the request payload and record bodies pre-re
   assert.deepEqual(context.resolveArtifactRef?.(missingKey), { exists: false });
   // A key that appeared nowhere in the swept sources is unanswered, not failed.
   assert.equal(context.resolveArtifactRef?.(`image/${REF_REQUEST}/${'e'.repeat(64)}.png`), undefined);
+});
+
+test('resolveArtifactRef: a miss is unanswered, not absent, when blob reads are only eventually consistent', async (t) => {
+  // getArtifactIndexBlobStore asks for strong consistency, but that is honoured
+  // only on the explicit-API path (blobSiteId + blobToken). On the Lambda
+  // name-lookup path it is silently downgraded to eventual, and a just-written
+  // artifact reads as missing for as long as the read lags. Reporting that as
+  // "absent" blocks publishing an article whose image is live and serving —
+  // observed for 25+ minutes against a real artifact on 2026-08-11.
+  const previous = { siteId: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN };
+  delete process.env.NETLIFY_SITE_ID;
+  delete process.env.SITE_ID;
+  delete process.env.NETLIFY_BLOBS_TOKEN;
+  delete process.env.NETLIFY_AUTH_TOKEN;
+  t.after(() => {
+    if (previous.siteId !== undefined) process.env.NETLIFY_SITE_ID = previous.siteId;
+    if (previous.token !== undefined) process.env.NETLIFY_BLOBS_TOKEN = previous.token;
+  });
+
+  const missingKey = `image/${REF_REQUEST}/${'d'.repeat(64)}.png`;
+  const indexStore = makeArtifactIndexStore([
+    {
+      blobKey: REF_KEY,
+      sha256: REF_SHA,
+      sizeBytes: 111,
+      contentType: 'image/png',
+      createdAtISO: '2026-07-19T00:00:00.000Z',
+      artifactKind: 'image',
+    },
+  ]);
+  const store = makeStore([]);
+
+  const context = await buildStoreValidationContext(store, {
+    artifactIndexStore: indexStore,
+    artifactRefSources: [{ ops: [{ op: 'set_section_fields', fields: { a: REF_KEY, b: missingKey } }] }],
+  });
+
+  // A HIT is still conclusive under either consistency.
+  assert.deepEqual(context.resolveArtifactRef?.(REF_KEY), {
+    exists: true,
+    sizeBytes: 111,
+    contentType: 'image/png',
+  });
+  // A MISS carries no information — leave it unanswered so the caller degrades
+  // to "cannot verify" (a warning) instead of blocking a valid artifact.
+  assert.equal(context.resolveArtifactRef?.(missingKey), undefined);
 });
 
 test('resolveArtifactRef: soft-deleted references resolve with deleted:true; no index store → no resolver', async () => {

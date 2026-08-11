@@ -20,6 +20,7 @@
 import { readArtifactReference, type ArtifactIndexStore } from './artifact-index.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE, PUBLIC_ARTIFACT_PATH_RE, rawArtifactRefForPublicPath } from './artifact-trust.js';
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY, type BlobListItem } from './blob-list.js';
+import { isBlobCredentialsConfigured } from './blob-store.js';
 import { loadContentItemIds } from './content-item-index.js';
 import type { ArtifactRefResolution, ObjectValidationContext, PageTypeConstraint } from './object-validate.js';
 import type { ObjectVerbStore } from './object-verbs.js';
@@ -80,10 +81,26 @@ const collectArtifactRefCandidates = (sources: unknown[]): Set<string> => {
  * sha). An unreadable index leaves the key unanswered ("cannot verify") rather
  * than reporting it absent; a reference whose stored blobKey differs (e.g. a
  * mistyped extension) reports absent.
+ *
+ * `strongReads` says whether a miss is TRUSTWORTHY. getArtifactIndexBlobStore
+ * asks for `consistency: 'strong'`, but that request is only honoured on the
+ * explicit-API path (blobSiteId + blobToken present); on the Lambda
+ * name-lookup path it is silently downgraded to eventual — see the W14 T14.4
+ * note in blob-store.ts. Under an eventual read a just-written artifact is
+ * routinely invisible, so a miss carries no information about existence and
+ * MUST leave the key unanswered rather than reporting absent.
+ *
+ * Observed live 2026-08-11 without those credentials: an image artifact that
+ * had just been created (verified, resolvable by slot through the explicit-API
+ * path, and serving fine) read as absent here for 25+ minutes, which blocked
+ * the article that referenced it from publishing at all — while a six-day-old
+ * artifact on the same site resolved normally. A hit is still conclusive under
+ * either consistency, so positive verification is unaffected.
  */
 const preloadArtifactRefResolutions = async (
   indexStore: ArtifactIndexStore,
-  candidates: Set<string>
+  candidates: Set<string>,
+  strongReads: boolean
 ): Promise<Map<string, ArtifactRefResolution>> => {
   const resolutions = new Map<string, ArtifactRefResolution>();
   await Promise.all(
@@ -97,7 +114,9 @@ const preloadArtifactRefResolutions = async (
       try {
         const reference = await readArtifactReference(indexStore, requestId, sha256);
         if (!reference || reference.blobKey !== blobKey) {
-          resolutions.set(blobKey, { exists: false });
+          // Only an absence observed through a strongly-consistent read proves
+          // absence. Otherwise leave it unanswered: "cannot verify", not "gone".
+          if (strongReads) resolutions.set(blobKey, { exists: false });
           return;
         }
         resolutions.set(blobKey, {
@@ -268,7 +287,11 @@ export const buildStoreValidationContext = async (
       ...[...records.values()].map((record) => record.body),
     ]);
     if (candidates.size > 0) {
-      const resolutions = await preloadArtifactRefResolutions(self.artifactIndexStore, candidates);
+      const resolutions = await preloadArtifactRefResolutions(
+        self.artifactIndexStore,
+        candidates,
+        isBlobCredentialsConfigured()
+      );
       resolveArtifactRef = (blobKey) => resolutions.get(blobKey);
     }
   }
