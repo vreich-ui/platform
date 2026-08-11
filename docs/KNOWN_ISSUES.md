@@ -58,9 +58,32 @@ calls specifically are the ones that blow it.
   configured to honor, the mismatch itself is a bug independent of pdf-tool
   or git-export latency.
 
-## 2. QA-W16-3 follow-up: four destructive admin tools share the same broken auth, left unfixed on purpose
+## 2. QA-W16-3 follow-up: four destructive admin tools share the same broken auth — RESOLVED (Option B)
 
-**Status:** open, needs a human decision. **Related fix already landed:**
+**Status:** RESOLVED 2026-08-10 on branch `fix/qa-w16-3-admin-gate`. Wolf
+chose **Option B**: the four tools stay admin-only; the gate itself was fixed
+so it fails closed *correctly*. `requireAdminToolAccess`
+(`packages/core/server/lib/mcp-artifact-admin.ts`) now (a) refuses an
+MCP-gated caller up front with the catalogued `error_code: 'admin_required'`
+and a message that says the tool is admin-only — no more doomed
+`${IDENTITY_URL}/user` round trip impersonating a credential failure — and
+(b) resolves the human path through `resolveAdminAccessFromEvent`
+(`packages/core/server/lib/request-roles.ts`), the W15 S1 single admin
+resolver, instead of `getAdminStateFromEvent`'s older ADMIN_EMAILS-only
+`isAdmin`, which wrongly denied an admin granted the tier by store invite.
+Option A (widening these four to any MCP-authenticated caller) was
+explicitly NOT taken; do not add an `event.mcpGateAuthenticated` bypass to
+this gate. Covered by `tests/netlify/mcp-artifact-admin-gate.test.ts`.
+
+**One correction to the diagnosis below:** the gate never failed *open*, and
+it did already attach `error_code: 'admin_required'` to the structured
+payload — what was wrong was the human-readable message (it forwarded
+`getAdminStateFromEvent`'s "Authentication token could not be verified.")
+and the fact that authority was resolved from a role source no MCP caller
+can ever satisfy. There is also no HTTP `403` involved: an MCP tool
+refusal is an `isError` tool result with an `error_code`, not a status code.
+
+**Original entry, for the record. Related fix already landed:**
 PR #529 fixed the identical broken-auth bug for `list_artifacts_by_kind`,
 `search_artifacts`, and `list_artifacts_by_request` via a new
 `requireArtifactBrowseAccess` helper in
@@ -71,7 +94,7 @@ PR #529 fixed the identical broken-auth bug for `list_artifacts_by_kind`,
 Identity/GoTrue browser session — a check that always fails for an MCP
 caller regardless of how valid their MCP credentials are.
 
-**The bug, still present:** `soft_delete_artifact`, `restore_artifact`,
+**The bug (as originally described):** `soft_delete_artifact`, `restore_artifact`,
 `migrate_artifact_indexes`, and `reconcile_artifact_indexes` (all in
 `packages/core/server/lib/mcp-artifact-admin.ts`, dispatched from
 `packages/core/server/functions/mcp.ts`'s `callTool`) still call the
@@ -103,9 +126,8 @@ fix.
   — the caller may be a perfectly valid MCP caller who simply isn't an
   admin).
 
-Either option is a legitimate call; this file exists so the choice doesn't
-get lost. Whoever makes it should update this entry with the decision and
-the PR that implements it.
+**Decision:** Wolf, 2026-08-10 — **Option B**, as recorded at the top of this
+entry. The security posture stays tight: these four remain privileged.
 
 ## 3. Admin-content perf follow-up: unbounded `history[]` makes every store sweep heavier over time
 
