@@ -39,6 +39,18 @@ export interface ToolContextDeps {
    * `publishObject`, same as every other exportRoot-required call site.
    */
   exportRoot?: string;
+  /**
+   * PF4: the CMS-Agent bridge for the workspace orchestration tools —
+   * provided by callers that hold the module-level client; when absent (or
+   * unconfigured) those tools answer with a clear error.
+   */
+  cmsAgent?: {
+    callTool<T = unknown>(
+      name: string,
+      args: Record<string, unknown>
+    ): Promise<{ ok: true; data: T } | { ok: false; code: string; message: string }>;
+    projectId: string;
+  };
 }
 
 export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
@@ -62,6 +74,7 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
 
   return {
     roles: deps.roles,
+    ...(deps.cmsAgent ? { cmsAgent: deps.cmsAgent } : {}),
 
     verb: async (request) => {
       const parsed = objectVerbRequestSchema.safeParse(request);

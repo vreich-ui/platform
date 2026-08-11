@@ -40,6 +40,9 @@ import {
   type AgentKeysBlobStore,
 } from '../lib/agent-keys.js';
 import { CHAT_TOOLS, defaultAutonomyFor } from '../lib/agent/tools.js';
+import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
+import { resolveEffectiveChatMode } from '../lib/agent/engine.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import { approvalPolicyConfigSchema, activeApprovalPolicy } from '../../lib/approval-policy.js';
 import { creationPolicyConfigSchema, activeCreationPolicy } from '../../lib/creation-policy.js';
 
@@ -69,10 +72,12 @@ export const requestSchema = z.discriminatedUnion('verb', [
     creation: creationPolicyConfigSchema.optional(),
     chat_tools: chatToolAutonomySchema.optional(),
     learning_mode: z.boolean().optional(),
+    /** PF3/PF5: the chat TurnEngine mode override — the cutover/rollback lever. */
+    cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
   }),
   z.object({
     verb: z.literal('revert'),
-    target: z.enum(['approval', 'creation', 'chat_tools', 'learning_mode', 'all']),
+    target: z.enum(['approval', 'creation', 'chat_tools', 'learning_mode', 'cms_agent_chat_mode', 'all']),
   }),
   z.object({ verb: z.literal('agent_keys_list') }),
   z.object({ verb: z.literal('agent_keys_create'), agent_name: z.string().min(1), site: z.string().min(1) }),
@@ -91,6 +96,43 @@ const safeJsonParse = (event: LambdaEvent): { ok: true; value: unknown } | { ok:
 
 const nowIso = () => new Date().toISOString();
 const committed = () => ({ approval: activeApprovalPolicy(), creation: activeCreationPolicy() });
+
+// ─── PF3: CMS-Agent bridge status (memoized health probe) ────────────────────
+
+const CMS_AGENT_HEALTH_TTL_MS = 60_000;
+const cmsAgentHealthClient = new CmsAgentClient();
+/** Keyed by project id: each site is its own Netlify process, but a keyed
+ *  cache removes the whole cross-tenant-staleness class outright. */
+const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string, unknown> }>();
+
+/** Config + effective mode + a memoized live `agent_resolve` probe. Env NAMES
+ *  only, never values; the probe is read-only and cached for a minute so the
+ *  governance page cannot hammer the service. */
+const cmsAgentStatus = async (override?: 'off' | 'fallback' | 'required'): Promise<Record<string, unknown>> => {
+  const missing = cmsAgentMissingEnvVars();
+  const effective = resolveEffectiveChatMode(override);
+  const status: Record<string, unknown> = {
+    configured: missing.length === 0,
+    ...(missing.length > 0 ? { missing_env: missing } : {}),
+    mode: effective.mode,
+    mode_source: override ? 'governance_override' : 'env_default',
+    ...(effective.invalidEnvValue === undefined ? {} : { invalid_env_value: effective.invalidEnvValue }),
+  };
+  if (missing.length > 0) return status;
+  const projectId = getSiteIdentity().cmsAgentProjectId;
+  const now = Date.now();
+  const cached = cmsAgentHealthCache.get(projectId);
+  if (!cached || now - cached.at > CMS_AGENT_HEALTH_TTL_MS) {
+    const probe = await cmsAgentHealthClient.resolveAgent({ role: 'client_manager', project_id: projectId });
+    cmsAgentHealthCache.set(projectId, {
+      at: now,
+      health: probe.ok
+        ? { ok: true, agent_ref: probe.data }
+        : { ok: false, code: probe.code, message: probe.message },
+    });
+  }
+  return { ...status, health: cmsAgentHealthCache.get(projectId)!.health };
+};
 
 /** The chat-tool catalog for the guardrails table — the SINGLE source is
  *  CHAT_TOOLS, so the UI can never drift from the tools the run loop actually
@@ -124,11 +166,13 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     const req = request.data;
 
     if (req.verb === 'get') {
+      const doc = await getGovernanceDoc(store);
       return jsonResponse(200, {
-        doc: await getGovernanceDoc(store),
+        doc,
         committed: committed(),
         active: await resolveActivePolicies(store),
         chat_tools_catalog: chatToolsCatalog,
+        cms_agent: await cmsAgentStatus(doc?.cms_agent_chat_mode),
       });
     }
 
@@ -186,6 +230,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         req.creation && 'creation',
         req.chat_tools && 'chat_tools',
         req.learning_mode !== undefined && 'learning_mode',
+        req.cms_agent_chat_mode !== undefined && `cms_agent_chat_mode=${req.cms_agent_chat_mode}`,
       ]
         .filter(Boolean)
         .join(', ');
@@ -195,6 +240,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         ...(req.creation !== undefined ? { creation: req.creation } : {}),
         ...(req.chat_tools !== undefined ? { chat_tools: req.chat_tools } : {}),
         ...(req.learning_mode !== undefined ? { learning_mode: req.learning_mode } : {}),
+        ...(req.cms_agent_chat_mode !== undefined ? { cms_agent_chat_mode: req.cms_agent_chat_mode } : {}),
         updated_by: email,
         updated_at: nowIso(),
         history: [...existing.history, { at: nowIso(), actor_email: email, action: 'set', detail: touched || 'none' }],
@@ -206,6 +252,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         delete next.creation;
         delete next.chat_tools;
         delete next.learning_mode;
+        delete next.cms_agent_chat_mode;
       } else {
         delete next[req.target];
       }

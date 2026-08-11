@@ -2662,6 +2662,11 @@ const PROTECTED_ENV_KEYS = [
   'NETLIFY_BUILD_HOOK_URL',
   'OPENAI_API_KEY',
   'ARTIFACT_UPLOAD_TOKEN_SECRET',
+  // PF1: the per-site scoped CMS-Agent bearer. Only the TOKEN belongs here —
+  // CMS_AGENT_MCP_ENDPOINT is a public URL, and CMS_AGENT_CHAT_MODE's values
+  // ('off'/'fallback'/'required') are ordinary English long enough to clear the
+  // 8-char scan floor, so listing either would block deploys on innocent copy.
+  'CMS_AGENT_MCP_TOKEN',
   // Commerce (06-shop-module-plan §8.5): the keys are env-only; Stripe IDS in
   // content are fine (ids aren't secrets), but a pasted key would block every
   // deploy exactly as the portrait URL did. Both mode pairs (§8.7) plus the

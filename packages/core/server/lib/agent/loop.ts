@@ -31,7 +31,8 @@ import {
   type ToolAutonomy,
 } from './chat-store.js';
 import { chatToolByName, CHAT_TOOLS, type ToolContext } from './tools.js';
-import type { ProviderAdapter, WireTool } from './provider.js';
+import { CmsAgentEngineError, humanCopyForCmsAgentError, type TurnEngine } from './engine.js';
+import type { WireTool } from './provider.js';
 import {
   candidateSetView,
   isPresentCandidatesCall,
@@ -63,7 +64,8 @@ export const argsHash = (args: Record<string, unknown>): string =>
 export interface LoopDeps {
   chatStore: AgentChatStore;
   toolContext: ToolContext;
-  adapter: ProviderAdapter;
+  /** PF2: the TurnEngine seam — providerEngine (legacy adapters) or cmsAgentEngine. */
+  engine: TurnEngine;
   nowIso?: () => string;
   /** Remaining invocation budget (context.getRemainingTimeInMillis); absent locally. */
   remainingMs?: () => number;
@@ -366,6 +368,9 @@ export const runAgentLoop = async (
           tool: call.name,
           is_error: result.is_error,
           ...(created ?? {}),
+          // PF4: bounded orchestration output rides the event so the UI can
+          // offer a collapsed raw-output disclosure.
+          ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),
         });
         await persist();
         if (await cancelledCheck()) return { ok: true, status: doc.status };
@@ -389,7 +394,7 @@ export const runAgentLoop = async (
 
       // One provider turn.
       run.provider_turns += 1;
-      const turn = await deps.adapter({ system, transcript: run.transcript, tools });
+      const turn = await deps.engine({ doc, run, system, tools });
       run.output_tokens_used += turn.outputTokens;
       run.transcript.push({
         role: 'assistant',
@@ -412,10 +417,16 @@ export const runAgentLoop = async (
       await persist();
     }
   } catch (error) {
-    appendChatEvent(doc, now(deps), 'run_error', {
-      run_id: run.run_id,
-      message: error instanceof Error ? error.message : String(error),
-    });
+    // PF3: a CMS-Agent engine failure carries a stable machine code plus
+    // editor-safe human copy; anything else keeps the raw message as before.
+    appendChatEvent(
+      doc,
+      now(deps),
+      'run_error',
+      error instanceof CmsAgentEngineError
+        ? { run_id: run.run_id, code: error.code, message: humanCopyForCmsAgentError(error.code) }
+        : { run_id: run.run_id, message: error instanceof Error ? error.message : String(error) }
+    );
     finishRun(doc, now(deps), 'error', runChips(doc, run));
     await persist();
     return { ok: false, status: doc.status, error: 'run failed' };
@@ -499,6 +510,7 @@ export const approvePendingTool = async (
     tool: pending.tool,
     is_error: result.is_error,
     ...(created ?? {}),
+    ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),
   });
   if (!result.is_error && edited && deps.learningStore && doc.run.preference_context?.target_call_id === callId) {
     await addPostEditDelta(
@@ -606,6 +618,7 @@ export const startRun = async (
     learning_mode: learningMode,
     ...(focus ? { focus } : {}),
     diagnostics_requested: editorIsOwner && asksForDiagnostics(text),
+    engine: 'provider',
     trigger_token: triggerToken,
     transcript: [...priorTranscript, { role: 'user', text }],
     call_queue: [],

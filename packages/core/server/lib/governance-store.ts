@@ -37,6 +37,10 @@ export const governanceDocSchema = z.object({
   chat_tools: chatToolAutonomySchema.optional(),
   /** M2b: expensive candidate generation is explicitly Owner-governed and off by default. */
   learning_mode: z.boolean().optional(),
+  /** PF2 (schema-additive): runtime override for the chat TurnEngine mode —
+   *  `governance override ?? CMS_AGENT_CHAT_MODE env ?? 'off'`. Rollback to
+   *  the provider path is this one field → 'off', no deploy. */
+  cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
   updated_by: z.string(),
   updated_at: z.string(),
   history: z.array(governanceHistoryEntrySchema),
@@ -70,6 +74,8 @@ export interface ActivePolicies {
   creation: CreationPolicy;
   chat_tools?: GovernanceDoc['chat_tools'];
   learning_mode: boolean;
+  /** PF3: the runtime chat-engine mode override, when one is set. */
+  cms_agent_chat_mode?: 'off' | 'fallback' | 'required';
   provenance: { approval: PolicyProvenance; creation: PolicyProvenance; learning_mode: PolicyProvenance };
 }
 
@@ -92,6 +98,7 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
     creation: doc?.creation ?? activeCreationPolicy(),
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
+    ...(doc?.cms_agent_chat_mode ? { cms_agent_chat_mode: doc.cms_agent_chat_mode } : {}),
     provenance: {
       approval: doc?.approval ? 'override' : 'committed',
       creation: doc?.creation ? 'override' : 'committed',

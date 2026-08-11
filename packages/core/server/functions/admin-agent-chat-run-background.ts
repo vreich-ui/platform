@@ -12,12 +12,15 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { getHeader } from '../lib/admin-auth.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
 import { getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
-import { getGovernanceBlobStore } from '../lib/governance-store.js';
+import { getGovernanceBlobStore, getGovernanceDoc } from '../lib/governance-store.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { getAgentChatBlobStore, loadChatDoc } from '../lib/agent/chat-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
+import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
+import { buildChatEngine, resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { runAgentLoop } from '../lib/agent/loop.js';
 import { adapterForProfile } from '../lib/agent/provider.js';
 import { z } from 'zod';
@@ -29,6 +32,11 @@ type LambdaEvent = {
   headers?: Record<string, string | undefined>;
 };
 type LambdaContext = { getRemainingTimeInMillis?: () => number };
+
+/** One client per site process (PF1's design): module-level so the MCP session
+ *  and the agent_ref cache survive warm invocations. Construction is
+ *  side-effect-free; config is read at call time, never at import time. */
+const cmsAgentClient = new CmsAgentClient();
 
 const bodySchema = z.object({ chat_id: z.string().min(1), trigger_token: z.string().min(1) });
 
@@ -53,9 +61,19 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const roles = await resolveRolesForPrincipalAsync(principal, {
     getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
   });
+  const governanceStore = await getGovernanceBlobStore(event);
+  // PF4: the workspace orchestration tools reach CMS-Agent through the same
+  // module-level client; absent config → the tools answer with a clear error.
+  const cmsAgentBridge = isCmsAgentConfigured()
+    ? {
+        callTool: <T,>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
+        projectId: getSiteIdentity().cmsAgentProjectId,
+      }
+    : undefined;
   const toolContext = buildToolContext({
     objectStore: (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore,
-    governanceStore: await getGovernanceBlobStore(event),
+    governanceStore,
+    ...(cmsAgentBridge ? { cmsAgent: cmsAgentBridge } : {}),
     artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
       | ArtifactIndexStore
       | undefined,
@@ -64,11 +82,30 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     exportRoot: binding.dataRoot,
   });
 
+  // PF2/PF3 — TurnEngine selection: governance override ?? CMS_AGENT_CHAT_MODE ?? 'off'.
+  // 'off' is the byte-identical legacy path; 'required' is CMS-Agent-only
+  // fail-fast; 'fallback' degrades to the provider path with a loud
+  // engine_fallback event (buildChatEngine). Resolved PER HOP deliberately:
+  // the PF5 rollback lever (override → 'off') must take effect instantly,
+  // including for a run paused behind an approval card — safe because the
+  // transcript is provider-neutral, so either engine can continue any run.
+  // A failed governance read degrades to the env default, the same
+  // never-brick doctrine as resolveActivePolicies.
+  const governanceDoc = await getGovernanceDoc(governanceStore).catch(() => null);
+  const { mode } = resolveEffectiveChatMode(governanceDoc?.cms_agent_chat_mode);
+  const engine = buildChatEngine({
+    mode,
+    adapter: adapterForProfile(doc.run.profile),
+    client: cmsAgentClient,
+    projectId: getSiteIdentity().cmsAgentProjectId,
+    siteId: binding.siteId,
+  });
+
   const result = await runAgentLoop(
     {
       chatStore,
       toolContext,
-      adapter: adapterForProfile(doc.run.profile),
+      engine,
       ...(context?.getRemainingTimeInMillis ? { remainingMs: () => context.getRemainingTimeInMillis!() } : {}),
     },
     parsed.chat_id,

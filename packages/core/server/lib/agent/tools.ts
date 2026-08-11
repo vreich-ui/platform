@@ -49,6 +49,19 @@ export interface ToolContext {
   /** Agent-authored patch op names for a type (from the contract). */
   agentAuthoredOps(objectType: ObjectType): Set<string>;
   roles: readonly Role[];
+  /**
+   * PF4: the CMS-Agent bridge for the workspace orchestration tools. Absent
+   * when the site has no bridge configured — those tools then answer with a
+   * clear error instead of crashing. `callTool` is the PF1 client's; the
+   * scoped site token must allowlist the specific workspace/workflow tools.
+   */
+  cmsAgent?: {
+    callTool<T = unknown>(
+      name: string,
+      args: Record<string, unknown>
+    ): Promise<{ ok: true; data: T } | { ok: false; code: string; message: string }>;
+    projectId: string;
+  };
 }
 
 export interface ChatTool {
@@ -56,6 +69,18 @@ export interface ChatTool {
   toolClass: ToolClass;
   description: string;
   input_schema: Record<string, unknown>;
+  /**
+   * PF4 hard floor (P3.1's rule): when set to 'ask', neither a governance
+   * chat_tools override nor a profile override can resolve this tool to
+   * 'auto' — resolveAutonomy clamps it. 'off' remains available.
+   */
+  autonomyFloor?: 'ask';
+  /**
+   * PF4: attach this tool's (bounded) result content to its tool_result
+   * EVENT so the UI can render it in a collapsed disclosure. Only for tools
+   * whose output is already a bounded, editor-safe projection.
+   */
+  discloseResult?: boolean;
   /** Server-side validation; runs before auto-execution AND before any pause. */
   parse(args: Record<string, unknown>, ctx: ToolContext): { ok: true; value: unknown } | { ok: false; error: string };
   execute(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolResult>;
@@ -541,6 +566,172 @@ const applyTheme: ChatTool = {
   describe: (args) => `Apply theme ${args.theme_id} to ${args.site_id}`,
 };
 
+// ─── PF4: workspace orchestration (CMS-Agent bridge; P3.1's surviving half) ──
+
+const CMS_AGENT_UNAVAILABLE = {
+  content: json({ error: 'The workspace orchestration bridge is not configured for this site.' }),
+  is_error: true,
+};
+
+const truncate = (value: unknown, max: number): string => {
+  const text = typeof value === 'string' ? value : '';
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+};
+
+/** Bounded, editor-safe node projection: NEVER prompts, schemas or model config. */
+const projectWorkspaceNode = (node: Record<string, unknown>): Record<string, unknown> => ({
+  id: node.id,
+  name: node.name,
+  kind: node.kind,
+  risk_level: node.riskLevel,
+  status: node.status,
+  description: truncate(node.description, 240),
+  ...(Array.isArray(node.dependsOn) && node.dependsOn.length > 0 ? { depends_on: node.dependsOn } : {}),
+});
+
+/** Bounded run projection — the full run record can approach ~500KB; this
+ *  keeps status, per-node states and driver notes and nothing else. The
+ *  `mode` block is reduced to a live/mock boolean: its raw form names the
+ *  provider (executionMode: 'openai'), which editor-facing output must
+ *  never carry. `stall` reduces to a boolean for the same reason. */
+const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unknown> => {
+  const nodes = Array.isArray(run.nodes)
+    ? (run.nodes as Record<string, unknown>[]).slice(0, 64).map((node) => ({
+        id: node.nodeId ?? node.id,
+        status: node.status,
+      }))
+    : undefined;
+  const mode = run.mode as { live?: boolean; executionMode?: string } | undefined;
+  const stall = run.stall as { stalled?: boolean } | boolean | undefined;
+  return {
+    run_id: run.runId ?? run.id,
+    status: run.status,
+    ...(mode !== undefined ? { live_output: mode.live === true || mode.executionMode === 'openai' } : {}),
+    ...(stall !== undefined ? { stalled: stall === true || (typeof stall === 'object' && stall?.stalled === true) } : {}),
+    ...(typeof run.driverNote === 'string' ? { driver_note: truncate(run.driverNote, 500) } : {}),
+    ...(nodes ? { nodes } : {}),
+  };
+};
+
+const listWorkspaceNodes: ChatTool = {
+  name: 'list_workspace_nodes',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'List the publishing workspace nodes (id, kind, risk level, short description, dependencies). Use before starting or discussing a workspace workflow run.',
+  input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  parse: zodParse(z.object({})),
+  execute: async (ctx) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    const result = await ctx.cmsAgent.callTool<{ nodes?: Record<string, unknown>[] }>('workspace_get_nodes', {});
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    const all = result.data.nodes ?? [];
+    // Bounded even against a pathological workspace: this projection rides a
+    // PERSISTED tool_result event (discloseResult), and the event-log trim is
+    // count-based, not byte-based.
+    const nodes = all.slice(0, 100).map(projectWorkspaceNode);
+    return {
+      content: json({ nodes, ...(all.length > nodes.length ? { truncated: all.length - nodes.length } : {}) }),
+      is_error: false,
+    };
+  },
+  describe: () => 'List workspace nodes',
+};
+
+const runWorkspaceWorkflow: ChatTool = {
+  name: 'run_workspace_workflow',
+  toolClass: 'privileged',
+  autonomyFloor: 'ask',
+  discloseResult: true,
+  description:
+    'Start a workspace publishing workflow run (a dry-run: no publishing side effects), or advance an existing run by run_id. Long executions never block the chat — poll with get_workspace_run. Publishing itself always remains a separate human decision on the workspace surface.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      input: { type: 'object', description: 'The publishing request envelope to start a new run with.' },
+      run_id: { type: 'string', description: 'Advance THIS existing run instead of starting a new one.' },
+      workflow_id: { type: 'string' },
+      budget_usd: { type: 'number', minimum: 0, description: 'Optional per-run cost ceiling.' },
+      execution_mode: { type: 'string', enum: ['mock', 'openai'], description: 'mock = cheap structural placeholders; openai (default) = real model output.' },
+    },
+    additionalProperties: false,
+  },
+  parse: (args) => {
+    const parsed = z
+      .object({
+        input: z.record(z.string(), z.unknown()).optional(),
+        run_id: z.string().min(1).optional(),
+        workflow_id: z.string().min(1).optional(),
+        budget_usd: z.number().nonnegative().optional(),
+        execution_mode: z.enum(['mock', 'openai']).optional(),
+      })
+      .refine((value) => Boolean(value.run_id) !== Boolean(value.input), {
+        message: 'Provide exactly one of: input (start a new run) or run_id (advance an existing run).',
+      })
+      .safeParse(args);
+    return parsed.success
+      ? { ok: true, value: parsed.data }
+      : { ok: false, error: `Invalid arguments: ${parsed.error.issues.map((issue) => issue.message).join('; ')}` };
+  },
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    if (args.run_id) {
+      // Advance only — `approved` is NEVER sent: CMS-Agent's own gate keeps
+      // stopping the run before publish-risk nodes (the second wall).
+      const advanced = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_run_all', {
+        runId: args.run_id,
+      });
+      if (!advanced.ok) return { content: json({ error: advanced.message, code: advanced.code }), is_error: true };
+      return { content: json(projectWorkspaceRun(advanced.data)), is_error: false };
+    }
+    const started = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_start_dry_run', {
+      projectId: ctx.cmsAgent.projectId,
+      input: args.input,
+      ...(args.workflow_id ? { workflowId: args.workflow_id } : {}),
+      ...(args.budget_usd !== undefined ? { budgetUsd: args.budget_usd } : {}),
+      ...(args.execution_mode ? { executionMode: args.execution_mode } : {}),
+    });
+    if (!started.ok) return { content: json({ error: started.message, code: started.code }), is_error: true };
+    return { content: json(projectWorkspaceRun(started.data)), is_error: false };
+  },
+  // The approval-card preview is an INPUT ECHO by design — no server call, so
+  // the human approves exactly the bytes that will be sent.
+  dryRun: async (_ctx, args) => ({
+    dry_run: true,
+    action: args.run_id ? 'advance_existing_run' : 'start_dry_run_workflow',
+    ...(args.run_id ? { run_id: args.run_id } : {}),
+    ...(args.input !== undefined ? { input_echo: args.input } : {}),
+    ...(args.workflow_id ? { workflow_id: args.workflow_id } : {}),
+    ...(args.budget_usd !== undefined ? { budget_usd: args.budget_usd } : {}),
+    execution_mode: args.execution_mode ?? 'openai',
+    note: 'A dry-run workflow has no publishing side effects; publishing remains a separate human decision.',
+  }),
+  describe: (args) =>
+    args.run_id ? `Advance workspace run ${args.run_id}` : 'Start a workspace publishing workflow (dry-run)',
+};
+
+const getWorkspaceRun: ChatTool = {
+  name: 'get_workspace_run',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'Poll a workspace workflow run: status, per-node states, driver notes. Bounded summary — use the workspace surface for full details.',
+  input_schema: {
+    type: 'object',
+    properties: { run_id: { type: 'string' } },
+    required: ['run_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ run_id: z.string().min(1) })),
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    const result = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_get_run', { runId: args.run_id });
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    return { content: json(projectWorkspaceRun(result.data)), is_error: false };
+  },
+  describe: (args) => `Check workspace run ${args.run_id}`,
+};
+
 // ─── registry ────────────────────────────────────────────────────────────────
 
 export const CHAT_TOOLS: readonly ChatTool[] = [
@@ -562,6 +753,9 @@ export const CHAT_TOOLS: readonly ChatTool[] = [
   publish,
   discard,
   applyTheme,
+  listWorkspaceNodes,
+  runWorkspaceWorkflow,
+  getWorkspaceRun,
 ];
 
 export const chatToolByName = (name: string): ChatTool | undefined => CHAT_TOOLS.find((tool) => tool.name === name);
@@ -581,7 +775,11 @@ export const resolveAutonomy = (
 ): Record<string, ToolAutonomy> => {
   const autonomy: Record<string, ToolAutonomy> = {};
   for (const tool of CHAT_TOOLS) {
-    autonomy[tool.name] = profileOverrides?.[tool.name] ?? governanceChatTools?.[tool.name] ?? defaultAutonomyFor(tool);
+    const resolved =
+      profileOverrides?.[tool.name] ?? governanceChatTools?.[tool.name] ?? defaultAutonomyFor(tool);
+    // PF4 hard floor: an override can disable a floored tool but can never
+    // promote it to 'auto' — regardless of governance settings (D2).
+    autonomy[tool.name] = tool.autonomyFloor === 'ask' && resolved === 'auto' ? 'ask' : resolved;
   }
   return autonomy;
 };

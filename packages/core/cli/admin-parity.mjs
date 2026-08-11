@@ -198,6 +198,24 @@ export const ADMIN_CRITICAL_ENV = [
     why: 'Second v1 provider adapter (Wolf 2026-07-16: both providers are v1 requirements; profiles choose per agent).',
   },
   {
+    name: 'CMS_AGENT_MCP_ENDPOINT',
+    provisioner: 'human (fleet-shared)',
+    checklist: true,
+    why: "The CMS-Agent Cloud Run /mcp URL the admin chat's client_manager turns run through. Absent, the bridge reports cms_agent_not_configured and the site stays on the legacy provider path (mode `off`).",
+  },
+  {
+    name: 'CMS_AGENT_MCP_TOKEN',
+    provisioner: 'human (secret custody, per-site scoped bearer)',
+    checklist: true,
+    why: "This site's scoped CMS-Agent bearer, pinned to its own project and tool allow-list. Never MCP_API_TOKEN and never another tenant's — the scope is the tenant-isolation boundary, enforced at the door rather than by careful coding.",
+  },
+  {
+    name: 'CMS_AGENT_CHAT_MODE',
+    provisioner: 'human (Netlify console, per-site cutover)',
+    checklist: true,
+    why: 'off | fallback | required. Defaults to `off`; PF5 flips it per site after a clean soak. Unrecognized values resolve to `off` rather than promoting the site.',
+  },
+  {
     name: 'PUBLISH_SECRET',
     provisioner: 'create-site provisioning (auto)',
     checklist: true,

@@ -74,6 +74,9 @@ export const chatEventTypeSchema = z.enum([
   'run_finished',
   'run_error',
   'run_cancelled',
+  /** PF3: emitted when fallback mode degrades a turn from the CMS-Agent
+   *  engine to the provider path — loud by design, never silent. */
+  'engine_fallback',
   'events_trimmed',
 ]);
 export const chatEventSchema = z.object({
@@ -144,6 +147,12 @@ export const chatRunSchema = z.object({
   focus: z.string().max(500).optional(),
   /** Server-derived: only an Owner who explicitly requested diagnostics may see technical detail. */
   diagnostics_requested: z.boolean().default(false),
+  /** PF2 (schema-additive; old docs parse via the default): which TurnEngine
+   *  actually reasoned this run — stamped 'cms_agent' by cmsAgentEngine on its
+   *  first successful turn, left 'provider' on the legacy path. */
+  engine: z.enum(['provider', 'cms_agent']).default('provider'),
+  /** PF2 (schema-additive): the resolved CMS-Agent ref (agt_client_manager[@rev]) used for this run. */
+  agent_ref: z.string().optional(),
   trigger_token: z.string().optional(),
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),

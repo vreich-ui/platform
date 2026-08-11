@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import { loadChatDoc, saveChatDoc, type AgentChatStore, type ChatDoc, type RunProfile } from './chat-store.js';
+import { providerEngine } from './engine.js';
 import { approvePendingTool, choosePendingCandidate, runAgentLoop, startRun, type ProtocolDeps } from './loop.js';
 import { exportPreferencePairs, type LearningEvidenceStore } from './preferences.js';
 import type { ProviderAdapter, WireTool } from './provider.js';
@@ -111,7 +112,7 @@ describe('governed learning-mode protocol', () => {
       };
     };
     const paused = await runAgentLoop(
-      { chatStore, toolContext: toolContext(), adapter, nowIso: protocol.nowIso },
+      { chatStore, toolContext: toolContext(), engine: providerEngine(adapter), nowIso: protocol.nowIso },
       'obj:site_test',
       started.resume!.triggerToken
     );
@@ -129,7 +130,7 @@ describe('governed learning-mode protocol', () => {
       {
         chatStore,
         toolContext: toolContext(),
-        adapter: async () => ({ outputTokens: 0, toolCalls: [] }),
+        engine: providerEngine(async () => ({ outputTokens: 0, toolCalls: [] })),
         nowIso: protocol.nowIso,
       },
       'obj:site_test',
@@ -170,10 +171,10 @@ describe('governed learning-mode protocol', () => {
       {
         chatStore,
         toolContext: toolContext(),
-        adapter: async ({ tools }) => {
+        engine: providerEngine(async ({ tools }) => {
           names = tools.map((tool) => tool.name);
           return { outputTokens: 1, toolCalls: [] };
-        },
+        }),
       },
       'obj:site_test',
       started.resume!.triggerToken

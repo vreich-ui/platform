@@ -21,4 +21,5 @@ export const siteIdentityConfig = {
   assetHost: 'https://example-assets.netlify.app',
   assetFolder: 'platform',
   pdfToolProjectId: 'platform',
+  cmsAgentProjectId: 'platform',
 } satisfies SiteIdentityConfig;

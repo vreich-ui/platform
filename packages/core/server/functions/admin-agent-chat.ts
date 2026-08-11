@@ -25,6 +25,9 @@ import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
+import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
+import { humanCopyForCmsAgentError, resolveEffectiveChatMode } from '../lib/agent/engine.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import {
   approvePendingTool,
   cancelRun,
@@ -147,6 +150,16 @@ const requestSchema = z.discriminatedUnion('action', [
     profile_id: z.union([z.string().min(1), z.null()]),
   }),
 ]);
+
+/** PF4: one client per process; the tool bridge is undefined when unconfigured. */
+const cmsAgentClient = new CmsAgentClient();
+const cmsAgentToolBridge = () =>
+  isCmsAgentConfigured()
+    ? {
+        callTool: <T,>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
+        projectId: getSiteIdentity().cmsAgentProjectId,
+      }
+    : undefined;
 
 /** Fire-and-forget background trigger; a lost POST leaves the doc queued and
  *  recoverable via the stale-takeover path (send/cancel after STALE_RUN_MS). */
@@ -330,7 +343,18 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           objectId: doc.object_id,
           objectType: doc.object_type,
         });
-        const { chat_tools, learning_mode } = await resolveActivePolicies(await getGovernanceBlobStore(event));
+        const policies = await resolveActivePolicies(await getGovernanceBlobStore(event));
+        const { chat_tools, learning_mode } = policies;
+
+        // PF3: in required mode a missing bridge config fails AT SEND with a
+        // clear error instead of queueing a run that can only die in the hop.
+        const { mode: chatEngineMode } = resolveEffectiveChatMode(policies.cms_agent_chat_mode);
+        if (chatEngineMode === 'required' && !isCmsAgentConfigured()) {
+          return jsonResponse(503, {
+            error: humanCopyForCmsAgentError('cms_agent_not_configured'),
+            code: 'cms_agent_not_configured',
+          });
+        }
         const autonomy = resolveAutonomy(
           chat_tools as Record<string, ToolAutonomy> | undefined,
           profile.tool_autonomy_overrides
@@ -347,8 +371,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const roles = await resolveRolesForPrincipalAsync(principal, {
           getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
         });
+        const cmsAgent = cmsAgentToolBridge();
         const toolContext = buildToolContext({
           objectStore,
+          ...(cmsAgent ? { cmsAgent } : {}),
           governanceStore: await getGovernanceBlobStore(event),
           artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
             | ArtifactIndexStore
@@ -393,8 +419,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const roles = await resolveRolesForPrincipalAsync(runPrincipal, {
           getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
         });
+        const cmsAgent = cmsAgentToolBridge();
         const toolContext = buildToolContext({
           objectStore,
+          ...(cmsAgent ? { cmsAgent } : {}),
           governanceStore: await getGovernanceBlobStore(event),
           artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
             | ArtifactIndexStore

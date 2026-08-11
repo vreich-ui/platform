@@ -21,4 +21,5 @@ export const siteIdentityConfig = {
   assetHost: 'https://example-assets.netlify.app',
   assetFolder: 'fernwell',
   pdfToolProjectId: 'fernwell',
+  cmsAgentProjectId: 'fernwell',
 } satisfies SiteIdentityConfig;

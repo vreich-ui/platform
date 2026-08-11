@@ -380,10 +380,24 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
           : approved
             ? `Approved by ${String(event.detail?.by ?? 'the human')}${event.detail?.edited ? ' (edited)' : ''}`
             : summary;
+  // PF4: bounded workspace-orchestration output rides tool_result events —
+  // rendered collapsed by default, never inline (P3.2's surviving idea).
+  const rawOutput = event.type === 'tool_result' && typeof event.detail?.output === 'string' ? event.detail.output : undefined;
+  let parsedOutput: unknown = rawOutput;
+  if (rawOutput) {
+    try {
+      parsedOutput = JSON.parse(rawOutput);
+    } catch {
+      parsedOutput = rawOutput;
+    }
+  }
   return (
-    <div className="flex items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-      <span className={tone}>{icon}</span>
-      <span className="truncate">{label}</span>
+    <div className="flex flex-col gap-1 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+      <div className="flex items-center gap-2">
+        <span className={tone}>{icon}</span>
+        <span className="truncate">{label}</span>
+      </div>
+      {rawOutput ? <JsonDisclosure label="Raw workspace output" value={parsedOutput} /> : null}
     </div>
   );
 }
