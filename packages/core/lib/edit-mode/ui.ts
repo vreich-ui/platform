@@ -262,6 +262,56 @@ const regionRect = (region: HTMLElement): DOMRect | undefined => {
   return rect;
 };
 
+/**
+ * The layout viewport. `window.innerWidth` includes the classic scrollbar, so
+ * every geometry decision made against it is off by the scrollbar's width —
+ * enough, on a page whose only wide box is a full-bleed header, to read a
+ * ~15px margin where the real one is hundreds of px.
+ */
+const viewportWidth = (): number => document.documentElement.clientWidth || window.innerWidth;
+
+/**
+ * A box at (or near) the viewport's own width is PAGE CHROME — a sticky
+ * header, a full-bleed section band — not a content column. 0.9 leaves room
+ * for a genuinely wide container to still count as a column.
+ */
+const FULL_BLEED_RATIO = 0.9;
+/** How far `contentRect` descends before giving up and keeping what it has. */
+const CONTENT_DESCENT_MAX = 6;
+
+/** A box the element generates itself, falling back to its children's union. */
+const ownRect = (element: HTMLElement): DOMRect | undefined => {
+  const box = element.getBoundingClientRect();
+  return box.width === 0 && box.height === 0 ? regionRect(element) : box;
+};
+
+/**
+ * The CONTENT box of an annotated region: `regionRect`'s union is the region's
+ * outermost box, which on a full-bleed section is the band spanning the whole
+ * viewport rather than the `max-w-*` column inside it. Walk down through
+ * single-child full-bleed wrappers until a box narrower than 90% of the
+ * viewport appears — that is the column the rail hangs off and the one the
+ * gutter marker sits beside (without this, a marker on a full-bleed section
+ * pins to x=4 because the band's left edge is 0).
+ */
+const contentRect = (region: HTMLElement): DOMRect | undefined => {
+  const limit = viewportWidth() * FULL_BLEED_RATIO;
+  let rect = regionRect(region);
+  let host = region;
+  for (let depth = 0; rect && rect.width >= limit && depth < CONTENT_DESCENT_MAX; depth += 1) {
+    const children = (Array.from(host.children) as HTMLElement[]).filter((child) => {
+      const box = child.getBoundingClientRect();
+      return box.width > 0 || box.height > 0;
+    });
+    if (children.length !== 1) break;
+    host = children[0];
+    const inner = ownRect(host);
+    if (!inner || inner.width === 0) break;
+    rect = inner;
+  }
+  return rect;
+};
+
 export const mountEditMode = (options: MountOptions): void => {
   if (document.querySelector('.dl-em-bar')) return; // singleton per document
   activeController?.abort();
@@ -1600,7 +1650,7 @@ export const mountEditMode = (options: MountOptions): void => {
   let railMode: RailLayoutMode = 'inset';
 
   const railMetrics = (): RailMetrics => ({
-    viewportWidth: window.innerWidth,
+    viewportWidth: viewportWidth(),
     columnRight: railColumnRight,
     railWidth: RAIL_W,
     railGap: RAIL_GAP,
@@ -1625,10 +1675,19 @@ export const mountEditMode = (options: MountOptions): void => {
 
   /**
    * The content column the rail hangs off: the widest in-viewport annotated
-   * region (spec §1.2 — one rail x per page, never a ragged edge). Measured
-   * with the slide REMOVED, because measuring it while slid would feed the
-   * mode decision its own output and oscillate; the class is off for a single
-   * synchronous reflow, with transitions suppressed so nothing animates.
+   * CONTENT column (spec §1.2 — one rail x per page, never a ragged edge).
+   *
+   * Two things are deliberately not columns. The navigation object wraps the
+   * sticky, full-bleed site header, which is in the viewport at every scroll
+   * position — measuring it made `columnRight` the viewport width on every
+   * page. And any box still spanning the viewport after `contentRect` has
+   * descended is a full-bleed band, i.e. page chrome. Both are skipped, so
+   * what is left is the reading column.
+   *
+   * Measured with the slide REMOVED, because measuring it while slid would
+   * feed the mode decision its own output and oscillate; the class is off for
+   * a single synchronous reflow, with transitions suppressed so nothing
+   * animates.
    */
   const measureColumnRight = (): number => {
     const slid = document.body.classList.contains('dl-em-slide');
@@ -1636,11 +1695,14 @@ export const mountEditMode = (options: MountOptions): void => {
       document.body.classList.add('dl-em-measuring');
       document.body.classList.remove('dl-em-slide');
     }
+    const width = viewportWidth();
+    const limit = width * FULL_BLEED_RATIO;
     let inViewport = 0;
     let anywhere = 0;
     for (const region of annotatedRegions()) {
-      const rect = regionRect(region);
-      if (!rect || rect.width === 0) continue;
+      if (region.matches(NAV_SELECTOR) || region.closest(NAV_SELECTOR)) continue;
+      const rect = contentRect(region);
+      if (!rect || rect.width === 0 || rect.width >= limit) continue;
       anywhere = Math.max(anywhere, rect.right);
       if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
       inViewport = Math.max(inViewport, rect.right);
@@ -1652,7 +1714,7 @@ export const mountEditMode = (options: MountOptions): void => {
       void document.body.offsetWidth;
       document.body.classList.remove('dl-em-measuring');
     }
-    return inViewport || anywhere || window.innerWidth;
+    return inViewport || anywhere || width;
   };
 
   const applySlide = (pad: number): void => {
@@ -2118,9 +2180,13 @@ export const mountEditMode = (options: MountOptions): void => {
     attentionCountEl.classList.toggle('dl-em-hot', total > 0);
   };
 
-  /** Where a marker sits: the block's own leading edge, one gutter step left. */
+  /**
+   * Where a marker sits: the block's own leading edge, one gutter step left.
+   * `contentRect`, not `regionRect` — a full-bleed section's band starts at
+   * x=0, which pinned every marker on such a block to the clamp at x=4.
+   */
   const markerPosition = (region: HTMLElement): { left: number; top: number } | undefined => {
-    const rect = regionRect(region);
+    const rect = contentRect(region);
     if (!rect) return undefined;
     return { left: Math.max(4, rect.left - GUTTER_X), top: Math.max(RAIL_TOP, rect.top) };
   };
