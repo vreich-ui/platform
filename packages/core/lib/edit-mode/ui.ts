@@ -84,6 +84,7 @@ import {
   type AffordanceEvent,
   type AffordanceState,
 } from './affordance-state.js';
+import { blockHasImage, drawerRowsFor, selectionStripLabel, type BlockActionInput } from './block-actions.js';
 import { listProfiles, type AgentProfileView } from '../admin/chat-client.js';
 import { avatarSrc } from '../admin/users-client.js';
 import {
@@ -205,9 +206,6 @@ type PanelState = {
   changes?: FieldChange[];
   snapshot?: RegionSnapshot;
 };
-
-/** Section types whose data carries an image the image tool should offer. */
-const IMAGE_SECTION_TYPES = new Set(['bio', 'content_split']);
 
 const isImageValue = (value: unknown): value is { src: string; alt?: string } =>
   Boolean(value) &&
@@ -908,6 +906,10 @@ export const mountEditMode = (options: MountOptions): void => {
     pendingRows = await fetchPendingObjects(getToken);
     applyToolbarPlan(); // the Editing pill's badge + the popover's Pending row
     renderTray();
+    // R4's state pill reads these rows, and a save through a drawer row is
+    // exactly when it changes — refresh it here rather than making the editor
+    // wait for whatever re-renders the rail next (T17.14a/b).
+    for (const entry of railPlan) if (entry.el) applyBubbleState(entry.el);
     await markDraftRegions();
   };
 
@@ -1285,7 +1287,7 @@ export const mountEditMode = (options: MountOptions): void => {
     } else {
       cancelInlineEdit();
       syncRegionFocusability(false);
-      panel.classList.remove('dl-em-open');
+      closePanel(); // …and with it the rail's yield, so a remount starts clean
       tray.classList.remove('dl-em-open');
       palette.style.display = 'none';
       setEditingPopoverOpen(false);
@@ -1639,13 +1641,9 @@ export const mountEditMode = (options: MountOptions): void => {
 
   /**
    * Labels for the related-grid selection algorithms. The chip's dropdown was
-   * their only caller until T17.14a retired it; T17.14b re-homes the whole
-   * `content_grid` group — algorithm, tiles, columns — as a labelled group in
-   * the bubble's drawer, against this same table and the unchanged
-   * `applyRelated` below. Kept deliberately (the T17.14a brief says so) rather
-   * than deleted and rewritten one task later.
+   * their caller until T17.14a retired it; the bubble drawer's
+   * `Related articles` group is their caller now (T17.14b).
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-homed into the block drawer by T17.14b
   const ALGORITHM_LABELS: Record<string, string> = {
     tag_similarity: 'Similar',
     same_category: 'Same category',
@@ -1706,7 +1704,6 @@ export const mountEditMode = (options: MountOptions): void => {
    * sec_* object. `algorithm` mirrors to the data attribute so the algorithm
    * still renders on a re-hover without a record round-trip.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-homed into the block drawer by T17.14b
   const applyRelated = async (
     target: EditTarget,
     region: HTMLElement,
@@ -2361,7 +2358,8 @@ export const mountEditMode = (options: MountOptions): void => {
       ? `<span class="dl-em-bubble-shared">· ${editTarget.objectType === 'navigation' ? 'site-wide' : 'shared'}</span>`
       : '';
     const drawerId = `dl-em-drawer-${(drawerDomIdSeq += 1)}`;
-    const hasDrawer = blockBubble && drawerRowCount(region as HTMLElement) > 0;
+    const hasDrawer =
+      blockBubble && drawerRowsFor(blockActionInputFor(region as HTMLElement, editTarget as EditTarget)).length > 0;
     el.innerHTML =
       // R1 — identity row.
       `<div class="dl-em-bubble-id">` +
@@ -2375,7 +2373,8 @@ export const mountEditMode = (options: MountOptions): void => {
           `${ICON_PENCIL}<span>edit directly</span></button>`
         : '') +
       `</div>` +
-      // R2 + R3 — the thread log and the composer (marginalia-panel.ts).
+      // R2 + R3 — the thread log and the composer (marginalia-panel.ts); the
+      // selection strip is moved into the body, above the composer, on mount.
       `<div class="dl-em-bubble-body"></div>` +
       // R4 — footer strip.
       `<div class="dl-em-bubble-foot">` +
@@ -2442,6 +2441,11 @@ export const mountEditMode = (options: MountOptions): void => {
       dispatchAffordance({ kind: 'toggleDrawer' });
     });
 
+    const selectionStrip = document.createElement('div');
+    selectionStrip.className = 'dl-em-selstrip';
+    selectionStrip.dataset.emSelstrip = '';
+    selectionStrip.hidden = true;
+
     const moreButton = document.createElement('button');
     moreButton.type = 'button';
     moreButton.className = 'dl-em-bubble-more';
@@ -2492,19 +2496,33 @@ export const mountEditMode = (options: MountOptions): void => {
         }
       );
       body.append(moreButton);
+      // Above the composer, per the PDF's reading order: the scope you are
+      // about to ask about sits over the field you type the ask into.
+      body.querySelector('.dl-em-composer')?.before(selectionStrip);
+      applySelectionStrip(el, region);
     };
     remountBubbleBody();
     return el;
   };
 
-  /**
-   * R5's rows for a block. T17.14a ships the shell — the drawer's own header
-   * line (identity WITH the object id visible, because a drawer is where
-   * provenance belongs) and `Delete block` behind the existing confirm modal.
-   * T17.14b fills in Image / Role & intent / Article settings / Ask AI and the
-   * `content_grid` group.
-   */
-  const drawerRowCount = (region: HTMLElement): number => (region.dataset.cmsNavObject !== undefined ? 0 : 1);
+  /** What `drawerRowsFor` needs to know about a block, read off the DOM once. */
+  const blockActionInputFor = (region: HTMLElement, target: EditTarget): BlockActionInput => ({
+    isNav: region.dataset.cmsNavObject !== undefined,
+    isNode: region.dataset.cmsNodeId !== undefined,
+    ...(region.dataset.cmsNodeKind !== undefined ? { nodeKind: region.dataset.cmsNodeKind } : {}),
+    sectionType: target.sectionType,
+    hasRelated: region.dataset.cmsRelatedAlgorithm !== undefined,
+    objectType: target.objectType,
+  });
+
+  /** The leading glyph for a drawer row. Labelled rows, not an icon strip. */
+  const DRAWER_ROW_ICONS: Record<string, string> = {
+    image: ICON_IMAGE,
+    role: ICON_TAG,
+    meta: ICON_TAG,
+    ai: ICON_SPARKLES,
+    delete: ICON_TRASH,
+  };
 
   /**
    * R4's state pill, applied on every render rather than once at build time:
@@ -2525,25 +2543,130 @@ export const mountEditMode = (options: MountOptions): void => {
     });
   };
 
+  /**
+   * Build R5 from `drawerRowsFor`'s plan (T17.14b). Every row the retired chip
+   * carried is here, as a LABELLED row with a leading glyph — the drawer must
+   * read as rows, not as the chip relocated (affordance-model §2, R5).
+   *
+   * The drawer's own header repeats the block identity WITH the object id
+   * visible: a drawer is where provenance belongs.
+   */
   const fillBubbleDrawer = (drawer: HTMLElement, region: HTMLElement, target: EditTarget): void => {
     if (drawer.dataset.emFilled === '1') return;
     drawer.dataset.emFilled = '1';
     drawer.innerHTML =
       `<div class="dl-em-drawer-head">${escapeHtml(blockIdentityFor(region, target))} · ` +
       `<span class="dl-em-drawer-id">${escapeHtml(target.objectId)}</span></div>`;
-    if (region.dataset.cmsNavObject !== undefined) return;
-    const rule = document.createElement('div');
-    rule.className = 'dl-em-drawer-rule';
-    drawer.append(rule);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'dl-em-drawer-row dl-em-drawer-danger';
-    remove.innerHTML = `${ICON_TRASH}<span>Delete block</span>`;
-    remove.addEventListener('click', (event) => {
-      event.stopPropagation();
-      void deleteRegion(target, region);
+    for (const row of drawerRowsFor(blockActionInputFor(region, target))) {
+      if (row.separatorBefore) {
+        const rule = document.createElement('div');
+        rule.className = 'dl-em-drawer-rule';
+        drawer.append(rule);
+      }
+      if (row.kind === 'related') {
+        drawer.append(buildRelatedGroup(region, target, row.label));
+        continue;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `dl-em-drawer-row${row.kind === 'delete' ? ' dl-em-drawer-danger' : ''}`;
+      button.innerHTML = `${DRAWER_ROW_ICONS[row.kind] ?? ''}<span>${escapeHtml(row.label)}</span>`;
+      const panelMode = row.panelMode;
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        // Delete is the confirm modal, never a panel; everything else opens
+        // the docked panel at the section the chip's button opened, and the
+        // panel morphs out of the row that was pressed (spec §5.1 rule 5).
+        if (row.kind === 'delete') void deleteRegion(target, region);
+        else if (panelMode) void openPanel(target, region, panelMode, { from: button });
+      });
+      drawer.append(button);
+    }
+  };
+
+  /**
+   * The `content_grid` configuration — algorithm, tiles, columns — with
+   * VISIBLE labels instead of the chip's `title` attributes, wired to the
+   * unchanged `applyRelated` (affordance-model §10 row 25).
+   */
+  const buildRelatedGroup = (region: HTMLElement, target: EditTarget, label: string): HTMLElement => {
+    const group = document.createElement('div');
+    group.className = 'dl-em-drawer-group';
+    group.innerHTML =
+      `<div class="dl-em-drawer-grouphead">${escapeHtml(label)}</div>` +
+      `<div class="dl-em-drawer-fields">` +
+      `<label class="dl-em-drawer-field"><span>Selection</span>` +
+      `<select class="dl-em-alg" data-em-alg>` +
+      Object.entries(ALGORITHM_LABELS)
+        .map(
+          ([value, name]) =>
+            `<option value="${value}"${value === region.dataset.cmsRelatedAlgorithm ? ' selected' : ''}>${name}</option>`
+        )
+        .join('') +
+      `</select></label>` +
+      `<label class="dl-em-drawer-field"><span>Tiles</span>` +
+      `<input class="dl-em-num" data-em-tiles type="number" min="1" max="12" ` +
+      `value="${escapeHtml(region.dataset.cmsRelatedLimit ?? '4')}"></label>` +
+      `<label class="dl-em-drawer-field"><span>Columns</span>` +
+      `<input class="dl-em-num" data-em-cols type="number" min="1" max="4" ` +
+      `value="${escapeHtml(region.dataset.cmsRelatedColumns ?? '2')}"></label>` +
+      `</div>`;
+    group.querySelector<HTMLSelectElement>('[data-em-alg]')?.addEventListener('change', (event) => {
+      const algorithm = (event.target as HTMLSelectElement).value;
+      void applyRelated(
+        target,
+        region,
+        { source: { kind: 'related', algorithm } },
+        `selection “${ALGORITHM_LABELS[algorithm] ?? 'updated'}”`
+      );
     });
-    drawer.append(remove);
+    group.querySelector<HTMLInputElement>('[data-em-tiles]')?.addEventListener('change', (event) => {
+      const limit = Math.max(1, Math.min(12, Number((event.target as HTMLInputElement).value) || 4));
+      region.dataset.cmsRelatedLimit = String(limit);
+      void applyRelated(target, region, { limit }, `${limit} tiles`);
+    });
+    group.querySelector<HTMLInputElement>('[data-em-cols]')?.addEventListener('change', (event) => {
+      const columns = Math.max(1, Math.min(4, Number((event.target as HTMLInputElement).value) || 2));
+      region.dataset.cmsRelatedColumns = String(columns);
+      void applyRelated(target, region, { columns }, `${columns} columns`);
+    });
+    return group;
+  };
+
+  /**
+   * R3's selection strip: `“…” ✕` above the composer while a text selection is
+   * armed inside this bubble's block, scoping the drawer's `Ask AI…` row to
+   * it. It replaces the chip's `.dl-em-ask.dl-em-sel` highlight, which was the
+   * only indication a selection was armed at all. T17.4 reuses this strip as
+   * the span anchor's surface (affordance-model §2 R3, §10 row 28).
+   */
+  const applySelectionStrip = (el: HTMLElement, region: HTMLElement | undefined): void => {
+    const strip = el.querySelector<HTMLElement>('[data-em-selstrip]');
+    if (!strip) return;
+    const armed = region !== undefined && selectionRegion === region && Boolean(currentSelectionText);
+    const label = armed ? selectionStripLabel(currentSelectionText as string) : '';
+    if (strip.dataset.emSel === label) return; // nothing changed — do not re-wire
+    strip.dataset.emSel = label;
+    strip.hidden = !label;
+    if (!label) {
+      strip.innerHTML = '';
+      return;
+    }
+    strip.innerHTML =
+      `<span class="dl-em-selquote">“${escapeHtml(label)}”</span>` +
+      `<button type="button" class="dl-em-selclear" data-em-selclear ` +
+      `aria-label="Clear the selection scope">${ICON_CLOSE}</button>`;
+    strip.querySelector('[data-em-selclear]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      currentSelectionText = undefined;
+      selectionRegion = undefined;
+      refreshSelectionStrips();
+    });
+  };
+
+  /** Re-apply every visible bubble's strip — the selection changed, not the plan. */
+  const refreshSelectionStrips = (): void => {
+    for (const entry of railPlan) if (entry.el) applySelectionStrip(entry.el, entry.region);
   };
 
   /**
@@ -2726,6 +2849,7 @@ export const mountEditMode = (options: MountOptions): void => {
       const isPinned = entry.key === pinnedEntryKey;
       el.classList.toggle('dl-em-pinned', isPinned);
       applyBubbleState(el);
+      applySelectionStrip(el, entry.region);
       syncBubbleDrawer(el, entry, isPinned && affordance.drawerOpen);
       entry.el = el;
     }
@@ -3166,6 +3290,7 @@ export const mountEditMode = (options: MountOptions): void => {
       if (!shouldCaptureSelection(event.detail)) {
         currentSelectionText = undefined;
         selectionRegion = undefined;
+        refreshSelectionStrips();
         return;
       }
       const selection = window.getSelection();
@@ -3178,6 +3303,9 @@ export const mountEditMode = (options: MountOptions): void => {
         undefined;
       currentSelectionText = region ? captureObjectSelection(region) : undefined;
       selectionRegion = currentSelectionText ? region : undefined;
+      // The strip above the composer is the ONLY sign a selection is armed
+      // now that the chip's highlighted sparkle is gone (spec §2, R3).
+      refreshSelectionStrips();
     },
     { signal }
   );
@@ -3657,6 +3785,9 @@ export const mountEditMode = (options: MountOptions): void => {
   let panelRegion: HTMLElement | undefined;
 
   const closePanel = (): void => {
+    // The rail stops yielding: the affordance state never changed, so exactly
+    // the bubble that was open comes back (spec §5.1 rule 2).
+    rail.classList.remove('dl-em-rail-yield');
     panel.classList.remove(
       'dl-em-open',
       'dl-em-mode-edit',
@@ -3669,6 +3800,7 @@ export const mountEditMode = (options: MountOptions): void => {
     );
     panel.style.left = '';
     panel.style.top = '';
+    panel.style.width = '';
     panel.querySelectorAll('.dl-em-acc').forEach((section) => section.classList.remove('dl-em-open'));
     panelState?.region.classList.remove('dl-em-focus');
     panelState = undefined;
@@ -3709,15 +3841,31 @@ export const mountEditMode = (options: MountOptions): void => {
   // material "container transform" idiom; reduced-motion users get an instant
   // open). Universal: every target kind shares this path. Mobile keeps the
   // bottom sheet.
+  /**
+   * Place the docked panel (T17.14b — affordance-model §5.1 rule 1).
+   *
+   * It used to anchor at `rect.right + 14` with NO rail awareness at all —
+   * which is the rail's exact slot, so a panel and a bubble could be painted
+   * on top of each other. The panel now takes the rail's own column: same
+   * left edge, never wider than the strip the rail already reserved. In
+   * `slide` mode that strip is padding the page has ALREADY given up, so
+   * nothing on the page moves when the panel opens — Wolf's no-movement
+   * ruling satisfied structurally rather than by care.
+   *
+   * Below the sheet floor there is no column to take: the `max-width:900px`
+   * rule turns the panel into the bottom sheet and owns its geometry.
+   */
   const anchorPanel = (region: HTMLElement): void => {
-    if (window.innerWidth <= 720) return; // the bottom-sheet media query owns mobile
+    if (window.innerWidth <= RAIL_SHEET_FLOOR) return;
     const rect = regionRect(region);
     if (!rect) return;
     panel.classList.add('dl-em-anchored');
-    const width = 372;
-    const rail = rect.right + 14;
-    const left = rail + width <= window.innerWidth - 8 ? rail : Math.max(8, window.innerWidth - width - 12);
+    const width = Math.min(372, railLeftPx !== undefined ? railWidthPx : RAIL_W);
+    const beside = rect.right + RAIL_GAP - 10;
+    const left =
+      railLeftPx ?? (beside + width <= window.innerWidth - 8 ? beside : Math.max(8, window.innerWidth - width - 12));
     panel.style.left = `${left + window.scrollX}px`;
+    panel.style.width = `${width}px`;
     // T17.6b: the same measured clearance the rail and gutter use
     // (`railTopPx`), translated into this call site's document-absolute
     // coordinates — not a second clearance constant.
@@ -3727,14 +3875,16 @@ export const mountEditMode = (options: MountOptions): void => {
   /**
    * The container transform that plays the panel out of whatever the editor
    * pressed. Its source used to be the hover chip's rect; with the chip gone
-   * (spec §5.1 rule 5) it is the bubble the drawer row lives in — and no
-   * morph at all when there is no bubble on screen, which is honest: there is
-   * nothing for the panel to have grown out of.
+   * it is the DRAWER ROW that was pressed, falling back to the bubble that row
+   * lives in, falling back to no morph at all (spec §5.1 rule 5) — which is
+   * honest: with nothing on screen there is nothing for the panel to have
+   * grown out of. Reduced-motion gating unchanged.
    */
-  const morphFromTile = (): void => {
+  const morphFromTile = (from?: HTMLElement): void => {
     if (window.innerWidth <= 720) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const origin = affordance.key ? railNodes.get(`block:${affordance.key}`) : undefined;
+    const bubble = affordance.key ? railNodes.get(`block:${affordance.key}`) : undefined;
+    const origin = from?.isConnected ? from : bubble;
     if (!origin?.isConnected) return;
     const source = origin.getBoundingClientRect();
     const dest = panel.getBoundingClientRect();
@@ -3753,7 +3903,12 @@ export const mountEditMode = (options: MountOptions): void => {
     );
   };
 
-  const openPanel = async (target: EditTarget, region: HTMLElement, mode: PanelMode): Promise<void> => {
+  const openPanel = async (
+    target: EditTarget,
+    region: HTMLElement,
+    mode: PanelMode,
+    options: { from?: HTMLElement } = {}
+  ): Promise<void> => {
     // A tool press while the same tile's accordion is open just switches the
     // section in place — the morph plays only on a fresh open.
     const freshOpen = !panel.classList.contains('dl-em-open') || panelRegion !== region;
@@ -3780,12 +3935,10 @@ export const mountEditMode = (options: MountOptions): void => {
           `<span class="dl-em-iid">${escapeHtml(target.objectId)}</span>`) +
       (target.shared ? `<span class="dl-em-idot dl-em-shd" title="Shared — affects every page using it"></span>` : '') +
       (isDraft ? `<span class="dl-em-idot dl-em-drf" title="Unpublished draft"></span>` : '');
-    panel.classList.toggle(
-      'dl-em-has-image',
-      target.objectType === 'content_item'
-        ? region.dataset.cmsNodeKind === 'content'
-        : IMAGE_SECTION_TYPES.has(target.sectionType)
-    );
+    // The same predicate the drawer's `Image…` row is planned from — one
+    // definition, so the panel can never offer an image section the drawer
+    // does not offer a row for (block-actions.ts).
+    panel.classList.toggle('dl-em-has-image', blockHasImage(blockActionInputFor(region, target)));
     panel.classList.toggle('dl-em-article', target.objectType === 'content_item' && Boolean(target.nodeId));
     // Chrome (navigation objects) is a copy form only: no section grammar for
     // AI scoping, no images — the accordion shows just the Edit section.
@@ -3803,7 +3956,11 @@ export const mountEditMode = (options: MountOptions): void => {
     const panelKey = anchorKeyForRegion(region);
     if (panelKey) dispatchAffordance({ kind: 'panelOpen', region, key: panelKey });
     anchorPanel(region);
-    if (freshOpen) morphFromTile();
+    // Precedence (spec §5.1 rule 3): only one of {panel, bubble} is ever
+    // painted in the column. The rail yields its bubbles — the gutter markers
+    // are a different layer and are untouched.
+    rail.classList.add('dl-em-rail-yield');
+    if (freshOpen) morphFromTile(options.from);
     if (mode === 'ai') {
       inputEl.value = '';
       inputEl.focus();

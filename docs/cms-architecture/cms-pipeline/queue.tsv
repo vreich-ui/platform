@@ -266,7 +266,12 @@ T17.13	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.13-can
 # R1-R4 anatomy + the drawer shell; the W7 hover chip deleted. Record in
 # 17-canvas-ux-plan.md §7. Row kept, commented, for the audit trail.
 #T17.14a	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14a-affordance-state-machine.md
-T17.14b	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14b-block-actions-panel-coexistence.md
+# T17.14b DONE 2026-08-11 — the block drawer's actions (image / role & intent /
+# article settings / interim Ask AI / the content_grid group / delete), the
+# composer's selection strip, and the panel-takes-the-rail's-column fix. With it
+# the T17.14 wave is shippable: nothing the chip could do is unreachable. Record
+# in 17-canvas-ux-plan.md §7. Row kept, commented, for the audit trail.
+#T17.14b	auto	claude-opus-5	high	docs/cms-architecture/cms-pipeline/T17.14b-block-actions-panel-coexistence.md
 T17.14c	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.14c-per-block-draft-provenance.md
 # T17.6b DONE 2026-08-11 — the toolbar reduced to floating pills (four, not the
 # PDF's three: Wolf's ruling on Q1 keeps Exit always visible); record in

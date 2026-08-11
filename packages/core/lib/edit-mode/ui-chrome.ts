@@ -432,6 +432,34 @@ body.dl-em-on .dl-em-rail.dl-em-rail-on{display:block}
 .dl-em-drawer-row.dl-em-drawer-danger{color:var(--dlem-danger)}
 .dl-em-drawer-row.dl-em-drawer-danger svg{color:var(--dlem-danger)}
 .dl-em-drawer-row.dl-em-drawer-danger:hover{background:color-mix(in srgb,var(--dlem-danger) 12%,transparent)}
+/* The content_grid group (T17.14b): the chip's three controls, now with
+   VISIBLE labels instead of title attributes. Same .dl-em-alg/.dl-em-num
+   controls the chip used — they outlived it for exactly this. */
+.dl-em-drawer-group{padding:2px 8px 6px}
+.dl-em-drawer-grouphead{padding:5px 0 6px;font:600 12px var(--dlem-font);color:var(--dlem-text)}
+.dl-em-drawer-fields{display:flex;flex-wrap:wrap;gap:8px}
+.dl-em-drawer-field{display:flex;flex-direction:column;gap:3px;
+  font:600 9.5px var(--dlem-font);letter-spacing:.04em;text-transform:uppercase;color:var(--dlem-muted)}
+.dl-em-drawer-field .dl-em-num{width:52px}
+/* The composer's selection strip (T17.14b — affordance-model §2, R3): the one
+   sign a text selection is armed, now that the chip's highlighted sparkle is
+   gone. T17.4 reuses it as the span anchor's surface. */
+.dl-em-selstrip{display:flex;align-items:center;gap:6px;margin:0 12px;padding:5px 8px;border-radius:8px;
+  background:color-mix(in srgb,var(--dlem-spark) 22%,transparent);
+  border:1px solid color-mix(in srgb,var(--dlem-spark) 55%,transparent)}
+.dl-em-selstrip[hidden]{display:none}
+.dl-em-selquote{flex:1;min-width:0;font:500 11px/1.4 var(--dlem-font);color:var(--dlem-heading);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-em-selclear{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+  padding:0;border:none;border-radius:6px;background:transparent;color:var(--dlem-muted);cursor:pointer}
+.dl-em-selclear:hover{background:color-mix(in srgb,var(--dlem-text) 12%,transparent);color:var(--dlem-text)}
+.dl-em-selclear:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:1px}
+/* The rail yields its bubbles while the docked panel is open (spec §5.1 rule
+   2): only one of {panel, bubble} is ever painted in the rail's column. The
+   GUTTER markers are a different layer and are deliberately untouched — they
+   are how you get back. The pin survives, so closing the panel restores
+   exactly the bubble that was there. */
+.dl-em-rail.dl-em-rail-yield .dl-em-bubble,.dl-em-rail.dl-em-rail-yield .dl-em-ghostbubble{display:none!important}
 .dl-em-bubble-more{margin:0 12px 8px;padding:4px 8px;border-radius:7px;border:1px dashed var(--dlem-border);
   background:transparent;color:var(--dlem-muted);font:600 10.5px var(--dlem-font);cursor:pointer;align-self:flex-start}
 .dl-em-bubble-more:hover{border-color:var(--dlem-accent);color:var(--dlem-accent)}
