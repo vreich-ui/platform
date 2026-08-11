@@ -1,0 +1,142 @@
+{
+  "__generated": {
+    "at": "2026-08-11T11:21:20.245Z",
+    "from": "objects/content_item/by-id/req_agent_pdf_tool_image_runbook_20260811_01.json",
+    "record_version": 8
+  },
+  "author": "Platform Documentation",
+  "deck": "Chromium can now embed a real image inside a rendered PDF, and typst rendered its first document end to end -- but both tests turned up a hard limit worth knowing before you rely on either.",
+  "description": "An operational runbook for embedding a real image in a chromium-rendered PDF: the working mechanism, the safe sequence, how the team verified it, and a narrow, previously-undocumented size limit found along the way. Also covers the first proven end-to-end typst render and the current state of image support there.",
+  "editorial": {
+    "framework": "fw_runbook",
+    "writer_notes": "Documents session-11 testing: chromium image-embedding data-URI corruption threshold (safe below ~172 base64 chars, corrupted at 292+) and the first proven typst validate-publish-render cycle (text only; image embedding not yet supported)."
+  },
+  "nodes": [
+    {
+      "id": "n_emb01",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "This session tested two things the render service had not proven before: embedding a real (non-CSS) image inside a chromium-rendered PDF, and running the typst renderer through a complete validate-publish-render cycle for the first time on this deployment.\n\nBoth tests produced a real capability. Both also produced a real limit. This runbook documents the working path for each, states the limit precisely, and gives the safe sequence to follow until the underlying issues are fixed.",
+        "title": "Why this runbook exists"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb02",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "There is no template-level field for attaching binary image bytes on either renderer. A pdf_template's templateJson does not carry an assets array of embedded files -- that mechanism does not exist on this bridge, whichever renderer you use.\n\nThe working mechanism is different: binary data travels through the artifact job's own data payload, the same payload validate_pdf_template and create_agent_artifact_job already require. On chromium, the template's html field is Liquid-templated, so a tag like {{ field_name }} pulls its value from data.field_name at render time -- including a full data:image/png;base64,... URI. On typst, the data payload reaches the template as sys.inputs.data, decoded with #let data = json(bytes(sys.inputs.data)).\n\nTypst has no equivalent image path yet. There is no assets field to declare, and the one alternative available in this typst version -- calling image.decode on raw bytes -- does not exist; the function errors with does not contain field \"decode\". Until one of those lands, typst templates on this deployment render text, tables, and vector shapes only.",
+        "title": "Prerequisites"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb03",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "For a chromium template that needs an embedded image:\n\n1. Author the template's html with an image tag pointing at a Liquid variable, for example src=\"data:image/png;base64,{{ photo_b64 }}\". Do not add an assets field -- it will be rejected.\n\n2. Run validate_pdf_template and poll get_pdf_template_validation until it reaches a terminal PASSED report.\n\n3. Publish the template.\n\n4. Call create_agent_artifact_job with data.photo_b64 set to the full base64 string of the image.\n\n5. Before treating the result as correct, verify it -- a completed job with verified: true does not mean the image survived intact.",
+        "title": "Safe sequence"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb04",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "proof"
+      },
+      "public": {
+        "body": "Verification means extracting the embedded image from the rendered PDF with pdfimages -png and comparing it, pixel by pixel, against the source file -- not trusting the job status or the output file size.\n\nFive base64 lengths were tested this way against the same chromium template and pipeline:\n\n108 characters, an 8x8 swatch -- byte-perfect, zero pixel difference.\n\n172 characters, a 60x40 two-color image -- byte-perfect, zero pixel difference.\n\n292 characters, a 120x80 four-color image -- corrupted. The bottom half of the image rendered solid black.\n\n7,048 characters, a 320x213 photo -- corrupted the same way.\n\n18,096 characters, a 480x320 photo -- corrupted the same way.\n\nThe corruption pattern is consistent across all three failing sizes: a clean horizontal split, correct pixels above the line, solid black below it -- consistent with truncation at a fixed byte offset, not random data loss. The job itself reports success in every case; nothing in the response signals that the image is wrong.",
+        "title": "Verification"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb05",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "The safe boundary on this pathway sits somewhere between 172 and 292 base64 characters -- roughly two orders of magnitude tighter than the pdfme renderer's separately documented ~14,200-character boundary. That is enough for a small icon or a solid-color swatch. It is not enough for a photo.\n\nUntil this is fixed, keep any base64 image data URI passed through a chromium template's Liquid substitution under about 170 characters. For anything larger, use the pdfme renderer instead -- its image field takes the same base64 data through its own data payload, verified separately to hold up to roughly 14,200 characters.\n\nDo not treat a successful create_agent_artifact_job call as proof an embedded image is correct. Extract and pixel-diff it first, every time, at every new size -- this is the same practice that caught this bug in the first place.",
+        "title": "Failure recovery"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb06",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "Chromium image embedding works, proven with a byte-perfect render, but only below a threshold narrow enough that it does not yet cover ordinary product photography. That is a real, narrow capability -- not the full fix a reader might assume from the word proven.\n\nTypst is proven end to end for the first time on this deployment: create, validate, publish, render, all the way to a correct one-page PDF. Text, brand color, and layout all came from the typst template's own engine. Image embedding on typst is not supported yet, for the two specific reasons above -- this is a confirmed gap, not something a different prompt or template will work around.\n\nNeither finding changes anything already live. Both are documented here so the next person who reaches for either capability starts from what was actually verified, not from what seemed likely to work.",
+        "title": "What this proves, and what's still open"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb07",
+      "kind": "content",
+      "private": {
+        "intent": "convert",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "This runbook's chromium proof: a one-page render with a 60x40 two-color image embedded via Liquid data-URI substitution, pixel-diffed against its source and confirmed byte-perfect. Held in this session's artifact store; ask Platform Documentation for a copy if the download link above is not yet live.",
+        "ctaLink": "",
+        "ctaText": "",
+        "title": "The image-embedding test PDF"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_emb08",
+      "kind": "content",
+      "private": {
+        "intent": "convert",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "This runbook's typst proof: the first complete validate-publish-render cycle run on the typst renderer for this deployment, producing a correct one-page PDF from the template's own layout engine. Held in this session's artifact store; ask Platform Documentation for a copy if the download link above is not yet live.",
+        "ctaLink": "",
+        "ctaText": "",
+        "title": "The typst end-to-end test PDF"
+      },
+      "visibility": "public"
+    }
+  ],
+  "publication_context": {
+    "domain": "kugel-platform.netlify.app",
+    "publication_name": "Platform",
+    "topic_scope": "CMS artifact generation"
+  },
+  "seo": {
+    "meta_description": "How to safely embed a real image in a chromium-rendered PDF, the size limit the team found by pixel-diffing test renders, and the first proven end-to-end typst render on this deployment.",
+    "meta_title": "PDF-Tool Runbook: Embedding Images and the Typst Renderer, Verified"
+  },
+  "slug": "pdf-tool-image-embedding-runbook",
+  "taxonomy": {
+    "category": "guide",
+    "tags": [
+      "publishing",
+      "architecture"
+    ]
+  },
+  "title": "Embedding a Real Image in a Generated PDF: A Runbook"
+}
