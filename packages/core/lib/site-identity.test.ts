@@ -51,6 +51,7 @@ test('Dr-Lurie values resolve exactly to the pre-parameterization literals (byte
     assetHost: 'https://kugelmedia.netlify.app',
     assetFolder: 'drlurieblog',
     pdfToolProjectId: 'dr-lurie',
+    cmsAgentProjectId: 'dr-lurie',
     // W11 T11.5 additions — pinned in the committed config so the
     // de-hardcoded core resolves byte-identically.
     adminLabel: 'Dr. Lurié admin',
@@ -72,12 +73,13 @@ test('the config stays in lockstep with the committed site export (drift guard)'
 test('a second tenant gets the id conventions from its siteId and slug', () => {
   const identity = resolveSiteIdentity(
     { SITE_OBJECT_ID: 'site_acme', SITE_SLUG: 'acme-skin' },
-    { ...siteIdentityConfig, pdfToolProjectId: undefined }
+    { ...siteIdentityConfig, pdfToolProjectId: undefined, cmsAgentProjectId: undefined }
   );
   assert.equal(identity.siteShortId, 'acme');
   assert.equal(identity.taxonomyId, 'tax_acme');
   assert.equal(identity.trackingProjectId, 'trk_acme');
   assert.equal(identity.pdfToolProjectId, 'acme-skin');
+  assert.equal(identity.cmsAgentProjectId, 'acme-skin');
 });
 
 test('the committed site-to-artifact-project mapping wins over slug inference', () => {
@@ -105,6 +107,7 @@ test('every env override wins over the committed config', () => {
     SITE_ASSET_HOST: 'https://assets.acme.example',
     SITE_ASSET_FOLDER: 'acmeblog',
     PDF_TOOL_PROJECT_ID: 'acme-pdf',
+    CMS_AGENT_PROJECT_ID: 'acme-cms',
   });
   assert.deepEqual(identity, {
     siteId: 'site_acme',
@@ -118,6 +121,7 @@ test('every env override wins over the committed config', () => {
     assetHost: 'https://assets.acme.example',
     assetFolder: 'acmeblog',
     pdfToolProjectId: 'acme-pdf',
+    cmsAgentProjectId: 'acme-cms',
     // No env overrides exist for these (by design: committer env is honored in
     // object-git-committer, not the resolver) — the committed config wins.
     adminLabel: 'Dr. Lurié admin',
@@ -127,10 +131,16 @@ test('every env override wins over the committed config', () => {
 });
 
 test('empty or whitespace env values are ignored, never resolved', () => {
-  const identity = resolveSiteIdentity({ SITE_OBJECT_ID: '  ', MCP_SERVER_NAME: '', PDF_TOOL_PROJECT_ID: '\t' });
+  const identity = resolveSiteIdentity({
+    SITE_OBJECT_ID: '  ',
+    MCP_SERVER_NAME: '',
+    PDF_TOOL_PROJECT_ID: '\t',
+    CMS_AGENT_PROJECT_ID: '  ',
+  });
   assert.equal(identity.siteId, 'site_drlurie');
   assert.equal(identity.mcpServerName, 'Dr_Lurie_MCP_Server');
   assert.equal(identity.pdfToolProjectId, 'dr-lurie');
+  assert.equal(identity.cmsAgentProjectId, 'dr-lurie');
 });
 
 test('a malformed config throws loudly instead of resolving to defaults', () => {

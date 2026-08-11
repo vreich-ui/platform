@@ -171,6 +171,9 @@ const fakeEnvNames = {
   gitBranch: [],
   buildHookUrl: [],
   deployLookupToken: [],
+  cmsAgentEndpoint: [],
+  cmsAgentToken: [],
+  cmsAgentChatMode: [],
 } satisfies SiteBinding['env'];
 
 const multiTargetFetch = () => {

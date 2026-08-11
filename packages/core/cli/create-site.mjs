@@ -269,6 +269,35 @@ export const ENV_CHECKLIST = [
         cls: 'fleet-shared',
         note: 'AI provider key — reuse the fleet value (second v1 adapter).',
       },
+      {
+        name: 'CMS_AGENT_MCP_ENDPOINT',
+        cls: 'fleet-shared',
+        note:
+          "The shared CMS-Agent Cloud Run Streamable-HTTP MCP URL (…/mcp) the admin chat's client_manager turns " +
+          'run through — one service for the whole fleet; reuse the fleet value.',
+      },
+      {
+        name: 'CMS_AGENT_MCP_TOKEN',
+        cls: 'per-site',
+        note:
+          "This site's OWN scoped CMS-Agent bearer — never fleet-shared and never MCP_API_TOKEN. Minted into " +
+          'the Secret Manager secret mcp-scoped-tokens-json, scoped to {projects: [this project], toolAllowlist: ' +
+          '[agent_resolve, agent_converse]} — that scope is what makes one tenant structurally incapable of ' +
+          'acting as another. Store Functions-only + secret so no value can reach a client bundle.',
+      },
+      {
+        name: 'CMS_AGENT_CHAT_MODE',
+        cls: 'per-site, optional',
+        note:
+          'off (default) | fallback | required — the admin-chat engine ladder. Unset, blank or ' +
+          'unrecognized all resolve to off, so a typo can never promote a site. Cutover flips this per site ' +
+          '(governance override is the instant, no-deploy rollback).',
+      },
+      {
+        name: 'CMS_AGENT_PROJECT_ID',
+        cls: 'per-site, optional',
+        note: 'Escape hatch for the canonical project id committed in sites/<client>/config/site-identity.ts.',
+      },
       // OPENAI_CHATKIT_WORKFLOW_ID was removed W15 S2: ChatKit retired at
       // T9.24 (OQ-W9-1) — the in-house agents hub replaced it and no core
       // code reads the variable any more.
@@ -314,6 +343,7 @@ export const SITE_IDENTITY_ENV_OVERRIDES = [
   'SITE_ASSET_HOST',
   'SITE_ASSET_FOLDER',
   'PDF_TOOL_PROJECT_ID',
+  'CMS_AGENT_PROJECT_ID',
 ];
 
 // This site's own blob-store namespace (packages/core/server/lib/{blob-store,

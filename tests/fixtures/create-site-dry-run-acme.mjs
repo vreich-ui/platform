@@ -159,6 +159,14 @@ Env checklist:
       AI provider key — reuse the fleet value. Admin-critical: the /admin agents hub and every per-object chat instantiate a provider adapter (both providers are v1 — Wolf 2026-07-16).
     OPENAI_API_KEY                   [fleet-shared]  reuse the fleet value — do not create a new one
       AI provider key — reuse the fleet value (second v1 adapter).
+    CMS_AGENT_MCP_ENDPOINT           [fleet-shared]  reuse the fleet value — do not create a new one
+      The shared CMS-Agent Cloud Run Streamable-HTTP MCP URL (…/mcp) the admin chat's client_manager turns run through — one service for the whole fleet; reuse the fleet value.
+    CMS_AGENT_MCP_TOKEN              [per-site]  ☐ human-supplied — see the provisioning runbook
+      This site's OWN scoped CMS-Agent bearer — never fleet-shared and never MCP_API_TOKEN. Minted into the Secret Manager secret mcp-scoped-tokens-json, scoped to {projects: [this project], toolAllowlist: [agent_resolve, agent_converse]} — that scope is what makes one tenant structurally incapable of acting as another. Store Functions-only + secret so no value can reach a client bundle.
+    CMS_AGENT_CHAT_MODE              [per-site, optional]  ☐ human-supplied — see the provisioning runbook
+      off (default) | fallback | required — the admin-chat engine ladder. Unset, blank or unrecognized all resolve to off, so a typo can never promote a site. Cutover flips this per site (governance override is the instant, no-deploy rollback).
+    CMS_AGENT_PROJECT_ID             [per-site, optional]  ☐ human-supplied — see the provisioning runbook
+      Escape hatch for the canonical project id committed in sites/<client>/config/site-identity.ts.
     NETLIFY_AUTH_TOKEN               [fleet-shared]  reuse the fleet value — do not create a new one
       Netlify account API token (provisioning/build automation) — reuse the fleet value.
     STRIPE_SECRET_KEY                [per-site, optional]  ☐ human-supplied — see the provisioning runbook
@@ -172,7 +180,7 @@ Env checklist:
     PURCHASE_TOKEN_SECRET            [per-site, optional]  ☐ human-supplied — see the provisioning runbook
       Signs the expiring bearer download token (purchase-tokens.ts) that gates digital-goods delivery — get-purchase/order_reissue/stripe-webhook/claim-free all read it (free claims too, not only paid Stripe orders). Needed only if this client's shop module delivers downloads. Unset (or <16 chars): those endpoints 503 with a plain message, not a catalogued errorCode. Covered by the T16.5 capability probe (purchase_token family).
   Transitional site-identity env overrides (escape hatch only; prefer the config file):
-    SITE_OBJECT_ID, SITE_SLUG, SITE_BRAND_NAME, SITE_TAXONOMY_ID, SITE_TRACKING_PROJECT_ID, MCP_SERVER_NAME, MCP_SERVER_DIAGNOSTIC_NAME, SITE_ASSET_HOST, SITE_ASSET_FOLDER, PDF_TOOL_PROJECT_ID
+    SITE_OBJECT_ID, SITE_SLUG, SITE_BRAND_NAME, SITE_TAXONOMY_ID, SITE_TRACKING_PROJECT_ID, MCP_SERVER_NAME, MCP_SERVER_DIAGNOSTIC_NAME, SITE_ASSET_HOST, SITE_ASSET_FOLDER, PDF_TOOL_PROJECT_ID, CMS_AGENT_PROJECT_ID
 
 ADMIN WORKSPACE BOOTSTRAP (human gate — runbook site-provisioning-runbook.md §admin):
   1. Enable Netlify Identity (GoTrue) on the new site — console-only; without it /admin login

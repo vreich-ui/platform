@@ -111,6 +111,35 @@ test('deploy safety: repo-file hotlink URL families are blockers even without en
   }
 });
 
+test('deploy safety: the scoped CMS-Agent bearer is a protected value; its siblings are deliberately not', () => {
+  // PF1/E4. The bearer is scanned exactly like every other credential…
+  const scanned = protectedEnvValues({ CMS_AGENT_MCP_TOKEN: 'scoped-bearer-abcdefghijklmnop' });
+  assert.deepEqual(
+    scanned.map((entry) => entry.key),
+    ['CMS_AGENT_MCP_TOKEN']
+  );
+  const [blocked] = checkDeploySafety(
+    { section: { data: { body: 'debug: scoped-bearer-abcdefghijklmnop' } } },
+    scanned
+  );
+  assert.equal(blocked.status, 'missing');
+  assert.ok(blocked.message.includes('CMS_AGENT_MCP_TOKEN'), blocked.message);
+  assert.ok(!blocked.message.includes('scoped-bearer'), 'the error must name the KEY, never echo the value');
+
+  // …while the endpoint (a public URL) and the mode are NOT protected keys.
+  // 'fallback' clears the 8-char scan floor, so listing CMS_AGENT_CHAT_MODE
+  // would block every deploy whose copy contains the word.
+  assert.deepEqual(
+    protectedEnvValues({ CMS_AGENT_CHAT_MODE: 'fallback', CMS_AGENT_MCP_ENDPOINT: 'https://cms-agent.example/mcp' }),
+    []
+  );
+  const [clean] = checkDeploySafety(
+    { section: { data: { body: 'Our fallback plan is a calmer routine.' } } },
+    protectedEnvValues({ CMS_AGENT_CHAT_MODE: 'fallback' })
+  );
+  assert.equal(clean.status, 'complete');
+});
+
 test('deploy safety: clean content passes; short/absent env values never scan', () => {
   const clean = checkDeploySafety(
     { data: { body: '<p>Normal skincare copy about the main routine.</p>' } },
