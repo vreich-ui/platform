@@ -89,15 +89,39 @@ T11.10	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T11.10-per-
 # account-authority gates halt.
 T14.0	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T14.0-admin-login-fix.md
 T14.1	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T14.1-app-shell-extraction.md
-T14.2	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.2-platform-genesis.md
-T14.3	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.3-platform-provisioning-repo-rename.md
-T14.4	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.4-fleet-propagation-proof.md
-T14.5	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T14.5-instruction-manual.md
-T14.6	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T14.6-test-plan-execution.md
-T14.7	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T14.7-fix-wave.md
-T14.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T14.8-agent-connection-hygiene.md
-T14.9	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.9-synthetic-third-site.md
-T14.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T14.10-v1-closeout.md
+# T14.2-T14.10 RESOLVED (backlog triage 2026-08-10, artifact-verified) — left commented for
+# audit trail, do not re-run. Evidence per row:
+#   T14.2  sites/platform/ scaffolded, builds, renders its seed pack (commit 5713fd8b).
+#   T14.3  platform Netlify project provisioned (commit 466295ea); repo renamed to `platform`
+#          (CLAUDE.md repo note; T14.3-checklist.md annotations).
+#   T14.4  state-of-play "T14.4 is closed" on Wolf's CI confirmation; two live /mcp endpoints
+#          on one core, fleet matrix green (commits a13b14c5, 65c70bf1).
+#   T14.5  15 manual pages live on platform (sites/platform/data/site/pages/page_manual_*.json)
+#          plus the --check drift guard in scripts/platform-manual-drive.mjs (commit 3b825cc0).
+#          Drift guard is a driver mode against the live contracts, not a CI test — see the
+#          triage note in backlog-triage-2026-08-10.md.
+#   T14.6  docs/cms-architecture/cms-pipeline/w14-findings.md, executed live on both sites
+#          (commit b35ca323).
+#   T14.7  findings log fully dispositioned F1-F13 (fixed / wontfix-v1 with reasons) — commit
+#          6afa172f plus the F11-F13 tail in PR #499.
+#   T14.8  MCP auth fails closed in packages/core/server/functions/mcp.ts (the W14 F1 comment
+#          block; commits 5c76e3a1, ed3a1d28). Per-agent-key rollout is DEFERRED post-V1 and
+#          the PUBLISH_SECRET rotation was ruled "ignore it" — both Wolf, 2026-07-26, and both
+#          carried openly on the V1 deferred list in state-of-play. Closing this row does not
+#          drop them; reinstating either needs a NEW row, not a re-run of T14.8.
+#   T14.9  sites/fernwell/ live, twelve objects through the front door, timings recorded, fleet
+#          CI discovers three sites; scripts/site-genesis-drive.mjs (commit bf84be25).
+#   T14.10 docs/cms-architecture/13-separation-plan.md + the V1 declaration entry in
+#          state-of-play (commit ed3a1d28).
+#T14.2	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.2-platform-genesis.md
+#T14.3	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.3-platform-provisioning-repo-rename.md
+#T14.4	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.4-fleet-propagation-proof.md
+#T14.5	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T14.5-instruction-manual.md
+#T14.6	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T14.6-test-plan-execution.md
+#T14.7	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T14.7-fix-wave.md
+#T14.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T14.8-agent-connection-hygiene.md
+#T14.9	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.9-synthetic-third-site.md
+#T14.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T14.10-v1-closeout.md
 T12.1	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T12.1-capture-spike.md
 T12.2	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.2-decomposition-mapper.md
 T12.3	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T12.3-theme-extraction.md
@@ -109,20 +133,51 @@ T12.6	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.6
 # W13 may be pulled ahead of W10-W12 freely (reordering this file IS the scheduler). Briefs are written against
 # today's single-repo tree — if W11 (core extraction) lands first, whichever wave runs second rebases file paths
 # mechanically (12-plan §9). Checkpoints: T13.6 waits on OQ-W13-1, T13.7 on OQ-W13-3 (both tracked in 12-plan §13).
-T13.1	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.1-tracking-attribute.md
-T13.2	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.2-tracking-config-type.md
-T13.3	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.3-tracking-event-ingest.md
-T13.4	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.4-own-tracker-loader.md
-T13.5	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.5-tracking-scripts-component.md
-T13.6	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.6-consent-banner-geo.md
-T13.7	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.7-google-ads-adapter-bridge.md
-T13.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.8-native-adapters-csp.md
-T13.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T13.9-owner-db-reference-kit.md
-T13.10	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T13.10-tracking-seeds-roundtrip.md
+# T13.1-T13.10 + T13.12/T13.13 RESOLVED (backlog triage 2026-08-10, artifact-verified) — left
+# commented for audit trail, do not re-run. state-of-play 2026-07-20 B records "EVERY W13 auto
+# row is now BUILT"; each artifact re-verified in the W11-relocated tree:
+#   T13.1  packages/core/schema/bodies/tracking-attribute-v1.ts; ...trackingAttributeShape on all
+#          ten bodies; set_tracking + the seven forbidKeys refusals in schema/object-patch-ops.ts;
+#          tests/netlify/tracking-attribute.test.ts (commit 6bb7446a).
+#   T13.2  packages/core/schema/bodies/tracking-config-v1.ts + server/lib/materializers/
+#          tracking-config.ts; tests/netlify/tracking-config.test.ts (commit 82c7baa3).
+#   T13.3  packages/core/schema/tracking-event-v1.ts, server/lib/tracking-events.ts,
+#          server/functions/track-ingest.ts; tests/netlify/tracking-ingest.test.ts (commit 3da00f7b).
+#   T13.4  packages/core/lib/tracking/loader/*; tests/netlify/tracking-loader.test.ts (commit a69184ac).
+#   T13.5  packages/core/app/components/tracking/TrackingScripts.astro mounted in
+#          app/layouts/Layout.astro; adapters own.ts + plausible.ts; Analytics.astro /
+#          SplitbeeAnalytics.astro deleted; tests/netlify/tracking-scripts.test.ts (commit 8860496a).
+#   T13.6  app/components/tracking/ConsentBanner.astro + lib/tracking/consent/{runtime,banner-html}.ts
+#          (commit 91e13cbe).
+#   T13.7  lib/tracking/adapters/{google-ads,ga4}.ts + loader/bridge.ts (commit 750ddbb9).
+#   T13.8  lib/tracking/adapters/{meta-pixel,taboola,outbrain,mgid}.ts + the
+#          Content-Security-Policy-Report-Only header in netlify.toml and every site's
+#          netlify.toml (commit d82ce433).
+#   T13.9  docs/cms-architecture/tracking-sink-reference/{README.md,schema.sql} +
+#          scripts/tracking-mirror-replay.mjs + tests/scripts/tracking-replay.test.mjs (commit 8fb3a64e).
+#   T13.10 sites/<client>/seeds/tracking-config-seed-data.mjs (all three sites; relocated from
+#          scripts/lib/ by T11.6), the set_tracking / set_tracking_config_fields drills in
+#          scripts/lib/roundtrip-drill.mjs + roundtrip-reconcile.mjs, and the ten-type drill test
+#          tests/netlify/tracking-roundtrip-drill.test.ts (commit 6fb910c2).
+#   T13.12 packages/core/admin/GovernancePage.tsx at app/routes/admin/settings/guardrails.astro;
+#          tests/netlify/tracking-governance.test.ts (commit 5414d701).
+#   T13.13 doc 12 §15 "Scores-feedback design" (commit a9fe2740).
+# T13.11 (below) is the ONLY W13 row still open — the credentialed production drive never ran:
+# there is no sites/drlurie/data/site/tracking.json export and no drive entry in state-of-play.
+#T13.1	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.1-tracking-attribute.md
+#T13.2	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.2-tracking-config-type.md
+#T13.3	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.3-tracking-event-ingest.md
+#T13.4	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.4-own-tracker-loader.md
+#T13.5	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.5-tracking-scripts-component.md
+#T13.6	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.6-consent-banner-geo.md
+#T13.7	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.7-google-ads-adapter-bridge.md
+#T13.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.8-native-adapters-csp.md
+#T13.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T13.9-owner-db-reference-kit.md
+#T13.10	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T13.10-tracking-seeds-roundtrip.md
 T13.11	human_gate	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.11-tracking-production-drive.md
 # W13 post-ruling additions (OQ-W13-1…6 all answered 2026-07-19 — T13.6/T13.7 flipped to auto above; reorder freely).
-T13.12	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.12-admin-governance-toggle.md
-T13.13	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.13-scores-feedback-design.md
+#T13.12	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.12-admin-governance-toggle.md
+#T13.13	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.13-scores-feedback-design.md
 #
 # W15 — fleet admin parity + follow-ups (mandate: docs/cms-architecture/15-fleet-admin-parity.md).
 # S1 (partial 1/4, PR #500), S2 (PR #502), S3 (PR #505, re-landed clean after #503 hit real conflicts against
