@@ -10,10 +10,13 @@
  *      and imports nothing from @tiptap — mirroring prosemirror.ts's rule that
  *      the data layer must not drag editor packages into the build.
  *
- *   2. BROWSER factory (`createRichTextEditor`): news up a TipTap Editor via a
- *      DYNAMIC import, so @tiptap/* load only at runtime in the overlay, never
- *      in the test/build graph. The toolbar surfaces ONLY grammar marks/nodes;
- *      links are https-only.
+ *   2. BROWSER factory (`createRichTextEditor`) + `buildInlineToolbar`: news up
+ *      a TipTap Editor via a DYNAMIC import, so @tiptap/* load only at runtime
+ *      in the overlay, never in the test/build graph, and mounts the
+ *      selection-anchored formatting bubble the canvas edits with. The toolbar
+ *      surfaces ONLY grammar marks/nodes; links are https-only. Its control
+ *      list and its placement maths are pure and unit-tested; only the DOM
+ *      wiring needs a browser.
  *
  * Grammar (08-articles-plan §2.2, this task's brief): p, br, strong, em,
  * a[https only], ul, ol, li, h2, h3, plus the `code` mark (inline code
@@ -29,6 +32,16 @@ import {
   type ProseMirrorMark,
 } from '../richtext/prosemirror.js';
 import type { RichTextV1Document } from '../../lib/richtext/rich-text-v1.js';
+import {
+  ICON_BOLD,
+  ICON_CODE,
+  ICON_ITALIC,
+  ICON_LINK,
+  ICON_LIST_BULLET,
+  ICON_LIST_ORDERED,
+  ICON_REDO,
+  ICON_UNDO,
+} from './ui-chrome.js';
 
 // ─── grammar allowlist (ProseMirror/TipTap side) ───────────────────────────────
 
@@ -139,6 +152,475 @@ export const serializeToRichTextV1 = (pmDoc: ProseMirrorNode): RichTextV1Documen
 /** rich_text.v1 → TipTap/ProseMirror JSON for loading into the editor. */
 export const deserializeFromRichTextV1 = (doc: RichTextV1Document): ProseMirrorNode => richTextV1ToProseMirror(doc);
 
+// ─── the inline formatting toolbar ─────────────────────────────────────────────
+
+/**
+ * How much formatting a surface may offer, decided from the field it edits.
+ *
+ *   rich    — a rich_text.v1 document: every grammar control.
+ *   upgrade — a plain string that MAY become one on the first formatting
+ *             command (fix 3); the same controls, applied after the upgrade.
+ *   plain   — a single-line string field (heading, title, eyebrow, ctaText…):
+ *             no buttons, just the muted hint. A <strong> in one of these is
+ *             escaped by the renderer and is actively harmful.
+ *   none    — no toolbar at all (a raw HTML body: out of scope here).
+ */
+export type InlineToolbarMode = 'rich' | 'upgrade' | 'plain' | 'none';
+
+export type InlineToolbarControl =
+  | 'bold'
+  | 'italic'
+  | 'code'
+  | 'bulletList'
+  | 'orderedList'
+  | 'h2'
+  | 'h3'
+  | 'paragraph'
+  | 'link'
+  | 'undo'
+  | 'redo';
+
+/**
+ * Every formatting command the surface offers. Each one round-trips
+ * sanitizer → prosemirror mapper → rich_text.v1 zod schema → the server's
+ * patch grammar → the renderer; nothing here can be saved and then silently
+ * dropped. `hardBreak` is keyboard-only (Shift+Enter) — it needs no button.
+ */
+export const INLINE_FORMAT_COMMANDS = [
+  'bold',
+  'italic',
+  'code',
+  'bulletList',
+  'orderedList',
+  'h2',
+  'h3',
+  'paragraph',
+  'link',
+  'hardBreak',
+  'undo',
+  'redo',
+] as const;
+
+/**
+ * Formatting the store has NO representation for. Offering any of these would
+ * either drop the mark on save (the sanitizer strips it) or 422 at the patch
+ * grammar. Blockquote is one line away from safe in rich-text-v1 but is
+ * deliberately out of scope for this task.
+ */
+export const INLINE_FORBIDDEN_CONTROLS = [
+  'strike',
+  'underline',
+  'highlight',
+  'subscript',
+  'superscript',
+  'color',
+  'fontSize',
+  'textAlign',
+  'codeBlock',
+  'horizontalRule',
+  'h1',
+  'h4',
+  'h5',
+  'h6',
+  'table',
+  'image',
+  'blockquote',
+] as const;
+
+const RICH_CONTROLS: readonly InlineToolbarControl[] = [
+  'bold',
+  'italic',
+  'code',
+  'bulletList',
+  'orderedList',
+  'h2',
+  'h3',
+  'paragraph',
+  'link',
+  'undo',
+  'redo',
+];
+
+/** The buttons each mode draws, in order. Pure — the shipped control list. */
+export const INLINE_TOOLBAR_BUTTONS: Record<InlineToolbarMode, readonly InlineToolbarControl[]> = {
+  rich: RICH_CONTROLS,
+  upgrade: RICH_CONTROLS,
+  plain: [],
+  none: [],
+};
+
+/** Where a separator is drawn (before this control). */
+const CONTROL_GROUP_BREAKS = new Set<InlineToolbarControl>(['h2', 'link', 'undo']);
+
+const CONTROL_LABELS: Record<InlineToolbarControl, string> = {
+  bold: 'Bold',
+  italic: 'Italic',
+  code: 'Inline code',
+  bulletList: 'Bullet list',
+  orderedList: 'Numbered list',
+  h2: 'Heading 2',
+  h3: 'Heading 3',
+  paragraph: 'Paragraph',
+  link: 'Link',
+  undo: 'Undo',
+  redo: 'Redo',
+};
+
+const CONTROL_FACES: Record<InlineToolbarControl, string> = {
+  bold: ICON_BOLD,
+  italic: ICON_ITALIC,
+  code: ICON_CODE,
+  bulletList: ICON_LIST_BULLET,
+  orderedList: ICON_LIST_ORDERED,
+  h2: 'H2',
+  h3: 'H3',
+  paragraph: '¶',
+  link: ICON_LINK,
+  undo: ICON_UNDO,
+  redo: ICON_REDO,
+};
+
+/** How each control reports "the caret is inside one of these already". */
+const CONTROL_ACTIVE: Partial<Record<InlineToolbarControl, [string, Record<string, unknown>?]>> = {
+  bold: ['bold'],
+  italic: ['italic'],
+  code: ['code'],
+  bulletList: ['bulletList'],
+  orderedList: ['orderedList'],
+  h2: ['heading', { level: 2 }],
+  h3: ['heading', { level: 3 }],
+  paragraph: ['paragraph'],
+  link: ['link'],
+};
+
+/** The slice of TipTap's Editor the toolbar uses — structural, so no static @tiptap dep. */
+type ChainedCommands = {
+  focus(): ChainedCommands;
+  toggleBold(): ChainedCommands;
+  toggleItalic(): ChainedCommands;
+  toggleCode(): ChainedCommands;
+  toggleBulletList(): ChainedCommands;
+  toggleOrderedList(): ChainedCommands;
+  toggleHeading(attributes: { level: number }): ChainedCommands;
+  setParagraph(): ChainedCommands;
+  setLink(attributes: { href: string }): ChainedCommands;
+  unsetLink(): ChainedCommands;
+  undo(): ChainedCommands;
+  redo(): ChainedCommands;
+  run(): boolean;
+};
+
+export type InlineToolbarEditor = {
+  chain(): ChainedCommands;
+  isActive(name: string, attributes?: Record<string, unknown>): boolean;
+  getAttributes(name: string): Record<string, unknown>;
+  state: { selection: { empty: boolean } };
+  on(event: string, handler: () => void): void;
+  off(event: string, handler: () => void): void;
+};
+
+const runControl = (editor: InlineToolbarEditor, control: InlineToolbarControl): void => {
+  const chain = editor.chain().focus();
+  switch (control) {
+    case 'bold':
+      chain.toggleBold().run();
+      return;
+    case 'italic':
+      chain.toggleItalic().run();
+      return;
+    case 'code':
+      chain.toggleCode().run();
+      return;
+    case 'bulletList':
+      chain.toggleBulletList().run();
+      return;
+    case 'orderedList':
+      chain.toggleOrderedList().run();
+      return;
+    case 'h2':
+      chain.toggleHeading({ level: 2 }).run();
+      return;
+    case 'h3':
+      chain.toggleHeading({ level: 3 }).run();
+      return;
+    case 'paragraph':
+      chain.setParagraph().run();
+      return;
+    case 'undo':
+      chain.undo().run();
+      return;
+    case 'redo':
+      chain.redo().run();
+      return;
+    case 'link':
+      // handled by the popover, never applied blind
+      return;
+  }
+};
+
+const EDGE = 8;
+
+/**
+ * Where the bubble goes: ~8px above the selection, flipped below when that
+ * would collide with the edit-mode top bar, clamped inside the viewport.
+ * Pure, so the geometry is unit-tested without a browser.
+ */
+export const inlineToolbarPlacement = (
+  anchor: { top: number; bottom: number; left: number; width: number },
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  topGuard = 0,
+  gap = 8
+): { left: number; top: number; flipped: boolean } => {
+  const above = anchor.top - gap - size.height;
+  const flipped = above < topGuard;
+  const wanted = flipped ? anchor.bottom + gap : above;
+  const lowestTop = Math.max(topGuard, viewport.height - size.height - EDGE);
+  const top = Math.min(Math.max(wanted, topGuard), lowestTop);
+  const rightmostLeft = Math.max(EDGE, viewport.width - size.width - EDGE);
+  const left = Math.min(Math.max(anchor.left + anchor.width / 2 - size.width / 2, EDGE), rightmostLeft);
+  return { left, top, flipped };
+};
+
+export interface InlineToolbarOptions {
+  /** The editing surface: the fallback anchor when there is no selection rect. */
+  anchor: () => HTMLElement;
+  /** Viewport y the bubble must clear (the edit-mode top bar). */
+  topGuard?: number;
+}
+
+export interface InlineToolbarHandle {
+  /** The bubble itself — must be exempt from the focusout/mousedown commit guards. */
+  element: HTMLElement;
+  /** Re-anchor to the current selection. */
+  reposition(): void;
+  /** Attach (or re-attach) to an editor — the upgrade path calls this. */
+  bind(editor: InlineToolbarEditor): void;
+  destroy(): void;
+}
+
+/**
+ * The selection-anchored formatting bubble. Two guards are load-bearing and
+ * neither is optional: every button cancels **mousedown** (a click alone is
+ * too late — the surface would have lost focus and autosaved before the
+ * handler ran), and the caller must add `element` to BOTH the focusout
+ * exemption and the document-mousedown exemption beside the host, panel and
+ * rail. Without them every button press saves and closes the editor.
+ */
+export const buildInlineToolbar = (
+  editor: InlineToolbarEditor | undefined,
+  mode: InlineToolbarMode,
+  options: InlineToolbarOptions
+): InlineToolbarHandle | undefined => {
+  if (mode === 'none') return undefined;
+
+  const element = document.createElement('div');
+  element.className = 'dl-em-fmt';
+  element.setAttribute('role', 'toolbar');
+  element.setAttribute('aria-label', 'Text formatting');
+
+  let bound: InlineToolbarEditor | undefined = editor;
+  const refreshers: Array<() => void> = [];
+  const refreshAll = (): void => {
+    for (const refresh of refreshers) refresh();
+  };
+
+  const place = (): void => {
+    const anchorElement = options.anchor();
+    const selection = window.getSelection();
+    let box: DOMRect | undefined;
+    if (selection && selection.rangeCount > 0) {
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0) box = rect;
+    }
+    const rect = box ?? anchorElement.getBoundingClientRect();
+    const size = element.getBoundingClientRect();
+    const { left, top } = inlineToolbarPlacement(
+      { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
+      { width: size.width, height: size.height },
+      { width: window.innerWidth, height: window.innerHeight },
+      options.topGuard ?? 0
+    );
+    element.style.left = `${Math.round(left)}px`;
+    element.style.top = `${Math.round(top)}px`;
+  };
+
+  // ── link popover ────────────────────────────────────────────────────────
+  let popover: HTMLElement | undefined;
+  const closePopover = (): boolean => {
+    if (!popover) return false;
+    popover.remove();
+    popover = undefined;
+    return true;
+  };
+  const openPopover = (): void => {
+    if (closePopover()) return; // the link button toggles it
+    const current = bound?.getAttributes('link').href;
+    const pop = document.createElement('div');
+    pop.className = 'dl-em-fmtpop';
+    const input = document.createElement('input');
+    input.type = 'url';
+    input.placeholder = 'https://…';
+    input.value = typeof current === 'string' ? current : '';
+    input.setAttribute('aria-label', 'Link address (https only)');
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'dl-em-fmtbtn';
+    apply.textContent = 'Apply';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'dl-em-fmtbtn';
+    remove.textContent = 'Remove';
+    remove.disabled = typeof current !== 'string' || current === '';
+    const commit = (): void => {
+      const href = input.value.trim();
+      // https-only, exactly as the sanitizer and the store schema require: an
+      // http/mailto/relative href would be stripped on save, so refuse it here
+      // rather than pretend it took.
+      if (href && !HTTPS_ONLY.test(href)) {
+        input.setAttribute('aria-invalid', 'true');
+        return;
+      }
+      if (href) bound?.chain().focus().setLink({ href }).run();
+      else bound?.chain().focus().unsetLink().run();
+      closePopover();
+    };
+    apply.addEventListener('mousedown', (event) => event.preventDefault());
+    apply.addEventListener('click', commit);
+    remove.addEventListener('mousedown', (event) => event.preventDefault());
+    remove.addEventListener('click', () => {
+      bound?.chain().focus().unsetLink().run();
+      closePopover();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit();
+      }
+    });
+    pop.append(input, apply, remove);
+    element.append(pop);
+    popover = pop;
+    window.requestAnimationFrame(() => input.focus());
+  };
+
+  // ── buttons ─────────────────────────────────────────────────────────────
+  const addButton = (control: InlineToolbarControl): void => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dl-em-fmtbtn';
+    button.dataset.emFmt = control;
+    const label = CONTROL_LABELS[control];
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    const face = CONTROL_FACES[control];
+    if (face.startsWith('<svg')) button.innerHTML = face;
+    else button.textContent = face;
+
+    const activeQuery = CONTROL_ACTIVE[control];
+    if (activeQuery) {
+      const refresh = (): void => {
+        const active = bound ? bound.isActive(activeQuery[0], activeQuery[1]) : false;
+        button.setAttribute('aria-pressed', String(active));
+      };
+      refresh();
+      refreshers.push(refresh);
+    }
+
+    // THE guard: cancel mousedown, not just click. A click handler alone fires
+    // after the surface has already blurred — and blur commits and closes.
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      activate(control);
+    });
+    element.append(button);
+  };
+
+  const activate = (control: InlineToolbarControl): void => {
+    if (!bound) return;
+    if (control === 'link') openPopover();
+    else runControl(bound, control);
+    refreshAll();
+    place();
+  };
+
+  if (mode === 'plain') {
+    const hint = document.createElement('span');
+    hint.className = 'dl-em-fmthint';
+    hint.textContent = 'Plain text';
+    element.append(hint);
+  } else {
+    for (const control of INLINE_TOOLBAR_BUTTONS[mode]) {
+      if (CONTROL_GROUP_BREAKS.has(control)) {
+        const separator = document.createElement('span');
+        separator.className = 'dl-em-fmtsep';
+        separator.setAttribute('aria-hidden', 'true');
+        element.append(separator);
+      }
+      addButton(control);
+    }
+  }
+
+  // ── editor binding ──────────────────────────────────────────────────────
+  const onEditorEvent = (): void => {
+    refreshAll();
+    place();
+  };
+  const bind = (next: InlineToolbarEditor): void => {
+    bound?.off('selectionUpdate', onEditorEvent);
+    bound?.off('transaction', onEditorEvent);
+    bound = next;
+    next.on('selectionUpdate', onEditorEvent);
+    next.on('transaction', onEditorEvent);
+    refreshAll();
+  };
+  if (editor) bind(editor);
+
+  // ── keyboard ────────────────────────────────────────────────────────────
+  // StarterKit already binds Mod-B/I/E, Mod-Shift-8/7, Mod-Alt-2/3, undo/redo,
+  // Shift-Enter and Tab. Two the surface has to own itself, in CAPTURE so they
+  // are decided before ui.ts's Esc-cancels-the-edit handler sees them.
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape' && popover) {
+      // Esc must close the popover FIRST; letting it through would revert the
+      // whole edit because the link URL was mistyped.
+      event.preventDefault();
+      event.stopPropagation();
+      closePopover();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+      if (!INLINE_TOOLBAR_BUTTONS[mode].includes('link')) return;
+      event.preventDefault(); // …and never reach the browser's own Mod-K
+      event.stopPropagation();
+      activate('link');
+    }
+  };
+  document.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('scroll', place, { passive: true, capture: true });
+  window.addEventListener('resize', place);
+  document.addEventListener('selectionchange', place);
+
+  document.body.append(element);
+  window.requestAnimationFrame(place);
+
+  return {
+    element,
+    reposition: place,
+    bind,
+    destroy: () => {
+      bound?.off('selectionUpdate', onEditorEvent);
+      bound?.off('transaction', onEditorEvent);
+      document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+      document.removeEventListener('selectionchange', place);
+      element.remove();
+    },
+  };
+};
+
 // ─── browser editor factory (dynamic TipTap import) ────────────────────────────
 
 export interface RichTextEditorHandle {
@@ -148,6 +630,8 @@ export interface RichTextEditorHandle {
   focus(): void;
   /** Tear down the TipTap instance (call on panel close — avoids leaks). */
   destroy(): void;
+  /** The formatting bubble for this editor, mounted on the document. */
+  buildToolbar(mode: InlineToolbarMode, options: InlineToolbarOptions): InlineToolbarHandle | undefined;
   /** The underlying TipTap editor (typed loosely to avoid a static @tiptap dep here). */
   editor: unknown;
 }
@@ -218,6 +702,8 @@ export const createRichTextEditor = async (options: CreateRichTextEditorOptions)
     getRichTextV1,
     focus: () => editor.commands.focus(),
     destroy: () => editor.destroy(),
+    buildToolbar: (mode, toolbarOptions) =>
+      buildInlineToolbar(editor as unknown as InlineToolbarEditor, mode, toolbarOptions),
     editor,
   };
 };

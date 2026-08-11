@@ -4,6 +4,7 @@ import assert from 'node:assert';
 import {
   derivePrimaryInlineField,
   inlineEditOps,
+  inlineToolbarModeFor,
   inlineValueBlockTexts,
   isRichTextDocument,
   shouldCaptureSelection,
@@ -98,6 +99,24 @@ describe('derivePrimaryInlineField', () => {
 
   it('does not offer a string ARRAY (a bullet list is not one value)', () => {
     assert.strictEqual(derivePrimaryInlineField({ items: ['one', 'two'] }, 'content_item'), undefined);
+  });
+});
+
+describe('inlineToolbarModeFor', () => {
+  it('gives a rich_text.v1 body the full grammar', () => {
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'doc' }), 'rich');
+  });
+
+  it('gives a single-line string the muted "Plain text" hint, never buttons', () => {
+    // A <strong> in a heading string is escaped by the renderer and ships as
+    // literal markup — offering the button would be actively harmful.
+    for (const key of ['title', 'heading', 'eyebrow', 'ctaText', 'label']) {
+      assert.strictEqual(inlineToolbarModeFor({ key, kind: 'plain' }), 'plain', key);
+    }
+  });
+
+  it('gives a raw HTML section body no toolbar at all (out of scope here)', () => {
+    assert.strictEqual(inlineToolbarModeFor({ key: 'body', kind: 'html' }), 'none');
   });
 });
 

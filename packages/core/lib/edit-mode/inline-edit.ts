@@ -10,6 +10,7 @@
  * Spec: docs/design/marginalia-interaction-model.md §5.
  */
 import { blockText, richTextToBlocks } from './preview.js';
+import type { InlineToolbarMode } from './richtext-editor.js';
 import { suggestionToOps, type EditTarget } from './targets.js';
 
 /**
@@ -84,6 +85,24 @@ export const derivePrimaryInlineField = (
     if (match) return match;
   }
   return eligible[0];
+};
+
+/**
+ * How much formatting the surface for a field may offer (Wolf, 2026-08-11:
+ * "When editing something that can be edited on the spot, like text it need to
+ * show rich text tools"). Derived from the field's own shape, because that is
+ * what decides which of them can actually be SAVED:
+ *
+ *   - a rich_text.v1 document takes the full grammar;
+ *   - a single-line string (heading, title, eyebrow, ctaText…) takes none —
+ *     the renderer escapes it, so a <strong> would ship as literal markup;
+ *   - a raw HTML section body gets no bubble at all: its surface is the markup
+ *     itself, and formatting it belongs with the section rich-text work.
+ */
+export const inlineToolbarModeFor = (field: InlineField): InlineToolbarMode => {
+  if (field.kind === 'doc') return 'rich';
+  if (field.kind === 'html') return 'none';
+  return 'plain';
 };
 
 type RichTextNode = { value?: unknown; content?: unknown };

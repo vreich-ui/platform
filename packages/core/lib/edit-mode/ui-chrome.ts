@@ -374,6 +374,37 @@ body.dl-em-on .dl-em-gutter{display:block}
   min-height:1.4em;caret-color:var(--dlem-accent)}
 .dl-em-inline:focus,.dl-em-inline .ProseMirror:focus{outline:2px solid var(--dlem-accent);outline-offset:6px}
 .dl-em-inline-rich{white-space:normal}
+/* The formatting bubble (T17.8 fix 3). Wolf, 2026-08-11: "When editing
+   something that can be edited on the spot, like text it need to show rich
+   text tools to make simple changes expected in such scenario: bold, italic,
+   bullet points and so on." It belongs AT the text, not in the rail bubble
+   head, so it is anchored to the selection rect and floats over everything on
+   the canvas — one notch above the chip, below the delete confirmation. Same
+   glass treatment as the chip so it reads as the same surface. */
+.dl-em-fmt{position:fixed;top:0;left:0;z-index:99995;display:flex;align-items:center;gap:2px;padding:4px 5px;
+  border-radius:10px;border:1px solid color-mix(in srgb,var(--dlem-text) 16%,transparent);
+  background:color-mix(in srgb,var(--dlem-surface) 32%,transparent);
+  -webkit-backdrop-filter:blur(9px) saturate(1.3);backdrop-filter:blur(9px) saturate(1.3);
+  color:var(--dlem-heading);font:700 11.5px var(--dlem-font);
+  box-shadow:0 2px 12px color-mix(in srgb,var(--dlem-text) 12%,transparent)}
+.dl-em-fmt .dl-em-fmtbtn{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:24px;
+  padding:0 4px;border:none;border-radius:5px;background:transparent;color:var(--dlem-text);cursor:pointer;
+  font:700 11.5px var(--dlem-font)}
+.dl-em-fmt .dl-em-fmtbtn:hover{background:color-mix(in srgb,var(--dlem-text) 14%,transparent);color:var(--dlem-heading)}
+.dl-em-fmt .dl-em-fmtbtn:focus-visible{outline:2px solid var(--dlem-accent);outline-offset:1px}
+.dl-em-fmt .dl-em-fmtbtn[aria-pressed="true"]{background:color-mix(in srgb,var(--dlem-accent) 22%,transparent);
+  color:var(--dlem-heading);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dlem-accent) 55%,transparent)}
+.dl-em-fmt .dl-em-fmtbtn:disabled{opacity:.4;cursor:not-allowed}
+.dl-em-fmt .dl-em-fmtbtn svg{display:block}
+.dl-em-fmt .dl-em-fmtsep{width:1px;height:14px;margin:0 3px;
+  background:color-mix(in srgb,var(--dlem-text) 18%,transparent)}
+.dl-em-fmt .dl-em-fmthint{padding:2px 6px;color:var(--dlem-muted);font:600 11px var(--dlem-font)}
+.dl-em-fmt .dl-em-fmtpop{position:absolute;top:calc(100% + 6px);left:0;display:flex;gap:6px;padding:6px;
+  border-radius:10px;border:1px solid var(--dlem-border);background:var(--dlem-surface);
+  box-shadow:var(--dlem-shadow)}
+.dl-em-fmt .dl-em-fmtpop input{width:15rem;border:1px solid var(--dlem-border);border-radius:7px;padding:5px 8px;
+  font:12.5px var(--dlem-font);background:var(--dlem-surface);color:var(--dlem-text)}
+.dl-em-fmt .dl-em-fmtpop input:focus{outline:2px solid var(--dlem-accent);outline-offset:1px;border-color:transparent}
 /* The hover outline would double up on the block being edited. */
 body.dl-em-on [data-cms-section-id].dl-em-editing>*,body.dl-em-on [data-cms-nav-object].dl-em-editing>*{outline:none}
 /* Sheet mode (< 900px): no rail column — the bubbles become the bottom sheet. */
@@ -453,6 +484,38 @@ export const ICON_UNDO =
   '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/>' +
   '<path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>';
+export const ICON_REDO =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/>' +
+  '<path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>';
+// ── inline formatting toolbar (T17.8 fix 3) ──────────────────────────────────
+// One icon per grammar control. Drawn to the same 24-box, 13px, currentColor
+// convention as the chip's tools so the bubble reads as the same surface.
+export const ICON_BOLD =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M7 4h6.5a4 4 0 0 1 0 8H7z"/><path d="M7 12h7.5a4 4 0 0 1 0 8H7z"/></svg>';
+export const ICON_ITALIC =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+  'stroke-linecap="round" aria-hidden="true"><path d="M15 4h5M9 20h5M14 4 10 20"/></svg>';
+export const ICON_CODE =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 17-5-5 5-5M15 7l5 5-5 5"/></svg>';
+export const ICON_LIST_BULLET =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/>' +
+  '<circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/>' +
+  '<circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/>' +
+  '<circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>';
+export const ICON_LIST_ORDERED =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10"/>' +
+  '<path d="M3.4 4.6 5 4v4.4M3.2 13.2a1.6 1.6 0 1 1 2.8 1L3.2 20H6"/></svg>';
+export const ICON_LINK =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M10 13.5a4 4 0 0 0 5.7.3l3-3a4 4 0 0 0-5.7-5.7L11.3 6.8"/>' +
+  '<path d="M14 10.5a4 4 0 0 0-5.7-.3l-3 3a4 4 0 0 0 5.7 5.7l1.7-1.7"/></svg>';
 export const ICON_SEND =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/>' +

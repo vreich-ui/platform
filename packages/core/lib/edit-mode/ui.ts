@@ -46,12 +46,13 @@ import {
 import {
   derivePrimaryInlineField,
   inlineEditOps,
+  inlineToolbarModeFor,
   inlineValueBlockTexts,
   shouldCaptureSelection,
   NON_COPY_KEY_RE,
   type InlineField,
 } from './inline-edit.js';
-import type { RichTextEditorHandle } from './richtext-editor.js';
+import type { InlineToolbarHandle, RichTextEditorHandle } from './richtext-editor.js';
 import { applyNavChangesToBody, navChangesToOps, navEditFieldsFor, type NavEditField } from './nav-editor.js';
 import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
@@ -136,6 +137,8 @@ const RAIL_TOP = 46;
 const RAIL_SHEET_FLOOR = 900;
 /** Gutter-marker centre, left of the block's leading edge (spec §4.2). */
 const GUTTER_X = 28;
+/** The formatting bubble flips below the selection rather than hide under the bar. */
+const INLINE_TOOLBAR_TOP_GUARD = RAIL_TOP;
 /** Reveal on pointer enter; dismiss on leave (the value clearChipSoon already used). */
 const RAIL_REVEAL_MS = 120;
 const RAIL_DISMISS_MS = 250;
@@ -2625,6 +2628,8 @@ export const mountEditMode = (options: MountOptions): void => {
     snapshot: RegionSnapshot;
     host: HTMLElement;
     richText?: RichTextEditorHandle;
+    /** The formatting bubble, when the field takes one. */
+    toolbar?: InlineToolbarHandle;
     committing: boolean;
   };
   let inlineEdit: InlineEditState | undefined;
@@ -2651,6 +2656,7 @@ export const mountEditMode = (options: MountOptions): void => {
   /** Leave inline edit, restoring the block's rendered content. */
   const finishInlineEdit = (edit: InlineEditState): void => {
     if (inlineEdit === edit) inlineEdit = undefined;
+    edit.toolbar?.destroy();
     edit.richText?.destroy();
     restoreRegion(edit.snapshot);
     edit.region.classList.remove('dl-em-editing');
@@ -2832,6 +2838,9 @@ export const mountEditMode = (options: MountOptions): void => {
     };
     inlineEdit = edit;
 
+    const toolbarMode = inlineToolbarModeFor(field);
+    const toolbarOptions = { anchor: () => edit.host, topGuard: INLINE_TOOLBAR_TOP_GUARD };
+
     if (field.kind === 'doc') {
       // The grammar-bound TipTap editor, imported only when one is needed so
       // @tiptap never enters the canvas's base bundle. Allowlist, paste
@@ -2846,6 +2855,7 @@ export const mountEditMode = (options: MountOptions): void => {
         edit.richText.destroy();
         return;
       }
+      edit.toolbar = edit.richText.buildToolbar(toolbarMode, toolbarOptions);
       edit.richText.focus();
     } else {
       host.setAttribute('contenteditable', 'plaintext-only');
@@ -2860,6 +2870,11 @@ export const mountEditMode = (options: MountOptions): void => {
         event.preventDefault();
         document.execCommand('insertText', false, text);
       });
+      if (toolbarMode !== 'none') {
+        const { buildInlineToolbar } = await import('./richtext-editor.js');
+        if (inlineEdit !== edit) return; // cancelled while the chunk loaded
+        edit.toolbar = buildInlineToolbar(undefined, toolbarMode, toolbarOptions);
+      }
     }
 
     host.addEventListener('keydown', (event) => {
@@ -2878,7 +2893,9 @@ export const mountEditMode = (options: MountOptions): void => {
     });
     host.addEventListener('focusout', (event) => {
       const next = event.relatedTarget as Node | null;
-      if (next && host.contains(next)) return;
+      // The formatting bubble is part of the editing surface: focus landing in
+      // it (the link popover's input) must not read as "clicked away, save".
+      if (next && (host.contains(next) || edit.toolbar?.element.contains(next))) return;
       void commitInlineEdit();
     });
 
@@ -2942,7 +2959,15 @@ export const mountEditMode = (options: MountOptions): void => {
     (event) => {
       if (!inlineEdit) return;
       const element = event.target as Node | null;
-      if (element && (inlineEdit.host.contains(element) || panel.contains(element) || rail.contains(element))) return;
+      if (
+        element &&
+        (inlineEdit.host.contains(element) ||
+          inlineEdit.toolbar?.element.contains(element) ||
+          panel.contains(element) ||
+          rail.contains(element))
+      ) {
+        return;
+      }
       void commitInlineEdit();
     },
     { signal }

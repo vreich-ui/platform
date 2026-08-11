@@ -17,6 +17,10 @@ import {
   serializeToRichTextV1,
   deserializeFromRichTextV1,
   GRAMMAR_MARKS,
+  INLINE_FORBIDDEN_CONTROLS,
+  INLINE_FORMAT_COMMANDS,
+  INLINE_TOOLBAR_BUTTONS,
+  inlineToolbarPlacement,
 } from './richtext-editor.js';
 import { richTextV1Schema } from '../../lib/richtext/rich-text-v1.js';
 import type { ProseMirrorNode } from '../richtext/prosemirror.js';
@@ -191,5 +195,95 @@ describe('server-side half: the store schema rejects a hand-built violation', ()
       content: [{ nodeType: BLOCKS.PARAGRAPH, data: {}, content: [rtText('x', [{ type: 'underline' }])] }],
     };
     assert.throws(() => richTextV1Schema.parse(violation), /invalid|underline|enum/i);
+  });
+});
+
+// ── the inline formatting toolbar ────────────────────────────────────────────
+
+describe('the toolbar offers exactly what the grammar can hold', () => {
+  it('offers no control the store has no representation for', () => {
+    const forbidden = new Set<string>(INLINE_FORBIDDEN_CONTROLS);
+    for (const control of INLINE_FORMAT_COMMANDS) {
+      assert.ok(!forbidden.has(control), `${control} is offered AND forbidden`);
+    }
+    for (const mode of ['rich', 'upgrade', 'plain', 'none'] as const) {
+      for (const control of INLINE_TOOLBAR_BUTTONS[mode]) {
+        assert.ok(!forbidden.has(control), `${mode} draws a button for the forbidden ${control}`);
+        assert.ok(
+          (INLINE_FORMAT_COMMANDS as readonly string[]).includes(control),
+          `${mode} draws ${control}, which is not a declared command`
+        );
+      }
+    }
+  });
+
+  it('names strikethrough, underline, code blocks, h1 and alignment as forbidden', () => {
+    // The list is the contract: these would either be stripped by the
+    // sanitizer on save or rejected by the store schema outright.
+    for (const banned of ['strike', 'underline', 'codeBlock', 'horizontalRule', 'h1', 'textAlign', 'blockquote']) {
+      assert.ok((INLINE_FORBIDDEN_CONTROLS as readonly string[]).includes(banned), `${banned} must stay off the bar`);
+    }
+  });
+
+  it('draws every mark and block the grammar allows, and only those', () => {
+    const marks = new Set(GRAMMAR_MARKS); // bold, italic, code, link
+    for (const control of ['bold', 'italic', 'code', 'link']) {
+      assert.ok(marks.has(control), `${control} must be a grammar mark`);
+    }
+    assert.deepStrictEqual(
+      [...INLINE_TOOLBAR_BUTTONS.rich],
+      ['bold', 'italic', 'code', 'bulletList', 'orderedList', 'h2', 'h3', 'paragraph', 'link', 'undo', 'redo'],
+      'the shipped control list'
+    );
+  });
+
+  it('gives an upgradable plain body the same controls as a rich one', () => {
+    assert.deepStrictEqual([...INLINE_TOOLBAR_BUTTONS.upgrade], [...INLINE_TOOLBAR_BUTTONS.rich]);
+  });
+
+  it('gives a plain single-line field NO buttons — the muted hint instead', () => {
+    assert.deepStrictEqual([...INLINE_TOOLBAR_BUTTONS.plain], []);
+    assert.deepStrictEqual([...INLINE_TOOLBAR_BUTTONS.none], []);
+  });
+});
+
+describe('inlineToolbarPlacement', () => {
+  const size = { width: 300, height: 32 };
+  const viewport = { width: 1200, height: 800 };
+
+  it('sits 8px above the selection, centred on it', () => {
+    const at = inlineToolbarPlacement({ top: 400, bottom: 420, left: 500, width: 100 }, size, viewport, 46);
+    assert.strictEqual(at.top, 400 - 8 - 32);
+    assert.strictEqual(at.left, 500 + 50 - 150);
+    assert.strictEqual(at.flipped, false);
+  });
+
+  it('flips below when it would collide with the top bar', () => {
+    const at = inlineToolbarPlacement({ top: 60, bottom: 90, left: 500, width: 100 }, size, viewport, 46);
+    assert.strictEqual(at.flipped, true);
+    assert.strictEqual(at.top, 98);
+  });
+
+  it('never rides under the top bar, even flipped', () => {
+    for (let top = -50; top < 200; top += 1) {
+      const at = inlineToolbarPlacement({ top, bottom: top + 20, left: 40, width: 80 }, size, viewport, 46);
+      assert.ok(at.top >= 46, `top ${at.top} for a selection at ${top}`);
+    }
+  });
+
+  it('clamps to the viewport on both edges', () => {
+    const left = inlineToolbarPlacement({ top: 400, bottom: 420, left: 0, width: 10 }, size, viewport, 46);
+    assert.strictEqual(left.left, 8);
+    const right = inlineToolbarPlacement({ top: 400, bottom: 420, left: 1190, width: 10 }, size, viewport, 46);
+    assert.strictEqual(right.left, 1200 - 300 - 8);
+    const bottom = inlineToolbarPlacement({ top: 790, bottom: 799, left: 500, width: 10 }, size, viewport, 46);
+    assert.ok(bottom.top + size.height <= viewport.height, 'never below the fold');
+  });
+
+  it('stays inside a viewport too small for it rather than going negative', () => {
+    const viewportTiny = { width: 200, height: 90 };
+    const tiny = inlineToolbarPlacement({ top: 20, bottom: 40, left: 5, width: 10 }, size, viewportTiny, 46);
+    assert.strictEqual(tiny.left, 8, 'wider than the viewport: pinned to the left edge, never negative');
+    assert.ok(tiny.top >= 46 && tiny.top + size.height <= viewportTiny.height, `top ${tiny.top} stays in the band`);
   });
 });
