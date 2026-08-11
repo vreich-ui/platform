@@ -23,6 +23,7 @@ export const artifactKindSet = new Set<ArtifactKind>(artifactKindValues);
 
 export const artifactReferenceLimits = {
   originalFilename: 160,
+  filename: 160,
   label: 120,
   tag: 40,
   tags: 20,
@@ -36,6 +37,17 @@ export type ArtifactReference = {
   createdAtISO: string;
   artifactKind?: ArtifactKind;
   originalFilename?: string;
+  /**
+   * Display name for the artifact, distinct from `originalFilename` when pdf-tool's
+   * by-filename collision handling had to append -2, -3, … to keep two different
+   * payloads from sharing a name inside one request. pdf-tool has persisted this on
+   * every reference since 2026-08-06 (pdf-tool c066798, PR #58); platform's allowlist
+   * did not know about it, so `isArtifactReference` rejected every such reference and
+   * `readArtifactReference` returned undefined — which the publish gate could not tell
+   * apart from a missing blob and reported as "has no artifact behind it … will 404"
+   * over bytes that served 200. Never affects blobKey or sha256: this is a label.
+   */
+  filename?: string;
   label?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
@@ -329,6 +341,8 @@ const allowedArtifactReferenceKeys = new Set([
   'createdAtISO',
   'artifactKind',
   'originalFilename',
+  // See ArtifactReference.filename — pdf-tool's collision-resolved display name.
+  'filename',
   'label',
   'tags',
   'metadata',
@@ -503,6 +517,7 @@ export const getArtifactReferenceIssue = (value: unknown): string | undefined =>
     createdAtISO,
     artifactKind,
     originalFilename,
+    filename,
     label,
     tags,
     metadata,
@@ -531,6 +546,13 @@ export const getArtifactReferenceIssue = (value: unknown): string | undefined =>
         filename: true,
       }
     );
+    if (issue) return issue;
+  }
+  if (filename !== undefined) {
+    // Same safety envelope as originalFilename: a display name, never a path.
+    const issue = getSafeArtifactStringIssue(filename, 'filename', artifactReferenceLimits.filename, {
+      filename: true,
+    });
     if (issue) return issue;
   }
   if (label !== undefined) {
