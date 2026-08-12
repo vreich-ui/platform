@@ -1,0 +1,174 @@
+{
+  "__generated": {
+    "at": "2026-08-12T08:24:49.482Z",
+    "from": "objects/content_item/by-id/req_agent_governed_content_object_lifecycle_checklist_20260811_01.json",
+    "record_version": 3
+  },
+  "deck": "A practical operating model for moving a governed content object from current-state review through validation, patch review, publish authorization, and separate release authorization without confusing checks, scope review, and approval.",
+  "description": "Use this gate-by-gate checklist to keep evidence, scope review, publish authorization, and release authorization separate in a governed content-object workflow.",
+  "nodes": [
+    {
+      "id": "n_a1",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Opens with the central lifecycle risk and frames the article as a conceptual guide rather than an execution action.",
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "The riskiest content movement is not a failed validation. It is an unclear decision that looks like approval.\n\nFor this workflow, a governed content-object lifecycle works best when each movement is treated as a separate gate. Checkout or current-state review, validation, patch review, publish authorization, and release authorization each answer a different question. None of those steps should be collapsed into one continuous action without evidence and an explicit decision.\n\nThis guide is a mental model and checklist for operators, agent authors, and technical content owners. It is not a live publishing action, and it does not imply that any object has been published or released. Use it to clarify what each gate is meant to prove, what evidence should be reviewed, and when the safest next step is to stop.",
+        "title": "Why lifecycle clarity matters"
+      }
+    },
+    {
+      "id": "n_a2",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Adds the requested reader-orienting caveat so the checklist supports operations without replacing authoritative platform documentation.",
+        "intent": "reassure",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "Use this article as a mental model and review checklist, not as an execution command.\n\nYour source-of-truth Kugel Platform workflow documentation controls the exact labels, roles, metadata, commands, and remediation paths for your environment. If any required evidence or authorization is unclear, stop at that gate and resolve the gap before continuing.",
+        "label": "Pre-use note",
+        "title": "Before you use this checklist"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "callout"
+      }
+    },
+    {
+      "id": "n_a3",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Establishes the operating model and the evidence-decision-stop pattern that the rest of the article follows.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "A governed content object should move through the lifecycle as a sequence of controlled gates, not as a single automated push. The exact labels in your implementation may vary, but the operating pattern in this guide remains consistent: confirm the evidence, make the decision explicit, and stop when the evidence or authorization is unclear.\n\nAt a high level, the path is: confirm the object identity and checkout or current state; validate the object against defined checks; review the patch scope; require explicit publish authorization; and require separate release authorization.\n\nEach gate has a different purpose. Validation can show that defined checks passed, but it is not the same as approval. Patch review can show what is changing, but it is not authorization to publish. Publishing may represent a governed advancement in your workflow, but it should not be treated as release unless release is separately confirmed.",
+        "title": "The governed path at a glance"
+      }
+    },
+    {
+      "id": "n_a4",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Maps the first gate to identity and working-state clarity, matching the narrative movement's foundation for all later review.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Before reviewing a content object, confirm that everyone is looking at the same object and the same working state. Downstream decisions become unreliable if the object identity, checkout status, or current state is ambiguous.\n\nThe operator should be able to identify which object is being prepared or reviewed, what version or working state is under consideration, and whether that state is the intended basis for the next step. This is a practical control: it prevents validation results, patch review, and later authorization from being attached to the wrong object or an unclear state.\n\nPurpose: establish that the correct object and working state are being reviewed.\n\nEvidence to confirm: object identity is confirmed; checkout or current state is understood; the operator knows which object is being prepared or reviewed.\n\nStop here if the object identity is unclear. Also stop if the checkout or current state is not understood. The next gate only has value when the object and working state are clear.",
+        "title": "Gate 1: Confirm object identity and checkout or current state"
+      }
+    },
+    {
+      "id": "n_a5",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Explains validation as evidence rather than approval and preserves the core stop conditions requested by review.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Once the object and working state are clear, the next question is whether the object passes the defined checks available for that workflow. Validation can reduce uncertainty by showing whether required checks have passed, failed, or produced results that need review.\n\nValidation should not be treated as business approval, legal approval, compliance approval, production readiness, or release authorization. It answers a narrower question: did the object pass the defined checks for this validation step?\n\nTeams may naturally want to move quickly after a check passes. A passing result can support the next decision, but it does not make the decision on the operator’s behalf. A failed or unclear result is a stop condition, not a reason to force the workflow forward.\n\nPurpose: confirm whether the object passes defined validation checks and whether the results are understood.\n\nEvidence to confirm: validation has been run according to the applicable workflow; validation passed defined checks, or any failure is clearly understood before further action; validation results have been reviewed rather than assumed.\n\nStop here if validation fails, if validation results are unclear, or if the team is treating validation as approval rather than as evidence for a later decision.",
+        "title": "Gate 2: Validate defined checks without treating validation as approval"
+      }
+    },
+    {
+      "id": "n_a6",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Positions patch review as scope visibility, not authorization, while giving practical generic examples.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "A valid object can still contain a change the operator does not intend to advance. Patch review is the gate where the team inspects what is changing, whether the change is expected, and whether the scope is appropriate for the intended movement.\n\nThis review should focus on practical questions. Are the changed fields expected? Is the patch broader than the operator intended? Is anything missing? Does the scope match the purpose of the update?\n\nPatch review does not authorize publication or release by itself. It helps the operator understand the change before making an authorization decision. If the patch contents are unexpected, too broad, or insufficiently reviewed, stop and resolve the scope before continuing.\n\nPurpose: make the change scope visible before any authorization gate.\n\nEvidence to confirm: patch scope has been reviewed; changes are expected and appropriately scoped; the operator understands what will advance if the process continues.\n\nStop here if patch contents are unexpected, if patch scope is too broad for the intended update, or if the change has not been reviewed enough to support an authorization decision.",
+        "title": "Gate 3: Review patch scope before advancement"
+      }
+    },
+    {
+      "id": "n_a7",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Reinforces explicit publish authorization as a decision gate and separates it from both validation and release.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "After the object identity, validation results, and patch scope are understood, the decision shifts from correctness to authorization. Publish should be treated as an explicitly authorized gate, not as an implied consequence of passing earlier checks.\n\nUse careful operating language here. The object may be ready for review at the publish gate, or the operator may be reviewing publish authorization. That is different from saying the object has been released or made live.\n\nPublish and release are separate controlled gates. Do not assume that a validated and reviewed object can be published without an explicit operator decision. Do not assume that an agent, workflow, or checklist can bypass that decision. If publish authorization is missing or ambiguous, stop.\n\nPurpose: confirm that publish is explicitly authorized before any publish movement is implied.\n\nEvidence to confirm: the publish decision is explicit; the operator or authorized decision-maker has confirmed the publish gate; publish is not being inferred from validation or patch review.\n\nStop here if publish authorization is missing, if publish authorization is ambiguous, or if the workflow language implies publish happened when no explicit decision exists.",
+        "title": "Gate 4: Treat publish as an explicitly authorized gate"
+      }
+    },
+    {
+      "id": "n_a8",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Softens platform-mechanics language while preserving the publish-versus-release separation required by the angle and reviews.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Publishing may represent a governed advancement in your workflow, but release remains a separate authorization question. No live-change implication should be made unless release authorization is separately confirmed.\n\nThis distinction is important for operator control. A team may have enough evidence to publish according to its governed process and still need a separate release decision before implying any live effect. Keeping those gates separate helps prevent readers, reviewers, or agents from treating one authorization as another.\n\nPurpose: prevent publish authorization from being treated as release authorization.\n\nEvidence to confirm: release is recognized as separate from publish; release authorization has been separately confirmed before any live-change implication is made; operator control remains central.\n\nStop here if release authorization is absent. Stop if the workflow suggests that publish automatically triggered release without authoritative confirmation. Release should be handled as its own gate with its own evidence, decision, and stop condition.",
+        "title": "Gate 5: Require separate release authorization"
+      }
+    },
+    {
+      "id": "n_a9",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Condenses the article into an operational checklist with the recurring evidence and stop-condition pattern.",
+        "intent": "navigate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "Use this checklist alongside your team’s source-of-truth platform documentation. If any item cannot be confirmed, stop at that gate and resolve the gap before continuing.",
+        "items": [
+          "Object identity confirmed. Stop here if the object identity is unclear.",
+          "Checkout or current state understood. Stop here if the working state is unclear.",
+          "Validation passed defined checks and results were reviewed. Stop here if validation failed or the results are not understood.",
+          "Patch scope reviewed. Stop here if the patch contents are unexpected, too broad, or insufficiently reviewed.",
+          "Publish decision explicitly authorized. Stop here if publish authorization is missing or ambiguous.",
+          "Release authorization separately confirmed. Stop here if release authorization is absent or assumed from publish."
+        ],
+        "title": "Evidence checklist: what to confirm before moving forward"
+      }
+    },
+    {
+      "id": "n_b1",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Normalizes stopping as a control so operational caution feels practical rather than punitive.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Stopping is not a failure of the operator. In a governed lifecycle, stopping is one of the controls that keeps unclear evidence from becoming unclear authorization.\n\nCommon stop conditions include an unclear object identity, an unclear checkout or current state, failed validation, validation results that are not understood, unexpected patch contents, missing publish authorization, and absent release authorization.\n\nWhen one of these conditions appears, the practical next step is to resolve the evidence or decision gap before advancing. The goal is not to move faster through every gate. The goal is to make each movement clear enough that the next reviewer can understand what happened, what was checked, and what was authorized.",
+        "title": "Common stop conditions"
+      }
+    },
+    {
+      "id": "n_b2",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Closes by resolving the tension in favor of clear governed decisions and reiterates the documentation caveat.",
+        "intent": "educate",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "A governed content-object lifecycle depends on explicit decisions. Passing checks is not approval. Reviewed scope is not authorization. Publish is not automatically release.\n\nFor operators, agent authors, and technical content owners, the useful habit is to ask the same questions at each gate: What evidence do we have? What decision is being made? What condition would make us stop?\n\nUse this checklist alongside the relevant Kugel Platform workflow documentation, governance runbook, or onboarding materials available to your team. If those materials define specific labels, commands, states, or release procedures, treat them as the source of truth for execution. This guide is intended to support clear review and authorization, not replace platform documentation or perform any publish or release action.",
+        "title": "The safest lifecycle is the clearest one"
+      }
+    }
+  ],
+  "seo": {
+    "meta_description": "A practical gate-by-gate guide to checkout, validation, patch review, publish authorization, and separate release authorization in a governed content-object lifecycle.",
+    "meta_title": "Governed Content-Object Lifecycle Checklist | Kugel Platform"
+  },
+  "slug": "governed-content-object-lifecycle-checklist",
+  "title": "How to Move a Governed Content Object Through Checkout, Validation, Patch, Publish, and Release"
+}
