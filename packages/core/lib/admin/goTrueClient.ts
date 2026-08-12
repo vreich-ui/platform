@@ -146,6 +146,16 @@ export const logout = async (): Promise<void> => {
   } catch {
     // ignored — nothing to invalidate if the module can't load
   }
+  // W-approval-mode-persistence: the per-chat "Approve safe actions" choice
+  // is sessionStorage-scoped by chat/object id, not by user — clear every
+  // persisted scope on sign-out so a shared machine's next sign-in never
+  // inherits the previous user's approval preference.
+  try {
+    const { clearAllPersistedRunApprovalModes } = await import('./approval-mode.js');
+    clearAllPersistedRunApprovalModes();
+  } catch {
+    // ignored — nothing to clear if the module can't load
+  }
   if (user?.token.access_token) {
     await fetch(`${getBase()}/logout`, {
       method: 'POST',
