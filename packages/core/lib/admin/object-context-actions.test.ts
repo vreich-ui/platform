@@ -136,4 +136,16 @@ describe('Page section sequential proposal', () => {
     gate.release('call_1');
     assert.strictEqual(gate.claim('call_1'), true);
   });
+
+  it('has() reports membership without claiming, tracking claim/release exactly — the consumed-approval derivation', () => {
+    const gate = createApprovalClaim();
+    assert.strictEqual(gate.has('call_2'), false);
+    assert.strictEqual(gate.claim('call_2'), true);
+    assert.strictEqual(gate.has('call_2'), true, 'has() reflects a successful claim');
+    assert.strictEqual(gate.has('call_2'), true, 'has() is read-only — repeated calls do not change state');
+    assert.strictEqual(gate.claim('call_2'), false, 'a claimed call_id cannot be reclaimed');
+    gate.release('call_2');
+    assert.strictEqual(gate.has('call_2'), false, 'release() clears membership so the card can go interactive again');
+    assert.strictEqual(gate.claim('call_2'), true, 'a released call_id can be reclaimed');
+  });
 });
