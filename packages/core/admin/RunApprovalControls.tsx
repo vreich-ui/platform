@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { UseChatState } from './chat';
 import {
+  readPersistedRunApprovalMode,
   shouldAutoApproveRunTool,
-  shouldResetRunApprovalMode,
+  writePersistedRunApprovalMode,
   type RunApprovalMode,
 } from '@core/lib/admin/approval-mode';
 
@@ -41,25 +42,36 @@ export function RunApprovalControls({
   );
 }
 
-/** Shared run-only preference behavior for every admin chat surface. */
+/**
+ * Shared run-only preference behavior for every admin chat surface.
+ *
+ * Per Wolf's ruling (2026-08-12), this preference is per-chat and sticky: it
+ * persists (via `approval-mode.ts`, `sessionStorage`-backed) across turns,
+ * status changes, remounts, and full page reloads, scoped by
+ * `preferenceScope`. It changes only when the editor clicks the other
+ * option, or when an auto-approval below is rejected by the server — both
+ * paths go through `setMode`, which persists as well as updates state.
+ */
 export function useRunApprovalMode(
-  chat: Pick<UseChatState, 'pending' | 'status' | 'busy' | 'approve'>,
+  chat: Pick<UseChatState, 'pending' | 'busy' | 'approve'>,
   { preferenceScope, approvalInStage = false }: { preferenceScope?: string; approvalInStage?: boolean } = {}
 ): [RunApprovalMode, (mode: RunApprovalMode) => void] {
-  const [mode, setMode] = useState<RunApprovalMode>('ask');
+  const [mode, setModeState] = useState<RunApprovalMode>(() => readPersistedRunApprovalMode(preferenceScope));
   const autoApproved = useRef(new Set<string>());
+  const scopeRef = useRef(preferenceScope);
+  scopeRef.current = preferenceScope;
 
+  const setMode = useCallback((next: RunApprovalMode) => {
+    writePersistedRunApprovalMode(scopeRef.current, next);
+    setModeState(next);
+  }, []);
+
+  // A scope change (e.g. switching chats) loads THAT scope's own stored
+  // value — never a blanket reset to 'ask'.
   useEffect(() => {
-    setMode('ask');
+    setModeState(readPersistedRunApprovalMode(preferenceScope));
     autoApproved.current.clear();
   }, [preferenceScope]);
-
-  useEffect(() => {
-    if (shouldResetRunApprovalMode(chat.status, Boolean(chat.pending))) {
-      setMode('ask');
-      autoApproved.current.clear();
-    }
-  }, [chat.pending, chat.status]);
 
   useEffect(() => {
     const pending = chat.pending;
@@ -78,7 +90,7 @@ export function useRunApprovalMode(
         setMode('ask');
       }
     });
-  }, [approvalInStage, chat.busy, chat.pending, mode]);
+  }, [approvalInStage, chat.busy, chat.pending, mode, setMode]);
 
   return [mode, setMode];
 }
