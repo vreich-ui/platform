@@ -27,6 +27,8 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { realTenantNames } from './scratch-sites.mjs';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CORE_APP = join(ROOT, 'packages', 'core', 'app');
 const SITES = join(ROOT, 'sites');
@@ -47,11 +49,15 @@ const walk = (dir, extension, out = []) => {
   return out;
 };
 
+/**
+ * Core plus every real tenant's app. Scratch tenants are excluded: admin-parity.test.mjs
+ * scaffolds them under `sites/` and node:test runs test FILES concurrently, so one can be
+ * on disk mid-walk. See tests/scripts/scratch-sites.mjs.
+ */
 const appRoots = () => [
   CORE_APP,
-  ...readdirSync(SITES, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(SITES, entry.name, 'app'))
+  ...realTenantNames(SITES)
+    .map((name) => join(SITES, name, 'app'))
     .filter(existsSync),
 ];
 

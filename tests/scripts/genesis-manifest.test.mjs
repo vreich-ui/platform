@@ -48,16 +48,20 @@ import {
   pendingEntries,
   scaffoldSeedFiles,
 } from '../../packages/core/cli/genesis-manifest.mjs';
+import { realTenantNames } from './scratch-sites.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const sitesDir = path.join(repoRoot, 'sites');
 
-/** Every real tenant, discovered — never a hardcoded three. */
-const SITES = fs
-  .readdirSync(sitesDir, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .sort();
+/**
+ * Every real tenant, discovered — never a hardcoded three.
+ *
+ * Scratch tenants are excluded: admin-parity.test.mjs scaffolds them under `sites/`
+ * and node:test runs test FILES concurrently, so one can be on disk while this walk
+ * runs. A fresh scaffold is genesis-stage by definition and would fail the manifest
+ * targets below — nondeterministically. See tests/scripts/scratch-sites.mjs.
+ */
+const SITES = realTenantNames(sitesDir);
 
 /**
  * Targets the manifest states that the fleet does not meet yet. Key format is
@@ -65,8 +69,7 @@ const SITES = fs
  * asserted to still FAIL — closing the gap without deleting the row is itself
  * a failure, which is how the annotation gets cleaned up.
  */
-const KNOWN_GAPS = new Map([
-]);
+const KNOWN_GAPS = new Map([]);
 
 const exercised = new Set();
 
