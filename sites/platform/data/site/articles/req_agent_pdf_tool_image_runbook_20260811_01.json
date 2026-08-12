@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-11T12:37:40.743Z",
+    "at": "2026-08-12T10:21:31.386Z",
     "from": "objects/content_item/by-id/req_agent_pdf_tool_image_runbook_20260811_01.json",
-    "record_version": 19
+    "record_version": 24
   },
   "author": "Platform Documentation",
   "deck": "The render service carries binary image bytes into a PDF through a dedicated asset channel, on both the chromium and typst renderers. Here is the supported path, how to verify it, and a correction to earlier guidance.",
@@ -10,6 +10,10 @@
   "editorial": {
     "framework": "fw_runbook",
     "writer_notes": "Documents session-11 testing: chromium image-embedding data-URI corruption threshold (safe below ~172 base64 chars, corrupted at 292+) and the first proven typst validate-publish-render cycle (text only; image embedding not yet supported)."
+  },
+  "image": {
+    "alt": "Flat-vector illustration of a document rendering pipeline feeding a photograph into a generated page",
+    "src": "/img/req_agent_pdf_tool_image_runbook_20260811_01/e8a6d6887528441683f5b1c49a63de6c9b52036f33914090f3ccba79a857f3ef.webp"
   },
   "nodes": [
     {
@@ -92,33 +96,33 @@
     },
     {
       "id": "n_emb07",
-      "kind": "content",
+      "kind": "action",
       "private": {
         "intent": "convert",
         "strategy": "resolution"
       },
       "public": {
-        "body": "Two documents were produced while writing this runbook. The first is a one-page chromium render carrying a real 64 KB image through the asset channel: about 13 KB at validation with no asset attached, about 632 KB once the image was supplied. The second is a typst render of the same pipeline, with page geometry, colour and text all produced by typst's own layout engine.\n\nBoth are stored against this article. Download links are not attached yet: the publish gate checks a request-scoped artifact index that does not yet list them, and linking an artifact it cannot see would block this correction from shipping. The links will be added once that index resolves.",
-        "ctaLink": "",
-        "ctaText": "",
-        "title": "The reference renders behind this page"
+        "body": "A one-page chromium render carrying a real 64 KB image through the asset channel -- the reference output described under Verification above. About 13 KB at validation with no asset attached; about 632 KB once the image was supplied.",
+        "ctaLink": "/pdf/req_agent_pdf_tool_image_runbook_20260811_01/817e135b0416a203be83a5d726f6304208b482c5f8d871893a87b656a2a15ec3.pdf",
+        "ctaText": "Download the asset-channel image embed (PDF)",
+        "title": "See the asset channel working"
       },
       "visibility": "public"
     },
     {
       "id": "n_emb08",
-      "kind": "content",
+      "kind": "action",
       "private": {
         "intent": "convert",
         "strategy": "resolution"
       },
       "public": {
-        "body": "This runbook's typst proof: the first complete validate-publish-render cycle run on the typst renderer for this deployment, producing a correct one-page PDF from the template's own layout engine. Held in this session's artifact store; ask Platform Documentation for a copy if the download link above is not yet live.",
-        "ctaLink": "",
-        "ctaText": "",
-        "title": "The typst end-to-end test PDF"
+        "body": "The typst renderer running the full validate, publish and render cycle, with page geometry, colour and text all produced by typst's own layout engine.",
+        "ctaLink": "/pdf/req_agent_pdf_tool_image_runbook_20260811_01/489d3c6a1e01c956118aacdd72d01f8cd0d5ec2e00cb7bdc6c430fb37b350c02.pdf",
+        "ctaText": "Download the typst end-to-end test (PDF)",
+        "title": "See the typst renderer working"
       },
-      "visibility": "hidden"
+      "visibility": "public"
     }
   ],
   "publication_context": {
