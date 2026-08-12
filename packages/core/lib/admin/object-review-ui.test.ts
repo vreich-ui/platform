@@ -65,6 +65,37 @@ describe('reviewerAvailableActions — autonomous types (policy: no approval req
     assert.equal(result.requiresApproval, false);
     assert.equal(result.canPublish, true);
   });
+
+  // Fixed defect: a caller with a server-confirmed `requires_approval` (e.g.
+  // from a release-state row) must be able to use it directly without
+  // resolving `activeApprovalPolicy()` again — the override wins outright.
+  it('requiresApprovalOverride wins over the policy outright', () => {
+    const gatedByOverride = reviewerAvailableActions({
+      objectType: 'page',
+      principalKind: 'human',
+      roles: ['admin'],
+      hasActiveLock: false,
+      review: undefined,
+      contentRevision: 1,
+      policy: ALL_AUTONOMOUS,
+      requiresApprovalOverride: true,
+    });
+    assert.equal(gatedByOverride.requiresApproval, true, 'override gates even though the policy is autonomous');
+    assert.equal(gatedByOverride.canPublish, false, 'gated with no approval yet — Publish stays hidden');
+
+    const autonomousByOverride = reviewerAvailableActions({
+      objectType: 'page',
+      principalKind: 'human',
+      roles: ['admin'],
+      hasActiveLock: false,
+      review: undefined,
+      contentRevision: 1,
+      policy: ALL_REQUIRE,
+      requiresApprovalOverride: false,
+    });
+    assert.equal(autonomousByOverride.requiresApproval, false, 'override frees Publish even though the policy is gated');
+    assert.equal(autonomousByOverride.canPublish, true);
+  });
 });
 
 describe('reviewerAvailableActions — gated types (policy: approval required)', () => {
@@ -165,6 +196,36 @@ describe('reviewerAvailableActions — review controls (policy-independent)', ()
     });
     assert.equal(notOpen.canApprove, false);
     assert.equal(notOpen.canRequestChanges, false);
+  });
+
+  // Fixed defect: Approve was silently re-opening and self-approving an
+  // object in `changes_requested` — with the model wired, an already-decided
+  // review (a rejection, or a prior approval, current or stale) needs an
+  // explicit new "open" step before a one-click re-decision is offered again.
+  it('blocks a one-click re-decision once a review has already been decided, but not before one starts', () => {
+    const base = {
+      objectType: 'page' as const,
+      principalKind: 'human' as const,
+      roles: ['editor' as const],
+      hasActiveLock: false,
+      policy: ALL_REQUIRE,
+    };
+
+    const neverReviewed = reviewerAvailableActions({ ...base, review: undefined, contentRevision: 1 });
+    assert.equal(neverReviewed.canApprove, true, 'nothing decided yet — direct approve is fine');
+
+    const changesRequested = reviewerAvailableActions({
+      ...base,
+      review: { state: 'changes_requested', decisions: [] },
+      contentRevision: 1,
+    });
+    assert.equal(changesRequested.canApprove, false, 'an explicit rejection must not be silently overridden');
+
+    const staleApproval = reviewerAvailableActions({ ...base, review: approvedReview(1), contentRevision: 2 });
+    assert.equal(staleApproval.canApprove, false, 'a stale approval (content moved) also needs a fresh open review');
+
+    const currentApproval = reviewerAvailableActions({ ...base, review: approvedReview(2), contentRevision: 2 });
+    assert.equal(currentApproval.canApprove, false, 'an already-current approval needs no re-decision either');
   });
 
   it('canSubmitForReview only reflects lock possession', () => {
