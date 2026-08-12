@@ -11,7 +11,7 @@
 import type { SiteBinding } from '../lib/site-binding.js';
 import { getHeader } from '../lib/admin-auth.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
-import { getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import { getAgentLearningBlobStore, getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import { getGovernanceBlobStore, getGovernanceDoc } from '../lib/governance-store.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
@@ -22,6 +22,7 @@ import { buildToolContext } from '../lib/agent/context.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { buildChatEngine, resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { runAgentLoop } from '../lib/agent/loop.js';
+import type { LearningEvidenceStore } from '../lib/agent/preferences.js';
 import { adapterForProfile } from '../lib/agent/provider.js';
 import { z } from 'zod';
 
@@ -70,6 +71,16 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         projectId: getSiteIdentity().cmsAgentProjectId,
       }
     : undefined;
+  // Task 5 fix 1: cap operational tools' inline waits to what's actually left
+  // on THIS invocation (mirrors mcp.ts's handler) — approve now defers
+  // EXECUTION to this hop, so a long inline wait (e.g.
+  // create_agent_artifact_job) must be bounded here, not just at send/approve.
+  const remainingTimeMs =
+    typeof context?.getRemainingTimeInMillis === 'function' ? context.getRemainingTimeInMillis() : undefined;
+  const eventWithDeadline = {
+    ...event,
+    ...(remainingTimeMs !== undefined ? { invocationDeadlineMs: Date.now() + remainingTimeMs } : {}),
+  };
   const toolContext = buildToolContext({
     objectStore: (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore,
     governanceStore,
@@ -83,7 +94,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     // Task 3 §5: so the generated registry's operational-bridge tools
     // (deploy_status, pdf-tool/image families, commerce, ...) execute in the
     // background hop too, not only on the interactive approve path.
-    operationalEvent: event,
+    operationalEvent: eventWithDeadline,
   });
 
   // PF2/PF3 — TurnEngine selection: governance override ?? CMS_AGENT_CHAT_MODE ?? 'off'.
@@ -110,6 +121,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       chatStore,
       toolContext,
       engine,
+      // Task 5: an edit-and-approve's EXECUTION now happens in this hop, not
+      // inline in approve — addPostEditDelta needs the learning store here.
+      learningStore: (await getAgentLearningBlobStore(event)) as unknown as LearningEvidenceStore,
       ...(context?.getRemainingTimeInMillis ? { remainingMs: () => context.getRemainingTimeInMillis!() } : {}),
     },
     parsed.chat_id,

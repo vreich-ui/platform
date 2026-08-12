@@ -128,9 +128,18 @@ describe('generated registry — wiring', () => {
 
     const approved = await approvePendingTool(protocol, CHAT_ID, 'c2', { id: 'editor_1', email: 'editor@example.com' });
     assert.equal(approved.status, 200);
+    // Task 5: approve defers EXECUTION to the next hop — it never runs the
+    // tool inline any more (long operational tools could otherwise blow the
+    // interactive function's invocation cap).
+    assert.deepEqual(approved.body, { approved: true, executing: true });
+    await runAgentLoop(
+      { chatStore, toolContext: toolContext(), engine: providerEngine(adapter), nowIso: protocol.nowIso },
+      CHAT_ID,
+      approved.resume!.triggerToken
+    );
     const afterApprove = await loadChatDoc(chatStore, CHAT_ID);
     const patchResult = afterApprove!.events.find((e) => e.type === 'tool_result' && e.detail?.tool === 'object_patch');
-    assert.ok(patchResult, 'object_patch should have executed on approval');
+    assert.ok(patchResult, 'object_patch should have executed on the resumed hop');
     assert.equal(patchResult!.detail?.is_error, false);
   });
 

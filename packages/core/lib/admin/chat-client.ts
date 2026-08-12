@@ -150,8 +150,12 @@ export interface PreferenceExportView {
 export const exportPreferences = (getToken: GetToken) =>
   post<PreferenceExportView>(getToken, { action: 'export_preferences' });
 
+// Task 5: approve no longer executes inline — the server response only
+// confirms the decision was recorded and the background hop is executing it.
+// The tool's success/failure arrives later as a normal `tool_result` event
+// via the poll, not on this response.
 export const approveTool = (getToken: GetToken, chatId: string, callId: string, editedArgs?: Record<string, unknown>) =>
-  post<{ approved: boolean; is_error: boolean; edited: boolean }>(getToken, {
+  post<{ approved: boolean; executing: boolean }>(getToken, {
     action: 'approve_tool',
     chat_id: chatId,
     call_id: callId,

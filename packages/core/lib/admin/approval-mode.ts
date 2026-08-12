@@ -1,30 +1,26 @@
-/**
- * Actions that may be approved consecutively for one active agent run.
- *
- * This is intentionally an allow-list. Publication, deletion, discard, theme,
- * access-control, and release actions always require an individual decision.
- */
-const RUN_SAFE_TOOLS = new Set([
-  'patch',
-  'create_object',
-  'create_variant',
-  'instantiate_template',
-  'instantiate_section_template',
-  'submit_review',
-  'create_pdf_template',
-  'get_agent_artifact_job_status',
-]);
-
 export type RunApprovalMode = 'ask' | 'safe-run';
 
-export function isRunSafeApproval(tool: string): boolean {
-  return RUN_SAFE_TOOLS.has(tool);
+/**
+ * Wolf's ruling, 2026-08-12 (this session): "Approve safe actions" means
+ * *continue the run without asking* — every pending approval in the run is
+ * auto-approved, including publication, privileged, and unknown tools. This
+ * used to be an allow-list (RUN_SAFE_TOOLS) of LEGACY tool names that no
+ * longer matched the generated registry's canonical names, so the toggle
+ * silently did nothing (Task 5 root cause 2). The function stays (so callers
+ * keep one seam to read), but it now always returns true — the server
+ * remains the sole authority: a risk floor still forces the pause in the
+ * first place (see `resolveAutonomy`'s D2 clamp), an Owner gate still
+ * enforces at EXECUTION, and Deny / "Ask each time" remain available at any
+ * time.
+ */
+export function isRunSafeApproval(_tool: string): boolean {
+  return true;
 }
 
 /**
  * Browser convenience only: the server remains the authority for every
- * approval. This deliberately fail-closes for a staged, dangerous, or unknown
- * tool even when the editor selected "Approve safe actions" for this run.
+ * approval. `approvalInStage` still fails closed (a staged proposal always
+ * asks, regardless of the run's approval mode).
  */
 export function shouldAutoApproveRunTool(mode: RunApprovalMode, tool: string, approvalInStage = false): boolean {
   return mode === 'safe-run' && !approvalInStage && isRunSafeApproval(tool);

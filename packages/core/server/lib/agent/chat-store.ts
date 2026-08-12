@@ -169,6 +169,23 @@ export const chatRunSchema = z.object({
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),
   pending: pendingCallSchema.optional(),
+  /** Fix 1 (schema-additive): the approver's decision on the pending call,
+   *  stamped by `approvePendingTool` and consumed by the NEXT background hop
+   *  — execution itself never happens inline in the interactive function
+   *  (long operational tools would blow the ~10s invocation cap before
+   *  `saveChatDoc` runs). `args` is present ONLY for edit-and-approve (the
+   *  human's replacement args); otherwise the hop uses the queued call's own
+   *  args. A stale marker whose call_id no longer heads `call_queue` (crashed
+   *  hop) is cleared at the next hop's start without effect. */
+  approved_call: z
+    .object({
+      call_id: z.string(),
+      /** Approver email. */
+      by: z.string(),
+      args: z.record(z.string(), z.unknown()).optional(),
+      edited: z.boolean().optional(),
+    })
+    .optional(),
   candidate_selection: pendingCandidateSetSchema.optional(),
   preference_context: z
     .object({

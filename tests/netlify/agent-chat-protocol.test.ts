@@ -177,8 +177,10 @@ const patchCall = (id: string, heading: string) => ({
 
 // ─── approval protocol ────────────────────────────────────────────────────────
 
-test('checkout+patch pause per §4 defaults; approvals execute STORED args under the run principal; history attributes the human', async () => {
-  // Turn 1: checkout (ask) → pause. Approve → executes. Turn continues: patch (ask) → pause → approve → executes.
+test('checkout+patch pause per §4 defaults; approve DEFERS execution to the next hop; history attributes the human', async () => {
+  // Turn 1: checkout (ask) → pause. Approve defers execution to the next hop,
+  // which executes it AND continues the turn: patch (ask) → pause → approve
+  // (edit-and-approve) defers again → the next hop executes it and finishes.
   const checkoutCall = { id: 'c1', name: 'checkout', args: { object_type: 'page', object_id: 'page_chat' } };
   const { store, deps, send } = await setup([
     { toolCalls: [checkoutCall], outputTokens: 2 },
@@ -200,18 +202,30 @@ test('checkout+patch pause per §4 defaults; approvals execute STORED args under
     HUMAN
   );
   assert.equal(approve1.status, 200, JSON.stringify(approve1.body));
-  assert.equal(approve1.body.is_error, false);
-
-  // Fix up the scripted patch args with the REAL lock token + version from the checkout result.
+  // Approve no longer executes inline — it only records the decision.
+  assert.deepEqual(approve1.body, { approved: true, executing: true });
+  // Nothing executed yet: the doc left `awaiting_approval` only once approve
+  // persisted the queued trigger, and the checkout result isn't in the
+  // transcript until the resumed hop actually runs it.
   doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
-  const checkoutResult = JSON.parse(
-    (doc.run!.transcript.find((msg) => msg.role === 'tool' && msg.tool_call_id === 'c1') as { content: string }).content
-  ) as { lockToken: string; record_version: number };
+  assert.equal(doc.status, 'queued');
+  assert.equal(
+    doc.run!.transcript.some((msg) => msg.role === 'tool' && msg.tool_call_id === 'c1'),
+    false
+  );
 
+  // The resumed hop executes the approved checkout AND continues the turn:
+  // the model's next call (patch) pauses again.
   const hop2 = await runAgentLoop(deps, 'obj:page_chat', approve1.resume!.triggerToken);
   assert.equal(hop2.status, 'awaiting_approval');
   doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
   assert.equal(doc.run!.pending!.tool, 'patch');
+  assert.equal(doc.run!.approved_call, undefined); // consumed and cleared by the hop
+
+  // Fix up the scripted patch args with the REAL lock token + version from the checkout result.
+  const checkoutResult = JSON.parse(
+    (doc.run!.transcript.find((msg) => msg.role === 'tool' && msg.tool_call_id === 'c1') as { content: string }).content
+  ) as { lockToken: string; record_version: number };
   // The model guessed stale lock fields; the human EDITS them on approve (edit-and-approve round-trip).
   const editedArgs = {
     ...doc.run!.pending!.args,
@@ -226,8 +240,14 @@ test('checkout+patch pause per §4 defaults; approvals execute STORED args under
     editedArgs
   );
   assert.equal(approve2.status, 200, JSON.stringify(approve2.body));
-  assert.equal(approve2.body.edited, true);
-  assert.equal(approve2.body.is_error, false);
+  assert.deepEqual(approve2.body, { approved: true, executing: true });
+  // The edit is recorded on the `tool_approved` EVENT, not on the response body.
+  doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  const approvedEventEarly = doc.events.find(
+    (event) => event.type === 'tool_approved' && event.detail?.call_id === 'c2'
+  )!;
+  assert.equal(approvedEventEarly.detail!.edited, true);
+  assert.deepEqual(approvedEventEarly.detail!.edited_args, editedArgs);
 
   const hop3 = await runAgentLoop(deps, 'obj:page_chat', approve2.resume!.triggerToken);
   assert.equal(hop3.status, 'idle');
@@ -243,8 +263,128 @@ test('checkout+patch pause per §4 defaults; approvals execute STORED args under
   const approvedEvent = doc.events.find((event) => event.type === 'tool_approved' && event.detail?.call_id === 'c2')!;
   assert.equal(approvedEvent.detail!.edited, true);
   assert.equal(approvedEvent.detail!.by, 'second-admin@example.com');
+  // The tool actually executed in the resumed hop — a real tool_result event
+  // (not just the approval event) carries the outcome.
+  const executedEvent = doc.events.find((event) => event.type === 'tool_result' && event.detail?.call_id === 'c2')!;
+  assert.equal(executedEvent.detail!.is_error, false);
   // Outcome chips recorded for the hub.
   assert.deepEqual(doc.runs[doc.runs.length - 1]!.outcome, 'completed');
+});
+
+test('approve stores approved_call and defers execution; the next hop executes exactly once and clears the marker', async () => {
+  const checkoutCall = { id: 'ac1', name: 'checkout', args: { object_type: 'page', object_id: 'page_chat' } };
+  const { deps, send } = await setup([
+    { toolCalls: [checkoutCall], outputTokens: 1 },
+    { text: 'done', toolCalls: [], outputTokens: 1 },
+  ]);
+  const sent = await send('Check it out.');
+  const hop1 = await runAgentLoop(deps, 'obj:page_chat', sent.resume!.triggerToken);
+  assert.equal(hop1.status, 'awaiting_approval');
+
+  const approve = await approvePendingTool(
+    { chatStore: deps.chatStore, toolContext: deps.toolContext, nowIso: deps.nowIso },
+    'obj:page_chat',
+    'ac1',
+    HUMAN
+  );
+  assert.deepEqual(approve.body, { approved: true, executing: true });
+  let doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.deepEqual(doc.run!.approved_call, { call_id: 'ac1', by: HUMAN.email });
+  assert.equal(doc.run!.call_queue[0]?.id, 'ac1', 'the call is NOT removed from call_queue by approve');
+  assert.equal(
+    doc.run!.transcript.some((msg) => msg.role === 'tool' && msg.tool_call_id === 'ac1'),
+    false,
+    'not executed inline by approve'
+  );
+
+  const hop2 = await runAgentLoop(deps, 'obj:page_chat', approve.resume!.triggerToken);
+  assert.equal(hop2.status, 'idle');
+  doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.equal(doc.run!.approved_call, undefined, 'the marker is cleared once consumed');
+  assert.equal(doc.run!.tool_calls_used, 1, 'executed exactly once');
+  const toolMsgs = doc.run!.transcript.filter((msg) => msg.role === 'tool' && msg.tool_call_id === 'ac1');
+  assert.equal(toolMsgs.length, 1, 'executed exactly once');
+});
+
+test('deny clears a matching approved_call (belt-and-braces defense-in-depth)', async () => {
+  const checkoutCall = { id: 'dc1', name: 'checkout', args: { object_type: 'page', object_id: 'page_chat' } };
+  const { deps, send } = await setup([{ toolCalls: [checkoutCall], outputTokens: 1 }]);
+  const sent = await send('Check it out.');
+  await runAgentLoop(deps, 'obj:page_chat', sent.resume!.triggerToken);
+  // Manufacture the (should-never-happen) edge case: an `approved_call`
+  // present alongside a still-live `pending` for the SAME call_id.
+  const doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  doc.run!.approved_call = { call_id: 'dc1', by: 'ghost@example.com' };
+  await saveChatDoc(deps.chatStore, doc);
+
+  const deny = await denyPendingTool(
+    { chatStore: deps.chatStore, toolContext: deps.toolContext, nowIso: deps.nowIso },
+    'obj:page_chat',
+    'dc1',
+    HUMAN,
+    'changed my mind'
+  );
+  assert.equal(deny.status, 200);
+  const after = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.equal(after.run!.approved_call, undefined);
+  assert.equal(after.run!.pending, undefined);
+});
+
+test('two queued ask calls in one turn: approving the first executes it in the hop and pauses on the second with a NEW card', async () => {
+  const call1 = { id: 'q1', name: 'checkout', args: { object_type: 'page', object_id: 'page_chat' } };
+  const call2 = { id: 'q2', name: 'checkout', args: { object_type: 'page', object_id: 'page_chat' } };
+  const { deps, send } = await setup([{ toolCalls: [call1, call2], outputTokens: 1 }]);
+  const sent = await send('Check it out twice.');
+  const hop1 = await runAgentLoop(deps, 'obj:page_chat', sent.resume!.triggerToken);
+  assert.equal(hop1.status, 'awaiting_approval');
+  let doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.equal(doc.run!.pending!.call_id, 'q1');
+
+  const approve = await approvePendingTool(
+    { chatStore: deps.chatStore, toolContext: deps.toolContext, nowIso: deps.nowIso },
+    'obj:page_chat',
+    'q1',
+    HUMAN
+  );
+  assert.equal(approve.status, 200);
+
+  const hop2 = await runAgentLoop(deps, 'obj:page_chat', approve.resume!.triggerToken);
+  assert.equal(hop2.status, 'awaiting_approval'); // pauses again — on the SECOND call
+  doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
+  assert.equal(doc.run!.pending!.call_id, 'q2', 'a NEW approval card, not q1 replayed');
+  assert.equal(doc.run!.approved_call, undefined);
+  assert.ok(
+    doc.run!.transcript.some((msg) => msg.role === 'tool' && msg.tool_call_id === 'q1'),
+    'q1 executed in the resumed hop'
+  );
+  assert.equal(
+    doc.run!.transcript.some((msg) => msg.role === 'tool' && msg.tool_call_id === 'q2'),
+    false,
+    'q2 has not executed — it is only pending'
+  );
+});
+
+// ─── Task 5: deadline propagation (root cause 1) ─────────────────────────────
+
+test('house pattern: both the interactive and background functions decorate the event with invocationDeadlineMs before it feeds tool execution', async () => {
+  let root = path.dirname(fileURLToPath(import.meta.url));
+  while (root !== path.dirname(root)) {
+    if (existsSync(path.join(root, 'netlify.toml')) && existsSync(path.join(root, 'packages/core/admin'))) break;
+    root = path.dirname(root);
+  }
+  const deadlinePattern =
+    /const remainingTimeMs =\s*\n?\s*typeof context\?\.getRemainingTimeInMillis === 'function' \? context\.getRemainingTimeInMillis\(\) : undefined;\s*\n\s*const eventWithDeadline = \{\s*\n\s*\.\.\.event,\s*\n\s*\.\.\.\(remainingTimeMs !== undefined \? \{ invocationDeadlineMs: Date\.now\(\) \+ remainingTimeMs \} : \{\}\),\s*\n\s*\};/;
+
+  const chatSource = await readFile(path.join(root, 'packages/core/server/functions/admin-agent-chat.ts'), 'utf8');
+  assert.match(chatSource, deadlinePattern);
+  assert.match(chatSource, /operationalEvent: eventWithDeadline,/);
+
+  const bgSource = await readFile(
+    path.join(root, 'packages/core/server/functions/admin-agent-chat-run-background.ts'),
+    'utf8'
+  );
+  assert.match(bgSource, deadlinePattern);
+  assert.match(bgSource, /operationalEvent: eventWithDeadline,/);
 });
 
 test('forged resume: wrong call_id, tampered stored args, and consumed trigger replay are all rejected', async () => {
@@ -453,9 +593,13 @@ test('apply_theme is Owner-gated at EXECUTION even when approved by an admin', a
     HUMAN
   );
   assert.equal(approve.status, 200);
-  assert.equal(approve.body.is_error, true); // executed but refused by the role wall
+  assert.deepEqual(approve.body, { approved: true, executing: true }); // execution deferred to the hop
+  // The resumed hop is where the Owner gate actually fires.
+  const hop2 = await runAgentLoop(deps, 'obj:page_chat', approve.resume!.triggerToken);
+  assert.equal(hop2.status, 'idle');
   const doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
-  const toolMsg = doc.run!.transcript.find((msg) => msg.role === 'tool') as { content: string };
+  const toolMsg = doc.run!.transcript.find((msg) => msg.role === 'tool') as { content: string; is_error?: boolean };
+  assert.equal(toolMsg.is_error, true); // executed but refused by the role wall
   assert.match(toolMsg.content, /Owner role/);
 });
 

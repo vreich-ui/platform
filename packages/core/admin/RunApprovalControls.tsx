@@ -33,7 +33,7 @@ export function RunApprovalControls({
         type="button"
         aria-pressed={mode === 'safe-run'}
         onClick={() => onChange('safe-run')}
-        title="Continue through ordinary content changes. Publishing, release, destructive, privileged, and unknown actions still ask."
+        title="Continue through every action this run proposes without asking. You can still deny or switch back."
         className={`adm-focusable rounded-[var(--adm-radius-pill)] px-2.5 py-1 font-medium ${mode === 'safe-run' ? 'bg-[var(--adm-accent-soft)] text-[var(--adm-accent)]' : 'text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]'}`}
       >
         Approve safe actions
