@@ -53,7 +53,7 @@ export function RunApprovalControls({
  * paths go through `setMode`, which persists as well as updates state.
  */
 export function useRunApprovalMode(
-  chat: Pick<UseChatState, 'pending' | 'busy' | 'approve'>,
+  chat: Pick<UseChatState, 'pending' | 'busy' | 'approve' | 'pendingConsumed'>,
   { preferenceScope, approvalInStage = false }: { preferenceScope?: string; approvalInStage?: boolean } = {}
 ): [RunApprovalMode, (mode: RunApprovalMode) => void] {
   const [mode, setModeState] = useState<RunApprovalMode>(() => readPersistedRunApprovalMode(preferenceScope));
@@ -77,6 +77,10 @@ export function useRunApprovalMode(
     const pending = chat.pending;
     if (
       chat.busy ||
+      // Already submitted (by this effect or a manual click on the same
+      // call_id) and awaiting the poll — retrying here would just hit the
+      // consumed-call guard and wrongly read as a failure below.
+      chat.pendingConsumed ||
       !pending ||
       !shouldAutoApproveRunTool(mode, pending.tool, approvalInStage) ||
       autoApproved.current.has(pending.call_id)
@@ -90,7 +94,7 @@ export function useRunApprovalMode(
         setMode('ask');
       }
     });
-  }, [approvalInStage, chat.busy, chat.pending, mode, setMode]);
+  }, [approvalInStage, chat.busy, chat.pendingConsumed, chat.pending, mode, setMode]);
 
   return [mode, setMode];
 }

@@ -107,3 +107,35 @@ export const EDITORIAL_STATE_PRESENTATION: Record<
   published: { label: 'Published', tone: 'warning' },
   live: { label: 'Live', tone: 'success' },
 };
+
+/** The lifecycle presented on an object's status pill when release state couldn't be confirmed. */
+export type ReleaseAwareLifecycle = EditorialObjectState | 'unknown';
+
+export const RELEASE_UNKNOWN_PRESENTATION: { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' } = {
+  label: 'Unknown',
+  tone: 'warning',
+};
+
+/**
+ * Fail-closed lifecycle resolution (fixed defect: Publish rendering when
+ * release state is unknown). A client can only ever trust a server-confirmed
+ * release-state row for this object — when the release overview couldn't be
+ * loaded, or this object isn't in it, the truthful answer is "unknown," never
+ * a value fabricated from partial/default client data (which previously
+ * showed a live approved object as Draft, or a gated unapproved object as
+ * publishable). Never call `getEditorialObjectState` as a substitute when the
+ * release row is missing — it needs `production_confirmed`/deploy facts only
+ * the server can supply.
+ */
+export function resolveReleaseAwareLifecycle(
+  releaseObject: { state: EditorialObjectState } | undefined
+): ReleaseAwareLifecycle {
+  return releaseObject?.state ?? 'unknown';
+}
+
+/** Status-pill presentation for a `ReleaseAwareLifecycle`, including the unknown case. */
+export function releaseAwareLifecyclePresentation(
+  lifecycle: ReleaseAwareLifecycle
+): { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' } {
+  return lifecycle === 'unknown' ? RELEASE_UNKNOWN_PRESENTATION : EDITORIAL_STATE_PRESENTATION[lifecycle];
+}

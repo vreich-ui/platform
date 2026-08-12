@@ -90,7 +90,20 @@ export function expandedAncestorsForActiveId(nodes: readonly TreeNode[], activeI
   return visit(nodes, []);
 }
 
-export function ObjectBrowser({ activeId }: { activeId?: string }) {
+export function ObjectBrowser({
+  activeId,
+  refreshSignal,
+}: {
+  activeId?: string;
+  /**
+   * Bump this (e.g. from a sibling ObjectWorkspace after publish/approve, or
+   * on its chat write-stamp) to force a re-fetch — fixed defect: this tree
+   * used to fetch once on mount and never again, so it could show a
+   * contradictory state (stale pill, stale Publish/Approve affordance) right
+   * next to a workspace that had just changed the same object.
+   */
+  refreshSignal?: number;
+}) {
   const [rows, setRows] = useState<LibraryRow[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -126,7 +139,7 @@ export function ObjectBrowser({ activeId }: { activeId?: string }) {
     return () => {
       live = false;
     };
-  }, []);
+  }, [refreshSignal]);
 
   const filtered = useMemo(() => filterRows(rows, { query }), [query, rows]);
   const treeNodes = useMemo(() => buildObjectTree(filtered, states, workByObject), [filtered, states, workByObject]);

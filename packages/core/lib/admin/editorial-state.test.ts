@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  EDITORIAL_STATE_PRESENTATION,
+  RELEASE_UNKNOWN_PRESENTATION,
   getEditorialDeployStatus,
   getEditorialObjectState,
+  releaseAwareLifecyclePresentation,
+  resolveReleaseAwareLifecycle,
   type EditorialDeployState,
   type EditorialStateRecord,
 } from './editorial-state.js';
@@ -98,5 +102,31 @@ describe('getEditorialObjectState', () => {
       ),
       'published'
     );
+  });
+});
+
+describe('resolveReleaseAwareLifecycle (fail-closed release-unknown decision)', () => {
+  it('passes a server-confirmed release row straight through', () => {
+    assert.equal(resolveReleaseAwareLifecycle({ state: 'live' }), 'live');
+    assert.equal(resolveReleaseAwareLifecycle({ state: 'draft' }), 'draft');
+    assert.equal(resolveReleaseAwareLifecycle({ state: 'approved' }), 'approved');
+    assert.equal(resolveReleaseAwareLifecycle({ state: 'published' }), 'published');
+  });
+
+  it('never fabricates a lifecycle when the release row is missing — always "unknown"', () => {
+    assert.equal(resolveReleaseAwareLifecycle(undefined), 'unknown');
+  });
+});
+
+describe('releaseAwareLifecyclePresentation', () => {
+  it('mirrors the known-state presentation for every real lifecycle', () => {
+    assert.deepEqual(releaseAwareLifecyclePresentation('draft'), EDITORIAL_STATE_PRESENTATION.draft);
+    assert.deepEqual(releaseAwareLifecyclePresentation('approved'), EDITORIAL_STATE_PRESENTATION.approved);
+    assert.deepEqual(releaseAwareLifecyclePresentation('published'), EDITORIAL_STATE_PRESENTATION.published);
+    assert.deepEqual(releaseAwareLifecyclePresentation('live'), EDITORIAL_STATE_PRESENTATION.live);
+  });
+
+  it('shows an honest "unknown" presentation rather than lying with a fabricated state', () => {
+    assert.deepEqual(releaseAwareLifecyclePresentation('unknown'), RELEASE_UNKNOWN_PRESENTATION);
   });
 });

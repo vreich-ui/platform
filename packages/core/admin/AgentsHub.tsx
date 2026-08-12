@@ -478,6 +478,7 @@ function HubBody() {
               onDeny={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
               onQuote={(text) => setQuote({ token: Date.now(), text })}
               onSendControls={(text) => void chat.send(text)}
+              pendingConsumed={chat.pendingConsumed}
             />
             {chat.error ? (
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>

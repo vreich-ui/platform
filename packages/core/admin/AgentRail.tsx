@@ -58,6 +58,7 @@ export function AgentRail({
         onSendControls={(text) => void chat.send(text)}
         preferenceScope={preferenceScope}
         approvalInStage={approvalInStage}
+        pendingConsumed={chat.pendingConsumed}
         emptyHint={
           <EmptyState
             title="Ready when you are"
