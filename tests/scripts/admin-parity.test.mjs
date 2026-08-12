@@ -46,6 +46,7 @@ import {
 } from '../../packages/core/cli/create-site.mjs';
 import { runAdminParity } from '../../packages/core/cli/migrate-site.mjs';
 import { discoverTargets } from '../../scripts/audit-site-admin-parity.mjs';
+import { SCRATCH_SITE_PREFIX, isScratchSite } from './scratch-sites.mjs';
 
 // ─── 1. canonical table + parsers ───────────────────────────────────────────
 
@@ -192,7 +193,21 @@ test('CANONICAL_TOML_POSTURE is byte-equal to the root netlify.toml’s own post
 
 // ─── 2. genesis parity by construction ──────────────────────────────────────
 
+/**
+ * Scaffold a throwaway tenant under `sites/` for a parity check to degrade.
+ *
+ * The slug MUST live in the reserved scratch namespace. Suites that enumerate `sites/*`
+ * as "every real tenant" (genesis-manifest, client-scripts-site-bindings) filter that
+ * namespace out, because node:test runs test FILES concurrently and would otherwise
+ * observe this directory mid-flight and fail against a genesis-stage scaffold. Naming a
+ * scratch tenant outside the namespace silently reintroduces that race, so it is an
+ * error here rather than a flake there. See tests/scripts/scratch-sites.mjs.
+ */
 const scratchSite = (slug) => {
+  assert.ok(
+    isScratchSite(slug),
+    `scratch tenant '${slug}' must start with '${SCRATCH_SITE_PREFIX}' — suites that enumerate sites/ ignore exactly that namespace`
+  );
   const dir = path.join(repoRoot, 'sites', slug);
   assert.ok(!fs.existsSync(dir), `scratch dir sites/${slug} must not already exist`);
   writeFiles(buildPlan({ name: slug, brandName: 'Parity Scratch' }));
