@@ -17,6 +17,14 @@
  * module's own top level, so it is always fully initialized by the time any
  * of these handlers actually runs.
  */
+import {
+  deriveBrandImageryFromTokens,
+  fnv1aHash,
+  type BrandImageryComposition,
+  type BrandImageryLora,
+  type BrandImageryRecord,
+  type ImageMedium,
+} from './brand-imagery-derive.js';
 import { isNetlifyBuildHookConfigured, NetlifyBuildHookTriggerError, triggerNetlifyBuild } from './netlify-deploys.js';
 import { releaseToProduction } from './production-release.js';
 import { buildPdfToolStorageGrant } from './pdf-tool-storage-grant.js';
@@ -746,22 +754,9 @@ const pollArtifactJobForInlineWait = async (
 // in the tool result's overriddenFields, never silently dropped. Applies
 // ONLY to image-GENERATION jobs (artifactKind "image", operation "generate")
 // -- never template renders, PDF jobs, or edits.
-type ImageMedium = 'photograph' | 'digital_illustration' | 'flat_vector' | 'editorial_collage';
-type BrandImageryComposition = { subjectScale?: string; cropRule?: string; depthOfField?: string };
-type BrandImageryLora = { url: string; scale?: number; triggerPhrase?: string; version?: string; modelEndpoint?: string };
+// Types and the FNV-1a helper live in brand-imagery-derive.ts alongside the
+// brandTokens-derived fallback that produces the same record shape.
 type ImageLoraRef = { path: string; scale?: number };
-
-type BrandImageryRecord = {
-  version: 1;
-  medium: ImageMedium;
-  styleSentence: string;
-  palette: string[];
-  negative: string[];
-  composition?: BrandImageryComposition;
-  aspectRatios?: Record<string, string>;
-  seedBase: number;
-  lora?: BrandImageryLora;
-};
 
 const IMAGE_MEDIUMS = new Set<ImageMedium>(['photograph', 'digital_illustration', 'flat_vector', 'editorial_collage']);
 
@@ -869,27 +864,26 @@ const parseBrandImagery = (body: Record<string, unknown> | undefined): BrandImag
 // Any lookup failure (site object absent, transient error) degrades to "no
 // brandImagery" rather than failing the job: this is an additive style
 // contract, not a required one (rule 3 -- backward compatible passthrough).
+// A site that never declared brandImagery still has a governed palette (the
+// theme-apply funnel is brandTokens' one writer), so rather than generating
+// with no visual identity at all we DERIVE a contract from those tokens --
+// deterministic, unstored, and superseded the moment a real brandImagery
+// block is declared. `source` tells the caller which of the two applied so it
+// can be surfaced rather than silently guessed at.
+type LoadedBrandImagery = { brand: BrandImageryRecord; source: 'declared' | 'derived' };
+
 const loadSiteBrandImagery = async (
   event: LambdaEvent,
   siteId: string
-): Promise<BrandImageryRecord | undefined> => {
+): Promise<LoadedBrandImagery | undefined> => {
   const lookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
   if ('isError' in lookup) return undefined;
   const record = getRecordValue(lookup.record);
-  return parseBrandImagery(getRecordValue(record?.body));
-};
-
-// A tiny non-cryptographic string hash (FNV-1a, 32-bit) used ONLY to derive a
-// stable per-job seed offset from job identity -- deterministic, no
-// Date.now()/Math.random(): the same {requestId, slot, subject} always
-// derives the same seed, so a re-run of the same job is reproducible.
-const fnv1aHash = (input: string): number => {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
+  const body = getRecordValue(record?.body);
+  const declared = parseBrandImagery(body);
+  if (declared) return { brand: declared, source: 'declared' };
+  const derived = deriveBrandImageryFromTokens(body, siteId);
+  return derived ? { brand: derived, source: 'derived' } : undefined;
 };
 
 // Fits a signed 32-bit int -- the common range image-model seed params
@@ -986,14 +980,15 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
   let seedOverride = toFiniteNumber(input.seed);
   let lorasOverride = toLoraList(input.loras);
   let brandOverriddenFields: string[] = [];
+  let brandImagerySource: 'declared' | 'derived' | undefined;
 
   // Rule 1: image-GENERATION jobs only -- never template renders (artifactKind
   // "pdf"), never edits (a masked_edit/image_variation/deterministic_transform
   // job carries no `prompt` at all).
   if (artifactKind === 'image' && (operationInput ?? 'generate') === 'generate') {
-    const brand = await loadSiteBrandImagery(event, scoped.scope.siteId);
-    if (brand) {
-      const assembled = assembleBrandAwareImageRequest(brand, {
+    const loaded = await loadSiteBrandImagery(event, scoped.scope.siteId);
+    if (loaded) {
+      const assembled = assembleBrandAwareImageRequest(loaded.brand, {
         subject: promptOverride,
         negativePrompt: negativePromptOverride,
         requestId: scoped.scope.requestId,
@@ -1006,10 +1001,12 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
       seedOverride = assembled.seed;
       lorasOverride = assembled.loras;
       brandOverriddenFields = assembled.overriddenFields;
+      brandImagerySource = loaded.source;
       event.log?.({
         event: 'brand_prompt_assembled',
         siteId: scoped.scope.siteId,
         requestId: scoped.scope.requestId,
+        brandImagerySource: loaded.source,
         overriddenFields: brandOverriddenFields,
         derivedSeedPresent: assembled.seed !== undefined,
       });
@@ -1058,6 +1055,9 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     projectId: built.grant.projectId,
     requestId: scoped.scope.requestId,
     polling: platformPolling(scoped.scope, jobId),
+    // Additive: tells the caller a brand contract shaped this job, and whether
+    // it was the site's declared block or one derived from its brandTokens.
+    ...(brandImagerySource ? { brandImagerySource } : {}),
     ...(brandOverriddenFields.length > 0 ? { overriddenFields: brandOverriddenFields } : {}),
   };
 
