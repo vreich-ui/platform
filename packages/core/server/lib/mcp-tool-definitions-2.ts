@@ -23,6 +23,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     name: 'ping',
     description: 'Diagnostic tool that confirms the MCP server is reachable.',
     inputSchema: objectSchema({}),
+    governance: { toolClass: 'read' },
   },
 
   // ── Object verbs (T0.9): the generic CMS object store. Each proxies to
@@ -36,6 +37,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       { object_type: objectTypeEnumSchema(), object_id: stringSchema('The object id, e.g. page_home.') },
       ['object_type', 'object_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'object_list',
@@ -47,6 +49,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'object_create',
@@ -63,6 +66,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'site', 'body']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'validate_new_object' } },
   },
   {
     name: 'object_instantiate_template',
@@ -89,6 +93,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['template_id', 'site', 'route', 'title']
     ),
+    governance: { toolClass: 'creation', autonomyFloor: 'ask', preview: { kind: 'verb_dry_run' } },
   },
   {
     name: 'object_instantiate_section_template',
@@ -108,6 +113,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['section_template_id', 'target']
     ),
+    governance: { toolClass: 'creation', autonomyFloor: 'ask', preview: { kind: 'verb_dry_run' } },
   },
   {
     name: 'site_apply_theme',
@@ -127,6 +133,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['theme_id', 'site_id']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'verb_dry_run' } },
   },
   {
     name: 'object_create_variant',
@@ -145,6 +152,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['source_object_id']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'verb_dry_run' } },
   },
   {
     name: 'object_checkout',
@@ -158,6 +166,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'object_refresh_lock',
@@ -171,6 +180,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'object_checkin',
@@ -179,6 +189,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       { object_type: objectTypeEnumSchema(), object_id: stringSchema(), lock_token: stringSchema() },
       ['object_type', 'object_id', 'lock_token']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'object_patch',
@@ -194,6 +205,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token', 'expected_record_version', 'ops']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'object_validate',
@@ -224,6 +236,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type']
     ),
+    governance: { toolClass: 'read' },
   },
 
   // ── Review + publish verbs (P1): the same submit_review / review_decide /
@@ -250,6 +263,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token']
     ),
+    governance: { toolClass: 'publication' },
   },
   {
     name: 'object_review_decide',
@@ -286,6 +300,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'decision']
     ),
+    governance: { toolClass: 'publication', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   // ── Marginalia (W15 S4, MVP): canvas commenting/annotation threads on ANY
   //    of the twelve governed object types, persisted in a DEDICATED blob
@@ -307,6 +322,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'body']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'marginalia_reply',
@@ -322,6 +338,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'thread_id', 'body']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'marginalia_list',
@@ -330,6 +347,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       'object_type',
       'object_id',
     ]),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'marginalia_resolve',
@@ -344,6 +362,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'thread_id', 'status']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'object_discard',
@@ -367,6 +386,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token', 'entries']
     ),
+    governance: { toolClass: 'publication' },
   },
   {
     name: 'object_retire',
@@ -384,6 +404,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token']
     ),
+    governance: { toolClass: 'publication', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'object_publish',
@@ -413,6 +434,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token']
     ),
+    governance: { toolClass: 'publication' },
   },
   {
     name: 'object_inventory',
@@ -436,6 +458,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
         description: 'Optional: true → only objects the live site has not seen; false → only fully published ones.',
       },
     }),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'object_contract',
@@ -444,6 +467,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     inputSchema: objectSchema({ object_type: objectTypeEnumSchema('The CMS object type to describe.') }, [
       'object_type',
     ]),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'product_set_price',
@@ -458,6 +482,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['product_id', 'amount_cents']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'order_reissue',
@@ -471,6 +496,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['order_key']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'commerce_orders',
@@ -484,6 +510,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       product_id: stringSchema('List filter: only orders for this product object id (prod_…).'),
       limit: { type: 'number', description: 'List cap, newest first (default 20, max 100).' },
     }),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'registry_get',
@@ -492,5 +519,6 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     inputSchema: objectSchema({
       registry: { type: 'string', enum: ['component', 'page_type'], description: 'Optional registry name.' },
     }),
+    governance: { toolClass: 'read' },
   },
 ];

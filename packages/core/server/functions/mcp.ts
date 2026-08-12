@@ -84,21 +84,7 @@ const OPTIONAL_HANDLER_TOOLS = new Set(['verify_article_images']);
  * not part of normal information exchange or governed object editing, and a
  * large destructive/upload surface makes agent planning needlessly noisy.
  */
-export const INTERNAL_ONLY_TOOLS = new Set([
-  'trigger_netlify_build',
-  'create_artifact_upload_intent',
-  'create_artifact_from_url',
-  'save_artifact',
-  'soft_delete_artifact',
-  'restore_artifact',
-  'migrate_artifact_indexes',
-  'wipe_blob_stores',
-  'reconcile_artifact_indexes',
-  // T16.5: an operational diagnostic (per-family env-gate truth), not part of
-  // normal agent object editing — callable (the fleet capability probe uses
-  // it) but not advertised, same rationale as the tools above it.
-  'capability_status',
-]);
+export { INTERNAL_ONLY_TOOLS };
 
 /** True when this site supplied the article-image verification handler. */
 const hasVerifyArticleImages = (): boolean => Boolean(requireSiblings().verifyArticleImagesHandler);
@@ -119,17 +105,7 @@ export const deployStatusHandler: SiblingHandler = (event, context) =>
   requireSiblings().deployStatusHandler(event, context);
 export const verifyArticleImagesHandler: SiblingHandler = (event, context) =>
   requireOptional('verifyArticleImagesHandler')(event, context);
-import {
-  getArtifactIndexBlobStore,
-  getCommerceBlobStore,
-  getCommerceEventsBlobStore,
-  getSiteObjectsBlobStore,
-} from '../lib/blob-store.js';
-import { getOrderDetail, listOrders } from '../lib/commerce-admin.js';
-import { orderReissue } from '../lib/order-reissue.js';
-import { productSetPrice } from '../lib/product-set-price.js';
-import { getStripeClient } from '../lib/stripe-env.js';
-import type { ObjectVerbStore } from '../lib/object-verbs.js';
+import { getArtifactIndexBlobStore } from '../lib/blob-store.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { getGovernanceBlobStore } from '../lib/governance-store.js';
 import { getCapabilityStatus } from '../lib/capability-status.js';
@@ -151,18 +127,9 @@ import {
 import { saveArtifactFromUrl } from '../lib/artifact-url-ingest.js';
 import { withIdempotentToolCall } from '../lib/idempotency-store.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
-import {
-  listPageTypeDefinitions,
-  pageTypeDefinitionJsonSchema,
-  unimplementedPageTypeIds,
-} from '../../lib/registry/page-types.js';
-import {
-  buildObjectContract,
-  listSectionTypeContracts,
-  OBJECT_CONTRACT_TYPES,
-} from '../../lib/registry/object-contract.js';
+import { buildObjectContract, OBJECT_CONTRACT_TYPES } from '../../lib/registry/object-contract.js';
 import type { ObjectType } from '../../schema/object-record-v1.js';
-import { TOOL_DEFINITIONS_PART1 } from '../lib/mcp-tool-definitions.js';
+import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS } from '../lib/mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../lib/mcp-tool-definitions-2.js';
 import {
   getArtifactMetadata,
@@ -206,6 +173,10 @@ import {
   callReleaseToProduction,
   callTriggerNetlifyBuild,
   callVerifyArticleImages,
+  callCommerceOrders,
+  callOrderReissue,
+  callProductSetPrice,
+  callRegistryGet,
   resolveArtifactJobInlineWaitBudgetMs,
   resolveReleaseWaitBudgetSeconds,
 } from '../lib/mcp-tool-handlers.js';
@@ -262,10 +233,27 @@ type JsonRpcResponse = {
   error?: { code: number; message: string; data?: unknown };
 };
 
+export type ToolPreviewBinding =
+  | { kind: 'verb_dry_run' }        // execute the same verb with dry_run: true
+  | { kind: 'validate_new_object' } // synthetic create preview (chat's validateNewObject)
+  | { kind: 'input_echo' };         // echo the exact args onto the approval card
+
+export type ToolGovernance = {
+  /** Chat risk class; drives default autonomy (read → auto, everything else → ask). */
+  toolClass: 'read' | 'draft' | 'creation' | 'publication' | 'privileged';
+  /** Hard floor: no governance or profile override may promote this tool to 'auto'. */
+  autonomyFloor?: 'ask';
+  /** Approval-card preview strategy for non-read tools. Absent = card shows args + describe only. */
+  preview?: ToolPreviewBinding;
+  /** Chat-side default autonomy is 'off' (tool exists but disabled until enabled by governance/profile). */
+  chatDefaultOff?: true;
+};
+
 export type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  governance: ToolGovernance;
 };
 
 // Derived from the site-identity seam; for Dr-Lurie the resolved values are
@@ -372,6 +360,23 @@ export const toolError = (message: string, payload: Record<string, unknown> = {}
   content: textContent(message),
   structuredContent: { error: message, ...payload },
 });
+
+// T9.13/PF5: 'ping' extracted to an exported function (mechanical, same
+// pattern as the mcp-tool-handlers.ts call* extractions) so the chat tool
+// registry's `operational` bridge (agent/context.ts) has something to
+// dispatch to. Kept here rather than mcp-tool-handlers.ts because it reads
+// this module's own private cold-start instance state
+// (INSTANCE_BOOTED_AT_MS/instanceInvocationCount) — moving those would not be
+// a mechanical, behavior-preserving extraction.
+export const callPing = () =>
+  // instance_age_ms near zero means this call paid a cold start; the fields
+  // are additive diagnostics on top of the original {ok, server}.
+  toolResult({
+    ok: true,
+    server: SERVER_DIAGNOSTIC_NAME,
+    instance_age_ms: Date.now() - INSTANCE_BOOTED_AT_MS,
+    instance_invocations: instanceInvocationCount,
+  });
 
 const TOOL_DEFINITIONS: ToolDefinition[] = [...TOOL_DEFINITIONS_PART1, ...TOOL_DEFINITIONS_PART2];
 export const response = (statusCode: number, body: unknown, headers: Record<string, string> = jsonHeaders) => ({
@@ -714,14 +719,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
 
   switch (name) {
     case 'ping':
-      // instance_age_ms near zero means this call paid a cold start; the
-      // fields are additive diagnostics on top of the original {ok, server}.
-      return toolResult({
-        ok: true,
-        server: SERVER_DIAGNOSTIC_NAME,
-        instance_age_ms: Date.now() - INSTANCE_BOOTED_AT_MS,
-        instance_invocations: instanceInvocationCount,
-      });
+      return callPing();
     case 'capability_status':
       // T16.5: pure, synchronous, in-process — no store round trip, nothing
       // secret-shaped in the response (booleans + env-var NAMES only).
@@ -1097,65 +1095,12 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
           release_build: input.release_build,
         })
       );
-    case 'product_set_price': {
-      const stripe = await getStripeClient();
-      if (!stripe) {
-        return toolError('Stripe is not configured for the running mode (no secret key).', {
-          error_code: 'not_configured',
-        });
-      }
-      const productId = toNonEmptyString(input.product_id);
-      if (!productId) return toolError('product_id is required.');
-      const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
-      const principal = {
-        kind: 'agent' as const,
-        agent_name: toNonEmptyString(input.agent_name) ?? 'unattributed-agent',
-        auth: 'publish_key' as const,
-      };
-      const result = await productSetPrice(
-        {
-          product_id: productId,
-          amount_cents: typeof input.amount_cents === 'number' ? input.amount_cents : NaN,
-          currency: toNonEmptyString(input.currency) ?? undefined,
-        },
-        { stripe, store, principal }
-      );
-      if (!result.ok) return toolError(result.error, { statusCode: result.status });
-      return toolResult(result);
-    }
-    case 'commerce_orders': {
-      const commerce = await getCommerceBlobStore(event);
-      const orderKeyLookup = toNonEmptyString(input.order_key);
-      if (orderKeyLookup) {
-        const detail = await getOrderDetail(commerce, orderKeyLookup);
-        if (!detail) return toolError(`No order found for key "${orderKeyLookup}".`, { statusCode: 404 });
-        return toolResult(detail);
-      }
-      const orders = await listOrders(commerce, {
-        email: toNonEmptyString(input.email) ?? undefined,
-        product_id: toNonEmptyString(input.product_id) ?? undefined,
-        limit: typeof input.limit === 'number' ? input.limit : undefined,
-      });
-      return toolResult({ count: orders.length, orders });
-    }
-    case 'order_reissue': {
-      const orderKeyInput = toNonEmptyString(input.order_key);
-      if (!orderKeyInput) return toolError('order_key is required.');
-      const result = await orderReissue(
-        {
-          order_key: orderKeyInput,
-          ttl_hours: typeof input.ttl_hours === 'number' ? input.ttl_hours : undefined,
-        },
-        {
-          commerce: await getCommerceBlobStore(event),
-          events: await getCommerceEventsBlobStore(event),
-          siteObjects: await getSiteObjectsBlobStore(event),
-          by: toNonEmptyString(input.agent_name) ?? 'unattributed-agent',
-        }
-      );
-      if (!result.ok) return toolError(result.error, { statusCode: result.status });
-      return toolResult(result);
-    }
+    case 'product_set_price':
+      return callProductSetPrice(event, input);
+    case 'commerce_orders':
+      return callCommerceOrders(event, input);
+    case 'order_reissue':
+      return callOrderReissue(event, input);
     case 'object_contract': {
       const objectType = toNonEmptyString(input.object_type);
       if (!objectType || !OBJECT_CONTRACT_TYPES.includes(objectType as ObjectType)) {
@@ -1167,38 +1112,8 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // enforcing schemas/registries/policy so it cannot drift.
       return toolResult({ contract: buildObjectContract(objectType as ObjectType) });
     }
-    case 'registry_get': {
-      const registry = toNonEmptyString(input.registry) ?? null;
-      if (registry === 'page_type') {
-        return toolResult({
-          registry,
-          status: 'ok',
-          available: true,
-          definitions: listPageTypeDefinitions(),
-          not_yet_implemented: unimplementedPageTypeIds(),
-          definition_schema: pageTypeDefinitionJsonSchema(),
-        });
-      }
-      if (registry === 'component') {
-        // Now populated: every section variant with its data JSON-schema,
-        // component-bound flag, and editor hints (same source as
-        // object_contract.section_types).
-        return toolResult({
-          registry,
-          status: 'ok',
-          available: true,
-          definitions: listSectionTypeContracts(),
-          message:
-            'For the full per-object-type contract (body schema + patch ops + constraints), use object_contract.',
-        });
-      }
-      return toolResult({
-        registries: ['page_type', 'component'],
-        available: ['page_type', 'component'],
-        message:
-          "Pass registry: 'page_type' or 'component'. For the complete per-object-type editing contract, prefer object_contract.",
-      });
-    }
+    case 'registry_get':
+      return callRegistryGet(event, input);
 
     default:
       break;

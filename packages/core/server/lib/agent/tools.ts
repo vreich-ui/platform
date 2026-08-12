@@ -62,6 +62,19 @@ export interface ToolContext {
     ): Promise<{ ok: true; data: T } | { ok: false; code: string; message: string }>;
     projectId: string;
   };
+  /**
+   * T9.13/PF5: the generated chat tools' bridge to the "operational" MCP
+   * tools (artifact reads/search, marginalia_*, registry_get, deploy_status,
+   * the pdf-tool/image families, commerce, ping/health, ...) — everything
+   * that isn't an object_* verb, object_contract, or list_artifacts_for_request
+   * (see agent/generated-tools.ts). Absent when the chat session has no
+   * operational bridge configured; those tools then answer with a clear
+   * error instead of crashing. Purely additive to this interface — every
+   * existing CHAT_TOOLS tool ignores it.
+   */
+  operational?: {
+    call(name: string, args: Record<string, unknown>): Promise<{ content: string; is_error: boolean }>;
+  };
 }
 
 export interface ChatTool {

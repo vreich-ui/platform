@@ -80,6 +80,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     principal,
     roles,
     exportRoot: binding.dataRoot,
+    // Task 3 §5: so the generated registry's operational-bridge tools
+    // (deploy_status, pdf-tool/image families, commerce, ...) execute in the
+    // background hop too, not only on the interactive approve path.
+    operationalEvent: event,
   });
 
   // PF2/PF3 — TurnEngine selection: governance override ?? CMS_AGENT_CHAT_MODE ?? 'off'.

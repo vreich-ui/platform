@@ -27,10 +27,12 @@ import {
   type ChatDoc,
   type ChatMsg,
   type ChatRun,
+  type RegistryKind,
   type RunProfile,
   type ToolAutonomy,
 } from './chat-store.js';
-import { chatToolByName, CHAT_TOOLS, type ToolContext } from './tools.js';
+import type { ToolContext } from './tools.js';
+import { autonomyForCall, registryTools, runRegistryKind, toolByName } from './registry.js';
 import { CmsAgentEngineError, humanCopyForCmsAgentError, type TurnEngine } from './engine.js';
 import type { WireTool } from './provider.js';
 import {
@@ -73,13 +75,18 @@ export interface LoopDeps {
 
 const now = (deps: { nowIso?: () => string }) => (deps.nowIso ?? (() => new Date().toISOString()))();
 
-/** The wire tool list for a run: everything not 'off'. */
-const wireTools = (autonomy: Record<string, ToolAutonomy>, learningMode: boolean): WireTool[] => [
-  ...CHAT_TOOLS.filter((tool) => autonomy[tool.name] !== 'off').map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    input_schema: tool.input_schema,
-  })),
+/** The wire tool list for a run: everything not 'off' in the run's registry,
+ *  using `autonomyForCall`'s defaults for any tool missing from the run's
+ *  frozen `autonomy` map (a tool added to the registry after the run's map
+ *  was resolved — the mid-deploy safety rule applies here too). */
+const wireTools = (kind: RegistryKind, run: ChatRun, learningMode: boolean): WireTool[] => [
+  ...registryTools(kind)
+    .filter((tool) => autonomyForCall(kind, run, tool.name) !== 'off')
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.input_schema,
+    })),
   ...(learningMode ? [PRESENT_CANDIDATES_WIRE_TOOL] : []),
 ];
 
@@ -91,9 +98,12 @@ const asksForDiagnostics = (text: string): boolean =>
 export const buildAgentSystemPrompt = (doc: ChatDoc, run: ChatRun): string => {
   const lines = [run.profile.system_prompt];
   if (doc.kind === 'object' && doc.object_type && doc.object_id) {
+    const generated = runRegistryKind(run) === 'generated';
+    const readTool = generated ? 'object_get' : 'get_object';
+    const contractTool = generated ? 'object_contract' : 'get_contract';
     lines.push(
       `This conversation is bound to the ${doc.object_type} object "${doc.object_id}". ` +
-        'Start by reading it (get_object) and its contract (get_contract) if you have not already. ' +
+        `Start by reading it (${readTool}) and its contract (${contractTool}) if you have not already. ` +
         'Work on THIS object unless the human explicitly asks about another.'
     );
   }
@@ -228,7 +238,8 @@ export const runAgentLoop = async (
   await saveChatDoc(deps.chatStore, doc);
 
   const run = doc.run;
-  const tools = wireTools(run.autonomy, run.learning_mode);
+  const kind = runRegistryKind(run);
+  const tools = wireTools(kind, run, run.learning_mode);
   const system = buildAgentSystemPrompt(doc, run);
 
   const persist = () => saveChatDoc(deps.chatStore, doc);
@@ -298,14 +309,28 @@ export const runAgentLoop = async (
           return { ok: true, status: doc.status };
         }
 
-        const tool = chatToolByName(call.name);
+        const tool = toolByName(kind, call.name);
 
-        if (!tool || run.autonomy[call.name] === 'off') {
+        if (!tool) {
           run.call_queue.shift();
           run.transcript.push({
             role: 'tool',
             tool_call_id: call.id,
-            content: `Tool "${call.name}" is not available in this workspace.`,
+            content: `Tool "${call.name}" is not a capability of this workspace.`,
+            is_error: true,
+          });
+          appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
+          await persist();
+          continue;
+        }
+
+        const callAutonomy = autonomyForCall(kind, run, call.name);
+        if (callAutonomy === 'off') {
+          run.call_queue.shift();
+          run.transcript.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: `Tool "${call.name}" is disabled by policy for this chat.`,
             is_error: true,
           });
           appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
@@ -323,7 +348,7 @@ export const runAgentLoop = async (
           continue;
         }
 
-        if (run.autonomy[call.name] === 'ask') {
+        if (callAutonomy === 'ask') {
           // Dry-run first (creation/privileged): the server-computed preview
           // rides the approval event for the card.
           let dryRun: Record<string, unknown> | undefined;
@@ -482,7 +507,7 @@ export const approvePendingTool = async (
   if (pending.call_id !== callId) {
     return { status: 409, body: { error: 'call_id does not match the pending call', code: 'forged_resume' } };
   }
-  const tool = chatToolByName(pending.tool);
+  const tool = toolByName(runRegistryKind(doc.run), pending.tool);
   if (!tool) return { status: 409, body: { error: 'pending tool no longer exists', code: 'forged_resume' } };
 
   let args = pending.args;
@@ -586,7 +611,12 @@ export const startRun = async (
   autonomy: Record<string, ToolAutonomy>,
   learningMode = false,
   focus?: string,
-  editorIsOwner = false
+  editorIsOwner = false,
+  /** Task 3: the registry kind resolved at send time (governance
+   *  `chat_registry` ?? 'generated'); frozen into the run, exactly like
+   *  profile/autonomy. Defaults to 'generated' to match the documented
+   *  effective default for callers (and existing tests) that don't pass it. */
+  registry: RegistryKind = 'generated'
 ): Promise<ProtocolResult> => {
   const at = () => (deps.nowIso ?? (() => new Date().toISOString()))();
   const nowMs = (deps.nowMs ?? Date.now)();
@@ -624,6 +654,7 @@ export const startRun = async (
     principal: { kind: 'human', ...principal },
     profile,
     autonomy,
+    registry,
     learning_mode: learningMode,
     ...(focus ? { focus } : {}),
     diagnostics_requested: editorIsOwner && asksForDiagnostics(text),

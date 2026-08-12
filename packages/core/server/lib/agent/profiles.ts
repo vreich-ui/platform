@@ -46,6 +46,12 @@ export const agentProfilesDocSchema = z.object({
     site_default: z.string().optional(),
   }),
   updated_at: z.string(),
+  /** Task 3 (schema-additive): set once every profile's
+   *  `tool_autonomy_overrides` has been canonicalized through
+   *  `migrateAutonomyKeys` (write-back on read in admin-agent-chat.ts) —
+   *  short-circuits re-migration so a post-migration owner may legitimately
+   *  set the canonical `search_artifacts` key. */
+  keys_migrated: z.boolean().optional(),
 });
 export type AgentProfilesDoc = z.infer<typeof agentProfilesDocSchema>;
 

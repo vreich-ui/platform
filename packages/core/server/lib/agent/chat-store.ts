@@ -115,6 +115,14 @@ export type RunProfile = z.infer<typeof runProfileSchema>;
 export const toolAutonomySchema = z.enum(['auto', 'ask', 'off']);
 export type ToolAutonomy = z.infer<typeof toolAutonomySchema>;
 
+/** Task 3 — which chat-tool registry (agent/tools.ts's curated CHAT_TOOLS vs
+ *  agent/generated-tools.ts's GENERATED_CHAT_TOOLS) a run is wired against.
+ *  Schema-additive: an in-flight run stamped before this deploy has no
+ *  `registry` field and is treated as 'legacy' at every read site
+ *  (agent/registry.ts's `runRegistryKind`) — never silently promoted. */
+export const registryKindSchema = z.enum(['legacy', 'generated']);
+export type RegistryKind = z.infer<typeof registryKindSchema>;
+
 export const pendingCandidateSetSchema = z.object({
   call_id: z.string(),
   run_id: z.string(),
@@ -153,6 +161,10 @@ export const chatRunSchema = z.object({
   engine: z.enum(['provider', 'cms_agent']).default('provider'),
   /** PF2 (schema-additive): the resolved CMS-Agent ref (agt_client_manager[@rev]) used for this run. */
   agent_ref: z.string().optional(),
+  /** Task 3 (schema-additive): the chat-tool registry stamped at send time —
+   *  frozen for the run, exactly like profile/autonomy. Absent on runs
+   *  in-flight from before this deploy; treated as 'legacy' (see RegistryKind). */
+  registry: registryKindSchema.optional(),
   trigger_token: z.string().optional(),
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),
