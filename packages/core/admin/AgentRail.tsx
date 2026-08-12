@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { EmptyState } from './primitives';
 import { ChatComposer, ChatThread, type UseChatState } from './chat';
 import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
@@ -24,6 +26,8 @@ export function AgentRail({
   approvalInStage?: boolean;
 }) {
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope, approvalInStage });
+  // Highlight-to-reference: a quoted selection from the transcript, relayed into the composer.
+  const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
 
   return (
     <section
@@ -50,6 +54,7 @@ export function AgentRail({
         onPreviewCandidate={(candidateId) => chat.preview(candidateId)}
         onChooseCandidate={(candidateId) => void chat.chooseCandidate(candidateId)}
         onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
+        onQuote={(text) => setQuote({ token: Date.now(), text })}
         onSendControls={(text) => void chat.send(text)}
         preferenceScope={preferenceScope}
         approvalInStage={approvalInStage}
@@ -75,6 +80,7 @@ export function AgentRail({
           suggestions={suggestions}
           contextActions={contextActions}
           draftSeed={draftSeed}
+          quote={quote}
           above={aboveComposer}
         />
       </div>
