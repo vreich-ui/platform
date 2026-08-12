@@ -1,0 +1,121 @@
+{
+  "__generated": {
+    "at": "2026-08-12T15:24:51.326Z",
+    "from": "objects/content_item/by-id/req_agent_editor_field_guide_draft_to_published_20260812_01.json",
+    "record_version": 2
+  },
+  "author": "Platform Documentation",
+  "deck": "Everything an editor needs to take an article from an empty draft to Published, on the governed object system — checkout, validate, review, publish, and the one distinction between Published and Live that trips people up.",
+  "description": "A task-focused walkthrough for editors: how to draft, lock, validate, review, and publish an article on the platform, plus a live tour of the media the platform can fabricate on demand.",
+  "nodes": [
+    {
+      "id": "n_efg01",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "Every article on this platform is a governed object: a structured record with a contract that says exactly what it may contain and how it moves toward publication. That sounds heavy, but for an editor it means something reassuring — nothing you do is a leap of faith. You lock the article before you touch it, the system checks your work before it goes out, and every state has a precise name. This guide walks the whole path once, in order, so the next time you start from a blank draft you already know every step.",
+        "title": "From empty draft to Published, without guesswork"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_efg02",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "An article is not one blob of text. It is an ordered list of nodes, each a small, self-contained block — a heading and body, a call to action, an image, an interactive element. You arrange nodes, move them, hide them, or remove them, and the article's public page is rendered from exactly those nodes marked visible. Alongside the nodes sits the envelope: the title, the deck, the taxonomy that files the article under a category and tags, and the SEO fields. Getting the taxonomy right matters — the category and tags must resolve against the site's registry, or the article will not validate.",
+        "title": "The shape of an article"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_efg03",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Before you change anything, you check the article out. That takes an edit lock — a lease that says the article is yours to edit for a set window. One lock exists per article at a time, so checkout is also how the system keeps two people from silently overwriting each other. Every edit you make is threaded through that lock. When your editing pass is done, you check back in and release it. If your lease runs out mid-edit, you simply take it again; if someone else holds it, you wait or ask them to release.",
+        "title": "Step one: take the lock"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_efg04",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Validation is the platform's read-before-you-leap safety net. It runs the exact same checks that publishing will run — the body against its schema, the taxonomy against the registry, every referenced image and PDF against the trusted-artifact rules — but it changes nothing. You can validate a draft as many times as you like. Blockers explain themselves: if a tag is unknown, or an image path is not a trusted artifact, the validator names it. The discipline is simple — validate until it comes back clean, then move on.",
+        "title": "Step two: validate before you commit"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_efg05",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Some changes go out on your own authority; others open a review first. Review is a decision record, not a state of the content itself — a reviewer can approve, or request changes. Approved means exactly that a reviewer said yes; it does not, by itself, mean anything has been published. If changes are requested, you address them and resubmit. Treating Approved as a review outcome, distinct from Published, keeps everyone honest about where an article actually stands.",
+        "title": "Step three: review, when it is called for"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_efg06",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "This is the distinction worth memorising. Publishing records an export commit — the article's content is now the committed, published version. But the actual production deployment is a separate, deliberate step a human takes afterwards. So an article can be Published and not yet Live. Until a deployment is confirmed, the honest word is Published, or awaiting live confirmation — never Live. Saying an article is Live because you clicked publish is the single most common way status gets misreported.",
+        "title": "Step four: Published is not the same as Live"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_efg07",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "Take the lock. Draft your nodes. Validate until clean. Open a review if the change calls for one. Publish to record the commit. Then — and only as a separate, deliberate step — release to production, and confirm the deployment before you call anything Live. Check the lock back in when you are done. That is the entire journey from blank draft to a Published article, and every step exists to make the one after it safe.",
+        "title": "The whole path, in one breath"
+      },
+      "visibility": "public"
+    }
+  ],
+  "publication_context": {
+    "domain": "kugel-platform.netlify.app",
+    "publication_name": "Platform",
+    "topic_scope": "CMS editorial workflow"
+  },
+  "seo": {
+    "meta_description": "How an editor takes an article from empty draft to Published on the governed CMS — checkout, validate, review, publish, and the Published-vs-Live distinction — with a live media-fabrication showcase.",
+    "meta_title": "From Blank Draft to Published: An Editor's Field Guide"
+  },
+  "slug": "editor-field-guide-draft-to-published",
+  "taxonomy": {
+    "category": "guide",
+    "tags": [
+      "publishing",
+      "architecture"
+    ]
+  },
+  "title": "From Blank Draft to Published: An Editor's Field Guide"
+}
