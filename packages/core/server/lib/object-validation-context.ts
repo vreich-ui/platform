@@ -90,6 +90,13 @@ const collectArtifactRefCandidates = (sources: unknown[]): Set<string> => {
  * routinely invisible, so a miss carries no information about existence and
  * MUST leave the key unanswered rather than reporting absent.
  *
+ * A read that THROWS is reported separately in `unreadable` rather than being
+ * silently swallowed. A thrown read means the index could not be consulted at
+ * all — almost always a credential fault — and it is indistinguishable at the
+ * call site from "the artifact isn't there", which is precisely how a wrong
+ * NETLIFY_BLOBS_TOKEN spent 2026-08-11 masquerading as a passing publish gate.
+ * Surfacing it lets the caller say "existence not verified" out loud.
+ *
  * Observed live 2026-08-11 without those credentials: an image artifact that
  * had just been created (verified, resolvable by slot through the explicit-API
  * path, and serving fine) read as absent here for 25+ minutes, which blocked
@@ -101,8 +108,9 @@ const preloadArtifactRefResolutions = async (
   indexStore: ArtifactIndexStore,
   candidates: Set<string>,
   strongReads: boolean
-): Promise<Map<string, ArtifactRefResolution>> => {
+): Promise<{ resolutions: Map<string, ArtifactRefResolution>; unreadable: string[] }> => {
   const resolutions = new Map<string, ArtifactRefResolution>();
+  const unreadable: string[] = [];
   await Promise.all(
     [...candidates].map(async (blobKey) => {
       const [, requestId = '', filename = ''] = blobKey.split('/');
@@ -134,11 +142,13 @@ const preloadArtifactRefResolutions = async (
           ...(typeof reference.contentType === 'string' ? { contentType: reference.contentType } : {}),
         });
       } catch {
-        // Index unreachable for this key — leave unanswered (not verified).
+        // Index unreachable for this key — leave unanswered (not verified), but
+        // RECORD it: a thrown read is a fault to report, not an absence to infer.
+        unreadable.push(blobKey);
       }
     })
   );
-  return resolutions;
+  return { resolutions, unreadable };
 };
 
 type TaxonomyTerm = { term_id: string; slug?: string; status?: string; merged_into?: string };
@@ -293,18 +303,20 @@ export const buildStoreValidationContext = async (
   // against the artifact index, so the sync resolver can answer during
   // validation. Any resulting body validation sees derives from these sources.
   let resolveArtifactRef: ObjectValidationContext['resolveArtifactRef'];
+  let artifactIndexUnreadable: string[] | undefined;
   if (self.artifactIndexStore) {
     const candidates = collectArtifactRefCandidates([
       ...(self.artifactRefSources ?? []),
       ...[...records.values()].map((record) => record.body),
     ]);
     if (candidates.size > 0) {
-      const resolutions = await preloadArtifactRefResolutions(
+      const preloaded = await preloadArtifactRefResolutions(
         self.artifactIndexStore,
         candidates,
         isBlobCredentialsConfigured()
       );
-      resolveArtifactRef = (blobKey) => resolutions.get(blobKey);
+      resolveArtifactRef = (blobKey) => preloaded.resolutions.get(blobKey);
+      if (preloaded.unreadable.length > 0) artifactIndexUnreadable = preloaded.unreadable;
     }
   }
 
@@ -359,5 +371,6 @@ export const buildStoreValidationContext = async (
     componentTypeExists,
     ...(resolveTaxonomyTerm ? { resolveTaxonomyTerm } : {}),
     ...(resolveArtifactRef ? { resolveArtifactRef } : {}),
+    ...(artifactIndexUnreadable ? { artifactIndexUnreadable } : {}),
   };
 };
