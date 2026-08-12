@@ -52,6 +52,47 @@ const makeArtifactIndexStore = (references: Array<Record<string, unknown>>) => {
   } as never;
 };
 
+const makeThrowingArtifactIndexStore = () =>
+  ({
+    async get() {
+      // What a bad blob credential actually looks like from here.
+      throw new Error('Netlify Blobs has generated an internal error (401 status code)');
+    },
+    async setJSON() {},
+    async list() {
+      return { blobs: [], directories: [] };
+    },
+  }) as never;
+
+test('artifactIndexUnreadable: a throwing index read is reported, not silently swallowed', async () => {
+  // A thrown read means the index could not be consulted at all. Leaving the key
+  // unanswered is right (it is not evidence of absence), but staying SILENT is
+  // what let a non-PAT NETLIFY_BLOBS_TOKEN read as a healthy publish gate on
+  // 2026-08-11: every read threw, nothing was verified, and article_media
+  // reported "complete".
+  const missingKey = `image/${REF_REQUEST}/${'d'.repeat(64)}.png`;
+  const context = await buildStoreValidationContext(makeStore([]), {
+    artifactIndexStore: makeThrowingArtifactIndexStore(),
+    artifactRefSources: [{ ops: [{ op: 'set_section_fields', fields: { a: REF_KEY, b: missingKey } }] }],
+  });
+
+  // Unanswered, so nothing is falsely reported absent...
+  assert.equal(context.resolveArtifactRef?.(REF_KEY), undefined);
+  assert.equal(context.resolveArtifactRef?.(missingKey), undefined);
+  // ...but the fault is visible to the caller.
+  assert.deepEqual([...(context.artifactIndexUnreadable ?? [])].sort(), [REF_KEY, missingKey].sort());
+});
+
+test('artifactIndexUnreadable: absent when every read succeeds', async () => {
+  const context = await buildStoreValidationContext(makeStore([]), {
+    artifactIndexStore: makeArtifactIndexStore([
+      { blobKey: REF_KEY, sha256: REF_SHA, sizeBytes: 111, contentType: 'image/png', artifactKind: 'image' },
+    ]),
+    artifactRefSources: [{ ops: [{ op: 'set_section_fields', fields: { a: REF_KEY } }] }],
+  });
+  assert.equal(context.artifactIndexUnreadable, undefined);
+});
+
 test('resolveArtifactRef: refs from the request payload and record bodies pre-resolve against the artifact index', async (t) => {
   // Explicit-API credentials present => blob reads really are strongly
   // consistent, so an absence observed here is conclusive. Without them the

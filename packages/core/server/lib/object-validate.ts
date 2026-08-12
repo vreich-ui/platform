@@ -201,6 +201,11 @@ export type ObjectValidationContext = {
    * uploads mint their own request ids and legitimately cross objects.
    */
   resolveArtifactRef?: (blobKey: string) => ArtifactRefResolution | undefined;
+  /** Major-Key refs whose index read THREW (not "absent" — unconsultable). A
+   * non-empty list almost always means a blob credential fault; existence for
+   * these keys is unverified and must be reported as such rather than passing
+   * silently. See preloadArtifactRefResolutions in object-validation-context. */
+  artifactIndexUnreadable?: string[];
   /** The PageType definition for a page's `pageType` (registry is code, D§3.4/OQ-4). */
   pageType?: PageTypeConstraint;
   /**
@@ -1989,6 +1994,25 @@ const checkContentItemMedia = (
     ];
   }
   if (warns.length > 0) return [crit('article_media', 'Article media paths', 'warning', warns.slice(0, 5).join(' '))];
+  // The index could not be consulted at all for some refs: say so. Passing
+  // "complete" here is what let a bad NETLIFY_BLOBS_TOKEN read as a healthy
+  // gate on 2026-08-11 — every read threw, nothing was verified, and the only
+  // visible signal was silence.
+  const unreadable = context.artifactIndexUnreadable ?? [];
+  if (unreadable.length > 0) {
+    return [
+      crit(
+        'article_media',
+        'Article media paths',
+        'warning',
+        `the artifact index could not be read for ${unreadable.length} reference(s) ` +
+          `(e.g. "${unreadable[0]}") — existence is NOT verified, so a missing or mistyped ` +
+          `artifact would not be caught here. This is usually a blob credential fault: check ` +
+          `NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN on this site (a value that is not a real ` +
+          `Netlify PAT fails this way).`
+      ),
+    ];
+  }
   return [crit('article_media', 'Article media paths', 'complete', '')];
 };
 
