@@ -1,0 +1,548 @@
+{
+  "__generated": {
+    "at": "2026-08-12T18:24:25.944Z",
+    "from": "objects/content_item/by-id/req_agent_governed_content_lifecycle_20260812_01.json",
+    "record_version": 3
+  },
+  "deck": "A practical first-run guide to creating, validating, publishing, and deliberately releasing governed content in the Kugel Platform.",
+  "description": "Learn the governed Kugel Platform workflow for draft/create, checkout, validation, patch, publish, and separate release-to-production.",
+  "image": {
+    "alt": "Abstract staged pipeline of five checkpoint gates, with the final release gate standing apart before production",
+    "src": "/img/req_agent_governed_content_lifecycle_20260812_01/e240e2d05458262d1d5d687377799a86ad40e818bbf7b8894e3907fcdac20c1a.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_01",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This opening node orients the reader with the article's practical lifecycle promise without using a competitive or promotional claim.",
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "title": "Governed Content Lifecycle: From Draft to Release"
+      }
+    },
+    {
+      "id": "n_02",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node establishes the audience and core governance concept so readers understand why the lifecycle is separated into controls.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "The Kugel Platform content lifecycle is designed to help operators, agent authors, and technical content owners move a governed content item forward in a deliberate sequence. Instead of treating creation, editing, publishing, and production release as one step, the lifecycle separates them into visible controls."
+      }
+    },
+    {
+      "id": "n_03",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node previews the complete sequence and supports the reader-journey arc from orientation to action.",
+        "intent": "navigate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "This guide walks through the standard path: create a draft, check it out, validate it, patch the content, validate it again, publish it, and then release it to production only through a separate deliberate trigger."
+      }
+    },
+    {
+      "id": "n_04",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node adds the approved scope note and confidence cue while preserving the article's limits.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Use this as a first-run orientation. It explains lifecycle order and the purpose of each gate, but it does not cover permissions, command-level execution, release authority, or project-specific approval policy. If you follow the gates in order, the workflow gives you several chances to catch problems before production release."
+      }
+    },
+    {
+      "id": "n_05",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This section heading signals a reader-fit explanation consistent with the clarity-first angle.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "title": "Who this lifecycle is for"
+      }
+    },
+    {
+      "id": "n_06",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node names likely users without inventing permission roles or approval levels.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "This workflow is useful when a content item needs controlled changes rather than casual edits. Typical readers include first-time operators preparing a content item, agent authors producing structured content, and technical content owners reviewing how a draft becomes eligible for release."
+      }
+    },
+    {
+      "id": "n_07",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node applies the requested softening edit so validation is framed as workflow-specific rather than universal.",
+        "intent": "reassure",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "The main idea is simple: make each state change intentional, and validate before write or publish actions are accepted in this workflow."
+      }
+    },
+    {
+      "id": "n_08",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This heading introduces the practical problem of unclear lifecycle state without overstating risk.",
+        "intent": "educate",
+        "strategy": "agitation"
+      },
+      "public": {
+        "title": "Why the gates exist"
+      }
+    },
+    {
+      "id": "n_09",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node explains the value of gates in calm operational terms and preserves the publish-versus-release distinction.",
+        "intent": "reassure",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "The lifecycle gates are not meant to slow down routine work. They make the work easier to inspect. A gated sequence helps the team understand which version is being edited, whether the content is structurally valid, whether the draft is ready to publish, and whether published content has actually been released to production."
+      }
+    },
+    {
+      "id": "n_10",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node compares validation, publish, and release so readers can reason about each control separately.",
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "That separation matters because different actions answer different questions. Validation asks whether the item meets expected structure and rules. Publish asks whether the prepared item should become the published version. Release asks whether the published version should be deliberately moved to production."
+      }
+    },
+    {
+      "id": "n_11",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This heading begins the procedural walkthrough at the center of the article.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "The standard sequence"
+      }
+    },
+    {
+      "id": "n_12",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node frames ordered progression as a practical safety habit rather than a rigid claim about every platform scenario.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Follow the lifecycle in order. Skipping ahead can make the item harder to reason about, especially when more than one operator or agent is involved."
+      }
+    },
+    {
+      "id": "n_13",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading starts the lifecycle sequence with draft creation.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "1. Create the draft"
+      }
+    },
+    {
+      "id": "n_14",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node explains the first operation and connects it to required object fields without adding command details.",
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Start with draft/create. This establishes the content item as a draft so it can be worked on through the governed workflow. The draft should include the required fields for the target content object, such as title, slug, description, taxonomy, content nodes, and any required editorial metadata."
+      }
+    },
+    {
+      "id": "n_15",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node reinforces trust and content hygiene before later validation gates.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "At this point, keep the draft focused on the intended content item. Avoid adding unsupported claims, unverified media, or production assumptions that cannot pass later checks."
+      }
+    },
+    {
+      "id": "n_16",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading moves the reader from creation to controlled editing.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "2. Check out the item"
+      }
+    },
+    {
+      "id": "n_17",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node explains checkout in terms of lock and version state based on the approved internal workflow context.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Next, check out the draft before editing. Checkout uses a lock and version workflow so changes are made against a known version of the item. This helps prevent unclear edits and makes the active working version explicit."
+      }
+    },
+    {
+      "id": "n_18",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node gives a practical pause condition without defining unresolved permission or conflict-handling procedures.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Treat checkout as the point where the item becomes actively edited. If the item is already locked or the version is not the one you expected, pause and resolve that state before continuing."
+      }
+    },
+    {
+      "id": "n_19",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading introduces the first validation gate before patching.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "3. Validate before changing content"
+      }
+    },
+    {
+      "id": "n_20",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node applies the requested validation wording so it avoids broad assurance language.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Run validation before applying a patch. Validation checks whether the current item meets the required rules for the next operation. In this workflow, validation occurs before write and publish actions so structural problems can be found before a state-changing request is accepted."
+      }
+    },
+    {
+      "id": "n_21",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node preempts a likely misconception by separating platform validation from editorial or business approval.",
+        "intent": "reassure",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "Do not treat validation as a final editorial review. It is a gate for platform rules and content structure. Editorial judgment, source review, and business approval may still be needed depending on the content item."
+      }
+    },
+    {
+      "id": "n_22",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading transitions from pre-change validation into the actual content update.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "4. Patch the draft"
+      }
+    },
+    {
+      "id": "n_23",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node gives patching guidance focused on specificity and schema discipline.",
+        "intent": "educate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "After checkout and validation, patch the draft with the intended changes. A patch should be specific: update the fields and nodes that need to change, keep the lifecycle order intact, and preserve any required identifiers or schema constraints."
+      }
+    },
+    {
+      "id": "n_24",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node reinforces reader safety and verified media discipline without exposing private annotations to readers.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "For content nodes, keep headings and paragraphs clean. Use stable node IDs, keep planning labels out of reader-visible copy, and only include media that has an approved artifact reference."
+      }
+    },
+    {
+      "id": "n_25",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading marks the second validation gate after changes are applied.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "5. Validate again"
+      }
+    },
+    {
+      "id": "n_26",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node explains why validation must be repeated after a patch.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Validate the patched draft before publish. This second validation matters because the draft has changed. A draft that was valid before the patch may no longer meet the required schema, taxonomy, media, or editorial constraints after the update."
+      }
+    },
+    {
+      "id": "n_27",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node gives a calm recovery path that supports the article's trust-through-clarity angle.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "If validation fails, address the reported issue and validate again. Keep the response practical: fix the draft, confirm the required fields, and avoid adding assumptions that are not supported by the content record or approved sources."
+      }
+    },
+    {
+      "id": "n_28",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading moves from draft readiness to the publish gate.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "6. Publish the validated item"
+      }
+    },
+    {
+      "id": "n_29",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node applies the requested review-as-needed wording while avoiding unsourced approval details.",
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Once the draft is valid, reviewed as needed, and ready for the publish gate, publish it. Publishing advances the governed content item from draft work toward a published state according to the platform workflow."
+      }
+    },
+    {
+      "id": "n_30",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node preserves the central distinction between publish and production release.",
+        "intent": "reassure",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "Publishing is still not the same as releasing to production. It is a separate control in the lifecycle, and it should be understood as its own checkpoint."
+      }
+    },
+    {
+      "id": "n_31",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This step heading identifies release-to-production as a separate deliberate action.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "7. Release to production separately"
+      }
+    },
+    {
+      "id": "n_32",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node reinforces the production-release boundary and reduces a common operational misunderstanding.",
+        "intent": "reassure",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Release-to-production requires a separate deliberate trigger. Do not assume that a published item is automatically live in production. The release step exists so production exposure remains controlled and intentional."
+      }
+    },
+    {
+      "id": "n_33",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node states the article's limit clearly so readers do not treat orientation guidance as authorization.",
+        "intent": "reassure",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "This article explains the lifecycle order only. It does not authorize a release, define who may release, or override your project's release policy."
+      }
+    },
+    {
+      "id": "n_34",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This heading shifts the walkthrough into a concise pre-publish checklist.",
+        "intent": "navigate",
+        "strategy": "summary"
+      },
+      "public": {
+        "title": "Checkpoint list before publish"
+      }
+    },
+    {
+      "id": "n_35",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node introduces the checklist as a practical readiness tool.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Before publishing, confirm the draft is ready for the publish gate:"
+      }
+    },
+    {
+      "id": "n_36",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This checklist condenses the lifecycle gates and unresolved operational checks into a usable pre-publish review.",
+        "intent": "navigate",
+        "strategy": "summary"
+      },
+      "public": {
+        "items": [
+          "The item was created through the draft workflow.",
+          "The item was checked out against the expected lock and version state.",
+          "The current draft was validated before patching.",
+          "The patch only changed the intended fields or nodes.",
+          "The patched draft was validated again.",
+          "The slug is lowercase, hyphenated, and appropriate for the content item.",
+          "Taxonomy terms are valid for the project registry.",
+          "Any image uses a verified artifact reference.",
+          "Reader-visible copy does not expose internal planning labels.",
+          "Publish has not been treated as production release."
+        ]
+      }
+    },
+    {
+      "id": "n_37",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This heading isolates the article's most important distinction for reinforcement.",
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "title": "Publish versus release"
+      }
+    },
+    {
+      "id": "n_38",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node names the confusion directly and prepares the reader for a clear comparison.",
+        "intent": "reassure",
+        "strategy": "agitation"
+      },
+      "public": {
+        "body": "A common source of confusion is the difference between publish and release. In the Kugel Platform lifecycle, they are separate controls."
+      }
+    },
+    {
+      "id": "n_39",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node explains the operational difference between publish and release without adding unsupported automation or authority claims.",
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "Publish is the checkpoint for advancing the governed content item after validation. Release-to-production is the later, deliberate step that moves the appropriate published version into production. Keeping those controls separate makes it easier to review what has been prepared and what has actually been released."
+      }
+    },
+    {
+      "id": "n_40",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node gives readers a safe phrasing rule that protects the publish-versus-release distinction.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "When in doubt, use the safer wording: the item is published, not released, until the separate production release trigger has been completed by the appropriate process."
+      }
+    },
+    {
+      "id": "n_41",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This heading moves the article toward a low-pressure operational next action.",
+        "intent": "navigate",
+        "strategy": "resolution"
+      },
+      "public": {
+        "title": "Next step"
+      }
+    },
+    {
+      "id": "n_42",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This node closes with a concrete next step aligned to the checklist-oriented promise.",
+        "intent": "navigate",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "For your next run, keep a lifecycle checklist beside the operator documentation and mark each gate as it is completed: draft/create, checkout, validation, patch, validation, publish, and separate release-to-production."
+      }
+    },
+    {
+      "id": "n_43",
+      "kind": "content",
+      "private": {
+        "agentNotes": "This final node reinforces the appropriate pause-before-publishing behavior for unresolved project-specific details.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "If any permission, taxonomy, image, or validation detail is unclear, pause before publishing and confirm it against the project's current operator documentation."
+      }
+    }
+  ],
+  "seo": {
+    "meta_description": "Learn the governed Kugel Platform workflow for draft/create, checkout, validation, patch, publish, and separate release-to-production.",
+    "meta_title": "Governed Content Lifecycle: From Draft to Release"
+  },
+  "slug": "governed-content-lifecycle",
+  "title": "Governed Content Lifecycle: From Draft to Release"
+}
