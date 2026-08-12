@@ -45,9 +45,10 @@ import type { ObjectType, ObjectRecord, HistoryEntry } from '@core/schema/object
 import type { ReadinessGroup, CriterionStatus } from '@core/lib/admin/readiness-criteria';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { objectStageModeClass } from '@core/lib/admin/object-stage';
-import { EDITORIAL_STATE_PRESENTATION, getEditorialObjectState } from '@core/lib/admin/editorial-state';
+import { releaseAwareLifecyclePresentation, resolveReleaseAwareLifecycle } from '@core/lib/admin/editorial-state';
 import { fetchReleaseOverview, type ReleaseObjectView } from '@core/lib/admin/release-client';
 import { pageSectionLabel } from '@core/lib/admin/preview-logic';
+import { reviewerAvailableActions, type Role as ReviewerRole } from '@core/lib/admin/object-review-ui';
 import {
   WORKSPACE_COMPACT_PANEL_CLASS,
   WORKSPACE_EXPANDED_GRID_CLASS,
@@ -58,7 +59,6 @@ import {
   NEW_NAV_ITEM_COMPOSER_SEED,
   NEW_SECTION_COMPOSER_SEED,
   contextActionsFor,
-  createApprovalClaim,
   isNewPageSectionProposal,
   repeatableItemCount,
   type ObjectActionContext,
@@ -459,7 +459,10 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const [focus, setFocus] = useState<WorkspaceFocus>({ kind: 'object', label: '' });
   const [composerSeed, setComposerSeed] = useState<{ key: string; text: string } | undefined>(undefined);
   const seedSequence = useRef(0);
-  const approvalClaim = useRef(createApprovalClaim());
+  // Bumped after publish/approve and on every chat write-stamp — the sole
+  // refresh signal ObjectBrowser needs to re-fetch instead of showing a
+  // contradictory state next to this workspace after an action here.
+  const [browserRefresh, setBrowserRefresh] = useState(0);
   const [loc] = useState(() => (typeof window === 'undefined' ? { id: '', type: undefined } : parseLocation()));
   // The resolved object type: `?type=` when the library link supplied it,
   // otherwise derived from the id (prefix map + inventory fallback, W15 S1).
@@ -552,6 +555,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     if (chat.writeStamp > 0) {
       void invalidateLibraryCache();
       void load();
+      setBrowserRefresh((n) => n + 1);
     }
   }, [chat.writeStamp]);
 
@@ -627,6 +631,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
         void invalidateLibraryCache();
         toast({ title: 'Published', tone: 'success' });
         await load();
+        setBrowserRefresh((n) => n + 1);
       } else {
         toast({
           title: 'Publish blocked',
@@ -636,37 +641,25 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       }
     });
 
+  // Fixed defect: this used to auto-open a review (checkout → submit_review)
+  // whenever one wasn't already 'open', silently re-opening and
+  // self-approving an object sitting in `changes_requested`. The server verb
+  // (review_decide) never required an open review in the first place — it
+  // records a fresh decision from whatever state review is in — so this now
+  // just decides. The Approve button itself only renders/enables per
+  // `reviewerAvailableActions.canApprove` (below), which is the actual gate
+  // against a silent re-decision; the server is the final authority either way.
   const doApprove = () =>
     runAction(async () => {
       if (!record) return;
       const { EditSession } = await import('@core/lib/edit-mode/verbs-client');
       const session = new EditSession(record.object_type, record.object_id, getToken);
-      if (record.review?.state !== 'open') {
-        const checkout = await session.ensureCheckout();
-        if (!checkout.ok) {
-          toast({
-            title: 'Locked',
-            description: checkout.heldBy ? `Held by ${checkout.heldBy}.` : undefined,
-            tone: 'warning',
-          });
-          return;
-        }
-        const submitted = await session.submitReview();
-        await session.checkin();
-        if (submitted.status !== 200) {
-          toast({
-            title: 'Could not open review',
-            description: String((submitted.body as { error?: string }).error ?? ''),
-            tone: 'danger',
-          });
-          return;
-        }
-      }
       const approved = await session.approveReview();
       if (approved.status === 200) {
         void invalidateLibraryCache();
         toast({ title: 'Approved', tone: 'success' });
         await load();
+        setBrowserRefresh((n) => n + 1);
       } else {
         toast({
           title: 'Approval blocked',
@@ -783,17 +776,43 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     );
   }
 
-  const lifecycle =
-    releaseObject?.state ??
-    getEditorialObjectState(
-      { ...record, requires_approval: releaseObject?.requires_approval ?? false },
-      { production_confirmed: false }
-    );
-  const status = EDITORIAL_STATE_PRESENTATION[lifecycle];
+  // Fixed defect: this used to fall back to a client-computed lifecycle
+  // (hardcoding production_confirmed:false and defaulting requires_approval
+  // to false) whenever the release overview couldn't be loaded or didn't
+  // list this object — fabricating a "Draft" pill and an unguarded Publish
+  // button for objects that could actually be gated, or already live. Only a
+  // server-confirmed release row is trustworthy here; anything else is
+  // UNKNOWN, and unknown fails closed (below).
+  const lifecycle = resolveReleaseAwareLifecycle(releaseObject);
+  const status = releaseAwareLifecyclePresentation(lifecycle);
   const url = liveUrl(record);
   const lockHeld = Boolean(record.lock && record.lock.token);
   const isContentItem = record.object_type === 'content_item';
   const stageMode = objectLensMode(record.object_type);
+  const reviewerRoles = currentUser.roles.filter(
+    (role): role is ReviewerRole => role === 'admin' || role === 'publisher' || role === 'editor'
+  );
+  // Only ever computed from a server-confirmed release row — when
+  // `releaseObject` is undefined (lifecycle 'unknown'), this stays undefined
+  // and the action chooser below fails closed rather than rendering Publish.
+  const availability =
+    releaseObject !== undefined
+      ? reviewerAvailableActions({
+          objectType: record.object_type,
+          principalKind: 'human',
+          roles: reviewerRoles,
+          hasActiveLock: lockHeld,
+          review: record.review,
+          contentRevision: record.content_revision,
+          requiresApprovalOverride: releaseObject.requires_approval,
+        })
+      : undefined;
+  const approvalDisabledReason =
+    record.review?.state === 'changes_requested'
+      ? 'Changes were requested on this review — resolve them, then re-open review before approving.'
+      : reviewerRoles.length === 0
+        ? 'You do not have review or publish authority for this object.'
+        : 'Waiting on a review decision.';
   const displayName = objectDisplayName(record);
   const pageSections = pageSectionFocuses(record);
   const existingSectionIds = new Set(pageSections.map((section) => section.id));
@@ -865,14 +884,14 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     });
   };
 
+  // `chat.approve` now carries its own consumed-call guard (chat.tsx) — a
+  // second click here while the same call_id is already in flight is a
+  // no-op there (approved: false), not a re-POST of a consumed call_id.
   const saveSequentialProposal = async (addNext: boolean) => {
     const pending = chat.pending;
-    if (!pending || !approvalClaim.current.claim(pending.call_id)) return;
+    if (!pending) return;
     const outcome = await chat.approve(pending.call_id);
-    if (!outcome.approved) {
-      approvalClaim.current.release(pending.call_id);
-      return;
-    }
+    if (!outcome.approved) return;
     if (!outcome.saved) {
       toast({ title: 'The proposal ran but was not saved', tone: 'danger' });
       return;
@@ -983,7 +1002,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       <div className={cn('grid min-h-0 gap-4', WORKSPACE_EXPANDED_GRID_CLASS)}>
         {expandedWorkspace ? (
           <div className={WORKSPACE_EXPANDED_PANEL_CLASS}>
-            <ObjectBrowser activeId={record.object_id} />
+            <ObjectBrowser activeId={record.object_id} refreshSignal={browserRefresh} />
           </div>
         ) : null}
         <section
@@ -1073,29 +1092,35 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
                 Preview a version, then pick it here or in the agent rail.
               </p>
             ) : sequentialProposal ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    chat.pending && void chat.deny(chat.pending.call_id, 'Please revise this proposal before saving.')
-                  }
-                  disabled={chat.busy}
-                >
-                  Ask for changes
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void saveSequentialProposal(false)}
-                  loading={chat.busy}
-                >
-                  Save
-                </Button>
-                <Button size="sm" onClick={() => void saveSequentialProposal(true)} loading={chat.busy}>
-                  Save &amp; Add Next
-                </Button>
-              </>
+              chat.pendingConsumed ? (
+                <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]">
+                  Approved — waiting for the agent…
+                </p>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      chat.pending && void chat.deny(chat.pending.call_id, 'Please revise this proposal before saving.')
+                    }
+                    disabled={chat.busy}
+                  >
+                    Ask for changes
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void saveSequentialProposal(false)}
+                    loading={chat.busy}
+                  >
+                    Save
+                  </Button>
+                  <Button size="sm" onClick={() => void saveSequentialProposal(true)} loading={chat.busy}>
+                    Save &amp; Add Next
+                  </Button>
+                </>
+              )
             ) : (
               <>
                 {url ? (
@@ -1115,14 +1140,33 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
                   </a>
                 ) : lifecycle === 'live' ? (
                   <Badge tone="success">Live</Badge>
-                ) : lifecycle === 'approved' || !releaseObject?.requires_approval ? (
+                ) : lifecycle === 'unknown' ? (
+                  <span className="flex items-center gap-2">
+                    <span
+                      title="The release/approval state for this object couldn't be confirmed, so Publish is disabled until it can be."
+                      className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]"
+                    >
+                      Publish status unknown
+                    </span>
+                    <Button size="sm" variant="secondary" onClick={() => void load()}>
+                      Retry
+                    </Button>
+                  </span>
+                ) : availability?.canPublish ? (
                   <Button size="sm" leftIcon={<IconRocket size={16} />} onClick={doPublish} loading={busy}>
                     Publish
                   </Button>
-                ) : (
+                ) : availability?.canApprove ? (
                   <Button size="sm" onClick={doApprove} loading={busy}>
                     Approve
                   </Button>
+                ) : (
+                  <span
+                    title={approvalDisabledReason}
+                    className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]"
+                  >
+                    {approvalDisabledReason}
+                  </span>
                 )}
               </>
             )}
@@ -1133,7 +1177,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
 
       {!expandedWorkspace ? (
         <Drawer open={publicationOpen} onClose={() => setPublicationOpen(false)} title="Publication" side="left" width={360}>
-          {publicationOpen ? <ObjectBrowser activeId={record.object_id} /> : null}
+          {publicationOpen ? <ObjectBrowser activeId={record.object_id} refreshSignal={browserRefresh} /> : null}
         </Drawer>
       ) : null}
 
