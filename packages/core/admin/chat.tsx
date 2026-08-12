@@ -31,9 +31,10 @@ import {
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import { groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
+import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/chat-quote';
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
 
-// ─── useChat: since_seq polling over get_chat ──────────────────────────
+// ─── useChat: since_seq polling over get_chat ──────────────────────
 
 export interface UseChatState {
   status: ChatStatus | undefined;
@@ -212,7 +213,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   };
 }
 
-// ─── AgentChip ─────────────────────────────────────────────────────
+// ─── AgentChip ─────────────────────────
 
 export function AgentChip({ agent }: { agent: AgentView | undefined }) {
   return (
@@ -318,7 +319,7 @@ export function CandidateSetCard({
   );
 }
 
-// ─── message + tool cards ──────────────────────────────────────────────
+// ─── message + tool cards ───────────────────────
 
 function Bubble({ mine, children }: { mine?: boolean; children: React.ReactNode }) {
   return (
@@ -491,7 +492,7 @@ function ActivityLine({ events, preferenceScope = 'default' }: { events: ChatEve
   );
 }
 
-// ─── ApprovalCard ──────────────────────────────────────────────────
+// ─── ApprovalCard ────────────────────────
 
 export function ApprovalCard({
   pending,
@@ -645,9 +646,15 @@ export function ApprovalCard({
   );
 }
 
-// ─── ChatThread ───────────────────────────────────────────────────
+// ─── ChatThread ─────────────────────────
 
 const HIDDEN_EVENTS = new Set(['run_started', 'events_trimmed']);
+
+interface QuoteSelectionState {
+  text: string;
+  top: number;
+  left: number;
+}
 
 export function ChatThread({
   events,
@@ -661,6 +668,7 @@ export function ChatThread({
   onPreviewCandidate,
   onChooseCandidate,
   onRejectCandidates,
+  onQuote,
   onSendControls,
   emptyHint,
   preferenceScope,
@@ -677,6 +685,8 @@ export function ChatThread({
   onPreviewCandidate?: (candidateId: string) => void;
   onChooseCandidate?: (candidateId: string) => void;
   onRejectCandidates?: (reason: string) => void;
+  /** Highlight-to-reference: called with the raw selected text when "Quote" is clicked. */
+  onQuote?: (text: string) => void;
   /** Sends a `controls` submission brief through the same path as the composer. */
   onSendControls?: (text: string) => void;
   emptyHint?: React.ReactNode;
@@ -687,10 +697,63 @@ export function ChatThread({
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const [showLatest, setShowLatest] = useState(false);
+  const [quoteSelection, setQuoteSelection] = useState<QuoteSelectionState | undefined>(undefined);
   useEffect(() => {
     if (atBottom.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     else setShowLatest(true);
   }, [events.length, pending, candidateSet, status]);
+
+  // Highlight-to-reference: track a text selection made inside the transcript
+  // and show a floating "Quote" pill above it (only while onQuote is wired up).
+  const updateQuoteSelection = useCallback(() => {
+    if (!onQuote) return;
+    const container = scrollRef.current;
+    const selection = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (!selectionWithinContainer(selection, container)) {
+      setQuoteSelection(undefined);
+      return;
+    }
+    const text = selection!.toString();
+    if (!text.trim()) {
+      setQuoteSelection(undefined);
+      return;
+    }
+    const rect = selection!.getRangeAt(0).getBoundingClientRect();
+    const containerRect = container!.getBoundingClientRect();
+    setQuoteSelection({
+      text,
+      top: Math.max(0, rect.top - containerRect.top + container!.scrollTop - 8),
+      left: rect.left - containerRect.left + container!.scrollLeft + rect.width / 2,
+    });
+  }, [onQuote]);
+
+  useEffect(() => {
+    if (!onQuote || typeof document === 'undefined') return;
+    const onSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) setQuoteSelection(undefined);
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, [onQuote]);
+
+  useEffect(() => {
+    if (!quoteSelection) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      window.getSelection()?.removeAllRanges();
+      setQuoteSelection(undefined);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [quoteSelection]);
+
+  const handleQuoteClick = () => {
+    if (!quoteSelection) return;
+    onQuote?.(quoteSelection.text);
+    window.getSelection()?.removeAllRanges();
+    setQuoteSelection(undefined);
+  };
 
   const timeline = groupChatEvents(events.filter((event) => !HIDDEN_EVENTS.has(event.type)));
   // Submitted-state for a `controls` block is derived from the transcript itself
@@ -707,11 +770,24 @@ export function ChatThread({
         if (!el) return;
         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
         if (atBottom.current) setShowLatest(false);
+        // Selection coordinates are relative to scrollTop — don't chase them, just hide.
+        if (quoteSelection) setQuoteSelection(undefined);
       }}
+      onMouseUp={updateQuoteSelection}
       className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1"
       role="log"
       aria-label="Conversation"
     >
+      {onQuote && quoteSelection ? (
+        <button
+          type="button"
+          style={{ top: quoteSelection.top, left: quoteSelection.left }}
+          className="adm-focusable absolute z-10 -translate-x-1/2 -translate-y-full rounded-full border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)] shadow-[var(--adm-shadow-md)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-accent)]"
+          onClick={handleQuoteClick}
+        >
+          Quote
+        </button>
+      ) : null}
       {events.length === 0 && status === undefined ? emptyHint : null}
       {timeline.map((item) => {
         if (item.kind === 'activity')
@@ -811,7 +887,7 @@ export function ChatThread({
   );
 }
 
-// ─── ChatComposer ──────────────────────────────────────────────────
+// ─── ChatComposer ─────────────────────────
 
 export function ChatComposer({
   status,
@@ -821,6 +897,7 @@ export function ChatComposer({
   suggestions,
   contextActions,
   draftSeed,
+  quote,
   above,
 }: {
   status: ChatStatus | undefined;
@@ -830,15 +907,32 @@ export function ChatComposer({
   suggestions?: string[];
   contextActions?: Array<{ id: string; label: string; text: string }>;
   draftSeed?: { key: string; text: string };
+  /** Highlight-to-reference: a raw selection to insert as a blockquote (appended below any existing draft). */
+  quote?: { token: number; text: string };
   /** The readiness strip mounts directly above the composer (plan §4). */
   above?: React.ReactNode;
 }) {
   const [text, setText] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const live =
     status === 'queued' || status === 'running' || status === 'awaiting_approval' || status === 'awaiting_candidate';
   useEffect(() => {
     if (draftSeed) setText(draftSeed.text);
   }, [draftSeed]);
+  useEffect(() => {
+    if (!quote) return;
+    setText((prev) => {
+      const inserted = insertQuoteIntoDraft(prev, quote.text);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(inserted.cursor, inserted.cursor);
+        }
+      });
+      return inserted.text;
+    });
+  }, [quote]);
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed || live || busy) return;
@@ -883,6 +977,7 @@ export function ChatComposer({
       ) : null}
       <div className="flex items-end gap-2">
         <Textarea
+          ref={textareaRef}
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
