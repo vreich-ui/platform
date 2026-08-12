@@ -26,6 +26,58 @@ export const WIPE_BLOB_CONFIRMATION = 'WIPE_BLOBS';
 // Used only inside this file's TOOL_DEFINITIONS_PART1 entries below.
 const SINGLE_SHOT_ARTIFACT_GUIDANCE_MAX_BYTES = 750_000;
 
+/**
+ * Operational tools that remain callable for admin and test workflows, but
+ * are intentionally absent from agent discovery. They are
+ * not part of normal information exchange or governed object editing, and a
+ * large destructive/upload surface makes agent planning needlessly noisy.
+ */
+export const INTERNAL_ONLY_TOOLS = new Set([
+  'trigger_netlify_build',
+  'create_artifact_upload_intent',
+  'create_artifact_from_url',
+  'save_artifact',
+  'soft_delete_artifact',
+  'restore_artifact',
+  'migrate_artifact_indexes',
+  'wipe_blob_stores',
+  'reconcile_artifact_indexes',
+  // T16.5: an operational diagnostic (per-family env-gate truth), not part of
+  // normal agent object editing — callable (the fleet capability probe uses
+  // it) but not advertised, same rationale as the tools above it.
+  'capability_status',
+]);
+
+/**
+ * Legacy chat tool names → canonical MCP tool names. Used ONLY to canonicalize
+ * stored autonomy keys (governance chat_tools, profile tool_autonomy_overrides)
+ * and legacy tool calls from in-flight runs. NEVER applied to wire tool names.
+ * Trap: 'search_artifacts' below refers to the OLD chat tool of that name
+ * (request-scoped artifact listing), which maps to list_artifacts_for_request;
+ * the MCP tool also named search_artifacts is a DIFFERENT tool and wins on
+ * exact-match lookup.
+ */
+export const CHAT_TOOL_ALIASES: Record<string, string> = {
+  get_object: 'object_get',
+  get_contract: 'object_contract',
+  list_objects: 'object_list',
+  inventory: 'object_inventory',
+  validate: 'object_validate',
+  checkout: 'object_checkout',
+  patch: 'object_patch',
+  checkin: 'object_checkin',
+  refresh_lock: 'object_refresh_lock',
+  create_object: 'object_create',
+  create_variant: 'object_create_variant',
+  instantiate_template: 'object_instantiate_template',
+  instantiate_section_template: 'object_instantiate_section_template',
+  submit_review: 'object_submit_review',
+  publish: 'object_publish',
+  discard: 'object_discard',
+  apply_theme: 'site_apply_theme',
+  search_artifacts: 'list_artifacts_for_request',
+};
+
 const mediaPortabilityWarning =
   'Media portability constraint: repo-style paths (src/assets/.../uploads/<slug>/...) are scoped to the specific article slug they were generated for and must NEVER be copied into a different request public_media_src or artifactReferences. portable:false and scoped_to_slug/scoped_to_request_id metadata are machine-readable hard constraints, not suggestions. Only artifact pointers freshly resolved for the CURRENT request (image/{requestId}/{sha}.{ext} or pdf/{requestId}/{sha}.{ext}) are safe inputs for a new or repair request. See docs/agents/naming-convention.md for canonical naming rules.';
 
@@ -288,6 +340,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       commit: stringSchema('Commit SHA to look up in saved Netlify deploy receipts.'),
       deployId: stringSchema('Netlify deploy id to look up in saved Netlify deploy receipts.'),
     }),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'verify_article_images',
@@ -321,6 +374,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['url', 'expectedImages']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'trigger_netlify_build',
@@ -331,6 +385,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         "Optional free-text reason for triggering this build, recorded only in this function's own server logs for traceability. Never sent to Netlify."
       ),
     }),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'release_to_production',
@@ -353,6 +408,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       idempotency_key: idempotencyKeyJsonSchema,
     }),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'create_agent_artifact_job',
@@ -404,6 +460,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'artifact_kind', 'filename']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
   {
     name: 'get_agent_artifact_job_status',
@@ -417,6 +474,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'job_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'get_agent_artifact_by_slot',
@@ -430,6 +488,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'slot']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'create_pdf_template',
@@ -451,6 +510,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_json']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
   {
     name: 'list_pdf_templates',
@@ -464,6 +524,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'get_pdf_template',
@@ -476,6 +537,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'validate_pdf_template',
@@ -492,6 +554,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_id', 'data']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'get_pdf_template_validation',
@@ -506,6 +569,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'publish_pdf_template',
@@ -519,6 +583,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_id']
     ),
+    governance: { toolClass: 'publication', preview: { kind: 'input_echo' } },
   },
   {
     name: 'delete_pdf_template',
@@ -533,6 +598,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_id']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' }, chatDefaultOff: true },
   },
   {
     name: 'health',
@@ -542,6 +608,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       { site_id: stringSchema('Owning site object id; must match this deployment.') },
       ['site_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'search_images',
@@ -564,6 +631,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'query']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'get_image_search_job_status',
@@ -576,6 +644,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'job_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'get_image_search_bank',
@@ -590,6 +659,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'update_image_search_candidate',
@@ -614,6 +684,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'candidate_id', 'state']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'import_image_from_url',
@@ -650,6 +721,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'url']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
   {
     name: 'import_images_from_url',
@@ -689,6 +761,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'request_id', 'urls']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
   {
     name: 'get_image_search_policy',
@@ -698,6 +771,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       { site_id: stringSchema('Owning site object id; must match this deployment.') },
       ['site_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'set_image_search_policy',
@@ -710,6 +784,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'policy']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' }, chatDefaultOff: true },
   },
   {
     name: 'get_image_model_policy',
@@ -719,6 +794,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       { site_id: stringSchema('Owning site object id; must match this deployment.') },
       ['site_id']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'set_image_model_policy',
@@ -733,12 +809,14 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'policy']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' }, chatDefaultOff: true },
   },
   {
     name: 'create_artifact_upload_intent',
     description:
       'Create a short-lived scoped direct artifact upload intent. New clients should call this tool first, then upload raw bytes with HTTP POST application/octet-stream to /api/artifacts/upload using the returned requiredHeaders. Keeps binary bytes out of MCP arguments and returns no server secrets other than the scoped upload token. Accepted image formats: JPEG, PNG, WebP only — the upload decodes the bytes and rejects GIF, AVIF, SVG, and anything that does not decode as the declared type. PDF uploads must start with %PDF-.',
     inputSchema: artifactUploadIntentInputSchema(),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'create_artifact_from_url',
@@ -762,6 +840,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['requestId', 'artifactKind', 'contentType', 'sourceUrl', 'expectedSizeBytes', 'expectedSha256']
     ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
   {
     name: 'save_artifact',
@@ -789,6 +868,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['requestId', 'artifactKind', 'contentType', 'payload']
     ),
+    governance: { toolClass: 'creation' },
   },
   {
     name: 'list_artifacts_for_request',
@@ -797,6 +877,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       { requestId: stringSchema('Workflow request id whose artifact references should be listed.') },
       ['requestId']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'get_artifact_metadata',
@@ -809,6 +890,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['requestId', 'sha256']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'list_artifacts_by_kind',
@@ -823,6 +905,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['artifactKind']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'list_artifacts_by_request',
@@ -838,6 +921,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['requestId']
     ),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'search_artifacts',
@@ -851,6 +935,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       cursor: artifactListCursorJsonSchema,
       includeDeleted: artifactIncludeDeletedJsonSchema,
     }),
+    governance: { toolClass: 'read' },
   },
   {
     name: 'soft_delete_artifact',
@@ -864,6 +949,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['requestId', 'sha256']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'restore_artifact',
@@ -876,6 +962,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['requestId', 'sha256']
     ),
+    governance: { toolClass: 'draft' },
   },
   {
     name: 'migrate_artifact_indexes',
@@ -886,6 +973,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       limit: artifactReconcileLimitJsonSchema,
       dryRun: artifactMigrationDryRunJsonSchema,
     }),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'wipe_blob_stores',
@@ -903,6 +991,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['prefixes']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'reconcile_artifact_indexes',
@@ -913,11 +1002,13 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       artifactKind: artifactKindJsonSchema('Optional artifact kind to reconcile after reading request-artifacts JSON.'),
       limit: artifactReconcileLimitJsonSchema,
     }),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {
     name: 'capability_status',
     description:
       "Admin-only diagnostic (T16.5): reports this tenant's per-family env-gate status for every tool family that is env-gated at call time (pdf_bridge, pdf_storage_grant, commerce, purchase_token, build_hook, deploy_lookup, git_committer, blob_credentials, mcp_auth, artifact_upload). Each family reports {configured, missing} — missing is a list of env-var NAMES only, never values, lengths, or prefixes. Takes no arguments. Also returns this deployment's own site_id (non-secret) so a fleet probe can target the right site for the pdf-tool bridge families. Use this to find a tenant where a tool family lists in tools/list but 503s at call time — the class of gap docs/cms-architecture/16-genesis-parity-plan.md §1.1 records as previously undetected.",
     inputSchema: objectSchema({}),
+    governance: { toolClass: 'read' },
   },
 ];

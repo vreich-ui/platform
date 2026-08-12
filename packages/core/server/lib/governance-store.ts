@@ -41,6 +41,17 @@ export const governanceDocSchema = z.object({
    *  `governance override ?? CMS_AGENT_CHAT_MODE env ?? 'off'`. Rollback to
    *  the provider path is this one field → 'off', no deploy. */
   cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
+  /** Task 3 (schema-additive): which chat-tool registry new runs stamp.
+   *  Effective default when unset is 'generated' (resolved by the caller,
+   *  same pattern as cms_agent_chat_mode) — the flag exists purely as a
+   *  no-deploy rollback lever back to 'legacy'. */
+  chat_registry: z.enum(['legacy', 'generated']).optional(),
+  /** Task 3 (schema-additive): set once `chat_tools` has been canonicalized
+   *  through `migrateAutonomyKeys` (write-back on read, or an admin-governance
+   *  `set`) — short-circuits re-migration so a post-migration owner may
+   *  legitimately set the canonical `search_artifacts` key without it being
+   *  reinterpreted as its legacy meaning. */
+  chat_tools_migrated: z.boolean().optional(),
   updated_by: z.string(),
   updated_at: z.string(),
   history: z.array(governanceHistoryEntrySchema),
@@ -76,6 +87,9 @@ export interface ActivePolicies {
   learning_mode: boolean;
   /** PF3: the runtime chat-engine mode override, when one is set. */
   cms_agent_chat_mode?: 'off' | 'fallback' | 'required';
+  /** Task 3: the runtime chat-registry override, when one is set. Callers
+   *  apply the effective default (`chat_registry ?? 'generated'`) themselves. */
+  chat_registry?: 'legacy' | 'generated';
   provenance: { approval: PolicyProvenance; creation: PolicyProvenance; learning_mode: PolicyProvenance };
 }
 
@@ -99,6 +113,7 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
     ...(doc?.cms_agent_chat_mode ? { cms_agent_chat_mode: doc.cms_agent_chat_mode } : {}),
+    ...(doc?.chat_registry ? { chat_registry: doc.chat_registry } : {}),
     provenance: {
       approval: doc?.approval ? 'override' : 'committed',
       creation: doc?.creation ? 'override' : 'committed',

@@ -40,6 +40,7 @@ import {
   type AgentKeysBlobStore,
 } from '../lib/agent-keys.js';
 import { CHAT_TOOLS, defaultAutonomyFor } from '../lib/agent/tools.js';
+import { migrateAutonomyKeys } from '../lib/agent/generated-tools.js';
 import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
 import { resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -74,10 +75,13 @@ export const requestSchema = z.discriminatedUnion('verb', [
     learning_mode: z.boolean().optional(),
     /** PF3/PF5: the chat TurnEngine mode override — the cutover/rollback lever. */
     cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
+    /** Task 3: the chat-tool registry override — the no-deploy rollback lever
+     *  back to the legacy (tools.ts) registry. Unset resolves to 'generated'. */
+    chat_registry: z.enum(['legacy', 'generated']).optional(),
   }),
   z.object({
     verb: z.literal('revert'),
-    target: z.enum(['approval', 'creation', 'chat_tools', 'learning_mode', 'cms_agent_chat_mode', 'all']),
+    target: z.enum(['approval', 'creation', 'chat_tools', 'learning_mode', 'cms_agent_chat_mode', 'chat_registry', 'all']),
   }),
   z.object({ verb: z.literal('agent_keys_list') }),
   z.object({ verb: z.literal('agent_keys_create'), agent_name: z.string().min(1), site: z.string().min(1) }),
@@ -231,16 +235,23 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         req.chat_tools && 'chat_tools',
         req.learning_mode !== undefined && 'learning_mode',
         req.cms_agent_chat_mode !== undefined && `cms_agent_chat_mode=${req.cms_agent_chat_mode}`,
+        req.chat_registry !== undefined && `chat_registry=${req.chat_registry}`,
       ]
         .filter(Boolean)
         .join(', ');
+      // Task 3 §6: canonicalize chat_tools keys on write, whatever this admin
+      // typed — an Owner-authored `chat_tools` may still name a legacy alias
+      // (e.g. `patch`). Stamped migrated: further reads never re-interpret a
+      // deliberately-set canonical `search_artifacts` key as its legacy meaning.
+      const { map: canonicalChatTools } = migrateAutonomyKeys(req.chat_tools);
       next = {
         ...existing,
         ...(req.approval !== undefined ? { approval: req.approval } : {}),
         ...(req.creation !== undefined ? { creation: req.creation } : {}),
-        ...(req.chat_tools !== undefined ? { chat_tools: req.chat_tools } : {}),
+        ...(req.chat_tools !== undefined ? { chat_tools: canonicalChatTools, chat_tools_migrated: true } : {}),
         ...(req.learning_mode !== undefined ? { learning_mode: req.learning_mode } : {}),
         ...(req.cms_agent_chat_mode !== undefined ? { cms_agent_chat_mode: req.cms_agent_chat_mode } : {}),
+        ...(req.chat_registry !== undefined ? { chat_registry: req.chat_registry } : {}),
         updated_by: email,
         updated_at: nowIso(),
         history: [...existing.history, { at: nowIso(), actor_email: email, action: 'set', detail: touched || 'none' }],
@@ -251,10 +262,13 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         delete next.approval;
         delete next.creation;
         delete next.chat_tools;
+        delete next.chat_tools_migrated;
         delete next.learning_mode;
         delete next.cms_agent_chat_mode;
+        delete next.chat_registry;
       } else {
         delete next[req.target];
+        if (req.target === 'chat_tools') delete next.chat_tools_migrated;
       }
       next.history = [...existing.history, { at: nowIso(), actor_email: email, action: 'revert', detail: req.target }];
     }

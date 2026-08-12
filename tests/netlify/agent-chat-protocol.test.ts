@@ -411,7 +411,7 @@ test('governance chat_tools overrides: auto write executes without approval; off
     autonomy
   );
   const hop = await runAgentLoop(deps, 'obj:page_chat', sent.resume!.triggerToken);
-  assert.equal(hop.status, 'idle'); // no pause: checkout ran auto, get_object was refused as unavailable
+  assert.equal(hop.status, 'idle'); // no pause: checkout ran auto, get_object was refused as disabled by policy
   const doc = (await loadChatDoc(deps.chatStore, 'obj:page_chat'))!;
   const checkoutMsg = doc.run!.transcript.find((msg) => msg.role === 'tool' && msg.tool_call_id === 'a1') as {
     content: string;
@@ -423,7 +423,9 @@ test('governance chat_tools overrides: auto write executes without approval; off
     is_error?: boolean;
   };
   assert.equal(offMsg.is_error, true);
-  assert.match(offMsg.content, /not available/);
+  // Task 3 split the old single "not available" message: a KNOWN tool that
+  // resolves to 'off' now says so explicitly, distinct from an unknown name.
+  assert.match(offMsg.content, /disabled by policy for this chat/);
 });
 
 test('apply_theme is Owner-gated at EXECUTION even when approved by an admin', async () => {

@@ -20,7 +20,14 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
 import { getAgentLearningBlobStore, getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
-import { getGovernanceBlobStore, resolveActivePolicies } from '../lib/governance-store.js';
+import {
+  getGovernanceBlobStore,
+  getGovernanceDoc,
+  putGovernanceDoc,
+  resolveActivePolicies,
+  type GovernanceBlobStore,
+  type GovernanceDoc,
+} from '../lib/governance-store.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
@@ -44,6 +51,7 @@ import {
   objectChatId,
   saveChatDoc,
   type ChatDoc,
+  type RegistryKind,
 } from '../lib/agent/chat-store.js';
 import { visibleChatDocs } from '../lib/agent/chat-visibility.js';
 import {
@@ -54,10 +62,12 @@ import {
   resolveProfile,
   type AgentProfile,
   type AgentProfilesDoc,
+  type AgentProfilesStore,
 } from '../lib/agent/profiles.js';
 import { isOwner } from '../lib/roles.js';
 import { randomUUID } from 'node:crypto';
 import { resolveAutonomy, type ToolAutonomy } from '../lib/agent/tools.js';
+import { migrateAutonomyKeys, resolveGeneratedAutonomy } from '../lib/agent/generated-tools.js';
 import { candidateSetView } from '../lib/agent/candidates.js';
 import { exportPreferencePairs, type LearningEvidenceStore } from '../lib/agent/preferences.js';
 import { objectTypeSchema, type Principal } from '../../schema/object-record-v1.js';
@@ -206,6 +216,56 @@ const chatSummary = (doc: ChatDoc, idleProfile?: AgentProfile) => ({
 const idleProfileFor = (profilesDoc: AgentProfilesDoc, doc: ChatDoc): AgentProfile | undefined =>
   doc.run ? undefined : resolveProfile(profilesDoc, { objectId: doc.object_id, objectType: doc.object_type });
 
+/**
+ * Task 3 §6 — canonicalize governance `chat_tools` through `migrateAutonomyKeys`
+ * ONCE (the `chat_tools_migrated` stamp short-circuits repeat work), best-
+ * effort persisting the migrated doc back. A failure to persist is non-fatal:
+ * the in-memory migrated map is still returned for this run.
+ */
+const migratedChatTools = async (
+  store: GovernanceBlobStore,
+  doc: GovernanceDoc | null
+): Promise<Record<string, ToolAutonomy> | undefined> => {
+  if (!doc || doc.chat_tools_migrated) return doc?.chat_tools as Record<string, ToolAutonomy> | undefined;
+  const migrated = migrateAutonomyKeys(doc.chat_tools as Record<string, ToolAutonomy> | undefined);
+  if (!migrated.changed) return doc.chat_tools as Record<string, ToolAutonomy> | undefined;
+  const next: GovernanceDoc = { ...doc, chat_tools: migrated.map, chat_tools_migrated: true };
+  await putGovernanceDoc(store, next).catch((error) => {
+    console.error('governance chat_tools key migration write-back failed', error);
+  });
+  return migrated.map;
+};
+
+/**
+ * Task 3 §6 — canonicalize every profile's `tool_autonomy_overrides` through
+ * `migrateAutonomyKeys` ONCE (the doc-level `keys_migrated` stamp short-
+ * circuits repeat work), best-effort persisting the migrated doc back. A
+ * failure to persist is non-fatal: the in-memory migrated doc is still used.
+ */
+const migratedProfilesDoc = async (
+  store: AgentProfilesStore,
+  doc: AgentProfilesDoc
+): Promise<AgentProfilesDoc> => {
+  if (doc.keys_migrated) return doc;
+  let changed = false;
+  const profiles: AgentProfilesDoc['profiles'] = {};
+  for (const [profileId, profile] of Object.entries(doc.profiles)) {
+    const migrated = migrateAutonomyKeys(profile.tool_autonomy_overrides);
+    if (migrated.changed) {
+      changed = true;
+      profiles[profileId] = { ...profile, tool_autonomy_overrides: migrated.map };
+    } else {
+      profiles[profileId] = profile;
+    }
+  }
+  if (!changed) return doc;
+  const next: AgentProfilesDoc = { ...doc, profiles, keys_migrated: true };
+  await putProfilesDoc(store, next).catch((error) => {
+    console.error('agent-profiles chat-tool key migration write-back failed', error);
+  });
+  return next;
+};
+
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
@@ -337,14 +397,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found — create_chat first.' });
 
-        // §4a: resolve the dedicated agent AT SEND TIME and stamp it into the run.
-        const profilesDoc = await getProfilesDoc(await getAgentProfilesBlobStore(event), nowIso());
-        const profile = resolveProfile(profilesDoc, {
-          objectId: doc.object_id,
-          objectType: doc.object_type,
-        });
-        const policies = await resolveActivePolicies(await getGovernanceBlobStore(event));
-        const { chat_tools, learning_mode } = policies;
+        const governanceStore = await getGovernanceBlobStore(event);
+        const policies = await resolveActivePolicies(governanceStore);
+        const { learning_mode } = policies;
+        // Task 3 §1: the rollback lever — unset resolves to 'generated'.
+        const registryKind: RegistryKind = policies.chat_registry ?? 'generated';
 
         // PF3: in required mode a missing bridge config fails AT SEND with a
         // clear error instead of queueing a run that can only die in the hop.
@@ -355,10 +412,25 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             code: 'cms_agent_not_configured',
           });
         }
-        const autonomy = resolveAutonomy(
-          chat_tools as Record<string, ToolAutonomy> | undefined,
-          profile.tool_autonomy_overrides
-        );
+
+        // Task 3 §6: canonicalize stored autonomy keys ON READ (best-effort
+        // write-back; the in-memory migrated values are used for this run
+        // regardless of whether the persist succeeds).
+        const rawGovernanceDoc = await getGovernanceDoc(governanceStore);
+        const chatTools = await migratedChatTools(governanceStore, rawGovernanceDoc);
+        const profilesStore = await getAgentProfilesBlobStore(event);
+        const profilesDoc = await migratedProfilesDoc(profilesStore, await getProfilesDoc(profilesStore, nowIso()));
+
+        // §4a: resolve the dedicated agent AT SEND TIME and stamp it into the run.
+        const profile = resolveProfile(profilesDoc, {
+          objectId: doc.object_id,
+          objectType: doc.object_type,
+        });
+
+        const autonomy =
+          registryKind === 'legacy'
+            ? resolveAutonomy(chatTools, profile.tool_autonomy_overrides)
+            : resolveGeneratedAutonomy(chatTools, profile.tool_autonomy_overrides);
 
         // Title generation: a fresh default-titled chat adopts its first message.
         if (doc.runs.length === 0 && (doc.title === 'New conversation' || doc.title === doc.object_id)) {
@@ -375,7 +447,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const toolContext = buildToolContext({
           objectStore,
           ...(cmsAgent ? { cmsAgent } : {}),
-          governanceStore: await getGovernanceBlobStore(event),
+          governanceStore,
           artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
             | ArtifactIndexStore
             | undefined,
@@ -399,7 +471,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           autonomy,
           learning_mode,
           request.data.focus,
-          roles.includes('owner')
+          roles.includes('owner'),
+          registryKind
         );
         if (result.resume) await triggerBackground(request.data.chat_id, result.resume.triggerToken);
         return jsonResponse(result.status, result.body);
@@ -430,6 +503,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           principal: runPrincipal,
           roles,
           exportRoot: binding.dataRoot,
+          // Task 3 §5: so an approved/executed generated-registry tool that
+          // rides the operational bridge (deploy_status, pdf-tool/image
+          // families, commerce, ...) can execute on THIS interactive path too,
+          // not only inside the background hop.
+          operationalEvent: event,
         });
         const protocolDeps = {
           chatStore,

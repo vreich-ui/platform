@@ -70,8 +70,19 @@ import {
 import { validateFilename, validateRequestId } from '../../lib/agents-naming.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { normalizeArtifactKindInput } from './mcp-artifact-admin.js';
-import { getIdempotencyBlobStore } from './blob-store.js';
+import { getCommerceBlobStore, getCommerceEventsBlobStore, getIdempotencyBlobStore, getSiteObjectsBlobStore } from './blob-store.js';
 import { getCachedValue, setCachedValue, type IdempotencyBlobStore } from './idempotency-store.js';
+import { getOrderDetail, listOrders } from './commerce-admin.js';
+import { orderReissue } from './order-reissue.js';
+import { productSetPrice } from './product-set-price.js';
+import { getStripeClient } from './stripe-env.js';
+import type { ObjectVerbStore } from './object-verbs.js';
+import {
+  listPageTypeDefinitions,
+  pageTypeDefinitionJsonSchema,
+  unimplementedPageTypeIds,
+} from '../../lib/registry/page-types.js';
+import { listSectionTypeContracts } from '../../lib/registry/object-contract.js';
 import {
   getHeader,
   getRecordValue,
@@ -1731,5 +1742,108 @@ export const callObjectPublish = async (event: LambdaEvent, payload: Record<stri
           }
         : {}),
     },
+  });
+};
+
+// ── T9.13/PF5: mechanical extraction of four case bodies that used to live
+// INLINE in mcp.ts's callTool switch (registry_get, commerce_orders,
+// product_set_price, order_reissue) — moved here verbatim so the chat tool
+// registry's `operational` bridge (agent/context.ts) has an exported call*
+// handler to dispatch to, same as every other operational tool. Behavior is
+// byte-identical to the inline bodies they replace; mcp.ts's case for each is
+// now a one-line delegation to the same function. ──
+
+export const callProductSetPrice = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const stripe = await getStripeClient();
+  if (!stripe) {
+    return toolError('Stripe is not configured for the running mode (no secret key).', {
+      error_code: 'not_configured',
+    });
+  }
+  const productId = toNonEmptyString(input.product_id);
+  if (!productId) return toolError('product_id is required.');
+  const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+  const principal = {
+    kind: 'agent' as const,
+    agent_name: toNonEmptyString(input.agent_name) ?? 'unattributed-agent',
+    auth: 'publish_key' as const,
+  };
+  const result = await productSetPrice(
+    {
+      product_id: productId,
+      amount_cents: typeof input.amount_cents === 'number' ? input.amount_cents : NaN,
+      currency: toNonEmptyString(input.currency) ?? undefined,
+    },
+    { stripe, store, principal }
+  );
+  if (!result.ok) return toolError(result.error, { statusCode: result.status });
+  return toolResult(result);
+};
+
+export const callCommerceOrders = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const commerce = await getCommerceBlobStore(event);
+  const orderKeyLookup = toNonEmptyString(input.order_key);
+  if (orderKeyLookup) {
+    const detail = await getOrderDetail(commerce, orderKeyLookup);
+    if (!detail) return toolError(`No order found for key "${orderKeyLookup}".`, { statusCode: 404 });
+    return toolResult(detail);
+  }
+  const orders = await listOrders(commerce, {
+    email: toNonEmptyString(input.email) ?? undefined,
+    product_id: toNonEmptyString(input.product_id) ?? undefined,
+    limit: typeof input.limit === 'number' ? input.limit : undefined,
+  });
+  return toolResult({ count: orders.length, orders });
+};
+
+export const callOrderReissue = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const orderKeyInput = toNonEmptyString(input.order_key);
+  if (!orderKeyInput) return toolError('order_key is required.');
+  const result = await orderReissue(
+    {
+      order_key: orderKeyInput,
+      ttl_hours: typeof input.ttl_hours === 'number' ? input.ttl_hours : undefined,
+    },
+    {
+      commerce: await getCommerceBlobStore(event),
+      events: await getCommerceEventsBlobStore(event),
+      siteObjects: await getSiteObjectsBlobStore(event),
+      by: toNonEmptyString(input.agent_name) ?? 'unattributed-agent',
+    }
+  );
+  if (!result.ok) return toolError(result.error, { statusCode: result.status });
+  return toolResult(result);
+};
+
+export const callRegistryGet = async (_event: LambdaEvent, input: Record<string, unknown>) => {
+  const registry = toNonEmptyString(input.registry) ?? null;
+  if (registry === 'page_type') {
+    return toolResult({
+      registry,
+      status: 'ok',
+      available: true,
+      definitions: listPageTypeDefinitions(),
+      not_yet_implemented: unimplementedPageTypeIds(),
+      definition_schema: pageTypeDefinitionJsonSchema(),
+    });
+  }
+  if (registry === 'component') {
+    // Now populated: every section variant with its data JSON-schema,
+    // component-bound flag, and editor hints (same source as
+    // object_contract.section_types).
+    return toolResult({
+      registry,
+      status: 'ok',
+      available: true,
+      definitions: listSectionTypeContracts(),
+      message:
+        'For the full per-object-type contract (body schema + patch ops + constraints), use object_contract.',
+    });
+  }
+  return toolResult({
+    registries: ['page_type', 'component'],
+    available: ['page_type', 'component'],
+    message:
+      "Pass registry: 'page_type' or 'component'. For the complete per-object-type editing contract, prefer object_contract.",
   });
 };
