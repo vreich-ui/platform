@@ -54,7 +54,7 @@ const STATUS_TONE: Record<ChatStatus, 'success' | 'info' | 'warning' | 'neutral'
   cancelled: 'neutral',
 };
 
-// ─── T9.26: agent roster & assignment (Owner manage, Admin read) ─────────────
+// ─── T9.26: agent roster & assignment (Owner manage, Admin read) ───────────
 
 const OBJECT_TYPES = [
   'page',
@@ -474,6 +474,7 @@ function HubBody() {
               busy={chat.busy}
               onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
               onDeny={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
+              onSendControls={(text) => void chat.send(text)}
             />
             {chat.error ? (
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
