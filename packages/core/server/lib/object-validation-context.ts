@@ -17,7 +17,7 @@
  * `isRouteTaken` excludes the object under validation (`selfObjectId`) so a page
  * re-saving its own route is not a false conflict.
  */
-import { readArtifactReference, type ArtifactIndexStore } from './artifact-index.js';
+import { readArtifactReferenceResult, type ArtifactIndexStore } from './artifact-index.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE, PUBLIC_ARTIFACT_PATH_RE, rawArtifactRefForPublicPath } from './artifact-trust.js';
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY, type BlobListItem } from './blob-list.js';
 import { isBlobCredentialsConfigured } from './blob-store.js';
@@ -112,7 +112,15 @@ const preloadArtifactRefResolutions = async (
         return;
       }
       try {
-        const reference = await readArtifactReference(indexStore, requestId, sha256);
+        const read = await readArtifactReferenceResult(indexStore, requestId, sha256);
+        if (read.status === 'rejected') {
+          // The entry EXISTS and platform refused it. That is knowable regardless of
+          // read consistency, and it is never fixed by re-uploading — so report it as
+          // its own condition rather than laundering it into "never uploaded".
+          resolutions.set(blobKey, { exists: false, indexIssue: read.issue });
+          return;
+        }
+        const reference = read.status === 'ok' ? read.reference : undefined;
         if (!reference || reference.blobKey !== blobKey) {
           // Only an absence observed through a strongly-consistent read proves
           // absence. Otherwise leave it unanswered: "cannot verify", not "gone".
@@ -164,7 +172,11 @@ export const buildStoreValidationContext = async (
       // regardless of data. Awaiting it first (which works for both a
       // Promise and a plain value) is what makes the try/catch effective.
       try {
-        const listResult = await store.list({ prefix: `objects/${objectType}/by-id/`, directories: false, paginate: true });
+        const listResult = await store.list({
+          prefix: `objects/${objectType}/by-id/`,
+          directories: false,
+          paginate: true,
+        });
         return { objectType, items: await collectBlobListItems(listResult) };
       } catch (error) {
         console.warn(`buildStoreValidationContext: skipping unlistable object type "${objectType}".`, error);

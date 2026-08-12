@@ -1,4 +1,10 @@
-import { isArtifactReference, safePathSegment, type ArtifactKind, type ArtifactReference } from './artifacts.js';
+import {
+  getArtifactReferenceIssue,
+  isArtifactReference,
+  safePathSegment,
+  type ArtifactKind,
+  type ArtifactReference,
+} from './artifacts.js';
 import { collectBlobListItems, type BlobListResponse } from './blob-list.js';
 
 export type ArtifactIndexStore = {
@@ -75,20 +81,61 @@ export const writeArtifactReferenceIndexes = async (
   ]);
 };
 
+/**
+ * Why this exists: `readArtifactReference` collapses three very different outcomes into
+ * one `undefined` — the index entry is absent, the index entry is present but unparseable,
+ * or the index entry is present, parseable and REJECTED by `isArtifactReference`. Callers
+ * that treat `undefined` as "no artifact" then report a live artifact as missing, and the
+ * operator has nothing to go on.
+ *
+ * That is not hypothetical. On 2026-08-06 pdf-tool began persisting a `filename` field on
+ * every ArtifactReference (pdf-tool c066798); platform's key allowlist did not include it,
+ * so every artifact written from 2026-08-10 onward was rejected here and the publish gate
+ * told operators the bytes "will 404 on the live page" while those bytes served HTTP 200.
+ * Diagnosing it took hours precisely because the rejection left no trace.
+ *
+ * Prefer this over `readArtifactReference` anywhere the distinction can reach a human.
+ */
+export type ArtifactReferenceRead =
+  | { status: 'ok'; reference: ArtifactReference }
+  | { status: 'absent' }
+  | { status: 'rejected'; issue: string };
+
+export const readArtifactReferenceResult = async (
+  indexStore: ArtifactIndexStore,
+  requestId: string,
+  sha256: string
+): Promise<ArtifactReferenceRead> => {
+  const existing = await indexStore.get(requestArtifactReferenceKey(requestId, sha256));
+  if (!existing) return { status: 'absent' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(existing) as unknown;
+  } catch {
+    return { status: 'rejected', issue: 'index entry is not valid JSON' };
+  }
+
+  const issue = getArtifactReferenceIssue(parsed);
+  if (issue) return { status: 'rejected', issue };
+  return { status: 'ok', reference: parsed as ArtifactReference };
+};
+
 export const readArtifactReference = async (
   indexStore: ArtifactIndexStore,
   requestId: string,
   sha256: string
 ): Promise<ArtifactReference | undefined> => {
-  const existing = await indexStore.get(requestArtifactReferenceKey(requestId, sha256));
-  if (!existing) return undefined;
-
-  try {
-    const parsed = JSON.parse(existing) as unknown;
-    return isArtifactReference(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
+  const result = await readArtifactReferenceResult(indexStore, requestId, sha256);
+  if (result.status === 'ok') return result.reference;
+  if (result.status === 'rejected') {
+    // A stored-but-rejected entry is a contract drift between pdf-tool and platform, not a
+    // missing artifact. Never let it pass silently, even through the legacy signature.
+    console.warn(
+      `[artifact-index] rejected stored ArtifactReference at ${requestArtifactReferenceKey(requestId, sha256)}: ${result.issue}`
+    );
   }
+  return undefined;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

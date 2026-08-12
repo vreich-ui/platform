@@ -96,7 +96,19 @@ export type ObjectResolution = { exists: boolean; published?: boolean };
 export type TaxonomyResolution = { active: boolean };
 export type TaxonomyUsage = { inUse: boolean };
 /** Resolution of one Major-Key blobKey against the artifact index. */
-export type ArtifactRefResolution = { exists: boolean; deleted?: boolean; sizeBytes?: number; contentType?: string };
+export type ArtifactRefResolution = {
+  exists: boolean;
+  deleted?: boolean;
+  sizeBytes?: number;
+  contentType?: string;
+  /**
+   * Set when the index entry for this blobKey WAS found but failed ArtifactReference
+   * validation. `exists:false` with an `indexIssue` means "the artifact's bytes may be
+   * perfectly fine; platform refused its index entry" — a categorically different repair
+   * from "never uploaded", and the message must say so.
+   */
+  indexIssue?: string;
+};
 
 export type PageTypeConstraint = {
   id?: string;
@@ -1841,6 +1853,17 @@ const resolvePublicPathExistence = (
     };
   }
   if (!resolution.exists) {
+    if (resolution.indexIssue) {
+      // The index entry is THERE — platform rejected it. Saying "no artifact behind it"
+      // here sends the operator to re-upload bytes that are already stored and serving.
+      return {
+        kind: 'existence',
+        message:
+          `${path} "${value}" has an artifact index entry that platform rejected: ${resolution.indexIssue}. ` +
+          `The bytes are probably fine — this is a contract mismatch between pdf-tool's stored ArtifactReference ` +
+          `and platform's schema, not a missing upload. Re-uploading will not fix it; reconcile the schema.`,
+      };
+    }
     return {
       kind: 'existence',
       message:
