@@ -523,10 +523,115 @@ test('brand-aware image generation: site brandImagery assembles the prompt/palet
   }
 });
 
-test('image generation on a site with no brandImagery passes prompt/negative/seed/loras through unchanged', async () => {
+test('a site with brandTokens but no declared brandImagery derives a contract from its palette', async () => {
   await resetAndSeedRequest();
-  // The site record exists (drift-safe: brandImagery removed/never set) but
-  // carries no brandImagery key at all.
+  // No brandImagery key -- but the site has a governed palette, so the bridge
+  // derives a contract from it rather than generating with no identity.
+  await seedSiteRecord({
+    name: 'Dr. Lurié',
+    brandTokens: {
+      colors: { primary: 'rgb(0 150 136)', 'bg-page': '#FFFFFF' },
+      fonts: { sans: 'system-ui, sans-serif', serif: 'Georgia, serif', heading: 'Georgia, serif' },
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-derived-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  const subject = 'A jar of moisturizer on a marble countertop';
+  const requestArgs = {
+    site_id: 'site_drlurie',
+    request_id: REQUEST_ID,
+    artifact_kind: 'image',
+    operation: 'generate',
+    prompt: subject,
+    filename: 'moisturizer-hero.webp',
+    slot: 'article_image_3',
+    wait: false,
+  };
+
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+    const created = await rpc('create_agent_artifact_job', requestArgs, logs);
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    const prompt = String(call!.body.prompt);
+    // The agent's subject survives verbatim; a derived style contract wraps it.
+    assert.ok(prompt.includes(subject), 'the agent subject is preserved');
+    assert.match(prompt, /teal/, 'the palette hue is named in prose');
+    assert.match(prompt, /Palette: #009688/, 'the exact hex is bound');
+    assert.ok(prompt.startsWith('Cool'), 'a teal-led site derives a cool style sentence');
+    assert.match(String(call!.body.negativePrompt), /watermarks/, 'baseline negatives apply');
+    assert.equal(typeof call!.body.seed, 'number', 'a stable seed is derived');
+
+    assert.equal(created.result.structuredContent?.brandImagerySource, 'derived');
+    const assemblyLog = logs.find((entry) => entry.event === 'brand_prompt_assembled');
+    assert.ok(assemblyLog);
+    assert.equal(assemblyLog!.brandImagerySource, 'derived');
+
+    // Determinism across identical calls, same as the declared path.
+    const repeated = await rpc('create_agent_artifact_job', requestArgs, logs);
+    assert.ok(!repeated.result.isError);
+    const repeatedCall = calls.filter((entry) => entry.tool === 'create_agent_artifact_job')[1];
+    assert.equal(repeatedCall!.body.seed, call!.body.seed, 'the derived seed is stable');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a declared brandImagery block wins over the brandTokens-derived fallback', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({
+    name: 'Dr. Lurié',
+    brandTokens: { colors: { primary: 'rgb(0 150 136)' }, fonts: { sans: 'x', serif: 'y', heading: 'y' } },
+    brandImagery: SEEDED_BRAND_IMAGERY,
+  });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-declared-wins-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const logs: Array<Record<string, unknown>> = [];
+    const created = await rpc(
+      'create_agent_artifact_job',
+      {
+        site_id: 'site_drlurie',
+        request_id: REQUEST_ID,
+        artifact_kind: 'image',
+        operation: 'generate',
+        prompt: 'A jar of moisturizer on a marble countertop',
+        filename: 'moisturizer-hero.webp',
+        slot: 'article_image_4',
+        wait: false,
+      },
+      logs
+    );
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    assert.equal(String(call!.body.prompt).startsWith(SEEDED_BRAND_IMAGERY.styleSentence), true);
+    assert.match(String(call!.body.prompt), /Palette: #2E5C42, #C2A878\./, 'the declared palette is used');
+    assert.ok(!String(call!.body.prompt).includes('#009688'), 'the derived palette is not mixed in');
+    assert.equal(created.result.structuredContent?.brandImagerySource, 'declared');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('image generation on a site with neither brandImagery nor brandTokens passes prompt/negative/seed/loras through unchanged', async () => {
+  await resetAndSeedRequest();
+  // The site record exists (drift-safe: brandImagery removed/never set) and
+  // carries no palette either -- nothing to derive from, so today's verbatim
+  // passthrough still holds.
   await seedSiteRecord({ name: 'Dr. Lurié' });
 
   const originalFetch = globalThis.fetch;
