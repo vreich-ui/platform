@@ -54,7 +54,7 @@ const STATUS_TONE: Record<ChatStatus, 'success' | 'info' | 'warning' | 'neutral'
   cancelled: 'neutral',
 };
 
-// ─── T9.26: agent roster & assignment (Owner manage, Admin read) ─────────────
+// ─── T9.26: agent roster & assignment (Owner manage, Admin read) ───────────
 
 const OBJECT_TYPES = [
   'page',
@@ -353,6 +353,8 @@ function HubBody() {
 
   const active = chats?.find((item) => item.chat_id === activeId);
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope: activeId });
+  // Highlight-to-reference: a quoted selection from the transcript, relayed into the composer.
+  const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
 
   return (
     <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -474,6 +476,7 @@ function HubBody() {
               busy={chat.busy}
               onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
               onDeny={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
+              onQuote={(text) => setQuote({ token: Date.now(), text })}
             />
             {chat.error ? (
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
@@ -487,6 +490,7 @@ function HubBody() {
                 busy={chat.busy}
                 onSend={(text) => void chat.send(text)}
                 onCancel={() => void chat.cancel()}
+                quote={quote}
               />
             </div>
           </>
