@@ -11,6 +11,7 @@ import { Avatar, Button, Card } from './primitives';
 import { Markdown } from './Markdown';
 import { Textarea } from './forms';
 import { useToast } from './overlays';
+import { ControlsCard } from './ControlsCard';
 import { IconAlertTriangle, IconCheck, IconRobot, IconSend, IconX } from './icons';
 import {
   approveTool,
@@ -30,8 +31,9 @@ import {
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import { groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
+import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
 
-// ─── useChat: since_seq polling over get_chat ────────────────────────────────
+// ─── useChat: since_seq polling over get_chat ──────────────────────────
 
 export interface UseChatState {
   status: ChatStatus | undefined;
@@ -210,7 +212,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   };
 }
 
-// ─── AgentChip ───────────────────────────────────────────────────────────────
+// ─── AgentChip ─────────────────────────────────────────────────────
 
 export function AgentChip({ agent }: { agent: AgentView | undefined }) {
   return (
@@ -316,7 +318,7 @@ export function CandidateSetCard({
   );
 }
 
-// ─── message + tool cards ────────────────────────────────────────────────────
+// ─── message + tool cards ──────────────────────────────────────────────
 
 function Bubble({ mine, children }: { mine?: boolean; children: React.ReactNode }) {
   return (
@@ -334,7 +336,19 @@ function Bubble({ mine, children }: { mine?: boolean; children: React.ReactNode 
   );
 }
 
-export function ChatMessage({ event }: { event: ChatEventView }) {
+export function ChatMessage({
+  event,
+  laterUserTexts,
+  busy = false,
+  onSendControls,
+}: {
+  event: ChatEventView;
+  /** Text of every user message that comes AFTER this one in the transcript — used to
+   *  derive a `controls` block's submitted state (see `chat-controls.ts`). Assistant messages only. */
+  laterUserTexts?: string[];
+  busy?: boolean;
+  onSendControls?: (text: string) => void;
+}) {
   if (event.type === 'user_message') {
     return (
       <Bubble mine>
@@ -342,9 +356,39 @@ export function ChatMessage({ event }: { event: ChatEventView }) {
       </Bubble>
     );
   }
+  const text = String(event.detail?.text ?? '');
+  const segments = splitControlsSegments(text);
+  if (segments.length === 1 && segments[0]?.kind === 'text') {
+    return (
+      <div className="max-w-none px-1 py-1 text-[length:var(--adm-text-sm)] leading-6 text-[var(--adm-text)]">
+        <Markdown>{text}</Markdown>
+      </div>
+    );
+  }
   return (
-    <div className="max-w-none px-1 py-1 text-[length:var(--adm-text-sm)] leading-6 text-[var(--adm-text)]">
-      <Markdown>{String(event.detail?.text ?? '')}</Markdown>
+    <div className="flex flex-col gap-2">
+      {segments.map((segment, index) => {
+        if (segment.kind === 'text') {
+          if (!segment.text.trim()) return null;
+          return (
+            <div
+              key={index}
+              className="max-w-none px-1 py-1 text-[length:var(--adm-text-sm)] leading-6 text-[var(--adm-text)]"
+            >
+              <Markdown>{segment.text}</Markdown>
+            </div>
+          );
+        }
+        return (
+          <ControlsCard
+            key={index}
+            block={segment.block}
+            submittedText={findControlsSubmissionText(segment.block.id, laterUserTexts ?? [])}
+            busy={busy}
+            onSubmit={(brief) => onSendControls?.(brief)}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -382,7 +426,8 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
             : summary;
   // PF4: bounded workspace-orchestration output rides tool_result events —
   // rendered collapsed by default, never inline (P3.2's surviving idea).
-  const rawOutput = event.type === 'tool_result' && typeof event.detail?.output === 'string' ? event.detail.output : undefined;
+  const rawOutput =
+    event.type === 'tool_result' && typeof event.detail?.output === 'string' ? event.detail.output : undefined;
   let parsedOutput: unknown = rawOutput;
   if (rawOutput) {
     try {
@@ -446,7 +491,7 @@ function ActivityLine({ events, preferenceScope = 'default' }: { events: ChatEve
   );
 }
 
-// ─── ApprovalCard ────────────────────────────────────────────────────────────
+// ─── ApprovalCard ──────────────────────────────────────────────────
 
 export function ApprovalCard({
   pending,
@@ -600,7 +645,7 @@ export function ApprovalCard({
   );
 }
 
-// ─── ChatThread ──────────────────────────────────────────────────────────────
+// ─── ChatThread ───────────────────────────────────────────────────
 
 const HIDDEN_EVENTS = new Set(['run_started', 'events_trimmed']);
 
@@ -616,6 +661,7 @@ export function ChatThread({
   onPreviewCandidate,
   onChooseCandidate,
   onRejectCandidates,
+  onSendControls,
   emptyHint,
   preferenceScope,
   approvalInStage = false,
@@ -631,6 +677,8 @@ export function ChatThread({
   onPreviewCandidate?: (candidateId: string) => void;
   onChooseCandidate?: (candidateId: string) => void;
   onRejectCandidates?: (reason: string) => void;
+  /** Sends a `controls` submission brief through the same path as the composer. */
+  onSendControls?: (text: string) => void;
   emptyHint?: React.ReactNode;
   preferenceScope?: string;
   approvalInStage?: boolean;
@@ -645,6 +693,11 @@ export function ChatThread({
   }, [events.length, pending, candidateSet, status]);
 
   const timeline = groupChatEvents(events.filter((event) => !HIDDEN_EVENTS.has(event.type)));
+  // Submitted-state for a `controls` block is derived from the transcript itself
+  // (rule 4 of the protocol) — never from local component state.
+  const userMessages = events.filter((event) => event.type === 'user_message');
+  const laterUserTextsAfter = (seq: number): string[] =>
+    userMessages.filter((event) => event.seq > seq).map((event) => String(event.detail?.text ?? ''));
 
   return (
     <div
@@ -671,7 +724,15 @@ export function ChatThread({
           );
         const event = item.event;
         if (event.type === 'user_message' || event.type === 'assistant_text') {
-          return <ChatMessage key={event.seq} event={event} />;
+          return (
+            <ChatMessage
+              key={event.seq}
+              event={event}
+              laterUserTexts={event.type === 'assistant_text' ? laterUserTextsAfter(event.seq) : undefined}
+              busy={busy}
+              onSendControls={onSendControls}
+            />
+          );
         }
         if (event.type === 'run_finished') return null;
         if (event.type === 'run_error') {
@@ -750,7 +811,7 @@ export function ChatThread({
   );
 }
 
-// ─── ChatComposer ────────────────────────────────────────────────────────────
+// ─── ChatComposer ──────────────────────────────────────────────────
 
 export function ChatComposer({
   status,

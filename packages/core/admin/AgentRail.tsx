@@ -50,6 +50,7 @@ export function AgentRail({
         onPreviewCandidate={(candidateId) => chat.preview(candidateId)}
         onChooseCandidate={(candidateId) => void chat.chooseCandidate(candidateId)}
         onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
+        onSendControls={(text) => void chat.send(text)}
         preferenceScope={preferenceScope}
         approvalInStage={approvalInStage}
         emptyHint={
