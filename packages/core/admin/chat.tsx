@@ -30,6 +30,7 @@ import {
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import { groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
+import { createApprovalClaim } from '@core/lib/admin/object-context-actions';
 
 // ─── useChat: since_seq polling over get_chat ────────────────────────────────
 
@@ -51,6 +52,15 @@ export interface UseChatState {
   cancel: () => Promise<void>;
   /** Bumps whenever an executed (non-error) write tool result arrives — preview refresh signal. */
   writeStamp: number;
+  /**
+   * True once `pending`'s call_id has been submitted for approve/deny/cancel
+   * and the poll hasn't yet confirmed it's gone. Consumers must treat the
+   * card as non-interactive while this holds — the local `busy` flag alone
+   * clears before the next poll and would otherwise let a second click
+   * re-submit an already-consumed call_id (fixed defect: stale approval
+   * re-enables the button).
+   */
+  pendingConsumed: boolean;
 }
 
 const WRITE_TOOLS = new Set([
@@ -83,6 +93,12 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const seqRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const liveRef = useRef(true);
+  // Local double-submit guard (same primitive the sequential-section path
+  // uses) generalized to every call_id this chat consumes: approve/deny act
+  // on `pending.call_id`, chooseCandidate/cancel on `candidateSet.call_id` /
+  // the in-flight `pending.call_id`. A claimed call_id stays claimed until
+  // the next poll confirms the server has moved past it (see `ingest`).
+  const claimRef = useRef(createApprovalClaim());
 
   const ingest = useCallback((view: ChatView) => {
     setStatus(view.status);
@@ -131,6 +147,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     setPending(undefined);
     setCandidateSet(undefined);
     setPreviewCandidateId(undefined);
+    claimRef.current = createApprovalClaim();
     if (chatId) void poll();
     return () => {
       liveRef.current = false;
@@ -162,12 +179,19 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const approve = useCallback(
     async (callId: string, editedArgs?: Record<string, unknown>): Promise<{ approved: boolean; saved: boolean }> => {
       if (!chatId) return { approved: false, saved: false };
+      // Same call_id claimed twice (a stale re-enabled button, or a race with
+      // deny/cancel on the same pending) is a no-op here, not a re-POST.
+      if (!claimRef.current.claim(callId)) return { approved: false, saved: false };
       setBusy(true);
       try {
         const result = await approveTool(getToken, chatId, callId, editedArgs);
         setError(undefined);
+        // The server didn't consume it (e.g. already-decided elsewhere) — free
+        // it up so a genuine retry isn't permanently blocked.
+        if (!result.approved) claimRef.current.release(callId);
         return { approved: result.approved, saved: !result.is_error };
       } catch (actionError) {
+        claimRef.current.release(callId);
         setError(actionError instanceof Error ? actionError.message : 'Action failed.');
         return { approved: false, saved: false };
       } finally {
@@ -188,15 +212,24 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     error,
     busy,
     writeStamp,
+    pendingConsumed: pending !== undefined && claimRef.current.has(pending.call_id),
     send: (text, focus) => wrap(() => sendChatMessage(getToken, chatId!, text, focus)),
     preview: setPreviewCandidateId,
-    chooseCandidate: (candidateId) =>
-      wrap(async () => {
+    chooseCandidate: (candidateId) => {
+      const callId = candidateSet?.call_id;
+      if (callId && !claimRef.current.claim(callId)) return Promise.resolve();
+      return wrap(async () => {
         if (!candidateSet) return;
-        await chooseCandidateRequest(getToken, chatId!, candidateSet.call_id, candidateId);
-        setCandidateSet(undefined);
-        setPreviewCandidateId(undefined);
-      }),
+        try {
+          await chooseCandidateRequest(getToken, chatId!, candidateSet.call_id, candidateId);
+          setCandidateSet(undefined);
+          setPreviewCandidateId(undefined);
+        } catch (actionError) {
+          if (callId) claimRef.current.release(callId);
+          throw actionError;
+        }
+      });
+    },
     rejectCandidates: (reason) =>
       wrap(async () => {
         if (!candidateSet) return;
@@ -205,8 +238,32 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
         setPreviewCandidateId(undefined);
       }),
     approve,
-    deny: (callId, reason) => wrap(() => denyTool(getToken, chatId!, callId, reason)),
-    cancel: () => wrap(() => cancelChatRun(getToken, chatId!)),
+    // Decline shares `pending.call_id` with Approve — claiming through the
+    // same guard means a click on one disables the other immediately, not
+    // just after the next poll.
+    deny: (callId, reason) => {
+      if (!claimRef.current.claim(callId)) return Promise.resolve();
+      return wrap(async () => {
+        try {
+          await denyTool(getToken, chatId!, callId, reason);
+        } catch (actionError) {
+          claimRef.current.release(callId);
+          throw actionError;
+        }
+      });
+    },
+    cancel: () => {
+      const callId = pending?.call_id;
+      if (callId && !claimRef.current.claim(callId)) return Promise.resolve();
+      return wrap(async () => {
+        try {
+          await cancelChatRun(getToken, chatId!);
+        } catch (actionError) {
+          if (callId) claimRef.current.release(callId);
+          throw actionError;
+        }
+      });
+    },
   };
 }
 
@@ -454,12 +511,15 @@ export function ApprovalCard({
   onApprove,
   onDeny,
   showActions = true,
+  consumed = false,
 }: {
   pending: PendingView;
   busy: boolean;
   onApprove: (editedArgs?: Record<string, unknown>) => void;
   onDeny: (reason?: string) => void;
   showActions?: boolean;
+  /** This call_id has already been submitted (approve/deny) — hide actions until the poll confirms it's gone. */
+  consumed?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -537,7 +597,11 @@ export function ApprovalCard({
           </div>
         </details>
 
-        {!showActions ? (
+        {consumed ? (
+          <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]">
+            Approved — waiting for the agent…
+          </p>
+        ) : !showActions ? (
           <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]">
             Review the proposal here, then save it from the Object Stage.
           </p>
@@ -619,6 +683,7 @@ export function ChatThread({
   emptyHint,
   preferenceScope,
   approvalInStage = false,
+  pendingConsumed = false,
 }: {
   events: ChatEventView[];
   status: ChatStatus | undefined;
@@ -634,6 +699,8 @@ export function ChatThread({
   emptyHint?: React.ReactNode;
   preferenceScope?: string;
   approvalInStage?: boolean;
+  /** From `chat.pendingConsumed` — `pending`'s call_id was already submitted. */
+  pendingConsumed?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -723,6 +790,7 @@ export function ChatThread({
           onApprove={onApprove}
           onDeny={onDeny}
           showActions={!approvalInStage}
+          consumed={pendingConsumed}
         />
       ) : null}
       {status === 'queued' || status === 'running' ? (

@@ -116,6 +116,15 @@ function TemplateGallery({ templates, onCreated }: { templates: Rec[]; onCreated
         title,
         dry_run: true,
       });
+      // Fixed defect: a 422 (or any non-200) here used to still call
+      // `setPreview`, and the footer switches to the enabled "Create page"
+      // button on any truthy `preview` — so a rejected dry run enabled the
+      // real create anyway. Compare `mintStandalone` below, which already
+      // gates on `dry.status`.
+      if (res.status !== 200) {
+        toast({ title: 'Preview failed', description: String(res.body.error ?? ''), tone: 'danger' });
+        return;
+      }
       setPreview(res.body);
     } finally {
       setBusy(false);
@@ -125,6 +134,7 @@ function TemplateGallery({ templates, onCreated }: { templates: Rec[]; onCreated
   const confirm = async () => {
     if (!target) return;
     setBusy(true);
+    let minted = false;
     try {
       const res = await verb({
         action: 'instantiate',
@@ -134,6 +144,7 @@ function TemplateGallery({ templates, onCreated }: { templates: Rec[]; onCreated
         title,
       });
       if (res.status === 200) {
+        minted = true;
         void invalidateLibraryCache();
         const id = (res.body.record as { object_id?: string } | undefined)?.object_id;
         toast({ title: 'Page created', tone: 'success' });
@@ -142,7 +153,12 @@ function TemplateGallery({ templates, onCreated }: { templates: Rec[]; onCreated
         toast({ title: 'Could not create the page', description: String(res.body.error ?? ''), tone: 'danger' });
       }
     } finally {
-      setBusy(false);
+      // Fixed defect: clearing `busy` unconditionally here re-enabled
+      // "Create page" while `onCreated`'s `location.assign` navigation was
+      // still pending, so a double-click minted a duplicate page. Stay
+      // busy/disabled through a successful mint — this view is about to be
+      // replaced anyway — and only clear it to let the human retry a failure.
+      if (!minted) setBusy(false);
     }
   };
 

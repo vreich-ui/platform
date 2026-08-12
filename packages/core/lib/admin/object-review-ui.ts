@@ -41,6 +41,16 @@ export type ReviewerAvailabilityInput = {
   contentRevision: number;
   /** The approval policy; defaults to the committed config (tests inject). */
   policy?: ApprovalPolicy;
+  /**
+   * Pre-resolved `requiresApproval`, e.g. the server-confirmed value on a
+   * release-state row. When supplied it wins over `policy`/the committed
+   * config outright — the caller already has authoritative, per-object data
+   * and resolving the policy again (which may need `activeApprovalPolicy()`'s
+   * provider registered) would be redundant. Callers that only know the
+   * release state is UNKNOWN should not call this function at all — there is
+   * no truthful input to give it; fail closed before this file is reached.
+   */
+  requiresApprovalOverride?: boolean;
 };
 
 export type ReviewerActionAvailability = {
@@ -62,7 +72,8 @@ const isApprovedCurrent = (review: ReviewSummary | undefined, contentRevision: n
 const canExecutePublish = (roles: readonly Role[]): boolean => roles.includes('admin') || roles.includes('publisher');
 
 export const reviewerAvailableActions = (input: ReviewerAvailabilityInput): ReviewerActionAvailability => {
-  const requiresApproval = publishRequiresApproval(input.objectType, input.policy ?? activeApprovalPolicy());
+  const requiresApproval =
+    input.requiresApprovalOverride ?? publishRequiresApproval(input.objectType, input.policy ?? activeApprovalPolicy());
   const isHuman = input.principalKind === 'human';
   const approvedCurrent = isApprovedCurrent(input.review, input.contentRevision);
 
@@ -73,7 +84,17 @@ export const reviewerAvailableActions = (input: ReviewerAvailabilityInput): Revi
     // for a role-holding human only; agentic approval happens on the MCP path
     // (review-state.ts decideReview), not here. Decisions are meaningful while open.
     canRequestChanges: isHuman && input.roles.length > 0 && input.review?.state === 'open',
-    canApprove: isHuman && input.roles.length > 0 && input.review?.state === 'open',
+    // `review_decide` (the server verb) itself never requires an open review —
+    // it records a fresh decision from whatever state the review is in. This
+    // display-only gate is deliberately narrower than the server: a review
+    // that has ALREADY been decided (approved — current or stale — or
+    // changes_requested) needs an explicit new "open" step before a one-click
+    // re-decision is offered again, so a same-click re-approve can never
+    // silently paper over a prior human decision (most visibly, a
+    // `changes_requested` verdict). An object that has never had a review at
+    // all is the one case with nothing to silently override, so it stays
+    // directly approvable.
+    canApprove: isHuman && input.roles.length > 0 && (input.review === undefined || input.review.state === 'open'),
     // Gated types require a current approval; autonomous types need publish
     // authority alone. Agent execution (M-6 pin matching) is NOT modeled here
     // — this surface is human-only by construction (Netlify Identity gate),

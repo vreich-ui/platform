@@ -218,5 +218,9 @@ export const createApprovalClaim = () => {
     release(callId: string): void {
       claimed.delete(callId);
     },
+    /** Read-only membership check — does not claim. Drives UI interactivity without mutating state. */
+    has(callId: string): boolean {
+      return claimed.has(callId);
+    },
   };
 };
