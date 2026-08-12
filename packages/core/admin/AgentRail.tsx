@@ -52,6 +52,7 @@ export function AgentRail({
         onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
         preferenceScope={preferenceScope}
         approvalInStage={approvalInStage}
+        pendingConsumed={chat.pendingConsumed}
         emptyHint={
           <EmptyState
             title="Ready when you are"
