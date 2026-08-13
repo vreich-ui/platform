@@ -49,13 +49,18 @@ afterEach(() => {
 });
 
 describe('isRunSafeApproval', () => {
+  // Wolf's ruling, 2026-08-12: "Approve safe actions" means *continue the run
+  // without asking* for EVERY tool — publication, privileged, and unknown
+  // tools included. The old RUN_SAFE_TOOLS allow-list held LEGACY tool names
+  // that no longer matched the generated registry's canonical names, so the
+  // toggle silently did nothing (Task 5 root cause 2).
   it('allows ordinary content work for the current run', () => {
     assert.equal(isRunSafeApproval('patch'), true);
     assert.equal(isRunSafeApproval('instantiate_section_template'), true);
     assert.equal(isRunSafeApproval('submit_review'), true);
   });
 
-  it('keeps consequential actions behind an explicit decision', () => {
+  it('also covers publication, privileged, and release tools — the server, not this allow-list, is the authority', () => {
     for (const tool of [
       'publish',
       'discard',
@@ -63,24 +68,25 @@ describe('isRunSafeApproval', () => {
       'delete_pdf_template',
       'publish_pdf_template',
       'create_agent_artifact_job',
-      'release',
+      'release_to_production',
     ]) {
-      assert.equal(isRunSafeApproval(tool), false);
+      assert.equal(isRunSafeApproval(tool), true);
     }
   });
 
-  it('fails closed for an unknown tool', () => {
-    assert.equal(isRunSafeApproval('future_unclassified_tool'), false);
+  it('does not fail closed for an unknown tool either — that gate lives server-side, not in this allow-list', () => {
+    assert.equal(isRunSafeApproval('future_unclassified_tool'), true);
   });
 
-  it('only auto-approves allow-listed actions in the editor-selected run mode', () => {
+  it('auto-approves every tool once "safe-run" is selected, unless a staged proposal is in flight', () => {
     assert.equal(shouldAutoApproveRunTool('ask', 'patch'), false);
+    assert.equal(shouldAutoApproveRunTool('ask', 'create_agent_artifact_job'), false);
     assert.equal(shouldAutoApproveRunTool('safe-run', 'patch'), true);
+    assert.equal(shouldAutoApproveRunTool('safe-run', 'create_agent_artifact_job'), true);
+    assert.equal(shouldAutoApproveRunTool('safe-run', 'release_to_production'), true);
+    // `approvalInStage` still fails closed regardless of mode or tool.
     assert.equal(shouldAutoApproveRunTool('safe-run', 'patch', true), false);
-
-    for (const tool of ['publish', 'release', 'apply_theme', 'delete_pdf_template', 'unknown_tool']) {
-      assert.equal(shouldAutoApproveRunTool('safe-run', tool), false);
-    }
+    assert.equal(shouldAutoApproveRunTool('safe-run', 'create_agent_artifact_job', true), false);
   });
 });
 

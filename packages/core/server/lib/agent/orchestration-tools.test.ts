@@ -49,8 +49,12 @@ test('run_workspace_workflow can NEVER resolve to auto — governance and profil
   assert.equal(defaults.run_workspace_workflow, 'ask');
 });
 
-test('run_workspace_workflow is excluded from the client-side safe-run allow-list', () => {
-  assert.equal(isRunSafeApproval('run_workspace_workflow'), false);
+test('run_workspace_workflow: the D2 risk floor (not the client-side safe-run check) is what keeps it behind a decision', () => {
+  // Wolf's ruling, 2026-08-12: `isRunSafeApproval` is a browser convenience
+  // that now covers every tool, including run_workspace_workflow — the
+  // actual floor is `resolveAutonomy`'s clamp above (D2), enforced
+  // server-side and unaffected by the client's approval-mode selection.
+  assert.equal(isRunSafeApproval('run_workspace_workflow'), true);
 });
 
 // ─── bounded, editor-safe projections ───────────────────────────────────────

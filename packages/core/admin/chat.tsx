@@ -50,7 +50,7 @@ export interface UseChatState {
   preview: (candidateId: string | undefined) => void;
   chooseCandidate: (candidateId: string) => Promise<void>;
   rejectCandidates: (reason: string) => Promise<void>;
-  approve: (callId: string, editedArgs?: Record<string, unknown>) => Promise<{ approved: boolean; saved: boolean }>;
+  approve: (callId: string, editedArgs?: Record<string, unknown>) => Promise<{ approved: boolean }>;
   deny: (callId: string, reason?: string) => Promise<void>;
   cancel: () => Promise<void>;
   /** Bumps whenever an executed (non-error) write tool result arrives — preview refresh signal. */
@@ -180,11 +180,11 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   );
 
   const approve = useCallback(
-    async (callId: string, editedArgs?: Record<string, unknown>): Promise<{ approved: boolean; saved: boolean }> => {
-      if (!chatId) return { approved: false, saved: false };
+    async (callId: string, editedArgs?: Record<string, unknown>): Promise<{ approved: boolean }> => {
+      if (!chatId) return { approved: false };
       // Same call_id claimed twice (a stale re-enabled button, or a race with
       // deny/cancel on the same pending) is a no-op here, not a re-POST.
-      if (!claimRef.current.claim(callId)) return { approved: false, saved: false };
+      if (!claimRef.current.claim(callId)) return { approved: false };
       setBusy(true);
       try {
         const result = await approveTool(getToken, chatId, callId, editedArgs);
@@ -192,11 +192,14 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
         // The server didn't consume it (e.g. already-decided elsewhere) — free
         // it up so a genuine retry isn't permanently blocked.
         if (!result.approved) claimRef.current.release(callId);
-        return { approved: result.approved, saved: !result.is_error };
+        // Execution is async now (Task 5): the card clears on approval; the
+        // tool's success/failure arrives as a normal `tool_result` event via
+        // the poll, not here.
+        return { approved: result.approved };
       } catch (actionError) {
         claimRef.current.release(callId);
         setError(actionError instanceof Error ? actionError.message : 'Action failed.');
-        return { approved: false, saved: false };
+        return { approved: false };
       } finally {
         setBusy(false);
         kick();

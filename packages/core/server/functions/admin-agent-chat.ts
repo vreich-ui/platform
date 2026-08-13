@@ -296,6 +296,16 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   const caller = { id: adminState.userId ?? '', email: adminState.email ?? '' };
   const nowIso = () => new Date().toISOString();
+  // Task 5 fix 1: cap operational tools' inline waits to what's actually left
+  // on THIS invocation (mirrors mcp.ts's handler) — without this, a tool like
+  // create_agent_artifact_job falls back to resolveArtifactJobInlineWaitBudgetMs's
+  // full 10s default and can outlast the platform's invocation cap.
+  const remainingTimeMs =
+    typeof context?.getRemainingTimeInMillis === 'function' ? context.getRemainingTimeInMillis() : undefined;
+  const eventWithDeadline = {
+    ...event,
+    ...(remainingTimeMs !== undefined ? { invocationDeadlineMs: Date.now() + remainingTimeMs } : {}),
+  };
 
   try {
     const chatStore = await getAgentChatBlobStore(event);
@@ -506,8 +516,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           // Task 3 §5: so an approved/executed generated-registry tool that
           // rides the operational bridge (deploy_status, pdf-tool/image
           // families, commerce, ...) can execute on THIS interactive path too,
-          // not only inside the background hop.
-          operationalEvent: event,
+          // not only inside the background hop. Task 5: carries the deadline
+          // so a long inline wait (e.g. create_agent_artifact_job) is capped
+          // to what's actually left on this invocation.
+          operationalEvent: eventWithDeadline,
         });
         const protocolDeps = {
           chatStore,

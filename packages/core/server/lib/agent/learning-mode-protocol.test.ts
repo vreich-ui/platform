@@ -149,6 +149,22 @@ describe('governed learning-mode protocol', () => {
       patchArgs('Clinical clarity, edited')
     );
     assert.strictEqual(approved.status, 200);
+    assert.deepStrictEqual(approved.body, { approved: true, executing: true });
+    // Task 5: the edit-and-approve EXECUTION (and the addPostEditDelta
+    // learning hook that rides it) now happens in the resumed hop, not
+    // inline in approve.
+    const executed = await runAgentLoop(
+      {
+        chatStore,
+        toolContext: toolContext(),
+        engine: providerEngine(async () => ({ outputTokens: 0, toolCalls: [] })),
+        learningStore,
+        nowIso: protocol.nowIso,
+      },
+      'obj:site_test',
+      approved.resume!.triggerToken
+    );
+    assert.strictEqual(executed.status, 'idle');
     const exported = await exportPreferencePairs(learningStore);
     assert.strictEqual(exported.count, 2);
     assert.match(exported.jsonl, /Clinical clarity, edited/);

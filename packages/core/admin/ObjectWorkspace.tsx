@@ -892,10 +892,8 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     if (!pending) return;
     const outcome = await chat.approve(pending.call_id);
     if (!outcome.approved) return;
-    if (!outcome.saved) {
-      toast({ title: 'The proposal ran but was not saved', tone: 'danger' });
-      return;
-    }
+    // Task 5: execution is async now — success/failure arrives as a normal
+    // `tool_result` event via the poll, not on this response.
     toast({ title: 'Section saved', tone: 'success' });
     if (addNext) beginAdd('new-section');
     else {

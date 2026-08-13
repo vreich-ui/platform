@@ -71,6 +71,9 @@ export interface LoopDeps {
   nowIso?: () => string;
   /** Remaining invocation budget (context.getRemainingTimeInMillis); absent locally. */
   remainingMs?: () => number;
+  /** Fix 1: needed to fire `addPostEditDelta` for an edit-and-approve whose
+   *  EXECUTION now happens here (in the hop) rather than inline in approve. */
+  learningStore?: LearningEvidenceStore;
 }
 
 const now = (deps: { nowIso?: () => string }) => (deps.nowIso ?? (() => new Date().toISOString()))();
@@ -191,6 +194,7 @@ const finishRun = (
     delete doc.run.trigger_token;
     doc.run.call_queue = [];
     delete doc.run.pending;
+    delete doc.run.approved_call;
     delete doc.run.candidate_selection;
     delete doc.run.preference_context;
   }
@@ -238,6 +242,13 @@ export const runAgentLoop = async (
   await saveChatDoc(deps.chatStore, doc);
 
   const run = doc.run;
+  // Fix 1: a stale `approved_call` whose call_id is no longer at the head of
+  // `call_queue` (a crashed hop between approve's persist and this hop) is
+  // cleared here, without effect — the next real approve/deny stamps a fresh
+  // one for whatever call is actually pending by then.
+  if (run.approved_call && run.call_queue[0]?.id !== run.approved_call.call_id) {
+    delete run.approved_call;
+  }
   const kind = runRegistryKind(run);
   const tools = wireTools(kind, run, run.learning_mode);
   const system = buildAgentSystemPrompt(doc, run);
@@ -259,6 +270,71 @@ export const runAgentLoop = async (
       while (run.call_queue.length > 0) {
         const call = run.call_queue[0]!;
         const at = now(deps);
+
+        // Fix 1: a call the human already approved (approvePendingTool
+        // stamped `approved_call` and deferred EXECUTION to this hop) is
+        // pre-approved — skip the autonomy pause entirely and execute
+        // through the same shape as the 'auto' path below, using the
+        // approver's (possibly edited) args.
+        if (run.approved_call?.call_id === call.id) {
+          const approved = run.approved_call;
+          const effectiveArgs = approved.args ?? call.args;
+          delete run.approved_call;
+          const approvedTool = toolByName(kind, call.name);
+          if (!approvedTool) {
+            run.call_queue.shift();
+            run.transcript.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: `Tool "${call.name}" is not a capability of this workspace.`,
+              is_error: true,
+            });
+            appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
+            await persist();
+            continue;
+          }
+          run.call_queue.shift();
+          run.tool_calls_used += 1;
+          appendChatEvent(doc, at, 'tool_call', {
+            run_id: run.run_id,
+            call_id: call.id,
+            tool: call.name,
+            summary: approvedTool.describe(effectiveArgs),
+          });
+          const result = await approvedTool.execute(deps.toolContext, effectiveArgs);
+          run.transcript.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: result.content,
+            ...(result.is_error ? { is_error: true } : {}),
+          });
+          const created = result.is_error ? undefined : resultObjectRef(call.name, effectiveArgs, result.content);
+          appendChatEvent(doc, now(deps), 'tool_result', {
+            run_id: run.run_id,
+            call_id: call.id,
+            tool: call.name,
+            is_error: result.is_error,
+            ...(created ?? {}),
+            ...(approvedTool.discloseResult && !result.is_error ? { output: result.content } : {}),
+          });
+          if (
+            !result.is_error &&
+            approved.edited &&
+            deps.learningStore &&
+            run.preference_context?.target_call_id === call.id
+          ) {
+            await addPostEditDelta(
+              deps.learningStore,
+              run.preference_context.event_key,
+              run.preference_context.chosen_args,
+              effectiveArgs
+            );
+            delete run.preference_context;
+          }
+          await persist();
+          if (await cancelledCheck()) return { ok: true, status: doc.status };
+          continue;
+        }
 
         if (isPresentCandidatesCall(call)) {
           run.call_queue.shift();
@@ -485,10 +561,15 @@ export interface ProtocolDeps {
 }
 
 /**
- * Approve the pending call. Plain approve executes the STORED args after
- * re-hash verification — client args are never read. Edit-and-approve
- * (edited_args present) replaces the args with the HUMAN's edit, re-validated
- * against the tool's schema and recorded as an edit by the approver.
+ * Approve the pending call. This DEFERS execution to the next background
+ * hop — it never runs the tool inline here. Long operational tools (e.g.
+ * `create_agent_artifact_job`) can outlast the interactive function's ~10s
+ * invocation cap; executing them here meant the doc never got a chance to
+ * persist and the run stayed stuck `awaiting_approval` forever (Task 5 root
+ * cause 1). Plain approve re-verifies the STORED args by hash — client args
+ * are never read. Edit-and-approve (edited_args present) re-validates the
+ * HUMAN's edit against the tool's schema and records it as an edit by the
+ * approver; the hop executes with THOSE args.
  */
 export const approvePendingTool = async (
   deps: ProtocolDeps,
@@ -521,8 +602,6 @@ export const approvePendingTool = async (
     return { status: 409, body: { error: 'stored call failed re-verification', code: 'forged_resume' } };
   }
 
-  doc.run.call_queue = doc.run.call_queue.filter((queued) => queued.id !== callId);
-  doc.run.tool_calls_used += 1;
   appendChatEvent(doc, at(), 'tool_approved', {
     run_id: doc.run.run_id,
     call_id: callId,
@@ -530,38 +609,22 @@ export const approvePendingTool = async (
     by: approver.email,
     ...(edited ? { edited: true, edited_args: args } : {}),
   });
-  const result = await tool.execute(deps.toolContext, args);
-  doc.run.transcript.push({
-    role: 'tool',
-    tool_call_id: callId,
-    content: result.content,
-    ...(result.is_error ? { is_error: true } : {}),
-  });
-  const created = result.is_error ? undefined : resultObjectRef(pending.tool, args, result.content);
-  appendChatEvent(doc, at(), 'tool_result', {
-    run_id: doc.run.run_id,
+
+  // The call stays at the head of `call_queue` exactly where it already was
+  // — the next hop's drain loop matches it against `approved_call` and
+  // executes it there, using these (possibly human-edited) args.
+  doc.run.approved_call = {
     call_id: callId,
-    tool: pending.tool,
-    is_error: result.is_error,
-    ...(created ?? {}),
-    ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),
-  });
-  if (!result.is_error && edited && deps.learningStore && doc.run.preference_context?.target_call_id === callId) {
-    await addPostEditDelta(
-      deps.learningStore,
-      doc.run.preference_context.event_key,
-      doc.run.preference_context.chosen_args,
-      args
-    );
-  }
-  delete doc.run.preference_context;
+    by: approver.email,
+    ...(edited ? { args, edited: true } : {}),
+  };
   delete doc.run.pending;
 
   const triggerToken = randomUUID();
   doc.run.trigger_token = triggerToken;
   doc.status = 'queued';
   await saveChatDoc(deps.chatStore, doc);
-  return { status: 200, body: { approved: true, is_error: result.is_error, edited }, resume: { triggerToken } };
+  return { status: 200, body: { approved: true, executing: true }, resume: { triggerToken } };
 };
 
 export const denyPendingTool = async (
@@ -592,6 +655,9 @@ export const denyPendingTool = async (
     is_error: true,
   });
   delete doc.run.pending;
+  // Belt-and-braces: a matching `approved_call` should never coexist with
+  // `pending` for the same call_id, but a denied call_id is never executed.
+  if (doc.run.approved_call?.call_id === callId) delete doc.run.approved_call;
   const triggerToken = randomUUID();
   doc.run.trigger_token = triggerToken;
   doc.status = 'queued';
@@ -808,6 +874,7 @@ export const cancelRun = async (deps: ProtocolDeps, chatId: string): Promise<Pro
       chips: ['cancelled'],
     });
     delete doc.run.pending;
+    delete doc.run.approved_call;
     delete doc.run.candidate_selection;
     delete doc.run.preference_context;
     delete doc.run.trigger_token;
