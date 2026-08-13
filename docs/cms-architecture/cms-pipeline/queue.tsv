@@ -135,7 +135,7 @@ T12.6	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.6
 # duplication; deterministic-first, AI only at three judgment points. ORDER: T12.7 first; then T12.8 || T12.9 ||
 # T12.12-prep in parallel lanes; T12.10 after T12.8; T12.11 last. T12.8 lands in pdf-tool, T12.9/T12.11 in
 # CMS-Agent — briefs live here because the queue does.
-T12.7	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T12.7-capture-policy-seed-kit.md
+#T12.7	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T12.7-capture-policy-seed-kit.md	# CLOSED 2026-08-13; closing_commit=T12.7
 T12.8	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.8-pdf-tool-capture-plane.md
 T12.9	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.9-capture-conductor-workflow.md
 T12.10	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T12.10-draft-preview-evidence.md

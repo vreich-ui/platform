@@ -41,8 +41,9 @@ test('fixture dry-run plan is deterministic, complete, and has no transport side
   assert.deepEqual(plan.forbiddenVerbs, ['deploy', 'object_publish', 'release_to_production', 'trigger_netlify_build']);
 });
 
-function projectPolicy(target = 'fixture-target', rights = { content: 'retain_allowed_origin_content', media: 'deny' }) {
-  return { project: { id: target, capture_policy: { rights } } };
+// The canonical CMS-Agent ProjectSummary envelope: projectId + capturePolicy.
+function projectPolicy(target = 'fixture-target', rights = { content: 'retain_allowed_origin_content', media: 'prohibited' }) {
+  return { project: { projectId: target, capturePolicy: { rights } } };
 }
 
 function mockTransport({ createFailure, pageRoute = null, pageRouteInDetail = false, recipeSummary = null } = {}) {
@@ -115,7 +116,7 @@ test('ambiguous create retries exactly once with the same idempotency key', asyn
 test('missing rights requires an explicit adapter and creation restrictions quarantine without loosening policy', async () => {
   const plan = await fixturePlan();
   const mapping = await fixture('zilberman.mapping.v1.redacted.json');
-  await assert.rejects(() => executeEmission({ plan, mapping, transport: mockTransport(), projectPolicyResolver: async (target) => projectPolicy(target, { content: 'deny', media: 'deny' }) }), /model-adapter/);
+  await assert.rejects(() => executeEmission({ plan, mapping, transport: mockTransport(), projectPolicyResolver: async (target) => projectPolicy(target, { content: 'prohibited', media: 'prohibited' }) }), /model-adapter/);
   const transport = mockTransport();
   const originalCall = transport.call.bind(transport);
   transport.call = async (verb, args) => {
@@ -125,7 +126,7 @@ test('missing rights requires an explicit adapter and creation restrictions quar
   const report = await executeEmission({
     plan,
     mapping,
-    transport, projectPolicyResolver: async (target) => projectPolicy(target, { content: 'deny', media: 'deny' }),
+    transport, projectPolicyResolver: async (target) => projectPolicy(target, { content: 'prohibited', media: 'prohibited' }),
     modelAdapter: { async regenerateBody({ body }) { return structuredClone(body); } },
   });
   assert.equal(report.copyPolicy.mode, 'regenerate');
