@@ -190,9 +190,17 @@ export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'>
   title?: ReactNode;
   actions?: ReactNode;
   footer?: ReactNode;
+  /**
+   * Extra classes for the BODY wrapper (the padded div around `children`).
+   * Needed by full-height flex layouts (e.g. the agents-hub chat panel): the
+   * body div sits between the Card and its children, so without
+   * `min-h-0 flex-1 flex flex-col` here, a child's own `overflow-y-auto`
+   * never engages and content grows the page instead of scrolling.
+   */
+  bodyClassName?: string;
 }
 
-export function Card({ kicker, title, actions, footer, className, children, ...rest }: CardProps) {
+export function Card({ kicker, title, actions, footer, className, bodyClassName, children, ...rest }: CardProps) {
   const hasHeader = kicker || title || actions;
   return (
     <div
@@ -219,7 +227,7 @@ export function Card({ kicker, title, actions, footer, className, children, ...r
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
         </div>
       ) : null}
-      <div className="px-5 py-4">{children}</div>
+      <div className={cn('px-5 py-4', bodyClassName)}>{children}</div>
       {footer ? <div className="border-t border-[var(--adm-border)] px-5 py-3">{footer}</div> : null}
     </div>
   );

@@ -766,11 +766,20 @@ export function ChatThread({
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+  /** False until the first scroll-to-bottom with content: opening a
+   *  conversation LANDS on the latest message instantly (like any chat app);
+   *  only subsequent appends animate. Reset by remount (the hub keys this
+   *  component by conversation id). */
+  const settledAtBottom = useRef(false);
   const [showLatest, setShowLatest] = useState(false);
   const [quoteSelection, setQuoteSelection] = useState<QuoteSelectionState | undefined>(undefined);
   useEffect(() => {
-    if (atBottom.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    else setShowLatest(true);
+    if (atBottom.current) {
+      bottomRef.current?.scrollIntoView({ behavior: settledAtBottom.current ? 'smooth' : 'auto', block: 'end' });
+      if (events.length > 0) settledAtBottom.current = true;
+    } else {
+      setShowLatest(true);
+    }
   }, [events.length, pending, candidateSet, status]);
 
   // Highlight-to-reference: track a text selection made inside the transcript
