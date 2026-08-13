@@ -357,7 +357,7 @@ function HubBody() {
   const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
 
   return (
-    <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+    <div className="grid min-h-0 gap-5 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
       {/* Left: starters + session list */}
       <div className="flex min-h-0 flex-col gap-4">
         <Card kicker="Start something" title="New conversation">
@@ -387,7 +387,12 @@ function HubBody() {
 
         <RosterSection owner={owner} />
 
-        <Card kicker="Conversations" title="Recent sessions" className="min-h-0 flex-1 overflow-auto">
+        <Card
+          kicker="Conversations"
+          title="Recent sessions"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          bodyClassName="min-h-0 flex-1 overflow-y-auto"
+        >
           {chats === null ? (
             <Skeleton variant="rect" height={120} />
           ) : chats.length === 0 ? (
@@ -435,8 +440,14 @@ function HubBody() {
         </Card>
       </div>
 
-      {/* Right: the active conversation */}
-      <Card className="flex min-h-[30rem] flex-col lg:max-h-[calc(100vh-14rem)]">
+      {/* Right: the active conversation — a fixed-height chat panel at every
+          breakpoint (AgentRail's proven pattern): the thread scrolls inside
+          ChatThread's own overflow container, pinned to the latest message,
+          while the composer stays stationary at the bottom. */}
+      <Card
+        className="flex h-[calc(100dvh-9rem)] min-h-[24rem] flex-col overflow-hidden"
+        bodyClassName="flex min-h-0 flex-1 flex-col"
+      >
         {activeId ? (
           <>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--adm-border)] pb-3">
@@ -470,6 +481,7 @@ function HubBody() {
               </div>
             ) : null}
             <ChatThread
+              key={activeId}
               events={chat.events}
               status={chat.status}
               pending={chat.pending}
