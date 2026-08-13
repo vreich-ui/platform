@@ -136,11 +136,11 @@ T12.6	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.6
 # T12.12-prep in parallel lanes; T12.10 after T12.8; T12.11 last. T12.8 lands in pdf-tool, T12.9/T12.11 in
 # CMS-Agent — briefs live here because the queue does.
 #T12.7	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T12.7-capture-policy-seed-kit.md	# CLOSED 2026-08-13; closing_commit=T12.7
-T12.8	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.8-pdf-tool-capture-plane.md
-T12.9	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.9-capture-conductor-workflow.md
+#T12.8	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.8-pdf-tool-capture-plane.md	# CLOSED 2026-08-13; closing_commit=T12.8 in pdf-tool (branch t12-8-capture-plane); all acceptance test-proven; deploying the raised Cloud Run revision is Wolf's (pdf-tool docs/CAPTURE_OPS.md carries the command)
+T12.9	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.9-capture-conductor-workflow.md	# 2026-08-13: scaffolding + mock-mode proof LANDED (CMS-Agent branch t12-9-capture-conductor); row OPEN pending the LIVE proof against the deployed T12.8 plane + `npm run nodes:update` + redeploy (Wolf) + PLATFORM_MCP_TOKEN rotation
 #T12.10	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T12.10-draft-preview-evidence.md	# CLOSED 2026-08-13; closing_commit=T12.10
-T12.11	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.11-one-call-site-duplication.md
-T12.12	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.12-zilberman-tenant.md
+#T12.11	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.11-one-call-site-duplication.md	# CLOSED 2026-08-13; closing_commit=T12.11 in CMS-Agent (branch t12-11-site-duplicate) + the platform --json seam; acceptance proven on fixture + dry-run Netlify mode; LIVE genesis waits on NETLIFY_API_TOKEN with site-create rights (Wolf, standing)
+T12.12	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.12-zilberman-tenant.md	# 2026-08-13: agent prep COMPLETE (dry-run clean, parity ×3 PASS, zero genesis-stage defects); Wolf's 22-item account-authority checklist delivered; row OPEN awaiting Wolf's steps, then agent steps 3-6
 #
 # W13 — object tracking & analytics (plan: docs/cms-architecture/12-object-tracking-and-analytics.md, 2026-07-19).
 # W13 may be pulled ahead of W10-W12 freely (reordering this file IS the scheduler). Briefs are written against

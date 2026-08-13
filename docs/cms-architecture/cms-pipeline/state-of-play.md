@@ -9,6 +9,57 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-13 — W12 productization wave: T12.8 + T12.9(scaffold) + T12.10 + T12.11 landed, T12.12 prepped
+
+One orchestrated run (Fable orchestrator, subagents per task, per the runner
+plan) took the wave from T12.7 to the T12.6-rerun gate. Cross-repo results,
+each verified by the orchestrator re-running the owning repo's full suite:
+
+- **T12.8 (pdf-tool, branch `t12-8-capture-plane`): CLOSED.** The capture
+  plane exists beside the untouched print path — a render-service
+  `/capture/page` endpoint (JS on, per-request context, allowlist-only
+  network) + a `capture` job kind on the Netlify plane with worker-side
+  policy ceilings, robots+rate evidence in the job record, deadline+resume
+  from a persisted frontier, and `create_capture_job` /
+  `get_capture_job_status` MCP tools. Suites 456/456 + 61. Deploying the
+  raised Cloud Run revision (600s/2Gi/2CPU) is Wolf's; `docs/CAPTURE_OPS.md`
+  in pdf-tool carries the exact command + cost estimate (~$0.02–0.03 per
+  20-page crawl).
+- **T12.9 (CMS-Agent, branch `t12-9-capture-conductor`): scaffolding + mock
+  proof landed, row OPEN.** `capture_conductor` is workflow #2 through the
+  built seam: five `capture.*` controlled tools, deterministic fast-path
+  nodes, exactly three AI nodes, drafts-only with the forbidden-verb set
+  refused pre-transport, engine vendored byte-faithfully from this repo
+  @2feb0001 (hash-pinned provenance test). Mock e2e run completes with zero
+  model spend outside the three AI nodes; 14-gap replay proves the
+  reject-never-coerce path. Suite 164 files/1515 → green. PENDING: live proof
+  vs the deployed T12.8 plane, `nodes:update` + redeploy (Wolf),
+  PLATFORM_MCP_TOKEN rotation.
+- **T12.10 (this repo): CLOSED** — see the entry below.
+- **T12.11 (CMS-Agent, branch `t12-11-site-duplicate`, on top of T12.9):
+  CLOSED.** `site.duplicate` is the one-call entry (target resolution →
+  genesis where `newSite` → `workflow.start_dry_run` + long-run kick in one
+  call) with `site.duplicate_status`, catalogued refusals (unreachable /
+  deny-all / `netlify_token_missing` / budget), and a genesis driver proven
+  against a dry-run Netlify API mode emitting the 14-item runbook-verbatim
+  human checklist. Plus the small platform seam in this wave:
+  `create-site.mjs --json` (T12.11 seam commit). Suites: CMS-Agent 169
+  files/1531; platform 2387+149+45. LIVE genesis waits on
+  `NETLIFY_API_TOKEN` with site-create rights (standing).
+- **T12.12: agent prep complete, human_gate OPEN.** Dry-run mint of
+  `sites/zilberman` is clean (80 files, env table matches T11.7, seed pack
+  matches fernwell/platform), parity audit passes ×3 existing tenants, zero
+  genesis-stage defects. Wolf's 22-item account-authority checklist + the
+  automation-notes template (feeds T12.11's live genesis) delivered as
+  session output.
+
+Nothing was pushed and no PRs were opened (per convention); the wave reaches
+main via Wolf's land script. The T12.6 rerun gate is untouched: rerun waits
+on T12.9-live + T12.12, goes through `site.duplicate`, and **Wolf
+dispositions it**.
+
+---
+
 ## 2026-08-13 — T12.10: drafts render without publishing; the visual half of the fidelity loop exists
 
 The T12.6 run scored **0 visual comparisons out of 34** because a captured
