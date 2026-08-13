@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-09T18:14:48.789Z",
+    "at": "2026-08-13T13:04:50.257Z",
     "from": "objects/content_item/by-id/req_agent_niacinamide_barrier_after40_20260719_01.json",
-    "record_version": 31
+    "record_version": 44
   },
   "deck": "An evidence-based look at what niacinamide does for barrier function after 40 — what the research supports, what it doesn't, and how to use it without irritation.",
   "description": "A plain-language, evidence-based explainer on niacinamide and the aging skin barrier: how it supports barrier function after 40, what studies actually show, and how to use it without irritation.",
@@ -15,6 +15,17 @@
     "src": "https://drluriescience.netlify.app/img/req_agent_niacinamide_barrier_after40_20260719_01/b0bada557488c1322b44d3d6b85f7acf6d9394a8e74899843b42898ec190f5b4.webp"
   },
   "nodes": [
+    {
+      "id": "n_b93f248842c4",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "New paragraph. Click the pencil to edit, or ask the AI to draft it."
+      }
+    },
     {
       "id": "n_open",
       "kind": "content",
@@ -493,6 +504,18 @@
       "visibility": "public"
     },
     {
+      "id": "n_88caf7d2aba6",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Copy for this part of the story.",
+        "title": "New heading"
+      }
+    },
+    {
       "id": "n_c94e6",
       "kind": "content",
       "private": {
@@ -626,6 +649,11 @@
               ],
               "data": {},
               "nodeType": "ordered-list"
+            },
+            {
+              "content": [],
+              "data": {},
+              "nodeType": "paragraph"
             }
           ],
           "data": {},
@@ -719,6 +747,33 @@
       },
       "rendering": {
         "emphasis": "medium",
+        "placement": "footer",
+        "presentation": "card"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_logoguide",
+      "kind": "action",
+      "private": {
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "A premium, six-page Dr. Lurié Skincare guide — the same evidence-first guidance, with original photography and a printable layout.",
+        "ctaLink": "/pdf/req_agent_niacinamide_barrier_after40_20260719_01/30eea9fb6c63095efb7b9005de6ff9ecf29fa68984b070e051ceb545a0722d38.pdf",
+        "ctaText": "Download the PDF guide",
+        "eyebrow": "Free illustrated guide",
+        "media": {
+          "contentType": "application/pdf",
+          "src": "/pdf/req_agent_niacinamide_barrier_after40_20260719_01/30eea9fb6c63095efb7b9005de6ff9ecf29fa68984b070e051ceb545a0722d38.pdf",
+          "title": "Niacinamide for the aging skin barrier - illustrated PDF guide",
+          "type": "document"
+        },
+        "title": "Download the illustrated barrier guide"
+      },
+      "rendering": {
+        "emphasis": "high",
         "placement": "footer",
         "presentation": "card"
       },
