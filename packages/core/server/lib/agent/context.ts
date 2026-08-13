@@ -255,8 +255,24 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
                   is_error: true,
                 };
               }
-              const raw = await handler(operationalEvent, args);
-              return toOperationalToolResult(raw);
+              try {
+                const raw = await handler(operationalEvent, args);
+                return toOperationalToolResult(raw);
+              } catch (error) {
+                // An operational handler that THROWS (a site that doesn't
+                // deploy an optional sibling, a bridge misconfiguration) must
+                // fail this ONE tool call, not the whole run: every other
+                // tool reports failure as an is_error result the agent can
+                // react to, and a thrown error here would instead reach
+                // runAgentLoop's catch and end the run.
+                return {
+                  content: JSON.stringify({
+                    error: error instanceof Error ? error.message : `The "${name}" tool failed.`,
+                    tool: name,
+                  }),
+                  is_error: true,
+                };
+              }
             },
           },
         }

@@ -58,6 +58,23 @@ export const configureMcp = (handlers: McpSiblingHandlers): void => {
   siblings = handlers;
 };
 
+/**
+ * Whether this PROCESS already has siblings injected.
+ *
+ * The admin chat lambdas are a second, separate entry point into this module:
+ * since the chat's generated tool registry executes operational tools
+ * (`create_agent_artifact_job`, `deploy_status`, the pdf-tool/image families)
+ * through the very same handler bodies `tools/call` uses, and those bodies
+ * reach the object store through `objectStoreHandler`, a chat lambda that
+ * never called `configureMcp` fails closed with "MCP server not configured" —
+ * correct behavior, wrong place to hit it. Those functions configure the trio
+ * themselves from their own SiteBinding, but must NOT clobber a shim that has
+ * already injected a richer set (e.g. one carrying
+ * `verifyArticleImagesHandler`), hence this guard rather than an
+ * unconditional call.
+ */
+export const isMcpConfigured = (): boolean => siblings !== undefined;
+
 const requireSiblings = (): McpSiblingHandlers => {
   if (!siblings) {
     throw new Error(
