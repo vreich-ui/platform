@@ -1,0 +1,129 @@
+{
+  "__generated": {
+    "at": "2026-08-13T09:37:30.291Z",
+    "from": "objects/content_item/by-id/req_agent_from_draft_to_live_how_publishing_works_20260812_01.json",
+    "record_version": 2
+  },
+  "author": "Platform Team",
+  "deck": "A plain-language walkthrough of the five stages every article moves through — and why \"published\" and \"live\" are not the same thing.",
+  "description": "Learn the full publishing lifecycle in the CMS: draft, validate, review, publish, and release. Understand what each stage does and why nothing goes live by accident.",
+  "nodes": [
+    {
+      "id": "n_open",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "It is one of the most common questions new editors ask. You finished an article, clicked through the steps, saw the word \"Published\" — and yet the page still isn't showing up for readers. Nothing is broken. The system is doing exactly what it was designed to do.\n\nThe short answer is that publishing and going live are two separate, deliberate steps. Once you understand the five stages an article moves through, the whole process stops feeling mysterious.",
+        "eyebrow": "Publishing",
+        "title": "You hit publish. So why isn't it live?"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_bigidea",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "Every article travels through five stages: draft, validate, review, publish, and release. Each stage has a single job, and each one is separate on purpose.\n\nThat separation is the safety net. It means work-in-progress never leaks to readers, mistakes get caught before they matter, and nothing appears on the live site until a person deliberately decides it should. Keep that in mind and the rest of this guide is just the details.",
+        "title": "The one idea that makes it all click"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_draft",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Every article begins life as a draft. This is your workspace: you can write, restructure, and revise as much as you like, and none of it is visible to readers.\n\nA draft can sit for five minutes or five weeks. Nothing about creating or editing a draft touches the live site, so there is no risk in starting one — or in leaving one unfinished.",
+        "title": "Stage 1 — Draft"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_validate",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Validation is a dry run. It checks the article against the rules — required fields, valid structure, categories and tags that actually exist — without changing anything.\n\nThink of it as spell-check for the whole document. Running it early and often means you catch problems while they are cheap to fix, long before anyone else is waiting on the work.",
+        "title": "Stage 2 — Validate"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_review",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Review is where another person weighs in. Someone reads the draft and either approves it or asks for changes.\n\nAn important distinction lives here: approval is a decision, not a publication. \"Approved\" means a reviewer signed off — it does not mean the article is out in the world yet. That still takes the next two steps.",
+        "title": "Stage 3 — Review"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_publish",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Publishing records the approved article as an official, committed version. This is the moment the work becomes part of the permanent record rather than a working draft.\n\nBut here is the part that surprises people: publishing does not put the article on the live website. \"Published\" means the version is committed and ready — it is the last step before going live, not going live itself.",
+        "title": "Stage 4 — Publish"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_release",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Releasing is the deliberate go-live. It takes everything that has been published and deploys it to the production site, where readers finally see it.\n\nThis step is separate on purpose. It lets several published articles go out together, and it keeps the exact moment of going live in human hands. Only after a release is confirmed is an article truly \"Live.\"",
+        "title": "Stage 5 — Release"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_recap",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "Draft is where you write. Validate checks your work. Review is another person's sign-off. Publish commits the approved version. Release deploys it to the live site.\n\nThe key takeaway: \"Published\" and \"Live\" are not the same thing. An article is Published once its version is committed, and Live only after a release is deployed and confirmed. That gap is not a bug — it is the safeguard that keeps anything from reaching readers by accident.",
+        "title": "The five stages, at a glance"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "A walkthrough of the publishing lifecycle — draft, validate, review, publish, release — and the difference between Published and Live.",
+    "meta_title": "From Draft to Live: How Publishing Works"
+  },
+  "slug": "from-draft-to-live-how-publishing-works",
+  "taxonomy": {
+    "category": "guide",
+    "tags": [
+      "publishing"
+    ]
+  },
+  "title": "From Draft to Live: How Publishing Works"
+}
