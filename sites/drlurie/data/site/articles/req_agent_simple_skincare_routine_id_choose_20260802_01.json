@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-02T17:23:25.937Z",
+    "at": "2026-08-13T12:15:46.071Z",
     "from": "objects/content_item/by-id/req_agent_simple_skincare_routine_id_choose_20260802_01.json",
-    "record_version": 10
+    "record_version": 14
   },
   "author": "Dr. Lurie Skincare",
   "deck": "A practical morning-and-evening routine built around consistency, comfort, and sun protection.",
@@ -77,6 +77,27 @@
         "emphasis": "low",
         "placement": "section",
         "presentation": "section"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_takeaway",
+      "kind": "action",
+      "private": {
+        "intent": "convert",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Keep the whole routine at your fingertips — a beautifully simple five-page guide you can save, print, or revisit any time.",
+        "ctaLink": "/pdf/req_agent_simple_skincare_routine_id_choose_20260802_01/d9bf0f5ec4017f7b3c61eae425423800342cf8c1dfc5661a85b96c528cf0a2fa.pdf",
+        "ctaText": "Download the free PDF guide",
+        "eyebrow": "Free download",
+        "title": "Take the routine with you"
+      },
+      "rendering": {
+        "emphasis": "high",
+        "placement": "section",
+        "presentation": "callout"
       },
       "visibility": "public"
     },
