@@ -50,21 +50,18 @@ test('fixture score is deterministic and records the ratified coverage-based rub
   assert.deepEqual(first, await fixture('zilberman.fidelity-report.v1.golden.json'));
 });
 
+// Every case here reads the ONE canonical shape: a ProjectCapturePolicy under
+// the CMS-Agent ProjectSummary's `capturePolicy` key (T12.7).
+const withOverride = (coverageRubricOverride, key = 'capturePolicy') => ({
+  project: { projectId: 'fixture-target', [key]: { fidelity: { coverageRubricOverride } } },
+});
+
 test('project-owned coverage rubric override uses the exact CMS-Agent contract seam and fails closed', () => {
-  const project = {
-    project: {
-      id: 'fixture-target',
-      capture_policy: {
-        fidelity: {
-          coverageRubricOverride: {
-            minimumMappedBlockCoverage: 0.5,
-            requireCompleteTokens: false,
-            requireEnumeratedGaps: false,
-          },
-        },
-      },
-    },
-  };
+  const project = withOverride({
+    minimumMappedBlockCoverage: 0.5,
+    requireCompleteTokens: false,
+    requireEnumeratedGaps: false,
+  });
   assert.deepEqual(fidelityLimitsFromProject(project, 'fixture-target'), {
     structuralCoverage: 0.5,
     requireTokensComplete: false,
@@ -73,69 +70,52 @@ test('project-owned coverage rubric override uses the exact CMS-Agent contract s
     source: 'target_project_contract_override',
   });
   assert.throws(() => fidelityLimitsFromProject(project, 'other-target'), FidelityError);
+  const zeroed = { minimumMappedBlockCoverage: 0, requireCompleteTokens: true, requireEnumeratedGaps: true };
+  assert.equal(fidelityLimitsFromProject(withOverride(zeroed), 'fixture-target').structuralCoverage, 0);
+  // The snake_case envelope stays readable; the policy inside it does not change.
   assert.equal(
-    fidelityLimitsFromProject(
-      {
-        project: {
-          id: 'fixture-target',
-          capture_policy: { fidelity: { coverageRubricOverride: { minimumMappedBlockCoverage: 0 } } },
-        },
-      },
-      'fixture-target'
-    ).structuralCoverage,
+    fidelityLimitsFromProject(withOverride(zeroed, 'capture_policy'), 'fixture-target').structuralCoverage,
     0
   );
   assert.throws(
-    () =>
-      fidelityLimitsFromProject(
-        {
-          project: {
-            id: 'fixture-target',
-            capture_policy: { fidelity: { coverageRubricOverride: { minimumMappedBlockCoverage: 2 } } },
-          },
-        },
-        'fixture-target'
-      ),
-    /structuralCoverage/
+    () => fidelityLimitsFromProject(withOverride({ ...zeroed, minimumMappedBlockCoverage: 2 }), 'fixture-target'),
+    /minimumMappedBlockCoverage/
   );
+  assert.throws(() => fidelityLimitsFromProject(withOverride({ coverage: 0.5 }), 'fixture-target'), /unknown field/);
   assert.throws(
-    () =>
-      fidelityLimitsFromProject(
-        {
-          project: {
-            id: 'fixture-target',
-            capture_policy: { fidelity: { coverageRubricOverride: { coverage: 0.5 } } },
-          },
-        },
-        'fixture-target'
-      ),
-    /unknown field/
-  );
-  assert.throws(
-    () =>
-      fidelityLimitsFromProject(
-        {
-          project: {
-            id: 'fixture-target',
-            capture_policy: { fidelity: { coverageRubricOverride: { requireCompleteTokens: 'yes' } } },
-          },
-        },
-        'fixture-target'
-      ),
+    () => fidelityLimitsFromProject(withOverride({ ...zeroed, requireCompleteTokens: 'yes' }), 'fixture-target'),
     /boolean/
   );
-  assert.equal(
-    fidelityLimitsFromProject(
-      {
-        project: {
-          id: 'fixture-target',
-          capturePolicy: { fidelity: { coverageRubricOverride: { minimumMappedBlockCoverage: 0 } } },
-        },
-      },
-      'fixture-target'
-    ).structuralCoverage,
-    DEFAULT_FIDELITY_LIMITS.structuralCoverage
+  // A partial override is a malformed contract, not a set of defaults to fill in.
+  assert.throws(
+    () => fidelityLimitsFromProject(withOverride({ minimumMappedBlockCoverage: 0.5 }), 'fixture-target'),
+    /requireCompleteTokens/
   );
+  // No override at all: the ratified default applies untouched.
+  assert.deepEqual(fidelityLimitsFromProject(withOverride(undefined), 'fixture-target'), {
+    structuralCoverage: DEFAULT_FIDELITY_LIMITS.structuralCoverage,
+    requireTokensComplete: DEFAULT_FIDELITY_LIMITS.requireTokensComplete,
+    requireGapsEnumerated: DEFAULT_FIDELITY_LIMITS.requireGapsEnumerated,
+    maxRounds: DEFAULT_FIDELITY_LIMITS.maxRounds,
+    source: 'ratified_default',
+  });
+});
+
+test('the recorded Zilberman policy drives the scorer through the canonical envelope', async () => {
+  const snapshot = await fixture('zilberman.snapshot.v1.redacted.json');
+  const recorded = snapshot.capture.policy;
+  const project = { project: { projectId: 'platform', capturePolicy: recorded } };
+  // The live record declares no rubric override, so the 90% bar stands.
+  assert.deepEqual(fidelityLimitsFromProject(project, 'platform'), {
+    structuralCoverage: DEFAULT_FIDELITY_LIMITS.structuralCoverage,
+    requireTokensComplete: true,
+    requireGapsEnumerated: true,
+    maxRounds: 3,
+    source: 'ratified_default',
+  });
+  const report = await scoreFixture({ projectPolicy: project, target: 'platform' });
+  assert.equal(report.limits.structuralCoverage, 0.9);
+  assert.equal(report.source.capturePolicy.fidelityMode, 'design_inspired');
 });
 
 test('visual comparison uses normalized image bytes and reports unavailable evidence safely', async () => {
@@ -192,12 +172,11 @@ test('consolidated gap report retains every mapped gap as T10.7 evidence', async
 
 test('bounded iterations admit only validated data edits and quarantine invalid proposals', async () => {
   const report = await scoreFixture({
-    projectPolicy: {
-      project: {
-        id: 'fixture-target',
-        capture_policy: { fidelity: { coverageRubricOverride: { minimumMappedBlockCoverage: 1 } } },
-      },
-    },
+    projectPolicy: withOverride({
+      minimumMappedBlockCoverage: 1,
+      requireCompleteTokens: true,
+      requireEnumeratedGaps: true,
+    }),
   });
   const applied = [];
   const result = await runBoundedFidelityIterations({

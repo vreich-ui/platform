@@ -9,6 +9,33 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-13 — T12.7: capture policy unified on ProjectCapturePolicy; seed kit committed
+
+CMS-Agent's `ProjectCapturePolicy` is now the ONE capture policy shape; the
+engine is a consumer of it at every entry point. `snapshot-v1.mjs` gained
+`parseCapturePolicy` (full canonical validation — enums, bounds, strict keys,
+`rights`/`designReferences`/`fidelity` all required) and
+`readProjectCapturePolicy` (envelope reader: `capturePolicy`, with
+`capture_policy` still read); `validateCapturePolicy` is that parse plus the
+crawl gate, so the registry's deny-all default (`maxPages: 0`) is well-formed
+but authorizes no run. `emit.mjs` and `score.mjs` read through the same reader
+— **fixing a real defect: `score.mjs` read only `capture_policy`, so a live
+CMS-Agent `project.get` (which emits `capturePolicy`) silently fell back to the
+default rubric.** `emit.mjs` lost its invented `governance.capture` spelling and
+now validates `rights` against the canonical enum.
+
+Committed: `fixtures/capture-policy.template.json` (test-proven to pass
+`validateCapturePolicy`) and `docs/cms-architecture/capture-runbook.md`
+(seeding via `project.update` or the CLI JSON, all five stages with exact
+commands, the field table, how to read coverage/gaps/verdict, the Zilberman
+worked example — 52.94%, 14 gaps, 0/34 visual — and the deferred client-store
+consent object per R-C2 v2). A test proves the recorded 2026-08-13 Zilberman
+policy round-trips through the new validation unchanged. Tests: 2387 + 147 + 32
+pass (capture leg 26 → 32). No crawler/mapper/emit behavior change beyond the
+field-shape alignment; T12.6 stays a `human_gate` awaiting Wolf.
+
+---
+
 ## 2026-08-13 — W12 T12.6 PREPARED, NOT DISPOSED: evidence assembled, awaiting Wolf
 
 **Commit ref:** `refs/tags/w12-t12-6` (the `T12.6: …` records commit).

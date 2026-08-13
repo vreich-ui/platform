@@ -9,6 +9,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { parseCaptureRights, readProjectCapturePolicy } from './snapshot-v1.mjs';
+
 const FORBIDDEN_VERBS = new Set(['object_publish', 'release_to_production', 'trigger_netlify_build', 'deploy']);
 const REQUIRED_TYPES = ['theme', 'section_template', 'navigation', 'page'];
 const sha = (value, length = 16) => createHash('sha256').update(value).digest('hex').slice(0, length);
@@ -59,23 +61,33 @@ function targetId(result) {
   return project?.id ?? project?.project_id ?? project?.projectId ?? null;
 }
 
-/** Project policy is deliberately read only from the target project response. */
+/**
+ * Project policy is deliberately read only from the target project response,
+ * and only through the one canonical reader — a CMS-Agent `ProjectCapturePolicy`
+ * under `capturePolicy` (or its snake_case envelope spelling). There is no
+ * third spelling to fall back to: an unrecognized shape stops emission.
+ */
 export function capturePolicyFromProject(result, target) {
   if (targetId(result) !== target) throw new EmissionError(`Target binding mismatch: expected ${target}.`);
-  const value = payload(result);
-  const project = value?.project ?? value;
-  const policy = project?.capture_policy ?? project?.capturePolicy ?? project?.governance?.capture ?? null;
-  if (!policy || typeof policy !== 'object') throw new EmissionError('Target project contract has no capture policy.');
+  const policy = readProjectCapturePolicy(result);
+  if (!policy) throw new EmissionError('Target project contract has no capture policy.');
   return policy;
 }
 
 const CONTENT_RIGHT = 'retain_allowed_origin_content';
 const MEDIA_RIGHT = 'retain_referenced_allowed_origin_media';
 
+/**
+ * Rights are read with the canonical enum, not a looser local reading: a value
+ * outside `ProjectCapturePolicy["rights"]` is a malformed contract and stops
+ * emission rather than being silently treated as "no rights".
+ */
 function policyRights(policy) {
-  const rights = policy?.rights;
-  if (!rights || typeof rights !== 'object') throw new EmissionError('Target project capture policy has no rights object.');
-  return rights;
+  try {
+    return parseCaptureRights(policy?.rights);
+  } catch (error) {
+    throw new EmissionError(`Target project capture policy has no valid rights object: ${error.message}`);
+  }
 }
 
 function canRetainContent(policy) { return policyRights(policy).content === CONTENT_RIGHT; }

@@ -13,6 +13,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
+import { parseCoverageRubricOverride, readProjectCapturePolicy } from './snapshot-v1.mjs';
+
 export const DEFAULT_FIDELITY_LIMITS = Object.freeze({
   structuralCoverage: 0.9,
   requireTokensComplete: true,
@@ -49,35 +51,30 @@ function targetId(result) {
   return project?.id ?? project?.project_id ?? project?.projectId ?? null;
 }
 
-/** Reads the project-owned override while retaining a bounded local ceiling. */
+/**
+ * Reads the project-owned override while retaining a bounded local ceiling.
+ *
+ * The policy is resolved through the one canonical reader (T12.7) and the
+ * override is parsed with the canonical `ProjectCapturePolicy` rules — same
+ * field names, same bounds, all three fields required when the override is
+ * present. Do not infer an alternate spelling or accept a partial override: a
+ * malformed contract must stop the run rather than weaken it.
+ */
 export function fidelityLimitsFromProject(result, target) {
   if (result && targetId(result) !== target) throw new FidelityError(`Target binding mismatch: expected ${target}.`);
-  const value = payload(result);
-  const project = value?.project ?? value;
-  const fidelity = project?.capture_policy?.fidelity ?? {};
-  // This is the CMS-Agent project-registry seam. Do not infer an alternate
-  // spelling: a malformed contract must stop the run rather than weaken it.
-  const supplied = fidelity.coverageRubricOverride;
-  if (supplied !== undefined && (supplied === null || typeof supplied !== 'object' || Array.isArray(supplied)))
-    throw new FidelityError('Project coverageRubricOverride must be an object when supplied.');
-  const override = supplied ?? {};
-  const allowed = new Set(['minimumMappedBlockCoverage', 'requireCompleteTokens', 'requireEnumeratedGaps']);
-  for (const key of Object.keys(override))
-    if (!allowed.has(key)) throw new FidelityError(`Project coverageRubricOverride has unknown field ${key}.`);
-  const coverage = override.minimumMappedBlockCoverage ?? DEFAULT_FIDELITY_LIMITS.structuralCoverage;
-  const maxRounds = DEFAULT_FIDELITY_LIMITS.maxRounds;
-  if (!Number.isFinite(coverage) || coverage < 0 || coverage > 1)
-    throw new FidelityError('Project structuralCoverage must be in [0, 1].');
-  if (override.requireCompleteTokens !== undefined && typeof override.requireCompleteTokens !== 'boolean')
-    throw new FidelityError('Project requireCompleteTokens must be boolean.');
-  if (override.requireEnumeratedGaps !== undefined && typeof override.requireEnumeratedGaps !== 'boolean')
-    throw new FidelityError('Project requireEnumeratedGaps must be boolean.');
+  const fidelity = readProjectCapturePolicy(result)?.fidelity ?? {};
+  let override;
+  try {
+    override = parseCoverageRubricOverride(fidelity.coverageRubricOverride);
+  } catch (error) {
+    throw new FidelityError(error.message);
+  }
   return {
-    structuralCoverage: coverage,
-    requireTokensComplete: override.requireCompleteTokens ?? DEFAULT_FIDELITY_LIMITS.requireTokensComplete,
-    requireGapsEnumerated: override.requireEnumeratedGaps ?? DEFAULT_FIDELITY_LIMITS.requireGapsEnumerated,
-    maxRounds,
-    source: Object.keys(override).length ? 'target_project_contract_override' : 'ratified_default',
+    structuralCoverage: override?.minimumMappedBlockCoverage ?? DEFAULT_FIDELITY_LIMITS.structuralCoverage,
+    requireTokensComplete: override?.requireCompleteTokens ?? DEFAULT_FIDELITY_LIMITS.requireTokensComplete,
+    requireGapsEnumerated: override?.requireEnumeratedGaps ?? DEFAULT_FIDELITY_LIMITS.requireGapsEnumerated,
+    maxRounds: DEFAULT_FIDELITY_LIMITS.maxRounds,
+    source: override ? 'target_project_contract_override' : 'ratified_default',
   };
 }
 

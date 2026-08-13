@@ -1,0 +1,32 @@
+{
+  "maxPages": 20,
+  "allowedCrawlOrigins": ["https://www.example.com"],
+  "allowedPathPrefixes": ["/"],
+  "sameOriginOnly": true,
+  "respectRobots": true,
+  "concurrency": 1,
+  "delayMs": 1500,
+  "authenticatedAccess": "prohibited",
+  "rights": {
+    "content": "retain_allowed_origin_content",
+    "media": "retain_referenced_allowed_origin_media"
+  },
+  "designReferences": [
+    {
+      "origin": "https://design-reference.example.net",
+      "purpose": "design_inspiration_only",
+      "crawlAllowed": false,
+      "contentReuse": "prohibited",
+      "mediaReuse": "prohibited"
+    }
+  ],
+  "fidelity": {
+    "mode": "design_inspired",
+    "sourceDesignTreatment": "source_content_with_design_inspiration_only",
+    "coverageRubricOverride": {
+      "minimumMappedBlockCoverage": 0.9,
+      "requireCompleteTokens": true,
+      "requireEnumeratedGaps": true
+    }
+  }
+}
