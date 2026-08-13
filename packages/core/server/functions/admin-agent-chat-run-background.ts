@@ -19,6 +19,7 @@ import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { getAgentChatBlobStore, loadChatDoc } from '../lib/agent/chat-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
+import { ensureMcpSiblingsForChat } from '../lib/agent/mcp-siblings.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { buildChatEngine, resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { runAgentLoop } from '../lib/agent/loop.js';
@@ -42,6 +43,10 @@ const cmsAgentClient = new CmsAgentClient();
 const bodySchema = z.object({ chat_id: z.string().min(1), trigger_token: z.string().min(1) });
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+  // The generated registry's operational tools run through mcp.ts's handler
+  // bodies, which reach the object store via its injected siblings — this
+  // lambda is not the MCP shim, so it injects them itself from ITS binding.
+  ensureMcpSiblingsForChat(binding);
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
   if (!getHeader(event.headers, 'content-type').includes('application/json')) {
     return { statusCode: 415, body: 'application/json required' };
