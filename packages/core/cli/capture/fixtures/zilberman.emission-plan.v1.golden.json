@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "capture-emission-plan.v1",
+  "target": "fixture-target",
+  "repeatThreshold": 2,
+  "createKinds": [
+    "theme",
+    "section_template",
+    "navigation",
+    "navigation",
+    "page",
+    "page",
+    "page",
+    "page",
+    "page"
+  ],
+  "createIds": [
+    "thm_capture_3a980f55e7a9df2378",
+    "stpl_capture_7ebf831f7132fd3409",
+    "nav_capture_b9cfafd65ac61976c1",
+    "nav_capture_e1b3d6b6cd9d58f1f0",
+    "page_capture_0dab20cec74b87733e",
+    "page_capture_d5bd70381ea544b763",
+    "page_capture_b1d5b8c4afe3b161ad",
+    "page_capture_0f9154b8ed565f1249",
+    "page_capture_9e3000e280950d9b0d"
+  ],
+  "preflightVerbs": [
+    "resolver:project_policy",
+    "object_inventory",
+    "object_contract",
+    "object_contract",
+    "object_contract",
+    "object_contract",
+    "object_inventory",
+    "object_inventory",
+    "object_inventory",
+    "object_get"
+  ],
+  "mediaCount": 1,
+  "gapCount": 17
+}

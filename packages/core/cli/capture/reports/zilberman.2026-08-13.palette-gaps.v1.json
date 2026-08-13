@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "capture-palette-gaps.v1",
+  "entries": [
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "gapId": "gap_3cf295a5c3af",
+      "blockRef": "page_9563b8e16278_block_001",
+      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
+      "why": "unmaterialized_visual_evidence",
+      "nearestType": "media",
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+    },
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "gapId": "gap_07ad96fe838f",
+      "blockRef": "page_9563b8e16278_block_006",
+      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_006.png",
+      "why": "section_not_allowed_for_page_type",
+      "nearestType": "prose",
+      "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+    },
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "gapId": "gap_4fb4d4158abe",
+      "blockRef": "page_9563b8e16278_block_007",
+      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
+      "why": "section_not_allowed_for_page_type",
+      "nearestType": "prose",
+      "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+    },
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "gapId": "gap_9f7db86a9535",
+      "blockRef": "page_9563b8e16278_block_010",
+      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
+      "why": "unmaterialized_visual_evidence",
+      "nearestType": "content_split",
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+    },
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "gapId": "gap_244ef90d50b7",
+      "blockRef": "page_9563b8e16278_block_012",
+      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
+      "why": "media_gallery_requires_assets",
+      "nearestType": "media",
+      "missingCapability": "materialized first-party asset references and item-level text association"
+    },
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "gapId": "gap_9b7bd6c11204",
+      "blockRef": "page_9563b8e16278_block_014",
+      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
+      "why": "section_not_allowed_for_page_type",
+      "nearestType": "contact_form",
+      "missingCapability": "home PageType does not allow contact_form; preserve source evidence as a gap rather than coercing it"
+    },
+    {
+      "pageRef": "page_593efe6a40c0",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
+      "gapId": "gap_d92603a71c6a",
+      "blockRef": "page_593efe6a40c0_block_001",
+      "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
+      "why": "mixed_interactive_detail",
+      "nearestType": "prose",
+      "missingCapability": "separable event metadata, body, registration state, and sharing behavior"
+    },
+    {
+      "pageRef": "page_c470adaf57fc",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
+      "gapId": "gap_4d8f62e8c497",
+      "blockRef": "page_c470adaf57fc_block_002",
+      "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
+      "why": "embedded_builder_style_payload",
+      "nearestType": "media",
+      "missingCapability": "clean semantic gallery data without injected CSS"
+    },
+    {
+      "pageRef": "page_c470adaf57fc",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
+      "gapId": "gap_0eeef6da1d84",
+      "blockRef": "page_c470adaf57fc_block_003",
+      "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
+      "why": "media_gallery_requires_assets",
+      "nearestType": "media",
+      "missingCapability": "materialized first-party asset references and item-level text association"
+    },
+    {
+      "pageRef": "page_c470adaf57fc",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
+      "gapId": "gap_643ec1c31a1c",
+      "blockRef": "page_c470adaf57fc_block_004",
+      "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_004.png",
+      "why": "embedded_builder_style_payload",
+      "nearestType": "media",
+      "missingCapability": "clean semantic gallery data without injected CSS"
+    },
+    {
+      "pageRef": "page_79c515d4cebf",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "gapId": "gap_cbffeb161998",
+      "blockRef": "page_79c515d4cebf_block_003",
+      "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
+      "why": "unmaterialized_visual_evidence",
+      "nearestType": "content_split",
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+    },
+    {
+      "pageRef": "page_79c515d4cebf",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "gapId": "gap_7e68552d477f",
+      "blockRef": "page_79c515d4cebf_block_004",
+      "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
+      "why": "unmaterialized_visual_evidence",
+      "nearestType": "content_split",
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+    },
+    {
+      "pageRef": "page_79c515d4cebf",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "gapId": "gap_b36e8f83a5cd",
+      "blockRef": "page_79c515d4cebf_block_005",
+      "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
+      "why": "unmaterialized_visual_evidence",
+      "nearestType": "media",
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+    },
+    {
+      "pageRef": "page_79c515d4cebf",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "gapId": "gap_c6d9ee44a31b",
+      "blockRef": "page_79c515d4cebf_block_006",
+      "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
+      "why": "unmaterialized_visual_evidence",
+      "nearestType": "content_split",
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+    }
+  ],
+  "byCapability": [
+    {
+      "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks",
+      "count": 6,
+      "gapIds": [
+        "gap_3cf295a5c3af",
+        "gap_7e68552d477f",
+        "gap_9f7db86a9535",
+        "gap_b36e8f83a5cd",
+        "gap_c6d9ee44a31b",
+        "gap_cbffeb161998"
+      ]
+    },
+    {
+      "missingCapability": "clean semantic gallery data without injected CSS",
+      "count": 2,
+      "gapIds": ["gap_4d8f62e8c497", "gap_643ec1c31a1c"]
+    },
+    {
+      "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it",
+      "count": 2,
+      "gapIds": ["gap_07ad96fe838f", "gap_4fb4d4158abe"]
+    },
+    {
+      "missingCapability": "materialized first-party asset references and item-level text association",
+      "count": 2,
+      "gapIds": ["gap_0eeef6da1d84", "gap_244ef90d50b7"]
+    },
+    {
+      "missingCapability": "home PageType does not allow contact_form; preserve source evidence as a gap rather than coercing it",
+      "count": 1,
+      "gapIds": ["gap_9b7bd6c11204"]
+    },
+    {
+      "missingCapability": "separable event metadata, body, registration state, and sharing behavior",
+      "count": 1,
+      "gapIds": ["gap_d92603a71c6a"]
+    }
+  ]
+}

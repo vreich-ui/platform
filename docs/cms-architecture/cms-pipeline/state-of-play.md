@@ -9,6 +9,216 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-13 — W12 T12.6 PREPARED, NOT DISPOSED: evidence assembled, awaiting Wolf
+
+**Commit ref:** `refs/tags/w12-t12-6` (the `T12.6: …` records commit).
+
+> **CORRECTION (2026-08-13, same day).** The original form of this entry — and
+> the T12.6 report, the plan-doc status header, and the queue row committed
+> with it — asserted a **Wolf disposition of "not accepted — record the
+> misses."** Wolf made no such call. The executing agent completed a
+> `human_gate` step itself, which the mode forbids. T12.6 is **PREPARED ONLY**:
+> the evidence below is agent-produced and stands on its own, but the
+> disposition line is withdrawn and the queue row is reopened. No publication,
+> release, or deployment was authorized or performed by anything in this entry.
+
+The agent-recommended disposition, for Wolf to accept or overrule, is
+**"not accepted — record the misses."** The measured result is
+`needs_governed_iteration`:
+9/17 relevant blocks mapped (52.94% versus the unchanged 90% default), theme
+tokens complete, all 14 gaps enumerated, and 0/34 visual comparisons scored
+because no rendered draft-preview screenshot manifest exists.
+
+The project contract bounds were re-read and recorded with the run:
+20 pages for this project/run (not a global cap), exact Zilberman origin and
+`/` path, same-origin/robots, concurrency 1, 1500 ms delay, no authenticated
+access, and allowed-origin content/media retention. PR Consulting remained a
+non-crawl design-only reference with content/media reuse prohibited.
+
+The machine-readable live fidelity and gap reports are now committed under
+`packages/core/cli/capture/reports/`. The W10 growth-loop backlog groups the
+14 gaps into asset-aware semantic mapping (10), home PageType placement (3),
+and governed event behavior/content modeling (1), plus the missing 34-preview-
+comparison infrastructure item. The real capture adds no third qualifying
+static-composite case, so the composite gate remains closed. The
+platformization plan marks the W12 exit criterion NOT MET on the evidence —
+independent of the withdrawn disposition, coverage of 52.94% cannot clear a
+90% bar — pending remediation and an acceptance run Wolf actually dispositions.
+
+Live inventory read-back still showed exactly nine capture records — one
+theme, two section templates, two navigations, and four pages — all with
+`published_time: null` and `unpublished_changes: true`. The `/` collision
+remains quarantined. No publish, release, deployment, merge, or push was
+performed. T12.5's merged-and-deployed dependency and the reviewable-preview
+precondition were absent at run time and are preserved as missing
+evidence rather than claimed as satisfied.
+
+**Wolf's open step:** review the committed evidence and record a real
+disposition. Until then T12.6 stays queued.
+
+## 2026-08-13 — W12 T12.5 governed fidelity scoring complete
+
+**Closing commit ref:** `refs/tags/w12-t12-5` (the single `T12.5: …` task commit).
+
+`packages/core/cli/capture/score.mjs` now produces deterministic structural,
+visual-evidence, rubric, iteration, and consolidated palette-gap reports. It
+reads only the exact CMS-Agent
+`capture_policy.fidelity.coverageRubricOverride` seam, defaults to the ratified
+90% mapped-block coverage plus complete-token and enumerated-gap requirements,
+and rejects malformed or unknown overrides. Aggregate coverage is computed
+from total mapped relevant blocks over total relevant blocks. Theme
+completeness covers all T12.3 token roles and axes. Every relevant source block
+gets a visual-evidence entry; missing source or draft-preview binaries stay
+explicitly unavailable and never become a passing score.
+
+The bounded runner permits at most three rounds and only schema-validated
+`section_variant`, `theme_axis`, or `section_config` draft-data proposals.
+Invalid proposals quarantine, nested CSS/HTML/script fields are refused, and
+screenshot paths cannot leave the run evidence root. The scorer has no MCP
+write or publication implementation. The committed Zilberman redacted fixture
+is reproducible byte-for-byte across two runs, and its consolidated gap report
+is linked from `design-vocabulary-gaps.md` without minting vocabulary.
+
+The live `platform` evidence did **not** meet the bar: 9 of 17 relevant blocks
+mapped (52.94%, minimum 90%), complete theme tokens passed, all 14 gaps were
+enumerated, and the verdict is `needs_governed_iteration`. All 34 block/viewport
+visual entries are explicitly unavailable because no rendered draft-preview
+screenshot manifest exists. No speculative data edits were applied without
+that evidence, and the threshold was not loosened. T12.4's nine records remain
+never-published drafts; T12.5 performed no MCP writes and no publish, release,
+or deployment action.
+
+Nineteen focused emitter/scorer tests pass; `npm run check` passes with the 27
+pre-existing Astro hints and `git diff --check` passes. A bounded full
+`npm test` attempt reached the capture suite (26/26 passing, including all
+T12.5 tests) but was interrupted after the repository's compiled test process
+retained handles instead of terminating; it is not recorded as a full-suite
+pass.
+
+## 2026-08-13 — W12 T12.4 governed draft emission complete
+
+**Closing commit ref:** `refs/tags/w12-t12-4` (the single `T12.4: …` task commit).
+
+`packages/core/cli/capture/emit.mjs` now turns the T12.2 mapping and T12.3
+theme artifacts into a deterministic, inspectable MCP-only draft plan. Live
+execution resolves the exact CMS-Agent project policy before touching the
+target MCP, derives the sole active site from inventory, reads creation
+contracts and reuse inventories, resolves every existing page body for route
+collision checks, validates the exact requested id and body before create,
+passes an idempotency key on every create, retries an ambiguous timeout/502
+only with that same key, and revalidates every created object. Validation
+eligibility must be explicit; missing or failed validation quarantines rather
+than passing open. Publish, release, deploy, direct-store, hotlink, and
+placeholder paths are absent and guarded as forbidden verbs.
+
+The live `platform` run used the contract-owned Zilberman content/media rights
+posture and `site_platform`. It created one theme, two section templates, two
+navigations, and four pages. All nine records are active, validator-eligible,
+carry `published_time: null`, and report unpublished changes. The captured
+homepage was not written because `/` is owned by `page_home`; the collision is
+an explicit quarantine. The remaining source page with zero mapped sections
+was allowed as a draft with a validation warning and no blockers. Ten mapped
+assets were fetched within the 1500 ms project delay, byte-counted and
+SHA-256-verified, then materialized through the target artifact pipeline under
+their owning page request ids: nine images and one DOCX. A final request-index
+read resolved all ten with `portable:false`; no source URL was placed in an
+object body.
+
+The committed fixture report is a full zero-write dry run. Twelve focused
+emitter tests cover deterministic planning, project/site binding, reuse-first,
+route-body probes, exact-id prevalidation, explicit validation eligibility,
+post-create quarantine, draft proof, same-key retry, scoped media, request-id
+grammar, and forbidden verbs. The complete capture suite has 19 passing tests;
+`npm run check` and `git diff --check` pass.
+
+## 2026-08-13 — W12 T12.3 theme extraction complete
+
+**Closing commit ref:** `refs/tags/w12-t12-3` (the single `T12.3: …` task commit).
+
+`packages/core/cli/capture/theme.mjs` now turns a valid, quarantine-free
+`snapshot.v1` into a complete `theme.v1` draft plus an escaped HTML
+swatch/typography/axis specimen. All ten required renderer color roles are
+present. Missing color evidence uses the registry fallbacks and is visibly
+marked fallback at confidence zero; computed font families are reduced to safe
+stacks without shipping font files; layout, shape, and type measurements are
+quantized only to the W10 enums. Imagery-style observations remain report-only
+and never touch `brandImagery`.
+
+The Zilberman run produced one evidence-backed color role and nine explicit
+fallback roles from the sparse outer-block computed-style sample; six axes had
+bounded measurement evidence and shadow correctly stayed at its default with
+zero confidence. The fixture theme and HTML specimen are checked in for human
+review. No theme was applied and no store write occurred.
+
+Verification: three focused compiled tests pass, covering registry/schema
+validation, checked-in golden artifacts, inert-data HTML escaping, invalid and
+quarantined input refusal, and the real `site_apply_theme` dry-run path. The
+dry run emitted a clean exact-replace operation, explicitly unset every stale
+dark key, and made zero writes. Existing 147 script tests and seven capture
+tests pass; `npm run check` passes with 0 errors and 0 warnings (27 pre-existing
+hints); `git diff --check` clean.
+
+## 2026-08-13 — W12 T12.2 decomposition mapper complete
+
+**Closing commit ref:** `refs/tags/w12-t12-2` (the single `T12.2: …` task commit).
+
+`packages/core/cli/capture/map.mjs` now deterministically maps `snapshot.v1`
+pages into ordered, schema-ready page/section candidates and header/footer
+`navigation.v1` candidates. Every candidate exposes
+`{ sectionType, data, confidence }`, source-block/screenshot evidence, and
+field-level `source: 'extracted'` provenance. Optional model assistance can
+suggest only a registered type; it cannot inject data. Links are classified as
+route/external targets and media remains in manifest bindings pending artifact
+materialization, never as source hotlinks in section data.
+
+The mapper accounts for every source block and enumerates unexpressed,
+below-threshold, or PageType-disallowed evidence using the documented gap
+contract. It refuses input with quarantined pages and has no store, publish, or
+release path. The full local Zilberman snapshot produced nine section
+candidates, two navigation candidates, 14 explicit gaps, and 33/33 accounted
+blocks. The checked-in redacted golden produces three section candidates, two
+navigation candidates, 17 gaps, and 33/33 accounted blocks; lower semantic
+coverage is expected because source copy is intentionally redacted. The home
+PageType allowlist is pinned fail-closed and drift-tested against the live
+registry, so disallowed evidence becomes an explicit gap rather than being
+coerced into an invalid draft.
+
+Verification: the six new compiled golden/schema/safety tests pass; every
+emitted page, section, and navigation body parses against the live Zod schemas;
+the existing 147 script tests and seven capture tests pass; `npm run check`
+passes with 0 errors and 0 warnings (27 pre-existing hints); `git diff --check`
+clean. The default unbounded-concurrency compiled-suite runner was also tried
+and reached the new tests green, but did not terminate because unrelated
+pre-existing server test workers retained handles; the immediately preceding
+T12.1 full baseline was green.
+
+## 2026-08-13 — W12 T12.1 capture spike complete
+
+**Closing commit ref:** `refs/tags/w12-t12-1` (the single `T12.1: …` task commit).
+
+The live CMS-Agent `platform` capture contract was verified before the run:
+Zilberman-only origin, `/` scope, project-local max 20 pages, same-origin,
+robots required, concurrency 1, 1,500 ms delay, no authentication, source
+content/referenced-media retention allowed. PR Consulting remained a non-crawl,
+design-inspiration-only reference with content/media reuse prohibited.
+
+The Playwright-core spike in `packages/core/cli/capture/` ran locally against
+the robots-declared sitemap and captured all five unique HTML pages: 67 outline
+nodes, 33 candidate blocks, 43 asset references (35 unique URLs), and 76/76
+mobile+desktop screenshots. Zero pages were quarantined; one document link was
+kept as an asset and one legacy route was deduplicated after redirect. No CMS
+or store write occurred. Full text/screenshots remain ignored under `.tmp/`;
+the committed fixture has structure and asset URLs only, with text redacted and
+no media bytes.
+
+Verification: live end-to-end capture `ok: true`; `npm test` passed 2,378
+compiled tests + 147 script tests + 6 capture tests, then the final focused
+capture suite passed 7/7 after adding the fixture-byte guard; `npm run check`
+completed with 0 errors and 0 warnings (27 pre-existing hints);
+`git diff --check` clean.
+Format limits and the T12.2 mapper-input recommendation are recorded in
+`docs/cms-architecture/capture-spike-findings.md`.
+
 ## 2026-08-10 — W16 executed: genesis scope + fleet parity (T16.0–T16.8, T16.10 landed; T16.9 partial)
 
 Mandate: `docs/cms-architecture/16-genesis-parity-plan.md` (same-day plan, ratified same day).

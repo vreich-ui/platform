@@ -1,6 +1,13 @@
 # 11 — Platformization Plan (W10–W12): design vocabulary, multi-tenant core, site capture
 
-> **Status (2026-07-19): PLANNED — docs only, no code, nothing converted.**
+> **Status (2026-08-13): W10/W11 delivered; W12 built and demonstrated, exit
+> criterion NOT MET, T12.6 disposition still OPEN.** The first Zilberman
+> capture run scored 52.94% mapped coverage against the 90% default with no
+> draft-preview visual evidence, so the exit bar is not cleared on the
+> measurement alone. **No Wolf disposition has been recorded** — an earlier
+> version of this header claimed one; it was agent-authored and is withdrawn.
+> The never-published drafts and 14-gap evidence are retained pending Wolf's
+> review, backlog work, and a rerun.
 > Formalizes parts 2 and 3 of the 2026-07-19 conversion-roadmap strategy
 > session (branch `claude/conversion-roadmap-cms-strategy-hgplp8`): (part 2)
 > agents create templates/themes/sections rich enough to reproduce other
@@ -428,7 +435,10 @@ Recorded verbatim-in-intent from Wolf's rulings; full text and rationale in
   files; provisioning CLI + fleet CI + migration harness live; per-site
   governance + secrets rotation runbook in place; **T11.11 second-site
   proof recorded** — including one core commit rebuilding both sites.
-- **W12:** one authorized target captured end-to-end into a client site by
-  agents through governed verbs only — drafts validate clean, fidelity +
-  gap reports committed, Wolf sign-off at T12.6; gap reports feeding the
-  W10 growth loop.
+- **W12 (NOT MET on measurement; T12.6 disposition OPEN):** the Zilberman target was
+  captured through governed verbs into never-published drafts and its live
+  fidelity + 14-gap reports are committed, but coverage was 52.94% against
+  the 90% default and no draft-preview screenshots were available. The agent
+  recommends “not accepted — record the misses”; **Wolf has not yet ruled.**
+  The W10 growth-loop backlog is recorded in `design-vocabulary-gaps.md` §8;
+  W12 requires remediation and a new acceptance run.
