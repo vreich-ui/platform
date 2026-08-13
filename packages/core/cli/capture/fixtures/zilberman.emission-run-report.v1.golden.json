@@ -1,0 +1,487 @@
+{
+  "dryRun": true,
+  "plan": {
+    "schemaVersion": "capture-emission-plan.v1",
+    "task": "T12.4",
+    "target": "fixture-target",
+    "source": {
+      "mappingGeneratedAt": "2026-08-13T12:03:52.902Z",
+      "targetUrl": "https://www.zilbermanfilmfoundation.com/"
+    },
+    "pageRefs": [
+      "page_9563b8e16278",
+      "page_593efe6a40c0",
+      "page_c470adaf57fc",
+      "page_79c515d4cebf",
+      "page_3ee57ccd5fac"
+    ],
+    "repeatThreshold": 2,
+    "copy": {
+      "source": "target_project_contract",
+      "extractedTextPresent": true,
+      "dryRunDisposition": "policy_read_required_before_live_execution"
+    },
+    "preflight": [
+      {
+        "resolver": "project_policy",
+        "arguments": {
+          "project_id": "fixture-target"
+        },
+        "purpose": "exact project binding and capture policy (outside target MCP)"
+      },
+      {
+        "verb": "object_inventory",
+        "arguments": {
+          "object_type": "site",
+          "status": "active"
+        },
+        "purpose": "source-derived target site binding"
+      },
+      {
+        "verb": "object_contract",
+        "arguments": {
+          "object_type": "theme"
+        }
+      },
+      {
+        "verb": "object_contract",
+        "arguments": {
+          "object_type": "section_template"
+        }
+      },
+      {
+        "verb": "object_contract",
+        "arguments": {
+          "object_type": "navigation"
+        }
+      },
+      {
+        "verb": "object_contract",
+        "arguments": {
+          "object_type": "page"
+        }
+      },
+      {
+        "verb": "object_inventory",
+        "arguments": {
+          "object_type": "theme"
+        },
+        "purpose": "reuse-first theme summaries"
+      },
+      {
+        "verb": "object_inventory",
+        "arguments": {
+          "object_type": "section_template"
+        },
+        "purpose": "reuse-first recipe summaries"
+      },
+      {
+        "verb": "object_inventory",
+        "arguments": {
+          "object_type": "page"
+        },
+        "purpose": "route-collision availability context"
+      },
+      {
+        "verb": "object_get",
+        "arguments": {
+          "object_type": "page",
+          "object_id": "<each inventory page id>"
+        },
+        "purpose": "route-collision body probes when summaries omit routes"
+      }
+    ],
+    "creates": [
+      {
+        "kind": "theme",
+        "objectType": "theme",
+        "requestedId": "thm_capture_3a980f55e7a9df2378",
+        "idempotencyKey": "t12.4:fixture-target:theme:25a849c4cf5b5b85",
+        "body": {
+          "name": "Captured site theme",
+          "description": "Bounded theme draft extracted from captured computed styles.",
+          "whenToUse": "Use only for this captured site after human swatch review.",
+          "scope": "one_off",
+          "tokens": {
+            "colors": {
+              "primary": "rgb(46 111 149)",
+              "secondary": "rgb(37 90 120)",
+              "accent": "rgb(94 140 138)",
+              "gold": "rgb(194 168 120)",
+              "text-heading": "rgb(22 26 29)",
+              "text-default": "rgb(0  0  0)",
+              "text-muted": "rgb(58 65 73 / 76%)",
+              "bg-page": "rgb(252 251 248)",
+              "bg-surface": "rgb(247 245 240)",
+              "bg-page-dark": "rgb(3 6 32)"
+            },
+            "fonts": {
+              "sans": "Arial, Helvetica, sans-serif",
+              "serif": "'Source Serif 4', Georgia, serif",
+              "heading": "'Playfair Display', 'Times New Roman', serif"
+            },
+            "layout": {
+              "containerWidth": "wide",
+              "sectionRhythm": "compact"
+            },
+            "shape": {
+              "radius": "sharp",
+              "buttonShape": "rect",
+              "shadow": "soft"
+            },
+            "type": {
+              "scale": "compact",
+              "headingWeight": "regular"
+            }
+          }
+        },
+        "reason": "T12.3 bounded theme draft; draft only (site_apply_theme is intentionally absent)."
+      },
+      {
+        "kind": "section_template",
+        "objectType": "section_template",
+        "requestedId": "stpl_capture_7ebf831f7132fd3409",
+        "idempotencyKey": "t12.4:fixture-target:section-template:ed801ce3c9bdc88e",
+        "reason": "shape repeated 2 times (threshold 2)",
+        "body": {
+          "name": "Captured lede recipe",
+          "description": "Draft recipe extracted from 2 repeated lede shapes.",
+          "whenToUse": "Use for the repeated lede shape discovered in this capture.",
+          "scope": "one_off",
+          "blueprint": {
+            "id": "s_7f8b34f814",
+            "type": "lede",
+            "data": {
+              "heading": "[redacted:19 chars]",
+              "actions": []
+            }
+          }
+        }
+      },
+      {
+        "kind": "navigation",
+        "objectType": "navigation",
+        "requestedId": "nav_capture_b9cfafd65ac61976c1",
+        "idempotencyKey": "t12.4:fixture-target:navigation:055bc4fb4ec6ccd1",
+        "body": {
+          "role": "header",
+          "groups": [
+            {
+              "id": "g_primary",
+              "items": [
+                {
+                  "id": "i_168cf11182",
+                  "label": "[redacted:4 chars]",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  }
+                },
+                {
+                  "id": "i_00a7dc8d30",
+                  "label": "[redacted:8 chars]",
+                  "target": {
+                    "kind": "route",
+                    "href": "/s-projects-side-by-side"
+                  }
+                },
+                {
+                  "id": "i_f358b6431f",
+                  "label": "[redacted:8 chars]",
+                  "target": {
+                    "kind": "route",
+                    "href": "/partners"
+                  }
+                },
+                {
+                  "id": "i_44e5b4d60c",
+                  "label": "[redacted:11 chars]",
+                  "target": {
+                    "kind": "route",
+                    "href": "/filmography"
+                  }
+                }
+              ]
+            }
+          ],
+          "actions": []
+        },
+        "reason": "Mapped navigation candidate."
+      },
+      {
+        "kind": "navigation",
+        "objectType": "navigation",
+        "requestedId": "nav_capture_e1b3d6b6cd9d58f1f0",
+        "idempotencyKey": "t12.4:fixture-target:navigation:eaaa72ea6899ea27",
+        "body": {
+          "role": "footer",
+          "groups": [],
+          "footNote": "[redacted:50 chars]"
+        },
+        "reason": "Mapped navigation candidate."
+      },
+      {
+        "kind": "page",
+        "objectType": "page",
+        "requestedId": "page_capture_0dab20cec74b87733e",
+        "idempotencyKey": "t12.4:fixture-target:page:19c2f2fbce7026f2",
+        "body": {
+          "route": "/",
+          "pageType": "home",
+          "title": "[redacted:20 chars]",
+          "seo": {
+            "description": "[redacted:157 chars]"
+          },
+          "sections": []
+        },
+        "reason": "Mapped page https://www.zilbermanfilmfoundation.com/; route availability is probed before creation."
+      },
+      {
+        "kind": "page",
+        "objectType": "page",
+        "requestedId": "page_capture_d5bd70381ea544b763",
+        "idempotencyKey": "t12.4:fixture-target:page:98369e48724fc750",
+        "body": {
+          "route": "/blank-1/moye-sobytiye",
+          "pageType": "standard",
+          "title": "[redacted:11 chars]",
+          "seo": {
+            "description": "[redacted:13 chars]"
+          },
+          "sections": []
+        },
+        "reason": "Mapped page https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye; route availability is probed before creation."
+      },
+      {
+        "kind": "page",
+        "objectType": "page",
+        "requestedId": "page_capture_b1d5b8c4afe3b161ad",
+        "idempotencyKey": "t12.4:fixture-target:page:86acf93a599fe147",
+        "body": {
+          "route": "/filmography",
+          "pageType": "standard",
+          "title": "[redacted:19 chars]",
+          "seo": {},
+          "sections": [
+            {
+              "id": "s_7f8b34f814",
+              "type": "lede",
+              "data": {
+                "heading": "[redacted:19 chars]",
+                "actions": []
+              }
+            }
+          ]
+        },
+        "reason": "Mapped page https://www.zilbermanfilmfoundation.com/filmography; route availability is probed before creation."
+      },
+      {
+        "kind": "page",
+        "objectType": "page",
+        "requestedId": "page_capture_0f9154b8ed565f1249",
+        "idempotencyKey": "t12.4:fixture-target:page:8a8d283de8990937",
+        "body": {
+          "route": "/partners",
+          "pageType": "standard",
+          "title": "[redacted:12 chars]",
+          "seo": {},
+          "sections": [
+            {
+              "id": "s_3bf9b659b0",
+              "type": "lede",
+              "data": {
+                "heading": "[redacted:12 chars]",
+                "actions": []
+              }
+            },
+            {
+              "id": "s_8d1b67616f",
+              "type": "prose",
+              "data": {
+                "body": "<p>[redacted:735 chars]</p>"
+              }
+            }
+          ]
+        },
+        "reason": "Mapped page https://www.zilbermanfilmfoundation.com/partners; route availability is probed before creation."
+      },
+      {
+        "kind": "page",
+        "objectType": "page",
+        "requestedId": "page_capture_9e3000e280950d9b0d",
+        "idempotencyKey": "t12.4:fixture-target:page:79d63878e18fe9b8",
+        "body": {
+          "route": "/book-online",
+          "pageType": "standard",
+          "title": "[redacted:36 chars]",
+          "seo": {},
+          "sections": []
+        },
+        "reason": "Mapped page https://www.zilbermanfilmfoundation.com/book-online; route availability is probed before creation."
+      }
+    ],
+    "media": [
+      {
+        "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_ed4f78af95c9",
+        "manifestRef": "asset_2e28c6c60668",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+        "kind": "image",
+        "alt": "[redacted:11 chars]",
+        "status": "pending_artifact_materialization"
+      }
+    ],
+    "gaps": [
+      {
+        "gapId": "gap_615362d9f5bd",
+        "blockRef": "page_9563b8e16278_block_001",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
+        "why": "section_not_allowed_for_page_type",
+        "nearestType": "cta_banner",
+        "missingCapability": "home PageType does not allow cta_banner; preserve source evidence as a gap rather than coercing it"
+      },
+      {
+        "gapId": "gap_07ad96fe838f",
+        "blockRef": "page_9563b8e16278_block_006",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_006.png",
+        "why": "section_not_allowed_for_page_type",
+        "nearestType": "prose",
+        "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+      },
+      {
+        "gapId": "gap_4fb4d4158abe",
+        "blockRef": "page_9563b8e16278_block_007",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
+        "why": "section_not_allowed_for_page_type",
+        "nearestType": "cta_banner",
+        "missingCapability": "home PageType does not allow cta_banner; preserve source evidence as a gap rather than coercing it"
+      },
+      {
+        "gapId": "gap_4025a57d3e19",
+        "blockRef": "page_9563b8e16278_block_010",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_1d376811a72e",
+        "blockRef": "page_9563b8e16278_block_011",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
+        "why": "section_not_allowed_for_page_type",
+        "nearestType": "prose",
+        "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+      },
+      {
+        "gapId": "gap_244ef90d50b7",
+        "blockRef": "page_9563b8e16278_block_012",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_8515975a683d",
+        "blockRef": "page_9563b8e16278_block_014",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
+        "why": "insufficient_structure",
+        "nearestType": "prose",
+        "missingCapability": "more semantic or textual evidence"
+      },
+      {
+        "gapId": "gap_8c8b1b819645",
+        "blockRef": "page_9563b8e16278_block_017",
+        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
+        "why": "logo_or_partner_strip_requires_assets",
+        "nearestType": "brand_row",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_d92603a71c6a",
+        "blockRef": "page_593efe6a40c0_block_001",
+        "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_4d8f62e8c497",
+        "blockRef": "page_c470adaf57fc_block_002",
+        "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_0eeef6da1d84",
+        "blockRef": "page_c470adaf57fc_block_003",
+        "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_35a5ff7e9380",
+        "blockRef": "page_79c515d4cebf_block_003",
+        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_c4231af4b63c",
+        "blockRef": "page_79c515d4cebf_block_004",
+        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_b36e8f83a5cd",
+        "blockRef": "page_79c515d4cebf_block_005",
+        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
+        "why": "unmaterialized_visual_evidence",
+        "nearestType": "media",
+        "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+      },
+      {
+        "gapId": "gap_147c556f95e9",
+        "blockRef": "page_79c515d4cebf_block_006",
+        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_c724cdb13bf8",
+        "blockRef": "page_79c515d4cebf_block_007",
+        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
+        "why": "media_gallery_requires_assets",
+        "nearestType": "media",
+        "missingCapability": "materialized first-party asset references and item-level text association"
+      },
+      {
+        "gapId": "gap_3ca2c570f6e6",
+        "blockRef": "page_3ee57ccd5fac_block_001",
+        "screenshotRef": "pages/page_3ee57ccd5fac/mobile/blocks/page_3ee57ccd5fac_block_001.png",
+        "why": "insufficient_structure",
+        "nearestType": "prose",
+        "missingCapability": "more semantic or textual evidence"
+      }
+    ],
+    "forbiddenVerbs": [
+      "deploy",
+      "object_publish",
+      "release_to_production",
+      "trigger_netlify_build"
+    ]
+  },
+  "createdObjects": [],
+  "validationStates": [],
+  "quarantines": [],
+  "copyPolicy": {
+    "source": "target_project_contract",
+    "extractedTextPresent": true,
+    "dryRunDisposition": "policy_read_required_before_live_execution"
+  }
+}

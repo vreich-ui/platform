@@ -1,0 +1,38 @@
+{
+  "name": "Captured site theme",
+  "description": "Bounded theme draft extracted from captured computed styles.",
+  "whenToUse": "Use only for this captured site after human swatch review.",
+  "scope": "one_off",
+  "tokens": {
+    "colors": {
+      "primary": "rgb(46 111 149)",
+      "secondary": "rgb(37 90 120)",
+      "accent": "rgb(94 140 138)",
+      "gold": "rgb(194 168 120)",
+      "text-heading": "rgb(22 26 29)",
+      "text-default": "rgb(0  0  0)",
+      "text-muted": "rgb(58 65 73 / 76%)",
+      "bg-page": "rgb(252 251 248)",
+      "bg-surface": "rgb(247 245 240)",
+      "bg-page-dark": "rgb(3 6 32)"
+    },
+    "fonts": {
+      "sans": "Arial, Helvetica, sans-serif",
+      "serif": "'Source Serif 4', Georgia, serif",
+      "heading": "'Playfair Display', 'Times New Roman', serif"
+    },
+    "layout": {
+      "containerWidth": "wide",
+      "sectionRhythm": "compact"
+    },
+    "shape": {
+      "radius": "sharp",
+      "buttonShape": "rect",
+      "shadow": "soft"
+    },
+    "type": {
+      "scale": "compact",
+      "headingWeight": "regular"
+    }
+  }
+}

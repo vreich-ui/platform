@@ -1,0 +1,674 @@
+{
+  "schemaVersion": "capture-map.v1",
+  "snapshotSchemaVersion": "snapshot.v1",
+  "generatedAt": "2026-08-13T12:03:52.902Z",
+  "source": {
+    "targetUrl": "https://www.zilbermanfilmfoundation.com/",
+    "capturedAt": "2026-08-13T12:03:52.902Z",
+    "redacted": true
+  },
+  "policy": {
+    "confidenceThreshold": 0.72,
+    "copyHandling": "defer_to_target_project_capture_policy",
+    "emittedTextSource": "extracted",
+    "mediaHandling": "manifest_refs_only_pending_artifact_materialization",
+    "assistance": "none"
+  },
+  "pages": [
+    {
+      "pageRef": "page_9563b8e16278",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
+      "pageBody": {
+        "route": "/",
+        "pageType": "home",
+        "title": "[redacted:20 chars]",
+        "seo": {
+          "description": "[redacted:157 chars]"
+        },
+        "sections": []
+      },
+      "candidates": [],
+      "gaps": [
+        {
+          "gapId": "gap_615362d9f5bd",
+          "blockRef": "page_9563b8e16278_block_001",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
+          "why": "section_not_allowed_for_page_type",
+          "nearestType": "cta_banner",
+          "missingCapability": "home PageType does not allow cta_banner; preserve source evidence as a gap rather than coercing it"
+        },
+        {
+          "gapId": "gap_07ad96fe838f",
+          "blockRef": "page_9563b8e16278_block_006",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_006.png",
+          "why": "section_not_allowed_for_page_type",
+          "nearestType": "prose",
+          "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+        },
+        {
+          "gapId": "gap_4fb4d4158abe",
+          "blockRef": "page_9563b8e16278_block_007",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
+          "why": "section_not_allowed_for_page_type",
+          "nearestType": "cta_banner",
+          "missingCapability": "home PageType does not allow cta_banner; preserve source evidence as a gap rather than coercing it"
+        },
+        {
+          "gapId": "gap_4025a57d3e19",
+          "blockRef": "page_9563b8e16278_block_010",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        },
+        {
+          "gapId": "gap_1d376811a72e",
+          "blockRef": "page_9563b8e16278_block_011",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
+          "why": "section_not_allowed_for_page_type",
+          "nearestType": "prose",
+          "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+        },
+        {
+          "gapId": "gap_244ef90d50b7",
+          "blockRef": "page_9563b8e16278_block_012",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        },
+        {
+          "gapId": "gap_8515975a683d",
+          "blockRef": "page_9563b8e16278_block_014",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
+          "why": "insufficient_structure",
+          "nearestType": "prose",
+          "missingCapability": "more semantic or textual evidence"
+        },
+        {
+          "gapId": "gap_8c8b1b819645",
+          "blockRef": "page_9563b8e16278_block_017",
+          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
+          "why": "logo_or_partner_strip_requires_assets",
+          "nearestType": "brand_row",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        }
+      ],
+      "blockAccounting": [
+        {
+          "blockRef": "page_9563b8e16278_block_001",
+          "status": "gap",
+          "gapId": "gap_615362d9f5bd"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_002",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_001"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_003",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_001"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_004",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_006"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_005",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_006"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_006",
+          "status": "gap",
+          "gapId": "gap_07ad96fe838f"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_007",
+          "status": "gap",
+          "gapId": "gap_4fb4d4158abe"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_008",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_007"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_009",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_007"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_010",
+          "status": "gap",
+          "gapId": "gap_4025a57d3e19"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_011",
+          "status": "gap",
+          "gapId": "gap_1d376811a72e"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_012",
+          "status": "gap",
+          "gapId": "gap_244ef90d50b7"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_013",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_012"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_014",
+          "status": "gap",
+          "gapId": "gap_8515975a683d"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_015",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_014"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_016",
+          "status": "duplicate",
+          "resolvedInto": "page_9563b8e16278_block_014"
+        },
+        {
+          "blockRef": "page_9563b8e16278_block_017",
+          "status": "gap",
+          "gapId": "gap_8c8b1b819645"
+        }
+      ]
+    },
+    {
+      "pageRef": "page_593efe6a40c0",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
+      "pageBody": {
+        "route": "/blank-1/moye-sobytiye",
+        "pageType": "standard",
+        "title": "[redacted:11 chars]",
+        "seo": {
+          "description": "[redacted:13 chars]"
+        },
+        "sections": []
+      },
+      "candidates": [],
+      "gaps": [
+        {
+          "gapId": "gap_d92603a71c6a",
+          "blockRef": "page_593efe6a40c0_block_001",
+          "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        }
+      ],
+      "blockAccounting": [
+        {
+          "blockRef": "page_593efe6a40c0_block_001",
+          "status": "gap",
+          "gapId": "gap_d92603a71c6a"
+        },
+        {
+          "blockRef": "page_593efe6a40c0_block_002",
+          "status": "duplicate",
+          "resolvedInto": "page_593efe6a40c0_block_001"
+        },
+        {
+          "blockRef": "page_593efe6a40c0_block_003",
+          "status": "duplicate",
+          "resolvedInto": "page_593efe6a40c0_block_001"
+        }
+      ]
+    },
+    {
+      "pageRef": "page_c470adaf57fc",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
+      "pageBody": {
+        "route": "/filmography",
+        "pageType": "standard",
+        "title": "[redacted:19 chars]",
+        "seo": {},
+        "sections": [
+          {
+            "id": "s_7f8b34f814",
+            "type": "lede",
+            "data": {
+              "heading": "[redacted:19 chars]",
+              "actions": []
+            }
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "candidateId": "candidate_6efacac5dea4",
+          "sectionType": "lede",
+          "data": {
+            "heading": "[redacted:19 chars]",
+            "actions": []
+          },
+          "section": {
+            "id": "s_7f8b34f814",
+            "type": "lede",
+            "data": {
+              "heading": "[redacted:19 chars]",
+              "actions": []
+            }
+          },
+          "confidence": 0.91,
+          "mappingReason": "first semantic block carries the page heading",
+          "sourceBlockIds": [
+            "page_c470adaf57fc_block_001"
+          ],
+          "screenshotRefs": [
+            "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_001.png",
+            "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_001.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_c470adaf57fc_block_001"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "gaps": [
+        {
+          "gapId": "gap_4d8f62e8c497",
+          "blockRef": "page_c470adaf57fc_block_002",
+          "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        },
+        {
+          "gapId": "gap_0eeef6da1d84",
+          "blockRef": "page_c470adaf57fc_block_003",
+          "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        }
+      ],
+      "blockAccounting": [
+        {
+          "blockRef": "page_c470adaf57fc_block_001",
+          "status": "mapped",
+          "candidateId": "candidate_6efacac5dea4"
+        },
+        {
+          "blockRef": "page_c470adaf57fc_block_002",
+          "status": "gap",
+          "gapId": "gap_4d8f62e8c497"
+        },
+        {
+          "blockRef": "page_c470adaf57fc_block_003",
+          "status": "gap",
+          "gapId": "gap_0eeef6da1d84"
+        },
+        {
+          "blockRef": "page_c470adaf57fc_block_004",
+          "status": "duplicate",
+          "resolvedInto": "page_c470adaf57fc_block_002"
+        }
+      ]
+    },
+    {
+      "pageRef": "page_79c515d4cebf",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "pageBody": {
+        "route": "/partners",
+        "pageType": "standard",
+        "title": "[redacted:12 chars]",
+        "seo": {},
+        "sections": [
+          {
+            "id": "s_3bf9b659b0",
+            "type": "lede",
+            "data": {
+              "heading": "[redacted:12 chars]",
+              "actions": []
+            }
+          },
+          {
+            "id": "s_8d1b67616f",
+            "type": "prose",
+            "data": {
+              "body": "<p>[redacted:735 chars]</p>"
+            }
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "candidateId": "candidate_58b1fa0d7ab9",
+          "sectionType": "lede",
+          "data": {
+            "heading": "[redacted:12 chars]",
+            "actions": []
+          },
+          "section": {
+            "id": "s_3bf9b659b0",
+            "type": "lede",
+            "data": {
+              "heading": "[redacted:12 chars]",
+              "actions": []
+            }
+          },
+          "confidence": 0.91,
+          "mappingReason": "first semantic block carries the page heading",
+          "sourceBlockIds": [
+            "page_79c515d4cebf_block_001"
+          ],
+          "screenshotRefs": [
+            "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_001.png",
+            "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_001.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_79c515d4cebf_block_001"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "candidateId": "candidate_ed4f78af95c9",
+          "sectionType": "prose",
+          "data": {
+            "body": "<p>[redacted:735 chars]</p>"
+          },
+          "section": {
+            "id": "s_8d1b67616f",
+            "type": "prose",
+            "data": {
+              "body": "<p>[redacted:735 chars]</p>"
+            }
+          },
+          "confidence": 0.76,
+          "mappingReason": "explanatory text fallback",
+          "sourceBlockIds": [
+            "page_79c515d4cebf_block_005"
+          ],
+          "screenshotRefs": [
+            "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
+            "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_005.png"
+          ],
+          "assetBindings": [
+            {
+              "manifestRef": "asset_2e28c6c60668",
+              "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+              "kind": "image",
+              "alt": "[redacted:11 chars]",
+              "status": "pending_artifact_materialization"
+            }
+          ],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.body",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_79c515d4cebf_block_005"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "gaps": [
+        {
+          "gapId": "gap_35a5ff7e9380",
+          "blockRef": "page_79c515d4cebf_block_003",
+          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        },
+        {
+          "gapId": "gap_c4231af4b63c",
+          "blockRef": "page_79c515d4cebf_block_004",
+          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        },
+        {
+          "gapId": "gap_b36e8f83a5cd",
+          "blockRef": "page_79c515d4cebf_block_005",
+          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
+          "why": "unmaterialized_visual_evidence",
+          "nearestType": "media",
+          "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+        },
+        {
+          "gapId": "gap_147c556f95e9",
+          "blockRef": "page_79c515d4cebf_block_006",
+          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        },
+        {
+          "gapId": "gap_c724cdb13bf8",
+          "blockRef": "page_79c515d4cebf_block_007",
+          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
+          "why": "media_gallery_requires_assets",
+          "nearestType": "media",
+          "missingCapability": "materialized first-party asset references and item-level text association"
+        }
+      ],
+      "blockAccounting": [
+        {
+          "blockRef": "page_79c515d4cebf_block_001",
+          "status": "mapped",
+          "candidateId": "candidate_58b1fa0d7ab9"
+        },
+        {
+          "blockRef": "page_79c515d4cebf_block_002",
+          "status": "duplicate",
+          "resolvedInto": "page_79c515d4cebf_block_003"
+        },
+        {
+          "blockRef": "page_79c515d4cebf_block_003",
+          "status": "gap",
+          "gapId": "gap_35a5ff7e9380"
+        },
+        {
+          "blockRef": "page_79c515d4cebf_block_004",
+          "status": "gap",
+          "gapId": "gap_c4231af4b63c"
+        },
+        {
+          "blockRef": "page_79c515d4cebf_block_005",
+          "status": "mapped_with_gap",
+          "candidateId": "candidate_ed4f78af95c9",
+          "gapId": "gap_b36e8f83a5cd"
+        },
+        {
+          "blockRef": "page_79c515d4cebf_block_006",
+          "status": "gap",
+          "gapId": "gap_147c556f95e9"
+        },
+        {
+          "blockRef": "page_79c515d4cebf_block_007",
+          "status": "gap",
+          "gapId": "gap_c724cdb13bf8"
+        }
+      ]
+    },
+    {
+      "pageRef": "page_3ee57ccd5fac",
+      "sourceUrl": "https://www.zilbermanfilmfoundation.com/book-online",
+      "pageBody": {
+        "route": "/book-online",
+        "pageType": "standard",
+        "title": "[redacted:36 chars]",
+        "seo": {},
+        "sections": []
+      },
+      "candidates": [],
+      "gaps": [
+        {
+          "gapId": "gap_3ca2c570f6e6",
+          "blockRef": "page_3ee57ccd5fac_block_001",
+          "screenshotRef": "pages/page_3ee57ccd5fac/mobile/blocks/page_3ee57ccd5fac_block_001.png",
+          "why": "insufficient_structure",
+          "nearestType": "prose",
+          "missingCapability": "more semantic or textual evidence"
+        }
+      ],
+      "blockAccounting": [
+        {
+          "blockRef": "page_3ee57ccd5fac_block_001",
+          "status": "gap",
+          "gapId": "gap_3ca2c570f6e6"
+        },
+        {
+          "blockRef": "page_3ee57ccd5fac_block_002",
+          "status": "duplicate",
+          "resolvedInto": "page_3ee57ccd5fac_block_001"
+        }
+      ]
+    }
+  ],
+  "navigationCandidates": [
+    {
+      "candidateId": "navigation_1e0584a25d9f",
+      "role": "header",
+      "body": {
+        "role": "header",
+        "groups": [
+          {
+            "id": "g_primary",
+            "items": [
+              {
+                "id": "i_168cf11182",
+                "label": "[redacted:4 chars]",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                }
+              },
+              {
+                "id": "i_00a7dc8d30",
+                "label": "[redacted:8 chars]",
+                "target": {
+                  "kind": "route",
+                  "href": "/s-projects-side-by-side"
+                }
+              },
+              {
+                "id": "i_f358b6431f",
+                "label": "[redacted:8 chars]",
+                "target": {
+                  "kind": "route",
+                  "href": "/partners"
+                }
+              },
+              {
+                "id": "i_44e5b4d60c",
+                "label": "[redacted:11 chars]",
+                "target": {
+                  "kind": "route",
+                  "href": "/filmography"
+                }
+              }
+            ]
+          }
+        ],
+        "actions": []
+      },
+      "confidence": 0.96,
+      "sourcePageRefs": [
+        "page_9563b8e16278",
+        "page_593efe6a40c0",
+        "page_c470adaf57fc",
+        "page_79c515d4cebf",
+        "page_3ee57ccd5fac"
+      ],
+      "provenance": {
+        "textFields": [
+          {
+            "path": "data.groups.0.items.0.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_9563b8e16278"
+            ]
+          },
+          {
+            "path": "data.groups.0.items.1.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_9563b8e16278"
+            ]
+          },
+          {
+            "path": "data.groups.0.items.2.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_9563b8e16278"
+            ]
+          },
+          {
+            "path": "data.groups.0.items.3.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_9563b8e16278"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "candidateId": "navigation_0301844ccd8e",
+      "role": "footer",
+      "body": {
+        "role": "footer",
+        "groups": [],
+        "footNote": "[redacted:50 chars]"
+      },
+      "confidence": 0.9,
+      "sourcePageRefs": [
+        "page_9563b8e16278",
+        "page_593efe6a40c0",
+        "page_c470adaf57fc",
+        "page_79c515d4cebf",
+        "page_3ee57ccd5fac"
+      ],
+      "provenance": {
+        "textFields": [
+          {
+            "path": "data.footNote",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_9563b8e16278"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "pages": 5,
+    "sectionCandidates": 3,
+    "navigationCandidates": 2,
+    "gaps": 17,
+    "sourceBlocks": 33,
+    "accountedBlocks": 33
+  }
+}

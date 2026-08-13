@@ -1,6 +1,49 @@
 # Design-vocabulary survey — reference targets → mint list + gap report (T10.3)
 
-> **Status: PROPOSAL — awaiting Wolf's T10.4 ratification (OQ-W10-1 + OQ-W10-2).**
+## 8. W12 capture evidence — Zilberman Foundation (T12.5/T12.6, 2026-08-13)
+
+The first capture-fed gap artifact is
+[`zilberman.palette-gap-report.v1.golden.json`](../../packages/core/cli/capture/fixtures/zilberman.palette-gap-report.v1.golden.json).
+It is generated from the authorized Zilberman snapshot and mapper output; it
+records unexpressible source blocks as evidence only, and does not mint a new
+section type or relax PageType law. The capture policy classifies the separate
+PR Consulting reference as design inspiration only: it was not crawled and no
+copy or media from it is present in this evidence.
+
+The companion fidelity fixture uses the ratified coverage-based rubric rather
+than a pixel threshold. Its screenshot paths are retained as evidence but the
+fixture intentionally has no image binaries, so unavailable visual comparisons
+remain explicit rather than being invented or treated as a pass.
+
+Wolf reviewed the first live run at T12.6 and selected **not accepted — record
+the misses**. The committed live
+[`fidelity report`](../../packages/core/cli/capture/reports/zilberman.2026-08-13.fidelity-report.v1.json)
+records 9/17 mapped relevant blocks (52.94%, below the 90% default), complete
+tokens, all gaps enumerated, and 0/34 visual comparisons available because no
+draft-preview screenshot manifest existed. The companion
+[`palette-gap report`](../../packages/core/cli/capture/reports/zilberman.2026-08-13.palette-gaps.v1.json)
+contains all 14 source-block findings.
+
+### 8.1 W10 growth-loop backlog from the live run
+
+| Evidence group | Count | Disposition |
+| --- | ---: | --- |
+| Materialized asset refs must be rebound into schema-safe image/media fields | 6 | Mapping/emission follow-up; no new type and no hotlinks |
+| Gallery needs first-party assets plus item-level text | 2 | Use the existing governed `media` vocabulary; improve asset-aware mapping |
+| Embedded builder style payload cannot be retained | 2 | Normalize into semantic gallery/media data; never import CSS |
+| Home PageType refuses prose/contact form | 3 | Placement/PageType-policy decision; keep quarantined and do not widen merely to pass |
+| Event detail mixes metadata, body, registration, and sharing | 1 | Governed event/workflow content-model backlog; behavior gap, not static-composite evidence |
+| Draft-preview screenshots absent | 34 comparisons | Capture infrastructure backlog; generate a reviewable preview before rescoring |
+
+This first real capture therefore adds **no third qualifying static-composite
+case**: the event finding needs behavior and content modeling, while the other
+findings are asset binding, semantic normalization, PageType placement, or
+preview infrastructure. The composite gate remains closed. A future acceptance
+run must address these items and meet the unchanged rubric; this evidence does
+not mint vocabulary or loosen validation.
+
+> **Original T10.3 survey status (historic): PROPOSAL — awaiting Wolf's T10.4
+> ratification (OQ-W10-1 + OQ-W10-2).**
 > Produced 2026-07-19 per `11-platformization-plan.md` §1.2. This document
 > mints NOTHING: it is the evidence and the proposal. Rule 1 grows the palette
 > on demand — the multi-site/capture ambition (W11/W12) is the demand — and

@@ -4,9 +4,10 @@
 > 2026-07-20 per the T10.7 brief from `09-template-system-plan.md` §8 (the
 > spec + the four OQs), `block-tree.md` (the designed-never-built nested
 > ops), and `design-vocabulary-gaps.md` §5 (the T10.3 composite evidence),
-> re-checked AFTER the T10.5/T10.6 mints landed. No W12 capture gap reports
-> exist yet (W12 has not run); a re-check rides the first T12.5 fidelity
-> report. Each OQ below ends with an explicit ANSWER line for Wolf.
+> re-checked AFTER the T10.5/T10.6 mints landed. The first real W12 capture
+> run (2026-08-13, T12.6 prepared — disposition still open) produced 14 gaps;
+> none is a third qualifying static-composite case, so the gate remains
+> closed. Each OQ below ends with an explicit ANSWER line for Wolf.
 
 ## 0. The question being decided
 
@@ -32,13 +33,16 @@ layouts the bounded palette cannot express; only **two** (bento, overlap)
 are genuine static-composition cases the §8 spec would actually fix. The
 third is an interactivity gap — building composite sections would leave it
 exactly as inexpressible as today. Two archetype-derived cases, zero
-capture-derived cases (W12 has produced no gap reports yet).
+qualifying capture-derived cases. The 2026-08-13 Zilberman capture produced
+14 gaps, but they resolve to asset binding/semantic media normalization,
+PageType placement, draft-preview infrastructure, and one event
+behavior/content-model gap — none is a third static-composite layout.
 
-**Recommendation: composite STAYS GATED.** Revisit when W12's palette-gap
-reports (T12.2/T12.5 emit them by design) supply a third genuine static
-case from a REAL capture target — the strongest possible evidence, and the
-exact demand rule 1 wants. If Wolf weighs bento + overlap as sufficient on
-their own, the §2–§4 recommendations below are build-ready answers.
+**Recommendation: composite STAYS GATED.** Revisit when a future palette-gap
+report supplies a third genuine static case from a real capture target — the
+strongest possible evidence, and the exact demand rule 1 wants. If Wolf weighs
+bento + overlap as sufficient on their own, the §2–§4 recommendations below
+are build-ready answers.
 
 **OQ-W8-1 ANSWER (Wolf):** ******************\_\_\_\_******************
 

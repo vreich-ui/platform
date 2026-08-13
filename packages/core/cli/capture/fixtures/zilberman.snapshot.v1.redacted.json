@@ -1,0 +1,4847 @@
+{
+  "schemaVersion": "snapshot.v1",
+  "capture": {
+    "targetUrl": "https://www.zilbermanfilmfoundation.com/",
+    "origin": "https://www.zilbermanfilmfoundation.com",
+    "capturedAt": "2026-08-13T12:03:52.902Z",
+    "localOnly": true,
+    "redacted": true,
+    "contentTreatment": "page content was recorded as data and never interpreted as instructions",
+    "crawler": {
+      "userAgent": "W12CaptureSpike/1.0",
+      "browserExecutable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "concurrency": 1,
+      "delayMs": 1500
+    },
+    "policy": {
+      "maxPages": 20,
+      "allowedCrawlOrigins": [
+        "https://www.zilbermanfilmfoundation.com"
+      ],
+      "allowedPathPrefixes": [
+        "/"
+      ],
+      "sameOriginOnly": true,
+      "respectRobots": true,
+      "concurrency": 1,
+      "delayMs": 1500,
+      "authenticatedAccess": "prohibited",
+      "rights": {
+        "content": "retain_allowed_origin_content",
+        "media": "retain_referenced_allowed_origin_media"
+      },
+      "designReferences": [
+        {
+          "origin": "https://prconsulting.net",
+          "purpose": "design_inspiration_only",
+          "crawlAllowed": false,
+          "contentReuse": "prohibited",
+          "mediaReuse": "prohibited"
+        }
+      ],
+      "fidelity": {
+        "mode": "design_inspired",
+        "sourceDesignTreatment": "source_content_with_design_inspiration_only"
+      }
+    },
+    "robots": {
+      "url": "https://www.zilbermanfilmfoundation.com/robots.txt",
+      "status": 200,
+      "fetchedAt": "2026-08-13T12:03:00.719Z",
+      "sha256": "55d8151b0cfc2521af06081023b3a69e66e36e5bdd091a508c98f3ad2e7bb62d",
+      "sitemaps": [
+        "https://www.zilbermanfilmfoundation.com/sitemap.xml"
+      ],
+      "crawlDelayMs": 0,
+      "respected": true,
+      "sitemapFetches": [
+        {
+          "url": "https://www.zilbermanfilmfoundation.com/sitemap.xml",
+          "status": 200,
+          "sha256": "fc034669b857920fc5607ad837ced12bf9abc9751cc296ae323b18b4e5e82aaf",
+          "locations": 2
+        },
+        {
+          "url": "https://www.zilbermanfilmfoundation.com/event-pages-sitemap.xml",
+          "status": 200,
+          "sha256": "797aa7135862819ef78fa76f75a8290a79cd96e7b0aef53931aab7960b7de276",
+          "locations": 1
+        },
+        {
+          "url": "https://www.zilbermanfilmfoundation.com/pages-sitemap.xml",
+          "status": 200,
+          "sha256": "a6fdc3545b5096875dd7b918fc0de5bb9d26a61f58ee999d0e72fcb06f9198ce",
+          "locations": 5
+        }
+      ]
+    },
+    "viewports": [
+      {
+        "id": "mobile",
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1
+      },
+      {
+        "id": "desktop",
+        "width": 1440,
+        "height": 1000,
+        "deviceScaleFactor": 1
+      }
+    ],
+    "redaction": {
+      "text": "replaced with length-preserving markers",
+      "screenshots": "references retained; binary files omitted",
+      "assets": "URL manifest retained; bytes never stored"
+    }
+  },
+  "pages": [
+    {
+      "pageId": "page_9563b8e16278",
+      "requestedUrl": "https://www.zilbermanfilmfoundation.com/",
+      "url": "https://www.zilbermanfilmfoundation.com/",
+      "path": "/",
+      "status": 200,
+      "capturedAt": "2026-08-13T12:03:17.812Z",
+      "title": "[redacted:47 chars]",
+      "lang": "en",
+      "canonicalUrl": "https://www.zilbermanfilmfoundation.com/",
+      "metaDescription": "[redacted:157 chars]",
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#SITE_HEADER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#comp-lfva20u2"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "[redacted:78 chars]",
+          "selector": "#comp-lfva214vnavContainer"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#PAGES_CONTAINER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:163 chars]",
+          "selector": "#comp-lfva27bj"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:163 chars]",
+          "selector": "#comp-lfva21rg"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:163 chars]",
+          "selector": "#comp-lfva21rh"
+        },
+        {
+          "tag": "h1",
+          "role": null,
+          "level": 1,
+          "text": "[redacted:20 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(1) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > div > div > div:nth-of-type(2) > h1"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfva27rv"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfva21rm1"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfva21rn"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfwgpzkm"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfwgrs3f"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfwgrs3g1"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfwgu4ur"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "[redacted:12 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(4) > div:nth-of-type(2) > div > div:nth-of-type(1) > h2"
+        },
+        {
+          "tag": "div",
+          "role": "region",
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lfwgu4xe1"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(4) > div:nth-of-type(2) > div > div:nth-of-type(2) > nav"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:52 chars]",
+          "selector": "#comp-lgdf70p5"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:52 chars]",
+          "selector": "#comp-loczwzc1"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "[redacted:12 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(5) > div:nth-of-type(3) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > h2"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#comp-lfva280c"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#comp-lfva21rp"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#comp-lfva21rp2"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "[redacted:8 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(6) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > h2"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#SITE_FOOTER"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva27bj",
+          "text": {
+            "value": "[redacted:163 chars]",
+            "length": 163,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:8 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 740
+            },
+            "desktop": {
+              "x": 0,
+              "y": -3252,
+              "width": 1440,
+              "height": 740
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_001.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg"
+          ],
+          "id": "page_9563b8e16278_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva21rg",
+          "text": {
+            "value": "[redacted:163 chars]",
+            "length": 163,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:8 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 740
+            },
+            "desktop": {
+              "x": 0,
+              "y": -3252,
+              "width": 1440,
+              "height": 740
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_002.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_002.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg"
+          ],
+          "id": "page_9563b8e16278_block_002"
+        },
+        {
+          "ordinal": 2,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva21rh",
+          "text": {
+            "value": "[redacted:163 chars]",
+            "length": 163,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:8 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 740
+            },
+            "desktop": {
+              "x": 0,
+              "y": -3252,
+              "width": 1440,
+              "height": 740
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_003.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_003.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg"
+          ],
+          "id": "page_9563b8e16278_block_003"
+        },
+        {
+          "ordinal": 3,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva27rv",
+          "text": {
+            "value": "[redacted:581 chars]",
+            "length": 581,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 840,
+              "width": 980,
+              "height": 376.5
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2512,
+              "width": 1440,
+              "height": 376.5
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_004.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_004.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_9563b8e16278_block_004"
+        },
+        {
+          "ordinal": 4,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva21rm1",
+          "text": {
+            "value": "[redacted:581 chars]",
+            "length": 581,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 840,
+              "width": 980,
+              "height": 334.5
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2512,
+              "width": 1440,
+              "height": 334.5
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "42px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "42px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_005.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_005.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_9563b8e16278_block_005"
+        },
+        {
+          "ordinal": 5,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva21rn",
+          "text": {
+            "value": "[redacted:581 chars]",
+            "length": 581,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 853,
+              "width": 980,
+              "height": 321.5
+            },
+            "desktop": {
+              "x": 80,
+              "y": -2499,
+              "width": 1280,
+              "height": 321.5
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "13px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "13px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_006.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_006.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_9563b8e16278_block_006"
+        },
+        {
+          "ordinal": 6,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfwgpzkm",
+          "text": {
+            "value": "[redacted:577 chars]",
+            "length": 577,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:11 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/filmography"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 1216.5,
+              "width": 980,
+              "height": 724
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2135.5,
+              "width": 1440,
+              "height": 724
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_007.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg"
+          ],
+          "id": "page_9563b8e16278_block_007"
+        },
+        {
+          "ordinal": 7,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfwgrs3f",
+          "text": {
+            "value": "[redacted:577 chars]",
+            "length": 577,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:11 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/filmography"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 1216.5,
+              "width": 980,
+              "height": 724
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2135.5,
+              "width": 1440,
+              "height": 724
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_008.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_008.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg"
+          ],
+          "id": "page_9563b8e16278_block_008"
+        },
+        {
+          "ordinal": 8,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfwgrs3g1",
+          "text": {
+            "value": "[redacted:577 chars]",
+            "length": 577,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:11 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/filmography"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 1216.5,
+              "width": 980,
+              "height": 742
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2135.5,
+              "width": 1440,
+              "height": 742
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_009.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_009.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg"
+          ],
+          "id": "page_9563b8e16278_block_009"
+        },
+        {
+          "ordinal": 9,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfwgu4ur",
+          "text": {
+            "value": "[redacted:627 chars]",
+            "length": 627,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwgu4xh"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwh9gb1"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lg6299tr"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 1940.5,
+              "width": 980,
+              "height": 692
+            },
+            "desktop": {
+              "x": 0,
+              "y": -1411.5,
+              "width": 1440,
+              "height": 692
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_010.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg"
+          ],
+          "id": "page_9563b8e16278_block_010"
+        },
+        {
+          "ordinal": 10,
+          "tag": "div",
+          "role": "region",
+          "accessibleName": "[redacted:9 chars]",
+          "selector": "#comp-lfwgu4xe1",
+          "text": {
+            "value": "[redacted:615 chars]",
+            "length": 615,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwgu4xh"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwh9gb1"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lg6299tr"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 2090.5,
+              "width": 980,
+              "height": 542
+            },
+            "desktop": {
+              "x": 0,
+              "y": -1261.5,
+              "width": 1440,
+              "height": 542
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "grid",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "grid",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_011.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg"
+          ],
+          "id": "page_9563b8e16278_block_011"
+        },
+        {
+          "ordinal": 11,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lgdf70p5",
+          "text": {
+            "value": "[redacted:52 chars]",
+            "length": 52,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 2632.5,
+              "width": 980,
+              "height": 840
+            },
+            "desktop": {
+              "x": 0,
+              "y": -719.5,
+              "width": 1440,
+              "height": 840
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_012.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+            "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png"
+          ],
+          "id": "page_9563b8e16278_block_012"
+        },
+        {
+          "ordinal": 12,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-loczwzc1",
+          "text": {
+            "value": "[redacted:52 chars]",
+            "length": 52,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 2632.5,
+              "width": 980,
+              "height": 840
+            },
+            "desktop": {
+              "x": 0,
+              "y": -719.5,
+              "width": 1440,
+              "height": 840
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_013.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_013.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+            "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png"
+          ],
+          "id": "page_9563b8e16278_block_013"
+        },
+        {
+          "ordinal": 13,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva280c",
+          "text": {
+            "value": "[redacted:50 chars]",
+            "length": 50,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 3472.5,
+              "width": 980,
+              "height": 723
+            },
+            "desktop": {
+              "x": 0,
+              "y": 120.5,
+              "width": 1440,
+              "height": 723
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_014.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_9563b8e16278_block_014"
+        },
+        {
+          "ordinal": 14,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva21rp",
+          "text": {
+            "value": "[redacted:50 chars]",
+            "length": 50,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 3472.5,
+              "width": 980,
+              "height": 723
+            },
+            "desktop": {
+              "x": 0,
+              "y": 120.5,
+              "width": 1440,
+              "height": 723
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_015.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_015.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_9563b8e16278_block_015"
+        },
+        {
+          "ordinal": 15,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lfva21rp2",
+          "text": {
+            "value": "[redacted:50 chars]",
+            "length": 50,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 3472.5,
+              "width": 980,
+              "height": 723
+            },
+            "desktop": {
+              "x": 0,
+              "y": 120.5,
+              "width": 1440,
+              "height": 723
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_016.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_016.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_9563b8e16278_block_016"
+        },
+        {
+          "ordinal": 16,
+          "tag": "div",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#SITE_PAGES",
+          "text": {
+            "value": "[redacted:2052 chars]",
+            "length": 2052,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:8 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+            },
+            {
+              "label": "[redacted:11 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/filmography"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwgu4xh"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwh9gb1"
+            },
+            {
+              "label": "",
+              "href": "https://www.zilbermanfilmfoundation.com/#comp-lg6299tr"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            },
+            {
+              "label": "[redacted:10 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/partners"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 4095.5
+            },
+            "desktop": {
+              "x": 0,
+              "y": -3252,
+              "width": 1440,
+              "height": 4095.5
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_017.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
+            "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
+            "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+            "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png"
+          ],
+          "id": "page_9563b8e16278_block_017"
+        }
+      ],
+      "assets": [
+        {
+          "url": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png",
+          "kind": "image",
+          "alt": "[redacted:8 chars]",
+          "referencedBy": "#img_comp-lfva20u31",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png 1x, https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_274,h_76,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:9 chars]",
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(1) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(1) > div:nth-of-type(2) > wow-image > img",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
+          "kind": "image",
+          "alt": "[redacted:15 chars]",
+          "referencedBy": "#img_comp-lfwgrs3h1",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg 1x, https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_540,h_588,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:21 chars]",
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(4) > div:nth-of-type(1) > div:nth-of-type(2) > wow-image > img",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
+          "kind": "image",
+          "alt": "[redacted:5 chars]",
+          "referencedBy": "#img_comp-lfwgu4xj2",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg 1x, https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_279,h_279,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:10 chars]",
+          "referencedBy": "#img_comp-loczwzc5",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg 1x, https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_462,h_410,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:17 chars]",
+          "referencedBy": "#img_comp-loczwzc8",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg 1x, https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_202,h_202,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+          "kind": "image",
+          "alt": "[redacted:4 chars]",
+          "referencedBy": "#img_comp-loczwzca",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png 1x, https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_366,h_86,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
+          "kind": "image",
+          "alt": "[redacted:9 chars]",
+          "referencedBy": "#img_comp-lr4qyp0r",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png 1x, https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_354,h_85,al_c,lg_1,q_85,enc_avif,quality_auto/Young%20Vic_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png",
+          "kind": "image",
+          "alt": "[redacted:5 chars]",
+          "referencedBy": "#img_comp-lg62pb1y",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 1x, https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_118,h_44,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 2x"
+        }
+      ],
+      "navigation": {
+        "primary": [
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:4 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/partners"
+          },
+          {
+            "label": "[redacted:11 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/filmography"
+          },
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwgu4xh"
+          },
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/#comp-lfwh9gb1"
+          },
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/#comp-lg6299tr"
+          }
+        ],
+        "footer": []
+      },
+      "discoveredLinks": [
+        "https://www.zilbermanfilmfoundation.com/",
+        "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side",
+        "https://www.zilbermanfilmfoundation.com/partners",
+        "https://www.zilbermanfilmfoundation.com/filmography",
+        "https://www.zilbermanfilmfoundation.com/#comp-lfwgu4xh",
+        "https://www.zilbermanfilmfoundation.com/#comp-lfwh9gb1",
+        "https://www.zilbermanfilmfoundation.com/#comp-lg6299tr"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_9563b8e16278/mobile/full-page.png",
+          "captured": true,
+          "committed": false
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_9563b8e16278/desktop/full-page.png",
+          "captured": true,
+          "committed": false
+        }
+      ]
+    },
+    {
+      "pageId": "page_593efe6a40c0",
+      "requestedUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
+      "url": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
+      "path": "/blank-1/moye-sobytiye",
+      "status": 200,
+      "capturedAt": "2026-08-13T12:03:23.786Z",
+      "title": "[redacted:34 chars]",
+      "lang": "en",
+      "canonicalUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
+      "metaDescription": "[redacted:13 chars]",
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#SITE_HEADER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#comp-lfva20u2"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "[redacted:78 chars]",
+          "selector": "#comp-lfva214vnavContainer"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#PAGES_CONTAINER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lg5ajfor"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#event-details"
+        },
+        {
+          "tag": "h1",
+          "role": null,
+          "level": 1,
+          "text": "[redacted:11 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section > div:nth-of-type(2) > div > div > div > div > div > div > div > section > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) > h1"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "[redacted:15 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section > div:nth-of-type(2) > div > div > div > div > div > div > div > section > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > h2"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "[redacted:15 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section > div:nth-of-type(2) > div > div > div > div > div > div > div > section > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > h2"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "[redacted:16 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section > div:nth-of-type(2) > div > div > div > div > div > div > div > section > div:nth-of-type(3) > div:nth-of-type(3) > div > h2"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#SITE_FOOTER"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lg5ajfor",
+          "text": {
+            "value": "[redacted:748 chars]",
+            "length": 748,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:23 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/"
+            },
+            {
+              "label": "",
+              "href": "https://www.facebook.com/sharer/sharer.php?u=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&quote=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!"
+            },
+            {
+              "label": "",
+              "href": "https://twitter.com/intent/tweet?url=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&text=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!"
+            },
+            {
+              "label": "",
+              "href": "https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fwww.zilbermanfilmfoundation.com%2Fblank-1%2Fmoye-sobytiye"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 1973.02
+            },
+            "desktop": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 1973.02
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_593efe6a40c0/desktop/blocks/page_593efe6a40c0_block_001.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_147,h_147,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
+            "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_979,h_552,fp_0.50_0.50,q_85,usm_0.66_1.00_0.01,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg"
+          ],
+          "id": "page_593efe6a40c0_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "section",
+          "role": null,
+          "accessibleName": "[redacted:11 chars]",
+          "selector": "#event-details",
+          "text": {
+            "value": "[redacted:748 chars]",
+            "length": 748,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:23 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/"
+            },
+            {
+              "label": "",
+              "href": "https://www.facebook.com/sharer/sharer.php?u=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&quote=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!"
+            },
+            {
+              "label": "",
+              "href": "https://twitter.com/intent/tweet?url=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&text=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!"
+            },
+            {
+              "label": "",
+              "href": "https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fwww.zilbermanfilmfoundation.com%2Fblank-1%2Fmoye-sobytiye"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 1973.02
+            },
+            "desktop": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 1973.02
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_002.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_593efe6a40c0/desktop/blocks/page_593efe6a40c0_block_002.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_147,h_147,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
+            "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_979,h_552,fp_0.50_0.50,q_85,usm_0.66_1.00_0.01,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg"
+          ],
+          "id": "page_593efe6a40c0_block_002"
+        },
+        {
+          "ordinal": 2,
+          "tag": "div",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#SITE_PAGES",
+          "text": {
+            "value": "[redacted:748 chars]",
+            "length": 748,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:23 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/"
+            },
+            {
+              "label": "",
+              "href": "https://www.facebook.com/sharer/sharer.php?u=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&quote=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!"
+            },
+            {
+              "label": "",
+              "href": "https://twitter.com/intent/tweet?url=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&text=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!"
+            },
+            {
+              "label": "",
+              "href": "https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fwww.zilbermanfilmfoundation.com%2Fblank-1%2Fmoye-sobytiye"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 1973.02
+            },
+            "desktop": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 1973.02
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_003.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_593efe6a40c0/desktop/blocks/page_593efe6a40c0_block_003.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_147,h_147,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
+            "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_979,h_552,fp_0.50_0.50,q_85,usm_0.66_1.00_0.01,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg"
+          ],
+          "id": "page_593efe6a40c0_block_003"
+        }
+      ],
+      "assets": [
+        {
+          "url": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png",
+          "kind": "image",
+          "alt": "[redacted:8 chars]",
+          "referencedBy": "#img_comp-lfva20u31",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png 1x, https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_274,h_76,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_147,h_147,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section > div:nth-of-type(2) > div > div > div > div > div > div > div > section > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) > div > div:nth-of-type(1) > wow-image > img",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_979,h_552,fp_0.50_0.50,q_85,usm_0.66_1.00_0.01,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section > div:nth-of-type(2) > div > div > div > div > div > div > div > section > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) > div > div:nth-of-type(2) > wow-image > img",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png",
+          "kind": "image",
+          "alt": "[redacted:5 chars]",
+          "referencedBy": "#img_comp-lg62pb1y",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 1x, https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_118,h_44,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 2x"
+        }
+      ],
+      "navigation": {
+        "primary": [
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:4 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/partners"
+          },
+          {
+            "label": "[redacted:11 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/filmography"
+          }
+        ],
+        "footer": []
+      },
+      "discoveredLinks": [
+        "https://www.zilbermanfilmfoundation.com/",
+        "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side",
+        "https://www.zilbermanfilmfoundation.com/partners",
+        "https://www.zilbermanfilmfoundation.com/filmography",
+        "https://www.facebook.com/sharer/sharer.php?u=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&quote=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!",
+        "https://twitter.com/intent/tweet?url=https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye&text=Check%20out%20this%20event.%20Hope%20to%20see%20you%20there!",
+        "https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fwww.zilbermanfilmfoundation.com%2Fblank-1%2Fmoye-sobytiye"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_593efe6a40c0/mobile/full-page.png",
+          "captured": true,
+          "committed": false
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_593efe6a40c0/desktop/full-page.png",
+          "captured": true,
+          "committed": false
+        }
+      ]
+    },
+    {
+      "pageId": "page_c470adaf57fc",
+      "requestedUrl": "https://www.zilbermanfilmfoundation.com/filmography",
+      "url": "https://www.zilbermanfilmfoundation.com/filmography",
+      "path": "/filmography",
+      "status": 200,
+      "capturedAt": "2026-08-13T12:03:31.536Z",
+      "title": "[redacted:34 chars]",
+      "lang": "en",
+      "canonicalUrl": "https://www.zilbermanfilmfoundation.com/filmography",
+      "metaDescription": null,
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#SITE_HEADER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#comp-lfva20u2"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "[redacted:78 chars]",
+          "selector": "#comp-lfva214vnavContainer"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#PAGES_CONTAINER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:19 chars]",
+          "selector": "#comp-lg5apy06"
+        },
+        {
+          "tag": "h3",
+          "role": null,
+          "level": 3,
+          "text": "[redacted:19 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(1) > div:nth-of-type(2) > div > div > h3"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lg5aordi"
+        },
+        {
+          "tag": "div",
+          "role": "region",
+          "level": null,
+          "text": "[redacted:140 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2)"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#SITE_FOOTER"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lg5apy06",
+          "text": {
+            "value": "[redacted:19 chars]",
+            "length": 19,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 158
+            },
+            "desktop": {
+              "x": 0,
+              "y": -202,
+              "width": 1440,
+              "height": 158
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_001.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_001.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_c470adaf57fc_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lg5aordi",
+          "text": {
+            "value": "[redacted:12000 chars]",
+            "length": 169869,
+            "truncated": true
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 258,
+              "width": 980,
+              "height": 1819
+            },
+            "desktop": {
+              "x": 0,
+              "y": -44,
+              "width": 1440,
+              "height": 1819
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_002.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145"
+          ],
+          "id": "page_c470adaf57fc_block_002"
+        },
+        {
+          "ordinal": 2,
+          "tag": "div",
+          "role": "region",
+          "accessibleName": null,
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2)",
+          "text": {
+            "value": "[redacted:140 chars]",
+            "length": 140,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 118,
+              "y": 302,
+              "width": 720,
+              "height": 1738
+            },
+            "desktop": {
+              "x": 348,
+              "y": 0,
+              "width": 720,
+              "height": 1738
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_003.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145"
+          ],
+          "id": "page_c470adaf57fc_block_003"
+        },
+        {
+          "ordinal": 3,
+          "tag": "div",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#SITE_PAGES",
+          "text": {
+            "value": "[redacted:12000 chars]",
+            "length": 169888,
+            "truncated": true
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 1977
+            },
+            "desktop": {
+              "x": 0,
+              "y": -202,
+              "width": 1440,
+              "height": 1977
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_004.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_004.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145",
+            "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146",
+            "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145"
+          ],
+          "id": "page_c470adaf57fc_block_004"
+        }
+      ],
+      "assets": [
+        {
+          "url": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png",
+          "kind": "image",
+          "alt": "[redacted:8 chars]",
+          "referencedBy": "#img_comp-lfva20u31",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png 1x, https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_274,h_76,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#\\37 9f504ba-6d5e-4185-bb4d-d9feb0f7ef17",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#bb866f29-0044-42d4-89a1-f45c5c461f35",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#abee8492-633e-4dc6-8841-36f5cae0c1b9",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#a9575975-1252-491c-b92a-1fd4bbc6e73d",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#bc7f3d12-75c4-40fe-9832-895899becefc",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#f2a50fea-0862-4c9c-b623-04817eac98e1",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#\\33 4d5a9e6-d359-4931-b9b4-b260d0ac869c",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#\\34 5cf2553-8eee-4cf6-8e30-a56694acefd3",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png",
+          "kind": "image",
+          "alt": "[redacted:5 chars]",
+          "referencedBy": "#img_comp-lg62pb1y",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 1x, https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_118,h_44,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(1) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg 1x, https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_292,h_388,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg 2x, https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_438,h_582,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg 3x, https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_584,h_776,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg 4x, https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_674,h_895,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg 1x, https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_290,h_388,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg 2x, https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_435,h_582,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg 3x, https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_580,h_776,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg 4x, https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_671,h_897,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(3) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg 1x, https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_292,h_388,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg 2x, https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_438,h_582,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg 3x, https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_584,h_776,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg 4x, https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_674,h_895,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(4) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg 1x, https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_290,h_388,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg 2x, https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_435,h_582,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg 3x, https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_580,h_776,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg 4x, https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_671,h_897,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg 1x, https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_292,h_388,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg 2x, https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_438,h_582,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg 3x, https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_584,h_776,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg 4x, https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_674,h_895,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(6) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg 1x, https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_290,h_388,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg 2x, https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_435,h_582,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg 3x, https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_580,h_776,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg 4x, https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_671,h_897,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(7) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg 1x, https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_292,h_388,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg 2x, https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_438,h_582,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg 3x, https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_584,h_776,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg 4x, https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_674,h_895,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg 5x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145",
+          "kind": "media",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > div > div > div > div > div > div > div:nth-of-type(2) > div > div > div:nth-of-type(8) > div > div:nth-of-type(2) > div > div:nth-of-type(1) > picture > source",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg 1x, https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_290,h_388,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg 2x, https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_435,h_582,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg 3x, https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_580,h_776,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg 4x, https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_671,h_897,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg 5x"
+        }
+      ],
+      "navigation": {
+        "primary": [
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:4 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/partners"
+          },
+          {
+            "label": "[redacted:11 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/filmography"
+          }
+        ],
+        "footer": []
+      },
+      "discoveredLinks": [
+        "https://www.zilbermanfilmfoundation.com/",
+        "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side",
+        "https://www.zilbermanfilmfoundation.com/partners",
+        "https://www.zilbermanfilmfoundation.com/filmography"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_c470adaf57fc/mobile/full-page.png",
+          "captured": true,
+          "committed": false
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_c470adaf57fc/desktop/full-page.png",
+          "captured": true,
+          "committed": false
+        }
+      ]
+    },
+    {
+      "pageId": "page_79c515d4cebf",
+      "requestedUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "url": "https://www.zilbermanfilmfoundation.com/partners",
+      "path": "/partners",
+      "status": 200,
+      "capturedAt": "2026-08-13T12:03:39.163Z",
+      "title": "[redacted:31 chars]",
+      "lang": "en",
+      "canonicalUrl": "https://www.zilbermanfilmfoundation.com/partners",
+      "metaDescription": null,
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#SITE_HEADER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#comp-lfva20u2"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "[redacted:78 chars]",
+          "selector": "#comp-lfva214vnavContainer"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#PAGES_CONTAINER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:12 chars]",
+          "selector": "#comp-lgdezri7"
+        },
+        {
+          "tag": "h1",
+          "role": null,
+          "level": 1,
+          "text": "[redacted:12 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(1) > div:nth-of-type(2) > div > div > h1"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lr4nyp0i"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lr4nyp1n"
+        },
+        {
+          "tag": "h3",
+          "role": null,
+          "level": 3,
+          "text": "[redacted:8 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(6) > h3"
+        },
+        {
+          "tag": "h3",
+          "role": null,
+          "level": 3,
+          "text": "[redacted:13 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(7) > h3"
+        },
+        {
+          "tag": "h3",
+          "role": null,
+          "level": 3,
+          "text": "[redacted:21 chars]",
+          "selector": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div:nth-of-type(11) > h3"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:251 chars]",
+          "selector": "#comp-lgdd18hs"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lod125zd"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:500 chars]",
+          "selector": "#comp-lgdd82wr"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#SITE_FOOTER"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lgdezri7",
+          "text": {
+            "value": "[redacted:12 chars]",
+            "length": 12,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 150
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2238,
+              "width": 1440,
+              "height": 150
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_001.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_001.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_79c515d4cebf_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lr4nyp0i",
+          "text": {
+            "value": "[redacted:1505 chars]",
+            "length": 1505,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 250,
+              "width": 980,
+              "height": 999.08
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2088,
+              "width": 1440,
+              "height": 999.08
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_002.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_002.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
+            "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png"
+          ],
+          "id": "page_79c515d4cebf_block_002"
+        },
+        {
+          "ordinal": 2,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lr4nyp1n",
+          "text": {
+            "value": "[redacted:1505 chars]",
+            "length": 1505,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 255,
+              "width": 980,
+              "height": 994.08
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2083,
+              "width": 1440,
+              "height": 994.08
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "5px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "flex",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "5px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_003.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
+            "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png"
+          ],
+          "id": "page_79c515d4cebf_block_003"
+        },
+        {
+          "ordinal": 3,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lgdd18hs",
+          "text": {
+            "value": "[redacted:251 chars]",
+            "length": 251,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:22 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 1249.08,
+              "width": 980,
+              "height": 537.33
+            },
+            "desktop": {
+              "x": 0,
+              "y": -1088.92,
+              "width": 1440,
+              "height": 537.33
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_004.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
+            "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+          ],
+          "id": "page_79c515d4cebf_block_004"
+        },
+        {
+          "ordinal": 4,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lod125zd",
+          "text": {
+            "value": "[redacted:735 chars]",
+            "length": 735,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 1786.41,
+              "width": 980,
+              "height": 465
+            },
+            "desktop": {
+              "x": 0,
+              "y": -551.59,
+              "width": 1440,
+              "height": 465
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_005.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png"
+          ],
+          "id": "page_79c515d4cebf_block_005"
+        },
+        {
+          "ordinal": 5,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lgdd82wr",
+          "text": {
+            "value": "[redacted:1518 chars]",
+            "length": 1518,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 2251.41,
+              "width": 980,
+              "height": 1018.17
+            },
+            "desktop": {
+              "x": 0,
+              "y": -86.59,
+              "width": 1440,
+              "height": 1018.17
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_006.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg/v1/fill/w_147,h_83,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_avif,quality_auto/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg"
+          ],
+          "id": "page_79c515d4cebf_block_006"
+        },
+        {
+          "ordinal": 6,
+          "tag": "div",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#SITE_PAGES",
+          "text": {
+            "value": "[redacted:4024 chars]",
+            "length": 4024,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "[redacted:22 chars]",
+              "href": "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 3169.58
+            },
+            "desktop": {
+              "x": 0,
+              "y": -2238,
+              "width": 1440,
+              "height": 3169.58
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_007.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [
+            "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
+            "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png",
+            "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
+            "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+            "https://static.wixstatic.com/media/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg/v1/fill/w_147,h_83,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_avif,quality_auto/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg",
+            "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg",
+            "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+          ],
+          "id": "page_79c515d4cebf_block_007"
+        }
+      ],
+      "assets": [
+        {
+          "url": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png",
+          "kind": "image",
+          "alt": "[redacted:8 chars]",
+          "referencedBy": "#img_comp-lfva20u31",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png 1x, https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_274,h_76,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
+          "kind": "image",
+          "alt": "[redacted:19 chars]",
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(2) > div:nth-of-type(2) > div > section > div:nth-of-type(2) > div > div:nth-of-type(1) > div:nth-of-type(2) > wow-image > img",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png",
+          "kind": "image",
+          "alt": "[redacted:14 chars]",
+          "referencedBy": "#img_comp-lr4ovity",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png 1x, https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_354,h_112,al_c,lg_1,q_85,enc_avif,quality_auto/Young%20Vic_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
+          "kind": "image",
+          "alt": "[redacted:23 chars]",
+          "referencedBy": "#img_comp-lgdd18hv",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg 1x, https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_796,h_288,al_c,lg_1,q_80,enc_avif,quality_auto/Bafta_edited_edited.jpg 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+          "kind": "image",
+          "alt": "[redacted:11 chars]",
+          "referencedBy": "#img_comp-lod13ros",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png 1x, https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_580,h_136,al_c,lg_1,q_85,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg/v1/fill/w_147,h_83,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_avif,quality_auto/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg",
+          "kind": "image",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(5) > div:nth-of-type(2) > div:nth-of-type(2) > wow-image > img",
+          "downloaded": false,
+          "srcset": null
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg",
+          "kind": "image",
+          "alt": "[redacted:13 chars]",
+          "referencedBy": "#img_comp-lobn2bju",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg 1x, https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_388,h_382,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png",
+          "kind": "image",
+          "alt": "[redacted:5 chars]",
+          "referencedBy": "#img_comp-lg62pb1y",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 1x, https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_118,h_44,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 2x"
+        },
+        {
+          "url": "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx",
+          "kind": "document",
+          "alt": null,
+          "referencedBy": "html > body > div > div > div:nth-of-type(3) > div > main > div > div > div > div:nth-of-type(2) > div > div > div > section:nth-of-type(3) > div:nth-of-type(3) > div > div:nth-of-type(3) > a",
+          "downloaded": false,
+          "label": "[redacted:22 chars]"
+        }
+      ],
+      "navigation": {
+        "primary": [
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:4 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/partners"
+          },
+          {
+            "label": "[redacted:11 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/filmography"
+          }
+        ],
+        "footer": []
+      },
+      "discoveredLinks": [
+        "https://www.zilbermanfilmfoundation.com/",
+        "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side",
+        "https://www.zilbermanfilmfoundation.com/partners",
+        "https://www.zilbermanfilmfoundation.com/filmography",
+        "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_79c515d4cebf/mobile/full-page.png",
+          "captured": true,
+          "committed": false
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_79c515d4cebf/desktop/full-page.png",
+          "captured": true,
+          "committed": false
+        }
+      ]
+    },
+    {
+      "pageId": "page_3ee57ccd5fac",
+      "requestedUrl": "https://www.zilbermanfilmfoundation.com/book-online",
+      "url": "https://www.zilbermanfilmfoundation.com/book-online",
+      "path": "/book-online",
+      "status": 200,
+      "capturedAt": "2026-08-13T12:03:52.771Z",
+      "title": "[redacted:36 chars]",
+      "lang": "en",
+      "canonicalUrl": "https://www.zilbermanfilmfoundation.com/book-online",
+      "metaDescription": null,
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#SITE_HEADER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:84 chars]",
+          "selector": "#comp-lfva20u2"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "[redacted:78 chars]",
+          "selector": "#comp-lfva214vnavContainer"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "[redacted:43 chars]",
+          "selector": "#PAGES_CONTAINER"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "[redacted:43 chars]",
+          "selector": "#comp-lg5ajfox"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "[redacted:50 chars]",
+          "selector": "#SITE_FOOTER"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#comp-lg5ajfox",
+          "text": {
+            "value": "[redacted:43 chars]",
+            "length": 43,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 315.59
+            },
+            "desktop": {
+              "x": 0,
+              "y": 100,
+              "width": 1440,
+              "height": 315.59
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_3ee57ccd5fac/mobile/blocks/page_3ee57ccd5fac_block_001.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_3ee57ccd5fac/desktop/blocks/page_3ee57ccd5fac_block_001.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_3ee57ccd5fac_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "div",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#SITE_PAGES",
+          "text": {
+            "value": "[redacted:43 chars]",
+            "length": 43,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 100,
+              "width": 980,
+              "height": 315.59
+            },
+            "desktop": {
+              "x": 0,
+              "y": 100,
+              "width": 1440,
+              "height": 315.59
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "relative",
+              "color": "rgb(0, 0, 0)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Arial, Helvetica, sans-serif",
+              "fontSize": "10px",
+              "fontWeight": "400",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_3ee57ccd5fac/mobile/blocks/page_3ee57ccd5fac_block_002.png",
+              "captured": true,
+              "committed": false
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_3ee57ccd5fac/desktop/blocks/page_3ee57ccd5fac_block_002.png",
+              "captured": true,
+              "committed": false
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_3ee57ccd5fac_block_002"
+        }
+      ],
+      "assets": [
+        {
+          "url": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png",
+          "kind": "image",
+          "alt": "[redacted:8 chars]",
+          "referencedBy": "#img_comp-lfva20u31",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_151,h_42,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/ZFF_.png 1x, https://static.wixstatic.com/media/944663_4bb549c07f574d1dbeb2c4c681a04595~mv2.png/v1/crop/x_0,y_1,w_196,h_58/fill/w_274,h_76,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_.png 2x"
+        },
+        {
+          "url": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png",
+          "kind": "image",
+          "alt": "[redacted:5 chars]",
+          "referencedBy": "#img_comp-lg62pb1y",
+          "downloaded": false,
+          "srcset": "https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_90,h_34,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 1x, https://static.wixstatic.com/media/944663_6e70be4780fd408c816927e47b7af833~mv2.png/v1/crop/x_2,y_0,w_84,h_32/fill/w_118,h_44,al_c,lg_1,q_85,enc_avif,quality_auto/ZFF_01.png 2x"
+        }
+      ],
+      "navigation": {
+        "primary": [
+          {
+            "label": "",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:4 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side"
+          },
+          {
+            "label": "[redacted:8 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/partners"
+          },
+          {
+            "label": "[redacted:11 chars]",
+            "href": "https://www.zilbermanfilmfoundation.com/filmography"
+          }
+        ],
+        "footer": []
+      },
+      "discoveredLinks": [
+        "https://www.zilbermanfilmfoundation.com/",
+        "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side",
+        "https://www.zilbermanfilmfoundation.com/partners",
+        "https://www.zilbermanfilmfoundation.com/filmography"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_3ee57ccd5fac/mobile/full-page.png",
+          "captured": true,
+          "committed": false
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_3ee57ccd5fac/desktop/full-page.png",
+          "captured": true,
+          "committed": false
+        }
+      ]
+    }
+  ],
+  "diagnostics": {
+    "queuedUrls": 7,
+    "capturedPages": 5,
+    "skipped": [
+      {
+        "url": "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx",
+        "reason": "non_html_resource"
+      },
+      {
+        "url": "https://www.zilbermanfilmfoundation.com/s-projects-side-by-side",
+        "reason": "duplicate_redirect_target",
+        "finalUrl": "https://www.zilbermanfilmfoundation.com/partners"
+      }
+    ],
+    "quarantined": [],
+    "stoppedAtProjectMaxPages": false
+  }
+}

@@ -122,12 +122,12 @@ T14.1	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T14.1-app-s
 #T14.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T14.8-agent-connection-hygiene.md
 #T14.9	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T14.9-synthetic-third-site.md
 #T14.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T14.10-v1-closeout.md
-T12.1	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T12.1-capture-spike.md
-T12.2	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.2-decomposition-mapper.md
-T12.3	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T12.3-theme-extraction.md
-T12.4	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T12.4-emission-pipeline.md
-T12.5	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T12.5-fidelity-loop.md
-T12.6	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.6-capture-acceptance-run.md
+#T12.1	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T12.1-capture-spike.md	# CLOSED 2026-08-13; closing_commit_ref=refs/tags/w12-t12-1
+#T12.2	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T12.2-decomposition-mapper.md	# CLOSED 2026-08-13; closing_commit_ref=refs/tags/w12-t12-2
+#T12.3	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T12.3-theme-extraction.md	# CLOSED 2026-08-13; closing_commit_ref=refs/tags/w12-t12-3
+#T12.4	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T12.4-emission-pipeline.md	# CLOSED 2026-08-13; closing_commit_ref=refs/tags/w12-t12-4
+#T12.5	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T12.5-fidelity-loop.md	# CLOSED 2026-08-13; closing_commit_ref=refs/tags/w12-t12-5
+T12.6	human_gate	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T12.6-capture-acceptance-run.md	# REOPENED 2026-08-13: evidence prepared (refs/tags/w12-t12-6, reports/T12.6-zilberman-2026-08-13.md) but the agent self-authored a Wolf disposition, which human_gate forbids; withdrawn. Row stays OPEN until Wolf records a real disposition.
 #
 # W13 — object tracking & analytics (plan: docs/cms-architecture/12-object-tracking-and-analytics.md, 2026-07-19).
 # W13 may be pulled ahead of W10-W12 freely (reordering this file IS the scheduler). Briefs are written against
