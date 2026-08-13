@@ -1,0 +1,27 @@
+{
+  "__generated": {
+    "at": "2026-08-13T09:39:53.661Z",
+    "from": "objects/section/by-id/sec_audience_grid.json",
+    "record_version": 4
+  },
+  "section": {
+    "data": {
+      "heading": "New audience heading",
+      "kicker": "Who this is for",
+      "limit": 4,
+      "source": {
+        "cards": [
+          {
+            "description": "First audience or feature cell."
+          },
+          {
+            "description": "Second audience or feature cell."
+          }
+        ],
+        "kind": "cards"
+      }
+    },
+    "id": "s_346cd208c759",
+    "type": "content_grid"
+  }
+}
