@@ -112,6 +112,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_001",
+        "blockStatus": "gap",
+        "gapId": "gap_615362d9f5bd",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
         "status": "unavailable",
@@ -120,6 +122,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_001",
+        "blockStatus": "gap",
+        "gapId": "gap_615362d9f5bd",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_001.png",
         "status": "unavailable",
@@ -128,6 +132,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_006",
+        "blockStatus": "gap",
+        "gapId": "gap_07ad96fe838f",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_006.png",
         "status": "unavailable",
@@ -136,6 +142,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_006",
+        "blockStatus": "gap",
+        "gapId": "gap_07ad96fe838f",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_006.png",
         "status": "unavailable",
@@ -144,6 +152,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_007",
+        "blockStatus": "gap",
+        "gapId": "gap_4fb4d4158abe",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
         "status": "unavailable",
@@ -152,6 +162,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_007",
+        "blockStatus": "gap",
+        "gapId": "gap_4fb4d4158abe",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_007.png",
         "status": "unavailable",
@@ -160,6 +172,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_010",
+        "blockStatus": "gap",
+        "gapId": "gap_4025a57d3e19",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
         "status": "unavailable",
@@ -168,6 +182,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_010",
+        "blockStatus": "gap",
+        "gapId": "gap_4025a57d3e19",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_010.png",
         "status": "unavailable",
@@ -176,6 +192,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_011",
+        "blockStatus": "gap",
+        "gapId": "gap_1d376811a72e",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
         "status": "unavailable",
@@ -184,6 +202,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_011",
+        "blockStatus": "gap",
+        "gapId": "gap_1d376811a72e",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_011.png",
         "status": "unavailable",
@@ -192,6 +212,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_012",
+        "blockStatus": "gap",
+        "gapId": "gap_244ef90d50b7",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
         "status": "unavailable",
@@ -200,6 +222,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_012",
+        "blockStatus": "gap",
+        "gapId": "gap_244ef90d50b7",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_012.png",
         "status": "unavailable",
@@ -208,6 +232,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_014",
+        "blockStatus": "gap",
+        "gapId": "gap_8515975a683d",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
         "status": "unavailable",
@@ -216,6 +242,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_014",
+        "blockStatus": "gap",
+        "gapId": "gap_8515975a683d",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_014.png",
         "status": "unavailable",
@@ -224,6 +252,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_017",
+        "blockStatus": "gap",
+        "gapId": "gap_8c8b1b819645",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
         "status": "unavailable",
@@ -232,6 +262,8 @@
       {
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_017",
+        "blockStatus": "gap",
+        "gapId": "gap_8c8b1b819645",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_017.png",
         "status": "unavailable",
@@ -240,6 +272,8 @@
       {
         "pageRef": "page_593efe6a40c0",
         "blockRef": "page_593efe6a40c0_block_001",
+        "blockStatus": "gap",
+        "gapId": "gap_d92603a71c6a",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
         "status": "unavailable",
@@ -248,6 +282,8 @@
       {
         "pageRef": "page_593efe6a40c0",
         "blockRef": "page_593efe6a40c0_block_001",
+        "blockStatus": "gap",
+        "gapId": "gap_d92603a71c6a",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_593efe6a40c0/desktop/blocks/page_593efe6a40c0_block_001.png",
         "status": "unavailable",
@@ -257,6 +293,7 @@
         "pageRef": "page_c470adaf57fc",
         "candidateId": "candidate_6efacac5dea4",
         "blockRef": "page_c470adaf57fc_block_001",
+        "blockStatus": "mapped",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_001.png",
         "status": "unavailable",
@@ -266,6 +303,7 @@
         "pageRef": "page_c470adaf57fc",
         "candidateId": "candidate_6efacac5dea4",
         "blockRef": "page_c470adaf57fc_block_001",
+        "blockStatus": "mapped",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_001.png",
         "status": "unavailable",
@@ -274,6 +312,8 @@
       {
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_002",
+        "blockStatus": "gap",
+        "gapId": "gap_4d8f62e8c497",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
         "status": "unavailable",
@@ -282,6 +322,8 @@
       {
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_002",
+        "blockStatus": "gap",
+        "gapId": "gap_4d8f62e8c497",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_002.png",
         "status": "unavailable",
@@ -290,6 +332,8 @@
       {
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_003",
+        "blockStatus": "gap",
+        "gapId": "gap_0eeef6da1d84",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
         "status": "unavailable",
@@ -298,6 +342,8 @@
       {
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_003",
+        "blockStatus": "gap",
+        "gapId": "gap_0eeef6da1d84",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_003.png",
         "status": "unavailable",
@@ -307,6 +353,7 @@
         "pageRef": "page_79c515d4cebf",
         "candidateId": "candidate_58b1fa0d7ab9",
         "blockRef": "page_79c515d4cebf_block_001",
+        "blockStatus": "mapped",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_001.png",
         "status": "unavailable",
@@ -316,6 +363,7 @@
         "pageRef": "page_79c515d4cebf",
         "candidateId": "candidate_58b1fa0d7ab9",
         "blockRef": "page_79c515d4cebf_block_001",
+        "blockStatus": "mapped",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_001.png",
         "status": "unavailable",
@@ -324,6 +372,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_003",
+        "blockStatus": "gap",
+        "gapId": "gap_35a5ff7e9380",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
         "status": "unavailable",
@@ -332,6 +382,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_003",
+        "blockStatus": "gap",
+        "gapId": "gap_35a5ff7e9380",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_003.png",
         "status": "unavailable",
@@ -340,6 +392,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_004",
+        "blockStatus": "gap",
+        "gapId": "gap_c4231af4b63c",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
         "status": "unavailable",
@@ -348,6 +402,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_004",
+        "blockStatus": "gap",
+        "gapId": "gap_c4231af4b63c",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_004.png",
         "status": "unavailable",
@@ -357,6 +413,8 @@
         "pageRef": "page_79c515d4cebf",
         "candidateId": "candidate_ed4f78af95c9",
         "blockRef": "page_79c515d4cebf_block_005",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_b36e8f83a5cd",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
         "status": "unavailable",
@@ -366,6 +424,8 @@
         "pageRef": "page_79c515d4cebf",
         "candidateId": "candidate_ed4f78af95c9",
         "blockRef": "page_79c515d4cebf_block_005",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_b36e8f83a5cd",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_005.png",
         "status": "unavailable",
@@ -374,6 +434,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_006",
+        "blockStatus": "gap",
+        "gapId": "gap_147c556f95e9",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
         "status": "unavailable",
@@ -382,6 +444,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_006",
+        "blockStatus": "gap",
+        "gapId": "gap_147c556f95e9",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_006.png",
         "status": "unavailable",
@@ -390,6 +454,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_007",
+        "blockStatus": "gap",
+        "gapId": "gap_c724cdb13bf8",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
         "status": "unavailable",
@@ -398,6 +464,8 @@
       {
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_007",
+        "blockStatus": "gap",
+        "gapId": "gap_c724cdb13bf8",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_007.png",
         "status": "unavailable",
@@ -406,6 +474,8 @@
       {
         "pageRef": "page_3ee57ccd5fac",
         "blockRef": "page_3ee57ccd5fac_block_001",
+        "blockStatus": "gap",
+        "gapId": "gap_3ca2c570f6e6",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_3ee57ccd5fac/mobile/blocks/page_3ee57ccd5fac_block_001.png",
         "status": "unavailable",
@@ -414,6 +484,8 @@
       {
         "pageRef": "page_3ee57ccd5fac",
         "blockRef": "page_3ee57ccd5fac_block_001",
+        "blockStatus": "gap",
+        "gapId": "gap_3ca2c570f6e6",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_3ee57ccd5fac/desktop/blocks/page_3ee57ccd5fac_block_001.png",
         "status": "unavailable",
@@ -422,7 +494,424 @@
     ],
     "aggregateScore": null,
     "scoredCount": 0,
-    "unavailableCount": 38
+    "unavailableCount": 38,
+    "pagesWithoutScoredComparison": [
+      "page_9563b8e16278",
+      "page_593efe6a40c0",
+      "page_c470adaf57fc",
+      "page_79c515d4cebf",
+      "page_3ee57ccd5fac"
+    ],
+    "defects": [
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_001",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_615362d9f5bd",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_001",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_615362d9f5bd",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_006",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_07ad96fe838f",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_006",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_07ad96fe838f",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_007",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_4fb4d4158abe",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_007",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_4fb4d4158abe",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_010",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_4025a57d3e19",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_010",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_4025a57d3e19",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_011",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_1d376811a72e",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_011",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_1d376811a72e",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_012",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_244ef90d50b7",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_012",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_244ef90d50b7",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_014",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_8515975a683d",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_014",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_8515975a683d",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_017",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_8c8b1b819645",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "blockRef": "page_9563b8e16278_block_017",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_8c8b1b819645",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_593efe6a40c0",
+        "blockRef": "page_593efe6a40c0_block_001",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_d92603a71c6a",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_593efe6a40c0",
+        "blockRef": "page_593efe6a40c0_block_001",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_d92603a71c6a",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "blockRef": "page_c470adaf57fc_block_001",
+        "viewportId": "mobile",
+        "blockStatus": "mapped",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "blockRef": "page_c470adaf57fc_block_001",
+        "viewportId": "desktop",
+        "blockStatus": "mapped",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "blockRef": "page_c470adaf57fc_block_002",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_4d8f62e8c497",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "blockRef": "page_c470adaf57fc_block_002",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_4d8f62e8c497",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "blockRef": "page_c470adaf57fc_block_003",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_0eeef6da1d84",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "blockRef": "page_c470adaf57fc_block_003",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_0eeef6da1d84",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_001",
+        "viewportId": "mobile",
+        "blockStatus": "mapped",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_001",
+        "viewportId": "desktop",
+        "blockStatus": "mapped",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_003",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_35a5ff7e9380",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_003",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_35a5ff7e9380",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_004",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_c4231af4b63c",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_004",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_c4231af4b63c",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_005",
+        "viewportId": "mobile",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_b36e8f83a5cd",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_005",
+        "viewportId": "desktop",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_b36e8f83a5cd",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_006",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_147c556f95e9",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_006",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_147c556f95e9",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_007",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_c724cdb13bf8",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "blockRef": "page_79c515d4cebf_block_007",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_c724cdb13bf8",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_3ee57ccd5fac",
+        "blockRef": "page_3ee57ccd5fac_block_001",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_3ca2c570f6e6",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "capture_source_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_3ee57ccd5fac",
+        "blockRef": "page_3ee57ccd5fac_block_001",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_3ca2c570f6e6",
+        "detail": "source_screenshot_binary_not_available"
+      },
+      {
+        "code": "page_has_no_scored_visual_comparison",
+        "severity": "defect",
+        "pageRef": "page_9563b8e16278",
+        "detail": "no_scored_visual_comparison_for_emitted_page"
+      },
+      {
+        "code": "page_has_no_scored_visual_comparison",
+        "severity": "defect",
+        "pageRef": "page_593efe6a40c0",
+        "detail": "no_scored_visual_comparison_for_emitted_page"
+      },
+      {
+        "code": "page_has_no_scored_visual_comparison",
+        "severity": "defect",
+        "pageRef": "page_c470adaf57fc",
+        "detail": "no_scored_visual_comparison_for_emitted_page"
+      },
+      {
+        "code": "page_has_no_scored_visual_comparison",
+        "severity": "defect",
+        "pageRef": "page_79c515d4cebf",
+        "detail": "no_scored_visual_comparison_for_emitted_page"
+      },
+      {
+        "code": "page_has_no_scored_visual_comparison",
+        "severity": "defect",
+        "pageRef": "page_3ee57ccd5fac",
+        "detail": "no_scored_visual_comparison_for_emitted_page"
+      }
+    ],
+    "defectCount": 43,
+    "evidenceComplete": false
   },
   "rubric": {
     "coverage": {

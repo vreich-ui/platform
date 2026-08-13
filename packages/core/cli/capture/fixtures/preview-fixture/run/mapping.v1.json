@@ -1,0 +1,806 @@
+{
+  "schemaVersion": "capture-map.v1",
+  "snapshotSchemaVersion": "snapshot.v1",
+  "generatedAt": "2026-08-13T19:17:24.994Z",
+  "source": {
+    "targetUrl": "http://127.0.0.1:8913/",
+    "capturedAt": "2026-08-13T19:17:24.994Z",
+    "redacted": false
+  },
+  "policy": {
+    "confidenceThreshold": 0.72,
+    "copyHandling": "defer_to_target_project_capture_policy",
+    "emittedTextSource": "extracted",
+    "mediaHandling": "manifest_refs_only_pending_artifact_materialization",
+    "assistance": "none"
+  },
+  "pages": [
+    {
+      "pageRef": "page_7b2df291175a",
+      "sourceUrl": "http://127.0.0.1:8913/",
+      "pageBody": {
+        "route": "/",
+        "pageType": "home",
+        "title": "Larkmoor Press",
+        "seo": {
+          "description": "Larkmoor Press publishes short books about rivers, weather, and walking."
+        },
+        "sections": [
+          {
+            "id": "s_4f0dbf23f1",
+            "type": "hero",
+            "data": {
+              "heading": "Larkmoor Press",
+              "body": "<p>Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the moor.</p>",
+              "actions": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                },
+                {
+                  "label": "Read our story",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s_ce9c205cc9",
+            "type": "bio",
+            "data": {
+              "heading": "Our founder",
+              "body": "<p>Larkmoor was started by a printer who spent thirty years setting other people&#39;s sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet.</p>",
+              "trustNotes": []
+            }
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "candidateId": "candidate_6bc1b8f9c726",
+          "sectionType": "hero",
+          "data": {
+            "heading": "Larkmoor Press",
+            "body": "<p>Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the moor.</p>",
+            "actions": [
+              {
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                },
+                "style": "primary"
+              },
+              {
+                "label": "About",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                },
+                "style": "link"
+              },
+              {
+                "label": "Read our story",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                },
+                "style": "link"
+              }
+            ]
+          },
+          "section": {
+            "id": "s_4f0dbf23f1",
+            "type": "hero",
+            "data": {
+              "heading": "Larkmoor Press",
+              "body": "<p>Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the moor.</p>",
+              "actions": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                },
+                {
+                  "label": "Read our story",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          "confidence": 0.93,
+          "mappingReason": "first semantic block carries the page heading",
+          "sourceBlockIds": [
+            "page_7b2df291175a_block_001"
+          ],
+          "screenshotRefs": [
+            "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_001.png",
+            "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_001.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_001"
+                ]
+              },
+              {
+                "path": "data.body",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_001"
+                ]
+              },
+              {
+                "path": "data.actions.0.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_001"
+                ]
+              },
+              {
+                "path": "data.actions.1.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_001"
+                ]
+              },
+              {
+                "path": "data.actions.2.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_001"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "candidateId": "candidate_b1f305fc1b29",
+          "sectionType": "bio",
+          "data": {
+            "heading": "Our founder",
+            "body": "<p>Larkmoor was started by a printer who spent thirty years setting other people&#39;s sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet.</p>",
+            "trustNotes": []
+          },
+          "section": {
+            "id": "s_ce9c205cc9",
+            "type": "bio",
+            "data": {
+              "heading": "Our founder",
+              "body": "<p>Larkmoor was started by a printer who spent thirty years setting other people&#39;s sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet.</p>",
+              "trustNotes": []
+            }
+          },
+          "confidence": 0.86,
+          "mappingReason": "person-focused biography signals detected",
+          "sourceBlockIds": [
+            "page_7b2df291175a_block_002"
+          ],
+          "screenshotRefs": [
+            "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_002.png",
+            "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_002.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_002"
+                ]
+              },
+              {
+                "path": "data.body",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_7b2df291175a_block_002"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "gaps": [
+        {
+          "gapId": "gap_6e48234cca7c",
+          "blockRef": "page_7b2df291175a_block_003",
+          "screenshotRef": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_003.png",
+          "why": "section_not_allowed_for_page_type",
+          "nearestType": "link_list",
+          "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it"
+        },
+        {
+          "gapId": "gap_05fd8c5976b9",
+          "blockRef": "page_7b2df291175a_block_004",
+          "screenshotRef": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_004.png",
+          "why": "section_not_allowed_for_page_type",
+          "nearestType": "link_list",
+          "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it"
+        }
+      ],
+      "blockAccounting": [
+        {
+          "blockRef": "page_7b2df291175a_block_001",
+          "status": "mapped",
+          "candidateId": "candidate_6bc1b8f9c726"
+        },
+        {
+          "blockRef": "page_7b2df291175a_block_002",
+          "status": "mapped",
+          "candidateId": "candidate_b1f305fc1b29"
+        },
+        {
+          "blockRef": "page_7b2df291175a_block_003",
+          "status": "gap",
+          "gapId": "gap_6e48234cca7c"
+        },
+        {
+          "blockRef": "page_7b2df291175a_block_004",
+          "status": "gap",
+          "gapId": "gap_05fd8c5976b9"
+        }
+      ]
+    },
+    {
+      "pageRef": "page_bb79cc0333f5",
+      "sourceUrl": "http://127.0.0.1:8913/about",
+      "pageBody": {
+        "route": "/about",
+        "pageType": "standard",
+        "title": "About Larkmoor",
+        "seo": {
+          "description": "How Larkmoor Press works, and where to find its books."
+        },
+        "sections": [
+          {
+            "id": "s_032f27274e",
+            "type": "lede",
+            "data": {
+              "heading": "About Larkmoor",
+              "body": "<p>A two-person press working to a deliberately small calendar.</p>",
+              "actions": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s_030afaaa1e",
+            "type": "prose",
+            "data": {
+              "body": "<p>How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet.</p>"
+            }
+          },
+          {
+            "id": "s_8372bbef45",
+            "type": "link_list",
+            "data": {
+              "heading": "Where to find us",
+              "links": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "Stockists",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s_16b6958790",
+            "type": "link_list",
+            "data": {
+              "heading": "About Larkmoor",
+              "links": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "candidateId": "candidate_a4be7d8a509b",
+          "sectionType": "lede",
+          "data": {
+            "heading": "About Larkmoor",
+            "body": "<p>A two-person press working to a deliberately small calendar.</p>",
+            "actions": [
+              {
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                },
+                "style": "primary"
+              },
+              {
+                "label": "About",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                },
+                "style": "link"
+              }
+            ]
+          },
+          "section": {
+            "id": "s_032f27274e",
+            "type": "lede",
+            "data": {
+              "heading": "About Larkmoor",
+              "body": "<p>A two-person press working to a deliberately small calendar.</p>",
+              "actions": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          "confidence": 0.91,
+          "mappingReason": "first semantic block carries the page heading",
+          "sourceBlockIds": [
+            "page_bb79cc0333f5_block_001"
+          ],
+          "screenshotRefs": [
+            "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_001.png",
+            "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_001.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_001"
+                ]
+              },
+              {
+                "path": "data.body",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_001"
+                ]
+              },
+              {
+                "path": "data.actions.0.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_001"
+                ]
+              },
+              {
+                "path": "data.actions.1.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_001"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "candidateId": "candidate_adf4fb6ba959",
+          "sectionType": "prose",
+          "data": {
+            "body": "<p>How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet.</p>"
+          },
+          "section": {
+            "id": "s_030afaaa1e",
+            "type": "prose",
+            "data": {
+              "body": "<p>How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet.</p>"
+            }
+          },
+          "confidence": 0.76,
+          "mappingReason": "explanatory text fallback",
+          "sourceBlockIds": [
+            "page_bb79cc0333f5_block_002"
+          ],
+          "screenshotRefs": [
+            "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_002.png",
+            "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_002.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.body",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_002"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "candidateId": "candidate_a9e64477be7e",
+          "sectionType": "link_list",
+          "data": {
+            "heading": "Where to find us",
+            "links": [
+              {
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                },
+                "style": "primary"
+              },
+              {
+                "label": "Stockists",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                },
+                "style": "link"
+              }
+            ]
+          },
+          "section": {
+            "id": "s_8372bbef45",
+            "type": "link_list",
+            "data": {
+              "heading": "Where to find us",
+              "links": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "Stockists",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          "confidence": 0.82,
+          "mappingReason": "compact multi-link block",
+          "sourceBlockIds": [
+            "page_bb79cc0333f5_block_003"
+          ],
+          "screenshotRefs": [
+            "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_003.png",
+            "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_003.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_003"
+                ]
+              },
+              {
+                "path": "data.links.0.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_003"
+                ]
+              },
+              {
+                "path": "data.links.1.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_003"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "candidateId": "candidate_2381abdd97cc",
+          "sectionType": "link_list",
+          "data": {
+            "heading": "About Larkmoor",
+            "links": [
+              {
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                },
+                "style": "primary"
+              },
+              {
+                "label": "About",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                },
+                "style": "link"
+              }
+            ]
+          },
+          "section": {
+            "id": "s_16b6958790",
+            "type": "link_list",
+            "data": {
+              "heading": "About Larkmoor",
+              "links": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          "confidence": 0.82,
+          "mappingReason": "compact multi-link block",
+          "sourceBlockIds": [
+            "page_bb79cc0333f5_block_004"
+          ],
+          "screenshotRefs": [
+            "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_004.png",
+            "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_004.png"
+          ],
+          "assetBindings": [],
+          "provenance": {
+            "textFields": [
+              {
+                "path": "data.heading",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_004"
+                ]
+              },
+              {
+                "path": "data.links.0.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_004"
+                ]
+              },
+              {
+                "path": "data.links.1.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_bb79cc0333f5_block_004"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "gaps": [],
+      "blockAccounting": [
+        {
+          "blockRef": "page_bb79cc0333f5_block_001",
+          "status": "mapped",
+          "candidateId": "candidate_a4be7d8a509b"
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_002",
+          "status": "mapped",
+          "candidateId": "candidate_adf4fb6ba959"
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_003",
+          "status": "mapped",
+          "candidateId": "candidate_a9e64477be7e"
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_004",
+          "status": "mapped",
+          "candidateId": "candidate_2381abdd97cc"
+        }
+      ]
+    }
+  ],
+  "navigationCandidates": [
+    {
+      "candidateId": "navigation_1e0584a25d9f",
+      "role": "header",
+      "body": {
+        "role": "header",
+        "groups": [
+          {
+            "id": "g_primary",
+            "items": [
+              {
+                "id": "i_584486a743",
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                }
+              },
+              {
+                "id": "i_95b10363c0",
+                "label": "About",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                }
+              },
+              {
+                "id": "i_f8ac8bd317",
+                "label": "Read our story",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                }
+              }
+            ]
+          }
+        ],
+        "actions": []
+      },
+      "confidence": 0.96,
+      "sourcePageRefs": [
+        "page_7b2df291175a",
+        "page_bb79cc0333f5"
+      ],
+      "provenance": {
+        "textFields": [
+          {
+            "path": "data.groups.0.items.0.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_7b2df291175a"
+            ]
+          },
+          {
+            "path": "data.groups.0.items.1.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_7b2df291175a"
+            ]
+          },
+          {
+            "path": "data.groups.0.items.2.label",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_7b2df291175a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "candidateId": "navigation_0301844ccd8e",
+      "role": "footer",
+      "body": {
+        "role": "footer",
+        "groups": [],
+        "footNote": "Home About Larkmoor Press, an invented publisher used only as capture-pipeline test material."
+      },
+      "confidence": 0.9,
+      "sourcePageRefs": [
+        "page_7b2df291175a",
+        "page_bb79cc0333f5"
+      ],
+      "provenance": {
+        "textFields": [
+          {
+            "path": "data.footNote",
+            "source": "extracted",
+            "sourceBlockRefs": [
+              "page_7b2df291175a"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "pages": 2,
+    "sectionCandidates": 6,
+    "navigationCandidates": 2,
+    "gaps": 2,
+    "sourceBlocks": 8,
+    "accountedBlocks": 8
+  }
+}

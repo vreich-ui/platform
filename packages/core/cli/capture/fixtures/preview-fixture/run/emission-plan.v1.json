@@ -1,0 +1,413 @@
+{
+  "schemaVersion": "capture-emission-plan.v1",
+  "task": "T12.4",
+  "target": "fixture-preview-target",
+  "source": {
+    "mappingGeneratedAt": "2026-08-13T19:17:24.994Z",
+    "targetUrl": "http://127.0.0.1:8913/"
+  },
+  "pageRefs": [
+    "page_7b2df291175a",
+    "page_bb79cc0333f5"
+  ],
+  "repeatThreshold": 2,
+  "copy": {
+    "source": "target_project_contract",
+    "extractedTextPresent": true,
+    "dryRunDisposition": "policy_read_required_before_live_execution"
+  },
+  "preflight": [
+    {
+      "resolver": "project_policy",
+      "arguments": {
+        "project_id": "fixture-preview-target"
+      },
+      "purpose": "exact project binding and capture policy (outside target MCP)"
+    },
+    {
+      "verb": "object_inventory",
+      "arguments": {
+        "object_type": "site",
+        "status": "active"
+      },
+      "purpose": "source-derived target site binding"
+    },
+    {
+      "verb": "object_contract",
+      "arguments": {
+        "object_type": "theme"
+      }
+    },
+    {
+      "verb": "object_contract",
+      "arguments": {
+        "object_type": "section_template"
+      }
+    },
+    {
+      "verb": "object_contract",
+      "arguments": {
+        "object_type": "navigation"
+      }
+    },
+    {
+      "verb": "object_contract",
+      "arguments": {
+        "object_type": "page"
+      }
+    },
+    {
+      "verb": "object_inventory",
+      "arguments": {
+        "object_type": "theme"
+      },
+      "purpose": "reuse-first theme summaries"
+    },
+    {
+      "verb": "object_inventory",
+      "arguments": {
+        "object_type": "section_template"
+      },
+      "purpose": "reuse-first recipe summaries"
+    },
+    {
+      "verb": "object_inventory",
+      "arguments": {
+        "object_type": "page"
+      },
+      "purpose": "route-collision availability context"
+    },
+    {
+      "verb": "object_get",
+      "arguments": {
+        "object_type": "page",
+        "object_id": "<each inventory page id>"
+      },
+      "purpose": "route-collision body probes when summaries omit routes"
+    }
+  ],
+  "creates": [
+    {
+      "kind": "theme",
+      "objectType": "theme",
+      "requestedId": "thm_capture_6642672d2d4019daaf",
+      "idempotencyKey": "t12.4:fixture-preview-target:theme:0d043123962e8489",
+      "body": {
+        "name": "Captured site theme",
+        "description": "Bounded theme draft extracted from captured computed styles.",
+        "whenToUse": "Use only for this captured site after human swatch review.",
+        "scope": "one_off",
+        "tokens": {
+          "colors": {
+            "primary": "rgb(46 111 149)",
+            "secondary": "rgb(37 90 120)",
+            "accent": "rgb(94 140 138)",
+            "gold": "rgb(194 168 120)",
+            "text-heading": "rgb(22 26 29)",
+            "text-default": "rgb(29  43  37)",
+            "text-muted": "rgb(58 65 73 / 76%)",
+            "bg-page": "rgb(252 251 248)",
+            "bg-surface": "rgb(47  93  70)",
+            "bg-page-dark": "rgb(3 6 32)"
+          },
+          "fonts": {
+            "sans": "Georgia, \"Times New Roman\", serif",
+            "serif": "'Source Serif 4', Georgia, serif",
+            "heading": "'Playfair Display', 'Times New Roman', serif"
+          },
+          "layout": {
+            "containerWidth": "wide",
+            "sectionRhythm": "compact"
+          },
+          "shape": {
+            "radius": "sharp",
+            "buttonShape": "rect",
+            "shadow": "soft"
+          },
+          "type": {
+            "scale": "default",
+            "headingWeight": "regular"
+          }
+        }
+      },
+      "reason": "T12.3 bounded theme draft; draft only (site_apply_theme is intentionally absent)."
+    },
+    {
+      "kind": "section_template",
+      "objectType": "section_template",
+      "requestedId": "stpl_capture_f7834268396c09fc37",
+      "idempotencyKey": "t12.4:fixture-preview-target:section-template:4a55eebdac4c6e55",
+      "reason": "shape repeated 2 times (threshold 2)",
+      "body": {
+        "name": "Captured link list recipe",
+        "description": "Draft recipe extracted from 2 repeated link_list shapes.",
+        "whenToUse": "Use for the repeated link_list shape discovered in this capture.",
+        "scope": "one_off",
+        "blueprint": {
+          "id": "s_8372bbef45",
+          "type": "link_list",
+          "data": {
+            "heading": "Where to find us",
+            "links": [
+              {
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                },
+                "style": "primary"
+              },
+              {
+                "label": "Stockists",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                },
+                "style": "link"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "kind": "navigation",
+      "objectType": "navigation",
+      "requestedId": "nav_capture_2c1e28ff17c9ed49cb",
+      "idempotencyKey": "t12.4:fixture-preview-target:navigation:4690a35cc63fb114",
+      "body": {
+        "role": "header",
+        "groups": [
+          {
+            "id": "g_primary",
+            "items": [
+              {
+                "id": "i_584486a743",
+                "label": "Home",
+                "target": {
+                  "kind": "route",
+                  "href": "/"
+                }
+              },
+              {
+                "id": "i_95b10363c0",
+                "label": "About",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                }
+              },
+              {
+                "id": "i_f8ac8bd317",
+                "label": "Read our story",
+                "target": {
+                  "kind": "route",
+                  "href": "/about"
+                }
+              }
+            ]
+          }
+        ],
+        "actions": []
+      },
+      "reason": "Mapped navigation candidate."
+    },
+    {
+      "kind": "navigation",
+      "objectType": "navigation",
+      "requestedId": "nav_capture_a620375a57d9fee5da",
+      "idempotencyKey": "t12.4:fixture-preview-target:navigation:b47e3b1f03ffad30",
+      "body": {
+        "role": "footer",
+        "groups": [],
+        "footNote": "Home About Larkmoor Press, an invented publisher used only as capture-pipeline test material."
+      },
+      "reason": "Mapped navigation candidate."
+    },
+    {
+      "kind": "page",
+      "objectType": "page",
+      "requestedId": "page_capture_448f8ebbdf0684e5bf",
+      "idempotencyKey": "t12.4:fixture-preview-target:page:7dc8cd47f5c803be",
+      "body": {
+        "route": "/",
+        "pageType": "home",
+        "title": "Larkmoor Press",
+        "seo": {
+          "description": "Larkmoor Press publishes short books about rivers, weather, and walking."
+        },
+        "sections": [
+          {
+            "id": "s_4f0dbf23f1",
+            "type": "hero",
+            "data": {
+              "heading": "Larkmoor Press",
+              "body": "<p>Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the moor.</p>",
+              "actions": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                },
+                {
+                  "label": "Read our story",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s_ce9c205cc9",
+            "type": "bio",
+            "data": {
+              "heading": "Our founder",
+              "body": "<p>Larkmoor was started by a printer who spent thirty years setting other people&#39;s sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet.</p>",
+              "trustNotes": []
+            }
+          }
+        ]
+      },
+      "reason": "Mapped page http://127.0.0.1:8913/; route availability is probed before creation."
+    },
+    {
+      "kind": "page",
+      "objectType": "page",
+      "requestedId": "page_capture_c28844d41b8e03f961",
+      "idempotencyKey": "t12.4:fixture-preview-target:page:c9525ed3fd3c7594",
+      "body": {
+        "route": "/about",
+        "pageType": "standard",
+        "title": "About Larkmoor",
+        "seo": {
+          "description": "How Larkmoor Press works, and where to find its books."
+        },
+        "sections": [
+          {
+            "id": "s_032f27274e",
+            "type": "lede",
+            "data": {
+              "heading": "About Larkmoor",
+              "body": "<p>A two-person press working to a deliberately small calendar.</p>",
+              "actions": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s_030afaaa1e",
+            "type": "prose",
+            "data": {
+              "body": "<p>How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet.</p>"
+            }
+          },
+          {
+            "id": "s_8372bbef45",
+            "type": "link_list",
+            "data": {
+              "heading": "Where to find us",
+              "links": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "Stockists",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          },
+          {
+            "id": "s_16b6958790",
+            "type": "link_list",
+            "data": {
+              "heading": "About Larkmoor",
+              "links": [
+                {
+                  "label": "Home",
+                  "target": {
+                    "kind": "route",
+                    "href": "/"
+                  },
+                  "style": "primary"
+                },
+                {
+                  "label": "About",
+                  "target": {
+                    "kind": "route",
+                    "href": "/about"
+                  },
+                  "style": "link"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reason": "Mapped page http://127.0.0.1:8913/about; route availability is probed before creation."
+    }
+  ],
+  "media": [],
+  "gaps": [
+    {
+      "gapId": "gap_6e48234cca7c",
+      "blockRef": "page_7b2df291175a_block_003",
+      "screenshotRef": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_003.png",
+      "why": "section_not_allowed_for_page_type",
+      "nearestType": "link_list",
+      "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it"
+    },
+    {
+      "gapId": "gap_05fd8c5976b9",
+      "blockRef": "page_7b2df291175a_block_004",
+      "screenshotRef": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_004.png",
+      "why": "section_not_allowed_for_page_type",
+      "nearestType": "link_list",
+      "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it"
+    }
+  ],
+  "forbiddenVerbs": [
+    "deploy",
+    "object_publish",
+    "release_to_production",
+    "trigger_netlify_build"
+  ]
+}

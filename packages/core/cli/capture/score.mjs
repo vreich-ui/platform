@@ -11,8 +11,9 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import sharp from 'sharp';
 
+import { normalizeScreenshotPair } from './screenshot-normalize.mjs';
+import { renderSideBySideHtml } from './side-by-side.mjs';
 import { parseCoverageRubricOverride, readProjectCapturePolicy } from './snapshot-v1.mjs';
 
 export const DEFAULT_FIDELITY_LIMITS = Object.freeze({
@@ -171,31 +172,30 @@ function evidencePath(root, relativePath) {
   return resolved;
 }
 
-/** Pixel score after deterministic RGBA flattening and resize to source dimensions. */
+/**
+ * Pixel score over the normalized pair (screenshot-normalize.mjs): both sides
+ * flattened onto white and resampled onto ONE comparison raster before a byte
+ * is compared. Normalization is the ceiling of allowed variance — it drops
+ * antialiasing and compositing, never a content difference.
+ */
 export async function normalizedScreenshotDiff(sourcePath, previewPath) {
-  const [sourceMeta, previewMeta] = await Promise.all([sharp(sourcePath).metadata(), sharp(previewPath).metadata()]);
-  if (!sourceMeta.width || !sourceMeta.height || !previewMeta.width || !previewMeta.height)
-    throw new FidelityError('Screenshot dimensions are unavailable.');
-  const source = await sharp(sourcePath).flatten({ background: '#ffffff' }).removeAlpha().raw().toBuffer();
-  const preview = await sharp(previewPath)
-    .flatten({ background: '#ffffff' })
-    .resize(sourceMeta.width, sourceMeta.height, { fit: 'fill', kernel: sharp.kernel.nearest })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-  if (source.length !== preview.length) throw new FidelityError('Normalized screenshot byte lengths differ.');
+  let normalized;
+  try {
+    normalized = await normalizeScreenshotPair(sourcePath, previewPath);
+  } catch (error) {
+    throw new FidelityError(error.message);
+  }
+  const { source, preview } = normalized;
   let difference = 0;
   for (let index = 0; index < source.length; index += 1) difference += Math.abs(source[index] - preview[index]);
   const normalizedDifference = difference / (source.length * 255);
   return {
     score: round(1 - normalizedDifference),
     normalizedDifference: round(normalizedDifference),
-    source: { width: sourceMeta.width, height: sourceMeta.height },
-    preview: { width: previewMeta.width, height: previewMeta.height },
-    normalization:
-      previewMeta.width === sourceMeta.width && previewMeta.height === sourceMeta.height
-        ? 'rgba_flatten'
-        : 'rgba_flatten_resize_preview_to_source',
+    source: normalized.dimensions.source,
+    preview: normalized.dimensions.preview,
+    comparisonRaster: normalized.raster,
+    normalization: normalized.normalization,
   };
 }
 
@@ -224,6 +224,13 @@ async function scoreVisuals({ snapshot, mapping, previewManifest, screenshotRoot
           pageRef: page.pageRef,
           ...(candidateByBlock.has(blockRef) ? { candidateId: candidateByBlock.get(blockRef) } : {}),
           blockRef,
+          // The block's mapping status travels with the comparison so an
+          // unavailable one says WHY it is missing — a block the mapper
+          // recorded as a `gap` was never emitted, so there is nothing to
+          // screenshot. It is still a defect (a hole in the evidence is a hole
+          // however it got there); it is just an explained one.
+          blockStatus: accounting.status,
+          ...(accounting.gapId ? { gapId: accounting.gapId } : {}),
           viewportId: sourceShot.viewportId,
           sourceScreenshot: sourceShot.path,
           ...(candidatePath ? { previewScreenshot: candidatePath } : {}),
@@ -241,6 +248,9 @@ async function scoreVisuals({ snapshot, mapping, previewManifest, screenshotRoot
     }
   }
   const scored = comparisons.filter((comparison) => comparison.status === 'scored');
+  const pageRefs = (mapping.pages ?? []).map((page) => page.pageRef);
+  const scoredPageRefs = new Set(scored.map((comparison) => comparison.pageRef));
+  const pagesWithoutScoredComparison = pageRefs.filter((pageRef) => !scoredPageRefs.has(pageRef));
   return {
     comparisons,
     aggregateScore: scored.length
@@ -248,7 +258,51 @@ async function scoreVisuals({ snapshot, mapping, previewManifest, screenshotRoot
       : null,
     scoredCount: scored.length,
     unavailableCount: comparisons.length - scored.length,
+    pagesWithoutScoredComparison,
+    ...visualEvidenceDefects({ comparisons, pagesWithoutScoredComparison }),
   };
+}
+
+/**
+ * The 0/34 rule (T12.10). The first acceptance run scored ZERO visual
+ * comparisons out of 34 and the report said only "unavailable" — a neutral
+ * word for a hole in the evidence, which is how the hole survived a whole run
+ * unnoticed. Every unavailable comparison is now an enumerated DEFECT, and a
+ * page with no scored comparison at all is a defect in its own right.
+ *
+ * This is evidence accounting, NOT a rubric change: `rubric` is untouched, so
+ * visual evidence still explains and never authorizes (capture-runbook §4). A
+ * missing preview lowers no bar and passes no verdict; it is simply impossible
+ * for it to go unreported now — the CLI also exits non-zero on any defect.
+ */
+export const VISUAL_DEFECT_CODES = Object.freeze({
+  source_screenshot_binary_not_available: 'capture_source_evidence_missing',
+  draft_preview_screenshot_not_available: 'draft_preview_evidence_missing',
+  page_not_previewed: 'page_has_no_scored_visual_comparison',
+});
+
+function visualEvidenceDefects({ comparisons, pagesWithoutScoredComparison }) {
+  const defects = [
+    ...comparisons
+      .filter((comparison) => comparison.status === 'unavailable')
+      .map((comparison) => ({
+        code: VISUAL_DEFECT_CODES[comparison.reason] ?? 'visual_evidence_unavailable',
+        severity: 'defect',
+        pageRef: comparison.pageRef,
+        blockRef: comparison.blockRef,
+        viewportId: comparison.viewportId,
+        blockStatus: comparison.blockStatus,
+        ...(comparison.gapId ? { gapId: comparison.gapId } : {}),
+        detail: comparison.reason,
+      })),
+    ...pagesWithoutScoredComparison.map((pageRef) => ({
+      code: VISUAL_DEFECT_CODES.page_not_previewed,
+      severity: 'defect',
+      pageRef,
+      detail: 'no_scored_visual_comparison_for_emitted_page',
+    })),
+  ];
+  return { defects, defectCount: defects.length, evidenceComplete: defects.length === 0 };
 }
 
 export function consolidatedGapReport(mapping) {
@@ -412,7 +466,7 @@ export async function runBoundedFidelityIterations({ report, propose, validatePr
 function usage(message) {
   if (message) console.error(`Error: ${message}\n`);
   console.error(
-    'Usage: node packages/core/cli/capture/score.mjs --target <project> --snapshot <snapshot.v1.json> --mapping <capture-map.v1.json> --theme <theme.v1.json> [--project-policy <safe-project-get.json>] [--preview <capture-preview.v1.json>] [--screenshot-root <dir>] --out <fidelity-report.json> [--gap-out <palette-gaps.json>]'
+    'Usage: node packages/core/cli/capture/score.mjs --target <project> --snapshot <snapshot.v1.json> --mapping <capture-map.v1.json> --theme <theme.v1.json> [--project-policy <safe-project-get.json>] [--preview <capture-preview.v1.json>] [--screenshot-root <dir>] --out <fidelity-report.json> [--gap-out <palette-gaps.json>] [--side-by-side <review.html>]'
   );
   process.exit(message ? 1 : 0);
 }
@@ -457,7 +511,42 @@ async function main() {
   });
   await writeFile(path.resolve(args.out), `${JSON.stringify(report, null, 2)}\n`);
   if (args['gap-out']) await writeFile(path.resolve(args['gap-out']), `${JSON.stringify(report.gapReport, null, 2)}\n`);
-  console.log(JSON.stringify({ rubric: report.rubric, visual: report.visual, out: path.resolve(args.out) }, null, 2));
+  if (args['side-by-side']) {
+    const outPath = path.resolve(args['side-by-side']);
+    await writeFile(
+      outPath,
+      renderSideBySideHtml({
+        report,
+        snapshot,
+        previewManifest,
+        screenshotRoot: args['screenshot-root'] ? path.resolve(args['screenshot-root']) : process.cwd(),
+        outPath,
+      })
+    );
+  }
+  // The per-comparison array is long and lives in the written report; the
+  // console gets the counts, the verdict, and the first defects.
+  const visual = Object.fromEntries(
+    Object.entries(report.visual).filter(([key]) => key !== 'comparisons' && key !== 'defects')
+  );
+  console.log(
+    JSON.stringify(
+      { rubric: report.rubric, visual, defects: report.visual.defects.slice(0, 20), out: path.resolve(args.out) },
+      null,
+      2
+    )
+  );
+  // Missing visual evidence exits non-zero (T12.10): the 0/34 run must be
+  // impossible to mistake for a clean one. The RUBRIC verdict is unaffected —
+  // this is the evidence channel, not the acceptance bar.
+  if (!report.visual.evidenceComplete) {
+    console.error(
+      `Visual evidence incomplete: ${report.visual.defectCount} defect(s); ` +
+        `${report.visual.scoredCount} scored, ${report.visual.unavailableCount} unavailable, ` +
+        `${report.visual.pagesWithoutScoredComparison.length} page(s) with no scored comparison.`
+    );
+    process.exitCode = 3;
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))

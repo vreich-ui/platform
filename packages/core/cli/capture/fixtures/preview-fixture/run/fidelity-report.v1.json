@@ -1,0 +1,524 @@
+{
+  "schemaVersion": "capture-fidelity-report.v1",
+  "task": "T12.5",
+  "target": "fixture-preview-target",
+  "source": {
+    "targetUrl": "http://127.0.0.1:8913/",
+    "capturePolicy": {
+      "fidelityMode": null,
+      "sourceDesignTreatment": null,
+      "designReferences": []
+    }
+  },
+  "limits": {
+    "structuralCoverage": 0.9,
+    "requireTokensComplete": true,
+    "requireGapsEnumerated": true,
+    "maxRounds": 3,
+    "source": "ratified_default"
+  },
+  "pages": [
+    {
+      "pageRef": "page_7b2df291175a",
+      "sourceUrl": "http://127.0.0.1:8913/",
+      "structural": {
+        "sourceBlocks": 4,
+        "mappedBlocks": 2,
+        "mappedBlockCoverage": 0.5,
+        "accountedBlocks": 4,
+        "allGapsEnumerated": true,
+        "orderFidelity": 1,
+        "expectedSectionIds": [
+          "s_4f0dbf23f1",
+          "s_ce9c205cc9"
+        ],
+        "emittedSectionIds": [
+          "s_4f0dbf23f1",
+          "s_ce9c205cc9"
+        ]
+      }
+    },
+    {
+      "pageRef": "page_bb79cc0333f5",
+      "sourceUrl": "http://127.0.0.1:8913/about",
+      "structural": {
+        "sourceBlocks": 4,
+        "mappedBlocks": 4,
+        "mappedBlockCoverage": 1,
+        "accountedBlocks": 4,
+        "allGapsEnumerated": true,
+        "orderFidelity": 1,
+        "expectedSectionIds": [
+          "s_032f27274e",
+          "s_030afaaa1e",
+          "s_8372bbef45",
+          "s_16b6958790"
+        ],
+        "emittedSectionIds": [
+          "s_032f27274e",
+          "s_030afaaa1e",
+          "s_8372bbef45",
+          "s_16b6958790"
+        ]
+      }
+    }
+  ],
+  "visual": {
+    "comparisons": [
+      {
+        "pageRef": "page_7b2df291175a",
+        "candidateId": "candidate_6bc1b8f9c726",
+        "blockRef": "page_7b2df291175a_block_001",
+        "blockStatus": "mapped",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_001.png",
+        "previewScreenshot": "preview/pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_001.png",
+        "status": "scored",
+        "score": 0.4045,
+        "normalizedDifference": 0.5955,
+        "source": {
+          "width": 390,
+          "height": 349
+        },
+        "preview": {
+          "width": 390,
+          "height": 440
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 286
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "candidateId": "candidate_6bc1b8f9c726",
+        "blockRef": "page_7b2df291175a_block_001",
+        "blockStatus": "mapped",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_001.png",
+        "previewScreenshot": "preview/pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_001.png",
+        "status": "scored",
+        "score": 0.3265,
+        "normalizedDifference": 0.6735,
+        "source": {
+          "width": 1440,
+          "height": 322
+        },
+        "preview": {
+          "width": 896,
+          "height": 377
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 72
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "candidateId": "candidate_b1f305fc1b29",
+        "blockRef": "page_7b2df291175a_block_002",
+        "blockStatus": "mapped",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_002.png",
+        "previewScreenshot": "preview/pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_002.png",
+        "status": "scored",
+        "score": 0.9053,
+        "normalizedDifference": 0.0947,
+        "source": {
+          "width": 390,
+          "height": 394
+        },
+        "preview": {
+          "width": 390,
+          "height": 413
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 323
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "candidateId": "candidate_b1f305fc1b29",
+        "blockRef": "page_7b2df291175a_block_002",
+        "blockStatus": "mapped",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_002.png",
+        "previewScreenshot": "preview/pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_002.png",
+        "status": "scored",
+        "score": 0.9328,
+        "normalizedDifference": 0.0672,
+        "source": {
+          "width": 1440,
+          "height": 312
+        },
+        "preview": {
+          "width": 1024,
+          "height": 274
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 69
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_003",
+        "blockStatus": "gap",
+        "gapId": "gap_6e48234cca7c",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_003.png",
+        "status": "unavailable",
+        "reason": "draft_preview_screenshot_not_available"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_003",
+        "blockStatus": "gap",
+        "gapId": "gap_6e48234cca7c",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_003.png",
+        "status": "unavailable",
+        "reason": "draft_preview_screenshot_not_available"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_004",
+        "blockStatus": "gap",
+        "gapId": "gap_05fd8c5976b9",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_004.png",
+        "status": "unavailable",
+        "reason": "draft_preview_screenshot_not_available"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_004",
+        "blockStatus": "gap",
+        "gapId": "gap_05fd8c5976b9",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_004.png",
+        "status": "unavailable",
+        "reason": "draft_preview_screenshot_not_available"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_a4be7d8a509b",
+        "blockRef": "page_bb79cc0333f5_block_001",
+        "blockStatus": "mapped",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_001.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_001.png",
+        "status": "scored",
+        "score": 0.3996,
+        "normalizedDifference": 0.6004,
+        "source": {
+          "width": 390,
+          "height": 254
+        },
+        "preview": {
+          "width": 390,
+          "height": 380
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 208
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_a4be7d8a509b",
+        "blockRef": "page_bb79cc0333f5_block_001",
+        "blockStatus": "mapped",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_001.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_001.png",
+        "status": "scored",
+        "score": 0.3216,
+        "normalizedDifference": 0.6784,
+        "source": {
+          "width": 1440,
+          "height": 227
+        },
+        "preview": {
+          "width": 896,
+          "height": 353
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 50
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_adf4fb6ba959",
+        "blockRef": "page_bb79cc0333f5_block_002",
+        "blockStatus": "mapped",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_002.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_002.png",
+        "status": "scored",
+        "score": 0.8948,
+        "normalizedDifference": 0.1052,
+        "source": {
+          "width": 390,
+          "height": 394
+        },
+        "preview": {
+          "width": 390,
+          "height": 414
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 323
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_adf4fb6ba959",
+        "blockRef": "page_bb79cc0333f5_block_002",
+        "blockStatus": "mapped",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_002.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_002.png",
+        "status": "scored",
+        "score": 0.946,
+        "normalizedDifference": 0.054,
+        "source": {
+          "width": 1440,
+          "height": 312
+        },
+        "preview": {
+          "width": 1280,
+          "height": 331
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 69
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_a9e64477be7e",
+        "blockRef": "page_bb79cc0333f5_block_003",
+        "blockStatus": "mapped",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_003.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_003.png",
+        "status": "scored",
+        "score": 0.9221,
+        "normalizedDifference": 0.0779,
+        "source": {
+          "width": 390,
+          "height": 240
+        },
+        "preview": {
+          "width": 390,
+          "height": 229
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 197
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_a9e64477be7e",
+        "blockRef": "page_bb79cc0333f5_block_003",
+        "blockStatus": "mapped",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_003.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_003.png",
+        "status": "scored",
+        "score": 0.9538,
+        "normalizedDifference": 0.0462,
+        "source": {
+          "width": 1440,
+          "height": 214
+        },
+        "preview": {
+          "width": 1280,
+          "height": 265
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 48
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_2381abdd97cc",
+        "blockRef": "page_bb79cc0333f5_block_004",
+        "blockStatus": "mapped",
+        "viewportId": "mobile",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_004.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_004.png",
+        "status": "scored",
+        "score": 0.8561,
+        "normalizedDifference": 0.1439,
+        "source": {
+          "width": 390,
+          "height": 176
+        },
+        "preview": {
+          "width": 390,
+          "height": 229
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 144
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      },
+      {
+        "pageRef": "page_bb79cc0333f5",
+        "candidateId": "candidate_2381abdd97cc",
+        "blockRef": "page_bb79cc0333f5_block_004",
+        "blockStatus": "mapped",
+        "viewportId": "desktop",
+        "sourceScreenshot": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_004.png",
+        "previewScreenshot": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_004.png",
+        "status": "scored",
+        "score": 0.8858,
+        "normalizedDifference": 0.1142,
+        "source": {
+          "width": 1440,
+          "height": 176
+        },
+        "preview": {
+          "width": 1280,
+          "height": 265
+        },
+        "comparisonRaster": {
+          "width": 320,
+          "height": 39
+        },
+        "normalization": "flatten_rgb_common_raster.v1"
+      }
+    ],
+    "aggregateScore": 0.7291,
+    "scoredCount": 12,
+    "unavailableCount": 4,
+    "pagesWithoutScoredComparison": [],
+    "defects": [
+      {
+        "code": "draft_preview_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_003",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_6e48234cca7c",
+        "detail": "draft_preview_screenshot_not_available"
+      },
+      {
+        "code": "draft_preview_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_003",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_6e48234cca7c",
+        "detail": "draft_preview_screenshot_not_available"
+      },
+      {
+        "code": "draft_preview_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_004",
+        "viewportId": "mobile",
+        "blockStatus": "gap",
+        "gapId": "gap_05fd8c5976b9",
+        "detail": "draft_preview_screenshot_not_available"
+      },
+      {
+        "code": "draft_preview_evidence_missing",
+        "severity": "defect",
+        "pageRef": "page_7b2df291175a",
+        "blockRef": "page_7b2df291175a_block_004",
+        "viewportId": "desktop",
+        "blockStatus": "gap",
+        "gapId": "gap_05fd8c5976b9",
+        "detail": "draft_preview_screenshot_not_available"
+      }
+    ],
+    "defectCount": 4,
+    "evidenceComplete": false
+  },
+  "rubric": {
+    "coverage": {
+      "score": 0.75,
+      "mappedBlocks": 6,
+      "relevantBlocks": 8,
+      "minimum": 0.9,
+      "met": false
+    },
+    "tokensComplete": {
+      "value": true,
+      "required": true,
+      "met": true
+    },
+    "gapsEnumerated": {
+      "value": true,
+      "required": true,
+      "met": true
+    },
+    "verdict": "needs_governed_iteration"
+  },
+  "iterations": [],
+  "gapReport": {
+    "schemaVersion": "capture-palette-gaps.v1",
+    "entries": [
+      {
+        "pageRef": "page_7b2df291175a",
+        "sourceUrl": "http://127.0.0.1:8913/",
+        "gapId": "gap_6e48234cca7c",
+        "blockRef": "page_7b2df291175a_block_003",
+        "screenshotRef": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_003.png",
+        "why": "section_not_allowed_for_page_type",
+        "nearestType": "link_list",
+        "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it"
+      },
+      {
+        "pageRef": "page_7b2df291175a",
+        "sourceUrl": "http://127.0.0.1:8913/",
+        "gapId": "gap_05fd8c5976b9",
+        "blockRef": "page_7b2df291175a_block_004",
+        "screenshotRef": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_004.png",
+        "why": "section_not_allowed_for_page_type",
+        "nearestType": "link_list",
+        "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it"
+      }
+    ],
+    "byCapability": [
+      {
+        "missingCapability": "home PageType does not allow link_list; preserve source evidence as a gap rather than coercing it",
+        "count": 2,
+        "gapIds": [
+          "gap_05fd8c5976b9",
+          "gap_6e48234cca7c"
+        ]
+      }
+    ]
+  },
+  "safety": {
+    "draftOnly": true,
+    "forbiddenVerbs": [
+      "object_publish",
+      "release_to_production",
+      "trigger_netlify_build",
+      "deploy"
+    ],
+    "sourceContentIsData": true
+  }
+}

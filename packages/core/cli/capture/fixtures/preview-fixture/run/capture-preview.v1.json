@@ -1,0 +1,210 @@
+{
+  "schemaVersion": "capture-preview.v1",
+  "task": "T12.10",
+  "target": "fixture-preview-target",
+  "generatedAt": "2026-08-13T19:18:45.664Z",
+  "source": {
+    "targetUrl": "http://127.0.0.1:8913/",
+    "mappingGeneratedAt": "2026-08-13T19:17:24.994Z"
+  },
+  "preview": {
+    "mechanism": "local_astro_build_of_scratch_tenant_copy",
+    "siteDir": "sites/fernwell",
+    "previewSiteDir": ".tmp/capture-preview-fixture",
+    "routePrefix": "/__draft-preview",
+    "themeApplied": true,
+    "published": false,
+    "released": false,
+    "deployed": false,
+    "refusedVerbs": [
+      "deploy",
+      "object_publish",
+      "release_to_production",
+      "trigger_netlify_build"
+    ]
+  },
+  "viewports": [
+    {
+      "id": "mobile",
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 1
+    },
+    {
+      "id": "desktop",
+      "width": 1440,
+      "height": 1000,
+      "deviceScaleFactor": 1
+    }
+  ],
+  "pages": [
+    {
+      "pageRef": "page_7b2df291175a",
+      "sourceUrl": "http://127.0.0.1:8913/",
+      "pageObjectId": "page_capture_448f8ebbdf0684e5bf",
+      "emittedRoute": "/",
+      "previewRoute": "/__draft-preview/page_capture_448f8ebbdf0684e5bf",
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "preview/pages/page_7b2df291175a/mobile/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "668d67f0a969b9137e167d779867b8a52d474a45811a9cad1d649273236dfeab",
+          "byteLength": 69805
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "preview/pages/page_7b2df291175a/desktop/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "2a02838a54a68323e5557957d326fd39b27c66e85c90fb71326590a448ac7985",
+          "byteLength": 70491
+        }
+      ],
+      "blocks": [
+        {
+          "blockRef": "page_7b2df291175a_block_001",
+          "candidateId": "candidate_6bc1b8f9c726",
+          "sectionId": "s_4f0dbf23f1",
+          "viewportId": "mobile",
+          "screenshotPath": "preview/pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_001.png",
+          "sha256": "ca6a4c0f425b0f14406ce864d18970508cb7a9bacd3df168db295f62150c31de",
+          "byteLength": 22493
+        },
+        {
+          "blockRef": "page_7b2df291175a_block_002",
+          "candidateId": "candidate_b1f305fc1b29",
+          "sectionId": "s_ce9c205cc9",
+          "viewportId": "mobile",
+          "screenshotPath": "preview/pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_002.png",
+          "sha256": "44cd481ab0f68b27e6bc953b6751ce3ff9335f2efc3662256f25e3b8bd759307",
+          "byteLength": 35286
+        },
+        {
+          "blockRef": "page_7b2df291175a_block_001",
+          "candidateId": "candidate_6bc1b8f9c726",
+          "sectionId": "s_4f0dbf23f1",
+          "viewportId": "desktop",
+          "screenshotPath": "preview/pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_001.png",
+          "sha256": "2c18ff67d88aa8545e38cb1614114db9e92c4122162cfdf615396952b782ebba",
+          "byteLength": 23904
+        },
+        {
+          "blockRef": "page_7b2df291175a_block_002",
+          "candidateId": "candidate_b1f305fc1b29",
+          "sectionId": "s_ce9c205cc9",
+          "viewportId": "desktop",
+          "screenshotPath": "preview/pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_002.png",
+          "sha256": "a0b63e236d4110aabb0cded2c5168158c93c1c5a4f7f0bc593291ed74222835f",
+          "byteLength": 33931
+        }
+      ]
+    },
+    {
+      "pageRef": "page_bb79cc0333f5",
+      "sourceUrl": "http://127.0.0.1:8913/about",
+      "pageObjectId": "page_capture_c28844d41b8e03f961",
+      "emittedRoute": "/about",
+      "previewRoute": "/__draft-preview/page_capture_c28844d41b8e03f961",
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "preview/pages/page_bb79cc0333f5/mobile/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "f476e9bc5702f78643fb4b3befbe7ba82b45b9a00f00cc22c844878359f3cfc6",
+          "byteLength": 75432
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "preview/pages/page_bb79cc0333f5/desktop/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "9068eb798bc1ef94e7772989d955c2cbd2ca303b6a56f528cec29e8d885c606b",
+          "byteLength": 81850
+        }
+      ],
+      "blocks": [
+        {
+          "blockRef": "page_bb79cc0333f5_block_001",
+          "candidateId": "candidate_a4be7d8a509b",
+          "sectionId": "s_032f27274e",
+          "viewportId": "mobile",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_001.png",
+          "sha256": "9724aa1853aa88711e1e3691b385bce20a94a03dcc300686ed390d44c4a6ffb6",
+          "byteLength": 14285
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_002",
+          "candidateId": "candidate_adf4fb6ba959",
+          "sectionId": "s_030afaaa1e",
+          "viewportId": "mobile",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_002.png",
+          "sha256": "eb3e3ec10eb9620083e990795b0f26cb621ab26297c022cb2fe6032545187681",
+          "byteLength": 34928
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_003",
+          "candidateId": "candidate_a9e64477be7e",
+          "sectionId": "s_8372bbef45",
+          "viewportId": "mobile",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_003.png",
+          "sha256": "5324abb961628e7cd648efb2992cc5225b9a242443d7b1d91b7bb6ad519ca056",
+          "byteLength": 7378
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_004",
+          "candidateId": "candidate_2381abdd97cc",
+          "sectionId": "s_16b6958790",
+          "viewportId": "mobile",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_004.png",
+          "sha256": "e030e4042a62ce098b1660a2abdf20e7c57fdd8c216f465f0cdc7c010e166019",
+          "byteLength": 6862
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_001",
+          "candidateId": "candidate_a4be7d8a509b",
+          "sectionId": "s_032f27274e",
+          "viewportId": "desktop",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_001.png",
+          "sha256": "c0e896834b88eb08d4775da82a3966292b0a83ac40d8e3cbb8d9671b66e0a5be",
+          "byteLength": 16406
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_002",
+          "candidateId": "candidate_adf4fb6ba959",
+          "sectionId": "s_030afaaa1e",
+          "viewportId": "desktop",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_002.png",
+          "sha256": "e347777b8c9a2fa7c7d3abc9b2158368408d59a6aacf0fb7e64ec575f106d0f7",
+          "byteLength": 36626
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_003",
+          "candidateId": "candidate_a9e64477be7e",
+          "sectionId": "s_8372bbef45",
+          "viewportId": "desktop",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_003.png",
+          "sha256": "44dacb76ee0d9d5eb0b027b1aff74a080b46e7845e549d2326dce52e3bc8cceb",
+          "byteLength": 9801
+        },
+        {
+          "blockRef": "page_bb79cc0333f5_block_004",
+          "candidateId": "candidate_2381abdd97cc",
+          "sectionId": "s_16b6958790",
+          "viewportId": "desktop",
+          "screenshotPath": "preview/pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_004.png",
+          "sha256": "9c8dac246a70cbf35d930280cb7c14e747c2ac9e73803b8830dda02a0d32a709",
+          "byteLength": 8079
+        }
+      ]
+    }
+  ],
+  "defects": [],
+  "defectCount": 0
+}

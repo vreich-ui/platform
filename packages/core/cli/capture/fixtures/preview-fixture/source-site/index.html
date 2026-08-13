@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Larkmoor Press</title>
+    <meta name="description" content="Larkmoor Press publishes short books about rivers, weather, and walking." />
+    <style>
+      /* A SYNTHETIC source site: invented publisher, invented copy, no third-party
+         assets, no external requests. It exists so the draft-preview fixture can be
+         regenerated offline by anyone without capturing someone else's website. */
+      :root {
+        --ink: #1d2b25;
+        --paper: #f7f4ec;
+        --moss: #2f5d46;
+        --clay: #b4593a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 17px/1.6 Georgia, 'Times New Roman', serif;
+      }
+      header,
+      main > section,
+      footer {
+        padding: 40px 32px;
+      }
+      header {
+        background: var(--moss);
+        color: var(--paper);
+      }
+      header h1 {
+        font-size: 40px;
+        margin: 0 0 8px;
+        letter-spacing: -0.01em;
+      }
+      header p {
+        margin: 0 0 20px;
+        max-width: 34em;
+      }
+      nav a {
+        color: var(--paper);
+        margin-right: 20px;
+        text-decoration: underline;
+      }
+      .cta {
+        display: inline-block;
+        margin-top: 20px;
+        padding: 12px 22px;
+        background: var(--clay);
+        color: var(--paper);
+        text-decoration: none;
+        font-family: system-ui, sans-serif;
+        font-size: 15px;
+      }
+      main > section {
+        border-bottom: 1px solid #ded7c6;
+      }
+      h2 {
+        font-size: 27px;
+        margin: 0 0 12px;
+        color: var(--moss);
+      }
+      p {
+        max-width: 40em;
+      }
+      footer {
+        background: #e8e2d4;
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+      }
+      footer a {
+        color: var(--moss);
+        margin-right: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Larkmoor Press</h1>
+      <p>
+        Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the
+        moor.
+      </p>
+      <nav>
+        <a href="/">Home</a>
+        <a href="/about">About</a>
+      </nav>
+      <a class="cta" href="/about">Read our story</a>
+    </header>
+    <main>
+      <section id="founder">
+        <h2>Our founder</h2>
+        <p>
+          Larkmoor was started by a printer who spent thirty years setting other people's sentences and wanted, once,
+          to set her own. She still reads every manuscript twice: first walking, then sitting down.
+        </p>
+        <p>
+          The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out
+          with a letter rather than a leaflet.
+        </p>
+      </section>
+      <section id="catalogue">
+        <h2>This season</h2>
+        <p>Two new titles, both about water and the people who live beside it.</p>
+        <a href="/about">The Slow Weir</a>
+        <a href="/about">Nine Ways Home</a>
+      </section>
+    </main>
+    <footer>
+      <a href="/">Home</a>
+      <a href="/about">About</a>
+      <p>Larkmoor Press, an invented publisher used only as capture-pipeline test material.</p>
+    </footer>
+  </body>
+</html>

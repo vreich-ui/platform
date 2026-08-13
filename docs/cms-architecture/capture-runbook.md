@@ -168,6 +168,49 @@ and `deploy` are refused at the transport. When `rights.content` is
 `prohibited`, emission refuses to run without an explicit `--model-adapter`
 rather than quietly carrying the source's copy across.
 
+### Stage 4.5 — preview (render the drafts, screenshot the emission)
+
+**T12.10.** Emitted drafts are unpublished objects, and unpublished objects do
+not render — which is why the first acceptance run scored **0/34**. The preview
+stage renders them anyway, without publishing anything:
+
+```bash
+node packages/core/cli/capture/preview.mjs \
+  --target <target-project> \
+  --plan ./.tmp/capture-run/emission-plan.json \
+  --mapping ./.tmp/capture-run/mapping.v1.json \
+  --theme ./.tmp/capture-run/theme.v1.json \
+  --site sites/<landing-tenant> \
+  --run-root ./.tmp/capture-run \
+  --out ./.tmp/capture-run/capture-preview.v1.json \
+  [--preview-site-dir .tmp/capture-preview-<target>] [--browser-executable <path>] [--keep]
+```
+
+How a draft renders without a publish: the tenant directory is **copied** to a
+scratch directory under `.tmp/`, each emitted page body is written into the
+COPY's export directory at a preview-only route (`/__draft-preview/<page object
+id>` — never the emitted route, which the tenant may already own), the captured
+theme is applied to the COPY's site object `brandTokens`, and the ordinary
+Astro build runs against the copy. Drafts then render through the real
+`PageObjectRenderer` → section-component path. Nothing is written to the store,
+the working tree, git, or a deploy; `object_publish`, `release_to_production`,
+`trigger_netlify_build`, and `deploy` are never called and are listed as
+refused in the manifest.
+
+Screenshots use the SAME browser plane and the SAME viewports as the capture
+(`packages/core/cli/capture/browser.mjs` — mobile 390×844, desktop 1440×1000);
+a preview shot at any other size makes the per-block diff meaningless. Each
+emitted section is located by the identity annotation the renderer already
+stamps (`data-cms-object-id` / `data-cms-section-id`), which is how a preview
+screenshot is joined back to the SOURCE block the mapper mapped it from.
+
+Output is `capture-preview.v1` — the manifest `score.mjs --preview` expects —
+with preview PNGs under `<run-root>/preview/pages/…`. The CLI exits `3` if any
+page or block could not be previewed; each reason is an enumerated defect
+(`page_type_not_previewable`, `mapped_section_absent_from_emitted_page`,
+`page_has_no_previewable_block`, `preview_block_screenshot_failed`,
+`preview_page_render_failed`).
+
 ### Stage 5 — score (fidelity + gaps)
 
 ```bash
@@ -180,12 +223,16 @@ node packages/core/cli/capture/score.mjs \
   [--preview ./.tmp/capture-run/capture-preview.v1.json] \
   [--screenshot-root ./.tmp/capture-run] \
   --out ./.tmp/capture-run/fidelity-report.json \
-  [--gap-out ./.tmp/capture-run/palette-gaps.json]
+  [--gap-out ./.tmp/capture-run/palette-gaps.json] \
+  [--side-by-side ./.tmp/capture-run/side-by-side.html]
 ```
 
 Omitting `--project-policy` applies the ratified default rubric. Omitting
 `--preview` is legal and produces `unavailable` visual comparisons — it does
-not fail the run, and it does not silently pass it either (see below).
+not fail the run, and it does not silently pass it either: every unavailable
+comparison is an enumerated **defect** and the CLI exits `3` (see below).
+`--side-by-side` writes the human review artifact: source block next to emitted
+block, per page, per viewport, with each pair's score.
 
 ## 4. Reading the reports
 
@@ -202,9 +249,25 @@ not fail the run, and it does not silently pass it either (see below).
   has a matching record in `gapReport`. This is what makes a miss auditable.
 - **`rubric.verdict`** — `within_reasonable_limits` when all three are met,
   otherwise `needs_governed_iteration`. There is no partial pass.
-- **`visual`** — `scoredCount` / `unavailableCount` / `aggregateScore`.
-  **Visual evidence explains, it never authorizes.** Zero scored comparisons
-  does not lower the bar; a high pixel score does not raise a failing verdict.
+- **`visual`** — `scoredCount` / `unavailableCount` / `aggregateScore`, plus
+  (T12.10) `defects`, `defectCount`, `evidenceComplete`, and
+  `pagesWithoutScoredComparison`. **Visual evidence explains, it never
+  authorizes.** Zero scored comparisons does not lower the bar; a high pixel
+  score does not raise a failing verdict.
+- **`visual.defects`** — the 0/34 rule. An unavailable comparison is a DEFECT,
+  never a neutral absence, and a page with no scored comparison at all is a
+  defect in its own right; the CLI exits non-zero whenever
+  `evidenceComplete` is false. Each defect names its block's mapping status, so
+  "unavailable because the mapper never mapped this block (gap_…)" is
+  distinguishable from "unavailable because the preview failed" — both are
+  holes, neither is silent. The `rubric` object is untouched by any of it.
+- **`visual.comparisons[].normalization`** — both sides are flattened onto
+  white and resampled onto ONE comparison raster
+  (`screenshot-normalize.mjs`) before a byte is compared. That drops
+  antialiasing, font hinting, and compositing — differences a reader cannot see
+  — and nothing else. It is the ceiling of allowed variance, not a place to
+  hide a diff, and **no CSS or code change may be made to chase a pixel
+  score**.
 - **`gapReport.byCapability`** — gaps grouped by the missing capability, most
   frequent first. This is the backlog: each group is a capability to build, not
   a block to force through.
@@ -243,6 +306,28 @@ The 14 gaps group into asset materialization (8), home PageType placement (3),
 gallery semantics (2), and event modelling (1). Because `requireEnumeratedGaps`
 was met, every one of those is a named capability rather than an unexplained
 miss — which is the point of the rubric.
+
+## 5b. Worked example — the offline draft-preview fixture (T12.10)
+
+The Zilberman fixtures are text-redacted and **byte-free** — no screenshot
+binaries — so nothing in the repo could produce a scored comparison. The
+draft-preview fixture is the offline counterpart with real pixels on both
+sides, over a SYNTHETIC two-page source site invented for the purpose
+(`packages/core/cli/capture/fixtures/preview-fixture/source-site/`, served on
+loopback; no third party's pixels are committed).
+
+```bash
+node scripts/capture-preview-fixture.mjs            # regenerates the whole run
+```
+
+It runs capture → map → theme → emit (dry run) → **preview** → score and writes
+`packages/core/cli/capture/fixtures/preview-fixture/run/`: snapshot, mapping,
+theme, emission plan, `capture-preview.v1.json`, the fidelity report, the
+source and preview PNGs, and `side-by-side.html`. Result: 12 scored
+comparisons, both pages scored at both viewports, aggregate 72.91%, 4
+unavailable comparisons reported as defects (two home-page blocks the `home`
+PageType does not allow, so nothing was emitted for them). Two full
+regenerations produce byte-identical PNGs and an identical `visual` block.
 
 **T12.6 remains a `human_gate`: the disposition is Wolf's.** The 2026-08-13
 agent-authored disposition was withdrawn and stays withdrawn; nothing in this

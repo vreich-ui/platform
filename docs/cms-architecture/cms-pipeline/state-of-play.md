@@ -9,6 +9,76 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-13 — T12.10: drafts render without publishing; the visual half of the fidelity loop exists
+
+The T12.6 run scored **0 visual comparisons out of 34** because a captured
+draft is an unpublished object graph and unpublished objects do not render.
+`score.mjs` had `--preview` / `--screenshot-root` inputs nothing had ever fed.
+Both halves are now built.
+
+**The preview render path (`packages/core/cli/capture/preview.mjs`).** Of the
+three stages between a draft and a reader — `object_publish` (derived export),
+`release_to_production` (commit into `sites/<client>/data/site/pages/`), deploy
+(build) — only the last makes HTML. So the preview keeps the build and replaces
+the governance stages with a throwaway tenant: `sites/<client>` is COPIED into
+`.tmp/`, each emitted page body is written into the copy's export directory at
+a preview-only route `/__draft-preview/<page object id>` (never the emitted
+route — a captured home page claims `/`, which is what quarantined a page in
+T12.6), the captured theme is applied to the copy's site object `brandTokens`,
+and an ordinary Astro build runs against the copy. Drafts render through the
+real `PageObjectRenderer` → section-component path; there is no second
+renderer, nothing touches the store, the working tree, git, or a deploy, and
+`object_publish` / `release_to_production` / `trigger_netlify_build` / `deploy`
+are recorded as refused in the manifest. Local build, per the brief's own
+allowance.
+
+**One screenshot implementation (`browser.mjs`).** `capture.mjs`'s private
+middle — viewports, DOM extraction, per-viewport measurement, screenshot
+writers, settle rules — moved into a shared module both planes use, at exactly
+the capture viewports (mobile 390×844, desktop 1440×1000). It is the module
+pdf-tool's T12.8 `render-service/src/capture.ts` was ported from; pdf-tool's
+plane is https-and-DNS-only by design and cannot be pointed at a loopback
+preview build, which is why the local plane exists. Emitted sections are
+located by the annotation the renderer already stamps
+(`data-cms-object-id`/`data-cms-section-id`), which is how a preview shot is
+filed under the SOURCE block's ref — the key `previewLookup` already read.
+
+**Normalization (`screenshot-normalize.mjs`)** is the pixel twin of
+`html-normalize.mjs`: flatten alpha onto white, resample BOTH sides onto one
+comparison raster (pinned width + kernel, derived from the source aspect).
+That fixes a real defect — the old code resized only the preview, so a one-pixel
+height difference sheared every row below it — and averages away antialiasing.
+No blur, no per-channel tolerance, no ignore-regions; no CSS was touched to
+chase a pixel.
+
+**The 0/34 rule.** Every `unavailable` comparison is now an enumerated
+**defect** carrying its block's mapping status, a page with no scored
+comparison is itself a defect, and `score.mjs` exits `3` when
+`visual.evidenceComplete` is false. `rubric` is untouched — visual evidence
+explains, it never authorizes. Re-scoring the committed Zilberman fixture in
+the suite yields 0 scored / 38 unavailable → **43 defects**.
+
+**Fixture (`fixtures/preview-fixture/`).** The Zilberman fixtures are redacted
+and byte-free, so nothing in the repo could score a comparison. A synthetic
+two-page publisher (invented copy, no third-party pixels) is served on loopback
+and run through capture → map → theme → emit → preview → score by
+`scripts/capture-preview-fixture.mjs`, landing on `sites/fernwell`. Result:
+**12 scored / 4 unavailable**, both pages scored at both viewports, aggregate
+**72.91%**, per-block 32.65%–95.38%; the 4 defects are the two home blocks the
+`home` PageType does not allow (nothing was emitted, so there is nothing to
+photograph — said plainly instead of scored away). Two full regenerations give
+byte-identical PNGs (all 36) and an identical `visual` block. Committed
+side-by-side artifact: `fixtures/preview-fixture/run/side-by-side.html`.
+
+Report: `cms-pipeline/reports/T12.10-draft-preview-2026-08-13.md`. Runbook
+gained Stage 4.5 + the defect/normalization reading rules. Tests: 2387 + 147 +
+45 pass (capture leg 32 → 45). **This reruns nothing**: a Zilberman rerun needs
+a fresh capture (no committed bytes) and a live emission into `sites/zilberman`
+(T12.12), through `site.duplicate` (T12.11). T12.6 stays a `human_gate`
+awaiting Wolf.
+
+---
+
 ## 2026-08-13 — T12.7: capture policy unified on ProjectCapturePolicy; seed kit committed
 
 CMS-Agent's `ProjectCapturePolicy` is now the ONE capture policy shape; the

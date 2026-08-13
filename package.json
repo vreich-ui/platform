@@ -31,6 +31,7 @@
     "capture:map": "node packages/core/cli/capture/map.mjs",
     "capture:theme": "node packages/core/cli/capture/theme.mjs",
     "capture:emit": "node packages/core/cli/capture/emit.mjs",
+    "capture:preview": "node packages/core/cli/capture/preview.mjs",
     "capture:score": "node packages/core/cli/capture/score.mjs",
     "site:genesis": "node scripts/site-genesis-drive.mjs",
     "site:verify": "node scripts/site-genesis-drive.mjs --verify",

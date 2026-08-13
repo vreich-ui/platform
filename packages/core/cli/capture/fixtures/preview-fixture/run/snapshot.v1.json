@@ -1,0 +1,1179 @@
+{
+  "schemaVersion": "snapshot.v1",
+  "capture": {
+    "targetUrl": "http://127.0.0.1:8913/",
+    "origin": "http://127.0.0.1:8913",
+    "capturedAt": "2026-08-13T19:17:24.994Z",
+    "localOnly": true,
+    "redacted": false,
+    "fixture": "T12.10 draft-preview fixture; synthetic source site served on loopback",
+    "contentTreatment": "page content was recorded as data and never interpreted as instructions",
+    "crawler": {
+      "userAgent": "W12CaptureFixture/1.0",
+      "browserExecutable": "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+      "concurrency": 1,
+      "delayMs": 0
+    },
+    "viewports": [
+      {
+        "id": "mobile",
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1
+      },
+      {
+        "id": "desktop",
+        "width": 1440,
+        "height": 1000,
+        "deviceScaleFactor": 1
+      }
+    ]
+  },
+  "pages": [
+    {
+      "pageId": "page_7b2df291175a",
+      "requestedUrl": "http://127.0.0.1:8913/",
+      "url": "http://127.0.0.1:8913/",
+      "path": "/",
+      "status": 200,
+      "capturedAt": "2026-08-13T19:17:19.667Z",
+      "title": "Larkmoor Press",
+      "lang": "en",
+      "canonicalUrl": null,
+      "metaDescription": "Larkmoor Press publishes short books about rivers, weather, and walking.",
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "Larkmoor Press Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the moor. Home About Read our story",
+          "selector": "html > body > header"
+        },
+        {
+          "tag": "h1",
+          "role": null,
+          "level": 1,
+          "text": "Larkmoor Press",
+          "selector": "html > body > header > h1"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "Home About",
+          "selector": "html > body > header > nav"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "Our founder Larkmoor was started by a printer who spent thirty years setting other people's sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet. This season Two new titles, both about water and the people who live beside it. The Slow Weir Nine Ways Home",
+          "selector": "html > body > main"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "Our founder Larkmoor was started by a printer who spent thirty years setting other people's sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet.",
+          "selector": "#founder"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "Our founder",
+          "selector": "html > body > main > section:nth-of-type(1) > h2"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "This season Two new titles, both about water and the people who live beside it. The Slow Weir Nine Ways Home",
+          "selector": "#catalogue"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "This season",
+          "selector": "html > body > main > section:nth-of-type(2) > h2"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "Home About Larkmoor Press, an invented publisher used only as capture-pipeline test material.",
+          "selector": "html > body > footer"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "header",
+          "role": null,
+          "accessibleName": null,
+          "selector": "html > body > header",
+          "text": {
+            "value": "Larkmoor Press Short books about rivers, weather, and walking. Printed twice a year in a small workshop at the edge of the moor. Home About Read our story",
+            "length": 154,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "Home",
+              "href": "http://127.0.0.1:8913/"
+            },
+            {
+              "label": "About",
+              "href": "http://127.0.0.1:8913/about"
+            },
+            {
+              "label": "Read our story",
+              "href": "http://127.0.0.1:8913/about"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 0,
+              "width": 390,
+              "height": 348.75
+            },
+            "desktop": {
+              "x": 0,
+              "y": -20,
+              "width": 1440,
+              "height": 321.56
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(247, 244, 236)",
+              "backgroundColor": "rgb(47, 93, 70)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(247, 244, 236)",
+              "backgroundColor": "rgb(47, 93, 70)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_001.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "bac9c468f893acb649d944b1dce1076907c1ab9338c8d29e9aea73fdf8b0d1e7",
+              "byteLength": 19592
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_001.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "f5c2659a3cecac0831f4652c02068770eaf79de18f27efb21a4c644f5040c273",
+              "byteLength": 22365
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_7b2df291175a_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#founder",
+          "text": {
+            "value": "Our founder Larkmoor was started by a printer who spent thirty years setting other people's sentences and wanted, once, to set her own. She still reads every manuscript twice: first walking, then sitting down. The press keeps to two titles a year so that each one can be edited slowly, printed carefully, and sent out with a letter rather than a leaflet.",
+            "length": 354,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 348.75,
+              "width": 390,
+              "height": 392.69
+            },
+            "desktop": {
+              "x": 0,
+              "y": 301.56,
+              "width": 1440,
+              "height": 311.13
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_002.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "a310dc12f858ec5aa28af63f434e6f4711b6b9663b60286cc7d92d276b157ef1",
+              "byteLength": 28267
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_002.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "f18f0dc6d920b3913b0ac22cac724ec2e176fa14b83ae243eff194dc7cd0394e",
+              "byteLength": 31377
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_7b2df291175a_block_002"
+        },
+        {
+          "ordinal": 2,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#catalogue",
+          "text": {
+            "value": "This season Two new titles, both about water and the people who live beside it. The Slow Weir Nine Ways Home",
+            "length": 108,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "The Slow Weir",
+              "href": "http://127.0.0.1:8913/about"
+            },
+            {
+              "label": "Nine Ways Home",
+              "href": "http://127.0.0.1:8913/about"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 741.44,
+              "width": 390,
+              "height": 239.75
+            },
+            "desktop": {
+              "x": 0,
+              "y": 612.69,
+              "width": 1440,
+              "height": 212.56
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_003.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "d79ea31e5455e00a9c0c51746bd2c5b6d14dc92f9fce9548879f8dfcaaa43a9b",
+              "byteLength": 11613
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_003.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "3ac3d2dc42421602a21ea72ac3cbc2fc79346e32c0dcec5d6f6458276d38dcf1",
+              "byteLength": 12922
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_7b2df291175a_block_003"
+        },
+        {
+          "ordinal": 3,
+          "tag": "footer",
+          "role": null,
+          "accessibleName": null,
+          "selector": "html > body > footer",
+          "text": {
+            "value": "Home About Larkmoor Press, an invented publisher used only as capture-pipeline test material.",
+            "length": 93,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "Home",
+              "href": "http://127.0.0.1:8913/"
+            },
+            {
+              "label": "About",
+              "href": "http://127.0.0.1:8913/about"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 981.19,
+              "width": 390,
+              "height": 175.17
+            },
+            "desktop": {
+              "x": 0,
+              "y": 825.25,
+              "width": 1440,
+              "height": 175.17
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgb(232, 226, 212)",
+              "backgroundImage": null,
+              "fontFamily": "system-ui, sans-serif",
+              "fontSize": "14px",
+              "fontWeight": "400",
+              "lineHeight": "22.4px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgb(232, 226, 212)",
+              "backgroundImage": null,
+              "fontFamily": "system-ui, sans-serif",
+              "fontSize": "14px",
+              "fontWeight": "400",
+              "lineHeight": "22.4px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/mobile/blocks/page_7b2df291175a_block_004.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "8de358b60bc45950c5740c983ae50ab1bb2ef93aae1bde88c6a83b17ebe1fe1a",
+              "byteLength": 8405
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_7b2df291175a/desktop/blocks/page_7b2df291175a_block_004.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "b6e1e5a0a4f23d058e46da682da9ca98ca7d4fe1ca57d145a3a48073f153a56d",
+              "byteLength": 10144
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_7b2df291175a_block_004"
+        }
+      ],
+      "assets": [],
+      "navigation": {
+        "primary": [
+          {
+            "label": "Home",
+            "href": "http://127.0.0.1:8913/"
+          },
+          {
+            "label": "About",
+            "href": "http://127.0.0.1:8913/about"
+          },
+          {
+            "label": "Read our story",
+            "href": "http://127.0.0.1:8913/about"
+          }
+        ],
+        "footer": [
+          {
+            "label": "Home",
+            "href": "http://127.0.0.1:8913/"
+          },
+          {
+            "label": "About",
+            "href": "http://127.0.0.1:8913/about"
+          }
+        ]
+      },
+      "discoveredLinks": [
+        "http://127.0.0.1:8913/",
+        "http://127.0.0.1:8913/about"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_7b2df291175a/mobile/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "9c744e3e4972ec201393be0b125f25ee253855d9821ca72f55e864f529e1c708",
+          "byteLength": 68125
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_7b2df291175a/desktop/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "1f3b0ed2c158fdeb1fd5cd51df50db61a6b25884e2741d80171b3f2be1f25368",
+          "byteLength": 77358
+        }
+      ]
+    },
+    {
+      "pageId": "page_bb79cc0333f5",
+      "requestedUrl": "http://127.0.0.1:8913/about",
+      "url": "http://127.0.0.1:8913/about",
+      "path": "/about",
+      "status": 200,
+      "capturedAt": "2026-08-13T19:17:24.978Z",
+      "title": "About — Larkmoor Press",
+      "lang": "en",
+      "canonicalUrl": null,
+      "metaDescription": "How Larkmoor Press works, and where to find its books.",
+      "outline": [
+        {
+          "tag": "header",
+          "role": null,
+          "level": null,
+          "text": "About Larkmoor A two-person press working to a deliberately small calendar. Home About",
+          "selector": "html > body > header"
+        },
+        {
+          "tag": "h1",
+          "role": null,
+          "level": 1,
+          "text": "About Larkmoor",
+          "selector": "html > body > header > h1"
+        },
+        {
+          "tag": "nav",
+          "role": null,
+          "level": null,
+          "text": "Home About",
+          "selector": "html > body > header > nav"
+        },
+        {
+          "tag": "main",
+          "role": null,
+          "level": null,
+          "text": "How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet. Where to find us Booksellers who stock Larkmoor, and the two markets we attend each year. Home Stockists",
+          "selector": "html > body > main"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet.",
+          "selector": "#how-we-work"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "How we work",
+          "selector": "html > body > main > section:nth-of-type(1) > h2"
+        },
+        {
+          "tag": "section",
+          "role": null,
+          "level": null,
+          "text": "Where to find us Booksellers who stock Larkmoor, and the two markets we attend each year. Home Stockists",
+          "selector": "#find-us"
+        },
+        {
+          "tag": "h2",
+          "role": null,
+          "level": 2,
+          "text": "Where to find us",
+          "selector": "html > body > main > section:nth-of-type(2) > h2"
+        },
+        {
+          "tag": "footer",
+          "role": null,
+          "level": null,
+          "text": "Home About Larkmoor Press, an invented publisher used only as capture-pipeline test material.",
+          "selector": "html > body > footer"
+        }
+      ],
+      "blocks": [
+        {
+          "ordinal": 0,
+          "tag": "header",
+          "role": null,
+          "accessibleName": null,
+          "selector": "html > body > header",
+          "text": {
+            "value": "About Larkmoor A two-person press working to a deliberately small calendar. Home About",
+            "length": 86,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "Home",
+              "href": "http://127.0.0.1:8913/"
+            },
+            {
+              "label": "About",
+              "href": "http://127.0.0.1:8913/about"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 0,
+              "width": 390,
+              "height": 253.56
+            },
+            "desktop": {
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 226.38
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(247, 244, 236)",
+              "backgroundColor": "rgb(47, 93, 70)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(247, 244, 236)",
+              "backgroundColor": "rgb(47, 93, 70)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_001.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "2ae6a595b140415e709e77f0a9107b0fdeeea153c19f7db1d7087de1b05295af",
+              "byteLength": 13822
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_001.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "4d783db2350aabccd68b10da24e0004c5ea49633af5982dc078a1cb409d93e88",
+              "byteLength": 15134
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_bb79cc0333f5_block_001"
+        },
+        {
+          "ordinal": 1,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#how-we-work",
+          "text": {
+            "value": "How we work Manuscripts arrive by post. We read them away from a screen, answer every one, and take on two a year. An accepted book is edited over eight months, set in metal for the title pages, and printed in runs of nine hundred. Nothing is reprinted. When a run is gone the book stays gone, which keeps the shelf honest and the workshop quiet.",
+            "length": 346,
+            "truncated": false
+          },
+          "links": [],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 253.56,
+              "width": 390,
+              "height": 392.69
+            },
+            "desktop": {
+              "x": 0,
+              "y": 226.38,
+              "width": 1440,
+              "height": 311.13
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_002.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "d91f33e83735e6564f1709b529c4725c2460785b7d837617f746fcb295ccc6c3",
+              "byteLength": 29947
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_002.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "954fc8fbde0d26484d783261977084f67fcd2d3cf01965cd51078cf40651616a",
+              "byteLength": 33056
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_bb79cc0333f5_block_002"
+        },
+        {
+          "ordinal": 2,
+          "tag": "section",
+          "role": null,
+          "accessibleName": null,
+          "selector": "#find-us",
+          "text": {
+            "value": "Where to find us Booksellers who stock Larkmoor, and the two markets we attend each year. Home Stockists",
+            "length": 104,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "Home",
+              "href": "http://127.0.0.1:8913/"
+            },
+            {
+              "label": "Stockists",
+              "href": "http://127.0.0.1:8913/about"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 646.25,
+              "width": 390,
+              "height": 239.75
+            },
+            "desktop": {
+              "x": 0,
+              "y": 537.5,
+              "width": 1440,
+              "height": 212.56
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgba(0, 0, 0, 0)",
+              "backgroundImage": null,
+              "fontFamily": "Georgia, \"Times New Roman\", serif",
+              "fontSize": "17px",
+              "fontWeight": "400",
+              "lineHeight": "27.2px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_003.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "1156f52b60e666132e1ab0619dfd90842c1f4089a9792f24fd9100c7f90e089f",
+              "byteLength": 12970
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_003.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "c2f450adbf2d313dad287a3a68418e1906a5b3ee8a4fc2f8b812886fca1219a2",
+              "byteLength": 13828
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_bb79cc0333f5_block_003"
+        },
+        {
+          "ordinal": 3,
+          "tag": "footer",
+          "role": null,
+          "accessibleName": null,
+          "selector": "html > body > footer",
+          "text": {
+            "value": "Home About Larkmoor Press, an invented publisher used only as capture-pipeline test material.",
+            "length": 93,
+            "truncated": false
+          },
+          "links": [
+            {
+              "label": "Home",
+              "href": "http://127.0.0.1:8913/"
+            },
+            {
+              "label": "About",
+              "href": "http://127.0.0.1:8913/about"
+            }
+          ],
+          "boundingBoxes": {
+            "mobile": {
+              "x": 0,
+              "y": 886,
+              "width": 390,
+              "height": 175.17
+            },
+            "desktop": {
+              "x": 0,
+              "y": 750.06,
+              "width": 1440,
+              "height": 175.17
+            }
+          },
+          "computedStyles": {
+            "mobile": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgb(232, 226, 212)",
+              "backgroundImage": null,
+              "fontFamily": "system-ui, sans-serif",
+              "fontSize": "14px",
+              "fontWeight": "400",
+              "lineHeight": "22.4px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            },
+            "desktop": {
+              "display": "block",
+              "position": "static",
+              "color": "rgb(29, 43, 37)",
+              "backgroundColor": "rgb(232, 226, 212)",
+              "backgroundImage": null,
+              "fontFamily": "system-ui, sans-serif",
+              "fontSize": "14px",
+              "fontWeight": "400",
+              "lineHeight": "22.4px",
+              "letterSpacing": "normal",
+              "textAlign": "start",
+              "margin": [
+                "0px",
+                "0px",
+                "0px",
+                "0px"
+              ],
+              "padding": [
+                "40px",
+                "32px",
+                "40px",
+                "32px"
+              ],
+              "borderRadius": "0px"
+            }
+          },
+          "screenshots": [
+            {
+              "viewportId": "mobile",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/mobile/blocks/page_bb79cc0333f5_block_004.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "e95cf4a7d829546b9278c5e80a3313b9824ab7049709c26d49ee750e73dbe59e",
+              "byteLength": 8405
+            },
+            {
+              "viewportId": "desktop",
+              "kind": "block",
+              "path": "pages/page_bb79cc0333f5/desktop/blocks/page_bb79cc0333f5_block_004.png",
+              "captured": true,
+              "committed": false,
+              "sha256": "93d167b52270ee126f7ce81c047eb4389272688df461048c3d16b88c013a7de3",
+              "byteLength": 10144
+            }
+          ],
+          "assetUrls": [],
+          "id": "page_bb79cc0333f5_block_004"
+        }
+      ],
+      "assets": [],
+      "navigation": {
+        "primary": [
+          {
+            "label": "Home",
+            "href": "http://127.0.0.1:8913/"
+          },
+          {
+            "label": "About",
+            "href": "http://127.0.0.1:8913/about"
+          }
+        ],
+        "footer": [
+          {
+            "label": "Home",
+            "href": "http://127.0.0.1:8913/"
+          },
+          {
+            "label": "About",
+            "href": "http://127.0.0.1:8913/about"
+          }
+        ]
+      },
+      "discoveredLinks": [
+        "http://127.0.0.1:8913/",
+        "http://127.0.0.1:8913/about"
+      ],
+      "screenshots": [
+        {
+          "viewportId": "mobile",
+          "kind": "full-page",
+          "path": "pages/page_bb79cc0333f5/mobile/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "a42c1823165c4646181bd7a61749d8d0d5a1c13bdbffd2818730e29610ced9ef",
+          "byteLength": 65207
+        },
+        {
+          "viewportId": "desktop",
+          "kind": "full-page",
+          "path": "pages/page_bb79cc0333f5/desktop/full-page.png",
+          "captured": true,
+          "committed": false,
+          "sha256": "1fa8ee4372b4d3da08a51f5c7f4cb850fe63278046f0ed65ad91497c0a00e6b7",
+          "byteLength": 73203
+        }
+      ]
+    }
+  ],
+  "diagnostics": {
+    "queuedUrls": 2,
+    "capturedPages": 2,
+    "skipped": [],
+    "quarantined": [],
+    "stoppedAtProjectMaxPages": false
+  }
+}

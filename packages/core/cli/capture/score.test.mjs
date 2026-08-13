@@ -9,6 +9,7 @@ import sharp from 'sharp';
 import {
   DEFAULT_FIDELITY_LIMITS,
   FidelityError,
+  VISUAL_DEFECT_CODES,
   consolidatedGapReport,
   fidelityLimitsFromProject,
   normalizedScreenshotDiff,
@@ -18,6 +19,29 @@ import {
 
 const directory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const fixture = async (name) => JSON.parse(await readFile(path.join(directory, name), 'utf8'));
+
+// The T12.10 fixture: a synthetic two-page source site captured, mapped,
+// emitted, PREVIEWED (local build of a scratch tenant), and scored — the whole
+// pipeline with real screenshot bytes on both sides. Regenerate with
+// `node scripts/capture-preview-fixture.mjs`.
+const previewRunRoot = path.join(directory, 'preview-fixture', 'run');
+const previewFixture = async (name) => JSON.parse(await readFile(path.join(previewRunRoot, name), 'utf8'));
+const scorePreviewFixture = async () => {
+  const [snapshot, mapping, theme, previewManifest] = await Promise.all([
+    previewFixture('snapshot.v1.json'),
+    previewFixture('mapping.v1.json'),
+    previewFixture('theme.v1.json'),
+    previewFixture('capture-preview.v1.json'),
+  ]);
+  return scoreCaptureFidelity({
+    snapshot,
+    mapping,
+    theme,
+    target: 'fixture-preview-target',
+    previewManifest,
+    screenshotRoot: previewRunRoot,
+  });
+};
 
 async function scoreFixture(options = {}) {
   const [snapshot, mapping, theme] = await Promise.all([
@@ -46,6 +70,18 @@ test('fixture score is deterministic and records the ratified coverage-based rub
   });
   assert.equal(first.visual.scoredCount, 0);
   assert.equal(first.visual.unavailableCount, 38);
+  // The 0/34 condition itself: unavailable evidence is a DEFECT, never a
+  // neutral absence. 38 missing comparisons + 5 pages with nothing scored.
+  assert.equal(first.visual.evidenceComplete, false);
+  assert.equal(first.visual.defectCount, 43);
+  assert.equal(first.visual.pagesWithoutScoredComparison.length, first.pages.length);
+  assert.ok(first.visual.defects.every((defect) => defect.severity === 'defect' && typeof defect.code === 'string'));
+  assert.equal(
+    first.visual.defects.filter((defect) => defect.code === VISUAL_DEFECT_CODES.page_not_previewed).length,
+    5
+  );
+  // …and the rubric is untouched by it: visual evidence explains, never authorizes.
+  assert.equal(first.rubric.verdict, 'needs_governed_iteration');
   assert.ok(first.pages.every((page) => page.structural.allGapsEnumerated));
   assert.deepEqual(first, await fixture('zilberman.fidelity-report.v1.golden.json'));
 });
@@ -217,5 +253,70 @@ test('bounded iterations admit only validated data edits and quarantine invalid 
         rescore: async () => report,
       }),
     /CSS/
+  );
+});
+
+test('the draft-preview fixture scores at least one visual comparison per emitted page', async () => {
+  const report = await scorePreviewFixture();
+  assert.ok(report.pages.length >= 2, 'fixture must cover more than one page');
+  for (const page of report.pages) {
+    const scored = report.visual.comparisons.filter(
+      (comparison) => comparison.pageRef === page.pageRef && comparison.status === 'scored'
+    );
+    assert.ok(scored.length >= 1, `page ${page.pageRef} has no scored visual comparison`);
+    assert.ok(
+      new Set(scored.map((comparison) => comparison.viewportId)).size === 2,
+      `page ${page.pageRef} must be scored at both capture viewports`
+    );
+  }
+  assert.equal(report.visual.pagesWithoutScoredComparison.length, 0);
+  assert.ok(report.visual.aggregateScore > 0 && report.visual.aggregateScore <= 1);
+  // Every scored comparison went through the common comparison raster.
+  assert.ok(
+    report.visual.comparisons
+      .filter((comparison) => comparison.status === 'scored')
+      .every((comparison) => comparison.normalization === 'flatten_rgb_common_raster.v1')
+  );
+  // Evidence still missing for blocks the mapper never mapped: reported as
+  // defects that name the gap, not quietly dropped.
+  for (const defect of report.visual.defects) {
+    assert.equal(defect.severity, 'defect');
+    assert.equal(defect.blockStatus, 'gap');
+    assert.equal(typeof defect.gapId, 'string');
+  }
+});
+
+test('draft-preview fixture scores are reproducible across runs on the same input', async () => {
+  const [first, second] = await Promise.all([scorePreviewFixture(), scorePreviewFixture()]);
+  assert.deepEqual(first.visual, second.visual);
+  assert.deepEqual(first, second);
+  // …and match the report committed with the fixture run.
+  const committed = await previewFixture('fidelity-report.v1.json');
+  assert.deepEqual(first.visual, committed.visual);
+  assert.deepEqual(first.rubric, committed.rubric);
+});
+
+test('a preview manifest that names no screenshot leaves every comparison a defect', async () => {
+  const [snapshot, mapping, theme] = await Promise.all([
+    previewFixture('snapshot.v1.json'),
+    previewFixture('mapping.v1.json'),
+    previewFixture('theme.v1.json'),
+  ]);
+  const report = await scoreCaptureFidelity({
+    snapshot,
+    mapping,
+    theme,
+    target: 'fixture-preview-target',
+    previewManifest: { schemaVersion: 'capture-preview.v1', pages: [] },
+    screenshotRoot: previewRunRoot,
+  });
+  assert.equal(report.visual.scoredCount, 0);
+  assert.equal(report.visual.evidenceComplete, false);
+  assert.equal(
+    report.visual.defectCount,
+    report.visual.unavailableCount + report.visual.pagesWithoutScoredComparison.length
+  );
+  assert.ok(
+    report.visual.defects.some((defect) => defect.code === VISUAL_DEFECT_CODES.draft_preview_screenshot_not_available)
   );
 });
