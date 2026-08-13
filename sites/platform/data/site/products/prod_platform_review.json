@@ -1,0 +1,24 @@
+{
+  "__generated": {
+    "at": "2026-08-13T09:40:04.889Z",
+    "from": "objects/product/by-id/prod_platform_review.json",
+    "record_version": 10
+  },
+  "commerce": {
+    "availability": "coming_soon",
+    "mode": "free",
+    "provider": "none"
+  },
+  "fulfillment": {
+    "kind": "none"
+  },
+  "presentation": {
+    "excerpt": "A coming-soon example that demonstrates a governed offer without activating checkout.",
+    "notes": "QA example for the Platform manual; not a live commercial offer.",
+    "seo": {
+      "description": "Example product object used to document presentation, commerce, fulfillment, approval, and release requirements."
+    },
+    "title": "CMS Readiness Review"
+  },
+  "slug": "cms-readiness-review"
+}
