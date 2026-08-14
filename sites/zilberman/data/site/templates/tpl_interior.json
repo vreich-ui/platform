@@ -1,0 +1,64 @@
+{
+  "__generated": {
+    "at": "2026-08-14T07:00:09.113Z",
+    "from": "objects/template/by-id/tpl_interior.json",
+    "record_version": 4
+  },
+  "appliesTo": [
+    "standard"
+  ],
+  "description": "The standard interior-page shape: a quiet lede opener, one or more prose body sections, and an optional closing CTA banner.",
+  "name": "Interior page",
+  "scope": "evergreen",
+  "slots": [
+    {
+      "allowed": [
+        "lede"
+      ],
+      "blueprint": {
+        "data": {
+          "actions": [],
+          "heading": "New page heading",
+          "kicker": "Overview"
+        },
+        "id": "s_tplintlede",
+        "type": "lede"
+      },
+      "repeatable": false,
+      "required": true,
+      "slotId": "slot_lede"
+    },
+    {
+      "allowed": [
+        "prose"
+      ],
+      "blueprint": {
+        "data": {
+          "body": "<p></p>"
+        },
+        "id": "s_tplintbody",
+        "type": "prose"
+      },
+      "repeatable": true,
+      "required": true,
+      "slotId": "slot_body"
+    },
+    {
+      "allowed": [
+        "cta_banner"
+      ],
+      "blueprint": {
+        "data": {
+          "actions": [],
+          "heading": "Keep exploring"
+        },
+        "id": "s_tplintcta",
+        "type": "cta_banner"
+      },
+      "repeatable": false,
+      "required": false,
+      "slotId": "slot_cta"
+    }
+  ],
+  "whenToUse": "The default recipe for any evergreen content page — guides, explainers, policies. Pick tpl_landing when the page must convert with a hero + highlight grid; tpl_legal for single-block system boilerplate."
+}
