@@ -1,12 +1,8 @@
 {
   "__generated": {
-    "at": "1970-01-01T00:00:00.000Z",
-    "from": "create-site:bootstrap (not store-backed — replaced by the seed drive)",
-    "record_version": 0
-  },
-  "role": "header",
-  "brand": {
-    "text": "Zilberman"
+    "at": "2026-08-14T06:58:57.817Z",
+    "from": "objects/navigation/by-id/nav_header.json",
+    "record_version": 4
   },
   "groups": [
     {
@@ -16,54 +12,55 @@
           "id": "i_home",
           "label": "Home",
           "target": {
-            "kind": "route",
-            "href": "/"
+            "href": "/",
+            "kind": "route"
           }
         }
       ]
     },
     {
-      "id": "g_admin",
-      "title": "Admin",
       "adminOnly": true,
+      "id": "g_admin",
       "items": [
         {
+          "description": "Admin home — overview and quick actions.",
           "id": "i_admin_dashboard",
           "label": "Dashboard",
-          "description": "Admin home — overview and quick actions.",
           "target": {
-            "kind": "route",
-            "href": "/admin"
+            "href": "/admin",
+            "kind": "route"
           }
         },
         {
+          "description": "Browse everything by human name — pages, articles, sections, and more.",
           "id": "i_admin_content",
           "label": "Content library",
-          "description": "Browse everything by human name — pages, articles, sections, and more.",
           "target": {
-            "kind": "route",
-            "href": "/admin/content"
+            "href": "/admin/content",
+            "kind": "route"
           }
         },
         {
+          "description": "Chat with CMS Agents across any object.",
           "id": "i_admin_agents",
           "label": "Agents",
-          "description": "Chat with CMS Agents across any object.",
           "target": {
-            "kind": "route",
-            "href": "/admin/agents"
+            "href": "/admin/agents",
+            "kind": "route"
           }
         },
         {
+          "description": "Blob browser, diagnostics, and wipe tools (Owner-only).",
           "id": "i_admin_maintenance",
           "label": "Maintenance",
-          "description": "Blob browser, diagnostics, and wipe tools (Owner-only).",
           "target": {
-            "kind": "route",
-            "href": "/admin/maintenance"
+            "href": "/admin/maintenance",
+            "kind": "route"
           }
         }
-      ]
+      ],
+      "title": "Admin"
     }
-  ]
+  ],
+  "role": "header"
 }
