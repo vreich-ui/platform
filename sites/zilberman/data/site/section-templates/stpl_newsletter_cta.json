@@ -1,0 +1,20 @@
+{
+  "__generated": {
+    "at": "2026-08-14T06:59:54.817Z",
+    "from": "objects/section_template/by-id/stpl_newsletter_cta.json",
+    "record_version": 4
+  },
+  "blueprint": {
+    "data": {
+      "body": "<p>Get occasional updates — no spam.</p>",
+      "formName": "newsletter",
+      "heading": "Stay in the loop"
+    },
+    "id": "s_stplnewsletter",
+    "type": "newsletter_signup"
+  },
+  "description": "A single-field email capture band.",
+  "name": "Newsletter CTA",
+  "scope": "evergreen",
+  "whenToUse": "Anywhere the page should offer an email opt-in."
+}
