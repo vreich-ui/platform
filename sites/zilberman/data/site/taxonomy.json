@@ -1,0 +1,15 @@
+{
+  "__generated": {
+    "at": "2026-08-14T06:59:19.616Z",
+    "from": "objects/taxonomy/by-id/tax_zilberman.json",
+    "record_version": 4
+  },
+  "kinds": {
+    "category": {
+      "terms": []
+    },
+    "tag": {
+      "terms": []
+    }
+  }
+}
