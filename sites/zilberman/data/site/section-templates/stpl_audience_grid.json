@@ -1,0 +1,31 @@
+{
+  "__generated": {
+    "at": "2026-08-14T06:59:40.814Z",
+    "from": "objects/section_template/by-id/stpl_audience_grid.json",
+    "record_version": 4
+  },
+  "blueprint": {
+    "data": {
+      "heading": "New audience heading",
+      "kicker": "Who this is for",
+      "limit": 4,
+      "source": {
+        "cards": [
+          {
+            "description": "First audience or feature cell."
+          },
+          {
+            "description": "Second audience or feature cell."
+          }
+        ],
+        "kind": "cards"
+      }
+    },
+    "id": "s_stplaudience",
+    "type": "content_grid"
+  },
+  "description": "Curated text-cell grid (\"who this is for\" / feature highlights) — cards are hand-written copy.",
+  "name": "Audience grid",
+  "scope": "evergreen",
+  "whenToUse": "\"Who this is for\" and feature-highlight rows where every cell is hand-written copy."
+}
