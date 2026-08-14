@@ -1,26 +1,26 @@
 {
   "__generated": {
-    "at": "1970-01-01T00:00:00.000Z",
-    "from": "create-site:bootstrap (not store-backed — replaced by the seed drive)",
-    "record_version": 0
+    "at": "2026-08-14T07:01:21.194Z",
+    "from": "objects/page/by-id/page_404.json",
+    "record_version": 6
   },
   "pageType": "system",
   "route": "/404",
-  "title": "Page not found",
+  "sections": [
+    {
+      "data": {
+        "body": "<h2>Page not found</h2><p>That page does not exist on Zilberman.</p>"
+      },
+      "id": "s_notfound",
+      "type": "prose"
+    }
+  ],
   "seo": {
     "description": "Page not found.",
     "robots": {
-      "index": false,
-      "follow": false
+      "follow": false,
+      "index": false
     }
   },
-  "sections": [
-    {
-      "id": "s_notfound",
-      "type": "prose",
-      "data": {
-        "body": "<h2>Page not found</h2><p>That page does not exist on Zilberman.</p>"
-      }
-    }
-  ]
+  "title": "Page not found"
 }
