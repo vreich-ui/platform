@@ -19,7 +19,7 @@ export const siteBody = {
   },
   urls: {
     base: '/',
-    canonicalHost: 'https://zilberman.netlify.app',
+    canonicalHost: 'https://zilbermanfilmfoundation.netlify.app',
   },
   metadataDefaults: {
     description: 'Zilberman — a starter site, ready for real content.',
