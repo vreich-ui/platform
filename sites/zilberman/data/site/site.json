@@ -1,39 +1,32 @@
 {
   "__generated": {
-    "at": "1970-01-01T00:00:00.000Z",
-    "from": "create-site:bootstrap (not store-backed — replaced by the seed drive)",
-    "record_version": 0
+    "at": "2026-08-14T06:59:12.192Z",
+    "from": "objects/site/by-id/site_zilberman.json",
+    "record_version": 4
   },
-  "name": "Zilberman",
-  "logo": {
-    "text": "ZILBERMAN"
-  },
-  "urls": {
-    "base": "/",
-    "canonicalHost": "https://zilberman.netlify.app"
-  },
-  "metadataDefaults": {
-    "description": "Zilberman — a starter site, ready for real content.",
-    "ogImage": "/Social/og-default.jpg",
-    "titleTemplate": "%s - Zilberman"
+  "blog": {
+    "categoryBase": "category",
+    "listPath": "learn/library",
+    "postsPerPage": 6,
+    "tagBase": "tag"
   },
   "brandTokens": {
     "colors": {
+      "accent": "rgb(0 150 136)",
+      "bg-page": "rgb(255 255 255)",
+      "bg-page-dark": "rgb(10 12 20)",
+      "bg-surface": "rgb(245 246 248)",
+      "gold": "rgb(191 155 48)",
       "primary": "rgb(51 102 204)",
       "secondary": "rgb(38 77 153)",
-      "accent": "rgb(0 150 136)",
-      "gold": "rgb(191 155 48)",
-      "text-heading": "rgb(20 24 28)",
       "text-default": "rgb(38 43 48)",
-      "text-muted": "rgb(60 67 75 / 76%)",
-      "bg-page": "rgb(255 255 255)",
-      "bg-surface": "rgb(245 246 248)",
-      "bg-page-dark": "rgb(10 12 20)"
+      "text-heading": "rgb(20 24 28)",
+      "text-muted": "rgb(60 67 75 / 76%)"
     },
     "fonts": {
+      "heading": "Georgia, serif",
       "sans": "system-ui, sans-serif",
-      "serif": "Georgia, serif",
-      "heading": "Georgia, serif"
+      "serif": "Georgia, serif"
     }
   },
   "chrome": {
@@ -41,13 +34,20 @@
     "showThemeToggle": true
   },
   "defaultNavigation": {
-    "header": "nav_header",
-    "footer": "nav_footer"
+    "footer": "nav_footer",
+    "header": "nav_header"
   },
-  "blog": {
-    "listPath": "learn/library",
-    "postsPerPage": 6,
-    "categoryBase": "category",
-    "tagBase": "tag"
+  "logo": {
+    "text": "ZILBERMAN"
+  },
+  "metadataDefaults": {
+    "description": "Zilberman — a starter site, ready for real content.",
+    "ogImage": "/Social/og-default.jpg",
+    "titleTemplate": "%s - Zilberman"
+  },
+  "name": "Zilberman",
+  "urls": {
+    "base": "/",
+    "canonicalHost": "https://zilberman.netlify.app"
   }
 }
