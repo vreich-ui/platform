@@ -1,0 +1,30 @@
+{
+  "__generated": {
+    "at": "2026-08-14T06:59:26.433Z",
+    "from": "objects/theme/by-id/thm_zilberman_default.json",
+    "record_version": 4
+  },
+  "description": "The starter palette, verbatim from the site seed — applying it to the untouched site is a no-op.",
+  "name": "Default",
+  "scope": "evergreen",
+  "tokens": {
+    "colors": {
+      "accent": "rgb(0 150 136)",
+      "bg-page": "rgb(255 255 255)",
+      "bg-page-dark": "rgb(10 12 20)",
+      "bg-surface": "rgb(245 246 248)",
+      "gold": "rgb(191 155 48)",
+      "primary": "rgb(51 102 204)",
+      "secondary": "rgb(38 77 153)",
+      "text-default": "rgb(38 43 48)",
+      "text-heading": "rgb(20 24 28)",
+      "text-muted": "rgb(60 67 75 / 76%)"
+    },
+    "fonts": {
+      "heading": "Georgia, serif",
+      "sans": "system-ui, sans-serif",
+      "serif": "Georgia, serif"
+    }
+  },
+  "whenToUse": "Apply to restore the starter palette after theme experiments, or copy as the starting point for a real brand palette."
+}
