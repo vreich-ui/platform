@@ -1,0 +1,29 @@
+{
+  "__generated": {
+    "at": "1970-01-01T00:00:00.000Z",
+    "from": "create-site:bootstrap (not store-backed — replaced by the seed drive)",
+    "record_version": 0
+  },
+  "pageType": "system",
+  "route": "/",
+  "title": "Zilberman",
+  "navigationOverrides": {
+    "footer": "nav_footer"
+  },
+  "seo": {
+    "description": "Zilberman — a starter site, ready for real content.",
+    "robots": {
+      "index": true,
+      "follow": true
+    }
+  },
+  "sections": [
+    {
+      "id": "s_welcome",
+      "type": "prose",
+      "data": {
+        "body": "<h2>Zilberman is live.</h2><p>This starter page is a bootstrap export written by <strong>create-site</strong>. Sign in at <a href=\"https://zilberman.netlify.app/admin\">https://zilberman.netlify.app/admin</a> and publish real content — the first publish replaces this file with a genuine derived export.</p>"
+      }
+    }
+  ]
+}

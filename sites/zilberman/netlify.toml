@@ -1,0 +1,182 @@
+# Per-site Netlify config. The redirects here MUST equal this client's
+# site.config.ts `redirects` (the drift-guard discipline root netlify.toml and
+# the fleet's root-deployed site's site.config.ts already share).
+#
+# W14 T14.3: this file describes a REAL build. Set the Netlify project's BASE
+# DIRECTORY to sites/zilberman — that is what makes Netlify read this
+# file instead of the repo-root one. Every path below is then relative to that
+# base, and the build command runs with sites/zilberman as its working
+# directory (the shell's astro config, tailwind config, and config.yaml lookups
+# are all absolute for exactly this reason).
+
+# The build command self-heals the workspace install. Netlify runs this with
+# the BASE DIRECTORY as cwd, and on a site's FIRST build (no warm cache) it does
+# not necessarily install the monorepo ROOT — so `astro` is absent from
+# node_modules, plain `npx astro` silently DOWNLOADS the latest astro from the
+# registry, and that version rejects NODE_VERSION 20 ("not supported by Astro").
+# That is exactly how fernwell's first build failed (W14 T14.9). So: resolve the
+# workspace astro or install the root, then run astro with --no-install, which
+# makes a missing binary a loud error instead of a silent wrong-version fetch.
+# The check short-circuits on warm builds, so this costs nothing once cached.
+#
+# T16.2: the build also runs scripts/validate-upload-images.mjs, the same
+# gate root's `npm run build` always ran — a corrupt/mismatched committed
+# upload image or a dangling markdown image reference fails the BUILD, not
+# just a later render. This site's own tree lays out uploads under
+# assets/images and legacy markdown posts under data/post (not the
+# root deploy's src/-prefixed legacy layout), so both roots are passed explicitly,
+# site-relative (Netlify runs this command with sites/zilberman as cwd).
+[build]
+  publish = "dist"
+  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts"
+  # Netlify skips a build when nothing under the base directory (sites/zilberman) changed.
+  # Our MCP functions bundle the shared packages/core workspace, which lives OUTSIDE this
+  # base dir — so a packages/core-only change was being skipped and shipped stale functions
+  # (PR #501, 2026-08-04). This ignore command builds when EITHER sites/zilberman OR
+  # packages/core changed. exit 0 = skip, non-zero = build; `git diff --quiet` is 0 when
+  # unchanged. An empty $CACHED_COMMIT_REF (first/forced build) makes git error non-zero =>
+  # build, which is the safe default.
+  ignore = "git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/zilberman packages/core"
+[build.environment]
+  NODE_VERSION = "20"
+  # Same omission the root netlify.toml carries (W15 S3 parity): the secrets
+  # scanner fails the ENTIRE build on any appearance of GITHUB_REPOSITORY's
+  # literal value (the monorepo's own owner/name string) anywhere in scanned
+  # files -- and repo docs legitimately name the repo. See the root file's
+  # comment for the full story.
+  SECRETS_SCAN_OMIT_KEYS = "GITHUB_REPOSITORY"
+
+# T16.2 (genesis-parity-plan §1.2 item 4): the core build/security posture
+# root netlify.toml has always carried — pretty_urls off, the /_astro/*
+# immutable-cache header, and the CSP-Report-Only header — copied verbatim
+# (the admin-parity `toml-posture` check enforces byte equality against
+# packages/core/cli/admin-parity.mjs's CANONICAL_TOML_POSTURE).
+[build.processing.html]
+  pretty_urls = false
+[[headers]]
+  for = "/_astro/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# W13 T13.8 (12-plan §4): the site's first CSP — REPORT-ONLY until T13.11's
+# clean soak promotes the header name to Content-Security-Policy. This value
+# is the ALL-PROVIDERS-DISABLED baseline: script-src keeps 'unsafe-inline'
+# (the inline consent bootstrap + astro-compress reality); style/font cover
+# the Google Fonts chrome; frame-src covers the T10.5 media mint's embed
+# hosts (youtube-nocookie/vimeo); img-src stays wide (article/content images
+# are externally hosted by design) — the pinning value lives in script-src,
+# connect-src, and frame-src. Enabling any ad provider REQUIRES adding its
+# adapter's cspHosts here in the SAME change: the hosts-drift test
+# (tests/netlify/csp-drift.test.ts) fails otherwise, in both directions.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Every site DEPLOYS `mcp-keepalive`, but a scheduled function only ever runs
+# if its schedule is DECLARED here. Shipping the function without this block is
+# what leaves a site's /mcp cold: after ~5-15 idle minutes the instance is
+# reclaimed and the next agent pays a cold start (bundle load + native sharp
+# binding) slow enough to blow an MCP client's initialize timeout — the
+# "cannot connect" symptom the function exists to prevent. Scheduled functions
+# run only on the published production deploy; MCP_KEEPALIVE_DISABLED=true
+# turns probing off without a code change.
+[functions."mcp-keepalive"]
+  schedule = "*/5 * * * *"
+
+[[redirects]]
+  from = "/pdf/*"
+  to = "/.netlify/functions/get-public-pdf?blobKey=pdf/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/img/*"
+  to = "/.netlify/functions/get-public-image?blobKey=image/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/mcp"
+  to = "/.netlify/functions/mcp"
+  status = 200
+  force = true
+
+# W14 F10 — the site's own OAuth 2.1 authorization server, beside the MCP
+# resource server it protects. One function serves every endpoint; each rule
+# names its endpoint explicitly rather than relying on a splat, so the routing
+# is readable here instead of inferred there. The two well-known splats exist
+# because MCP clients probe both the bare metadata path and the
+# resource-path-suffixed form.
+
+[[redirects]]
+  from = "/.well-known/oauth-protected-resource"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/.well-known/oauth-protected-resource/*"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/.well-known/oauth-authorization-server"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=authorization-server-metadata"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/.well-known/oauth-authorization-server/*"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=authorization-server-metadata"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/register"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=register"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/authorize"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=authorize"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/consent"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=consent"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/token"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=token"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/revoke"
+  to = "/.netlify/functions/mcp-oauth?oauth_endpoint=revoke"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/t"
+  to = "/.netlify/functions/track-ingest"
+  status = 200
+  force = true
+
+# W15 S1: one path segment (`:objectId`), unforced — the splat + force pair
+# shadowed the static content library index at /admin/content (root
+# netlify.toml's comment has the full story).
+[[redirects]]
+  from = "/admin/content/:objectId"
+  to = "/admin/content/__workspace"
+  status = 200

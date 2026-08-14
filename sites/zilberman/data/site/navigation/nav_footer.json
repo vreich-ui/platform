@@ -1,0 +1,28 @@
+{
+  "__generated": {
+    "at": "1970-01-01T00:00:00.000Z",
+    "from": "create-site:bootstrap (not store-backed — replaced by the seed drive)",
+    "record_version": 0
+  },
+  "role": "footer",
+  "brand": {
+    "text": "Zilberman"
+  },
+  "footNote": "© Zilberman",
+  "groups": [
+    {
+      "id": "g_explore",
+      "title": "Explore",
+      "items": [
+        {
+          "id": "i_home",
+          "label": "Home",
+          "target": {
+            "kind": "route",
+            "href": "/"
+          }
+        }
+      ]
+    }
+  ]
+}

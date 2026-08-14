@@ -1,0 +1,48 @@
+---
+import type { InferGetStaticPropsType, GetStaticPaths } from 'astro';
+
+import Layout from '~/layouts/PageLayout.astro';
+import BlogList from '~/components/blog/List.astro';
+import Headline from '~/components/blog/Headline.astro';
+import Pagination from '~/components/blog/Pagination.astro';
+import ObjectSections from '~/components/cms/ObjectSections.astro';
+import { blogListRobots, getStaticPathsBlogList } from '~/utils/blog';
+import { loadRoutePageObject, routeHeaderAnnotation } from '~/utils/route-page-object';
+
+export const prerender = true;
+
+// Block body + blank lines — see the article loader's hoist-bug note.
+export const getStaticPaths = (async ({ paginate }) => {
+  return await getStaticPathsBlogList({ paginate });
+}) satisfies GetStaticPaths;
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>;
+
+const { page } = Astro.props as Props;
+const currentPage = page.currentPage ?? 1;
+const listing = await loadRoutePageObject('page_library');
+const header = listing?.header ?? { heading: 'Library', paragraphs: ['Browse the published content library.'] };
+const baseTitle = listing?.title ?? 'Library';
+const headerAnnotation = routeHeaderAnnotation('page_library', listing?.header);
+const metadata = {
+  title: `${baseTitle}${currentPage > 1 ? ` — Page ${currentPage}` : ''}`,
+  ...(listing?.seo.description ? { description: listing.seo.description } : {}),
+  robots: {
+    index: (listing?.seo.robots?.index ?? blogListRobots?.index) && currentPage === 1,
+    follow: listing?.seo.robots?.follow ?? blogListRobots?.follow,
+  },
+  openGraph: { type: 'blog' },
+};
+---
+
+<Layout metadata={metadata}>
+  <section class="px-6 sm:px-6 py-12 sm:py-16 lg:py-20 mx-auto max-w-4xl">
+    <div style="display:contents" {...headerAnnotation}>
+      {header.kicker && <p class="mb-4 text-center text-sm font-semibold uppercase tracking-[0.18em] text-accent">{header.kicker}</p>}
+      <Headline subtitle={header.paragraphs.join(' ')}>{header.heading}</Headline>
+    </div>
+    <BlogList posts={page.data} />
+    <Pagination prevUrl={page.url.prev} nextUrl={page.url.next} />
+  </section>
+  <ObjectSections objectId="page_library" sections={listing?.extraSections ?? []} />
+</Layout>

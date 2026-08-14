@@ -1,0 +1,10 @@
+{
+  "name": "@fleet/site-zilberman",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scaffold only (T11.7 create-site). This client site (data + bindings only). Depends on @fleet/core (link declared now; exercised once this site has content).",
+  "dependencies": {
+    "@fleet/core": "*"
+  }
+}
