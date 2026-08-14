@@ -9,6 +9,62 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-14 — T12.12 EXECUTED: sites/zilberman is fleet tenant #4, live and registered
+
+The human_gate ran with Wolf's live delegation — he handed the session his
+Netlify CLI token, gcloud auth, git credential, and Chrome, so the
+account-authority steps were executed by the orchestrator under his watch
+rather than clicked by hand. Every step, its mechanism, and what the Netlify
+API absorbed is measured in `T12.12-automation-notes.md` (the brief's
+secondary purpose — it shrinks T12.11's humanChecklist to four items).
+
+What stands: Netlify site `zilbermanfilmfoundation` (id `37d2e689…`), built
+from `main` with base `sites/zilberman` (scaffold commit `ac4fd0fa` + the
+lock-file fix `ae637855` its first build failure demanded), full env set
+(per-site secrets auto-minted; fleet-shared values from their real
+custodians after the masked-secret-copy trap — see the notes), Identity
+ENABLED VIA API (the runbook's "console-only" is stale), build hook wired,
+`NETLIFY_BUILD_HOOK_URL` set. The 15-object seed pack was driven through the
+site's own `/mcp` by `site-genesis-drive` (created 15, published 15 after
+one transient GitHub-500 retry, ONE release_to_production; `--verify` PASS
+15/15, bootstrap pages replaced; production confirmed on export commit
+`ec7e6b1a`). ROUND-TRIP PROOF: `page_t12_12_proof` created →
+`set_page_meta` patched (409-guarded against the real post-checkout
+version) → published (export commit `eaa3e46e`) → checked in → released
+(hook deploy `6a7ec69c`, ready 07:41Z) → LIVE at `/t12-12-proof` with the
+patched title; `object_inventory` returns it (16 objects). ISOLATION:
+platform's live inventory fingerprint is byte-identical before and after
+(74 objects, `a148181f248217a6`), and no commit today touches
+`sites/drlurie|fernwell|platform` — every publish commit names a zilberman
+object. Parity audit PASS ×4 at full check count; capability probe green
+except the two deliberate gaps (per-site pdf-tool storage PAT, Stripe).
+CMS-Agent side: project `zilberman` registered (deny-all default, then the
+ratified Zilberman capture policy copied verbatim from `platform`'s),
+`ZILBERMAN_MCP_ENDPOINT`/`ZILBERMAN_MCP_TOKEN` on the Cloud Run service
+(secret `zilberman-mcp-token`), `project.test_connection` green
+("Zilberman_MCP_Server"), scoped `CMS_AGENT_MCP_TOKEN` minted into
+`mcp-scoped-tokens-json` v4 (agent_resolve + agent_converse only — narrower
+than siblings, deliberate).
+
+Also closed en route: pdf-tool Cloud Run T12.8 revision DEPLOYED
+(`pdf-tool-render-00005-462`, 600s/2Gi/2CPU/conc-2; health green, capture
+endpoint 401s without the shared secret and captures a live URL with it),
+and the PLATFORM_MCP_TOKEN 401 confirmed FIXED. Wolf's CMS-Agent redeploy
+carries the wave: the five `capture.*` controlled tools + `site_duplicate`
+are live on the deployed service.
+
+OUTSTANDING (what survived automation): dedicated pdf-tool storage PAT +
+machine account for zilberman (notes row 16), Wolf's first-Owner sign-in at
+`/admin` (row 17), the Identity "Invite only" preference click (row 10),
+rotation of zilberman's NETLIFY_AUTH_TOKEN/NETLIFY_BLOBS_TOKEN off the
+account token onto dedicated PATs (row 7). Plus: T12.9's LIVE proof is now
+UNBLOCKED (the T12.8 plane is deployed), and CMS-Agent's
+`cloudbuild.deploy.yaml` env manifest should name the ZILBERMAN pair. The
+T12.6 rerun gate is UNTOUCHED: it goes through `site.duplicate` and **Wolf
+dispositions it**.
+
+---
+
 ## 2026-08-13 — W12 productization wave: T12.8 + T12.9(scaffold) + T12.10 + T12.11 landed, T12.12 prepped
 
 One orchestrated run (Fable orchestrator, subagents per task, per the runner

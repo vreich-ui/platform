@@ -21,9 +21,11 @@ layout that governs every path below:
   those sections are pre-relocation and describe behavior, not current paths.
 - **`sites/<client>/` is per-client data + bindings + a thin build entry** —
   config bundle, seeds, committed exports, function shims. Joined to core at the
-  `SiteBinding` seam. Three today: `sites/drlurie` (the worked example),
+  `SiteBinding` seam. Four today: `sites/drlurie` (the worked example),
   `sites/platform` (the core/agency site — documents the system through its own
-  `/mcp`), `sites/fernwell` (the synthetic repeatability proof, T14.9).
+  `/mcp`), `sites/fernwell` (the synthetic repeatability proof, T14.9),
+  `sites/zilberman` (fleet tenant #4, the W12 capture landing zone — minted
+  2026-08-14, T12.12, serving at `zilbermanfilmfoundation.netlify.app`).
 - **Each site is its own Netlify project** whose base directory selects that
   site's `netlify.toml` + entry + shims, and **its own `/mcp` endpoint** over
   the same core (per-client endpoints, one engine), auth-gated by its own
