@@ -1,0 +1,21 @@
+{
+  "__generated": {
+    "at": "2026-08-14T06:59:33.704Z",
+    "from": "objects/section_template/by-id/stpl_hero_landing.json",
+    "record_version": 4
+  },
+  "blueprint": {
+    "data": {
+      "actions": [],
+      "body": "<p>One short paragraph setting up what this page offers.</p>",
+      "heading": "New hero heading",
+      "kicker": "Overview"
+    },
+    "id": "s_stplhero",
+    "type": "hero"
+  },
+  "description": "Opening hero for a landing or campaign page: kicker + heading + intro copy + action slots.",
+  "name": "Landing hero",
+  "scope": "evergreen",
+  "whenToUse": "Stamp as the FIRST section of a campaign or landing page."
+}
