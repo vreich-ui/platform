@@ -1,0 +1,26 @@
+{
+  "__generated": {
+    "at": "2026-08-14T07:41:11.287Z",
+    "from": "objects/page/by-id/page_t12_12_proof.json",
+    "record_version": 7
+  },
+  "pageType": "standard",
+  "route": "/t12-12-proof",
+  "sections": [
+    {
+      "data": {
+        "body": "<h2>Round-trip proof</h2><p>Created, patched, published, and released through the governed MCP verbs on fleet tenant #4.</p>"
+      },
+      "id": "s_proof",
+      "type": "prose"
+    }
+  ],
+  "seo": {
+    "description": "T12.12 acceptance round-trip proof page.",
+    "robots": {
+      "follow": false,
+      "index": false
+    }
+  },
+  "title": "T12.12 round-trip proof — patched"
+}
