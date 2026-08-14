@@ -1,28 +1,27 @@
 {
   "__generated": {
-    "at": "1970-01-01T00:00:00.000Z",
-    "from": "create-site:bootstrap (not store-backed — replaced by the seed drive)",
-    "record_version": 0
+    "at": "2026-08-14T06:59:05.157Z",
+    "from": "objects/navigation/by-id/nav_footer.json",
+    "record_version": 4
   },
-  "role": "footer",
   "brand": {
     "text": "Zilberman"
   },
-  "footNote": "© Zilberman",
+  "footNote": "© Zilberman.",
   "groups": [
     {
-      "id": "g_explore",
-      "title": "Explore",
+      "id": "g_footer_primary",
       "items": [
         {
           "id": "i_home",
           "label": "Home",
           "target": {
-            "kind": "route",
-            "href": "/"
+            "href": "/",
+            "kind": "route"
           }
         }
       ]
     }
-  ]
+  ],
+  "role": "footer"
 }
