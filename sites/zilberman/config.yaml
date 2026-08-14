@@ -1,6 +1,6 @@
 site:
   name: Zilberman
-  site: 'https://zilberman.netlify.app'
+  site: 'https://zilbermanfilmfoundation.netlify.app'
   base: '/'
   trailingSlash: false
 
