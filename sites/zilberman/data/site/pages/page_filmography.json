@@ -1,0 +1,61 @@
+{
+  "__generated": {
+    "at": "2026-08-15T11:22:40.760Z",
+    "from": "objects/page/by-id/page_filmography.json",
+    "record_version": 2
+  },
+  "pageType": "standard",
+  "route": "/filmography",
+  "sections": [
+    {
+      "data": {
+        "actions": [],
+        "body": "<p>A lifetime in cinema, across more than forty feature films.</p>",
+        "heading": "Misha's Filmography"
+      },
+      "id": "s_filmlede",
+      "type": "lede"
+    },
+    {
+      "data": {
+        "heading": "Films",
+        "items": [
+          "The Little Princess",
+          "House with the ghosts",
+          "Mio mein Mio",
+          "Sisters Liberty",
+          "Two Moons, Three Suns",
+          "I Want to go Prison",
+          "Come Look at me",
+          "Captain's Daughter",
+          "Give me Moonlight",
+          "A Driver for Vera",
+          "Papa",
+          "Striped Happiness",
+          "Yankovsky",
+          "The Dust of Time",
+          "The Gromovs",
+          "Stubborn Khutziev",
+          "The Cavaliers of the Starfish",
+          "One against all",
+          "Ulianov on Ulianov",
+          "Recluse",
+          "Russian Singer",
+          "Border 1918",
+          "The circus burned down and the clowns fled",
+          "The joys and sorrows of the little prince"
+        ]
+      },
+      "id": "s_filmlist",
+      "type": "checklist"
+    }
+  ],
+  "seo": {
+    "description": "Misha Zilberman's filmography — more than forty feature films across a lifetime in cinema.",
+    "robots": {
+      "follow": true,
+      "index": true
+    }
+  },
+  "title": "Filmography"
+}
