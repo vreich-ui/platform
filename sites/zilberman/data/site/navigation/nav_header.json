@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-14T06:58:57.817Z",
+    "at": "2026-08-15T11:22:19.565Z",
     "from": "objects/navigation/by-id/nav_header.json",
-    "record_version": 4
+    "record_version": 13
   },
   "groups": [
     {
@@ -10,9 +10,33 @@
       "items": [
         {
           "id": "i_home",
-          "label": "Home",
+          "label": "Main",
           "target": {
             "href": "/",
+            "kind": "route"
+          }
+        },
+        {
+          "id": "i_projects",
+          "label": "Projects",
+          "target": {
+            "href": "/partners",
+            "kind": "route"
+          }
+        },
+        {
+          "id": "i_partners",
+          "label": "Partners",
+          "target": {
+            "href": "/partners",
+            "kind": "route"
+          }
+        },
+        {
+          "id": "i_filmography",
+          "label": "Filmography",
+          "target": {
+            "href": "/filmography",
             "kind": "route"
           }
         }
