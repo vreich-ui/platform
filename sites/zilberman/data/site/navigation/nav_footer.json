@@ -1,20 +1,20 @@
 {
   "__generated": {
-    "at": "2026-08-14T06:59:05.157Z",
+    "at": "2026-08-15T11:21:28.567Z",
     "from": "objects/navigation/by-id/nav_footer.json",
-    "record_version": 4
+    "record_version": 11
   },
   "brand": {
-    "text": "Zilberman"
+    "text": "Zilberman Foundation"
   },
-  "footNote": "© Zilberman.",
+  "footNote": "© 2026 ZilbermanFilmFoundation. All rights reserved.",
   "groups": [
     {
       "id": "g_footer_primary",
       "items": [
         {
           "id": "i_home",
-          "label": "Home",
+          "label": "Main",
           "target": {
             "href": "/",
             "kind": "route"
