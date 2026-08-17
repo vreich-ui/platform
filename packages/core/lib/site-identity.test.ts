@@ -24,7 +24,15 @@ import test from 'node:test';
 // zero-drlurie core lint per the ratified carve-out, 2026-07-22).
 import '../../../sites/drlurie/config/policy-bindings.js';
 import { siteIdentityConfig } from '../../../sites/drlurie/config/site-identity.js';
-import { getSiteIdentity, resolveSiteIdentity } from './site-identity.js';
+import { siteIdentityConfig as fernwellIdentity } from '../../../sites/fernwell/config/site-identity.js';
+import { siteIdentityConfig as platformIdentity } from '../../../sites/platform/config/site-identity.js';
+import { siteIdentityConfig as zilbermanIdentity } from '../../../sites/zilberman/config/site-identity.js';
+import {
+  AGGRESSION_CEILING_DIALS,
+  getSiteIdentity,
+  resolveSiteIdentity,
+  type AggressionCeiling,
+} from './site-identity.js';
 
 // The compiled test runs from a temp dir; ascend to the repo root to read the
 // committed production export.
@@ -57,6 +65,8 @@ test('Dr-Lurie values resolve exactly to the pre-parameterization literals (byte
     adminLabel: 'Dr. Lurié admin',
     committerName: 'Dr. Lurié Publisher',
     committerEmail: 'publisher@drlurie.local',
+    // W6 §2: the committed aggression ceiling passes through untouched.
+    aggressionCeiling: { claim_strength: 0.45, urgency: 0.1, emotional_agitation: 0.15, cta_density: 0.2 },
   });
 });
 
@@ -127,6 +137,7 @@ test('every env override wins over the committed config', () => {
     adminLabel: 'Dr. Lurié admin',
     committerName: 'Dr. Lurié Publisher',
     committerEmail: 'publisher@drlurie.local',
+    aggressionCeiling: { claim_strength: 0.45, urgency: 0.1, emotional_agitation: 0.15, cta_density: 0.2 },
   });
 });
 
@@ -152,4 +163,50 @@ test('a malformed config throws loudly instead of resolving to defaults', () => 
 
 test('getSiteIdentity resolves from process.env over the committed config', () => {
   assert.equal(getSiteIdentity().siteId, 'site_drlurie');
+});
+
+// ─── W6 §2: aggression ceiling ──────────────────────────────────────────────────────────────────────────
+
+const ALL_SITE_IDENTITY_CONFIGS: Record<string, unknown> = {
+  drlurie: siteIdentityConfig,
+  fernwell: fernwellIdentity,
+  platform: platformIdentity,
+  zilberman: zilbermanIdentity,
+};
+
+test('every committed site identity carries a valid aggression ceiling (all four dials, finite, 0..1)', () => {
+  for (const [site, config] of Object.entries(ALL_SITE_IDENTITY_CONFIGS)) {
+    const identity = resolveSiteIdentity({}, config);
+    assert.ok(identity.aggressionCeiling, `${site}: site-identity.ts must set aggressionCeiling`);
+    const ceiling: AggressionCeiling = identity.aggressionCeiling;
+    for (const dial of AGGRESSION_CEILING_DIALS) {
+      const value = ceiling[dial];
+      assert.equal(typeof value, 'number', `${site}.${dial} must be a number`);
+      assert.ok(Number.isFinite(value), `${site}.${dial} must be finite`);
+      assert.ok(value >= 0 && value <= 1, `${site}.${dial} must be within [0, 1]`);
+    }
+    assert.deepEqual(Object.keys(ceiling).sort(), [...AGGRESSION_CEILING_DIALS].sort(), `${site}: exactly four dials`);
+  }
+});
+
+test('the ruled per-site ceilings are pinned (drlurie/fernwell conservative; platform/zilberman moderate)', () => {
+  const conservative = { claim_strength: 0.45, urgency: 0.1, emotional_agitation: 0.15, cta_density: 0.2 };
+  const moderate = { claim_strength: 0.55, urgency: 0.2, emotional_agitation: 0.2, cta_density: 0.3 };
+  assert.deepEqual(resolveSiteIdentity({}, siteIdentityConfig).aggressionCeiling, conservative);
+  assert.deepEqual(resolveSiteIdentity({}, fernwellIdentity).aggressionCeiling, conservative);
+  assert.deepEqual(resolveSiteIdentity({}, platformIdentity).aggressionCeiling, moderate);
+  assert.deepEqual(resolveSiteIdentity({}, zilbermanIdentity).aggressionCeiling, moderate);
+});
+
+test('a malformed aggression ceiling is refused at resolve time with a clear per-dial error', () => {
+  const withCeiling = (aggressionCeiling: unknown) => ({ ...siteIdentityConfig, aggressionCeiling });
+  assert.throws(() => resolveSiteIdentity({}, withCeiling({ ...siteIdentityConfig.aggressionCeiling, urgency: 1.5 })), /urgency/);
+  assert.throws(() => resolveSiteIdentity({}, withCeiling({ ...siteIdentityConfig.aggressionCeiling, cta_density: -0.1 })), /cta_density/);
+  assert.throws(() => resolveSiteIdentity({}, withCeiling({ ...siteIdentityConfig.aggressionCeiling, claim_strength: Number.NaN })), /claim_strength/);
+  assert.throws(
+    () => resolveSiteIdentity({}, withCeiling({ claim_strength: 0.5, urgency: 0.5, emotional_agitation: 0.5 })),
+    /cta_density/
+  );
+  assert.throws(() => resolveSiteIdentity({}, withCeiling({ ...siteIdentityConfig.aggressionCeiling, extra: 1 })), /Invalid aggressionCeiling/);
+  assert.throws(() => resolveSiteIdentity({}, withCeiling('0.5')), /Invalid aggressionCeiling/);
 });
