@@ -330,7 +330,39 @@ export const probeSite = async (site) => {
     realReads[family] = REAL_READ_NOTES[family];
   }
 
-  return { slug: site.slug, endpoint: site.endpoint, ok: true, siteObjectId, families, realReads };
+  // ── T12.13: the capture bridge, probed on its OWN axis ──────────────────
+  // The capture plane needs ONLY the fleet-shared pdf_bridge pair: pdf-tool persists the
+  // whole crawl output into its own store (Wolf, 2026-08-14 — "option A, same-site writes"),
+  // so a tenant with no PDF_TOOL_STORAGE_TOKEN / PDF_TOOL_STORAGE_SITE_ID can still capture.
+  // That is precisely why it cannot ride the pdf_bridge real-read above, which is gated on
+  // BOTH families being configured: on a tenant with no per-site PAT that read is skipped and
+  // the one capability this change makes load-bearing would go unprobed.
+  //
+  // Not a new capability_status family, because it introduces no new env var — a family is a
+  // set of env-var names, and capture's are already covered by pdf_bridge. Reported as its own
+  // line instead.
+  const extraReads = {};
+  if (families.pdf_bridge?.configured) {
+    // Read-only, harmless, and reaches pdf-tool through the bridge WITHOUT a storage grant:
+    // pdf-tool answers a nonexistent job with its own typed CAPTURE_JOB_NOT_FOUND / "Capture
+    // job not found". Getting that back proves the whole credential-free path is live. A
+    // storage-grant refusal coming back here would mean the deployed pdf-tool predates T12.13.
+    const probed = await callTool(site.endpoint, token, 'get_capture_job_status', {
+      site_id: siteObjectId,
+      job_id: `capprobe-${todayCompact()}`,
+    });
+    const payload = brief(probed.data ?? probed.error ?? {});
+    if (probed.ok) extraReads.capture_bridge = 'ok';
+    else if (/CAPTURE_JOB_NOT_FOUND|[Cc]apture job not found/.test(payload)) {
+      extraReads.capture_bridge = 'ok (bridge reached pdf-tool credential-free; probe job id is deliberately unknown)';
+    } else if (/STORAGE_GRANT_REQUIRED/.test(payload)) {
+      extraReads.capture_bridge = `FAIL: the deployed pdf-tool still demands a storage grant for capture (pre-T12.13 revision): ${payload}`;
+    } else extraReads.capture_bridge = `FAIL: ${payload}`;
+  } else {
+    extraReads.capture_bridge = 'skipped (pdf_bridge reports unconfigured)';
+  }
+
+  return { slug: site.slug, endpoint: site.endpoint, ok: true, siteObjectId, families, realReads, extraReads };
 };
 
 // ── report ───────────────────────────────────────────────────────────────
@@ -351,6 +383,11 @@ const printMatrix = (results) => {
       const entry = result.families[family];
       if (!entry) continue;
       console.log(`   ${family.padEnd(18)} ${cell(entry).padEnd(28)} real-read: ${result.realReads[family]}`);
+    }
+    for (const [name, outcome] of Object.entries(result.extraReads ?? {})) {
+      // Not a capability_status family (no env var of its own) — reported as its own line so a
+      // capability the fleet depends on cannot be load-bearing and unprobed. See T12.13.
+      console.log(`   ${name.padEnd(18)} ${'(no env var of its own)'.padEnd(28)} real-read: ${outcome}`);
     }
     console.log('');
   }

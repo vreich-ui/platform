@@ -9,6 +9,108 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T12.13: the capture bridge exists, and the per-site pdf-tool PAT is gone from the capture path
+
+W12's last blocker, and it was three failures stacked. `capture.crawl` called
+pdf-tool's `create_capture_job` with no `storage` argument, so pdf-tool refused
+every call (`STORAGE_GRANT_REQUIRED` — it holds no storage credentials of its
+own since the env fallbacks were removed). The T12.9 fix for that
+(CMS-Agent `09eb215`, branch `t12-9-grant-wiring`) fetched
+`get_pdf_tool_storage_grant` from the target and forwarded it — but core
+**DELETED that RPC on 2026-08-02** (`7d1640ce`) in favour of a server-side
+bridge that mints the grant internally and never returns it, so the fix could
+never have worked live (`grep -rn get_pdf_tool_storage_grant
+packages/core/server/` returns nothing; CMS-Agent's `platform` record still
+lists it `"allowed"` — stale policy, not a capability). And underneath both:
+**there was no capture bridge at all** — `grep -rln create_capture_job
+packages/core/` returned nothing, so no tenant was reachable by the capture
+plane by any route.
+
+Wolf ratified **option A, same-site writes** on 2026-08-14 (now recorded in
+`decisions/2026-08-14-capture-auth-and-media-rulings.md`, R-A1, together with
+R-M1 ratifying T12.14's asset-aware media binding). **pdf-tool persists the
+whole crawl output — job records, screenshots, `snapshot.v1` — into its OWN Blob
+store**, and the tenant imports what it wants afterwards through the artifact
+bridge that already exists. The consequence is the point: **no cross-site
+credential exists anywhere in the capture plane.** A new tenant needs no
+dedicated Netlify Blobs PAT to be captured, which is the manual console step
+Wolf refused to repeat per tenant. Mechanically it is one new internal
+`grantType` (`pdf-tool-own-storage`), minted only by the capture plane, whose
+credential fields are non-credential sentinels and which is deliberately absent
+from `SUPPORTED_GRANT_TYPES` so no caller can name it; one ALS frame
+(`lib/capture/storage.ts`) every capture entrypoint runs inside, which REPLACES
+any ambient grant, so a caller that still sends `storage` cannot make the plane
+write with its credential. The exchange-grant variant was rejected because the
+swap must still end in a real Blobs credential the tenant cannot mint without a
+PAT; tenant-side writes were rejected on volume (100+ screenshots as base64
+through MCP, across multiple 15-minute worker windows).
+
+**The bridge** (new, in core, so all four tenants get it from one place):
+`create_capture_job` / `get_capture_job_status` / `get_capture_snapshot`. Site
+ownership and the canonical pdf-tool project resolve server-side; the pdf-tool
+request scope is DERIVED server-side from site + seed URL, so a caller cannot
+name it and a re-driven crawl re-attaches to the running job instead of starting
+a parallel one. `site_id` is an OPTIONAL cross-check (an artifact belongs to a
+`content_item` a caller names anyway; a capture job belongs to nothing, and
+`project.create` cannot even set `objectDialect`) — omitted, the deployment
+answers for its own site; supplied and wrong, `capture_site_mismatch`. The
+snapshot READ PATH is the third tool: a completed job carries only the
+`ArtifactReference`, the bytes live in pdf-tool's own store, and no credential is
+handed out — pdf-tool reads its own artifact, checks it against the digest
+recorded on the job, and returns the parsed `snapshot.v1` (structured DATA, not
+an artifact binary; screenshots stay references, and >8 MiB is refused with the
+reference still importable). The three tools are `INTERNAL_ONLY_TOOLS`: callable
+on every tenant, absent from agent discovery, same mechanism and reason as
+`create_artifact_from_url` and `capability_status` — capture is operated from
+CMS-Agent (R-C5) and tenant-side there is no registry to bound a crawl with.
+
+**Bounds are now enforced on three sides** and the bridge can only narrow:
+`capture-bridge-policy.ts` refuses `sameOriginOnly !== true`,
+`respectRobots !== true`, `authenticatedAccess !== "prohibited"`, `maxPages < 1`,
+empty origin/prefix lists, an out-of-policy seed, and a policy SUBSET (the T12.9
+defect — `rights`/`designReferences`/`fidelity` all required, failing here with a
+bridge error code instead of three hops away); `maxPages` clamps to 50, mirroring
+pdf-tool's own hard ceiling. Not one refusal reaches pdf-tool (asserted).
+
+**CMS-Agent** repointed: `capture.crawl` calls the TARGET's bridge, the
+grant-fetch/forward/redact/scrub module is deleted, and the
+`capture_snapshot_unavailable` dead end is replaced by the bridge read. Kept from
+`09eb215`: the full canonical policy travels VERBATIM, the authority gate runs
+first, refusals stay catalogued, and the radioactivity discipline survives as
+`stripCredentialShapedFields` — belt and braces over a remote that echoed
+something, tested against a bridge that echoes credential-shaped fields on every
+answer.
+
+**Laws.** P1: no `sites/<client>` file changes because the change adds no
+repo-tree file, netlify.toml setting, seed entry, env var or function shim — the
+tools are core dispatch over the existing `/mcp`; parity audit PASS ×4 at full
+check count (76 rows). P2: **no new env var** — capture is gated only by the
+fleet-shared `PDF_TOOL_BASE_URL` + `PDF_TOOL_AGENT_RUN_TOKEN` pair (family
+`pdf_bridge`, already in the T11.7 table and `ENV_CHECKLIST`, both
+`inheritFromPdfTool`); this change REMOVES a per-site pair from a path. The probe
+was still extended, because the existing `pdf_bridge` real-read is gated on
+`pdf_storage_grant` also being configured and would therefore be SKIPPED on
+exactly the tenant this unblocks: the new `capture_bridge` line runs on
+`pdf_bridge` alone and treats pdf-tool's own `CAPTURE_JOB_NOT_FOUND` as proof the
+credential-free path is live, with `STORAGE_GRANT_REQUIRED` named explicitly as
+"the deployed pdf-tool predates T12.13".
+
+Suites: platform 2393 + 149 + 45 green; pdf-tool 460 netlify + 61 service green;
+CMS-Agent 170 files / 1545 tests green (the 16-test grant-wiring file became a
+14-test bridge file). Headline acceptance test asserts
+`capability_status.pdf_storage_grant.configured === false` before running the
+crawl, so it cannot pass on a machine where the pair happens to be set.
+
+STILL NEEDED (human): **three redeploys** — platform core (every tenant),
+pdf-tool (until then the bridge answers `STORAGE_GRANT_REQUIRED`, which the probe
+now names), and CMS-Agent. Plus two project-record policy retirements Wolf owns,
+flagged in code comments and NOT changed here because both need a
+`definitionVersion` bump + live re-seed: `get_pdf_tool_storage_grant` off the
+`platform` record (stale — the RPC no longer exists anywhere) and
+`create_capture_job`/`get_capture_job_status` off the `pdf-tool` record (now
+unused — capture goes through the target's bridge). Dropped from the capture
+critical path: the outstanding "dedicated pdf-tool storage PAT for zilberman"
+item — still needed for the artifact/template families, no longer for capture.
 ## 2026-08-17 — T12.14: captured clones bind images now (asset-aware mapping + media binding)
 
 The reason every captured clone came out text-only was structural, and it was

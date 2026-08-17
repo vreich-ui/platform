@@ -11,8 +11,8 @@ import type { ToolDefinition } from '../functions/mcp.js';
 const TOOL_DEFINITIONS: ToolDefinition[] = [...TOOL_DEFINITIONS_PART1, ...TOOL_DEFINITIONS_PART2];
 
 describe('Tool definitions', () => {
-  it('has exactly 67 definitions', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 67, `Expected 67 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 70 definitions', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 70, `Expected 70 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {

@@ -540,6 +540,56 @@ export const setPlatformImageModelPolicy = (
   options: PdfToolClientOptions = {}
 ) => postPdfTool('set-image-model-policy', projectPayload(grant, { policy }), options);
 
+/**
+ * T12.13: the CAPTURE bridge's three calls — and the only calls in this file that forward NO
+ * storage grant at all.
+ *
+ * Wolf ratified "option A, same-site writes" on 2026-08-14 because minting a per-site Netlify
+ * PAT is a manual console step he refuses to repeat per tenant. Under option A pdf-tool
+ * persists everything the crawl produces (job records, screenshots, snapshot.v1) into its OWN
+ * Blob store and the tenant imports what it wants afterwards through the artifact bridge
+ * above. So the capture plane has no cross-site credential anywhere in it: there is no grant
+ * to mint here, which is exactly why capture works on a tenant whose
+ * PDF_TOOL_STORAGE_TOKEN / PDF_TOOL_STORAGE_SITE_ID are unset.
+ *
+ * `projectId` still travels — it namespaces the tenant inside pdf-tool's stores — and comes
+ * from the site-identity seam server-side (getSiteIdentity().pdfToolProjectId), never from a
+ * caller argument. It is a non-secret tenancy label, the same value the artifact bridge
+ * already returns to callers; it is not a credential and grants nothing on its own.
+ *
+ * `health` (above) is the only other grant-free bridge call, for the same reason: nothing to
+ * authorize.
+ */
+export const createPlatformCaptureJob = (
+  projectId: string,
+  input: {
+    requestId: string;
+    url: string;
+    policy: Record<string, unknown>;
+    label?: string;
+    viewports?: Array<Record<string, unknown>>;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'create-capture-job',
+    {
+      projectId,
+      requestId: input.requestId,
+      url: input.url,
+      policy: input.policy,
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.viewports ? { viewports: input.viewports } : {}),
+    },
+    options
+  );
+
+export const getPlatformCaptureJobStatus = (projectId: string, jobId: string, options: PdfToolClientOptions = {}) =>
+  postPdfTool('get-capture-job-status', { projectId, jobId }, options);
+
+export const getPlatformCaptureSnapshot = (projectId: string, jobId: string, options: PdfToolClientOptions = {}) =>
+  postPdfTool('get-capture-snapshot', { projectId, jobId }, options);
+
 export const canonicalPlatformArtifact = (body: Record<string, unknown>) => {
   const reference = isRecord(body.artifactReference)
     ? body.artifactReference

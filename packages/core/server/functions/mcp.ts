@@ -167,8 +167,11 @@ import {
   callCreatePdfTemplate,
   callDeletePdfTemplate,
   callDeployStatus,
+  callCreateCaptureJob,
   callGetAgentArtifactBySlot,
   callGetAgentArtifactJobStatus,
+  callGetCaptureJobStatus,
+  callGetCaptureSnapshot,
   callGetImageModelPolicy,
   callGetImageSearchBank,
   callGetImageSearchJobStatus,
@@ -775,6 +778,16 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callDeletePdfTemplate(event, input);
     case 'health':
       return callPdfToolHealth(event, input);
+    // T12.13 capture bridge — see the block comment above callCreateCaptureJob in
+    // mcp-tool-handlers.ts. create is idempotency-keyed by pdf-tool itself on a
+    // server-derived request scope, so it needs no withIdempotentToolCall wrapper:
+    // a retried create re-attaches to the running crawl by construction.
+    case 'create_capture_job':
+      return callCreateCaptureJob(event, input);
+    case 'get_capture_job_status':
+      return callGetCaptureJobStatus(event, input);
+    case 'get_capture_snapshot':
+      return callGetCaptureSnapshot(event, input);
     case 'search_images':
       return callSearchImages(event, input);
     case 'get_image_search_job_status':

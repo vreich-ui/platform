@@ -227,7 +227,9 @@ export const ENV_CHECKLIST = [
           "dedicated Netlify Blobs-scoped PAT + site id for THIS site (docs/agents/pdf-tool-storage-grant.md's " +
           '"Credential provisioning" steps); do not reuse another tenant\'s value. (Historically every tenant read ' +
           'one shared pair pointed at a single site’s storage; platform moved off that 2026-08-04 — treat the shared ' +
-          'pair as legacy, not the default for a new client.)',
+          'pair as legacy, not the default for a new client.) NOT a capture blocker since T12.13: the ' +
+          'capture bridge needs no storage grant at all (pdf-tool writes its own store — Wolf, ' +
+          '2026-08-14). This pair gates the ARTIFACT/template/image-search families only.',
       },
       {
         name: 'PDF_TOOL_STORAGE_TOKEN',
