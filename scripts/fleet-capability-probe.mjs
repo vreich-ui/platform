@@ -33,7 +33,26 @@
  * a probe failure); 1 when any site could not be reached/authenticated/
  * answered with a malformed response; 2 on bad usage.
  */
-import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// The REAL repo root — walked up, not `..`, because this module is also imported
+// from the COMPILED test tree (.tmp/ci-test/scripts/…), same as admin-parity.mjs.
+const findRepoRoot = (startDir) => {
+  let dir = startDir;
+  for (;;) {
+    if (
+      fs.existsSync(path.join(dir, 'netlify.toml')) &&
+      fs.existsSync(path.join(dir, 'packages', 'core', 'app', 'shell-routes.ts'))
+    )
+      return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return path.resolve(startDir, '..');
+    dir = parent;
+  }
+};
+const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
 
 // ── the small committed fleet endpoints map (T16.5 brief) — `--all` iterates
 //    this. Endpoint is each site's OWN `/mcp` front door (per-client
@@ -44,6 +63,9 @@ export const FLEET_SITES = [
   { slug: 'drlurie', endpoint: 'https://drluriescience.netlify.app/.netlify/functions/mcp' },
   { slug: 'platform', endpoint: 'https://kugel-platform.netlify.app/.netlify/functions/mcp' },
   { slug: 'fernwell', endpoint: 'https://kugel-fernwell.netlify.app/.netlify/functions/mcp' },
+  // Fleet tenant #4 (T12.12, minted 2026-08-14) — added here by W18 T18.7 (P1: the probe map
+  // is part of what a tenant's existence must update).
+  { slug: 'zilberman', endpoint: 'https://zilbermanfilmfoundation.netlify.app/.netlify/functions/mcp' },
 ];
 
 // ── the ten families capability_status reports on. MUST stay in sync with
@@ -256,6 +278,65 @@ export const IDENTITY_CONSOLE_PREREQUISITES = [
   'ADMIN_EMAILS set (bootstrap Owner) — or the first Owner invited from /admin/settings/admins',
 ];
 
+// ── membership (W18 T18.7): the `membership` family. Not a capability_status
+//    family (W18 introduced NO env var — asserted in the T18.7 commit body) so
+//    it is reported as its own block: the repo-side parity facts this probe can
+//    read without a network (sweep declared, templates present, committed
+//    policy override registered) and the two live reads a bearer-token probe
+//    CAN make — `membership_status` (internal-only, non-secret; the verbs
+//    themselves are human-only) and a HEAD on /admin/accept. ──
+export const IDENTITY_EMAIL_TEMPLATE_FILES = ['invitation', 'confirmation', 'recovery', 'email-change'];
+
+/** Root-deploy tenant: sites/<slug>/netlify.toml may not exist because the ROOT netlify.toml is that site's. */
+const tomlPathFor = (slug) => {
+  const own = path.join(repoRoot, 'sites', slug, 'netlify.toml');
+  if (fs.existsSync(own)) return own;
+  const root = path.join(repoRoot, 'netlify.toml');
+  return fs.existsSync(root) ? root : null;
+};
+
+/** Repo-side membership parity for one tenant — pure disk reads, non-secret, no network. */
+export const membershipRepoChecks = (slug) => {
+  const toml = tomlPathFor(slug);
+  const tomlText = toml ? fs.readFileSync(toml, 'utf8') : '';
+  const sweepDeclared = /\[functions\."membership-sweep"\]\s*\n\s*schedule = /.test(tomlText);
+  const templatesDir = path.join(repoRoot, 'packages', 'core', 'app', 'emails', 'identity');
+  const missingTemplates = IDENTITY_EMAIL_TEMPLATE_FILES.filter(
+    (f) => !fs.existsSync(path.join(templatesDir, `${f}.html`))
+  );
+  const configDir = path.join(repoRoot, 'sites', slug, 'config');
+  const policyStub = fs.existsSync(path.join(configDir, 'membership-policy.ts'));
+  const bindings = path.join(configDir, 'policy-bindings.ts');
+  const policyRegistered =
+    fs.existsSync(bindings) && /setActiveMembershipPolicyProvider\(/.test(fs.readFileSync(bindings, 'utf8'));
+  return {
+    sweep_declared: sweepDeclared
+      ? 'ok'
+      : `FAIL: no [functions."membership-sweep"] schedule in ${toml ? path.relative(repoRoot, toml) : 'netlify.toml (missing)'}`,
+    templates_present: missingTemplates.length
+      ? `FAIL: missing ${missingTemplates.join(', ')}`
+      : 'ok (4/4 under packages/core/app/emails/identity)',
+    policy_override:
+      policyStub && policyRegistered
+        ? 'ok (config/membership-policy.ts present + registered in policy-bindings)'
+        : `FAIL: ${[!policyStub && 'config/membership-policy.ts missing', !policyRegistered && 'policy-bindings does not register it'].filter(Boolean).join('; ')}`,
+  };
+};
+
+const acceptUrlFor = (endpoint) => {
+  try {
+    return new URL('/admin/accept', endpoint).toString();
+  } catch {
+    return null;
+  }
+};
+
+const printMembershipBlock = (result) => {
+  for (const [name, outcome] of Object.entries(result.membership ?? {})) {
+    console.log(`   membership/${name.padEnd(18)} ${outcome}`);
+  }
+};
+
 const printIdentityNote = () => {
   console.log(
     '   identity           (console-only, not probed)  human prerequisites for the invite flow — tick in FLEET-STATUS.md:'
@@ -284,6 +365,9 @@ const parseArgs = (argv) => {
       opts.all = true;
     } else if (arg === '--markdown') {
       opts.markdown = true;
+    } else if (arg === '--repo-only') {
+      // W18 T18.7: print only the repo-side membership parity block per site — no token, no network.
+      opts.repoOnly = true;
     } else if (arg === '--help' || arg === '-h') {
       opts.help = true;
     }
@@ -294,6 +378,7 @@ const parseArgs = (argv) => {
 const usage =
   'usage: node scripts/fleet-capability-probe.mjs (--site <slug> --endpoint <url>)... [--markdown]\n' +
   '       node scripts/fleet-capability-probe.mjs --all [--markdown]\n' +
+  '       node scripts/fleet-capability-probe.mjs --all --repo-only   (W18 T18.7: membership parity from the repo, no token/network)\n' +
   '\n' +
   'Per-site token from env MCP_HTTP_AUTH_TOKEN__<SLUG> (never argv). --all reads the committed FLEET_SITES map in this file.';
 
@@ -438,7 +523,47 @@ export const probeSite = async (site) => {
     extraReads.capture_bridge = 'skipped (pdf_bridge reports unconfigured)';
   }
 
-  return { slug: site.slug, endpoint: site.endpoint, ok: true, siteObjectId, families, realReads, extraReads };
+  // ── W18 T18.7: the membership family ─────────────────────────────────────
+  const membership = { ...membershipRepoChecks(site.slug) };
+  const mstatus = await callTool(site.endpoint, token, 'membership_status', {});
+  if (mstatus.ok && mstatus.data && typeof mstatus.data.users_store === 'string') {
+    const policy = mstatus.data.policy ?? {};
+    membership.users_store =
+      mstatus.data.users_store === 'reachable' ? 'ok (reachable)' : 'FAIL: users store unreachable';
+    membership.policy =
+      `${policy.source ?? '?'}` +
+      (policy.committed_override_keys?.length ? ` committed[${policy.committed_override_keys.join(',')}]` : '') +
+      (policy.store_override_keys?.length ? ` store[${policy.store_override_keys.join(',')}]` : '') +
+      (policy.effective
+        ? ` min_owners=${policy.effective.min_owners} ttl=${policy.effective.invite_ttl_hours}h who_can_invite=${policy.effective.who_can_invite}`
+        : '');
+  } else {
+    membership.users_store = `FAIL: membership_status ${brief(mstatus.data ?? mstatus.error)}`;
+    membership.policy = 'unknown (membership_status failed — deployed core predates T18.7?)';
+  }
+  const acceptUrl = acceptUrlFor(site.endpoint);
+  if (acceptUrl) {
+    try {
+      const head = await fetch(acceptUrl, { method: 'HEAD', redirect: 'manual' });
+      membership.accept_page =
+        head.status === 200 ? `ok (HEAD ${acceptUrl} → 200)` : `FAIL: HEAD ${acceptUrl} → ${head.status}`;
+    } catch (error) {
+      membership.accept_page = `FAIL: HEAD ${acceptUrl}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  } else {
+    membership.accept_page = 'skipped (no site URL known)';
+  }
+
+  return {
+    slug: site.slug,
+    endpoint: site.endpoint,
+    ok: true,
+    siteObjectId,
+    families,
+    realReads,
+    extraReads,
+    membership,
+  };
 };
 
 // ── report ───────────────────────────────────────────────────────────────
@@ -465,6 +590,7 @@ const printMatrix = (results) => {
       // capability the fleet depends on cannot be load-bearing and unprobed. See T12.13.
       console.log(`   ${name.padEnd(18)} ${'(no env var of its own)'.padEnd(28)} real-read: ${outcome}`);
     }
+    printMembershipBlock(result);
     printIdentityNote();
     console.log('');
   }
@@ -507,6 +633,17 @@ export const main = async (argv) => {
         return site;
       });
   if (process.exitCode === 2) return;
+
+  if (opts.repoOnly) {
+    console.log(`fleet membership parity (repo-side, W18 T18.7) — ${new Date().toISOString()}`);
+    console.log('');
+    for (const site of targets) {
+      console.log(`[${site.slug}]`);
+      printMembershipBlock({ membership: membershipRepoChecks(site.slug) });
+      console.log('');
+    }
+    return;
+  }
 
   const results = [];
   for (const site of targets) {

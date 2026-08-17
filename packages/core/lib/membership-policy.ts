@@ -37,3 +37,30 @@ export const DEFAULT_MEMBERSHIP_POLICY: MembershipPolicy = {
   default_role_for_external: 'viewer',
   delete_identity_on_remove: true,
 };
+
+/** The committed per-site override shape (`sites/<client>/config/membership-policy.ts`, W18 T18.7). Partial; unset fields keep the defaults. */
+export type MembershipPolicyOverride = Partial<MembershipPolicy>;
+
+/**
+ * Provider-injection seam (W18 T18.7, the W11 T11.2 pattern): `packages/core`
+ * is fleet law and must not import a site's config; the site's
+ * `policy-bindings.ts` registers its committed override via
+ * `setActiveMembershipPolicyProvider`. Unlike the approval/creation/media
+ * providers this one is OPTIONAL — no provider means "no committed override"
+ * (the defaults), so a site scaffolded before T18.7 keeps working. Runtime
+ * store overrides (`policy.json`, `getPolicy` in server/lib/membership/write.ts)
+ * layer on top of whatever this returns.
+ */
+let activeMembershipPolicyProvider: (() => MembershipPolicyOverride) | undefined;
+
+export const setActiveMembershipPolicyProvider = (provider: () => MembershipPolicyOverride): void => {
+  activeMembershipPolicyProvider = provider;
+};
+
+/** DEFAULT + the site's committed override (if a provider is registered). */
+export const activeMembershipPolicyBase = (): MembershipPolicy => {
+  if (!activeMembershipPolicyProvider) return DEFAULT_MEMBERSHIP_POLICY;
+  const override = activeMembershipPolicyProvider() ?? {};
+  const cleaned = Object.fromEntries(Object.entries(override).filter(([, v]) => v !== undefined));
+  return { ...DEFAULT_MEMBERSHIP_POLICY, ...cleaned };
+};

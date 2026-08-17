@@ -126,6 +126,7 @@ import { getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { getGovernanceBlobStore } from '../lib/governance-store.js';
 import { getCapabilityStatus } from '../lib/capability-status.js';
+import { getMembershipStatus } from '../lib/membership/status.js';
 import { getAgentKeysDoc, resolveVerifiedAgentName, type AgentKeysBlobStore } from '../lib/agent-keys.js';
 import {
   buildWwwAuthenticate,
@@ -759,6 +760,10 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // T16.5: pure, synchronous, in-process — no store round trip, nothing
       // secret-shaped in the response (booleans + env-var NAMES only).
       return toolResult(getCapabilityStatus());
+    case 'membership_status':
+      // W18 T18.7: the fleet probe's `membership` family — store reachability +
+      // policy provenance, non-secret by construction (names/numbers only).
+      return toolResult(await getMembershipStatus(event));
     case 'deploy_status':
       return callDeployStatus(event, input);
     case 'verify_article_images':

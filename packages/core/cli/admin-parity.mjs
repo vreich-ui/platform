@@ -615,15 +615,27 @@ export const computeAdminParity = (target) => {
     'approval-policy.ts',
     'creation-policy.ts',
     'media-policy.ts',
+    // W18 T18.7: the committed membership-policy override stub (fleet default = core's).
+    'membership-policy.ts',
     'policy-bindings.ts',
   ];
   const missingConfig = requiredConfig.filter((f) => !fs.existsSync(path.join(configDir, f)));
+  // W18 T18.7: the stub is inert unless policy-bindings registers it.
+  const bindingsPath = path.join(configDir, 'policy-bindings.ts');
+  const bindingsSrc = fs.existsSync(bindingsPath) ? fs.readFileSync(bindingsPath, 'utf8') : '';
+  const membershipRegistered = /setActiveMembershipPolicyProvider\(/.test(bindingsSrc);
+  const configProblems = [
+    ...(missingConfig.length ? [`missing: ${missingConfig.join(', ')}`] : []),
+    ...(!missingConfig.includes('policy-bindings.ts') && !membershipRegistered
+      ? ['policy-bindings.ts does not register the membership-policy override (setActiveMembershipPolicyProvider)']
+      : []),
+  ];
   add(
     'config-bundle',
-    'The per-site config bundle exists (identity, binding, approval/creation/media policy, policy-bindings)',
-    'scaffold (create-site)',
-    missingConfig.length ? 'GAP' : 'PASS',
-    missingConfig.length ? `missing: ${missingConfig.join(', ')}` : 'all 6 present'
+    'The per-site config bundle exists (identity, binding, approval/creation/media/membership policy, policy-bindings) and policy-bindings registers the membership override',
+    'scaffold (create-site) | migrate-site --admin-parity',
+    configProblems.length ? 'GAP' : 'PASS',
+    configProblems.length ? configProblems.join('; ') : 'all 7 present, membership override registered'
   );
 
   // 10. Reader route loaders for content_item (W14 F11) — without them,
@@ -956,6 +968,39 @@ export const planAdminParityFixes = (siteDir, { write = false } = {}) => {
     if (write) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, route.content);
+    }
+  }
+
+  // 5. W18 T18.7: the committed membership-policy override stub + its
+  //    registration in policy-bindings (P1 — every tenant gets the same seam).
+  const membershipPolicyPath = path.join(target.siteDir, 'config', 'membership-policy.ts');
+  if (!fs.existsSync(membershipPolicyPath)) {
+    note('config-bundle', 'write the membership-policy.ts override stub', membershipPolicyPath);
+    if (write) {
+      const stub = buildPlan({ name: target.slug.replace(/[^a-z0-9-]/g, '-') }).files.find((f) =>
+        f.path.endsWith('/config/membership-policy.ts')
+      );
+      fs.mkdirSync(path.dirname(membershipPolicyPath), { recursive: true });
+      fs.writeFileSync(membershipPolicyPath, stub.content);
+    }
+  }
+  const bindingsPath = path.join(target.siteDir, 'config', 'policy-bindings.ts');
+  if (fs.existsSync(bindingsPath)) {
+    let src = fs.readFileSync(bindingsPath, 'utf8');
+    if (!/setActiveMembershipPolicyProvider\(/.test(src)) {
+      note('config-bundle', 'register the membership-policy override in policy-bindings.ts', bindingsPath);
+      const importLines =
+        `import { membershipPolicyConfig } from './membership-policy.js';\n` +
+        `import { setActiveMembershipPolicyProvider } from '../../../packages/core/lib/membership-policy.js';\n`;
+      // insert the imports after the last import statement
+      const lastImport = [...src.matchAll(/^import [^;]*;\n/gm)].pop();
+      src = lastImport
+        ? src.slice(0, lastImport.index + lastImport[0].length) +
+          importLines +
+          src.slice(lastImport.index + lastImport[0].length)
+        : importLines + src;
+      src = `${src.trimEnd()}\n\n// W18 T18.7: the committed membership-policy override (runtime store overrides layer on top).\nsetActiveMembershipPolicyProvider(() => membershipPolicyConfig);\n`;
+      if (write) fs.writeFileSync(bindingsPath, src);
     }
   }
 

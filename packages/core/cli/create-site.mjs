@@ -1350,6 +1350,21 @@ export const mediaPolicyConfig = {
 } satisfies MediaPolicyConfig;
 `;
 
+const membershipPolicyTemplate = (ids) => `/**
+ * This site's committed membership-policy override (W18 T18.7). The LAW and
+ * the defaults live in packages/core/lib/membership-policy.ts
+ * (DEFAULT_MEMBERSHIP_POLICY); this file narrows them for '${ids.siteId}'.
+ * Owners can further override at runtime from the members page / MCP
+ * (\`membership_policy_set\` → the site's \`users\` store \`policy.json\`), which
+ * layers on top of this. Empty = the fleet defaults (Owner+Admin may invite
+ * editor|viewer, min_owners 1, 7-day invites, 30-day purge grace, delete the
+ * Identity login on remove).
+ */
+import type { MembershipPolicyOverride } from '../../../packages/core/lib/membership-policy.js';
+
+export const membershipPolicyConfig = {} satisfies MembershipPolicyOverride;
+`;
+
 const policyBindingsTemplate = (ids) => `/**
  * Site → core policy bindings for '${ids.siteId}'.
  *
@@ -1368,6 +1383,7 @@ import { approvalPolicyConfig } from './approval-policy.js';
 import { creationPolicyConfig } from './creation-policy.js';
 import { mediaPolicyConfig } from './media-policy.js';
 import { siteIdentityConfig } from './site-identity.js';
+import { membershipPolicyConfig } from './membership-policy.js';
 import {
   setActiveApprovalPolicyProvider,
   resolveApprovalPolicy,
@@ -1384,6 +1400,7 @@ import {
   type MediaPolicy,
 } from '../../../packages/core/lib/media-policy.js';
 import { setSiteIdentityConfigProvider } from '../../../packages/core/lib/site-identity.js';
+import { setActiveMembershipPolicyProvider } from '../../../packages/core/lib/membership-policy.js';
 
 let approvalPolicy: ApprovalPolicy | undefined;
 setActiveApprovalPolicyProvider((): ApprovalPolicy => (approvalPolicy ??= resolveApprovalPolicy(approvalPolicyConfig)));
@@ -1397,6 +1414,9 @@ setActiveMediaPolicyProvider((): MediaPolicy => (mediaPolicy ??= resolveMediaPol
 // site-identity resolves committed config + process env on each call (env may
 // change between calls); the provider just supplies the committed config.
 setSiteIdentityConfigProvider((): unknown => siteIdentityConfig);
+
+// W18 T18.7: the committed membership-policy override (runtime store overrides layer on top).
+setActiveMembershipPolicyProvider(() => membershipPolicyConfig);
 `;
 
 // ─── W14 T14.1/T14.2: the BUILD ENTRY ───
@@ -1855,6 +1875,7 @@ export const buildPlan = (opts) => {
     { path: `${dir}/config/approval-policy.ts`, content: approvalPolicyTemplate() },
     { path: `${dir}/config/creation-policy.ts`, content: creationPolicyTemplate() },
     { path: `${dir}/config/media-policy.ts`, content: mediaPolicyTemplate() },
+    { path: `${dir}/config/membership-policy.ts`, content: membershipPolicyTemplate(ids) },
     { path: `${dir}/config/policy-bindings.ts`, content: policyBindingsTemplate(ids) },
     { path: `${dir}/site.config.ts`, content: siteConfigTemplate(ids, brandName, canonicalHost) },
     { path: `${dir}/netlify.toml`, content: netlifyTomlTemplate(ids) },
@@ -1954,6 +1975,9 @@ export const renderAdminBootstrapChecklist = () =>
     '     users store can be empty/wiped and these addresses still get in.',
     '  3. Sign in, invite the first Owner via /admin/settings/admins, accept from the e-mail on',
     '     /admin/accept (or rely on ADMIN_EMAILS alone).',
+    '  4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in',
+    '     config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).',
+    '     Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only',
     `  Blob stores backing the workspace (probed automatically when a token is supplied): ${CORE_BLOB_STORES.join(', ')}.`,
     '  Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>',
   ].join('\n');

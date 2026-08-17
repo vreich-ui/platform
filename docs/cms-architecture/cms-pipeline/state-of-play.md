@@ -9,6 +9,98 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.7: fleet parity — every tenant at the same membership footing, the probe says so, the fleet-admin seam exists
+
+W18 wave 5 (plan F11, §2.2; laws P1/P2). Nothing member-facing changed; this
+row makes W18 UNIFORM across the four tenants and provable.
+
+**Committed policy override per site (P1).** NEW
+`sites/{drlurie,platform,fernwell,zilberman}/config/membership-policy.ts`
+(`membershipPolicyConfig = {} satisfies MembershipPolicyOverride` — empty =
+the fleet defaults) + each `policy-bindings.ts` registers it via the NEW
+optional provider seam `setActiveMembershipPolicyProvider` /
+`activeMembershipPolicyBase()` in `packages/core/lib/membership-policy.ts`
+(the W11 T11.2 pattern; no provider = defaults, so a pre-T18.7 tree keeps
+working). Effective policy is now DEFAULT ← committed override ← store
+`policy.json` (`getPolicy`/`setPolicy` in `membership/write.ts`).
+
+**create-site / migrate-site / parity.** The scaffold emits
+`config/membership-policy.ts` (`membershipPolicyTemplate`) and the
+policy-bindings template registers it (fixture 81 → 82 files; checklist row 4).
+`admin-parity.mjs` `config-bundle` now requires the stub AND the registration
+(7 files); `migrate-site --admin-parity --write` back-fills both onto an
+older tree (verified on a scratch copy of fernwell's pre-T18.7 shape). All
+four tenants + root: `config-bundle PASS`; platform/fernwell/zilberman full
+PASS; the drlurie GAP rows are the pre-existing root-deploy artefact (its
+functions/toml live at the repo root — `--root` is PASS).
+
+**Probe `membership` family.** `scripts/fleet-capability-probe.mjs` gains a
+`membership/*` block per tenant: repo-side `sweep_declared` (that site's
+netlify.toml, or the root toml for the root deploy), `templates_present` (4/4
+core-owned), `policy_override` (stub + registration); live `users_store` +
+`policy` provenance via the NEW INTERNAL-ONLY MCP tool `membership_status`
+(`packages/core/server/lib/membership/status.ts` — non-secret by construction:
+reachability, `source: default|committed_override|store_override`, override
+field NAMES, the effective non-secret numbers; needed because the membership
+verbs are human-only and a bearer probe cannot call them); and `HEAD
+/admin/accept → 200`. `--repo-only` prints the repo half with no token/network.
+Zilberman was MISSING from `FLEET_SITES` since T12.12 — added. Definitions
+86 → 87, `INTERNAL_ONLY_TOOLS` +1 (registry still 76, wire ≤ 64 untouched).
+
+**Cross-site person seam (§2.2, plan Q4 "yes").** NEW
+`packages/core/server/lib/membership/fleet.ts` →
+`listMembershipsForPerson(stores[], person_id)`: pure over injected stores,
+returns each site's membership + person and an `errors[]` for stores that
+threw, no caller yet by design. Plan §2.2 records why the deterministic
+`person_id` (`usr_`+base32(sha256(email))[:20]) is the whole seam and how it
+does not contradict `13-separation-plan.md`.
+
+**Env (P2): W18 introduced NO new env var** — asserted by grep over
+`membership/*`, `membership-sweep.ts`, `admin-users.ts`, `membership-policy.ts`
+(only the pre-existing `RoleEnv` names are read); ENV_CHECKLIST / T11.7 table
+untouched.
+
+**FLEET-STATUS.md**: new "Membership footing per tenant" table (sweep /
+templates / committed override / accept route ✓ for all four; Identity
+enabled, invite-only, templates set, first stored Owner ☐ = Wolf's T18.9
+clicks; `ADMIN_EMAILS` still relied on ✓ everywhere).
+
+Probe output (repo-side, non-secret — the live columns need a tenant token,
+Part B of T18.9):
+
+```
+fleet membership parity (repo-side, W18 T18.7) — 2026-08-17T18:18:55.827Z
+
+[drlurie]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+
+[platform]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+
+[fernwell]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+
+[zilberman]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+```
+
+Tests: NEW `tests/netlify/membership-fleet.test.ts` (provider layering,
+`listMembershipsForPerson` across four stores incl. an unreachable one,
+`membership_status` provenance + internal-only over `/mcp`, and every
+`FLEET_SITES` tenant passing the repo-side membership checks — the suite now
+FAILS if a tenant regresses). `npm test` 2475/150/50 green; eslint, prettier,
+astro check (0 errors) green. Next: T18.8.
+
+---
+
 ## 2026-08-17 — T18.6b: the membership tools — sixteen MCP definitions, the chat registry, approval cards, `membership_contract`
 
 W18 wave 4 (plan §7). NEW `packages/core/server/lib/mcp-tool-definitions-membership.ts`:

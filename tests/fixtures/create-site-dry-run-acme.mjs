@@ -16,12 +16,13 @@ create-site plan for 'acme' (Acme)
   theme id:       thm_acme_default
   canonical host: https://acme.netlify.app
 
-Files to create under sites/acme/ (81):
+Files to create under sites/acme/ (82):
   + sites/acme/config/site-identity.ts
   + sites/acme/config/site-binding.ts
   + sites/acme/config/approval-policy.ts
   + sites/acme/config/creation-policy.ts
   + sites/acme/config/media-policy.ts
+  + sites/acme/config/membership-policy.ts
   + sites/acme/config/policy-bindings.ts
   + sites/acme/site.config.ts
   + sites/acme/netlify.toml
@@ -199,6 +200,9 @@ ADMIN WORKSPACE BOOTSTRAP (human gate â€” runbook site-provisioning-runbook.md Â
      users store can be empty/wiped and these addresses still get in.
   3. Sign in, invite the first Owner via /admin/settings/admins, accept from the e-mail on
      /admin/accept (or rely on ADMIN_EMAILS alone).
+  4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in
+     config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).
+     Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only
   Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency.
   Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>
 `;

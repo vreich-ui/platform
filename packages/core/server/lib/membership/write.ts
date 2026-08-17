@@ -5,7 +5,7 @@
  * migration: a member first read from a v1 row is written back as v2 and its
  * `by-email` value becomes `{ person_id }`.
  */
-import { DEFAULT_MEMBERSHIP_POLICY, type MembershipPolicy } from '../../../lib/membership-policy.js';
+import { activeMembershipPolicyBase, type MembershipPolicy } from '../../../lib/membership-policy.js';
 import { getMembershipByEmail, listMembers, type Member } from './read.js';
 import {
   KEYS,
@@ -81,22 +81,24 @@ export const upsertFromV1 = async (store: MembershipStore, email: string, at = n
 
 // ── policy ──────────────────────────────────────────────────────────────────
 
+/** DEFAULT ← the site's committed override (policy-bindings provider, T18.7) ← the store's `policy.json` (Owner-set at runtime). */
 export const getPolicy = async (store: MembershipStore): Promise<MembershipPolicy> => {
+  const base = activeMembershipPolicyBase();
   try {
     const raw = await store.get(KEYS.policy());
-    if (!raw) return DEFAULT_MEMBERSHIP_POLICY;
+    if (!raw) return base;
     const parsed = membershipPolicyOverrideSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) return DEFAULT_MEMBERSHIP_POLICY;
-    return { ...DEFAULT_MEMBERSHIP_POLICY, ...stripUndefined(parsed.data) };
+    if (!parsed.success) return base;
+    return { ...base, ...stripUndefined(parsed.data) };
   } catch {
-    return DEFAULT_MEMBERSHIP_POLICY;
+    return base;
   }
 };
 
 export const setPolicy = async (store: MembershipStore, override: unknown): Promise<MembershipPolicy> => {
   const parsed = membershipPolicyOverrideSchema.parse(override);
   await store.setJSON(KEYS.policy(), parsed);
-  return { ...DEFAULT_MEMBERSHIP_POLICY, ...stripUndefined(parsed) };
+  return { ...activeMembershipPolicyBase(), ...stripUndefined(parsed) };
 };
 
 const stripUndefined = <T extends object>(value: T): Partial<T> =>
