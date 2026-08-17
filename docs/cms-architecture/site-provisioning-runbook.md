@@ -211,7 +211,7 @@ everything else, only you can click these.
 > sign in once — first login activates the record.
 
 What you do NOT need to do (verified by the audit, not remembered): the
-`/admin/*` routes, admin styles, the EditMode canvas, all 34 function shims,
+`/admin/*` routes, admin styles, the EditMode canvas, all 35 function shims (incl. the daily `membership-sweep`),
 the S1 `/admin/content/:objectId` rewrite, the OAuth authorization-server
 rewrites, and the blob-store expectations are scaffold/provisioning-owned.
 After the three steps above, verify the wiring any time with:

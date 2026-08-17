@@ -151,7 +151,42 @@ export interface OAuthBlobStore {
   /** Netlify Blobs exposes `delete`; the file-backed dev/test store exposes `del`. Either satisfies this module. */
   delete?(key: string): Promise<void>;
   del?(key: string): Promise<void>;
+  /** W18 T18.4: needed only by revocation-by-subject (offboarding); absent on stores that cannot list. */
+  list?(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<{ blobs: { key: string }[] }>;
 }
+
+/**
+ * W18 T18.4 — the by-subject index. Token/refresh/code records are keyed by
+ * sha256(value) and carry `subject_email`, but nothing could enumerate "every
+ * grant this person holds" — so suspend/remove could not revoke them. Every
+ * mint now ALSO writes `oauth/by-subject/<email>/<kind>-<hash>.json` →
+ * `{ kind, key }`; `revokeOAuthGrantsForSubject` (membership/offboarding.ts)
+ * lists that prefix and deletes both halves. Records minted before this
+ * change are not indexed until they rotate (access tokens live 1h, refresh
+ * tokens rotate on every use) — documented in plan §5.
+ */
+export const subjectIndexPrefix = (subjectEmail: string) =>
+  `${OAUTH_KEY_PREFIX}by-subject/${subjectEmail.trim().toLowerCase()}/`;
+export const subjectIndexKey = (subjectEmail: string, kind: 'token' | 'refresh' | 'code', recordKey: string) =>
+  `${subjectIndexPrefix(subjectEmail)}${kind}-${recordKey.split('/').pop()}`;
+export const subjectIndexEntrySchema = z.object({ kind: z.enum(['token', 'refresh', 'code']), key: z.string().min(1) });
+export type SubjectIndexEntry = z.infer<typeof subjectIndexEntrySchema>;
+
+const writeSubjectIndex = async (
+  store: OAuthBlobStore,
+  subjectEmail: string,
+  kind: 'token' | 'refresh' | 'code',
+  recordKey: string
+): Promise<void> => {
+  try {
+    await store.setJSON(subjectIndexKey(subjectEmail, kind, recordKey), {
+      kind,
+      key: recordKey,
+    } satisfies SubjectIndexEntry);
+  } catch {
+    // the index is an offboarding aid; a failure here must never fail a token mint
+  }
+};
 
 export const hashOAuthValue = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
 
@@ -223,7 +258,9 @@ export const putAuthorizationCode = async (
   code: string,
   record: AuthorizationCode
 ): Promise<void> => {
-  await store.setJSON(authorizationCodeKey(code), authorizationCodeSchema.parse(record));
+  const key = authorizationCodeKey(code);
+  await store.setJSON(key, authorizationCodeSchema.parse(record));
+  await writeSubjectIndex(store, record.subject_email, 'code', key);
 };
 
 /** Codes are single-use: redemption deletes before the token is minted (OAuth 2.1 §7.5). */
@@ -238,7 +275,9 @@ export const putAccessTokenRecord = async (
   token: string,
   record: AccessTokenRecord
 ): Promise<void> => {
-  await store.setJSON(accessTokenKey(token), accessTokenSchema.parse(record));
+  const key = accessTokenKey(token);
+  await store.setJSON(key, accessTokenSchema.parse(record));
+  await writeSubjectIndex(store, record.subject_email, 'token', key);
 };
 
 export const deleteAccessTokenRecord = (store: OAuthBlobStore, token: string) =>
@@ -252,7 +291,9 @@ export const putRefreshTokenRecord = async (
   token: string,
   record: RefreshTokenRecord
 ): Promise<void> => {
-  await store.setJSON(refreshTokenKey(token), refreshTokenSchema.parse(record));
+  const key = refreshTokenKey(token);
+  await store.setJSON(key, refreshTokenSchema.parse(record));
+  await writeSubjectIndex(store, record.subject_email, 'refresh', key);
 };
 
 export const deleteRefreshTokenRecord = (store: OAuthBlobStore, token: string) =>

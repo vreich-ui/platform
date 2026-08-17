@@ -9,6 +9,69 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.4: offboarding does what the members page promises — grants revoked, locks handed off, identity deleted (or queued), PII purged
+
+W18 wave 3 (Fable row, plan §5, F5, F12, §9-3). NEW
+`packages/core/server/lib/membership/offboarding.ts`:
+`revokeOAuthGrantsForSubject` (deletes every access/refresh/code record
+indexed for the subject and nothing else — `oauth-store.ts` now writes an
+`oauth/by-subject/<email>/<kind>-<hash>.json` index on every mint; a store
+without `list` revokes nothing and says so; a revoked token fails
+`resolveOAuthPrincipal` immediately), `releaseLocksHeldBy` (walks the
+active-status indexes of every object type, force-releases locks whose
+owner is the person by GoTrue id OR e-mail label, history
+`lock_forced_on_offboarding` attributed to the acting Owner with
+`on_behalf_of` {email, person_id, user_id}, version bumped),
+`deleteIdentity` (`DELETE {identity}/admin/users/{id}`, 404 idempotent),
+`deleteOrQueueIdentity` + `drainIdentityDeleteQueue` (**the identity-token
+constraint**, now in plan §5: the admin token exists only on Identity-JWT
+requests, so remove/purge delete now when the Owner's request has one,
+otherwise queue under `identity-delete-queue/<person_id>` and the next
+Owner request that has a token drains it — the sweep only reports),
+`scrubPerson` (person → `{schema_version, person_id, deleted:true,
+deleted_at}`, `by-email`/`by-identity` indexes removed FIRST, avatar
+soft-deleted via `softDeleteArtifact`, membership kept `removed` with a
+`purge` audit entry, stream audit kept), `purgeExpiredMemberships` (the
+sweep: `removed` past `purge_after` → scrub; idempotent),
+`transferOwnership` (both active; to → owner, from → admin unless
+`demote_to`; audits both), `exportPerson` (person, memberships,
+invitations, audit slice, authored object-history ids only — no third-party
+PII), `purgeConfirmMatches`. **Verbs (`admin-users`):** `suspend` now also
+revokes grants + hands off locks (response `offboarding:{oauth_revoked,
+locks_released}`); `remove` = those effects + `removed{purge_after}` +
+pending invitation revoked + identity per `delete_identity ??
+policy.delete_identity_on_remove` (`offboarding.identity.outcome:
+deleted|queued|failed|kept`); NEW `purge {email, confirm:'PURGE <email>'}`
+(server-verified typed confirm; removed members only; scrubs now), NEW
+`transfer_ownership {to_email, from_email?, demote_to?}` (env members 409),
+NEW `export_person {email}`, NEW `delete_identity {user_id, email}` (for
+the Identities tab; refuses members; 503 without a token), and
+`unmanaged_identities` now returns `capabilities.delete_identity` so
+T18.3b's hidden button appears exactly when a token is present; every
+Owner request that carries an admin token drains the identity queue first.
+NEW scheduled function `membership-sweep` (daily 03:17 UTC:
+`expireAll` + `purgeExpiredMemberships` + queue count) — core
+`server/functions/membership-sweep.ts`, shims for the root deploy and
+sites/{platform,fernwell,zilberman} (P1), `[functions."membership-sweep"]`
+declared in the root + three site `netlify.toml`s and the create-site
+scaffold, `admin-parity` requires the schedule (`netlify-functions-config`
+now names both) and `migrate-site --admin-parity` appends it; the acme
+dry-run fixture gained the shim (81 files). Tests: NEW
+`tests/netlify/membership-offboarding.test.ts` (7 cases: revoke exactly the
+subject + principal resolution fails + idempotent + no-list store; lock
+hand-off with on_behalf_of and other holders untouched; delete now / 404
+idempotent / lookup by e-mail / queue / sweep can't drain / Owner request
+drains + audits; purge scrubs PII, removes indexes, keeps audit, idempotent,
+sweep wrapper; transfer incl. keep/same/not-found/not-active; export shape
++ confirm matcher; and the handler end-to-end: suspend → grants gone + lock
+released, remove queues without a token and the next Owner list drains it,
+remove deletes with a token, `delete_identity:false` and policy-off keep
+it, `last_owner` on remove, purge confirm/not-removed/success,
+transfer, export, capabilities, delete_identity refusals, 403s). `npm test`
+2460/150/50, eslint, prettier, `astro check`, parity audit (root + 3 sites)
+green. Next: T18.6a (Fable/notify — human-principal gate + MCP/chat
+plumbing).
+
 ## 2026-08-17 — T18.5: `/admin/welcome` — every new member sets a real name once and learns what their role can do
 
 W18 wave 2 (plan §3.3, §4.1 step 4, §4.3, F8). NEW fleet route

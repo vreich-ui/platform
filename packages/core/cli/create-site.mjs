@@ -648,6 +648,11 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [functions."mcp-keepalive"]
   schedule = "*/5 * * * *"
 
+# W18 T18.4: daily membership housekeeping — expire stale invitations, purge
+# removed memberships past their grace period, report queued identity deletes.
+[functions."membership-sweep"]
+  schedule = "17 3 * * *"
+
 [[redirects]]
   from = "/pdf/*"
   to = "/.netlify/functions/get-public-pdf?blobKey=pdf/:splat"

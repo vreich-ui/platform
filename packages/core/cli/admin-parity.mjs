@@ -508,10 +508,14 @@ export const computeAdminParity = (target) => {
     if (!/\[functions\."mcp-keepalive"\]/.test(toml) || !/schedule = /.test(toml)) {
       fnProblems.push('mcp-keepalive schedule not declared (deployed but never runs → cold /mcp)');
     }
+    // W18 T18.4: the daily membership sweep (invitation expiry, purge) must be declared too.
+    if (!/\[functions\."membership-sweep"\]\s*\n\s*schedule = /.test(toml)) {
+      fnProblems.push('membership-sweep schedule not declared (invitations never expire, removed members never purge)');
+    }
   }
   add(
     'netlify-functions-config',
-    'netlify.toml declares the functions directory and the mcp-keepalive schedule',
+    'netlify.toml declares the functions directory and the mcp-keepalive + membership-sweep schedules',
     'scaffold (create-site) | migrate-site --admin-parity',
     fnProblems.length ? 'GAP' : 'PASS',
     fnProblems.length ? fnProblems.join('; ') : 'functions directory + keepalive schedule declared'
@@ -898,6 +902,11 @@ export const planAdminParityFixes = (siteDir, { write = false } = {}) => {
     if (!/\[functions\."mcp-keepalive"\]/.test(toml)) {
       note('netlify-functions-config', 'append the mcp-keepalive schedule block', target.tomlPath);
       toml = `${toml.trimEnd()}\n\n# W15 S2 admin parity: a scheduled function only runs if its schedule is DECLARED here.\n[functions."mcp-keepalive"]\n  schedule = "*/5 * * * *"\n`;
+      changed = true;
+    }
+    if (!/\[functions\."membership-sweep"\]/.test(toml)) {
+      note('netlify-functions-config', 'append the membership-sweep schedule block', target.tomlPath);
+      toml = `${toml.trimEnd()}\n\n# W18 T18.4: daily membership housekeeping (invitation expiry, purge) — a scheduled function only runs if DECLARED here.\n[functions."membership-sweep"]\n  schedule = "17 3 * * *"\n`;
       changed = true;
     }
 

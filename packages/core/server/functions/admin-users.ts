@@ -30,6 +30,7 @@ import {
 import {
   getUsersBlobStore,
   getUserRecord,
+  memberToUserRecord as memberToUserRecordSafe,
   putUserRecord,
   listUserRecords,
   normalizeUserEmail,
@@ -61,6 +62,22 @@ import {
   wouldBreachMinOwners,
 } from '../lib/membership/write.js';
 import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
+import {
+  OffboardingError,
+  deleteIdentity,
+  deleteOrQueueIdentity,
+  drainIdentityDeleteQueue,
+  exportPerson,
+  purgeConfirmMatches,
+  releaseLocksHeldBy,
+  revokeOAuthGrantsForSubject,
+  scrubPerson,
+  transferOwnership,
+} from '../lib/membership/offboarding.js';
+import { getMembershipByEmail } from '../lib/membership/read.js';
+import { getNetlifyBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import type { OAuthBlobStore } from '../lib/oauth-store.js';
+import { softDeleteArtifact } from '../lib/mcp-artifact-admin.js';
 import type { Principal } from '../../schema/object-record-v1.js';
 import { friendlyNameFromEmail } from '../../lib/admin/display-name.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -129,7 +146,23 @@ const requestSchema = z.discriminatedUnion('verb', [
   z.object({ verb: z.literal('disable'), email: z.string().min(3), reason: z.string().max(500).optional() }),
   z.object({ verb: z.literal('reinstate'), email: z.string().min(3) }),
   // T18.3a: remove (membership → removed{purge_after}; T18.4 adds identity/OAuth/lock side effects)
-  z.object({ verb: z.literal('remove'), email: z.string().min(3), reason: z.string().max(500).optional() }),
+  z.object({
+    verb: z.literal('remove'),
+    email: z.string().min(3),
+    reason: z.string().max(500).optional(),
+    // T18.4 (§9-3): delete the GoTrue identity too; defaults to policy.delete_identity_on_remove (true)
+    delete_identity: z.boolean().optional(),
+  }),
+  // T18.4 — offboarding verbs (Owner-only)
+  z.object({ verb: z.literal('purge'), email: z.string().min(3), confirm: z.string() }),
+  z.object({
+    verb: z.literal('transfer_ownership'),
+    to_email: z.string().min(3),
+    from_email: z.string().min(3).optional(),
+    demote_to: z.enum(['admin', 'publisher', 'editor', 'viewer', 'keep']).optional(),
+  }),
+  z.object({ verb: z.literal('export_person'), email: z.string().min(3) }),
+  z.object({ verb: z.literal('delete_identity'), user_id: z.string().min(1), email: z.string().min(3) }),
   // T18.3a: the audit stream for one person (Owner-only)
   z.object({
     verb: z.literal('member_audit'),
@@ -308,6 +341,52 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     });
     if (!roles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
     const owner = isOwner(roles);
+
+    // T18.4: the GoTrue admin token Netlify injects into Identity-JWT requests,
+    // the platform fetch, and the two side-effect stores (opened lazily).
+    const identityCtx = (context as { clientContext?: { identity?: GoTrueIdentity } } | undefined)?.clientContext
+      ?.identity;
+    const fetchImpl = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+      fetch(url, init);
+    const oauthStore = () =>
+      getNetlifyBlobStore({ name: 'governance', consistency: 'strong' }, event) as unknown as Promise<OAuthBlobStore>;
+    const objectStore = () => getSiteObjectsBlobStore(event);
+    /** suspend/remove side effects: OAuth grants gone, locks handed off. */
+    const cutAccess = async (target: UserRecord, reason: 'suspend' | 'remove', at: string) => {
+      const [grants, locks] = await Promise.all([
+        oauthStore()
+          .then((s) => revokeOAuthGrantsForSubject(s, target.email))
+          .catch((e: unknown) => ({ revoked: 0, error: e instanceof Error ? e.message : 'oauth store unavailable' })),
+        objectStore()
+          .then((s) =>
+            releaseLocksHeldBy(s as never, {
+              person: {
+                email: target.email,
+                person_id: target.person_id ?? personIdForEmail(target.email),
+                user_id: target.user_id,
+              },
+              actor: principal,
+              at,
+              reason,
+            })
+          )
+          .catch(() => [] as Array<{ object_id: string; object_type: string }>),
+      ]);
+      return {
+        oauth_revoked: grants.revoked,
+        oauth_error: 'error' in grants ? grants.error : undefined,
+        locks_released: locks,
+      };
+    };
+    // Owner requests carrying an admin token drain queued identity deletes (the sweep cannot).
+    if (owner && identityCtx) {
+      await drainIdentityDeleteQueue(store, {
+        identity: identityCtx,
+        fetchImpl,
+        at: nowIso(),
+        actor: auditActorFromPrincipal(principal),
+      }).catch(() => undefined);
+    }
 
     const req = request.data;
     switch (req.verb) {
@@ -488,7 +567,8 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
           }
           if (req.verb === 'unmanaged_identities') {
             const result = await listUnmanagedIdentities({ store, identity, fetchImpl });
-            return jsonResponse(200, result);
+            // T18.4: the UI shows "Delete identity" only when a token is at hand
+            return jsonResponse(200, { ...result, capabilities: { delete_identity: Boolean(identity) } });
           }
           // grant: a Netlify-UI identity (no membership) gets an ACTIVE membership at the given role.
           const target = normalizeUserEmail(req.email);
@@ -642,15 +722,167 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
           reason: req.reason,
           purgeGraceDays: policy.purge_grace_days,
         });
+        // T18.4: cut access now (OAuth grants + locks), then the identity (policy / flag).
+        const cut = await cutAccess(stored, 'remove', at);
+        const wantDelete = req.delete_identity ?? policy.delete_identity_on_remove;
+        const identityOutcome = wantDelete
+          ? await deleteOrQueueIdentity(store, {
+              person: {
+                person_id: stored.person_id ?? personIdForEmail(target),
+                email: target,
+                user_id: stored.user_id,
+              },
+              identity: identityCtx,
+              fetchImpl,
+              at,
+              reason: req.reason ?? 'member removed',
+            })
+          : { outcome: 'kept' as const };
         await appendAudit(store, {
           at,
           actor: auditActorFromPrincipal(principal),
           action: 'membership.remove',
           target: { person_id: stored.person_id ?? personIdForEmail(target), email: target },
-          ...(req.reason ? { detail: { reason: req.reason } } : {}),
+          detail: {
+            ...(req.reason ? { reason: req.reason } : {}),
+            oauth_revoked: cut.oauth_revoked,
+            locks_released: cut.locks_released.length,
+            identity: identityOutcome.outcome,
+          },
           via: 'admin_ui',
         }).catch(() => undefined);
-        return jsonResponse(200, { user: await getUserRecord(store, target) });
+        return jsonResponse(200, {
+          user: await getUserRecord(store, target),
+          offboarding: { ...cut, identity: identityOutcome },
+        });
+      }
+
+      case 'purge': {
+        // T18.4: PII scrub now (typed confirm verified server-side), no grace wait.
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const target = normalizeUserEmail(req.email);
+        if (target === email) return jsonResponse(409, { error: 'You cannot purge yourself.' });
+        if (!purgeConfirmMatches(req.confirm, target)) {
+          return jsonResponse(400, { error: `Type "PURGE ${target}" to confirm.`, error_code: 'confirm_mismatch' });
+        }
+        const member = await getMembershipByEmail(store, target);
+        if (!member) return jsonResponse(404, { error: 'No such member.' });
+        if (member.membership.status !== 'removed') {
+          return jsonResponse(409, {
+            error: 'Remove the member first; purge only applies to removed members.',
+            error_code: 'not_removed',
+          });
+        }
+        const at = nowIso();
+        const view = memberToUserRecordSafe(member);
+        const cut = await cutAccess(view, 'remove', at);
+        const identityOutcome = await deleteOrQueueIdentity(store, {
+          person: { person_id: member.person.person_id, email: target, user_id: member.person.identity.user_id },
+          identity: identityCtx,
+          fetchImpl,
+          at,
+          reason: 'purge',
+        });
+        await scrubPerson(store, {
+          person: member.person,
+          membership: member.membership,
+          at,
+          // avatar ref is image/<requestId>/<sha256>.<ext> (isTrustedAvatarRef) → soft-delete that artifact
+          softDeleteAvatar: async (ref) => {
+            const m = /^image\/([^/]+)\/([0-9a-f]{64})\./i.exec(ref);
+            if (!m) return;
+            await softDeleteArtifact(event as never, { requestId: m[1], sha256: m[2], deletedBy: email });
+          },
+        });
+        await appendAudit(store, {
+          at,
+          actor: auditActorFromPrincipal(principal),
+          action: 'membership.purge',
+          target: { person_id: member.person.person_id, email: target },
+          detail: { oauth_revoked: cut.oauth_revoked, identity: identityOutcome.outcome },
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, {
+          purged: true,
+          person_id: member.person.person_id,
+          offboarding: { ...cut, identity: identityOutcome },
+        });
+      }
+
+      case 'transfer_ownership': {
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const from = normalizeUserEmail(req.from_email ?? email);
+        const to = normalizeUserEmail(req.to_email);
+        if (environmentRoleForEmail(from) || environmentRoleForEmail(to)) {
+          return jsonResponse(409, {
+            error:
+              'Environment-configured members cannot take part in an ownership transfer; promote the stored Owner first.',
+            error_code: 'env_managed_member',
+          });
+        }
+        const at = nowIso();
+        try {
+          const result = await transferOwnership(store, {
+            from,
+            to,
+            actor: auditActorFromPrincipal(principal),
+            actorEmail: email,
+            at,
+            demoteTo: req.demote_to,
+          });
+          return jsonResponse(200, {
+            from: await getUserRecord(store, result.from.person.email),
+            to: await getUserRecord(store, result.to.person.email),
+          });
+        } catch (error) {
+          if (error instanceof OffboardingError) {
+            return jsonResponse(error.status, { error: error.message, error_code: error.code });
+          }
+          throw error;
+        }
+      }
+
+      case 'export_person': {
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const target = normalizeUserEmail(req.email);
+        const bundle = await exportPerson(store, {
+          email: target,
+          at: nowIso(),
+          objectStore: (await objectStore().catch(() => undefined)) as never,
+        });
+        if (!bundle) return jsonResponse(404, { error: 'No such member.' });
+        return jsonResponse(200, { export: bundle });
+      }
+
+      case 'delete_identity': {
+        // T18.4: delete a Netlify Identity user that has NO membership here (the Identities tab).
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const target = normalizeUserEmail(req.email);
+        if (target === email) return jsonResponse(409, { error: 'You cannot delete your own identity.' });
+        if (await getUserRecord(store, target)) {
+          return jsonResponse(409, {
+            error: 'This identity has a membership — remove the member instead.',
+            error_code: 'member_exists',
+          });
+        }
+        if (!identityCtx) {
+          return jsonResponse(503, {
+            error: 'Identity admin token unavailable.',
+            error_code: 'identity_admin_unavailable',
+          });
+        }
+        const res = await deleteIdentity({ identity: identityCtx, fetchImpl, gotrue_user_id: req.user_id });
+        if (!res.deleted)
+          return jsonResponse(502, { error: res.error ?? 'GoTrue delete failed.', error_code: 'gotrue_delete_failed' });
+        await appendAudit(store, {
+          at: nowIso(),
+          actor: auditActorFromPrincipal(principal),
+          action: 'person.sessions_revoked',
+          target: { email: target },
+          detail: { identity_deleted: true, gotrue_user_id: req.user_id, unmanaged: true },
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, { deleted: true, user_id: req.user_id });
       }
 
       case 'set_role':
@@ -736,15 +968,18 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
           auditAction = 'membership.reinstate';
         }
         await putUserRecord(store, updated);
+        // T18.4: suspending cuts access NOW — OAuth grants revoked, held locks handed off.
+        const cut = verb === 'suspend' ? await cutAccess(stored, 'suspend', at) : undefined;
         await appendAudit(store, {
           at,
           actor: auditActorFromPrincipal(principal),
           action: auditAction,
           target: { person_id: stored.person_id ?? personIdForEmail(target), email: target },
           ...(verb === 'set_role' && req.verb === 'set_role' ? { detail: { from: stored.role, to: req.role } } : {}),
+          ...(cut ? { detail: { oauth_revoked: cut.oauth_revoked, locks_released: cut.locks_released.length } } : {}),
           via: 'admin_ui',
         }).catch(() => undefined);
-        return jsonResponse(200, { user: await getUserRecord(store, target) });
+        return jsonResponse(200, { user: await getUserRecord(store, target), ...(cut ? { offboarding: cut } : {}) });
       }
     }
   } catch (error) {
