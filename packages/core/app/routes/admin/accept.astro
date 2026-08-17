@@ -1,0 +1,49 @@
+---
+// /admin/accept (T18.0b) — where every Netlify Identity e-mail token lands:
+// `#invite_token=` (set password + name, activate membership),
+// `#recovery_token=` (set a new password), `#confirmation_token=` and
+// `#email_change_token=` (confirm, then continue to the workspace).
+//
+// Deliberately NOT on AdminLayout: the person has no session yet — this page
+// creates one — so there is no auth gate. Public Layout, minimal chrome,
+// noindex. The site-wide router in HeaderAuthButton.astro sends any page that
+// carries one of the four hashes here with the hash intact.
+import '~/styles/admin-tokens.css';
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import Layout from '~/layouts/Layout.astro';
+import AcceptInvite from '~/admin/AcceptInvite';
+
+// D2: resolve identity once, server-side, and pass it down explicitly — the
+// island must not call getSiteIdentity() itself.
+const identity = getSiteIdentity();
+const metadata = {
+  title: `Join ${identity.brandName}`,
+  robots: { index: false, follow: false },
+};
+---
+
+<Layout metadata={metadata}>
+  <div class="adm-root accept-page">
+    <AcceptInvite client:load identity={identity} />
+  </div>
+</Layout>
+
+<style>
+  .accept-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4rem 1rem;
+    background: var(--adm-bg, #f6f7f9);
+  }
+</style>
+
+<script>
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-nocheck
+  // T14.0: register this site's identity/policy providers FIRST — goTrueClient
+  // derives its localStorage keys from getSiteIdentity() at call time.
+  import '@site/config/policy-bindings';
+</script>

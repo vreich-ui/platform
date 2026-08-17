@@ -303,6 +303,7 @@ export const parseShellRoutePatterns = (shellRoutesPath = path.join(repoRoot, 'p
 /** The admin routes the workspace is not usable without. */
 export const REQUIRED_SHELL_ROUTES = [
   '/admin',
+  '/admin/accept', // T18.0b — the Identity mail-token landing page (invite/recovery/confirm/email-change)
   '/admin/agents',
   '/admin/authorize', // W14 F10 OAuth consent — inside /admin so the approver is a named admin
   '/admin/content',

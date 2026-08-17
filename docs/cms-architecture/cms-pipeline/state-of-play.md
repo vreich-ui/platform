@@ -9,6 +9,54 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.0b: `/admin/accept` — every Identity e-mail token now lands somewhere that consumes it
+
+W18 wave 0, row 2 (plan §1 F1, F3, F8-min; flow §4.1 steps 2–4, §4.5).
+**The router:** `HeaderAuthButton.astro`'s `initializeHeaderAuthState` now
+starts with `shouldRouteToAccept(pathname, hash)` (pure, in
+`goTrueClient.ts`) — any page carrying `#invite_token=` /
+`#confirmation_token=` / `#recovery_token=` / `#email_change_token=` does
+`location.replace('/admin/accept' + hash)`; the hash survives, so the
+default Netlify templates (which link to `/`) work without any template
+change (T18.0c still switches them for a cleaner landing). **The page:**
+`packages/core/app/routes/admin/accept.astro` (injected fleet-wide via
+`SHELL_ROUTES`, added to `REQUIRED_SHELL_ROUTES` in the parity audit —
+P1 satisfied for all four tenants by construction) on the public `Layout`,
+noindex, NO AdminLayout gate; island `AcceptInvite.tsx` decides after
+hydration (`detectIdentityToken()` in an effect — deciding during render
+mismatched the token-less server HTML) and runs: **invite** → full name +
+password/confirm (show/hide, min from `invite_preview.policy`) →
+`acceptInvite(token,pw)` = `POST /verify {type:'signup'}` (session written,
+token never) → `PUT /user {data:{full_name}}` (best-effort) →
+`admin-users accept {display_name}` → `needs_grant` panel with Sign-out, else
+`/admin/welcome` if a HEAD probe finds it (T18.5) else `/admin`;
+**recovery** → new password → `exchangeRecoveryToken` (`/verify
+{type:'recovery'}`) → `updatePasswordWithToken` → `/admin`; **confirmation /
+email_change** → the matching `/verify` then `/admin` (email_change also
+calls `me` for last_seen; the by-email re-index is T18.1). No hash or a
+GoTrue 4xx → "This link can't be used … ask the person who invited you",
+raw token never rendered; the hash is stripped after success.
+`handleRecoveryCallback` is now async and accepts BOTH shapes (customised
+`type=recovery&access_token` unchanged; default `#recovery_token=` exchanged
+via `/verify`); `handleOAuthCallback` ignores all four token hashes.
+`users-client.ts` gains `acceptInvite(getToken,{display_name})` and the
+session-less `invitePreview()`. AdminLayout's forbidden panel now says "no
+role has been granted to this email on this site yet. Ask an Owner to grant
+you a role" (the old ADMIN_EMAILS wording described a break-glass detail).
+Tests: `goTrueClient.test.ts` +10 (all four hashes + none, the router
+predicate, `acceptInvite` posts signup+password and stores only the session,
+short-password refused offline, `exchangeRecoveryToken` posts recovery, 4xx
+carries status, both recovery hash shapes, OAuth callback ignores tokens).
+Smoke (built drlurie `dist/` served statically, headless Chromium):
+`/#invite_token=abc` → `/admin/accept#invite_token=abc` rendering "Set up
+your account" (Full name + Password + Confirm), `/admin/accept#recovery_token=`
+renders "Choose a new password", `/admin/accept` alone renders the error
+state, page HTML never contains the token, `localStorage` stays empty until a
+session exists, zero page errors. `astro build` green for `sites/drlurie`
+(root) and `sites/platform`; `npm test`/`check` green. Non-goals untouched:
+no template files (T18.0c), no welcome page (T18.5), no admin-users server
+change, no `@netlify/identity`. Next: T18.0c.
+
 ## 2026-08-17 — T18.0a: platform invites hit the mail-sending GoTrue endpoint; `accept` + `invite_preview` verbs
 
 W18 wave 0, row 1 (plan §1 F2, F6-min, F8-min server half). **What changed:**

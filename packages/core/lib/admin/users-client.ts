@@ -64,6 +64,35 @@ export const setUserRole = (getToken: GetToken, email: string, role: UserRole) =
 export const disableUser = (getToken: GetToken, email: string) =>
   post<{ user: UserView }>(getToken, { verb: 'disable', email });
 
+/**
+ * T18.0b — the accept page's verbs (server contract: T18.0a).
+ * `acceptInvite` runs on the fresh session GoTrue's /verify returned: flips the
+ * caller's invited record to active with the typed name; `needs_grant:true`
+ * (user null) means no record exists — nothing was created or granted.
+ */
+export const acceptInvite = (getToken: GetToken, fields: { display_name: string }) =>
+  post<{ user: UserView | null; needs_grant: boolean; bootstrap?: boolean }>(getToken, {
+    verb: 'accept',
+    display_name: fields.display_name,
+  });
+
+export interface InvitePreview {
+  site: { name: string; slug: string };
+  policy: { min_password: number };
+}
+
+/** Public (no session): site name + password policy for the accept page. The token is not validated server-side. */
+export const invitePreview = async (token?: string): Promise<InvitePreview> => {
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verb: 'invite_preview', ...(token ? { token } : {}) }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  return json as unknown as InvitePreview;
+};
+
 /** Resolve an image artifact reference (image/<id>/<sha>.<ext>) to its servable path. */
 export const avatarSrc = (ref: string | undefined): string | undefined =>
   ref && ref.startsWith('image/') ? `/img/${ref.slice('image/'.length)}` : undefined;

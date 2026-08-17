@@ -205,6 +205,8 @@ const processOAuthCallback = async (): Promise<GoTrueUser | null> => {
   const params = new URLSearchParams(hash.slice(1));
   // Recovery hashes are handled by handleRecoveryCallback — leave them untouched here.
   if (params.get('type') === 'recovery') return null;
+  // T18.0b: the four Identity mail tokens are consumed by /admin/accept only.
+  if (detectIdentityToken(hash)) return null;
   const accessToken = params.get('access_token');
   const refreshToken = params.get('refresh_token') ?? '';
   const expiresIn = parseInt(params.get('expires_in') ?? '3600', 10);
@@ -251,18 +253,135 @@ export const getAccessToken = async (): Promise<string | null> => {
 
 export type RecoveryCallbackResult = { recoveryToken: string };
 
-// Detect a Netlify Identity recovery hash and extract the token without persisting it.
-// Clears the hash from the URL after reading.
-export const handleRecoveryCallback = (): RecoveryCallbackResult | null => {
+// Detect a Netlify Identity recovery hash and extract a session token without
+// persisting it. Two shapes (T18.0b): the customised `#access_token=…&type=recovery`
+// form is returned as-is; GoTrue's default `#recovery_token=…` is exchanged via
+// POST /verify {type:'recovery'} for a session whose access token is returned.
+// Clears the hash from the URL after reading. The invite/confirmation/
+// email_change hashes are NOT handled here — the site-wide router sends them
+// to /admin/accept before this runs.
+export const handleRecoveryCallback = async (): Promise<RecoveryCallbackResult | null> => {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash;
   if (!hash) return null;
   const params = new URLSearchParams(hash.slice(1));
-  if (params.get('type') !== 'recovery') return null;
-  const accessToken = params.get('access_token');
-  if (!accessToken) return null;
+  if (params.get('type') === 'recovery') {
+    const accessToken = params.get('access_token');
+    if (!accessToken) return null;
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    return { recoveryToken: accessToken };
+  }
+  const detected = detectIdentityToken(hash);
+  if (detected?.kind !== 'recovery') return null;
   history.replaceState(null, '', window.location.pathname + window.location.search);
-  return { recoveryToken: accessToken };
+  const user = await exchangeRecoveryToken(detected.token);
+  return { recoveryToken: user.token.access_token };
+};
+
+// ── T18.0b: Identity mail-token consumption ─────────────────────────────────
+
+export type IdentityTokenKind = 'invite' | 'confirmation' | 'recovery' | 'email_change';
+export type DetectedIdentityToken = { kind: IdentityTokenKind; token: string };
+
+const IDENTITY_TOKEN_HASH_KEYS: ReadonlyArray<[string, IdentityTokenKind]> = [
+  ['invite_token', 'invite'],
+  ['confirmation_token', 'confirmation'],
+  ['recovery_token', 'recovery'],
+  ['email_change_token', 'email_change'],
+];
+
+/**
+ * Read one of GoTrue's four default mail hashes (`#invite_token=`,
+ * `#confirmation_token=`, `#recovery_token=`, `#email_change_token=`).
+ * Pure: does NOT clear the hash and never persists the token.
+ */
+export const detectIdentityToken = (
+  hash: string = typeof window !== 'undefined' ? window.location.hash : ''
+): DetectedIdentityToken | null => {
+  if (!hash || hash.length < 2) return null;
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+  for (const [key, kind] of IDENTITY_TOKEN_HASH_KEYS) {
+    const token = params.get(key)?.trim();
+    if (token) return { kind, token };
+  }
+  return null;
+};
+
+export const ACCEPT_PATH = '/admin/accept';
+
+/**
+ * The site-wide router predicate (T18.0b): a page carrying an Identity mail
+ * token in its hash must hand it to /admin/accept, unless it already is that
+ * page. Pure so it is unit-testable without a DOM.
+ */
+export const shouldRouteToAccept = (pathname: string, hash: string): boolean => {
+  if (!detectIdentityToken(hash)) return false;
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  return normalized !== ACCEPT_PATH;
+};
+
+/** Where the router sends a token-carrying page (the hash survives `location.replace`). */
+export const acceptRouteFor = (hash: string): string => `${ACCEPT_PATH}${hash}`;
+
+type VerifyType = 'signup' | 'recovery' | 'email_change';
+
+const identityVerifyError = async (res: Response, fallback: string): Promise<Error> => {
+  const err = (await res.json().catch(() => ({}))) as { msg?: string; error_description?: string; code?: number };
+  const message = err.msg || err.error_description || fallback;
+  const e = new Error(message) as Error & { status?: number };
+  e.status = res.status;
+  return e;
+};
+
+/** POST /verify — the one GoTrue call that turns a mail token into a session. */
+const verifyIdentityToken = async (type: VerifyType, token: string, password?: string): Promise<GoTrueUser> => {
+  const body: Record<string, string> = { type, token };
+  if (password !== undefined) body.password = password;
+  const res = await fetch(`${getBase()}/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await identityVerifyError(res, 'This link is no longer valid.');
+  const tok = (await res.json()) as TokenResponse;
+  const info = await fetchUserInfo(tok.access_token);
+  const user = buildUser(info, tok);
+  writeStorage(user);
+  return user;
+};
+
+/**
+ * Accept an invitation: `POST /verify {type:'signup', token, password}` (GoTrue:
+ * "Invited users must specify a password"). On success the session is written
+ * to storage exactly like the OAuth/password paths; the invite token never is.
+ */
+export const acceptInvite = async (token: string, password: string): Promise<GoTrueUser> => {
+  if (password.length < 8) throw new Error('Password must be at least 8 characters.');
+  return verifyIdentityToken('signup', token, password);
+};
+
+/** Exchange a `#recovery_token=` for a session; the caller then sets the password. */
+export const exchangeRecoveryToken = (token: string): Promise<GoTrueUser> => verifyIdentityToken('recovery', token);
+
+/** Confirm a signup (`#confirmation_token=`) — same `/verify` shape as an invite, no password. */
+export const confirmSignup = (token: string): Promise<GoTrueUser> => verifyIdentityToken('signup', token);
+
+/** Confirm an e-mail change (`#email_change_token=`). */
+export const confirmEmailChange = (token: string): Promise<GoTrueUser> => verifyIdentityToken('email_change', token);
+
+/** `PUT /user { data: { full_name } }` with the current session (informational; the store is the source of truth). */
+export const setFullName = async (fullName: string): Promise<void> => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Not signed in.');
+  const res = await fetch(`${getBase()}/user`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { full_name: fullName } }),
+  });
+  if (!res.ok) throw await identityVerifyError(res, 'Could not save your name.');
+  // keep the cached user in step so the header shows the new name
+  const stored = currentUser();
+  if (stored) writeStorage({ ...stored, user_metadata: { ...(stored.user_metadata ?? {}), full_name: fullName } });
 };
 
 // Request a password-reset email. Normalises the address before sending.
