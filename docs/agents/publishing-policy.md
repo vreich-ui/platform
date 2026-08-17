@@ -67,10 +67,13 @@ Call the right tool once instead of probing the write path. This table is the to
 | Taxonomy terms available right now | `object_get`/`object_inventory` on `taxonomy`/`tax_drlurie` (§8.4) |
 | Current media budget / preferred format / over-budget behavior | `object_contract` → `media_policy` (do not hardcode; §6.1 values are the committed defaults) |
 | Is publishing gated for this type right now? Which denial codes? | `object_contract` → `publish_policy` (computed from live policy) |
+| How hard may copy push on this site? (W6 §2 aggression ceiling) | `object_contract {object_type:"content_item"}` → `aggression_ceiling` (mirrored at `publish_policy.aggression_ceiling`) — see the note below this table |
 | May an agent create this type? | `object_contract` → `creation_policy`; denial at write is 403 `creation_restricted` listing `allowed_agents` |
 | Deploy state of a commit | `deploy_status {commit}` |
 | Did my images actually render on the live page? | `verify_article_images {url, expectedImages, commit}` |
 | Is the server cold? Am I paying a cold start? | `ping` → `{instance_age_ms, instance_invocations}`; unauthenticated probe `GET /mcp?health=1` |
+
+**`aggression_ceiling` (content_item only; W6 §2, Wolf's standing ruling in CMS-Agent WORK-ORDER-2026-08-12).** The client contract DECLARES the site's aggression ceiling — a componentwise UPPER BOUND on four dials, each a finite number in `[0, 1]`: `claim_strength` (how absolute claims may read), `urgency` (time pressure / scarcity), `emotional_agitation` (fear / shame / FOMO stirring), `cta_density` (how many and how prominent the calls to action). It is a ceiling, not a target: copy may always be calmer. CMS-Agent's `contractReduction` reads it off the contract record and resolves the brief's intensity vector as `resolved = min(placement_target, ceiling)` per dial. Source of truth is the committed `sites/<client>/config/site-identity.ts` (`aggressionCeiling`), validated at resolve time — a malformed value fails the boot/build loudly. An ABSENT ceiling is a blocker upstream by design (CMS-Agent warns `aggression_ceiling_missing` and leaves the intensity vector unresolved), so `object_contract(content_item)` throws rather than ship a contract without it. JSON paths: `contract.aggression_ceiling` and `contract.publish_policy.aggression_ceiling` (identical).
 
 **What `object_contract` does NOT answer — this policy owns it:** lock lease numbers and refresh semantics (§9.1), version-conflict recovery (§9.2), create-side error codes and the two-layer error envelope (§9.3), retry/idempotency rules and payload limits (§9.4–9.5), attribution (§8.5), review/discard argument shapes (§8.6, §10.3), and everything cross-cutting (naming, stale register, result classification).
 
