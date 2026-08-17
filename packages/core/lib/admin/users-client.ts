@@ -36,6 +36,7 @@ export interface UserView {
   audit?: UserAuditEntry[];
   /** T18.1 (membership v2) */
   person_id?: string;
+  onboarding?: OnboardingView;
   membership_status?: MembershipStatus;
   membership_source?: MembershipSource;
 }
@@ -52,10 +53,25 @@ async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promi
   return json as T;
 }
 
-export const fetchMe = (getToken: GetToken) =>
-  post<{ user: UserView; bootstrap: boolean; roles: string[] }>(getToken, { verb: 'me' });
+export interface OnboardingView {
+  completed_at?: string;
+  steps: { name?: string; password?: string; tour?: string };
+}
 
-export const updateMe = async (getToken: GetToken, fields: { display_name?: string; avatar_artifact?: string }) => {
+export const fetchMe = (getToken: GetToken) =>
+  post<{
+    user: UserView;
+    bootstrap: boolean;
+    roles: string[];
+    /** T18.5: null when the caller has no stored record (needs_grant / env-only before materialisation). */
+    onboarding?: OnboardingView | null;
+    policy?: { require_display_name: boolean };
+  }>(getToken, { verb: 'me' });
+
+export const updateMe = async (
+  getToken: GetToken,
+  fields: { display_name?: string; avatar_artifact?: string; onboarding_step?: 'name' | 'tour' | 'skipped' }
+) => {
   const result = await post<{ user: UserView }>(getToken, { verb: 'update_me', ...fields });
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cms:user-updated', { detail: result.user }));
   return result;

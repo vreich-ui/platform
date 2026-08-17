@@ -52,6 +52,8 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   { pattern: '/admin/authorize', entry: 'admin/authorize.astro' },
   { pattern: '/admin/content', entry: 'admin/content/index.astro' },
   { pattern: '/admin/content/[objectId]', entry: 'admin/content/[objectId].astro' },
+  // T18.5: one-time onboarding (name + "what your role can do") — the AdminShell gate sends new members here.
+  { pattern: '/admin/welcome', entry: 'admin/welcome.astro' },
   { pattern: '/admin/templates', entry: 'admin/templates.astro' },
   { pattern: '/admin/media', entry: 'admin/media.astro' },
   { pattern: '/admin/release', entry: 'admin/release.astro' },

@@ -65,6 +65,13 @@ export const userRecordSchema = z.object({
   person_id: z.string().optional(),
   /** T18.1: the real v2 status (invited|active|suspended|removed) behind the v1 `status`. */
   membership_status: z.enum(['invited', 'active', 'suspended', 'removed']).optional(),
+  /** T18.5: Person.onboarding, read-only on the view (written via stampOnboarding). */
+  onboarding: z
+    .object({
+      completed_at: z.string().optional(),
+      steps: z.object({ name: z.string().optional(), password: z.string().optional(), tour: z.string().optional() }),
+    })
+    .optional(),
   /** T18.1: how the membership came to exist (`source` is taken by ListedUser's stored|environment). */
   membership_source: z.enum(['bootstrap_env', 'invitation', 'netlify_ui', 'mcp', 'import', 'legacy_v1']).optional(),
 });
@@ -98,6 +105,7 @@ export const memberToUserRecord = (member: Member): UserRecord => {
     ...(person.last_seen_at ? { last_seen_at: person.last_seen_at } : {}),
     audit: membership.audit,
     person_id: person.person_id,
+    onboarding: person.onboarding,
     membership_status: membership.status,
     membership_source: membership.source,
   };

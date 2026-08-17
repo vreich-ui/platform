@@ -92,6 +92,9 @@ const requestSchema = z.discriminatedUnion('verb', [
     verb: z.literal('update_me'),
     display_name: z.string().min(1).max(200).optional(),
     avatar_artifact: z.string().min(1).optional(),
+    // T18.5: the welcome page's onboarding stamps — 'name' (step), 'tour' /
+    // 'skipped' (step + completed_at).
+    onboarding_step: z.enum(['name', 'tour', 'skipped']).optional(),
   }),
   z.object({ verb: z.literal('list'), include_removed: z.boolean().optional() }),
   z.object({
@@ -339,12 +342,23 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
             audit: [{ at, actor_email: email, action: 'bootstrap_activate' }],
           };
           await putUserRecord(store, bootstrapOwner);
-          return jsonResponse(200, { user: bootstrapOwner, bootstrap: true, roles });
+          const materialised = await getUserRecord(store, email);
+          return jsonResponse(200, {
+            user: materialised ?? bootstrapOwner,
+            bootstrap: true,
+            roles,
+            onboarding: materialised?.onboarding ?? { steps: {} },
+            policy: { require_display_name: (await getPolicy(store)).require_display_name },
+          });
         }
         return jsonResponse(200, {
           user: activated ?? synthesizedRecord(email, owner),
           bootstrap: !activated,
           roles,
+          // T18.5: the welcome gate reads these (no record ⇒ no onboarding ⇒ the
+          // layout's forbidden panel, never a redirect loop).
+          onboarding: activated?.onboarding ?? null,
+          policy: { require_display_name: (await getPolicy(store)).require_display_name },
         });
       }
 
@@ -368,6 +382,17 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         await putUserRecord(store, updated);
         if (req.display_name) {
           await stampOnboarding(store, email, { steps: { name: nowIso() }, at: nowIso() }).catch(() => undefined);
+        }
+        if (req.onboarding_step) {
+          const at = nowIso();
+          await stampOnboarding(store, email, {
+            steps:
+              req.onboarding_step === 'name'
+                ? { name: at }
+                : { tour: req.onboarding_step === 'skipped' ? 'skipped' : at },
+            ...(req.onboarding_step === 'name' ? {} : { completed_at: at }),
+            at,
+          }).catch(() => undefined);
         }
         await appendAudit(store, {
           at: nowIso(),

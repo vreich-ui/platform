@@ -55,17 +55,10 @@ const errorMessage = (err: unknown, fallback: string): string => {
   return raw || fallback;
 };
 
-/** After a token is consumed, continue to the workspace (or the welcome step, if a site has it — T18.5). */
+/** After a token is consumed, continue to the onboarding step (T18.5 — /admin/welcome is a fleet route; its gate is a no-op once completed). */
 const continueToWorkspace = async () => {
   stripHash();
-  let target = WORKSPACE_PATH;
-  try {
-    const probe = await fetch(WELCOME_PATH, { method: 'HEAD' });
-    if (probe.ok) target = WELCOME_PATH;
-  } catch {
-    // no welcome page — fall through to /admin
-  }
-  window.location.assign(target);
+  window.location.assign(WELCOME_PATH);
 };
 
 // ── shared bits ─────────────────────────────────────────────────────────────

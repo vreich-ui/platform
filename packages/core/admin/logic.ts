@@ -333,3 +333,37 @@ export function invitationSendStatus(row: Pick<InvitationRowInput, 'gotrue_invit
     };
   return { label: 'Not sent', tone: 'warning', hint: 'Resend to trigger the e-mail.' };
 }
+
+// ─── welcome gate (W18 T18.5) ─────────────────────────────────────────────────
+
+/** Admin paths that never redirect to /admin/welcome (the page itself, the token landing page, the OAuth consent screen). */
+export const WELCOME_EXEMPT_PATHS: ReadonlySet<string> = new Set([
+  '/admin/welcome',
+  '/admin/accept',
+  '/admin/authorize',
+]);
+
+export type WelcomeGateDecision = 'render' | 'redirect' | 'forbidden';
+
+/**
+ * Pure gate predicate. `hasRecord` = the caller has a stored membership
+ * (invited / Netlify-UI granted / bootstrap-materialised); `completed` =
+ * `Person.onboarding.completed_at` is set. A caller with no roles is the
+ * layout's forbidden panel, never a redirect (so `needs_grant` users cannot
+ * loop into welcome); env Owners are materialised by their first `me`, so
+ * they have a record and pass through welcome exactly once.
+ */
+export function welcomeGateDecision(input: {
+  path: string;
+  roles: readonly string[];
+  hasRecord: boolean;
+  completed: boolean;
+  requireDisplayName: boolean;
+}): WelcomeGateDecision {
+  if (input.roles.length === 0) return 'forbidden';
+  const path = input.path.replace(/\/+$/, '') || '/';
+  if (WELCOME_EXEMPT_PATHS.has(path)) return 'render';
+  if (!input.requireDisplayName) return 'render';
+  if (!input.hasRecord) return 'render';
+  return input.completed ? 'render' : 'redirect';
+}

@@ -290,3 +290,38 @@ describe('invitations tab logic', () => {
     assert.equal(invitationSendStatus({ gotrue_invited: false, send_count: 0 }).label, 'Not sent');
   });
 });
+
+// ─── W18 T18.5 — welcome gate ─────────────────────────────────────────────────
+
+import { welcomeGateDecision } from './logic.js';
+
+describe('welcomeGateDecision', () => {
+  const base = {
+    path: '/admin/content',
+    roles: ['admin'],
+    hasRecord: true,
+    completed: false,
+    requireDisplayName: true,
+  };
+  it('redirects an incomplete member on any ordinary admin path, renders once completed', () => {
+    assert.equal(welcomeGateDecision(base), 'redirect');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin' }), 'redirect');
+    assert.equal(welcomeGateDecision({ ...base, completed: true }), 'render');
+  });
+  it('never redirects on the exempt pages (welcome itself, accept, authorize), trailing slash tolerant', () => {
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/welcome' }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/welcome/' }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/accept' }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/authorize' }), 'render');
+  });
+  it('no roles → forbidden (needs_grant users see the panel, no loop); no record → render; policy off → render', () => {
+    assert.equal(welcomeGateDecision({ ...base, roles: [] }), 'forbidden');
+    assert.equal(welcomeGateDecision({ ...base, roles: [], hasRecord: false }), 'forbidden');
+    assert.equal(welcomeGateDecision({ ...base, hasRecord: false }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, requireDisplayName: false }), 'render');
+  });
+  it('a bootstrap Owner (materialised record, empty onboarding) goes through welcome once', () => {
+    assert.equal(welcomeGateDecision({ ...base, roles: ['owner', 'admin', 'publisher'] }), 'redirect');
+    assert.equal(welcomeGateDecision({ ...base, roles: ['owner', 'admin', 'publisher'], completed: true }), 'render');
+  });
+});

@@ -1,0 +1,16 @@
+---
+// /admin/welcome (W18 T18.5) — the one-time onboarding step every new member
+// passes through: confirm the display name, learn what the role can do, open
+// the workspace. On AdminLayout (needs a session + a role); the AdminShell
+// welcome gate sends incomplete members here and never redirects FROM here.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import WelcomePage from '~/admin/Welcome';
+
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Welcome">
+  <WelcomePage client:load identity={identity} />
+</AdminLayout>

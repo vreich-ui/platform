@@ -9,6 +9,39 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.5: `/admin/welcome` — every new member sets a real name once and learns what their role can do
+
+W18 wave 2 (plan §3.3, §4.1 step 4, §4.3, F8). NEW fleet route
+`/admin/welcome` (`SHELL_ROUTES` + `REQUIRED_SHELL_ROUTES`;
+`routes/admin/welcome.astro` on AdminLayout, island `admin/Welcome.tsx`, no
+sidebar): three steps on one screen — (1) confirm/edit the display name
+(avatar shown; upload stays on Profile), (2) "What you can do here as
+**<Role>**" — one second-person paragraph per tier from plan §6 + the tier
+one-liner + two links (Content library, Edit on site), (3) "Open the
+workspace" → `update_me { display_name?, onboarding_step:'tour' }` →
+`Person.onboarding.steps.{name,tour}` + `completed_at` → `/admin`. **The
+gate** lives in `AdminShell` (every workspace page mounts it): once
+`useCurrentUser` has loaded, `welcomeGateDecision({path, roles, hasRecord,
+completed, requireDisplayName})` (pure, `admin/logic.ts`, 4 new
+`logic.test.ts` cases) → `redirect` does `location.replace('/admin/welcome')`;
+exempt paths `/admin/welcome`, `/admin/accept`, `/admin/authorize`; no roles
+→ `forbidden` (the layout panel — `needs_grant` users can never loop into
+welcome); no record → render; `policy.require_display_name:false` → render.
+Owner override `?skip_welcome=1` on any admin page stamps
+`steps.tour:'skipped'` + `completed_at` and stays put. **Bootstrap Owners:**
+their first `me` materialises the record with empty onboarding ⇒ they pass
+through welcome exactly once (F10); `me` now returns `onboarding` (null when
+no record) + `policy.require_display_name`, and the materialised record is
+re-read so the response carries the fresh onboarding block; `update_me`
+accepts `onboarding_step: 'name'|'tour'|'skipped'` (`name` stamps the step;
+`tour`/`skipped` also complete). The `UserRecord` view exposes `onboarding`
+(read-only; written only via `stampOnboarding`). `use-current-user.ts`
+carries `onboarding` + `requireDisplayName`. `AcceptInvite.tsx` now sends an
+accepted invitee straight to `/admin/welcome` (the HEAD probe from T18.0b is
+gone — the route is fleet law). `npm test` 2453/150/50, eslint, prettier,
+`astro check`, `sites/platform` build (dist/admin/welcome/index.html) green.
+Next: T18.4 (Fable/notify — offboarding side effects).
+
 ## 2026-08-17 — T18.3b: Invitations tab, unmanaged-identity reconcile, accept-page preview
 
 W18 wave 2 (plan §4.1 step 5, §4.2, F9-UI). `/admin/settings/admins` is now

@@ -321,6 +321,7 @@ export const REQUIRED_SHELL_ROUTES = [
   '/admin/settings/admins',
   '/admin/settings/guardrails',
   '/admin/studio',
+  '/admin/welcome', // T18.5 — the onboarding step the AdminShell gate redirects to
 ];
 
 // ─── audit targets ───────────────────────────────────────────────────────────

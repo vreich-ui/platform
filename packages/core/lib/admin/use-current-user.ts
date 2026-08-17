@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-import { fetchMe, type UserView } from './users-client.js';
+import { fetchMe, type OnboardingView, type UserView } from './users-client.js';
 
 export interface CurrentUserState {
   user: UserView | null;
   roles: string[];
   loading: boolean;
   error?: string;
+  /** T18.5: null = no stored record; undefined = not loaded. */
+  onboarding?: OnboardingView | null;
+  requireDisplayName?: boolean;
 }
 
 const EMPTY: CurrentUserState = { user: null, roles: [], loading: true };
@@ -34,8 +37,14 @@ export function refreshCurrentUser(): Promise<CurrentUserState> {
   if (inflight) return inflight;
   setSnapshot({ ...snapshot, loading: true, error: undefined });
   inflight = fetchMe(token)
-    .then(({ user, roles }) => {
-      const next = { user, roles, loading: false } satisfies CurrentUserState;
+    .then(({ user, roles, onboarding, policy }) => {
+      const next = {
+        user,
+        roles,
+        loading: false,
+        onboarding: onboarding ?? null,
+        requireDisplayName: policy?.require_display_name ?? true,
+      } satisfies CurrentUserState;
       setSnapshot(next);
       return next;
     })
