@@ -4,7 +4,7 @@
  *
  * @deprecated for new code — read `membership/read.ts` and write through
  * `membership/write.ts`. These helpers stay so `admin-users.ts`,
- * `user-invite.ts`, `request-roles.ts`, `admin-agent-chat*.ts` and the tests
+ * `membership/invitations.ts`, `request-roles.ts`, `admin-agent-chat*.ts` and the tests
  * compile unchanged for one release; T18.8 removes them.
  *
  * What the adapter does:

@@ -38,7 +38,20 @@ import {
   type UsersBlobStore,
 } from '../lib/users-store.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
-import { inviteUser, activateOnLogin, acceptInvitation, type GoTrueIdentity } from '../lib/user-invite.js';
+import {
+  InvitationError,
+  acceptInvitation,
+  activateOnLogin,
+  assertMayInvite,
+  createInvitation,
+  listInvitations,
+  listUnmanagedIdentities,
+  previewInvitationByToken,
+  resendInvitation,
+  revokeInvitation,
+  type GoTrueIdentity,
+} from '../lib/membership/invitations.js';
+import { newMember, saveMember } from '../lib/membership/write.js';
 import { appendAudit, getPolicy, stampOnboarding, wouldBreachMinOwners } from '../lib/membership/write.js';
 import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
 import type { Principal } from '../../schema/object-record-v1.js';
@@ -74,7 +87,32 @@ const requestSchema = z.discriminatedUnion('verb', [
     avatar_artifact: z.string().min(1).optional(),
   }),
   z.object({ verb: z.literal('list'), include_removed: z.boolean().optional() }),
-  z.object({ verb: z.literal('invite'), email: z.string().min(3), role: userRoleSchema }),
+  z.object({
+    verb: z.literal('invite'),
+    email: z.string().min(3),
+    role: userRoleSchema,
+    message: z.string().max(1000).optional(),
+  }),
+  // T18.2 — invitations are first-class
+  z.object({ verb: z.literal('resend'), invite_id: z.string().min(1).optional(), email: z.string().min(3).optional() }),
+  z.object({
+    verb: z.literal('revoke'),
+    invite_id: z.string().min(1).optional(),
+    email: z.string().min(3).optional(),
+    reason: z.string().max(500).optional(),
+  }),
+  z.object({
+    verb: z.literal('list_invitations'),
+    status: z.enum(['pending', 'accepted', 'expired', 'revoked']).optional(),
+  }),
+  z.object({ verb: z.literal('unmanaged_identities') }),
+  // Owner grants a role to a Netlify-UI identity that has no membership (plan §4.2 "Grant role").
+  z.object({
+    verb: z.literal('grant'),
+    email: z.string().min(3),
+    role: userRoleSchema,
+    user_id: z.string().optional(),
+  }),
   z.object({ verb: z.literal('set_role'), email: z.string().min(3), role: userRoleSchema }),
   // T18.1: `suspend` is the verb; `disable` stays as an alias for one release (T18.8 removes it).
   z.object({ verb: z.literal('suspend'), email: z.string().min(3), reason: z.string().max(500).optional() }),
@@ -86,7 +124,7 @@ const requestSchema = z.discriminatedUnion('verb', [
   // T18.0a — the accept page's two verbs. `token` is accepted but NOT
   // validated: only GoTrue can validate an invite token, and an unauthenticated
   // request has no admin token to ask with. See the verb handler comment.
-  z.object({ verb: z.literal('invite_preview'), token: z.string().optional() }),
+  z.object({ verb: z.literal('invite_preview'), token: z.string().optional(), inv: z.string().optional() }),
   z.object({ verb: z.literal('accept'), display_name: z.string().min(1).max(200) }),
 ]);
 
@@ -180,9 +218,22 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
       }
       const identity = getSiteIdentity();
+      // T18.2 path 2: an Owner-shared link may carry OUR accept token (`inv`),
+      // which previews inviter/role before GoTrue accepts. Optional sugar.
+      let invitation: Record<string, unknown> | undefined;
+      const inv = request.data.verb === 'invite_preview' ? request.data.inv : undefined;
+      if (inv) {
+        try {
+          const preview = await previewInvitationByToken(await getUsersBlobStore(event), inv);
+          if (preview) invitation = preview;
+        } catch {
+          invitation = undefined;
+        }
+      }
       return jsonResponse(200, {
         site: { name: identity.brandName, slug: identity.siteSlug },
         policy: { min_password: ACCEPT_MIN_PASSWORD },
+        ...(invitation ? { invitation } : {}),
       });
     }
   }
@@ -211,16 +262,9 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       const accepted = await acceptInvitation(store, email, adminState.userId, request.data.display_name, at);
       if (accepted) {
         if (accepted.status === 'disabled') return jsonResponse(403, { error: 'This membership is disabled.' });
-        // T18.1: the accept page collected a password (GoTrue) and a name — stamp both onboarding steps.
-        await stampOnboarding(store, email, { steps: { password: at, name: at }, at }).catch(() => undefined);
-        await appendAudit(store, {
-          at,
-          actor: auditActorFromPrincipal(principal),
-          action: 'invitation.accept',
-          target: { person_id: accepted.person_id ?? personIdForEmail(email), email },
-          via: 'admin_ui',
-        }).catch(() => undefined);
-        return jsonResponse(200, { user: (await getUserRecord(store, email)) ?? accepted, needs_grant: false });
+        // T18.1/T18.2: acceptInvitation stamped onboarding (password + name),
+        // closed the pending invitation and wrote the audit event.
+        return jsonResponse(200, { user: accepted, needs_grant: false });
       }
       if (environmentRoleForEmail(email) === 'owner') {
         // Bootstrap ADMIN_EMAILS caller: the existing `me` materialization,
@@ -330,25 +374,128 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         });
       }
 
-      case 'invite': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        if (environmentRoleForEmail(req.email)) {
-          return jsonResponse(409, {
-            error: 'This member is configured in site environment variables and cannot be changed here.',
-          });
-        }
+      case 'invite':
+      case 'resend':
+      case 'revoke':
+      case 'list_invitations':
+      case 'unmanaged_identities':
+      case 'grant': {
+        // T18.2: Owner-only except `invite`, which policy.who_can_invite may
+        // open to Admins for the roles in policy.roles_admin_may_grant.
         const identity = (context as { clientContext?: { identity?: GoTrueIdentity } } | undefined)?.clientContext
           ?.identity;
-        const result = await inviteUser({
-          store,
-          email: req.email,
-          role: req.role,
-          invitedBy: email,
-          at: nowIso(),
-          identity,
-          fetchImpl: (url, init) => fetch(url, init),
-        });
-        return jsonResponse(200, { user: result.record, invite: result.invite });
+        const fetchImpl = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+          fetch(url, init);
+        const at = nowIso();
+        const actor = auditActorFromPrincipal(principal);
+        try {
+          if (req.verb === 'invite') {
+            const policy = await getPolicy(store);
+            assertMayInvite({ actorRoles: roles, role: req.role, policy });
+            if (environmentRoleForEmail(req.email)) {
+              return jsonResponse(409, {
+                error: 'This member is configured in site environment variables and cannot be changed here.',
+                error_code: 'env_managed_member',
+              });
+            }
+            const result = await createInvitation(store, {
+              email: req.email,
+              role: req.role,
+              invitedBy: { person_id: personIdForEmail(email), email },
+              actor,
+              at,
+              ...(req.message ? { message: req.message } : {}),
+              identity,
+              fetchImpl,
+            });
+            return jsonResponse(200, {
+              user: result.user,
+              invite: result.invite,
+              invitation: result.invitation,
+              accept_token: result.accept_token,
+            });
+          }
+          if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+          if (req.verb === 'resend') {
+            const result = await resendInvitation(store, {
+              invite_id: req.invite_id,
+              email: req.email,
+              actor,
+              actorEmail: email,
+              at,
+              identity,
+              fetchImpl,
+            });
+            return jsonResponse(200, {
+              invitation: result.invitation,
+              invite: result.invite,
+              accept_token: result.accept_token,
+            });
+          }
+          if (req.verb === 'revoke') {
+            const result = await revokeInvitation(store, {
+              invite_id: req.invite_id,
+              email: req.email,
+              actor,
+              actorEmail: email,
+              at,
+              reason: req.reason,
+            });
+            return jsonResponse(200, { invitation: result.invitation, membership: result.membership });
+          }
+          if (req.verb === 'list_invitations') {
+            return jsonResponse(200, { invitations: await listInvitations(store, { status: req.status, now: at }) });
+          }
+          if (req.verb === 'unmanaged_identities') {
+            const result = await listUnmanagedIdentities({ store, identity, fetchImpl });
+            return jsonResponse(200, result);
+          }
+          // grant: a Netlify-UI identity (no membership) gets an ACTIVE membership at the given role.
+          const target = normalizeUserEmail(req.email);
+          if (environmentRoleForEmail(target)) {
+            return jsonResponse(409, {
+              error: 'This member is configured in site environment variables and cannot be changed here.',
+              error_code: 'env_managed_member',
+            });
+          }
+          const existing = await getUserRecord(store, target);
+          if (existing && existing.membership_status !== 'removed') {
+            return jsonResponse(409, {
+              error: 'This person already has a membership. Change their role instead.',
+              error_code: 'member_exists',
+            });
+          }
+          const granted = newMember({
+            email: target,
+            display_name: existing?.display_name ?? friendlyNameFromEmail(target),
+            role: req.role,
+            status: 'active',
+            source: 'netlify_ui',
+            granted_by: { kind: 'human', person_id: personIdForEmail(email), email },
+            invited_by: email,
+            at,
+            user_id: req.user_id,
+            audit: [
+              ...(existing?.audit ?? []),
+              { at, actor_email: email, action: 'grant', detail: `role ${req.role}` },
+            ],
+          });
+          await saveMember(store, granted);
+          await appendAudit(store, {
+            at,
+            actor,
+            action: 'membership.grant',
+            target: { person_id: granted.person.person_id, email: target },
+            detail: { role: req.role, source: 'netlify_ui' },
+            via: 'admin_ui',
+          }).catch(() => undefined);
+          return jsonResponse(200, { user: await getUserRecord(store, target) });
+        } catch (error) {
+          if (error instanceof InvitationError) {
+            return jsonResponse(error.status, { error: error.message, error_code: error.code, ...error.extra });
+          }
+          throw error;
+        }
       }
 
       case 'promote_bootstrap': {

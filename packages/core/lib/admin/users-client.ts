@@ -64,8 +64,62 @@ export const updateMe = async (getToken: GetToken, fields: { display_name?: stri
 export const listUsers = (getToken: GetToken, opts: { include_removed?: boolean } = {}) =>
   post<{ users: UserView[] }>(getToken, { verb: 'list', ...opts });
 
-export const inviteUser = (getToken: GetToken, email: string, role: UserRole) =>
-  post<{ user: UserView; invite: { sent: boolean } }>(getToken, { verb: 'invite', email, role });
+export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
+export interface InvitationView {
+  invite_id: string;
+  email: string;
+  role: UserRole;
+  status: InvitationStatus;
+  gotrue: { invited: boolean; error?: string; last_sent_at?: string; send_count: number };
+  invited_by: { person_id?: string; email: string };
+  message?: string;
+  source: 'platform' | 'netlify_ui' | 'mcp' | 'chat';
+  expires_at: string;
+  accepted?: { at: string; person_id: string };
+  revoked?: { at: string; by: string; reason?: string };
+  created_at: string;
+  updated_at: string;
+}
+export interface UnmanagedIdentityView {
+  id: string;
+  email: string;
+  confirmed: boolean;
+  invited_at?: string;
+  created_at?: string;
+  last_sign_in_at?: string;
+}
+
+/** T18.2: creates the Invitation + Membership{invited}; `accept_token` is OUR opaque preview token, returned once. */
+export const inviteUser = (getToken: GetToken, email: string, role: UserRole, message?: string) =>
+  post<{ user: UserView; invite: { sent: boolean; error?: string }; invitation: InvitationView; accept_token: string }>(
+    getToken,
+    { verb: 'invite', email, role, ...(message ? { message } : {}) }
+  );
+
+export const resendInvitation = (getToken: GetToken, ref: { invite_id?: string; email?: string }) =>
+  post<{ invitation: InvitationView; invite: { sent: boolean; error?: string }; accept_token: string }>(getToken, {
+    verb: 'resend',
+    ...ref,
+  });
+
+export const revokeInvitation = (getToken: GetToken, ref: { invite_id?: string; email?: string }, reason?: string) =>
+  post<{ invitation: InvitationView; membership: unknown }>(getToken, {
+    verb: 'revoke',
+    ...ref,
+    ...(reason ? { reason } : {}),
+  });
+
+export const listInvitations = (getToken: GetToken, status?: InvitationStatus) =>
+  post<{ invitations: InvitationView[] }>(getToken, { verb: 'list_invitations', ...(status ? { status } : {}) });
+
+export const listUnmanagedIdentities = (getToken: GetToken) =>
+  post<{ identities: UnmanagedIdentityView[]; error_code?: 'identity_admin_unavailable'; error?: string }>(getToken, {
+    verb: 'unmanaged_identities',
+  });
+
+/** Owner grants a role to a Netlify-UI identity that has no membership (plan §4.2). */
+export const grantRole = (getToken: GetToken, email: string, role: UserRole, user_id?: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'grant', email, role, ...(user_id ? { user_id } : {}) });
 
 export const setUserRole = (getToken: GetToken, email: string, role: UserRole) =>
   post<{ user: UserView }>(getToken, { verb: 'set_role', email, role });
@@ -98,14 +152,16 @@ export const acceptInvite = (getToken: GetToken, fields: { display_name: string 
 export interface InvitePreview {
   site: { name: string; slug: string };
   policy: { min_password: number };
+  /** T18.2 path 2: present only when the page carried OUR `inv` token (Owner-shared link). */
+  invitation?: { email: string; role: UserRole; invited_by: string; expires_at: string; expired: boolean };
 }
 
 /** Public (no session): site name + password policy for the accept page. The token is not validated server-side. */
-export const invitePreview = async (token?: string): Promise<InvitePreview> => {
+export const invitePreview = async (token?: string, inv?: string): Promise<InvitePreview> => {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ verb: 'invite_preview', ...(token ? { token } : {}) }),
+    body: JSON.stringify({ verb: 'invite_preview', ...(token ? { token } : {}), ...(inv ? { inv } : {}) }),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);

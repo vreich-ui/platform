@@ -163,7 +163,7 @@ describe('principalName', () => {
 
 // D3: the email → friendly-name derivation, shared by principalName() and
 // the server-side default-display-name sites (admin-users.ts,
-// user-invite.ts). Covers the awkward local-parts the brief called out.
+// membership/invitations.ts, ex user-invite.ts). Covers the awkward local-parts the brief called out.
 describe('friendlyNameFromEmail', () => {
   it('title-cases a name-like local part', () => {
     assert.strictEqual(friendlyNameFromEmail('alex.rivera@example.com'), 'Alex Rivera');

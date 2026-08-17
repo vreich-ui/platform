@@ -295,6 +295,27 @@ One implementation (`server/lib/membership/*.ts`), three front doors: `admin-use
 Chat approval cards render human copy ("Invite **jane@x** as **Editor**; an e-mail goes out from Netlify Identity") — dry-run first (`member_invite` with `dry_run:true` returns "would send / already pending / domain not allowed").
 `object_contract`-style discoverability: add `membership_contract` (roles, verbs, policy, error catalogue: `invite_pending_exists`, `last_owner`, `env_managed_member`, `membership_requires_human`, `gotrue_invite_failed`, `invite_expired`, `invite_revoked`).
 
+**Error-code catalogue as built (T18.1/T18.2, `admin-users` responses carry `error_code`; `InvitationError` in `membership/invitations.ts`):**
+
+| code | HTTP | when |
+|---|---|---|
+| `invite_pending_exists` | 409 | an open invitation exists for the address (`existing_invite_id` returned) |
+| `member_active` | 409 | inviting someone who is already an active member (`set_role` instead) |
+| `member_exists` | 409 | `grant` for an address that already has a non-removed membership |
+| `env_managed_member` | 409 | target is an `ADMIN_EMAILS`/`ROLE_EMAILS_*` principal |
+| `last_owner` | 409 | `set_role`/`suspend` would leave < `policy.min_owners` (stored active + env bootstrap) |
+| `invite_not_found` | 404 | no such `invite_id` / no open invitation for the e-mail |
+| `invite_not_pending` | 409 | state is `accepted` |
+| `invite_expired` | 409 | TTL passed (lazy-expired on read) — send a NEW invitation |
+| `invite_revoked` | 409 | revoked; a new invitation is allowed |
+| `resend_cap` | 429 | `gotrue.send_count ≥ policy.max_resends` (`send_count`, `max_resends` returned) |
+| `domain_not_allowed` | 422 | `policy.allowed_email_domains` excludes the address |
+| `invite_forbidden` | 403 | caller may not invite under `policy.who_can_invite` |
+| `role_not_grantable` | 403 | an Admin invited a role outside `policy.roles_admin_may_grant` |
+| `identity_admin_unavailable` | 200 (degraded) | `unmanaged_identities` had no injected admin token / GoTrue admin list failed → `identities: []` |
+| `gotrue_invite_failed` | 200 (best-effort) | surfaced as `invite.error` / `invitation.gotrue.error`; the store record still exists |
+| `already_invited` | 200 (best-effort) | GoTrue 422 "already registered/invited" — not a failure |
+
 ---
 
 ## 8. Migration & task breakdown (proposed W18 rows)

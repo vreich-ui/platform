@@ -621,7 +621,8 @@ test('me / accept / update_me stamp Person.onboarding steps', async () => {
     const events = [...store.map.keys()]
       .filter((k) => k.startsWith(PREFIXES.audit))
       .map((k) => JSON.parse(store.map.get(k)!).action);
-    assert.ok(events.includes('invitation.accept'));
+    // no Invitation object existed for this v1-style invited record → the accept is a plain activation (T18.2)
+    assert.ok(events.includes('membership.activate'));
     assert.ok(events.includes('person.update_profile'));
   });
 });

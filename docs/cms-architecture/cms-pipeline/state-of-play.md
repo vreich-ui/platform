@@ -9,6 +9,63 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.2: invitations are first-class — invite / resend / revoke / accept / expire / reconcile
+
+W18 wave 2 (plan §2.1 Invitation, §3.1, §4.1/§4.2, F9). NEW
+`packages/core/server/lib/membership/invitations.ts`: `createInvitation`
+(policy `allowed_email_domains`; 409 `invite_pending_exists` +
+`existing_invite_id`; 409 `member_active`; a suspended/removed/invited
+member is RE-invited with a new invitation and its status → invited, F6;
+writes `Invitation{pending}` + `invitation-by-email` pointer + Person +
+`Membership{invited, source:'invitation', invitation_id}`; fires GoTrue
+`POST /invite` with `data:{invited_by, role, invite_id}` best-effort and
+records the outcome on `invitation.gotrue`; audits `invitation.create`;
+returns OUR opaque accept token ONCE — `inv_`+32 random bytes, only its
+sha256 stored as `token_hash`), `resendInvitation` (re-fires GoTrue,
+`send_count`/`last_sent_at`, ROTATES our token, extends the TTL, audit
+`reinvite_email` on the membership + `invitation.resend`; 429 `resend_cap`
+at `policy.max_resends`), `revokeInvitation` (→ revoked, pointer cleared; a
+never-activated membership → `removed{purge_after = +purge_grace_days}`;
+audit `invitation.revoke`; a fresh invite afterwards is allowed),
+`acceptInvitation` (moved from user-invite.ts; now matches the pending
+invitation BY E-MAIL, copies its `role` onto the membership, marks it
+`accepted{at, person_id}`, stamps identity + onboarding, audits
+`invitation.accept` — or `membership.activate` when no Invitation object
+existed; idempotent), `activateOnLogin` (moved; also closes a pending
+invitation), lazy expiry on every read (`getOpenInvitationByEmail`,
+resend, preview, list) + `expireAll(store, now)` sweep (T18.4 schedules
+it; audit `invitation.expire` once), `listInvitations({status})`,
+`previewInvitationByToken` (path 2), `listUnmanagedIdentities` (`GET
+{identity}/admin/users?per_page=1000` with the injected admin token minus
+every known member; degrades to `[]` + `error_code:'identity_admin_unavailable'`),
+`assertMayInvite` (`policy.who_can_invite`: Owner always; `owner_admin`
+lets Admins invite only `roles_admin_may_grant` → 403 `invite_forbidden` /
+`role_not_grantable`) and the typed `InvitationError` catalogue (appended
+to plan §7 as a table). **Two accept paths documented in the file header:**
+(1) GoTrue's own mail carries only `{{ .Token }}` → `/admin/accept` →
+`accept` verb matches by e-mail (default; nothing of ours travels in the
+mail); (2) our token previews inviter/role via `invite_preview {inv}` when
+an Owner shares the link manually (optional sugar). **Verbs (`admin-users`):**
+`invite` (now Owner OR policy-permitted Admin; `message?`; returns `user`,
+`invite`, `invitation`, `accept_token`), `resend {invite_id|email}`,
+`revoke {invite_id|email, reason?}`, `list_invitations {status?}`,
+`unmanaged_identities`, `grant {email, role, user_id?}` (Owner gives a
+Netlify-UI identity an ACTIVE membership, `source:'netlify_ui'`, audit
+`membership.grant`; 409 `member_exists` unless removed), `invite_preview`
+gains `inv?`; every `InvitationError` maps to `{error, error_code, ...extra}`.
+`user-invite.ts` and `tests/netlify/user-invite.test.ts` DELETED (nothing
+imported them anymore); the T18.0a endpoint tests are ported into NEW
+`tests/netlify/membership-invitations.test.ts` (14 cases: /invite + bearer +
+data, 422→already_invited, create shape/pointer/audit/token-hash-only,
+duplicate 409, member_active + F6 re-invite, best-effort GoTrue, policy
+domain/who-may-invite, resend rotate/cap, revoke → removed + re-invite,
+lazy expiry + sweep, accept copies role + idempotent, activateOnLogin,
+unmanaged identities with/without token, and the handler end-to-end incl.
+grant + preview). `users-client.ts` gains `resendInvitation`,
+`revokeInvitation`, `listInvitations`, `listUnmanagedIdentities`,
+`grantRole`, `InvitationView`, and `invitePreview(token, inv)`. `npm test`
+2441/150/50, eslint/prettier/`astro check` green. Next: T18.3a ∥ T18.3b.
+
 ## 2026-08-17 — T18.1: membership store v2 (Person / Membership / Audit / Policy), five tiers, `last_owner`, lazy migration — behind the unchanged v1 helpers
 
 W18 wave 1 (Fable row, plan §2/§3/§6, F6, F7, F9-store, F10, F12). **The
