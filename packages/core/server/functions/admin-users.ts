@@ -2,10 +2,14 @@
  * Function name: Admin_Users
  * Required method: POST
  * Auth: Netlify Identity. Verbs: me / update_me (self, any admin);
- *       list / set_role / disable (Owner). Invite is T9.5.
+ *       list / set_role / suspend (alias: disable) / reinstate /
+ *       promote_bootstrap (Owner). Invite is T9.5.
  *       T18.0a: invite_preview (PUBLIC, no auth) and accept (any
  *       authenticated Identity user — the fresh JWT GoTrue's /verify returned;
  *       no role gate, because an invitee has no roles yet).
+ *       T18.1: the store behind every verb is membership v2 (person +
+ *       membership + audit stream) read/written through the users-store
+ *       adapter; five tiers; the `last_owner` guard (409) on set_role/suspend.
  *
  * The workspace identity surface (T9.4). Roles are resolved server-side via
  * the async resolver (users store + ADMIN_EMAILS bootstrap owners); owner-only
@@ -35,6 +39,8 @@ import {
 } from '../lib/users-store.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
 import { inviteUser, activateOnLogin, acceptInvitation, type GoTrueIdentity } from '../lib/user-invite.js';
+import { appendAudit, getPolicy, stampOnboarding, wouldBreachMinOwners } from '../lib/membership/write.js';
+import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
 import type { Principal } from '../../schema/object-record-v1.js';
 import { friendlyNameFromEmail } from '../../lib/admin/display-name.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -67,10 +73,16 @@ const requestSchema = z.discriminatedUnion('verb', [
     display_name: z.string().min(1).max(200).optional(),
     avatar_artifact: z.string().min(1).optional(),
   }),
-  z.object({ verb: z.literal('list') }),
+  z.object({ verb: z.literal('list'), include_removed: z.boolean().optional() }),
   z.object({ verb: z.literal('invite'), email: z.string().min(3), role: userRoleSchema }),
   z.object({ verb: z.literal('set_role'), email: z.string().min(3), role: userRoleSchema }),
-  z.object({ verb: z.literal('disable'), email: z.string().min(3) }),
+  // T18.1: `suspend` is the verb; `disable` stays as an alias for one release (T18.8 removes it).
+  z.object({ verb: z.literal('suspend'), email: z.string().min(3), reason: z.string().max(500).optional() }),
+  z.object({ verb: z.literal('disable'), email: z.string().min(3), reason: z.string().max(500).optional() }),
+  z.object({ verb: z.literal('reinstate'), email: z.string().min(3) }),
+  // T18.1: materialise a stored Owner membership for an ADMIN_EMAILS member so
+  // the env row can later be emptied (plan §4.3 / F10).
+  z.object({ verb: z.literal('promote_bootstrap'), email: z.string().min(3) }),
   // T18.0a — the accept page's two verbs. `token` is accepted but NOT
   // validated: only GoTrue can validate an invite token, and an unauthenticated
   // request has no admin token to ask with. See the verb handler comment.
@@ -199,7 +211,16 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       const accepted = await acceptInvitation(store, email, adminState.userId, request.data.display_name, at);
       if (accepted) {
         if (accepted.status === 'disabled') return jsonResponse(403, { error: 'This membership is disabled.' });
-        return jsonResponse(200, { user: accepted, needs_grant: false });
+        // T18.1: the accept page collected a password (GoTrue) and a name — stamp both onboarding steps.
+        await stampOnboarding(store, email, { steps: { password: at, name: at }, at }).catch(() => undefined);
+        await appendAudit(store, {
+          at,
+          actor: auditActorFromPrincipal(principal),
+          action: 'invitation.accept',
+          target: { person_id: accepted.person_id ?? personIdForEmail(email), email },
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, { user: (await getUserRecord(store, email)) ?? accepted, needs_grant: false });
       }
       if (environmentRoleForEmail(email) === 'owner') {
         // Bootstrap ADMIN_EMAILS caller: the existing `me` materialization,
@@ -239,6 +260,18 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         // Owner deliberately so the members list reflects their real access.
         const at = nowIso();
         const activated = await activateOnLogin(store, email, adminState.userId, at);
+        if (activated) {
+          await appendAudit(store, {
+            at,
+            actor: auditActorFromPrincipal(principal),
+            action:
+              activated.status === 'active' && activated.audit.at(-1)?.action === 'activate'
+                ? 'membership.activate'
+                : 'person.login',
+            target: { person_id: activated.person_id ?? personIdForEmail(email), email },
+            via: 'admin_ui',
+          }).catch(() => undefined);
+        }
         if (!activated && environmentRoleForEmail(email) === 'owner') {
           const bootstrapOwner: UserRecord = {
             ...synthesizedRecord(email, true, at),
@@ -274,12 +307,27 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
           audit: [...base.audit, { at: nowIso(), actor_email: email, action: 'update_profile' }],
         };
         await putUserRecord(store, updated);
-        return jsonResponse(200, { user: updated });
+        if (req.display_name) {
+          await stampOnboarding(store, email, { steps: { name: nowIso() }, at: nowIso() }).catch(() => undefined);
+        }
+        await appendAudit(store, {
+          at: nowIso(),
+          actor: auditActorFromPrincipal(principal),
+          action: 'person.update_profile',
+          target: { person_id: updated.person_id ?? personIdForEmail(email), email },
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, { user: (await getUserRecord(store, email)) ?? updated });
       }
 
       case 'list': {
         if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        return jsonResponse(200, { users: await listUsersWithEnvironment(store) });
+        const users = await listUsersWithEnvironment(store);
+        // T18.1: `removed` memberships stay for audit/attribution but leave the
+        // default members list; `include_removed:true` shows them.
+        return jsonResponse(200, {
+          users: req.include_removed ? users : users.filter((u) => u.membership_status !== 'removed'),
+        });
       }
 
       case 'invite': {
@@ -303,8 +351,54 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         return jsonResponse(200, { user: result.record, invite: result.invite });
       }
 
+      case 'promote_bootstrap': {
+        // T18.1 (plan §4.3, F10): give an ADMIN_EMAILS member a STORED Owner
+        // membership so the env row can be emptied later. Owner-only; the
+        // target must be an env Owner; idempotent when a stored owner exists.
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const target = normalizeUserEmail(req.email);
+        if (environmentRoleForEmail(target) !== 'owner') {
+          return jsonResponse(409, {
+            error: 'Only an ADMIN_EMAILS (bootstrap) member can be promoted to a stored Owner.',
+          });
+        }
+        const at = nowIso();
+        const stored = await getUserRecord(store, target);
+        const promoted: UserRecord = stored
+          ? {
+              ...stored,
+              role: 'owner',
+              status: 'active',
+              updated_at: at,
+              audit: [
+                ...stored.audit,
+                {
+                  at,
+                  actor_email: email,
+                  action: 'promote_bootstrap',
+                  detail: `${stored.role}/${stored.status} → owner/active`,
+                },
+              ],
+            }
+          : {
+              ...synthesizedRecord(target, true, at),
+              audit: [{ at, actor_email: email, action: 'promote_bootstrap', detail: 'env → stored owner' }],
+            };
+        await putUserRecord(store, promoted);
+        await appendAudit(store, {
+          at,
+          actor: auditActorFromPrincipal(principal),
+          action: 'membership.promote_bootstrap',
+          target: { person_id: personIdForEmail(target), email: target },
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, { user: await getUserRecord(store, target) });
+      }
+
       case 'set_role':
-      case 'disable': {
+      case 'suspend':
+      case 'disable':
+      case 'reinstate': {
         if (!owner) return jsonResponse(403, { error: 'Owner access required' });
         const target = normalizeUserEmail(req.email);
         if (target === email) {
@@ -319,25 +413,80 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         if (!stored) {
           return jsonResponse(404, { error: 'No such member. Invite them first.' });
         }
-        const updated: UserRecord =
-          req.verb === 'set_role'
-            ? {
-                ...stored,
-                role: req.role,
-                updated_at: nowIso(),
-                audit: [
-                  ...stored.audit,
-                  { at: nowIso(), actor_email: email, action: 'set_role', detail: `${stored.role} → ${req.role}` },
-                ],
-              }
-            : {
-                ...stored,
-                status: 'disabled',
-                updated_at: nowIso(),
-                audit: [...stored.audit, { at: nowIso(), actor_email: email, action: 'disable' }],
-              };
+        const at = nowIso();
+        const verb = req.verb === 'disable' ? 'suspend' : req.verb;
+
+        // T18.1 `last_owner` guard: demoting or suspending an active stored
+        // Owner must not leave fewer than policy.min_owners owners (stored
+        // active + ADMIN_EMAILS bootstrap owners).
+        const wouldLoseOwner =
+          stored.role === 'owner' &&
+          stored.status === 'active' &&
+          ((verb === 'set_role' && req.verb === 'set_role' && req.role !== 'owner') || verb === 'suspend');
+        if (wouldLoseOwner) {
+          const policy = await getPolicy(store);
+          const envOwners = environmentRoleEntries().filter(([, role]) => role === 'owner').length;
+          const breach = await wouldBreachMinOwners(store, {
+            exceptPersonId: stored.person_id ?? personIdForEmail(target),
+            envOwnerCount: envOwners,
+            minOwners: policy.min_owners,
+          });
+          if (breach) {
+            return jsonResponse(409, {
+              error: 'This is the last Owner. Promote another member to Owner first.',
+              error_code: 'last_owner',
+            });
+          }
+        }
+
+        let updated: UserRecord;
+        let auditAction: 'membership.role_change' | 'membership.suspend' | 'membership.reinstate';
+        if (verb === 'set_role' && req.verb === 'set_role') {
+          updated = {
+            ...stored,
+            role: req.role,
+            updated_at: at,
+            audit: [
+              ...stored.audit,
+              { at, actor_email: email, action: 'set_role', detail: `${stored.role} → ${req.role}` },
+            ],
+          };
+          auditAction = 'membership.role_change';
+        } else if (verb === 'suspend') {
+          const reason = req.verb === 'suspend' || req.verb === 'disable' ? req.reason : undefined;
+          updated = {
+            ...stored,
+            status: 'disabled',
+            updated_at: at,
+            audit: [
+              ...stored.audit,
+              { at, actor_email: email, action: 'suspend', ...(reason ? { detail: reason } : {}) },
+            ],
+          };
+          auditAction = 'membership.suspend';
+        } else {
+          if (stored.membership_status === 'removed') {
+            return jsonResponse(409, { error: 'This member was removed. Re-invite them instead.' });
+          }
+          if (stored.status !== 'disabled') return jsonResponse(200, { user: stored });
+          updated = {
+            ...stored,
+            status: 'active',
+            updated_at: at,
+            audit: [...stored.audit, { at, actor_email: email, action: 'reinstate' }],
+          };
+          auditAction = 'membership.reinstate';
+        }
         await putUserRecord(store, updated);
-        return jsonResponse(200, { user: updated });
+        await appendAudit(store, {
+          at,
+          actor: auditActorFromPrincipal(principal),
+          action: auditAction,
+          target: { person_id: stored.person_id ?? personIdForEmail(target), email: target },
+          ...(verb === 'set_role' && req.verb === 'set_role' ? { detail: { from: stored.role, to: req.role } } : {}),
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, { user: await getUserRecord(store, target) });
       }
     }
   } catch (error) {

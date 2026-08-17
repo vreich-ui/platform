@@ -7,9 +7,13 @@ import type { GetToken } from '../edit-mode/verbs-client.js';
 
 const ENDPOINT = '/.netlify/functions/admin-users';
 
-export type UserRole = 'owner' | 'admin';
-export type UserViewRole = UserRole | 'publisher' | 'editor';
+/** The five workspace tiers (T18.1). */
+export type UserRole = 'owner' | 'admin' | 'publisher' | 'editor' | 'viewer';
+export type UserViewRole = UserRole;
+/** The v1 VIEW status; `membership_status` carries the real v2 state (suspended|removed both view as `disabled`). */
 export type UserStatus = 'invited' | 'active' | 'disabled';
+export type MembershipStatus = 'invited' | 'active' | 'suspended' | 'removed';
+export type MembershipSource = 'bootstrap_env' | 'invitation' | 'netlify_ui' | 'mcp' | 'import' | 'legacy_v1';
 
 export interface UserAuditEntry {
   at: string;
@@ -30,6 +34,10 @@ export interface UserView {
   updated_at?: string;
   last_seen_at?: string;
   audit?: UserAuditEntry[];
+  /** T18.1 (membership v2) */
+  person_id?: string;
+  membership_status?: MembershipStatus;
+  membership_source?: MembershipSource;
 }
 
 async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
@@ -53,7 +61,8 @@ export const updateMe = async (getToken: GetToken, fields: { display_name?: stri
   return result;
 };
 
-export const listUsers = (getToken: GetToken) => post<{ users: UserView[] }>(getToken, { verb: 'list' });
+export const listUsers = (getToken: GetToken, opts: { include_removed?: boolean } = {}) =>
+  post<{ users: UserView[] }>(getToken, { verb: 'list', ...opts });
 
 export const inviteUser = (getToken: GetToken, email: string, role: UserRole) =>
   post<{ user: UserView; invite: { sent: boolean } }>(getToken, { verb: 'invite', email, role });
@@ -61,8 +70,18 @@ export const inviteUser = (getToken: GetToken, email: string, role: UserRole) =>
 export const setUserRole = (getToken: GetToken, email: string, role: UserRole) =>
   post<{ user: UserView }>(getToken, { verb: 'set_role', email, role });
 
-export const disableUser = (getToken: GetToken, email: string) =>
-  post<{ user: UserView }>(getToken, { verb: 'disable', email });
+/** T18.1: `suspend` (roles → [] until reinstated). `disableUser` remains as the alias for one release. */
+export const suspendUser = (getToken: GetToken, email: string, reason?: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'suspend', email, ...(reason ? { reason } : {}) });
+
+export const disableUser = (getToken: GetToken, email: string) => suspendUser(getToken, email);
+
+export const reinstateUser = (getToken: GetToken, email: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'reinstate', email });
+
+/** T18.1: give an ADMIN_EMAILS member a stored Owner membership (so the env row can be emptied later). */
+export const promoteBootstrapOwner = (getToken: GetToken, email: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'promote_bootstrap', email });
 
 /**
  * T18.0b — the accept page's verbs (server contract: T18.0a).

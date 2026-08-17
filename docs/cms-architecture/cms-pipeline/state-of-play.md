@@ -9,6 +9,62 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.1: membership store v2 (Person / Membership / Audit / Policy), five tiers, `last_owner`, lazy migration — behind the unchanged v1 helpers
+
+W18 wave 1 (Fable row, plan §2/§3/§6, F6, F7, F9-store, F10, F12). **The
+store:** `packages/core/server/lib/membership/{store,read,write}.ts` — zod v2
+records (`schema_version: 2`) for Person, Membership, Invitation (records
+only; verbs are T18.2), AuditEvent (append-only stream at
+`audit/<yyyy-mm>/<ulid>.json`) and MembershipPolicy overrides
+(`policy.json` over the committed `DEFAULT_MEMBERSHIP_POLICY` in
+`packages/core/lib/membership-policy.ts`); keys exactly per plan §2.1 in the
+SAME `users` blob store; `person_id = 'usr_' + base32(sha256(email))[:20]`
+(deterministic, §9-4). **The read path** (`getMembershipByEmail`) tries the
+v2 pointer, then a v1 FULL record under `by-email/` upgraded IN MEMORY
+(`upgradeLegacyRecord`, no write; v1 `disabled` → `suspended`;
+`invited_by: bootstrap|environment` → `source: bootstrap_env`); `listMembers`
+merges v2 memberships with unmigrated v1 rows. **The write path**
+(`saveMember`/`putPerson`/`putMembership`/`appendAudit`/`upsertFromV1`/
+`stampOnboarding`) maintains the indexes, so the first write to a v1 row IS
+the migration (`by-email` becomes `{ person_id }`; `by-identity/<gotrue
+id>` appears). **Compatibility:** `users-store.ts` is now an `@deprecated`
+ADAPTER — `getUserRecord`/`putUserRecord`/`listUserRecords`/`userRoleSchema`
+keep their signatures and return a v1-shaped VIEW (+`person_id`,
+`membership_status`, `membership_source`; v2 `suspended`|`removed` view as
+`disabled`), so `admin-users.ts`, `user-invite.ts`, `request-roles.ts`,
+`admin-agent-chat*` and every existing test compile and pass unchanged (two
+tests that counted raw blobs now count members). **Roles:** `Role` gains
+`viewer`; `expandRole` owner→[owner,admin,publisher], admin→[admin],
+publisher→[publisher], editor→[editor], viewer→[viewer]; `canDecideReview`
+tightened to owner|admin|publisher|editor (viewer has no standing — closes
+the plan's "any role ⇒ viewer can decide" hole); resolver precedence
+UNCHANGED (agent → [], `ADMIN_EMAILS` → owner always, membership tier,
+suspended/removed → [], env fallback) and written as a table in `roles.ts`'s
+header; `publish-gate.ts` byte-untouched (`git diff --stat` empty).
+**Verbs (`admin-users`):** `set_role` takes all five tiers; `suspend` (with
+optional `reason`; `disable` kept as alias for one release), `reinstate`,
+`promote_bootstrap` (Owner-only, target must be an `ADMIN_EMAILS` member;
+materialises a stored Owner so the env row can be emptied — F10),
+`list {include_removed?}` returns v2 rows and hides `removed` by default;
+the **`last_owner` guard** (409 `error_code:'last_owner'`) on set_role
+(non-owner target role) and suspend when stored ACTIVE owners + env
+bootstrap owners would drop below `policy.min_owners`; `me`/`accept`/
+`update_me` stamp `Person.onboarding.steps` (password+name on accept, name
+on update_me) and every mutation also lands an `AuditEvent` in the stream
+(`membership.role_change|suspend|reinstate|promote_bootstrap|activate`,
+`invitation.accept`, `person.update_profile|login`). `users-client.ts`
+types/wrappers updated (`suspendUser`, `reinstateUser`,
+`promoteBootstrapOwner`, `listUsers({include_removed})`; UI is T18.3a).
+Tests: NEW `tests/netlify/membership-store-v2.test.ts` (17 cases: v1 read as
+v2 view, first write migrates + pointer, `upsertFromV1` idempotent + audit,
+list merge/skip-corrupt, env Owner over empty/corrupt/v1-suspended/v2-removed
+stores, five tiers, suspended/removed ⇒ [], agent ⇒ [], `canDecideReview`
+excludes viewer, policy defaults/merge/corrupt, set_role tiers + audit,
+`last_owner` with and without env owners incl. the handler 409, disable ==
+suspend + reinstate, `promote_bootstrap`, list v2 rows/removed hidden,
+onboarding stamps). `npm test` 2436/150/50 green, eslint/prettier/`astro
+check` green. Plan §2.3 gained an "as built" paragraph. Next: T18.2.
+
 ## 2026-08-17 — T18.0c: Identity e-mail templates published from core; the console clicks are written down everywhere a human looks
 
 W18 wave 0, row 3 (plan §4.1 step 2, F10-doc, F11-part; P1/P2). **Templates

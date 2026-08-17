@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { handler } from '../../netlify/functions/admin-users.js';
-import { getUserRecord, putUserRecord, type UsersBlobStore } from '../../packages/core/server/lib/users-store.js';
+import {
+  getUserRecord,
+  listUserRecords,
+  putUserRecord,
+  type UsersBlobStore,
+} from '../../packages/core/server/lib/users-store.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
 
 const ROLE_ENV_KEYS = ['ADMIN_EMAILS', 'ROLE_EMAILS_ADMIN', 'ROLE_EMAILS_PUBLISHER', 'ROLE_EMAILS_EDITOR'] as const;
@@ -77,7 +82,8 @@ test('me persists a bootstrap Owner exactly once with an activation audit entry'
     assert.equal(second.statusCode, 200);
     const persisted = await getUserRecord(store, 'boss@example.com');
     assert.equal(persisted?.audit.filter((entry) => entry.action === 'bootstrap_activate').length, 1);
-    assert.equal(store.map.size, 1);
+    // T18.1: one MEMBER (v2 = person + membership + two index pointers), not one blob
+    assert.equal((await listUserRecords(store)).length, 1);
   });
 });
 

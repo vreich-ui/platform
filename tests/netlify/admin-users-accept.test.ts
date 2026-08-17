@@ -10,7 +10,12 @@ import test from 'node:test';
 
 import { createHandler } from '../../packages/core/server/functions/admin-users.js';
 import { drlurieSiteBinding } from '../../sites/drlurie/config/site-binding.js';
-import { getUserRecord, putUserRecord, type UsersBlobStore } from '../../packages/core/server/lib/users-store.js';
+import {
+  getUserRecord,
+  listUserRecords,
+  putUserRecord,
+  type UsersBlobStore,
+} from '../../packages/core/server/lib/users-store.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
 
 const handler = createHandler(drlurieSiteBinding);
@@ -112,7 +117,7 @@ test('accept twice is idempotent — same active record, one accept audit entry,
     assert.equal(b2.user.display_name, 'Jane Doe');
     assert.equal(b2.user.audit.length, b1.user.audit.length);
     assert.equal(b2.needs_grant, false);
-    assert.equal(store.map.size, 1);
+    assert.equal((await listUserRecords(store)).length, 1); // T18.1: one member, however many v2 blobs
   });
 });
 

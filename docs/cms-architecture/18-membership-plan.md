@@ -177,6 +177,7 @@ users/            (store name unchanged: 'users')
 ### 2.3 Compatibility
 - `by-email/<email>` keeps working: read path tries v2 (`person`+`membership`), falls back to v1 record and lazily migrates on next write. `resolveRolesForPrincipalAsync` unchanged in signature; `expandRole` gains `publisher→['publisher']`, `editor→['editor']`, `viewer→['viewer']`.
 - `ADMIN_EMAILS` precedence unchanged (bootstrap Owner always wins).
+- **As built (T18.1, 2026-08-17):** store name stays `users`; keys exactly as §2.1 (`person/`, `by-email/` → `{ person_id }`, `by-identity/`, `membership/`, `invitation/`, `invitation-by-email/`, `audit/<yyyy-mm>/<ulid>.json`, `policy.json`). `users-store.ts` is the adapter (`getUserRecord`/`putUserRecord`/`listUserRecords` return a v1-shaped VIEW with `person_id`, `membership_status`, `membership_source` added; v2 `suspended`|`removed` both view as `disabled`). The per-record `audit[]` array is kept ON the membership (compat) and the stream gets `AuditEvent`s alongside; the committed policy default lives in `packages/core/lib/membership-policy.ts` (`DEFAULT_MEMBERSHIP_POLICY`, +`default_role_for_external`, `delete_identity_on_remove`). Membership `source` gained `legacy_v1` for rows upgraded from v1. `min_owners` counts stored ACTIVE owners + env bootstrap owners (`wouldBreachMinOwners`).
 
 ---
 
