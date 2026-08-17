@@ -201,6 +201,19 @@ everything else, only you can click these.
    membership. Then (T18.1) promote the stored Owner and remove the env row,
    so `ADMIN_EMAILS` goes back to being break-glass only. A team of one can
    stop after step 2; `ADMIN_EMAILS` alone is a complete bootstrap.
+   Invitations expire after 7 days by default and can be resent/revoked from
+   the **Invitations** tab (T18.3b); anyone invited from the Netlify Identity
+   tab instead shows under **Identities** and is granted a role from there.
+   The same verbs are available to a signed-in human over MCP/chat
+   (`member_invite` etc., T18.6b) — agents on the bearer token are refused
+   with `membership_requires_human` by design.
+4. **(Optional) Membership policy.** The fleet defaults apply (Owner+Admin
+   may invite editor|viewer, Owner alone the rest; `min_owners` 1; 7-day
+   invites; 30-day purge grace; the Identity login is deleted on remove).
+   Narrow them per site in `sites/<client>/config/membership-policy.ts`
+   (committed, T18.7) or at runtime as an Owner (`membership_policy_set`).
+   Fleet check without a token: `node scripts/fleet-capability-probe.mjs
+   --all --repo-only`.
 
 > **Recovering a stuck invite.** Someone was invited before T18.0a/b (the
 > link landed on the home page, nothing happened), or the mail never came:

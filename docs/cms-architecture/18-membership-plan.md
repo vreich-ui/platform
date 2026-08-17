@@ -34,7 +34,7 @@ The rest of this document: §1 evidence per finding, §2 the proposed schema, §
 
 ## 1. Findings — evidence and root cause
 
-Paths are under `packages/core/` unless stated.
+Paths are under `packages/core/` unless stated. **Status (T18.8 closeout, 2026-08-17):** F1 ✅ T18.0b/T18.0c · F2 ✅ T18.0a · F3 ✅ T18.0b (both hash shapes handled; the console template PATH per tenant is Wolf's T18.9 click) · F4 ✅ T18.6a/T18.6b · F5 ✅ T18.4 · F6 ✅ T18.0a/T18.1 · F7 ✅ T18.1/T18.3a · F8 ✅ T18.5 · F9 ✅ T18.2/T18.3b · F10 ✅ T18.1 (`promote_bootstrap`) — the env fallback stays as break-glass by design · F11 ✅ V1 part T18.7 (repo parity + probe + person seam), ⏳ V2 fleet-admin surface (no caller yet, by design) · F12 ✅ T18.1 (last-Owner guard, `min_owners`; the ≤1 h JWT lockout is documented in §5, not "fixed" — no server-side GoTrue logout exists). The evidence below is kept verbatim as the record of what was found; §8 is what shipped.
 
 ### F1 — invite token never consumed (the "offer page" bug)
 
@@ -321,20 +321,28 @@ Chat approval cards render human copy ("Invite **jane@x** as **Editor**; an e-ma
 
 ---
 
-## 8. Migration & task breakdown (proposed W18 rows)
+## 8. What shipped (W18, 2026-08-17) — the proposed rows as built
 
-| Task | Scope | Notes |
-|---|---|---|
-| **T18.0 Hotfix — accept page + hash router + `/invite` endpoint** | `HeaderAuthButton.astro` hash sniffer; new `app/pages/admin/accept.astro` + `lib/admin/goTrueClient.ts` `acceptInvite(token,password)`, `verifyRecovery(token)`; `user-invite.ts` → `POST /invite`; fix `tests/netlify/user-invite.test.ts`; `admin-users accept` verb (activate + name). | Closes F1, F2, F3, F8-min. Ship first, alone. P1: applies to all four sites automatically (core); **per-site manual step**: Emails → Invitation/Recovery template path → `/admin/accept/#…` (add to provisioning runbook + `create-site` checklist + capability probe). |
-| T18.1 Store v2 (Person / Membership / Invitation / Audit) with lazy migration; `expandRole` tiers; `min_owners`; reinvite reactivates | `server/lib/users-store.ts` → `membership/*.ts` | Closes F6, F7 (model), F9, F10 (promote), F12 |
-| T18.2 Members UI: Invitations tab (resend/revoke/status), roles incl. editor/viewer, suspend/reinstate/remove, unmanaged-identity reconcile, break-glass badge | `admin/AdminUsers.tsx`, `lib/admin/users-client.ts` | |
-| T18.3 Offboarding side-effects: OAuth token revocation, force-checkin, GoTrue delete/purge job, `transfer_ownership`, `export_person` | `oauth-store`, `object-verbs checkin{force}`, scheduled function | Closes F5 |
-| T18.4 `/admin/welcome` onboarding + `require_display_name` gate + `bootstrap` through welcome | `AdminLayout.astro`, new page | Closes F8 |
-| T18.5 Membership tools: chat registry + MCP definitions + `membership_contract`; human-principal gate; approval cards | `agent/tools.ts`, `mcp-tool-definitions-2.ts`, `mcp.ts` | Closes F4 |
-| T18.6 Fleet: probe checks (Identity enabled, invite-only, template paths), `create-site` emits templates + checklist, FLEET-STATUS rows, `fleet-admin` cross-site person view (V2 seam only) | `scripts/fleet-capability-probe.mjs`, `cli/create-site.mjs`, docs | Closes F11 (V1 part) |
-| T18.7 Docs: `docs/cms-architecture/18-membership-plan.md` (this), runbook §identity rewrite, KNOWN_ISSUES entries, queue.tsv rows | | R8: no parked questions except §9 |
+Rewritten by T18.8 from the proposed table (the proposal split into the T18.0a/b/c, T18.3a/b, T18.6a/b rows §10 lists; the numbering below is §10's, not the proposal's). Bare short SHAs on `w18/membership-plan` (never full URLs — CLAUDE.md gotcha).
 
-Test plan highlights: accept-page E2E against a GoTrue mock (invite→verify→accept→me), env-precedence tests untouched, `publish-gate` pinned, `last_owner` guard, idempotent invite, resend cap, purge scrub, OAuth revoke on suspend, agent principal 403 on every member tool, MCP OAuth owner succeeds.
+| Row | Commit | What shipped | Closes |
+|---|---|---|---|
+| T18.0a | `35006f9d` | GoTrue `/invite` endpoint (was `/admin/users`), `already_invited`, resend-if-existing, F6 disabled→invited; `accept` + `invite_preview` verbs; the wrong-URL test fixed | F2, F6-min |
+| T18.0b | `933657f6` | `/admin/accept` page (island; invite / recovery / confirm / email-change flows), the site-wide Identity token router in `HeaderAuthButton.astro` (`detectIdentityToken` → `/admin/accept`), `goTrueClient` verbs (`acceptInvite`, `exchangeRecoveryToken`, `confirmSignup`, `confirmEmailChange`, `setFullName`), both recovery hash shapes | F1, F3, F8-min |
+| T18.0c | `6f5d994d` | the four Identity e-mail templates published by every build at `/emails/identity/*.html` (core-owned, integration copies to `dist/`), create-site checklist rows, parity `identity-email-templates` PASS + `identity-console-settings` HUMAN, probe `IDENTITY_CONSOLE_PREREQUISITES`, runbook §admin rewrite, KNOWN_ISSUES §5 | F1 (mail side), F11 (templates) |
+| T18.1 | `2b3d76eb` | store v2 (Person / Membership / Invitation / AuditEvent / policy override) under the unchanged `users` store, deterministic `person_id`, five tiers + `expandRole`/`canDecideReview`, `last_owner`/`min_owners`, lazy v1→v2 migration, `users-store.ts` as the v1 VIEW adapter, verbs suspend/reinstate/promote_bootstrap/list include_removed | F6, F7 (model), F9 (records), F10 (promote), F12 |
+| T18.2 | `c47d66c0` | Invitation as an object: `createInvitation`/`resend`/`revoke`/`accept`/`activateOnLogin`/`previewInvitationByToken`/`expireAll`/`listUnmanagedIdentities`; verbs resend/revoke/list_invitations/unmanaged_identities/grant; §7 error table; `user-invite.ts` deleted | F9 |
+| T18.3a | `1915a9ea` | members page: five tiers, lifecycle actions, break-glass badge, promote, audit drawer, `remove`/`member_audit` verbs | F7 (UI), F10 (UI) |
+| T18.3b | `96eee2ed` | Invitations tab (resend/revoke/send status), Identities tab (unmanaged-identity reconcile → `grant`), accept-page `?inv=` preview | F9 (UI) |
+| T18.5 | `b3684c61` | `/admin/welcome`, `require_display_name` gate in AdminShell (`?skip_welcome=1`), `me` returns `onboarding` + policy, `update_me onboarding_step`, bootstrap Owners through welcome | F8 |
+| T18.4 | `b536eb60` | offboarding side effects: OAuth grant revocation (by-subject index), lock hand-off, GoTrue identity delete-or-queue (`identity-delete-queue/`), daily `membership-sweep` (invitation expiry, purge/scrub), `transferOwnership`, `exportPerson`; §5 amended with the identity-token constraint | F5 |
+| T18.6a | `103c3678` | `handleMembershipVerb` core + the human-principal gate (`membership_requires_human` first), `via: admin_ui|mcp|chat`, `buildMembershipContract`, error catalogue; admin-users thin; MCP `event.oauthPrincipal`; chat ToolClass `membership` | F4 (core) |
+| T18.6b | `40b0e90d` | 16 MCP membership tools (OAuth-human-only listing), chat registry + approval cards, `membership_contract`, governance `autonomy_floor`, publishing-policy §8.7 | F4 |
+| T18.7 | `c4240028` | committed `config/membership-policy.ts` per site (+ provider seam), create-site / migrate-site / parity, probe `membership` family + internal-only `membership_status`, FLEET-STATUS "membership footing" table, `membership/fleet.ts` `listMembershipsForPerson` (§2.2 seam), zilberman added to `FLEET_SITES`; **no new env var** | F11 (V1 part) |
+| T18.8 | this commit | docs closeout: §1 flipped, this table, CLAUDE.md W18 paragraph, 10-admin-workspace-plan §8 pointer + OQ-W9-4 DONE, KNOWN_ISSUES closed, decisions record `2026-08-17-membership-defaults.md`; `app/utils/netlifyIdentityLoader.ts` deleted (zero importers); `users-store.ts` KEPT (21 importers, see commit body) | — |
+| T18.9 | ⏳ | Part A: GoTrue-mock E2E (invite→verify→accept→me, recovery, email-change, agent-403, OAuth-owner-succeeds); Part B: Wolf's credentialed run (console clicks in FLEET-STATUS "membership footing", first stored Owner per tenant, live probe columns) | closes the ☐ columns |
+
+Test plan (as landed): `tests/netlify/{user-invite,admin-users-accept,membership-store-v2,membership-invitations,membership-offboarding,membership-verbs,membership-fleet}.test.ts`, `goTrueClient.test.ts`, `mcp-tool-definitions*.test.ts` — env-precedence tests untouched, `publish-gate.ts` byte-untouched, `last_owner` guard, idempotent invite, resend cap, purge scrub, OAuth revoke on suspend, agent principal 403 on every member tool, MCP OAuth Owner succeeds. The GoTrue-mock accept-page E2E is T18.9 Part A.
 
 ---
 
@@ -349,7 +357,7 @@ Test plan highlights: accept-page E2E against a GoTrue mock (invite→verify→a
 
 ## References
 
-- Repo evidence: `packages/core/server/lib/user-invite.ts`, `users-store.ts`, `roles.ts`, `admin-auth.ts`; `server/functions/admin-users.ts`; `lib/admin/goTrueClient.ts`; `app/components/common/{HeaderAuthButton,LoginModal}.astro`; `app/utils/netlifyIdentityLoader.ts` (unused); `admin/{AdminUsers,ProfilePage}.tsx`; `server/lib/agent/tools.ts`; `server/lib/mcp-tool-definitions*.ts`; `server/lib/oauth-server.ts`; `docs/cms-architecture/10-admin-workspace-plan.md` §6/§8; `docs/cms-architecture/site-provisioning-runbook.md` (identity steps); `tests/netlify/user-invite.test.ts`.
+- Repo evidence (as audited 2026-08-17 — `user-invite.ts` was deleted by T18.2, `app/utils/netlifyIdentityLoader.ts` by T18.8): `packages/core/server/lib/user-invite.ts`, `users-store.ts`, `roles.ts`, `admin-auth.ts`; `server/functions/admin-users.ts`; `lib/admin/goTrueClient.ts`; `app/components/common/{HeaderAuthButton,LoginModal}.astro`; `app/utils/netlifyIdentityLoader.ts` (unused); `admin/{AdminUsers,ProfilePage}.tsx`; `server/lib/agent/tools.ts`; `server/lib/mcp-tool-definitions*.ts`; `server/lib/oauth-server.ts`; `docs/cms-architecture/10-admin-workspace-plan.md` §6/§8; `docs/cms-architecture/site-provisioning-runbook.md` (identity steps); `tests/netlify/user-invite.test.ts`.
 - GoTrue source: `api/invite.go` (POST /invite sends mail), `api/admin.go` (POST /admin/users requires password, sends nothing; DELETE/PUT admin users), `api/verify.go` (POST /verify type=signup with password accepts an invite), `mailer/template.go` (`#invite_token=`, `#confirmation_token=`, `#recovery_token=`, `#email_change_token=`).
 - Netlify docs: [Registration and login](https://docs.netlify.com/manage/security/secure-access-to-sites/identity/registration-login/) (invite-only; `handleAuthCallback()` / `acceptInvite()` in `@netlify/identity`), [Identity-generated emails](https://docs.netlify.com/manage/security/secure-access-to-sites/identity/identity-generated-emails/) (custom template paths `{{ .SiteURL }}/some/path/#invite_token={{ .Token }}`), forum root-cause [“Accept the Invite” link always redirects to the home page](https://answers.netlify.com/t/accept-the-invite-link-always-redirects-to-the-home-page/107598), [Netlify Identity is staying (Feb 2026 reversal)](https://answers.netlify.com/t/netlify-identity-is-staying-feb-2026-reversal-what-changed-whos-affected-and-how-to-proceed/162733), [How do you programmatically invite Identity users with the GoTrue API?](https://answers.netlify.com/t/how-do-you-programmatically-invite-identity-users-with-the-gotrue-api/52121).
 - Pattern references: [Clerk — organization invitations](https://clerk.com/docs/guides/organizations/add-members/invitations) (role at invite time, revoke, metadata → membership), [WorkOS AuthKit — invitations](https://workos.com/docs/user-management/invitations) (accept-as-verification, org-scoped invites), [WorkOS — developer's guide to user management](https://workos.com/guide/the-developers-guide-to-user-management).

@@ -9,6 +9,44 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.8: docs closeout — plan §1/§8 flipped, CLAUDE.md W18 paragraph, OQ-W9-4 done, defaults recorded, one dead loader deleted
+
+W18 wave 5, docs + shim removal. **Shims:** `app/utils/netlifyIdentityLoader.ts`
+DELETED — zero importers (`grep -rn netlifyIdentityLoader packages sites netlify
+tests scripts src` → nothing; only docs mentioned it, updated). `user-invite.ts`
+was already deleted by T18.2. **`users-store.ts` KEPT** — it is not a dead shim:
+21 importers (`membership/{verbs,invitations,read}.ts`, `roles.ts`,
+`request-roles.ts`, `mcp-artifact-admin.ts`, `mcp-tool-definitions.ts`,
+`functions/{mcp,admin-users,mcp-oauth,admin-agent-chat,
+admin-agent-chat-run-background}.ts`, `cli/create-site.{mjs,test.ts}`, nine
+tests) use it as the v1 VIEW adapter over store v2 (`getUserRecord` /
+`putUserRecord` / `listUserRecords` / `memberToUserRecord`); removing it is a
+refactor of the role resolver, not a shim deletion — flagged, not bundled.
+
+**Docs:** `18-membership-plan.md` §1 gets a status line (F1–F12 ✅ with the
+closing row; F11 V2 fleet-admin ⏳ by design), §8 rewritten as the what-shipped
+table with bare short SHAs (`35006f9d` T18.0a … `c4240028` T18.7, this commit
+T18.8, T18.9 ⏳), References note the two deletions. `10-admin-workspace-plan.md`
+§8 → SUPERSEDED banner pointing at 18-plan §2/§6 (and §6's users-store/roles
+rows), OQ-W9-4 → RESOLVED / DONE (T18.1 + T18.3a). `KNOWN_ISSUES.md` §5 →
+W18 closeout paragraph (F4–F11 closed, the ≤1 h JWT lockout recorded as
+known-and-accepted). `site-provisioning-runbook.md` §admin: step 3 mentions
+Invitations/Identities tabs + the MCP verbs, new optional step 4 (membership
+policy, `--repo-only` probe). `15-fleet-admin-parity.md` item 11 no longer
+names the deleted loader. NEW
+`decisions/2026-08-17-membership-defaults.md`: the four §9 defaults as
+rulings-by-default under R8 (GoTrue wrapped ourselves; Owner+Admin invite
+editor|viewer; delete identity on remove, flag default true; deterministic
+`person_id`), each with where it lives and the queue-comment override
+mechanism, plus Wolf's signature line. `CLAUDE.md`: W18 governing paragraph
+(the plan, the defaults record, and the two rules — membership writes require
+a human principal / every Identity e-mail lands on `/admin/accept`).
+
+Tests 2475/150/50, eslint, prettier, astro check (0 errors) green. Next:
+T18.9 Part A (GoTrue-mock E2E); Part B is Wolf's credentialed run.
+
+---
+
 ## 2026-08-17 — T18.7: fleet parity — every tenant at the same membership footing, the probe says so, the fleet-admin seam exists
 
 W18 wave 5 (plan F11, §2.2; laws P1/P2). Nothing member-facing changed; this

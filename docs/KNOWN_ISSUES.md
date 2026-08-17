@@ -338,3 +338,17 @@ the symptoms.
   paths set once per site in the console. **T18.0c** wrote the checklist,
   audit row (`identity-console-settings`) and FLEET-STATUS tick-box block.
 
+**W18 closeout (T18.8, 2026-08-17) — the rest of the plan's findings are
+CLOSED too** (`18-membership-plan.md` §1 status line, §8 what-shipped table):
+no AI/MCP membership surface (F4 → T18.6a/b, human principal required —
+agents get `membership_requires_human`), disable ≠ offboarding (F5 → T18.4:
+OAuth grants revoked, locks handed off, identity deleted-or-queued, purge
+sweep), re-invite didn't reactivate (F6), half-modelled roles (F7 → five
+tiers), no name capture (F8 → `/admin/welcome`), invitations not first-class
+(F9), bootstrap owners unmanageable (F10 → `promote_bootstrap`), fleet parity
+(F11 → T18.7). Still human: the per-tenant console clicks and the first
+stored Owner per site — FLEET-STATUS "Membership footing per tenant", T18.9
+Part B. Known-and-accepted (not an issue): a suspended/removed member's JWT
+stays valid ≤ 1 h; every function re-resolves roles per call, so they cannot
+act — there is no server-side GoTrue logout.
+
