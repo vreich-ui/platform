@@ -321,3 +321,8 @@ T18.6b	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T18.6b-mem
 T18.7	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T18.7-fleet-parity-and-probe.md
 T18.8	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T18.8-docs-closeout-and-shim-removal.md
 T18.9	notify	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T18.9-membership-e2e-and-credentialed-run.md
+# T18.10 (2026-08-17): defect D1 found by the T18.9 harness — every admin function's
+# sign-in gate is still `roles.includes('admin')`, so the new editor/publisher/viewer
+# tiers are locked out of /admin. Security-boundary work (Fable). Runs BEFORE Wolf's
+# T18.9 Part B, whose step 3 hits it on the first editor invite.
+T18.10	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T18.10-tier-access-gates.md

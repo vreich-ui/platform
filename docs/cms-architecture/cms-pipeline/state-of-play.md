@@ -9,6 +9,69 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.9 Part A: the membership E2E harness (GoTrue mock) is green; Part B is Wolf's — HALT "T18.9 Part B — Wolf's turn"
+
+**Part A (agent) — DONE.** NEW `tests/e2e/gotrue-mock.mjs`: an in-process,
+stateful HTTP mock of every GoTrue endpoint this project uses (`/invite`,
+`/verify` signup|recovery|email_change, `/token` password|refresh, `/user`
+GET/PUT, `/recover`, `/logout`, `/admin/users` GET + `/:id` GET/DELETE,
+`/settings`), JWT-shaped unsigned tokens, an `outbox` of the mails GoTrue would
+send with Netlify's DEFAULT link shape (`${siteUrl}/#<kind>_token=…`),
+`consoleInvite()` for "the Identity tab". Injected the two ways the runtime
+does it: `IDENTITY_URL` (admin-auth's bearer fallback → `/user`) and
+`context.clientContext.identity` (the admin token). NEW
+`tests/e2e/membership.e2e.test.ts` (in `npm test`, ~0.7 s, 4 flows) drives
+the REAL functions — `admin-users`, `membership-sweep`, `/mcp` + `/oauth` —
+over memory blob stores per store name: **(1)** bootstrap Owner `me` →
+welcome name+tour → invite editor → mail → `/verify` (422 without password,
+then session) → `PUT /user full_name` → `accept` on the invitee's bare
+session → set_role publisher → OAuth grant + held lock → suspend (grant
+revoked, lock released, roles → []) → reinstate → remove with the admin token
+(GoTrue user deleted, session 401 at GoTrue and at `me`) → sweep purge (PII
+scrubbed, index gone) → audit stream retained; **(2)** Netlify-UI path:
+console invite → accept → `me` `needs_grant` → `unmanaged_identities` →
+`grant viewer` → reconciled, env address 409, viewer cannot invite; **(3)** MCP:
+OAuth-bound Owner `member_invite` for real (record `invited`, invitation
+`source:'mcp'`, no mail — no admin token on MCP; the Owner's UI `resend` sends
+it), shared token: hidden in `tools/list` + `membership_requires_human`;
+**(4)** recovery (`#recovery_token`) → new password → old password refused;
+e-mail change (`#email_change_token`) → session under the new e-mail.
+`tsconfig.test.json` now includes `tests/e2e/**`.
+
+**Browser smoke (Part A.3)** NEW `tests/e2e/accept-router.browser.mjs`
+(`npm run test:e2e:browser`, opt-in: needs a built site + Chromium;
+`playwright-core` is already a devDep): serves `sites/platform/dist` from
+loopback, real Chromium, 7 cases — the four token hashes on `/` land on
+`/admin/accept#<hash>`, a plain page / unrelated hash / the accept page itself
+are left alone. **Run here 2026-08-17 against a fresh platform build: 7/7 ok**
+(`--chromium /opt/pw-browsers/chromium-1194/chrome-linux/chrome`).
+
+**Found by the harness — one fix, one defect row.** Fix (in this commit, one
+line, `membership/verbs.ts`): an invitation created over MCP/chat recorded
+`source:'platform'` — now `source: via==='admin_ui' ? 'platform' : via`
+(plan §2.1). **DEFECT D1 → queue row T18.10** (`T18.10-tier-access-gates.md`,
+Fable, notify): every admin function's sign-in gate is still the pre-W18
+`roles.includes('admin')` (`request-roles.ts isAdmin`, `admin-users.ts:223`,
+`admin-object`, `admin-agent-chat`, `admin-audit`, `admin-taxonomy`,
+`admin-release`, `admin-governance`, `admin-auth-state` tier owner|admin|null,
+…) — so the assignable editor/publisher/viewer tiers accept, get an active
+membership, and are then locked out of `/admin` ("Admin access required");
+plan §6 promised them sign-in + own profile. Pinned in the E2E as two
+`D1/T18.10: flip to 200` assertions; Owners/Admins unaffected. Security-
+boundary work, not bundled here.
+
+**Part B (Wolf) — PREPARED, halts.** NEW `docs/cms-architecture/W18-acceptance.md`:
+per-tenant checklist (console → first Owner + welcome → invite editor → AI
+paths → suspend/reinstate/remove/purge → recovery → break-glass → record) with
+the D1 caveat up front and the recommendation to run T18.10 first; sign-off
+line. FLEET-STATUS ticks stay ☐ until his run.
+
+Tests 2479/150/50, eslint, prettier green (astro check unaffected — no app
+code). **W18 pipeline status: T18.0a → T18.9 Part A all committed on
+`w18/membership-plan`; next: T18.10 (D1), then Wolf's Part B.**
+
+---
+
 ## 2026-08-17 — T18.8: docs closeout — plan §1/§8 flipped, CLAUDE.md W18 paragraph, OQ-W9-4 done, defaults recorded, one dead loader deleted
 
 W18 wave 5, docs + shim removal. **Shims:** `app/utils/netlifyIdentityLoader.ts`

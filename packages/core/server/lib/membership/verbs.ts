@@ -499,6 +499,9 @@ export const handleMembershipVerb = async (input: MembershipVerbInput): Promise<
           at,
           ...(a.message ? { message: a.message } : {}),
           via,
+          // T18.9 (found by the E2E harness): record WHERE the invitation came from
+          // (plan §2.1 `source: platform|mcp|chat`) — the audit had `via`, the object did not.
+          source: via === 'admin_ui' ? 'platform' : via,
           identity,
           fetchImpl,
         });

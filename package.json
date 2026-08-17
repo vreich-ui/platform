@@ -25,6 +25,7 @@
     "fix:eslint": "eslint --fix .",
     "fix:prettier": "prettier -w .",
     "test": "rm -rf .tmp/ci-test && tsc -p tsconfig.test.json && (cd .tmp/ci-test && node --test); s1=$?; node --test tests/scripts/*.test.mjs; s2=$?; node --test packages/core/cli/capture/*.test.mjs; s3=$?; rm -rf .tmp/ci-test; [ \"$s1\" = 0 ] && [ \"$s2\" = 0 ] && [ \"$s3\" = 0 ]",
+    "test:e2e:browser": "E2E_BROWSER=1 node tests/e2e/accept-router.browser.mjs",
     "test:opt-in": "rm -rf .tmp/save-opt-in-test; tsc -p tests/netlify/tsconfig.json && node --test .tmp/save-opt-in-test/tests/netlify/*.test.js; status=$?; rm -rf .tmp/save-opt-in-test; exit $status",
     "site:create": "node packages/core/cli/create-site.mjs",
     "capture:spike": "node packages/core/cli/capture/capture.mjs",
