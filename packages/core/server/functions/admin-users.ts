@@ -3,6 +3,9 @@
  * Required method: POST
  * Auth: Netlify Identity. Verbs: me / update_me (self, any admin);
  *       list / set_role / disable (Owner). Invite is T9.5.
+ *       T18.0a: invite_preview (PUBLIC, no auth) and accept (any
+ *       authenticated Identity user — the fresh JWT GoTrue's /verify returned;
+ *       no role gate, because an invitee has no roles yet).
  *
  * The workspace identity surface (T9.4). Roles are resolved server-side via
  * the async resolver (users store + ADMIN_EMAILS bootstrap owners); owner-only
@@ -31,9 +34,13 @@ import {
   type UsersBlobStore,
 } from '../lib/users-store.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
-import { inviteUser, activateOnLogin, type GoTrueIdentity } from '../lib/user-invite.js';
+import { inviteUser, activateOnLogin, acceptInvitation, type GoTrueIdentity } from '../lib/user-invite.js';
 import type { Principal } from '../../schema/object-record-v1.js';
 import { friendlyNameFromEmail } from '../../lib/admin/display-name.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
+
+/** T18.0a: the accept page's password policy (mirrors GoTrue's default minimum). */
+export const ACCEPT_MIN_PASSWORD = 8;
 
 /** An avatar must be an uploaded IMAGE artifact reference, not a URL/data URI. */
 export const isTrustedAvatarRef = (ref: string): boolean =>
@@ -64,6 +71,11 @@ const requestSchema = z.discriminatedUnion('verb', [
   z.object({ verb: z.literal('invite'), email: z.string().min(3), role: userRoleSchema }),
   z.object({ verb: z.literal('set_role'), email: z.string().min(3), role: userRoleSchema }),
   z.object({ verb: z.literal('disable'), email: z.string().min(3) }),
+  // T18.0a — the accept page's two verbs. `token` is accepted but NOT
+  // validated: only GoTrue can validate an invite token, and an unauthenticated
+  // request has no admin token to ask with. See the verb handler comment.
+  z.object({ verb: z.literal('invite_preview'), token: z.string().optional() }),
+  z.object({ verb: z.literal('accept'), display_name: z.string().min(1).max(200) }),
 ]);
 
 const safeJsonParse = (event: LambdaEvent): { ok: true; value: unknown } | { ok: false } => {
@@ -140,6 +152,29 @@ export const listUsersWithEnvironment = async (
 const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
+  // T18.0a: `invite_preview` is PUBLIC — the accept page calls it before the
+  // invitee has any session. It is answered before auth and before the store
+  // is opened, and returns nothing user-specific. Limitation, by design: the
+  // GoTrue invite token cannot be validated here (only GoTrue can, and an
+  // unauthenticated request carries no admin token to ask with), so `token`
+  // is accepted and ignored; the page shows the e-mail AFTER GoTrue accepts,
+  // from the new session's `/user`.
+  const parsed = safeJsonParse(event);
+  if (parsed.ok) {
+    const peek = parsed.value as { verb?: unknown } | null;
+    if (peek && typeof peek === 'object' && peek.verb === 'invite_preview') {
+      const request = requestSchema.safeParse(parsed.value);
+      if (!request.success) {
+        return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
+      }
+      const identity = getSiteIdentity();
+      return jsonResponse(200, {
+        site: { name: identity.brandName, slug: identity.siteSlug },
+        policy: { min_password: ACCEPT_MIN_PASSWORD },
+      });
+    }
+  }
+
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
@@ -147,13 +182,44 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (!email) return jsonResponse(403, { error: 'A verified email is required.' });
   const principal: Principal = { kind: 'human', id: adminState.userId ?? '', email };
 
-  const parsed = safeJsonParse(event);
   if (!parsed.ok) return jsonResponse(400, { error: 'Invalid request body.' });
   const request = requestSchema.safeParse(parsed.value);
   if (!request.success) return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
 
   try {
     const store = await getUsersBlobStore(event);
+
+    // T18.0a: `accept` runs on the fresh JWT GoTrue's /verify returned. It is
+    // authenticated (verified e-mail from the token) but NOT role-gated: an
+    // invitee's roles come from the very record this verb activates, and a
+    // Netlify-UI invitee has no record (and no roles) at all. Uses the
+    // caller's verified e-mail — never a body-supplied one.
+    if (request.data.verb === 'accept') {
+      const at = nowIso();
+      const accepted = await acceptInvitation(store, email, adminState.userId, request.data.display_name, at);
+      if (accepted) {
+        if (accepted.status === 'disabled') return jsonResponse(403, { error: 'This membership is disabled.' });
+        return jsonResponse(200, { user: accepted, needs_grant: false });
+      }
+      if (environmentRoleForEmail(email) === 'owner') {
+        // Bootstrap ADMIN_EMAILS caller: the existing `me` materialization,
+        // unchanged (plus the name they just typed).
+        const bootstrapOwner: UserRecord = {
+          ...synthesizedRecord(email, true, at),
+          display_name: request.data.display_name,
+          user_id: adminState.userId,
+          last_seen_at: at,
+          audit: [{ at, actor_email: email, action: 'bootstrap_activate' }],
+        };
+        await putUserRecord(store, bootstrapOwner);
+        return jsonResponse(200, { user: bootstrapOwner, bootstrap: true, needs_grant: false });
+      }
+      // No record: invited from the Netlify UI (plan §4.2). Create nothing,
+      // grant nothing — the layout shows "Ask an Owner to grant you a role"
+      // (T18.0b renders it; T18.2 turns it into the unmanaged-identity flow).
+      return jsonResponse(200, { user: null, needs_grant: true });
+    }
+
     const roles = await resolveRolesForPrincipalAsync(principal, {
       getUserRecord: (e) => getUserRecord(store, e),
     });
@@ -162,6 +228,11 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 
     const req = request.data;
     switch (req.verb) {
+      case 'invite_preview':
+        // Answered above, before auth (and `accept` is narrowed out above);
+        // unreachable — kept so the switch stays exhaustive.
+        return jsonResponse(400, { error: 'Invalid request fields.' });
+
       case 'me': {
         // T9.5/T9.6: first-login activation (invited → active + stamp user_id)
         // and last_seen on every self-read. Materialize a missing bootstrap

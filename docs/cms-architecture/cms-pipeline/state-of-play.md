@@ -9,6 +9,52 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.0a: platform invites hit the mail-sending GoTrue endpoint; `accept` + `invite_preview` verbs
+
+W18 wave 0, row 1 (plan §1 F2, F6-min, F8-min server half). **What changed:**
+`packages/core/server/lib/user-invite.ts` now POSTs `${identity.url}/invite`
+with `{ email, data: { invited_by, role } }` — `data` is informational
+GoTrue `user_metadata`, the store stays the only source of truth for roles.
+**The endpoint fact:** GoTrue's `POST /invite` (admin bearer) creates the
+unconfirmed user AND sends the Netlify Identity invitation e-mail; the
+`POST /admin/users` the code called before creates a user, requires a
+password (422 without one) and sends nothing — which is why every
+platform-originated invite showed "invite email pending" forever while
+`tests/netlify/user-invite.test.ts` pinned the wrong URL and stayed green
+(that assertion now pins `/invite`; `grep -rn "admin/users"
+packages/core/server/lib/user-invite.ts` → no hits). GoTrue 422 "already
+registered / already been invited" is now `invite:{sent:false,
+error:'already_invited'}`, not a failure. New `resendIfExisting` option:
+an existing `invited` record re-fires the GoTrue invite (GoTrue re-sends
+for an unconfirmed user) and audits `reinvite_email`; without it a
+re-invite is a role update only, no e-mail. F6-min: re-inviting a
+`disabled` record flips it to `invited` (audit `reinvite`, detail
+`disabled → invited`). **The accept verb contract** (`admin-users`, T18.0b
+consumes it): `invite_preview` is PUBLIC (answered before auth, before the
+store opens) — `{ token? }` accepted but NOT validated (only GoTrue can;
+an anonymous request has no admin token to ask with) → `{ site: { name,
+slug }, policy: { min_password: 8 } }`, nothing user-specific; the page
+shows the e-mail after GoTrue `/verify` from the session's `/user`.
+`accept` runs on that fresh JWT: authenticated, NOT role-gated (an
+invitee's roles come from the record it activates), body
+`{ display_name }` (1..200), caller's verified e-mail only. Record exists
+`invited` → `active`, `display_name` set, `user_id` + `last_seen_at`
+stamped, audit `accept`; idempotent (second call returns the same active
+record, no second audit); a `disabled` record → 403; no record → `200 {
+user: null, needs_grant: true }` and NOTHING is created or granted (Netlify-UI
+invitee — the layout's forbidden panel says "Ask an Owner to grant you a
+role"; T18.2 makes it the unmanaged-identity flow); a bootstrap
+`ADMIN_EMAILS` caller with no record takes the `me` materialization
+(`bootstrap:true`) with the typed name. New helper `acceptInvitation` in
+`user-invite.ts`; new `tests/netlify/admin-users-accept.test.ts` (7 cases
+through `createHandler(binding)` with a fake `clientContext.user` and an
+in-memory store); `user-invite.test.ts` +4 cases. Every pre-existing verb
+is byte-identical in behaviour (`invite` does not yet pass
+`resendIfExisting` — T18.2/T18.3b wire the Resend button). Non-goals
+untouched: no client code, no e-mail templates, no schema v2,
+`roles.ts` / `publish-gate.ts` / `admin-auth.ts` not modified. Next row:
+T18.0b (`/admin/accept` + site-wide token router).
+
 ## 2026-08-17 — T12.13: the capture bridge exists, and the per-site pdf-tool PAT is gone from the capture path
 
 W12's last blocker, and it was three failures stacked. `capture.crawl` called
