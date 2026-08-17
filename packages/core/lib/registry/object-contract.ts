@@ -19,7 +19,7 @@
  * DESCRIPTION data — the authoritative machine schemas (body / patch args) stay
  * fully derived; only human-readable boundary notes are restated.
  */
-import { getSiteIdentity } from '../site-identity.js';
+import { assertAggressionCeiling, getSiteIdentity, type AggressionCeiling } from '../site-identity.js';
 import { z } from 'zod';
 
 import {
@@ -790,6 +790,33 @@ export type PublishPolicyContract = {
   note: string;
   denial_codes?: Record<string, string>;
   pin_rules?: string;
+  /** Mirror of the top-level `aggression_ceiling` (content_item only) — see `aggressionCeilingFor`. */
+  aggression_ceiling?: AggressionCeiling;
+};
+
+/**
+ * W6 §2 (CMS-Agent WORK-ORDER-2026-08-12, Wolf's standing ruling): the client
+ * contract must DECLARE the aggression ceiling — the site's componentwise
+ * upper bound (claim_strength / urgency / emotional_agitation / cta_density,
+ * each 0..1) on how hard published copy may push. Sourced from the committed
+ * site identity (`sites/<client>/config/site-identity.ts`), re-validated here
+ * so a malformed value fails loudly rather than shipping an empty contract.
+ * CMS-Agent's contractReduction reads `aggression_ceiling` off the record and
+ * resolves each dial as `min(placement_target, ceiling)`; an absent ceiling is
+ * an upstream blocker by design — so for content_item this THROWS when the
+ * site config omits it instead of quietly returning undefined.
+ */
+export const aggressionCeilingFor = (
+  objectType: ObjectType,
+  ceiling: AggressionCeiling | undefined = getSiteIdentity().aggressionCeiling
+): AggressionCeiling | undefined => {
+  if (objectType !== 'content_item') return undefined;
+  if (!ceiling) {
+    throw new Error(
+      'object_contract(content_item): site identity carries no aggressionCeiling — set it in sites/<client>/config/site-identity.ts (W6 §2: the client contract must declare the ceiling).'
+    );
+  }
+  return assertAggressionCeiling(ceiling, 'site identity');
 };
 
 const publishPolicy = (objectType: ObjectType, policy: ApprovalPolicy): PublishPolicyContract => {
@@ -1008,6 +1035,13 @@ export type ObjectContract = {
   patch_ops: PatchOpContract[];
   constraints: Constraint[];
   publish_policy: PublishPolicyContract;
+  /**
+   * content_item only (W6 §2): componentwise ceiling on claim_strength /
+   * urgency / emotional_agitation / cta_density, each 0..1. Also mirrored at
+   * `publish_policy.aggression_ceiling` so either object CMS-Agent reduces
+   * carries it.
+   */
+  aggression_ceiling?: AggressionCeiling;
   creation_policy: CreationPolicyContract;
   media_policy: MediaPolicyContract;
   workflow: ReturnType<typeof workflow>;
@@ -1018,11 +1052,20 @@ export const OBJECT_CONTRACT_TYPES = objectTypes;
 
 export const buildObjectContract = (
   objectType: ObjectType,
-  options: { approvalPolicy?: ApprovalPolicy; creationPolicy?: CreationPolicy; mediaPolicy?: MediaPolicy } = {}
+  options: {
+    approvalPolicy?: ApprovalPolicy;
+    creationPolicy?: CreationPolicy;
+    mediaPolicy?: MediaPolicy;
+    /** Override the site-identity ceiling (tests / a future governance layer). */
+    aggressionCeiling?: AggressionCeiling;
+  } = {}
 ): ObjectContract => {
   const policy = options.approvalPolicy ?? activeApprovalPolicy();
   const creationPolicy = options.creationPolicy ?? activeCreationPolicy();
   const mediaPolicy = options.mediaPolicy ?? activeMediaPolicy();
+  const aggressionCeiling = options.aggressionCeiling
+    ? aggressionCeilingFor(objectType, options.aggressionCeiling)
+    : aggressionCeilingFor(objectType);
   const schema = BODY_SCHEMA[objectType];
   const includesSections = objectType === 'page' || objectType === 'section' || objectType === 'section_template';
   return {
@@ -1058,7 +1101,11 @@ export const buildObjectContract = (
       ),
       ...perTypeConstraints(objectType),
     ],
-    publish_policy: publishPolicy(objectType, policy),
+    publish_policy: {
+      ...publishPolicy(objectType, policy),
+      ...(aggressionCeiling ? { aggression_ceiling: aggressionCeiling } : {}),
+    },
+    ...(aggressionCeiling ? { aggression_ceiling: aggressionCeiling } : {}),
     creation_policy: creationPolicyContract(objectType, creationPolicy),
     media_policy: mediaPolicyContract(mediaPolicy),
     workflow: workflow(objectType, policy),
