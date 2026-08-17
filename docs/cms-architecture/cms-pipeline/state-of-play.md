@@ -9,6 +9,46 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.3a: the members page knows five tiers, the lifecycle, and the break-glass rows
+
+W18 wave 2 (plan §6, §3.2, F5-UI, F10, F12). `packages/core/admin/AdminUsers.tsx`
+rebuilt on the T18.1/T18.2 verbs: members table with role badge (five tiers,
+tooltip = the §6 one-liner), status badge (invited / active / suspended /
+removed — removed hidden by default behind a "Show removed" switch that
+re-lists with `include_removed`), provenance badge (`Break-glass (env)` for
+`ADMIN_EMAILS`/`ROLE_EMAILS_*` rows, `Bootstrap`, `Invitation`, `Netlify
+UI`, `MCP`, `Import`; no badge for ordinary pre-v2 members), last seen, and
+a row menu — **Change role…** (dialog: `RolePicker` over the five tiers with
+the description under the select; options the policy forbids or the current
+role are disabled with a reason), **Suspend** / **Reinstate**, **Remove…**
+(typed confirm — type the e-mail; "history kept, purged after the grace
+period, you can re-invite them"), **Promote to stored Owner…** (env rows
+only), **View audit trail** (drawer over the T18.1 audit stream via the NEW
+Owner-only `member_audit {email, limit}` verb, falling back to the legacy
+per-record array). Guards surfaced: self and removed rows are audit-only,
+env rows are promote+audit only, `last_owner` 409 → toast "This is the last
+Owner — promote another member to Owner first". Copy fixed: suspend "loses
+access within an hour (sessions expire) and cannot act from now on"; the
+re-invite line lives on Remove only. A non-Owner Admin sees a read-only
+notice plus (when policy allows) the Invite button; the invite dialog's role
+picker is filtered by `grantableTiers` (Owner: all five; Admin: `editor|viewer`
+under the default `owner_admin` policy). NEW server verb `remove {email,
+reason?}` (Owner-only; self 409; env 409; `last_owner` guard; revokes a
+pending invitation; membership → `removed{purge_after}` via
+`removeMembership` in `membership/write.ts`; audit `membership.remove` —
+T18.4 adds the identity/OAuth/lock side effects without UI change) and
+`member_audit` (`listAuditForEmail`). Pure logic extracted into
+`admin/logic.ts` — `MEMBERSHIP_TIERS`, `grantableTiers`, `roleOptionsFor`,
+`memberActionsFor`, `memberSourceLabel` (+ T18.3b's `formatExpiresIn`,
+`invitationActionsFor`, `invitationSendStatus`, landed here so 3b is
+UI-only) — with 8 new `logic.test.ts` cases (policy × actor × target role
+matrix, action availability by status/self/env/removed, source labels,
+countdown, resend cap, send-status mapping). `users-client.ts` gains
+`removeUser`, `memberAudit`, `AuditEventView`. `npm test` 2449/150/50,
+eslint, prettier, `astro check`, `sites/platform` build green. No screenshot
+(no browser pass this session — T18.9 / a human pass covers it). Next:
+T18.3b.
+
 ## 2026-08-17 — T18.2: invitations are first-class — invite / resend / revoke / accept / expire / reconcile
 
 W18 wave 2 (plan §2.1 Invitation, §3.1, §4.1/§4.2, F9). NEW

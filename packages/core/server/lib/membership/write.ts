@@ -198,3 +198,57 @@ export const stampOnboarding = async (
   }
   return putPerson(store, person);
 };
+
+/**
+ * `remove` (T18.3a verb; T18.4 adds the identity/OAuth/lock side effects):
+ * membership → `removed{purge_after}`; the person stays for audit/attribution.
+ * Returns null when there is no member.
+ */
+export const removeMembership = async (
+  store: MembershipStore,
+  input: { email: string; actorEmail: string; at: string; reason?: string; purgeGraceDays: number }
+): Promise<Member | null> => {
+  const member = await getMembershipByEmail(store, input.email);
+  if (!member) return null;
+  if (member.membership.status === 'removed') return member;
+  const membership: Membership = {
+    ...member.membership,
+    status: 'removed',
+    removed: {
+      at: input.at,
+      by: input.actorEmail,
+      ...(input.reason ? { reason: input.reason } : {}),
+      purge_after: new Date(Date.parse(input.at) + input.purgeGraceDays * 86_400_000).toISOString(),
+    },
+    audit: [
+      ...member.membership.audit,
+      {
+        at: input.at,
+        actor_email: input.actorEmail,
+        action: 'remove',
+        ...(input.reason ? { detail: input.reason } : {}),
+      },
+    ],
+    updated_at: input.at,
+  };
+  delete (membership as { suspended?: unknown }).suspended;
+  return saveMember(store, { person: member.person, membership });
+};
+
+/** The audit stream filtered to one person (newest first), for the members page drawer / `member_audit`. */
+export const listAuditForEmail = async (store: MembershipStore, email: string, limit = 100): Promise<AuditEvent[]> => {
+  const normalized = normalizeEmail(email);
+  const listed = await store.list({ prefix: 'audit/', directories: false, paginate: true });
+  const events: AuditEvent[] = [];
+  for (const blob of listed.blobs ?? []) {
+    const raw = await store.get(blob.key);
+    if (!raw) continue;
+    try {
+      const parsed = auditEventSchema.safeParse(JSON.parse(raw));
+      if (parsed.success && parsed.data.target.email === normalized) events.push(parsed.data);
+    } catch {
+      // skip corrupt
+    }
+  }
+  return events.sort((a, b) => b.at.localeCompare(a.at) || b.event_id.localeCompare(a.event_id)).slice(0, limit);
+};

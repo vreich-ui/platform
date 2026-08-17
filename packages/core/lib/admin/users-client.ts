@@ -133,6 +133,28 @@ export const disableUser = (getToken: GetToken, email: string) => suspendUser(ge
 export const reinstateUser = (getToken: GetToken, email: string) =>
   post<{ user: UserView }>(getToken, { verb: 'reinstate', email });
 
+/** T18.3a: remove — membership → removed (kept for audit, purged after the grace period); a pending invitation is revoked. */
+export const removeUser = (getToken: GetToken, email: string, reason?: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'remove', email, ...(reason ? { reason } : {}) });
+
+export interface AuditEventView {
+  event_id: string;
+  at: string;
+  actor: { kind: 'human'; id?: string; email: string } | { kind: 'agent'; agent_name: string } | { kind: 'system' };
+  action: string;
+  target: { person_id?: string; email: string; invite_id?: string };
+  detail?: Record<string, unknown>;
+  via: 'admin_ui' | 'mcp' | 'chat' | 'system';
+}
+
+/** T18.3a: the audit stream for one person (Owner-only), newest first, plus the legacy per-record array. */
+export const memberAudit = (getToken: GetToken, email: string, limit?: number) =>
+  post<{ email: string; events: AuditEventView[]; legacy_audit: UserAuditEntry[] }>(getToken, {
+    verb: 'member_audit',
+    email,
+    ...(limit ? { limit } : {}),
+  });
+
 /** T18.1: give an ADMIN_EMAILS member a stored Owner membership (so the env row can be emptied later). */
 export const promoteBootstrapOwner = (getToken: GetToken, email: string) =>
   post<{ user: UserView }>(getToken, { verb: 'promote_bootstrap', email });

@@ -52,7 +52,14 @@ import {
   type GoTrueIdentity,
 } from '../lib/membership/invitations.js';
 import { newMember, saveMember } from '../lib/membership/write.js';
-import { appendAudit, getPolicy, stampOnboarding, wouldBreachMinOwners } from '../lib/membership/write.js';
+import {
+  appendAudit,
+  getPolicy,
+  listAuditForEmail,
+  removeMembership,
+  stampOnboarding,
+  wouldBreachMinOwners,
+} from '../lib/membership/write.js';
 import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
 import type { Principal } from '../../schema/object-record-v1.js';
 import { friendlyNameFromEmail } from '../../lib/admin/display-name.js';
@@ -118,6 +125,14 @@ const requestSchema = z.discriminatedUnion('verb', [
   z.object({ verb: z.literal('suspend'), email: z.string().min(3), reason: z.string().max(500).optional() }),
   z.object({ verb: z.literal('disable'), email: z.string().min(3), reason: z.string().max(500).optional() }),
   z.object({ verb: z.literal('reinstate'), email: z.string().min(3) }),
+  // T18.3a: remove (membership → removed{purge_after}; T18.4 adds identity/OAuth/lock side effects)
+  z.object({ verb: z.literal('remove'), email: z.string().min(3), reason: z.string().max(500).optional() }),
+  // T18.3a: the audit stream for one person (Owner-only)
+  z.object({
+    verb: z.literal('member_audit'),
+    email: z.string().min(3),
+    limit: z.number().int().min(1).max(500).optional(),
+  }),
   // T18.1: materialise a stored Owner membership for an ADMIN_EMAILS member so
   // the env row can later be emptied (plan §4.3 / F10).
   z.object({ verb: z.literal('promote_bootstrap'), email: z.string().min(3) }),
@@ -537,6 +552,77 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
           actor: auditActorFromPrincipal(principal),
           action: 'membership.promote_bootstrap',
           target: { person_id: personIdForEmail(target), email: target },
+          via: 'admin_ui',
+        }).catch(() => undefined);
+        return jsonResponse(200, { user: await getUserRecord(store, target) });
+      }
+
+      case 'member_audit': {
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const target = normalizeUserEmail(req.email);
+        const stored = await getUserRecord(store, target);
+        return jsonResponse(200, {
+          email: target,
+          events: await listAuditForEmail(store, target, req.limit ?? 100),
+          legacy_audit: stored?.audit ?? [],
+        });
+      }
+
+      case 'remove': {
+        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
+        const target = normalizeUserEmail(req.email);
+        if (target === email) return jsonResponse(409, { error: 'You cannot remove yourself.' });
+        if (environmentRoleForEmail(target)) {
+          return jsonResponse(409, {
+            error: 'This member is configured in site environment variables and cannot be changed here.',
+            error_code: 'env_managed_member',
+          });
+        }
+        const stored = await getUserRecord(store, target);
+        if (!stored) return jsonResponse(404, { error: 'No such member.' });
+        const at = nowIso();
+        if (stored.role === 'owner' && stored.status === 'active') {
+          const policy = await getPolicy(store);
+          const envOwners = environmentRoleEntries().filter(([, role]) => role === 'owner').length;
+          if (
+            await wouldBreachMinOwners(store, {
+              exceptPersonId: stored.person_id ?? personIdForEmail(target),
+              envOwnerCount: envOwners,
+              minOwners: policy.min_owners,
+            })
+          ) {
+            return jsonResponse(409, {
+              error: 'This is the last Owner. Promote another member to Owner first.',
+              error_code: 'last_owner',
+            });
+          }
+        }
+        const policy = await getPolicy(store);
+        // a pending invitation is revoked alongside
+        try {
+          await revokeInvitation(store, {
+            email: target,
+            actor: auditActorFromPrincipal(principal),
+            actorEmail: email,
+            at,
+            reason: req.reason ?? 'member removed',
+          });
+        } catch {
+          // no open invitation — fine
+        }
+        await removeMembership(store, {
+          email: target,
+          actorEmail: email,
+          at,
+          reason: req.reason,
+          purgeGraceDays: policy.purge_grace_days,
+        });
+        await appendAudit(store, {
+          at,
+          actor: auditActorFromPrincipal(principal),
+          action: 'membership.remove',
+          target: { person_id: stored.person_id ?? personIdForEmail(target), email: target },
+          ...(req.reason ? { detail: { reason: req.reason } } : {}),
           via: 'admin_ui',
         }).catch(() => undefined);
         return jsonResponse(200, { user: await getUserRecord(store, target) });
