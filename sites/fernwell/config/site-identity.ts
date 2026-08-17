@@ -22,4 +22,8 @@ export const siteIdentityConfig = {
   assetFolder: 'fernwell',
   pdfToolProjectId: 'fernwell',
   cmsAgentProjectId: 'fernwell',
+  // W6 §2 (CMS-Agent WORK-ORDER-2026-08-12): componentwise aggression ceiling
+  // (each dial 0..1) surfaced by object_contract(content_item).aggression_ceiling.
+  // CMS-Agent resolves min(placement_target, ceiling); never omit it.
+  aggressionCeiling: { claim_strength: 0.45, urgency: 0.10, emotional_agitation: 0.15, cta_density: 0.20 },
 } satisfies SiteIdentityConfig;
