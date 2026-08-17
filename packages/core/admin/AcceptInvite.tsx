@@ -150,7 +150,19 @@ function NoTokenPanel({ siteName, message }: { siteName: string; message?: strin
 
 // ── invite ──────────────────────────────────────────────────────────────────
 
-function InviteForm({ token, siteName, minLength }: { token: string; siteName: string; minLength: number }) {
+type InvitePreviewInfo = { email: string; role: string; invited_by: string; message?: string; expired: boolean };
+
+function InviteForm({
+  token,
+  siteName,
+  minLength,
+  preview,
+}: {
+  token: string;
+  siteName: string;
+  minLength: number;
+  preview?: InvitePreviewInfo | null;
+}) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -217,8 +229,24 @@ function InviteForm({ token, siteName, minLength }: { token: string; siteName: s
           void submit();
         }}
       >
+        {preview && !preview.expired ? (
+          <p className="text-[length:var(--adm-text-sm)]">
+            <strong>{preview.invited_by}</strong> invited you to <strong>{siteName}</strong> as{' '}
+            <strong>{preview.role.charAt(0).toUpperCase() + preview.role.slice(1)}</strong>.
+            {preview.message ? (
+              <span className="block mt-1 text-[var(--adm-text-muted)]">“{preview.message}”</span>
+            ) : null}
+          </p>
+        ) : null}
+        {preview?.expired ? (
+          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+            The shared invitation link has expired, but the e-mail link you opened may still work — continue below.
+          </p>
+        ) : null}
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-          You’ve been invited to the {siteName} workspace. Choose how your name appears and set a password.
+          {preview && !preview.expired
+            ? 'Choose how your name appears and set a password.'
+            : `You’ve been invited to the ${siteName} workspace. Choose how your name appears and set a password.`}
         </p>
         <Input
           label="Full name"
@@ -354,17 +382,24 @@ export default function AcceptInvite({ identity }: AcceptInviteProps) {
   const [detected, setDetected] = useState<DetectedIdentityToken | null | undefined>(undefined);
   const [minLength, setMinLength] = useState(MIN_PASSWORD_DEFAULT);
   const [siteName, setSiteName] = useState(identity.brandName);
+  const [preview, setPreview] = useState<InvitePreviewInfo | null>(null);
 
   useEffect(() => {
     setDetected(detectIdentityToken());
   }, []);
 
   useEffect(() => {
-    if (!detected) return;
-    invitePreview()
+    if (detected === undefined) return;
+    // T18.3b: an Owner-shared link carries OUR opaque token as `?inv=`; the
+    // preview shows who invited you and as what (never anything sensitive).
+    const inv =
+      typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('inv') ?? undefined) : undefined;
+    if (!detected && !inv) return;
+    invitePreview(undefined, inv)
       .then((p) => {
         if (p.policy?.min_password) setMinLength(p.policy.min_password);
         if (p.site?.name) setSiteName(p.site.name);
+        if (p.invitation) setPreview(p.invitation as InvitePreviewInfo);
       })
       .catch(() => {
         // the preview is a nicety; the server-resolved identity prop already carries the name
@@ -378,9 +413,19 @@ export default function AcceptInvite({ identity }: AcceptInviteProps) {
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">Checking your link.</p>
       </Card>
     );
-  else if (!detected) body = <NoTokenPanel siteName={siteName} />;
+  else if (!detected)
+    body = (
+      <NoTokenPanel
+        siteName={siteName}
+        message={
+          preview && !preview.expired
+            ? `${preview.invited_by} invited ${preview.email} to ${siteName} as ${preview.role}. To accept, open the link in the invitation e-mail from Netlify Identity — that link carries the sign-in token this page needs (this shared link only previews the invitation).`
+            : undefined
+        }
+      />
+    );
   else if (detected.kind === 'invite')
-    body = <InviteForm token={detected.token} siteName={siteName} minLength={minLength} />;
+    body = <InviteForm token={detected.token} siteName={siteName} minLength={minLength} preview={preview} />;
   else if (detected.kind === 'recovery')
     body = <RecoveryForm token={detected.token} siteName={siteName} minLength={minLength} />;
   else body = <AutoConfirm detected={detected} siteName={siteName} />;

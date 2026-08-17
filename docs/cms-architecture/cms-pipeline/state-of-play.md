@@ -9,6 +9,45 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.3b: Invitations tab, unmanaged-identity reconcile, accept-page preview
+
+W18 wave 2 (plan §4.1 step 5, §4.2, F9-UI). `/admin/settings/admins` is now
+three Owner tabs. **Members** (T18.3a, unchanged). **Invitations**
+(`InvitationsPanel`): pending / expired / revoked rows (accepted ones live
+in Members) — invitee + "invited by … · “message”", role badge, status
+pill with the live countdown (`formatExpiresIn`: "expires in 3d 4h" /
+"expired"), **E-mail** column = GoTrue send status (`Sent`/`Sent N×` ✓,
+`Already in Identity`, `Not sent` warning/danger) with a dotted-underline
+"How to fix" tooltip ("Enable Netlify Identity on this site … then Resend" /
+"re-send from the Netlify UI Identity tab"), last-sent relative time;
+actions **Resend** (disabled at `policy.max_resends` with the reason as
+title; a resend surfaces the NEW shareable link once) and **Revoke**
+(confirm; explains the pending membership is removed too). **Identities**
+(`IdentitiesPanel`): GoTrue users with no membership here (from
+`unmanaged_identities`), "confirmed" / "invited, not yet confirmed" + last
+sign-in, **Grant role…** (policy-filtered `RolePicker`, defaults to the
+lowest grantable tier → `grant` verb → active membership `source:'netlify_ui'`),
+**Delete identity** rendered only when the server reports
+`capabilities.delete_identity` (T18.4 — hidden until then); empty state
+"Everyone in Netlify Identity has a role here"; the
+`identity_admin_unavailable` degrade gets its own explanatory panel.
+**Invite dialog** upgrades: optional message (Textarea, ≤1000, stored on the
+invitation and shown on the accept page via the `?inv=` preview), inline
+error for domain-not-allowed / already-pending / already-active (other
+failures still toast), and a **"Invitation created" dialog shown ONCE** with
+the shareable `${origin}/admin/accept?inv=<token>` link + Copy button and the
+"after you close this the link is gone — Resend for a new one" note (we
+store only the token's hash). **AcceptInvite.tsx**: when the URL carries
+`?inv=` it calls `invite_preview {inv}` and renders "**Alex** invited you to
+**Dr Lurié** as **Editor**" (+ the message) above the form; an expired
+shared link says so but lets the e-mail token proceed; a shared link WITHOUT
+a GoTrue token explains that the e-mail's own link is still needed. Token-less
+path unchanged. Pure logic for the tab (`formatExpiresIn`,
+`invitationActionsFor`, `invitationSendStatus`) and its tests landed with
+T18.3a. `npm test` 2449/150/50, eslint, prettier, `astro check`,
+`sites/platform` build green. Next: T18.5 (welcome + name gate) then T18.4
+(Fable/notify) — plan order runs T18.5 before T18.4 in the wave table.
+
 ## 2026-08-17 — T18.3a: the members page knows five tiers, the lifecycle, and the break-glass rows
 
 W18 wave 2 (plan §6, §3.2, F5-UI, F10, F12). `packages/core/admin/AdminUsers.tsx`

@@ -12,20 +12,31 @@
  * (`last_owner` → "Promote another member to Owner first"). A non-Owner Admin
  * sees the page read-only. The server 403s every management verb for a
  * non-owner regardless — the client gate is UX, not the security boundary.
+ *
+ * T18.3b adds two Owner tabs: **Invitations** (pending / expired / revoked
+ * rows with GoTrue send status + "how to fix", Resend (capped) / Revoke /
+ * copy-link-once) and **Identities** (GoTrue users with no membership here —
+ * "Grant role…"; "Delete identity" appears only when the server reports the
+ * T18.4 capability). The invite dialog gains an optional message and an
+ * inline domain-not-allowed error; a fresh invitation shows its shareable
+ * link exactly once (we store only the token's hash).
  */
 import { useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Avatar, Badge, Button, Card, EmptyState, IconButton, Skeleton, StatusPill } from './primitives';
-import { Input, Select, Switch } from './forms';
+import { Input, Select, Switch, Textarea } from './forms';
 import { Dialog, ConfirmDialog, Drawer, useToast } from './overlays';
 import { DataTable, type Column } from './data';
-import { DropdownMenu } from './menus';
+import { DropdownMenu, Tabs } from './menus';
 import {
   DEFAULT_POLICY_VIEW,
   MEMBERSHIP_TIERS,
+  formatExpiresIn,
   grantableTiers,
+  invitationActionsFor,
+  invitationSendStatus,
   memberActionsFor,
   memberSourceLabel,
   relativeTimeFromNow,
@@ -35,7 +46,7 @@ import {
   type MembershipTier,
 } from './logic';
 import { canonicalMemberDisplayName, presentLastSeen } from '@core/lib/admin/admin-user-presentation';
-import { IconDots, IconPlus, IconAlertTriangle, IconUser } from './icons';
+import { IconDots, IconPlus, IconAlertTriangle, IconUser, IconCheck } from './icons';
 import {
   fetchMe,
   listUsers,
@@ -46,10 +57,17 @@ import {
   removeUser,
   promoteBootstrapOwner,
   memberAudit,
+  listInvitations,
+  resendInvitation,
+  revokeInvitation,
+  listUnmanagedIdentities,
+  grantRole,
   avatarSrc,
   type UserView,
   type UserRole,
   type AuditEventView,
+  type InvitationView,
+  type UnmanagedIdentityView,
 } from '@core/lib/admin/users-client';
 
 async function getToken(): Promise<string> {
@@ -154,7 +172,12 @@ export function AdminUsersBody() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('admin');
+  const [inviteMessage, setInviteMessage] = useState('');
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [createdLink, setCreatedLink] = useState<{ email: string; token: string } | null>(null);
+  const [tab, setTab] = useState<'members' | 'invitations' | 'identities'>('members');
+  const [invitationsVersion, setInvitationsVersion] = useState(0);
 
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [roleDialog, setRoleDialog] = useState<{ user: UserView; role: UserRole } | null>(null);
@@ -221,11 +244,15 @@ export function AdminUsersBody() {
     const email = inviteEmail.trim();
     if (!email) return;
     setInviting(true);
+    setInviteError(null);
     try {
-      const res = await inviteUser(getToken, email, inviteRole);
-      await refresh();
+      const res = await inviteUser(getToken, email, inviteRole, inviteMessage.trim() || undefined);
+      if (owner) await refresh();
       setInviteOpen(false);
       setInviteEmail('');
+      setInviteMessage('');
+      setInvitationsVersion((v) => v + 1);
+      setCreatedLink({ email, token: res.accept_token });
       toast({
         title: `Invited ${email} as ${tierLabel(inviteRole)}`,
         description: res.invite.sent
@@ -236,7 +263,9 @@ export function AdminUsersBody() {
         tone: res.invite.sent ? 'success' : 'warning',
       });
     } catch (err) {
-      toast({ title: 'Invite failed', description: friendlyError(err), tone: 'danger' });
+      const msg = friendlyError(err);
+      if (/domain|already pending|already an active member/i.test(msg)) setInviteError(msg);
+      else toast({ title: 'Invite failed', description: msg, tone: 'danger' });
     } finally {
       setInviting(false);
     }
@@ -340,7 +369,11 @@ export function AdminUsersBody() {
           busy={inviting}
           actorRoles={roles}
           policy={policy}
+          message={inviteMessage}
+          setMessage={setInviteMessage}
+          error={inviteError}
         />
+        <CreatedLinkDialog created={createdLink} onClose={() => setCreatedLink(null)} />
       </Card>
     );
   }
@@ -486,8 +519,8 @@ export function AdminUsersBody() {
 
   const removedCount = users.filter((u) => membershipStatus(u) === 'removed').length;
 
-  return (
-    <div className="flex flex-col gap-4">
+  const membersTab = (
+    <div className="flex flex-col gap-4 pt-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
           {visibleUsers.length} {visibleUsers.length === 1 ? 'member' : 'members'}
@@ -524,6 +557,47 @@ export function AdminUsersBody() {
           initialSort={{ key: 'display_name', dir: 'asc' }}
         />
       )}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Tabs
+        value={tab}
+        onChange={(id) => setTab(id as typeof tab)}
+        tabs={[
+          { id: 'members', label: 'Members', content: membersTab },
+          {
+            id: 'invitations',
+            label: 'Invitations',
+            content: (
+              <InvitationsPanel
+                key={invitationsVersion}
+                now={now}
+                policy={policy}
+                onInvite={() => setInviteOpen(true)}
+                onChanged={() => {
+                  void refresh();
+                }}
+                onLink={(email, token) => setCreatedLink({ email, token })}
+              />
+            ),
+          },
+          {
+            id: 'identities',
+            label: 'Identities',
+            content: (
+              <IdentitiesPanel
+                actorRoles={roles}
+                policy={policy}
+                onGranted={() => {
+                  void refresh();
+                }}
+              />
+            ),
+          },
+        ]}
+      />
 
       <InviteDialog
         open={inviteOpen}
@@ -536,7 +610,11 @@ export function AdminUsersBody() {
         busy={inviting}
         actorRoles={roles}
         policy={policy}
+        message={inviteMessage}
+        setMessage={setInviteMessage}
+        error={inviteError}
       />
+      <CreatedLinkDialog created={createdLink} onClose={() => setCreatedLink(null)} />
 
       <Dialog
         open={roleDialog !== null}
@@ -708,6 +786,9 @@ function InviteDialog({
   busy,
   actorRoles,
   policy,
+  message,
+  setMessage,
+  error,
 }: {
   open: boolean;
   onClose: () => void;
@@ -719,6 +800,9 @@ function InviteDialog({
   busy: boolean;
   actorRoles: readonly string[];
   policy: MembershipPolicyView;
+  message: string;
+  setMessage: (v: string) => void;
+  error: string | null;
 }) {
   const allowed = grantableTiers(actorRoles, policy);
   const roleOk = allowed.includes(role as MembershipTier);
@@ -746,10 +830,440 @@ function InviteDialog({
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="name@example.com"
+          error={error ?? undefined}
         />
         <RolePicker value={role} onChange={setRole} actorRoles={actorRoles} policy={policy} />
+        <Textarea
+          label="Message (optional)"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={3}
+          maxLength={1000}
+          hint="Stored on the invitation; shown on the accept page when you share the invitation link yourself."
+        />
       </div>
     </Dialog>
+  );
+}
+
+/** Shown ONCE after an invite/resend: we store only the token's hash, so the link cannot be recovered later. */
+function CreatedLinkDialog({
+  created,
+  onClose,
+}: {
+  created: { email: string; token: string } | null;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!created) setCopied(false);
+  }, [created]);
+  const link =
+    created && typeof window !== 'undefined' ? `${window.location.origin}/admin/accept?inv=${created.token}` : '';
+  return (
+    <Dialog
+      open={created !== null}
+      onClose={onClose}
+      title="Invitation created"
+      description={
+        created
+          ? `${created.email} gets the Netlify Identity e-mail. You can also share this link yourself — it previews who invited them and as what; the e-mail's own link is still needed to set a password.`
+          : undefined
+      }
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Done
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        <Input label="Invitation link (shown once)" value={link} readOnly onFocus={(e) => e.currentTarget.select()} />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(link);
+                setCopied(true);
+              } catch {
+                setCopied(false);
+              }
+            }}
+          >
+            Copy link
+          </Button>
+          {copied ? (
+            <span className="flex items-center gap-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+              <IconCheck size={14} /> Copied
+            </span>
+          ) : null}
+        </div>
+        <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          After you close this, the link is no longer available — Resend from the Invitations tab to get a new one.
+        </p>
+      </div>
+    </Dialog>
+  );
+}
+
+// ─── invitations tab (T18.3b) ────────────────────────────────────────────────
+
+function InvitationsPanel({
+  now,
+  policy,
+  onInvite,
+  onChanged,
+  onLink,
+}: {
+  now: number;
+  policy: MembershipPolicyView;
+  onInvite: () => void;
+  onChanged: () => void;
+  onLink: (email: string, token: string) => void;
+}) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<InvitationView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [revoke, setRevoke] = useState<InvitationView | null>(null);
+
+  const load = async () => {
+    try {
+      const { invitations } = await listInvitations(getToken);
+      setRows(invitations.filter((i) => i.status !== 'accepted'));
+    } catch (err) {
+      setError(errorMessage(err, 'Could not load invitations.'));
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const doResend = async (inv: InvitationView) => {
+    setBusyId(inv.invite_id);
+    try {
+      const res = await resendInvitation(getToken, { invite_id: inv.invite_id });
+      toast({
+        title: `Re-sent to ${inv.email}`,
+        description: res.invite.sent ? 'Invitation e-mail sent again.' : (res.invite.error ?? 'Not sent.'),
+        tone: res.invite.sent ? 'success' : 'warning',
+      });
+      onLink(inv.email, res.accept_token);
+      await load();
+    } catch (err) {
+      toast({ title: 'Resend failed', description: friendlyError(err), tone: 'danger' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const doRevoke = async () => {
+    if (!revoke) return;
+    setBusyId(revoke.invite_id);
+    try {
+      await revokeInvitation(getToken, { invite_id: revoke.invite_id });
+      toast({ title: `Invitation for ${revoke.email} revoked`, tone: 'warning' });
+      await load();
+      onChanged();
+    } catch (err) {
+      toast({ title: 'Revoke failed', description: friendlyError(err), tone: 'danger' });
+    } finally {
+      setBusyId(null);
+      setRevoke(null);
+    }
+  };
+
+  if (error) {
+    return (
+      <Card className="mt-3">
+        <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't load invitations" message={error} />
+      </Card>
+    );
+  }
+  if (rows === null) return <Skeleton variant="rect" height={200} className="mt-3" />;
+
+  const columns: Column<InvitationView>[] = [
+    {
+      key: 'email',
+      header: 'Invitee',
+      sortable: true,
+      accessor: (i) => i.email,
+      render: (i) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-[var(--adm-text)]">{i.email}</div>
+          <div className="truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            invited by {i.invited_by.email}
+            {i.message ? ` · “${i.message}”` : ''}
+          </div>
+        </div>
+      ),
+    },
+    { key: 'role', header: 'Role', render: (i) => <Badge tone={roleTone(i.role)}>{tierLabel(i.role)}</Badge> },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      accessor: (i) => i.status,
+      render: (i) => (
+        <div className="flex flex-col gap-0.5">
+          <StatusPill
+            status={i.status}
+            tone={i.status === 'pending' ? 'info' : i.status === 'revoked' ? 'danger' : 'neutral'}
+            label={i.status.charAt(0).toUpperCase() + i.status.slice(1)}
+          />
+          <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            {i.status === 'pending' && now ? formatExpiresIn(i.expires_at, now) : ''}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'sent',
+      header: 'E-mail',
+      render: (i) => {
+        const st = invitationSendStatus({
+          gotrue_invited: i.gotrue.invited,
+          gotrue_error: i.gotrue.error,
+          send_count: i.gotrue.send_count,
+        });
+        return (
+          <div className="flex flex-col gap-0.5">
+            <Badge tone={st.tone} title={st.hint}>
+              {st.label}
+            </Badge>
+            <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+              {i.gotrue.last_sent_at && now ? `last ${relativeTimeFromNow(i.gotrue.last_sent_at, now)}` : ''}
+              {st.hint ? (
+                <span title={st.hint} className="ml-1 cursor-help underline decoration-dotted">
+                  How to fix
+                </span>
+              ) : null}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      render: (i) => {
+        const a = invitationActionsFor(
+          {
+            status: i.status,
+            send_count: i.gotrue.send_count,
+            gotrue_invited: i.gotrue.invited,
+            gotrue_error: i.gotrue.error,
+          },
+          policy
+        );
+        return (
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!a.resend.enabled || busyId === i.invite_id}
+              title={a.resend.reason}
+              onClick={() => void doResend(i)}
+              loading={busyId === i.invite_id}
+            >
+              Resend
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!a.revoke.enabled || busyId === i.invite_id}
+              title={a.revoke.reason}
+              onClick={() => setRevoke(i)}
+            >
+              Revoke
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          {rows.filter((r) => r.status === 'pending').length} pending · accepted invitations move to Members
+        </p>
+        <Button leftIcon={<IconPlus size={16} />} onClick={onInvite}>
+          Invite
+        </Button>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={<IconUser size={26} />}
+          title="No open invitations"
+          message="Everyone you invited has accepted, or nobody has been invited yet."
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={rows}
+          getRowKey={(i) => i.invite_id}
+          initialSort={{ key: 'status', dir: 'asc' }}
+        />
+      )}
+      <ConfirmDialog
+        open={revoke !== null}
+        onClose={() => setRevoke(null)}
+        onConfirm={doRevoke}
+        title="Revoke invitation?"
+        message={
+          revoke
+            ? `${revoke.email} will not be able to accept. If they never signed in, their pending membership is removed too. You can invite them again later.`
+            : ''
+        }
+        confirmLabel="Revoke"
+        tone="danger"
+      />
+    </div>
+  );
+}
+
+// ─── unmanaged identities (T18.3b, plan §4.2) ────────────────────────────────
+
+function IdentitiesPanel({
+  actorRoles,
+  policy,
+  onGranted,
+}: {
+  actorRoles: readonly string[];
+  policy: MembershipPolicyView;
+  onGranted: () => void;
+}) {
+  const { toast } = useToast();
+  const [state, setState] = useState<{
+    identities: UnmanagedIdentityView[];
+    error_code?: string;
+    error?: string;
+    capabilities?: { delete_identity?: boolean };
+  } | null>(null);
+  const [grant, setGrant] = useState<{ identity: UnmanagedIdentityView; role: UserRole } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const res = await listUnmanagedIdentities(getToken);
+      setState(res as typeof state);
+    } catch (err) {
+      setState({ identities: [], error: errorMessage(err, 'Could not load identities.') });
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const doGrant = async () => {
+    if (!grant) return;
+    setBusy(true);
+    try {
+      await grantRole(getToken, grant.identity.email, grant.role, grant.identity.id);
+      toast({ title: `${grant.identity.email} is now ${tierLabel(grant.role)}`, tone: 'success' });
+      setGrant(null);
+      await load();
+      onGranted();
+    } catch (err) {
+      toast({ title: 'Grant failed', description: friendlyError(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (state === null) return <Skeleton variant="rect" height={200} className="mt-3" />;
+  const defaultRole = (grantableTiers(actorRoles, policy).at(-1) ?? 'viewer') as UserRole;
+
+  return (
+    <div className="flex flex-col gap-4 pt-3">
+      <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+        People who exist in Netlify Identity for this site but have no role here — typically invited from the Netlify
+        console. Grant a role to bring them into the workspace.
+      </p>
+      {state.error_code === 'identity_admin_unavailable' ? (
+        <Card>
+          <EmptyState
+            icon={<IconAlertTriangle size={26} />}
+            title="Identity list unavailable"
+            message="The Identity admin token was not available for this request (Identity disabled on the site, or a local run). Enable Netlify Identity on the site and reload."
+          />
+        </Card>
+      ) : state.identities.length === 0 ? (
+        <EmptyState
+          icon={<IconCheck size={26} />}
+          title="Everyone in Netlify Identity has a role here"
+          message="Nothing to reconcile."
+        />
+      ) : (
+        <DataTable
+          columns={[
+            {
+              key: 'email',
+              header: 'Identity',
+              sortable: true,
+              accessor: (i: UnmanagedIdentityView) => i.email,
+              render: (i: UnmanagedIdentityView) => (
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-[var(--adm-text)]">{i.email}</div>
+                  <div className="truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                    {i.confirmed ? 'confirmed' : 'invited, not yet confirmed'}
+                    {i.last_sign_in_at ? ` · last sign-in ${i.last_sign_in_at.slice(0, 10)}` : ''}
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right' as const,
+              render: (i: UnmanagedIdentityView) => (
+                <div className="flex items-center justify-end gap-2">
+                  <Button size="sm" onClick={() => setGrant({ identity: i, role: defaultRole })}>
+                    Grant role…
+                  </Button>
+                  {state.capabilities?.delete_identity ? (
+                    <Button size="sm" variant="ghost" title="Delete this Netlify Identity user (T18.4)" disabled>
+                      Delete identity
+                    </Button>
+                  ) : null}
+                </div>
+              ),
+            },
+          ]}
+          rows={state.identities}
+          getRowKey={(i) => i.id}
+        />
+      )}
+      <Dialog
+        open={grant !== null}
+        onClose={() => setGrant(null)}
+        title={grant ? `Grant ${grant.identity.email} a role` : 'Grant role'}
+        description="Creates an active membership for this identity (source: Netlify UI). They can sign in straight away."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setGrant(null)}>
+              Cancel
+            </Button>
+            <Button onClick={doGrant} loading={busy} disabled={busy}>
+              Grant role
+            </Button>
+          </>
+        }
+      >
+        {grant ? (
+          <RolePicker
+            value={grant.role}
+            onChange={(role) => setGrant({ ...grant, role })}
+            actorRoles={actorRoles}
+            policy={policy}
+          />
+        ) : null}
+      </Dialog>
+    </div>
   );
 }
 
