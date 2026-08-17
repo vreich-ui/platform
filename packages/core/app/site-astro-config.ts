@@ -44,6 +44,7 @@ import astrowind from '../../../vendor/integration';
 
 import { shellRoutes } from './shell-routes';
 import { siteRedirectsFile } from './site-redirects-integration';
+import { identityEmailTemplates } from './identity-email-templates-integration';
 
 import { readingTimeRemarkPlugin, responsiveTablesRehypePlugin, lazyImagesRehypePlugin } from './utils/frontmatter';
 
@@ -149,6 +150,10 @@ export const defineSiteAstroConfig = (options: SiteAstroConfigOptions) => {
       shellRoutes(),
       // W14 F6: serve the redirects that retirement records (Wolf's ruling 3).
       siteRedirectsFile({ siteDir: siteRoot }),
+      // W18 T18.0c: the Netlify Identity e-mail templates (all four link to
+      // /admin/accept) — fleet law, published by every tenant at
+      // /emails/identity/*.html; the console path is set per site (runbook).
+      identityEmailTemplates(),
     ],
 
     image: {

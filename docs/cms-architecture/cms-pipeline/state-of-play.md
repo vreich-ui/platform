@@ -9,6 +9,41 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.0c: Identity e-mail templates published from core; the console clicks are written down everywhere a human looks
+
+W18 wave 0, row 3 (plan §4.1 step 2, F10-doc, F11-part; P1/P2). **Templates
+are fleet law, not per-site files:** `packages/core/app/emails/identity/
+{invitation,confirmation,recovery,email-change}.html` (brand-neutral, only
+`{{ .SiteURL }}`/`{{ .Token }}`/`{{ .Email }}`/`{{ .NewEmail }}`; every link
+is `{{ .SiteURL }}/admin/accept/#<token>={{ .Token }}`) and a new Astro
+integration `identity-email-templates-integration.ts` mounted in
+`defineSiteAstroConfig` copies them into every tenant's build output at
+`/emails/identity/*.html` on `astro:build:done` (same shape as the redirects
+integration; a route would land as `…/index.html`). Nothing was added to any
+`sites/<client>/public/` — P1 by construction (a `sites/platform` build
+prints `published 4 Netlify Identity e-mail template(s)` and the four files
+sit in `dist/emails/identity/`). **Where the human steps now live:**
+`create-site`'s ADMIN WORKSPACE BOOTSTRAP block (step 1 grew the ☐ rows:
+Registration = Invite only, the four Emails template paths, Google optional;
+step 3 is now "invite yourself, accept from the e-mail on /admin/accept";
+fixture updated); the parity audit gained `identity-email-templates` (PASS —
+core files present, each links to /admin/accept, the shell config mounts the
+integration, `/admin/accept` is an injected route) and the human row
+`identity-console-settings`; `fleet-capability-probe.mjs` prints a
+non-gating `identity` note per tenant listing the console-only
+prerequisites (`IDENTITY_CONSOLE_PREREQUISITES`; it never calls the Identity
+admin API); the runbook's §admin step 1 is rewritten click-by-click
+(Project configuration → Identity → Enable / Registration → Invite only /
+Emails → paths table / Google optional), step 3 rewritten around
+`/admin/accept`, plus a "Recovering a stuck invite" box; `KNOWN_ISSUES.md`
+§5 lists F1/F2/F3 with the one-line symptom each, FIXED-BY T18.0a/b/c;
+`FLEET-STATUS.md` has the "Identity e-mail templates set (console)" ☐ block
+for the four tenants (Wolf ticks during T18.9). Audit: `--root`, platform,
+fernwell, zilberman all pass (drlurie's `--site` form has 6 pre-existing
+gaps unrelated to W18 — it deploys from `--root`). `npm test`, eslint,
+prettier, `astro check` green. Wave 0 (T18.0a–c) is complete and
+releasable on its own; next: T18.1 (store v2 — Fable/notify row).
+
 ## 2026-08-17 — T18.0b: `/admin/accept` — every Identity e-mail token now lands somewhere that consumes it
 
 W18 wave 0, row 2 (plan §1 F1, F3, F8-min; flow §4.1 steps 2–4, §4.5).

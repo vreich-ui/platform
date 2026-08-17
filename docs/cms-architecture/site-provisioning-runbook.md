@@ -155,14 +155,32 @@ site's admin is a locked door until a human does these three console steps.
 They are `human_gate` in the pipeline's sense: an agent can prepare
 everything else, only you can click these.
 
-1. **Enable Netlify Identity (GoTrue)** on the new site.
-   Netlify console → the site → **Integrations → Identity → Enable** (on
-   older console versions: Site configuration → Identity). This is what
-   stands up `https://<site>/.netlify/identity`; the `/admin` login widget
-   and every function-side token check point at it. Without it, `/admin`
-   shows a login that cannot complete and every admin function returns 401.
-   Registration preference: **Invite only** — this is a workspace, not a
-   signup page.
+1. **Enable Netlify Identity (GoTrue) and point its e-mails at the accept
+   page.** Netlify console → the site → **Project configuration → Identity**
+   (older consoles: Site configuration → Identity, or Integrations → Identity)
+   → **Enable Identity**. This is what stands up
+   `https://<site>/.netlify/identity`; the `/admin` login widget and every
+   function-side token check point at it. Without it, `/admin` shows a login
+   that cannot complete and every admin function returns 401. Then, on the
+   same Identity page (T18.0c):
+   - **Registration → Invite only** — this is a workspace, not a signup page.
+   - **Emails** → for each of the four templates, tick *Custom template* and
+     set the **path** (relative to the publish directory; every tenant's
+     build publishes these files from core, nothing to copy):
+     | Template | Path |
+     |---|---|
+     | Invitation | `/emails/identity/invitation.html` |
+     | Confirmation | `/emails/identity/confirmation.html` |
+     | Recovery | `/emails/identity/recovery.html` |
+     | Email change | `/emails/identity/email-change.html` |
+     Each template links to `https://<site>/admin/accept/#<token>=…`, the one
+     page that consumes an Identity token (T18.0b): invitees set a name and
+     password there, recoveries set a new password. **Until the paths are
+     set, the default Netlify templates still work** — they link to `/`, and
+     the site-wide router forwards the token to `/admin/accept` — the custom
+     ones just land cleanly and read like the site.
+   - **External providers → Google** (optional; offered as a sign-in method
+     after acceptance, never as the accept step itself).
 2. **Set `ADMIN_EMAILS`** on the site (Site settings → Environment
    variables) to the operator's real email address(es), comma-separated.
    These are **bootstrap Owners** (`roles.ts`): implicit Owner forever, the
@@ -172,12 +190,25 @@ everything else, only you can click these.
    not skip it. (Optional: `IDENTITY_URL` only if the default
    `<site URL>/.netlify/identity` must be overridden; `ROLE_EMAILS_*` for
    the extra publish-gate vocabulary.)
-3. **Invite the first Owner.** Sign in at `https://<site>/admin` with an
-   `ADMIN_EMAILS` address (Identity → your first login), then
-   `/admin/settings/admins` → **Invite** (email + role Owner). The invite
-   rides the GoTrue admin API with the identity context Netlify injects —
-   no extra secrets. A team of one can stop after step 2; `ADMIN_EMAILS`
-   alone is a complete bootstrap.
+3. **Sign in, invite the first Owner, accept from the e-mail.** Sign in at
+   `https://<site>/admin` with an `ADMIN_EMAILS` address (Identity → your
+   first login), then `/admin/settings/admins` → **Invite** (email + role
+   Owner). The invite rides GoTrue's `POST /invite` with the identity context
+   Netlify injects — no extra secrets — and Netlify Identity sends the
+   invitation e-mail (T18.0a; before it, the platform hit the wrong endpoint
+   and no mail was ever sent). The invitee opens the link → `/admin/accept`
+   → full name + password → lands in the workspace with an active
+   membership. Then (T18.1) promote the stored Owner and remove the env row,
+   so `ADMIN_EMAILS` goes back to being break-glass only. A team of one can
+   stop after step 2; `ADMIN_EMAILS` alone is a complete bootstrap.
+
+> **Recovering a stuck invite.** Someone was invited before T18.0a/b (the
+> link landed on the home page, nothing happened), or the mail never came:
+> Netlify console → the site → **Identity** tab → find the user → **Resend
+> invitation** (or delete and re-invite from `/admin/settings/admins`). The
+> new link now lands on `/admin/accept`. A member who already exists in
+> Identity but shows as *invited* on `/admin/settings/admins` just needs to
+> sign in once — first login activates the record.
 
 What you do NOT need to do (verified by the audit, not remembered): the
 `/admin/*` routes, admin styles, the EditMode canvas, all 34 function shims,

@@ -184,10 +184,20 @@ Env checklist:
 
 ADMIN WORKSPACE BOOTSTRAP (human gate — runbook site-provisioning-runbook.md §admin):
   1. Enable Netlify Identity (GoTrue) on the new site — console-only; without it /admin login
-     has no identity service and every admin function 401s.
+     has no identity service and every admin function 401s. Then, still in the console
+     (Project configuration → Identity), the invite flow needs (T18.0c):
+     ☐ Registration → Invite only
+     ☐ Emails → Invitation   template path = /emails/identity/invitation.html
+     ☐ Emails → Confirmation template path = /emails/identity/confirmation.html
+     ☐ Emails → Recovery     template path = /emails/identity/recovery.html
+     ☐ Emails → Email change template path = /emails/identity/email-change.html
+     ☐ External providers → Google (optional)
+     (the four templates are core-owned and published by every build; each links to
+     /admin/accept/#<token>=…, the page that consumes Identity tokens — T18.0b)
   2. Set ADMIN_EMAILS on the site to the operator’s real email(s) — bootstrap Owners; the
      users store can be empty/wiped and these addresses still get in.
-  3. Invite the first Owner via /admin/settings/admins (or rely on ADMIN_EMAILS alone).
+  3. Sign in, invite the first Owner via /admin/settings/admins, accept from the e-mail on
+     /admin/accept (or rely on ADMIN_EMAILS alone).
   Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency.
   Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>
 `;
