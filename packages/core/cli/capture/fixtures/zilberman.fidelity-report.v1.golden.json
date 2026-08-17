@@ -45,13 +45,17 @@
       "sourceUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
       "structural": {
         "sourceBlocks": 1,
-        "mappedBlocks": 0,
-        "mappedBlockCoverage": 0,
+        "mappedBlocks": 1,
+        "mappedBlockCoverage": 1,
         "accountedBlocks": 1,
         "allGapsEnumerated": true,
         "orderFidelity": 1,
-        "expectedSectionIds": [],
-        "emittedSectionIds": []
+        "expectedSectionIds": [
+          "s_d92603a71c"
+        ],
+        "emittedSectionIds": [
+          "s_d92603a71c"
+        ]
       }
     },
     {
@@ -59,16 +63,20 @@
       "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
       "structural": {
         "sourceBlocks": 3,
-        "mappedBlocks": 1,
-        "mappedBlockCoverage": 0.3333,
+        "mappedBlocks": 3,
+        "mappedBlockCoverage": 1,
         "accountedBlocks": 3,
         "allGapsEnumerated": true,
         "orderFidelity": 1,
         "expectedSectionIds": [
-          "s_7f8b34f814"
+          "s_7f8b34f814",
+          "s_4d8f62e8c4",
+          "s_0eeef6da1d"
         ],
         "emittedSectionIds": [
-          "s_7f8b34f814"
+          "s_7f8b34f814",
+          "s_4d8f62e8c4",
+          "s_0eeef6da1d"
         ]
       }
     },
@@ -77,18 +85,26 @@
       "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
       "structural": {
         "sourceBlocks": 6,
-        "mappedBlocks": 2,
-        "mappedBlockCoverage": 0.3333,
+        "mappedBlocks": 6,
+        "mappedBlockCoverage": 1,
         "accountedBlocks": 6,
         "allGapsEnumerated": true,
         "orderFidelity": 1,
         "expectedSectionIds": [
           "s_3bf9b659b0",
-          "s_8d1b67616f"
+          "s_35a5ff7e93",
+          "s_c4231af4b6",
+          "s_8d1b67616f",
+          "s_147c556f95",
+          "s_c724cdb13b"
         ],
         "emittedSectionIds": [
           "s_3bf9b659b0",
-          "s_8d1b67616f"
+          "s_35a5ff7e93",
+          "s_c4231af4b6",
+          "s_8d1b67616f",
+          "s_147c556f95",
+          "s_c724cdb13b"
         ]
       }
     },
@@ -173,7 +189,7 @@
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_010",
         "blockStatus": "gap",
-        "gapId": "gap_4025a57d3e19",
+        "gapId": "gap_f762dbd916dc",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
         "status": "unavailable",
@@ -183,7 +199,7 @@
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_010",
         "blockStatus": "gap",
-        "gapId": "gap_4025a57d3e19",
+        "gapId": "gap_f762dbd916dc",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_010.png",
         "status": "unavailable",
@@ -213,7 +229,7 @@
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_012",
         "blockStatus": "gap",
-        "gapId": "gap_244ef90d50b7",
+        "gapId": "gap_67c3d9961821",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
         "status": "unavailable",
@@ -223,7 +239,7 @@
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_012",
         "blockStatus": "gap",
-        "gapId": "gap_244ef90d50b7",
+        "gapId": "gap_67c3d9961821",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_012.png",
         "status": "unavailable",
@@ -253,7 +269,7 @@
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_017",
         "blockStatus": "gap",
-        "gapId": "gap_8c8b1b819645",
+        "gapId": "gap_45cd24af6219",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
         "status": "unavailable",
@@ -263,7 +279,7 @@
         "pageRef": "page_9563b8e16278",
         "blockRef": "page_9563b8e16278_block_017",
         "blockStatus": "gap",
-        "gapId": "gap_8c8b1b819645",
+        "gapId": "gap_45cd24af6219",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_9563b8e16278/desktop/blocks/page_9563b8e16278_block_017.png",
         "status": "unavailable",
@@ -271,9 +287,10 @@
       },
       {
         "pageRef": "page_593efe6a40c0",
+        "candidateId": "candidate_6aeb52775ce1",
         "blockRef": "page_593efe6a40c0_block_001",
-        "blockStatus": "gap",
-        "gapId": "gap_d92603a71c6a",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_c354f48f1e21",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
         "status": "unavailable",
@@ -281,9 +298,10 @@
       },
       {
         "pageRef": "page_593efe6a40c0",
+        "candidateId": "candidate_6aeb52775ce1",
         "blockRef": "page_593efe6a40c0_block_001",
-        "blockStatus": "gap",
-        "gapId": "gap_d92603a71c6a",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_c354f48f1e21",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_593efe6a40c0/desktop/blocks/page_593efe6a40c0_block_001.png",
         "status": "unavailable",
@@ -311,9 +329,9 @@
       },
       {
         "pageRef": "page_c470adaf57fc",
+        "candidateId": "candidate_1f834f611b6a",
         "blockRef": "page_c470adaf57fc_block_002",
-        "blockStatus": "gap",
-        "gapId": "gap_4d8f62e8c497",
+        "blockStatus": "mapped",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
         "status": "unavailable",
@@ -321,9 +339,9 @@
       },
       {
         "pageRef": "page_c470adaf57fc",
+        "candidateId": "candidate_1f834f611b6a",
         "blockRef": "page_c470adaf57fc_block_002",
-        "blockStatus": "gap",
-        "gapId": "gap_4d8f62e8c497",
+        "blockStatus": "mapped",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_002.png",
         "status": "unavailable",
@@ -331,9 +349,9 @@
       },
       {
         "pageRef": "page_c470adaf57fc",
+        "candidateId": "candidate_aa118c8c52c0",
         "blockRef": "page_c470adaf57fc_block_003",
-        "blockStatus": "gap",
-        "gapId": "gap_0eeef6da1d84",
+        "blockStatus": "mapped",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
         "status": "unavailable",
@@ -341,9 +359,9 @@
       },
       {
         "pageRef": "page_c470adaf57fc",
+        "candidateId": "candidate_aa118c8c52c0",
         "blockRef": "page_c470adaf57fc_block_003",
-        "blockStatus": "gap",
-        "gapId": "gap_0eeef6da1d84",
+        "blockStatus": "mapped",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_c470adaf57fc/desktop/blocks/page_c470adaf57fc_block_003.png",
         "status": "unavailable",
@@ -371,9 +389,9 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_90638ab2e8ec",
         "blockRef": "page_79c515d4cebf_block_003",
-        "blockStatus": "gap",
-        "gapId": "gap_35a5ff7e9380",
+        "blockStatus": "mapped",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
         "status": "unavailable",
@@ -381,9 +399,9 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_90638ab2e8ec",
         "blockRef": "page_79c515d4cebf_block_003",
-        "blockStatus": "gap",
-        "gapId": "gap_35a5ff7e9380",
+        "blockStatus": "mapped",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_003.png",
         "status": "unavailable",
@@ -391,9 +409,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_03be809a450e",
         "blockRef": "page_79c515d4cebf_block_004",
-        "blockStatus": "gap",
-        "gapId": "gap_c4231af4b63c",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_fa7b10668327",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
         "status": "unavailable",
@@ -401,9 +420,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_03be809a450e",
         "blockRef": "page_79c515d4cebf_block_004",
-        "blockStatus": "gap",
-        "gapId": "gap_c4231af4b63c",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_fa7b10668327",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_004.png",
         "status": "unavailable",
@@ -414,7 +434,7 @@
         "candidateId": "candidate_ed4f78af95c9",
         "blockRef": "page_79c515d4cebf_block_005",
         "blockStatus": "mapped_with_gap",
-        "gapId": "gap_b36e8f83a5cd",
+        "gapId": "gap_a04da85fad4d",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
         "status": "unavailable",
@@ -425,7 +445,7 @@
         "candidateId": "candidate_ed4f78af95c9",
         "blockRef": "page_79c515d4cebf_block_005",
         "blockStatus": "mapped_with_gap",
-        "gapId": "gap_b36e8f83a5cd",
+        "gapId": "gap_a04da85fad4d",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_005.png",
         "status": "unavailable",
@@ -433,9 +453,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_6f866996f192",
         "blockRef": "page_79c515d4cebf_block_006",
-        "blockStatus": "gap",
-        "gapId": "gap_147c556f95e9",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_18aa3971f2f4",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
         "status": "unavailable",
@@ -443,9 +464,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_6f866996f192",
         "blockRef": "page_79c515d4cebf_block_006",
-        "blockStatus": "gap",
-        "gapId": "gap_147c556f95e9",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_18aa3971f2f4",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_006.png",
         "status": "unavailable",
@@ -453,9 +475,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_1661a065c310",
         "blockRef": "page_79c515d4cebf_block_007",
-        "blockStatus": "gap",
-        "gapId": "gap_c724cdb13bf8",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_2f5bd371ee0b",
         "viewportId": "mobile",
         "sourceScreenshot": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
         "status": "unavailable",
@@ -463,9 +486,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_1661a065c310",
         "blockRef": "page_79c515d4cebf_block_007",
-        "blockStatus": "gap",
-        "gapId": "gap_c724cdb13bf8",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_2f5bd371ee0b",
         "viewportId": "desktop",
         "sourceScreenshot": "pages/page_79c515d4cebf/desktop/blocks/page_79c515d4cebf_block_007.png",
         "status": "unavailable",
@@ -570,7 +594,7 @@
         "blockRef": "page_9563b8e16278_block_010",
         "viewportId": "mobile",
         "blockStatus": "gap",
-        "gapId": "gap_4025a57d3e19",
+        "gapId": "gap_f762dbd916dc",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -580,7 +604,7 @@
         "blockRef": "page_9563b8e16278_block_010",
         "viewportId": "desktop",
         "blockStatus": "gap",
-        "gapId": "gap_4025a57d3e19",
+        "gapId": "gap_f762dbd916dc",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -610,7 +634,7 @@
         "blockRef": "page_9563b8e16278_block_012",
         "viewportId": "mobile",
         "blockStatus": "gap",
-        "gapId": "gap_244ef90d50b7",
+        "gapId": "gap_67c3d9961821",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -620,7 +644,7 @@
         "blockRef": "page_9563b8e16278_block_012",
         "viewportId": "desktop",
         "blockStatus": "gap",
-        "gapId": "gap_244ef90d50b7",
+        "gapId": "gap_67c3d9961821",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -650,7 +674,7 @@
         "blockRef": "page_9563b8e16278_block_017",
         "viewportId": "mobile",
         "blockStatus": "gap",
-        "gapId": "gap_8c8b1b819645",
+        "gapId": "gap_45cd24af6219",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -660,7 +684,7 @@
         "blockRef": "page_9563b8e16278_block_017",
         "viewportId": "desktop",
         "blockStatus": "gap",
-        "gapId": "gap_8c8b1b819645",
+        "gapId": "gap_45cd24af6219",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -669,8 +693,8 @@
         "pageRef": "page_593efe6a40c0",
         "blockRef": "page_593efe6a40c0_block_001",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_d92603a71c6a",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_c354f48f1e21",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -679,8 +703,8 @@
         "pageRef": "page_593efe6a40c0",
         "blockRef": "page_593efe6a40c0_block_001",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_d92603a71c6a",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_c354f48f1e21",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -707,8 +731,7 @@
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_002",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_4d8f62e8c497",
+        "blockStatus": "mapped",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -717,8 +740,7 @@
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_002",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_4d8f62e8c497",
+        "blockStatus": "mapped",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -727,8 +749,7 @@
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_003",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_0eeef6da1d84",
+        "blockStatus": "mapped",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -737,8 +758,7 @@
         "pageRef": "page_c470adaf57fc",
         "blockRef": "page_c470adaf57fc_block_003",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_0eeef6da1d84",
+        "blockStatus": "mapped",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -765,8 +785,7 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_003",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_35a5ff7e9380",
+        "blockStatus": "mapped",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -775,8 +794,7 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_003",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_35a5ff7e9380",
+        "blockStatus": "mapped",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -785,8 +803,8 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_004",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_c4231af4b63c",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_fa7b10668327",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -795,8 +813,8 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_004",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_c4231af4b63c",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_fa7b10668327",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -806,7 +824,7 @@
         "blockRef": "page_79c515d4cebf_block_005",
         "viewportId": "mobile",
         "blockStatus": "mapped_with_gap",
-        "gapId": "gap_b36e8f83a5cd",
+        "gapId": "gap_a04da85fad4d",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -816,7 +834,7 @@
         "blockRef": "page_79c515d4cebf_block_005",
         "viewportId": "desktop",
         "blockStatus": "mapped_with_gap",
-        "gapId": "gap_b36e8f83a5cd",
+        "gapId": "gap_a04da85fad4d",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -825,8 +843,8 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_006",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_147c556f95e9",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_18aa3971f2f4",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -835,8 +853,8 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_006",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_147c556f95e9",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_18aa3971f2f4",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -845,8 +863,8 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_007",
         "viewportId": "mobile",
-        "blockStatus": "gap",
-        "gapId": "gap_c724cdb13bf8",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_2f5bd371ee0b",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -855,8 +873,8 @@
         "pageRef": "page_79c515d4cebf",
         "blockRef": "page_79c515d4cebf_block_007",
         "viewportId": "desktop",
-        "blockStatus": "gap",
-        "gapId": "gap_c724cdb13bf8",
+        "blockStatus": "mapped_with_gap",
+        "gapId": "gap_2f5bd371ee0b",
         "detail": "source_screenshot_binary_not_available"
       },
       {
@@ -913,10 +931,18 @@
     "defectCount": 43,
     "evidenceComplete": false
   },
+  "assets": {
+    "plannedSections": 7,
+    "boundSections": null,
+    "defects": [],
+    "defectCount": 0,
+    "evidenceComplete": null,
+    "reason": "no_emission_report_supplied_binding_not_verified"
+  },
   "rubric": {
     "coverage": {
-      "score": 0.1579,
-      "mappedBlocks": 3,
+      "score": 0.5263,
+      "mappedBlocks": 10,
       "relevantBlocks": 19,
       "minimum": 0.9,
       "met": false
@@ -970,12 +996,12 @@
       {
         "pageRef": "page_9563b8e16278",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-        "gapId": "gap_4025a57d3e19",
+        "gapId": "gap_f762dbd916dc",
         "blockRef": "page_9563b8e16278_block_010",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
-        "why": "media_gallery_requires_assets",
+        "why": "section_not_allowed_for_page_type",
         "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "home PageType does not allow media; preserve source evidence as a gap rather than coercing it"
       },
       {
         "pageRef": "page_9563b8e16278",
@@ -990,12 +1016,12 @@
       {
         "pageRef": "page_9563b8e16278",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-        "gapId": "gap_244ef90d50b7",
+        "gapId": "gap_67c3d9961821",
         "blockRef": "page_9563b8e16278_block_012",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
-        "why": "media_gallery_requires_assets",
+        "why": "section_not_allowed_for_page_type",
         "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "home PageType does not allow media; preserve source evidence as a gap rather than coercing it"
       },
       {
         "pageRef": "page_9563b8e16278",
@@ -1010,92 +1036,62 @@
       {
         "pageRef": "page_9563b8e16278",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-        "gapId": "gap_8c8b1b819645",
+        "gapId": "gap_45cd24af6219",
         "blockRef": "page_9563b8e16278_block_017",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
-        "why": "logo_or_partner_strip_requires_assets",
+        "why": "section_not_allowed_for_page_type",
         "nearestType": "brand_row",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "home PageType does not allow brand_row; preserve source evidence as a gap rather than coercing it"
       },
       {
         "pageRef": "page_593efe6a40c0",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
-        "gapId": "gap_d92603a71c6a",
+        "gapId": "gap_c354f48f1e21",
         "blockRef": "page_593efe6a40c0_block_001",
         "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
-        "why": "media_gallery_requires_assets",
+        "why": "link_actions_not_carried_by_asset_section",
         "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
-      },
-      {
-        "pageRef": "page_c470adaf57fc",
-        "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
-        "gapId": "gap_4d8f62e8c497",
-        "blockRef": "page_c470adaf57fc_block_002",
-        "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_002.png",
-        "why": "media_gallery_requires_assets",
-        "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
-      },
-      {
-        "pageRef": "page_c470adaf57fc",
-        "sourceUrl": "https://www.zilbermanfilmfoundation.com/filmography",
-        "gapId": "gap_0eeef6da1d84",
-        "blockRef": "page_c470adaf57fc_block_003",
-        "screenshotRef": "pages/page_c470adaf57fc/mobile/blocks/page_c470adaf57fc_block_003.png",
-        "why": "media_gallery_requires_assets",
-        "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
       },
       {
         "pageRef": "page_79c515d4cebf",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-        "gapId": "gap_35a5ff7e9380",
-        "blockRef": "page_79c515d4cebf_block_003",
-        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_003.png",
-        "why": "media_gallery_requires_assets",
-        "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
-      },
-      {
-        "pageRef": "page_79c515d4cebf",
-        "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-        "gapId": "gap_c4231af4b63c",
+        "gapId": "gap_fa7b10668327",
         "blockRef": "page_79c515d4cebf_block_004",
         "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
-        "why": "media_gallery_requires_assets",
+        "why": "link_actions_not_carried_by_asset_section",
         "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
       },
       {
         "pageRef": "page_79c515d4cebf",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-        "gapId": "gap_b36e8f83a5cd",
+        "gapId": "gap_a04da85fad4d",
         "blockRef": "page_79c515d4cebf_block_005",
         "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
-        "why": "unmaterialized_visual_evidence",
+        "why": "section_type_has_no_asset_field",
         "nearestType": "media",
-        "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks"
+        "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
       },
       {
         "pageRef": "page_79c515d4cebf",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-        "gapId": "gap_147c556f95e9",
+        "gapId": "gap_18aa3971f2f4",
         "blockRef": "page_79c515d4cebf_block_006",
         "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_006.png",
-        "why": "media_gallery_requires_assets",
+        "why": "image_missing_item_level_text_association",
         "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented"
       },
       {
         "pageRef": "page_79c515d4cebf",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-        "gapId": "gap_c724cdb13bf8",
+        "gapId": "gap_2f5bd371ee0b",
         "blockRef": "page_79c515d4cebf_block_007",
         "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
-        "why": "media_gallery_requires_assets",
+        "why": "image_missing_item_level_text_association",
         "nearestType": "media",
-        "missingCapability": "materialized first-party asset references and item-level text association"
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented; 1 source link action(s) that media has no field for"
       },
       {
         "pageRef": "page_3ee57ccd5fac",
@@ -1110,19 +1106,11 @@
     ],
     "byCapability": [
       {
-        "missingCapability": "materialized first-party asset references and item-level text association",
-        "count": 10,
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for",
+        "count": 2,
         "gapIds": [
-          "gap_0eeef6da1d84",
-          "gap_147c556f95e9",
-          "gap_244ef90d50b7",
-          "gap_35a5ff7e9380",
-          "gap_4025a57d3e19",
-          "gap_4d8f62e8c497",
-          "gap_8c8b1b819645",
-          "gap_c4231af4b63c",
-          "gap_c724cdb13bf8",
-          "gap_d92603a71c6a"
+          "gap_c354f48f1e21",
+          "gap_fa7b10668327"
         ]
       },
       {
@@ -1131,6 +1119,14 @@
         "gapIds": [
           "gap_4fb4d4158abe",
           "gap_615362d9f5bd"
+        ]
+      },
+      {
+        "missingCapability": "home PageType does not allow media; preserve source evidence as a gap rather than coercing it",
+        "count": 2,
+        "gapIds": [
+          "gap_67c3d9961821",
+          "gap_f762dbd916dc"
         ]
       },
       {
@@ -1150,10 +1146,31 @@
         ]
       },
       {
-        "missingCapability": "first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks",
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented",
         "count": 1,
         "gapIds": [
-          "gap_b36e8f83a5cd"
+          "gap_18aa3971f2f4"
+        ]
+      },
+      {
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented; 1 source link action(s) that media has no field for",
+        "count": 1,
+        "gapIds": [
+          "gap_2f5bd371ee0b"
+        ]
+      },
+      {
+        "missingCapability": "home PageType does not allow brand_row; preserve source evidence as a gap rather than coercing it",
+        "count": 1,
+        "gapIds": [
+          "gap_45cd24af6219"
+        ]
+      },
+      {
+        "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block",
+        "count": 1,
+        "gapIds": [
+          "gap_a04da85fad4d"
         ]
       }
     ]

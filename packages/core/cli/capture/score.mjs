@@ -305,6 +305,74 @@ function visualEvidenceDefects({ comparisons, pagesWithoutScoredComparison }) {
   return { defects, defectCount: defects.length, evidenceComplete: defects.length === 0 };
 }
 
+/**
+ * T12.14 asset-binding evidence — the 0/34 rule applied to media.
+ *
+ * The mapper now MAPS a media block instead of declining it, so the block counts
+ * toward coverage as soon as its shape is understood. That is only honest if the
+ * other half is visible too: whether the artifact actually got bound. Every
+ * planned asset section that emission did not bind is an enumerated DEFECT here,
+ * with the emitter's own reason, so a run where nothing materialized cannot read
+ * as a clean one.
+ *
+ * This is evidence accounting, NOT a rubric change — `rubric` is untouched, and
+ * an unresolvable asset also remains a mapper-recorded gap in `gapReport`.
+ */
+export const ASSET_DEFECT_CODE_UNEMITTED = 'asset_section_absent_from_emission';
+
+function plannedAssetSections(mapping) {
+  return (mapping.pages ?? []).flatMap((page) =>
+    (page.candidates ?? [])
+      .filter((candidate) => candidate.assetPlan)
+      .map((candidate) => ({
+        pageRef: page.pageRef,
+        candidateId: candidate.candidateId,
+        sectionId: candidate.section?.id ?? null,
+        sectionType: candidate.sectionType,
+        target: candidate.assetPlan.target,
+        plannedAssets: candidate.assetPlan.entries?.length ?? 0,
+      }))
+  );
+}
+
+export function assetBindingEvidence(mapping, emissionReport = null) {
+  const planned = plannedAssetSections(mapping);
+  if (planned.length === 0) return null;
+  if (!emissionReport) {
+    return {
+      plannedSections: planned.length,
+      boundSections: null,
+      defects: [],
+      defectCount: 0,
+      evidenceComplete: null,
+      reason: 'no_emission_report_supplied_binding_not_verified',
+    };
+  }
+  const bound = new Set(
+    (emissionReport.assetBindings ?? []).filter((entry) => entry.status === 'bound').map((entry) => entry.sectionId)
+  );
+  const gapBySection = new Map((emissionReport.assetGaps ?? []).map((gap) => [gap.sectionId, gap]));
+  const defects = planned
+    .filter((section) => !bound.has(section.sectionId))
+    .map((section) => {
+      const gap = gapBySection.get(section.sectionId);
+      return {
+        code: gap?.why ?? ASSET_DEFECT_CODE_UNEMITTED,
+        severity: 'defect',
+        ...section,
+        detail: gap?.missingCapability ?? 'planned asset section is absent from the emission report',
+        ...(gap?.gapId ? { gapId: gap.gapId } : {}),
+      };
+    });
+  return {
+    plannedSections: planned.length,
+    boundSections: bound.size,
+    defects,
+    defectCount: defects.length,
+    evidenceComplete: defects.length === 0,
+  };
+}
+
 export function consolidatedGapReport(mapping) {
   const entries = (mapping.pages ?? []).flatMap((page) =>
     (page.gaps ?? []).map((gap) => ({ pageRef: page.pageRef, sourceUrl: page.sourceUrl, ...clone(gap) }))
@@ -349,6 +417,7 @@ export async function scoreCaptureFidelity({
   target,
   projectPolicy = null,
   previewManifest = null,
+  emissionReport = null,
   screenshotRoot = process.cwd(),
 }) {
   if (snapshot?.schemaVersion !== 'snapshot.v1') throw new FidelityError('Scorer requires snapshot.v1.');
@@ -366,6 +435,7 @@ export async function scoreCaptureFidelity({
   const gaps = consolidatedGapReport(mapping);
   const gapsEnumerated = pages.every((page) => page.structural.allGapsEnumerated);
   const visual = await scoreVisuals({ snapshot, mapping, previewManifest, screenshotRoot });
+  const assets = assetBindingEvidence(mapping, emissionReport);
   const rubric = rubricVerdict({ pages, tokensComplete, gapsEnumerated, limits });
   return {
     schemaVersion: FIDELITY_SCHEMA_VERSION,
@@ -390,6 +460,7 @@ export async function scoreCaptureFidelity({
     limits,
     pages,
     visual,
+    ...(assets ? { assets } : {}),
     rubric,
     iterations: [],
     gapReport: gaps,
@@ -466,7 +537,7 @@ export async function runBoundedFidelityIterations({ report, propose, validatePr
 function usage(message) {
   if (message) console.error(`Error: ${message}\n`);
   console.error(
-    'Usage: node packages/core/cli/capture/score.mjs --target <project> --snapshot <snapshot.v1.json> --mapping <capture-map.v1.json> --theme <theme.v1.json> [--project-policy <safe-project-get.json>] [--preview <capture-preview.v1.json>] [--screenshot-root <dir>] --out <fidelity-report.json> [--gap-out <palette-gaps.json>] [--side-by-side <review.html>]'
+    'Usage: node packages/core/cli/capture/score.mjs --target <project> --snapshot <snapshot.v1.json> --mapping <capture-map.v1.json> --theme <theme.v1.json> [--project-policy <safe-project-get.json>] [--preview <capture-preview.v1.json>] [--emission-report <capture-emission-run.json>] [--screenshot-root <dir>] --out <fidelity-report.json> [--gap-out <palette-gaps.json>] [--side-by-side <review.html>]'
   );
   process.exit(message ? 1 : 0);
 }
@@ -493,12 +564,13 @@ async function readJson(file) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const [snapshot, mapping, theme, projectPolicy, previewManifest] = await Promise.all([
+  const [snapshot, mapping, theme, projectPolicy, previewManifest, emissionReport] = await Promise.all([
     readJson(args.snapshot),
     readJson(args.mapping),
     readJson(args.theme),
     args['project-policy'] ? readJson(args['project-policy']) : null,
     args.preview ? readJson(args.preview) : null,
+    args['emission-report'] ? readJson(args['emission-report']) : null,
   ]);
   const report = await scoreCaptureFidelity({
     snapshot,
@@ -507,6 +579,7 @@ async function main() {
     target: args.target,
     projectPolicy,
     previewManifest,
+    emissionReport,
     screenshotRoot: args['screenshot-root'] ? path.resolve(args['screenshot-root']) : process.cwd(),
   });
   await writeFile(path.resolve(args.out), `${JSON.stringify(report, null, 2)}\n`);
@@ -531,11 +604,29 @@ async function main() {
   );
   console.log(
     JSON.stringify(
-      { rubric: report.rubric, visual, defects: report.visual.defects.slice(0, 20), out: path.resolve(args.out) },
+      {
+        rubric: report.rubric,
+        visual,
+        defects: report.visual.defects.slice(0, 20),
+        ...(report.assets
+          ? { assets: { ...report.assets, defects: report.assets.defects.slice(0, 20) } }
+          : {}),
+        out: path.resolve(args.out),
+      },
       null,
       2
     )
   );
+  // Unbound asset evidence exits non-zero on the same terms as missing visual
+  // evidence: the acceptance bar is untouched, but a media-less clone can never
+  // again be mistaken for a complete one.
+  if (report.assets && report.assets.evidenceComplete === false) {
+    console.error(
+      `Asset binding incomplete: ${report.assets.defectCount} defect(s); ` +
+        `${report.assets.boundSections}/${report.assets.plannedSections} planned asset section(s) bound.`
+    );
+    process.exitCode = 3;
+  }
   // Missing visual evidence exits non-zero (T12.10): the 0/34 run must be
   // impossible to mistake for a clean one. The RUBRIC verdict is unaffected —
   // this is the evidence channel, not the acceptance bar.

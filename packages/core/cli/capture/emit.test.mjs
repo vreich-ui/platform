@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildDryRunReport, buildEmissionPlan, captureRequestId, createMcpTransport, EmissionError, executeEmission } from './emit.mjs';
+import {
+  assertAssetFieldsFirstParty,
+  buildDryRunReport,
+  buildEmissionPlan,
+  captureRequestId,
+  createMcpTransport,
+  EmissionError,
+  executeEmission,
+} from './emit.mjs';
 
 async function fixture(name) {
   const directory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -31,6 +40,7 @@ test('fixture dry-run plan is deterministic, complete, and has no transport side
       createIds: plan.creates.map((item) => item.requestedId),
       preflightVerbs: plan.preflight.map((item) => item.verb ?? `resolver:${item.resolver}`),
       mediaCount: plan.media.length,
+      assetPlanCount: plan.assetPlans.length,
       gapCount: plan.gaps.length,
     },
     golden
@@ -46,7 +56,45 @@ function projectPolicy(target = 'fixture-target', rights = { content: 'retain_al
   return { project: { projectId: target, capturePolicy: { rights } } };
 }
 
-function mockTransport({ createFailure, pageRoute = null, pageRouteInDetail = false, recipeSummary = null } = {}) {
+const MEDIA_ALLOWED = { content: 'retain_allowed_origin_content', media: 'retain_referenced_allowed_origin_media' };
+const SUPPORTED_ARTIFACT_KINDS = new Set(['image', 'document']);
+const distinctUploadableAssets = (plan) =>
+  new Set(plan.media.filter((asset) => SUPPORTED_ARTIFACT_KINDS.has(asset.kind)).map((asset) => asset.manifestRef)).size;
+
+/**
+ * T12.14: with media rights PROHIBITED no asset field can be bound, so a
+ * captured `media` recipe cannot be shipped and is quarantined. Every count
+ * assertion below is expressed against this, rather than against a bare
+ * `plan.creates.length`, so it stays true whichever way rights fall.
+ */
+const attemptedCreates = (plan, report) =>
+  plan.creates.length - report.quarantines.filter((item) => item.reason === 'asset_binding_unresolved').length;
+
+/** A well-formed Major-Key reference, the only value the binder accepts. */
+const artifactRefFor = (requestId, seed) =>
+  `image/${requestId}/${createHash('sha256').update(seed).digest('hex')}.jpg`;
+
+/** Every value the section schemas treat as an asset field, wherever it sits. */
+function assetFieldValues(value, found = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => assetFieldValues(item, found));
+    return found;
+  }
+  if (!value || typeof value !== 'object') return found;
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === 'string' && (key === 'src' || /assetref$/i.test(key))) found.push([key, item]);
+    else assetFieldValues(item, found);
+  }
+  return found;
+}
+
+function mockTransport({
+  createFailure,
+  pageRoute = null,
+  pageRouteInDetail = false,
+  recipeSummary = null,
+  artifactBlobKey = null,
+} = {}) {
   const calls = [];
   let failed = false;
   let ordinal = 0;
@@ -63,7 +111,18 @@ function mockTransport({ createFailure, pageRoute = null, pageRouteInDetail = fa
       if (verb === 'object_validate') return { summary: { eligible: true, blockers: [], warnings: [] } };
       if (verb === 'object_get' && args.object_type === 'page' && args.object_id === 'page_existing')
         return { record: { object_id: 'page_existing', body: { route: pageRoute } } };
-      if (verb === 'create_artifact_from_url') return { artifact: { blobKey: `${args.artifactKind}/${args.requestId}/fixture.bin`, portable: false } };
+      if (verb === 'create_artifact_from_url')
+        return {
+          artifact: {
+            blobKey: artifactBlobKey
+              ? artifactBlobKey(args)
+              : artifactRefFor(args.requestId, args.sourceUrl).replace(
+                  /^image\//,
+                  args.artifactKind === 'doc' ? 'pdf/' : 'image/'
+                ),
+            portable: false,
+          },
+        };
       if (verb === 'object_create') {
         if (createFailure && !failed) {
           failed = true;
@@ -93,7 +152,7 @@ test('live emission binds exactly to the named project and orders all governed c
   ]);
   assert.equal(report.siteId, 'site_fixture');
   assert.equal(report.copyPolicy.mode, 'keep_extracted');
-  assert.equal(report.createdObjects.length, plan.creates.length);
+  assert.equal(report.createdObjects.length, attemptedCreates(plan, report));
   assert.ok(report.createdObjects.every((item) => item.published_time === null));
   assert.ok(report.trace.every((item) => !['object_publish', 'release_to_production', 'trigger_netlify_build', 'deploy'].includes(item.verb)));
   const firstCreate = transport.calls.findIndex((call) => call.verb === 'object_create');
@@ -108,7 +167,7 @@ test('ambiguous create retries exactly once with the same idempotency key', asyn
   const transport = mockTransport({ createFailure: true });
   const report = await executeEmission({ plan, mapping: await fixture('zilberman.mapping.v1.redacted.json'), transport, projectPolicyResolver: async (target) => projectPolicy(target) });
   const creates = transport.calls.filter((call) => call.verb === 'object_create');
-  assert.equal(creates.length, plan.creates.length + 1);
+  assert.equal(creates.length, attemptedCreates(plan, report) + 1);
   assert.equal(creates[0].args.idempotency_key, creates[1].args.idempotency_key);
   assert.ok(report.trace.some((entry) => entry.retry === 'same_idempotency_key'));
 });
@@ -178,7 +237,7 @@ test('media is deduped, hash-enriched, scoped to its owning page, and portable f
     assetProbe: async () => ({ contentType: 'image/jpeg', expectedSizeBytes: 12, expectedSha256: 'a'.repeat(64) }),
   });
   const uploads = transport.calls.filter((call) => call.verb === 'create_artifact_from_url');
-  assert.equal(uploads.length, new Set(plan.media.map((asset) => asset.manifestRef)).size);
+  assert.equal(uploads.length, distinctUploadableAssets(plan));
   assert.ok(uploads.every((call) => /^req_capture_zilberman_20260813_\d{2}$/.test(call.args.requestId)));
   assert.ok(uploads.some((call) => call.args.artifactKind === 'doc'));
   assert.equal(report.createdArtifacts.length, uploads.length);
@@ -199,9 +258,12 @@ test('a create response with no explicit null publication state is quarantined, 
     return original(verb, args);
   };
   const report = await executeEmission({ plan, mapping: await fixture('zilberman.mapping.v1.redacted.json'), transport, projectPolicyResolver: async (target) => projectPolicy(target) });
-  assert.equal(report.createdObjects.length, plan.creates.length);
+  assert.equal(report.createdObjects.length, attemptedCreates(plan, report));
   assert.ok(report.createdObjects.every((item) => item.draftVerified === false));
-  assert.equal(report.quarantines.filter((item) => item.reason === 'not_draft_only_response').length, plan.creates.length);
+  assert.equal(
+    report.quarantines.filter((item) => item.reason === 'not_draft_only_response').length,
+    report.createdObjects.length
+  );
 });
 
 test('precreate and postcreate validation fail closed on live summary shape', async () => {
@@ -215,7 +277,10 @@ test('precreate and postcreate validation fail closed on live summary shape', as
   };
   const preReport = await executeEmission({ plan, mapping, transport: preTransport, projectPolicyResolver: async (target) => projectPolicy(target) });
   assert.equal(preTransport.calls.filter((call) => call.verb === 'object_create').length, 0);
-  assert.equal(preReport.quarantines.filter((item) => item.reason === 'validation_or_create_failed').length, plan.creates.length);
+  assert.equal(
+    preReport.quarantines.filter((item) => item.reason === 'validation_or_create_failed').length,
+    attemptedCreates(plan, preReport)
+  );
 
   const postTransport = mockTransport();
   const postOriginal = postTransport.call.bind(postTransport);
@@ -224,8 +289,11 @@ test('precreate and postcreate validation fail closed on live summary shape', as
     return postOriginal(verb, args);
   };
   const postReport = await executeEmission({ plan, mapping, transport: postTransport, projectPolicyResolver: async (target) => projectPolicy(target) });
-  assert.equal(postReport.createdObjects.length, plan.creates.length);
-  assert.equal(postReport.quarantines.filter((item) => item.reason === 'postcreate_validation_failed').length, plan.creates.length);
+  assert.equal(postReport.createdObjects.length, attemptedCreates(plan, postReport));
+  assert.equal(
+    postReport.quarantines.filter((item) => item.reason === 'postcreate_validation_failed').length,
+    postReport.createdObjects.length
+  );
   assert.ok(postReport.validationStates.filter((item) => item.phase === 'postcreate').every((item) => item.valid === false));
 });
 
@@ -260,4 +328,157 @@ test('HTTP transport sends only MCP tools/call envelopes to the exact supplied e
   });
   await assert.rejects(() => transport.call('object_publish', {}), /Forbidden emission verb/);
   assert.equal(requests.length, 1);
+});
+
+// ─── T12.14 acceptance ───────────────────────────────────────────────────────
+
+test('materialized artifacts bind into the schema asset fields, first-party only', async () => {
+  const plan = await fixturePlan();
+  assert.ok(plan.assetPlans.length > 0, 'the fixture must exercise the asset-binding path');
+  const transport = mockTransport();
+  const report = await executeEmission({
+    plan,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: async (sourceUrl) => ({
+      contentType: 'image/jpeg',
+      expectedSizeBytes: 12,
+      expectedSha256: createHash('sha256').update(sourceUrl).digest('hex'),
+    }),
+  });
+
+  // Artifacts are materialized BEFORE anything is created — a section cannot be
+  // bound to bytes that do not exist yet.
+  const firstUpload = transport.calls.findIndex((call) => call.verb === 'create_artifact_from_url');
+  const firstCreate = transport.calls.findIndex((call) => call.verb === 'object_create');
+  assert.ok(firstUpload >= 0 && firstCreate > firstUpload);
+
+  assert.equal(report.assetGaps.length, 0);
+  // Every planned section bound, plus the repeated-media section_template recipe
+  // whose blueprint is one of those sections.
+  assert.equal(
+    report.assetBindings.filter((entry) => entry.objectType !== 'section_template').length,
+    plan.assetPlans.length
+  );
+  assert.equal(report.assetBindings.filter((entry) => entry.objectType === 'section_template').length, 1);
+  assert.ok(report.assetBindings.every((entry) => entry.status === 'bound'));
+  assert.deepEqual(
+    report.mediaPolicy.mediaRetention,
+    'retain_referenced_allowed_origin_media'
+  );
+
+  // Every asset value that reached the wire is a served first-party path (or, for
+  // the *AssetRef idiom, a Major-Key reference) — never a source URL.
+  const createdBodies = transport.calls.filter((call) => call.verb === 'object_create').map((call) => call.args.body);
+  const assetValues = assetFieldValues(createdBodies);
+  assert.ok(assetValues.length > 0, 'at least one asset field must have been emitted');
+  for (const [key, value] of assetValues) {
+    if (/assetref$/i.test(key)) assert.match(value, /^(image|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i);
+    else assert.match(value, /^\/(img|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i);
+  }
+  // …and no source-origin host appears anywhere in any created body.
+  const wire = JSON.stringify(createdBodies);
+  assert.equal(wire.includes('static.wixstatic.com'), false);
+  assert.equal(wire.includes('zilbermanfilmfoundation.com'), false);
+});
+
+test('a source-origin or third-party URL can never reach an asset field: it quarantines', async () => {
+  // The hostile case: an artifact bridge (or a tampered plan) answers with the
+  // SOURCE URL instead of a first-party artifact reference. Every planned section
+  // must quarantine, no page may carry the URL, and nothing may be coerced.
+  const hostileKeys = [
+    (args) => args.sourceUrl,
+    () => 'https://static.wixstatic.com/media/944663_hostile~mv2.jpg',
+    () => 'data:image/jpeg;base64,AAAA',
+    () => 'src/assets/hostile.jpg',
+    () => '',
+  ];
+  for (const artifactBlobKey of hostileKeys) {
+    const plan = await fixturePlan();
+    const transport = mockTransport({ artifactBlobKey });
+    const report = await executeEmission({
+      plan,
+      transport,
+      projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+      assetProbe: async (sourceUrl) => ({
+        contentType: 'image/jpeg',
+        expectedSizeBytes: 12,
+        expectedSha256: createHash('sha256').update(sourceUrl).digest('hex'),
+      }),
+    });
+    assert.equal(report.assetBindings.length, 0);
+    assert.equal(report.assetGaps.filter((gap) => gap.pageRef).length, plan.assetPlans.length);
+    assert.ok(report.assetGaps.every((gap) => gap.why === 'asset_binding_unresolved'));
+    assert.ok(report.quarantines.some((item) => item.reason === 'artifact_reference_not_bindable'));
+    const wire = JSON.stringify(transport.calls.filter((call) => call.verb === 'object_create'));
+    assert.equal(wire.includes('static.wixstatic.com'), false);
+    assert.equal(wire.includes('data:image'), false);
+    assert.equal(wire.includes('src/assets/'), false);
+    // No half-bound section survived: not one asset field reached the wire.
+    assert.deepEqual(
+      assetFieldValues(transport.calls.filter((call) => call.verb === 'object_create').map((call) => call.args.body)),
+      []
+    );
+  }
+});
+
+test('the final barrier refuses a coerced asset field even if binding were bypassed', () => {
+  // Defence in depth: `assertAssetFieldsFirstParty` guards EVERY body reaching
+  // object_create, so a future code path (or a model adapter rewriting copy)
+  // cannot introduce a hotlink without a thrown EmissionError.
+  for (const hostile of [
+    { sections: [{ id: 's', type: 'media', data: { items: [{ kind: 'image', src: 'https://cdn.example.com/a.jpg', alt: 'a' }] } }] },
+    { sections: [{ id: 's', type: 'bio', data: { portrait: { src: '/images/a.jpg', alt: 'a' } } }] },
+    { sections: [{ id: 's', type: 'bio', data: { portraitAssetRef: 'https://cdn.example.com/a.jpg' } }] },
+    { sections: [{ id: 's', type: 'brand_row', data: { logos: [{ src: 'src/assets/a.png', alt: 'a' }] } }] },
+  ]) {
+    assert.throws(() => assertAssetFieldsFirstParty(hostile), (error) => error instanceof EmissionError && /first-party/.test(error.message));
+  }
+  // Legitimate captured content is untouched: an external link target is not an
+  // asset field, and a bound first-party path passes.
+  assertAssetFieldsFirstParty({
+    sections: [
+      { id: 's1', type: 'cta_banner', data: { actions: [{ label: 'Donate', target: { kind: 'external', href: 'https://justgiving.com/x' } }] } },
+      {
+        id: 's2',
+        type: 'media',
+        data: { items: [{ kind: 'image', src: `/img/req_capture_x_20260817_01/${'a'.repeat(64)}.jpg`, alt: 'a' }] },
+      },
+    ],
+  });
+});
+
+test('a prohibited-media policy emits zero media and records the gap', async () => {
+  const plan = await fixturePlan();
+  const transport = mockTransport();
+  const report = await executeEmission({
+    plan,
+    transport,
+    projectPolicyResolver: async (target) =>
+      projectPolicy(target, { content: 'retain_allowed_origin_content', media: 'prohibited' }),
+  });
+  // Not one artifact call was made, and not one asset field was bound.
+  assert.equal(transport.calls.filter((call) => call.verb === 'create_artifact_from_url').length, 0);
+  assert.equal(report.createdArtifacts.length, 0);
+  assert.equal(report.assetBindings.length, 0);
+  assert.deepEqual(report.mediaPolicy, {
+    mediaRetention: 'prohibited',
+    materialized: 0,
+    declined: plan.media.length,
+  });
+  // Every planned asset section is a recorded gap, never a coerced or empty one.
+  assert.equal(report.assetGaps.filter((gap) => gap.pageRef).length, plan.assetPlans.length);
+  assert.ok(report.assetGaps.every((gap) => gap.why === 'asset_binding_unresolved' && gap.gapId && gap.sectionId));
+  // A repeated media shape became a section_template recipe; with no bindable
+  // asset it is quarantined rather than shipped with an empty gallery.
+  assert.ok(
+    report.quarantines.some(
+      (item) => item.objectType === 'section_template' && item.reason === 'asset_binding_unresolved'
+    )
+  );
+  const createdBodies = transport.calls.filter((call) => call.verb === 'object_create').map((call) => call.args.body);
+  assert.deepEqual(assetFieldValues(createdBodies), []);
+  const wire = JSON.stringify(createdBodies);
+  assert.equal(wire.includes('AssetRef'), false);
+  assert.equal(wire.includes('static.wixstatic.com'), false);
 });

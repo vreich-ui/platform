@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
 import {
+  ASSET_DEFECT_CODE_UNEMITTED,
   DEFAULT_FIDELITY_LIMITS,
   FidelityError,
   VISUAL_DEFECT_CODES,
@@ -61,9 +62,12 @@ test('fixture score is deterministic and records the ratified coverage-based rub
   assert.equal(first.source.capturePolicy.designReferences[0].origin, 'https://prconsulting.net');
   assert.equal(first.source.capturePolicy.designReferences[0].crawlAllowed, false);
   assert.equal(first.rubric.verdict, 'needs_governed_iteration');
+  // T12.14 raised this from 3/19 = 15.79% to 10/19 = 52.63% by binding media
+  // blocks instead of declining them. The bar is untouched at 90%: the verdict
+  // is still `needs_governed_iteration`, and the residue is still enumerated.
   assert.deepEqual(first.rubric.coverage, {
-    score: 0.1579,
-    mappedBlocks: 3,
+    score: 0.5263,
+    mappedBlocks: 10,
     relevantBlocks: 19,
     minimum: 0.9,
     met: false,
@@ -319,4 +323,59 @@ test('a preview manifest that names no screenshot leaves every comparison a defe
   assert.ok(
     report.visual.defects.some((defect) => defect.code === VISUAL_DEFECT_CODES.draft_preview_screenshot_not_available)
   );
+});
+
+// ─── T12.14 asset-binding evidence ───────────────────────────────────────────
+
+test('unbound asset sections are enumerated defects and the rubric is untouched', async () => {
+  const mapping = await fixture('zilberman.mapping.v1.redacted.json');
+  const planned = mapping.pages.flatMap((page) => page.candidates.filter((candidate) => candidate.assetPlan));
+  assert.equal(planned.length, 7);
+
+  // Without an emission report the binding is simply not verified — reported as
+  // such, never as clean.
+  const unverified = await scoreFixture();
+  assert.equal(unverified.assets.plannedSections, 7);
+  assert.equal(unverified.assets.evidenceComplete, null);
+  assert.equal(unverified.assets.reason, 'no_emission_report_supplied_binding_not_verified');
+
+  // A run where nothing bound: every planned section is a DEFECT carrying the
+  // emitter's own reason, and the acceptance rubric is byte-identical.
+  const nothingBound = await scoreFixture({
+    emissionReport: {
+      assetBindings: [],
+      assetGaps: planned.map((candidate) => ({
+        gapId: `gap_${candidate.candidateId}`,
+        sectionId: candidate.section.id,
+        why: 'asset_binding_unresolved',
+        missingCapability: '0/1 planned asset(s) resolved to a first-party artifact path',
+      })),
+    },
+  });
+  assert.equal(nothingBound.assets.evidenceComplete, false);
+  assert.equal(nothingBound.assets.defectCount, 7);
+  assert.equal(nothingBound.assets.boundSections, 0);
+  assert.ok(
+    nothingBound.assets.defects.every(
+      (defect) => defect.severity === 'defect' && defect.code === 'asset_binding_unresolved' && defect.gapId
+    )
+  );
+  assert.deepEqual(nothingBound.rubric, unverified.rubric);
+
+  // A run where everything bound: evidence complete, still no rubric movement.
+  const allBound = await scoreFixture({
+    emissionReport: {
+      assetBindings: planned.map((candidate) => ({ sectionId: candidate.section.id, status: 'bound' })),
+      assetGaps: [],
+    },
+  });
+  assert.equal(allBound.assets.evidenceComplete, true);
+  assert.equal(allBound.assets.defectCount, 0);
+  assert.equal(allBound.assets.boundSections, 7);
+  assert.deepEqual(allBound.rubric, unverified.rubric);
+
+  // A section emission never mentioned at all is still a defect, not a silence.
+  const silent = await scoreFixture({ emissionReport: { assetBindings: [], assetGaps: [] } });
+  assert.equal(silent.assets.defectCount, 7);
+  assert.ok(silent.assets.defects.every((defect) => defect.code === ASSET_DEFECT_CODE_UNEMITTED));
 });

@@ -9,6 +9,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+  bindSectionAssets,
+  FIRST_PARTY_ASSET_PATH_RE,
+  MAJOR_KEY_ARTIFACT_REF_RE,
+} from './map.mjs';
 import { parseCaptureRights, readProjectCapturePolicy } from './snapshot-v1.mjs';
 
 const FORBIDDEN_VERBS = new Set(['object_publish', 'release_to_production', 'trigger_netlify_build', 'deploy']);
@@ -193,21 +198,38 @@ export function buildEmissionPlan({ target, mapping, theme, repeatThreshold = 2 
         'Mapped navigation candidate.'
       )
     ),
-    ...(mapping.pages ?? []).map((page) =>
-      createPlan(
+    ...(mapping.pages ?? []).map((page) => ({
+      ...createPlan(
         'page',
         'page',
         target,
         requestedId('page_capture', target, page.pageRef),
         clone(page.pageBody),
         `Mapped page ${page.sourceUrl}; route availability is probed before creation.`
-      )
-    ),
+      ),
+      pageRef: page.pageRef,
+    })),
   ];
   const media = (mapping.pages ?? []).flatMap((page) =>
     (page.candidates ?? []).flatMap((candidate) =>
       (candidate.assetBindings ?? []).map((asset) => ({ pageRef: page.pageRef, candidateId: candidate.candidateId, ...asset }))
     )
+  );
+  // T12.14: the mapper's pending asset sections, carried onto the plan so the
+  // binding step is inspectable in a dry run and executable in a live one. Each
+  // entry names a section and the manifest identities + alt text it needs; it
+  // carries NO source URL, so no code path from here can produce a hotlink.
+  const assetPlans = (mapping.pages ?? []).flatMap((page) =>
+    (page.candidates ?? [])
+      .filter((candidate) => candidate.assetPlan)
+      .map((candidate) => ({
+        pageRef: page.pageRef,
+        candidateId: candidate.candidateId,
+        sectionId: candidate.section.id,
+        sectionType: candidate.sectionType,
+        target: candidate.assetPlan.target,
+        entries: candidate.assetPlan.entries.map((entry) => ({ manifestRef: entry.manifestRef, alt: entry.alt })),
+      }))
   );
   return {
     schemaVersion: 'capture-emission-plan.v1',
@@ -232,9 +254,98 @@ export function buildEmissionPlan({ target, mapping, theme, repeatThreshold = 2 
     ],
     creates,
     media,
+    assetPlans,
     gaps: (mapping.pages ?? []).flatMap((page) => page.gaps ?? []),
     forbiddenVerbs: [...FORBIDDEN_VERBS].sort(),
   };
+}
+
+/**
+ * Bind materialized artifacts into a page (or section-template) body's asset
+ * fields.
+ *
+ * `resolveArtifactRef(manifestRef)` returns the Major-Key reference of the
+ * MATERIALIZED artifact, or null. `bindSectionAssets` (map.mjs) derives the
+ * served first-party path itself and accepts nothing else — so a source-origin
+ * or third-party URL cannot reach an asset field even if one were smuggled onto
+ * a plan. A section whose plan cannot be satisfied is REMOVED from the body and
+ * returned as a gap; it is never emitted half-bound, never coerced, and never
+ * hotlinked.
+ */
+export function bindBodyAssets(body, plans, resolveArtifactRef) {
+  const sections = Array.isArray(body?.sections) ? body.sections : null;
+  if (!sections || plans.length === 0) return { body, bound: [], gaps: [] };
+  const plansById = new Map(plans.map((plan) => [plan.sectionId, plan]));
+  const bound = [];
+  const gaps = [];
+  const kept = [];
+  for (const section of sections) {
+    const plan = plansById.get(section.id);
+    if (!plan) {
+      kept.push(section);
+      continue;
+    }
+    const outcome = bindSectionAssets(section, plan, resolveArtifactRef);
+    if (outcome.error) {
+      gaps.push({
+        gapId: `gap_${sha(`${plan.sectionId}:${outcome.error.code}`, 12)}`,
+        blockRef: plan.candidateId,
+        sectionId: plan.sectionId,
+        pageRef: plan.pageRef,
+        why: outcome.error.code,
+        nearestType: plan.sectionType,
+        missingCapability: outcome.error.detail,
+        ...(outcome.error.unresolved ? { unresolved: outcome.error.unresolved } : {}),
+      });
+      continue;
+    }
+    kept.push(outcome.section);
+    bound.push({
+      sectionId: plan.sectionId,
+      sectionType: plan.sectionType,
+      target: plan.target,
+      manifestRefs: outcome.bound.map((item) => item.manifestRef),
+      artifactRefs: outcome.bound.map((item) => item.artifactRef),
+    });
+  }
+  return { body: { ...body, sections: kept }, bound, gaps };
+}
+
+/**
+ * The last line of defence, applied to every body that reaches `object_create`.
+ *
+ * A POSITIVE allowlist over asset-carrying keys: an image `src` must be the
+ * served first-party artifact path and an `*AssetRef` must be a Major-Key
+ * artifact reference — nothing else is a legal value, so a source-origin or
+ * third-party URL is rejected by shape rather than by blocklist. Ordinary link
+ * targets are untouched: an external `href` in a nav item or a `cta_banner`
+ * action is legitimate captured content and is not an asset field.
+ *
+ * Reaching this throw would be a code defect, not a content problem; throwing
+ * turns that defect into a quarantine instead of a hotlink in the store.
+ */
+const ASSET_REF_KEY_RE = /assetref$/i;
+export function assertAssetFieldsFirstParty(value, path = 'body') {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertAssetFieldsFirstParty(item, `${path}.${index}`));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    const at = `${path}.${key}`;
+    if (typeof item === 'string' && (key === 'src' || ASSET_REF_KEY_RE.test(key))) {
+      const legal = ASSET_REF_KEY_RE.test(key)
+        ? MAJOR_KEY_ARTIFACT_REF_RE.test(item)
+        : FIRST_PARTY_ASSET_PATH_RE.test(item);
+      if (!legal) {
+        throw new EmissionError(
+          `${at} is not a first-party artifact value ("${item}"); capture may never emit a hotlink or a coerced asset field.`
+        );
+      }
+      continue;
+    }
+    assertAssetFieldsFirstParty(item, at);
+  }
 }
 
 export const buildDryRunReport = (plan) => ({
@@ -431,9 +542,24 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
     createdArtifacts: [],
     validationStates: [],
     quarantines: [],
+    assetBindings: [],
+    assetGaps: [],
     gapReportRefs: plan.gaps,
     trace,
   };
+
+  // T12.14: artifacts are materialized BEFORE any object is created, because a
+  // materialized first-party artifact reference is the only legal value an asset
+  // field can hold. Sections whose plan cannot be satisfied are dropped from
+  // their body below and recorded in `assetGaps` — never hotlinked, never
+  // half-bound, never a widened schema.
+  const artifactRefs = await materializeMedia({ plan, transport, capturePolicy, assetProbe, report, trace });
+  const resolveArtifactRef = (manifestRef) => artifactRefs.get(manifestRef) ?? null;
+  const assetPlansByPage = new Map();
+  for (const assetPlan of plan.assetPlans ?? []) {
+    assetPlansByPage.set(assetPlan.pageRef, [...(assetPlansByPage.get(assetPlan.pageRef) ?? []), assetPlan]);
+  }
+  const allAssetPlans = plan.assetPlans ?? [];
 
   for (const operation of plan.creates) {
     if (FORBIDDEN_VERBS.has(operation.verb)) throw new EmissionError('Plan attempted a forbidden verb.');
@@ -460,6 +586,49 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
       continue;
     }
     let body = clone(operation.body);
+    // Bind materialized artifacts into this body's asset fields. A page binds its
+    // own page's plans; a section_template's blueprint is a single section, so it
+    // is bound (or quarantined) as a whole — an unbindable recipe is not shipped
+    // with an empty gallery.
+    if (operation.objectType === 'page') {
+      const bindingResult = bindBodyAssets(body, assetPlansByPage.get(operation.pageRef) ?? [], resolveArtifactRef);
+      body = bindingResult.body;
+      report.assetBindings.push(
+        ...bindingResult.bound.map((entry) => ({ ...entry, pageRef: operation.pageRef, status: 'bound' }))
+      );
+      report.assetGaps.push(...bindingResult.gaps);
+    } else if (operation.objectType === 'section_template' && body.blueprint?.id) {
+      const blueprintPlan = allAssetPlans.find((entry) => entry.sectionId === body.blueprint.id);
+      if (blueprintPlan) {
+        const outcome = bindSectionAssets(body.blueprint, blueprintPlan, resolveArtifactRef);
+        if (outcome.error) {
+          report.assetGaps.push({
+            gapId: `gap_${sha(`${blueprintPlan.sectionId}:template:${outcome.error.code}`, 12)}`,
+            blockRef: blueprintPlan.candidateId,
+            sectionId: blueprintPlan.sectionId,
+            why: outcome.error.code,
+            nearestType: blueprintPlan.sectionType,
+            missingCapability: outcome.error.detail,
+          });
+          report.quarantines.push({
+            requestedId: operation.requestedId,
+            objectType: 'section_template',
+            reason: 'asset_binding_unresolved',
+          });
+          continue;
+        }
+        body = { ...body, blueprint: outcome.section };
+        report.assetBindings.push({
+          sectionId: blueprintPlan.sectionId,
+          sectionType: blueprintPlan.sectionType,
+          target: blueprintPlan.target,
+          manifestRefs: outcome.bound.map((item) => item.manifestRef),
+          artifactRefs: outcome.bound.map((item) => item.artifactRef),
+          objectType: 'section_template',
+          status: 'bound',
+        });
+      }
+    }
     if (copyPolicy.mode === 'regenerate' && operation.objectType !== 'theme') {
       body = await modelAdapter.regenerateBody({ body, objectType: operation.objectType, target: plan.target, source: plan.source });
       if (!body || typeof body !== 'object') throw new EmissionError('Model adapter returned no replacement body.');
@@ -467,6 +636,10 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
     const candidate = { object_type: operation.objectType, body, requested_id: operation.requestedId };
     let createdObjectId = null;
     try {
+      // Every asset value that reaches the wire must be first-party by SHAPE.
+      // This runs after copy regeneration too: a model adapter cannot smuggle an
+      // image URL into a body either.
+      assertAssetFieldsFirstParty(body, `${operation.requestedId}.body`);
       // Contract-required candidate validation against the exact deterministic
       // id that object_create will use. This catches both body blockers and id
       // collisions without creating anything.
@@ -522,48 +695,80 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
     }
   }
 
-  // Artifact ingestion is optional and only runs when the target policy says
-  // media rights allow it AND the map supplies verified URL metadata.  No
-  // placeholder URLs, portable:false references, or fabricated checksums.
-  if (canRetainMedia(capturePolicy)) {
-    const probe = assetProbe ?? createAssetProbe();
-    const seen = new Set();
-    let lastAssetStartedAt = 0;
-    const assetDelayMs = Number.isInteger(capturePolicy.delayMs) && capturePolicy.delayMs >= 0 ? capturePolicy.delayMs : 0;
-    for (const asset of plan.media) {
-      if (seen.has(asset.manifestRef)) continue;
-      seen.add(asset.manifestRef);
-      const artifactKind = artifactKindForCapture(asset.kind);
-      if (!artifactKind) { report.quarantines.push({ asset: asset.manifestRef, reason: 'unsupported_media_kind' }); continue; }
-      const remainingDelay = assetDelayMs - (Date.now() - lastAssetStartedAt);
-      if (remainingDelay > 0) await new Promise((resolve) => setTimeout(resolve, remainingDelay));
-      lastAssetStartedAt = Date.now();
-      let resolved = asset;
-      if (!asset.contentType || !Number.isInteger(asset.expectedSizeBytes) || !/^[a-f0-9]{64}$/i.test(asset.expectedSha256 ?? '')) {
-        resolved = { ...asset, ...(await probe(asset.sourceUrl)) };
-      }
-      if (
-        !resolved.contentType ||
-        (artifactKind === 'image' && !resolved.contentType.startsWith('image/')) ||
-        !Number.isInteger(resolved.expectedSizeBytes) ||
-        !/^[a-f0-9]{64}$/i.test(resolved.expectedSha256 ?? '')
-      ) {
-        report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_metadata_missing' }); continue;
-      }
-      try {
-        const requestId = captureRequestId(plan, asset.pageRef);
-        const artifact = await transport.call('create_artifact_from_url', {
-          requestId,
-          artifactKind, contentType: resolved.contentType, sourceUrl: resolved.sourceUrl,
-          expectedSizeBytes: resolved.expectedSizeBytes, expectedSha256: resolved.expectedSha256,
-        });
-        const value = payload(artifact);
-        report.createdArtifacts.push({ manifestRef: asset.manifestRef, requestId, artifact: value.artifact ?? value });
-        trace.push({ verb: 'create_artifact_from_url', asset: asset.manifestRef });
-      } catch (error) { report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_ingest_failed', error: String(error.message) }); }
-    }
-  }
   return report;
+}
+
+/**
+ * Artifact ingestion. Runs when the target policy says media rights allow it AND
+ * the map supplies verified URL metadata.  No placeholder URLs, portable:false
+ * references, or fabricated checksums.
+ *
+ * T12.14 moved this AHEAD of object creation: an artifact reference is the only
+ * legal value for an asset field, so nothing can be bound until the bytes are
+ * first-party. Returns the manifestRef → Major-Key reference map the binder uses;
+ * an artifact whose bridge response carries no well-formed reference is recorded
+ * and simply never enters the map, so its section quarantines.
+ */
+async function materializeMedia({ plan, transport, capturePolicy, assetProbe, report, trace }) {
+  const artifactRefs = new Map();
+  if (!canRetainMedia(capturePolicy)) {
+    if (plan.media.length > 0) {
+      report.mediaPolicy = { mediaRetention: 'prohibited', materialized: 0, declined: plan.media.length };
+    }
+    return artifactRefs;
+  }
+  const probe = assetProbe ?? createAssetProbe();
+  const seen = new Set();
+  let lastAssetStartedAt = 0;
+  const assetDelayMs = Number.isInteger(capturePolicy.delayMs) && capturePolicy.delayMs >= 0 ? capturePolicy.delayMs : 0;
+  for (const asset of plan.media) {
+    if (seen.has(asset.manifestRef)) continue;
+    seen.add(asset.manifestRef);
+    const artifactKind = artifactKindForCapture(asset.kind);
+    if (!artifactKind) { report.quarantines.push({ asset: asset.manifestRef, reason: 'unsupported_media_kind' }); continue; }
+    const remainingDelay = assetDelayMs - (Date.now() - lastAssetStartedAt);
+    if (remainingDelay > 0) await new Promise((resolve) => setTimeout(resolve, remainingDelay));
+    lastAssetStartedAt = Date.now();
+    let resolved = asset;
+    if (!asset.contentType || !Number.isInteger(asset.expectedSizeBytes) || !/^[a-f0-9]{64}$/i.test(asset.expectedSha256 ?? '')) {
+      resolved = { ...asset, ...(await probe(asset.sourceUrl)) };
+    }
+    if (
+      !resolved.contentType ||
+      (artifactKind === 'image' && !resolved.contentType.startsWith('image/')) ||
+      !Number.isInteger(resolved.expectedSizeBytes) ||
+      !/^[a-f0-9]{64}$/i.test(resolved.expectedSha256 ?? '')
+    ) {
+      report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_metadata_missing' }); continue;
+    }
+    try {
+      const requestId = captureRequestId(plan, asset.pageRef);
+      const artifact = await transport.call('create_artifact_from_url', {
+        requestId,
+        artifactKind, contentType: resolved.contentType, sourceUrl: resolved.sourceUrl,
+        expectedSizeBytes: resolved.expectedSizeBytes, expectedSha256: resolved.expectedSha256,
+      });
+      const value = payload(artifact);
+      const reference = value.artifact ?? value;
+      report.createdArtifacts.push({ manifestRef: asset.manifestRef, requestId, artifact: reference });
+      trace.push({ verb: 'create_artifact_from_url', asset: asset.manifestRef });
+      // Only a well-formed Major-Key reference becomes bindable. A bridge that
+      // answered with a URL, a bare filename, or nothing at all leaves this
+      // asset unresolvable — which quarantines its section instead of
+      // hotlinking, and is recorded as a reason.
+      if (MAJOR_KEY_ARTIFACT_REF_RE.test(reference?.blobKey ?? '')) {
+        artifactRefs.set(asset.manifestRef, reference.blobKey);
+      } else {
+        report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_reference_not_bindable' });
+      }
+    } catch (error) { report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_ingest_failed', error: String(error.message) }); }
+  }
+  report.mediaPolicy = {
+    mediaRetention: 'retain_referenced_allowed_origin_media',
+    materialized: artifactRefs.size,
+    declined: seen.size - artifactRefs.size,
+  };
+  return artifactRefs;
 }
 
 async function main() {

@@ -5,6 +5,7 @@
   "createKinds": [
     "theme",
     "section_template",
+    "section_template",
     "navigation",
     "navigation",
     "page",
@@ -16,6 +17,7 @@
   "createIds": [
     "thm_capture_3a980f55e7a9df2378",
     "stpl_capture_7ebf831f7132fd3409",
+    "stpl_capture_895c6e31f08c25d2f2",
     "nav_capture_b9cfafd65ac61976c1",
     "nav_capture_e1b3d6b6cd9d58f1f0",
     "page_capture_0dab20cec74b87733e",
@@ -36,6 +38,7 @@
     "object_inventory",
     "object_get"
   ],
-  "mediaCount": 1,
-  "gapCount": 17
+  "mediaCount": 48,
+  "assetPlanCount": 7,
+  "gapCount": 14
 }

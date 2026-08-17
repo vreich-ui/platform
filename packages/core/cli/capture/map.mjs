@@ -19,6 +19,177 @@ export const CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS = {
   standard: 'any',
 };
 
+// ─── T12.14 asset-aware mapping ──────────────────────────────────────────────
+//
+// Media blocks used to be DECLINED outright: the mapper had no way to put an
+// image into a section, so a gallery became a gap and every emitted clone came
+// out text-only. The section types it needs already exist (`media`,
+// `content_split`, `brand_row`, `bio`); what was missing is the two-phase
+// binding below.
+//
+// PHASE 1 (here, deterministic, offline): a media-shaped block becomes a real
+// candidate whose section data is complete EXCEPT for its asset field, plus an
+// `assetPlan` naming the field and carrying, per item, the source asset's
+// manifest identity and its OWN alt text. The plan deliberately carries NO
+// source URL — a hotlink is unreachable from the binder by construction.
+//
+// PHASE 2 (emit.mjs, online): the emitter materializes each planned asset as a
+// first-party artifact and calls `bindSectionAssets`, which accepts ONLY a
+// Major-Key artifact reference and derives the served first-party path itself.
+// An asset that is not materialized cannot be bound, so the section is dropped
+// and the gap stays recorded. Never a hotlink, never a coerced field.
+export const CONTENT_SPLIT_MAX_IMAGES = 2;
+export const MEDIA_MAX_ITEMS = 8;
+export const BRAND_ROW_MIN_LOGOS = 2;
+export const BRAND_ROW_MAX_LOGOS = 8;
+/** `capturePolicy.rights.media` value that permits retaining source media. */
+export const MEDIA_RETENTION_RIGHT = 'retain_referenced_allowed_origin_media';
+/** A body shorter than this is a label, not copy a section has to preserve. */
+export const SUBSTANTIVE_BODY_MIN_CHARS = 40;
+
+/**
+ * A Major Key artifact reference, mirrored EXACTLY from the engine's
+ * `MAJOR_KEY_ARTIFACT_REF_RE` (packages/core/server/lib/artifact-trust.ts) so
+ * that anything this mapper produces is something `validateObject` accepts, and
+ * nothing wider.
+ */
+export const MAJOR_KEY_ARTIFACT_REF_RE = /^(image|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i;
+/** The ONLY shape an emitted asset field may carry: the served first-party path. */
+export const FIRST_PARTY_ASSET_PATH_RE = /^\/(img|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i;
+
+/**
+ * The served first-party path for a materialized artifact — the inverse of the
+ * `/img/*` and `/pdf/*` redirects (artifact-trust.ts `publicPathForArtifactRef`).
+ *
+ * THIS IS THE HOTLINK GUARD. The only input it accepts is a Major-Key artifact
+ * reference; a source-origin URL, a third-party URL, a `data:` URI, a repo path
+ * and a bare filename all fail `MAJOR_KEY_ARTIFACT_REF_RE` and return null. The
+ * binder below has no other way to obtain a value for an asset field, so an
+ * un-materialized asset can only ever quarantine.
+ */
+export function firstPartyAssetPath(artifactRef) {
+  if (typeof artifactRef !== 'string' || !MAJOR_KEY_ARTIFACT_REF_RE.test(artifactRef)) return null;
+  const path = artifactRef.startsWith('pdf/')
+    ? `/pdf/${artifactRef.slice('pdf/'.length)}`
+    : `/img/${artifactRef.slice('image/'.length)}`;
+  return FIRST_PARTY_ASSET_PATH_RE.test(path) ? path : null;
+}
+
+/** Per-field cardinality, mirrored from the live section schemas. */
+export const ASSET_FIELD_BOUNDS = {
+  items: { min: 1, max: MEDIA_MAX_ITEMS },
+  images: { min: 1, max: CONTENT_SPLIT_MAX_IMAGES },
+  logos: { min: BRAND_ROW_MIN_LOGOS, max: BRAND_ROW_MAX_LOGOS },
+  portrait: { min: 1, max: 1 },
+};
+
+/**
+ * Bind one planned asset field onto its section.
+ *
+ * `resolveArtifactRef(manifestRef)` returns the MATERIALIZED artifact's Major-Key
+ * reference, or null/undefined when it was never materialized. Everything else
+ * is derived here: the served path, the schema's cardinality, and the alt text
+ * (which comes from the source block's own item-level text association and is
+ * REQUIRED — an image with no accessible name is not bindable).
+ *
+ * Returns `{ section, bound, overflow }` or `{ error }`. It never returns a
+ * partially-bound section below the field's minimum: that is a quarantine.
+ */
+export function bindSectionAssets(section, assetPlan, resolveArtifactRef) {
+  if (!assetPlan) return { section, bound: [], overflow: [] };
+  const bounds = ASSET_FIELD_BOUNDS[assetPlan.target];
+  if (!bounds) return { error: { code: 'unknown_asset_field', detail: String(assetPlan.target) } };
+  const entries = Array.isArray(assetPlan.entries) ? assetPlan.entries : [];
+  const resolved = [];
+  const unresolved = [];
+  for (const entry of entries) {
+    const artifactRef = typeof resolveArtifactRef === 'function' ? resolveArtifactRef(entry.manifestRef) : null;
+    const src = firstPartyAssetPath(artifactRef);
+    const alt = clean(entry.alt);
+    if (!src || !alt) {
+      unresolved.push({ manifestRef: entry.manifestRef, reason: src ? 'missing_alt_text' : 'artifact_not_materialized' });
+      continue;
+    }
+    resolved.push({ manifestRef: entry.manifestRef, artifactRef, src, alt });
+  }
+  if (resolved.length < bounds.min) {
+    return {
+      error: {
+        code: 'asset_binding_unresolved',
+        detail:
+          `${resolved.length}/${entries.length} planned asset(s) resolved to a first-party artifact path; ` +
+          `${assetPlan.target} requires at least ${bounds.min}`,
+        unresolved,
+      },
+    };
+  }
+  const used = resolved.slice(0, bounds.max);
+  const data = { ...section.data };
+  if (assetPlan.target === 'items') {
+    data.items = used.map(({ src, alt }) => ({ kind: 'image', src, alt }));
+  } else if (assetPlan.target === 'images') {
+    data.images = used.map(({ src, alt }) => ({ src, alt }));
+  } else if (assetPlan.target === 'logos') {
+    data.logos = used.map(({ src, alt }) => ({ src, alt }));
+  } else {
+    // `bio` offers BOTH idioms: the trusted raw reference (validated against the
+    // artifact index, unrendered) and the rendered {src, alt} pair. Bind both —
+    // the *AssetRef is the durable artifact identity, the path is what renders.
+    data.portraitAssetRef = used[0].artifactRef;
+    data.portrait = { src: used[0].src, alt: used[0].alt };
+  }
+  return {
+    section: { ...section, data },
+    bound: used,
+    overflow: resolved.slice(bounds.max),
+    ...(unresolved.length > 0 ? { unresolved } : {}),
+  };
+}
+
+/**
+ * Bind every pending asset section in a mapping, in place on a clone.
+ * Shared by the emitter and by the focused tests, so "what the emitter creates"
+ * and "what the tests prove schema-valid" cannot diverge.
+ */
+export function bindMappingAssets(mapping, resolveArtifactRef) {
+  const result = JSON.parse(JSON.stringify(mapping));
+  const bound = [];
+  const quarantined = [];
+  for (const page of result.pages ?? []) {
+    const sectionsById = new Map((page.pageBody?.sections ?? []).map((section) => [section.id, section]));
+    for (const candidate of page.candidates ?? []) {
+      if (!candidate.assetPlan) continue;
+      const outcome = bindSectionAssets(candidate.section, candidate.assetPlan, resolveArtifactRef);
+      const record = {
+        pageRef: page.pageRef,
+        candidateId: candidate.candidateId,
+        sectionId: candidate.section.id,
+        sectionType: candidate.sectionType,
+        target: candidate.assetPlan.target,
+      };
+      if (outcome.error) {
+        quarantined.push({ ...record, ...outcome.error });
+        page.pageBody.sections = (page.pageBody.sections ?? []).filter(
+          (section) => section.id !== candidate.section.id
+        );
+        candidate.assetBindingStatus = 'quarantined';
+        continue;
+      }
+      candidate.section = outcome.section;
+      candidate.data = outcome.section.data;
+      candidate.assetBindingStatus = 'bound';
+      const emitted = sectionsById.get(candidate.section.id);
+      if (emitted) Object.assign(emitted, outcome.section);
+      bound.push({
+        ...record,
+        manifestRefs: outcome.bound.map((item) => item.manifestRef),
+        ...(outcome.overflow.length > 0 ? { overflowManifestRefs: outcome.overflow.map((i) => i.manifestRef) } : {}),
+      });
+    }
+  }
+  return { mapping: result, bound, quarantined };
+}
+
 const hash = (value, length = 12) => createHash('sha256').update(value).digest('hex').slice(0, length);
 const clean = (value) =>
   String(value ?? '')
@@ -163,9 +334,30 @@ function assetBindings(page, block) {
       manifestRef: `asset_${hash(asset.url)}`,
       sourceUrl: asset.url,
       kind: asset.kind,
-      alt: clean(asset.alt) || null,
+      alt: clean(asset.alt) || clean(asset.label) || null,
       status: 'pending_artifact_materialization',
     }));
+}
+
+/**
+ * The subset of a block's assets that can occupy an IMAGE field: declared
+ * `image` assets that carry their own accessible name. Everything else stays in
+ * `assetBindings` (it is still materialized and still accounted) but is never a
+ * candidate for a rendered field:
+ *   - `media`/`document` kinds are `<source>` srcset variants and file links,
+ *     not standalone images;
+ *   - an image with no alt text has no item-level text association, and every
+ *     asset field in the schema requires a non-empty `alt`. Fabricating one
+ *     would be inventing copy, so it is reported unbindable instead.
+ * De-duplicated by manifest identity, source order preserved.
+ */
+function bindableImages(bindings) {
+  const seen = new Set();
+  return bindings.filter((asset) => {
+    if (asset.kind !== 'image' || !asset.alt || seen.has(asset.manifestRef)) return false;
+    seen.add(asset.manifestRef);
+    return true;
+  });
 }
 
 function sourceProvenance(data, sourceBlockRefs) {
@@ -230,20 +422,85 @@ function buildForType(type, context) {
   }
 }
 
+const BIO_SIGNAL_RE = /in memory of|our trustees|founder|biograph|trustee/i;
+
+/**
+ * Choose the asset-bearing section type a block's shape warrants, and build its
+ * data MINUS the asset field (emission binds that — see `bindSectionAssets`).
+ *
+ * The governing constraint is that RE-TYPING MUST NOT DROP EXTRACTED COPY.
+ * `media` and `brand_row` carry a heading and images but no body, so they are
+ * only legal for blocks whose text is a label; a block with substantive body
+ * copy has to land on `content_split` or `bio`, which carry it — otherwise the
+ * block keeps its text type and the asset stays a recorded gap. Returns null
+ * when no asset-bearing type fits.
+ */
+function assetSectionPlan(context, images) {
+  const { block, headings, actions, styleNoise } = context;
+  const text = clean(block.text?.value);
+  const heading = headings[0]?.text;
+  // An injected builder style payload is NOT copy, so it is not body text a
+  // section has to preserve — and preserving CSS is an explicit non-goal. The
+  // block's real evidence is the gallery; the payload reaches no field at all.
+  const body = styleNoise ? '' : stripHeadingAndLinks(text, headings, actions);
+  const substantive = body.length >= SUBSTANTIVE_BODY_MIN_CHARS;
+  const plan = (target, entries) => ({
+    target,
+    entries: entries.map((asset) => ({ manifestRef: asset.manifestRef, alt: asset.alt })),
+  });
+
+  if (substantive && heading && BIO_SIGNAL_RE.test(text.toLowerCase())) {
+    return {
+      type: 'bio',
+      data: { heading, body: richText(body), trustNotes: [] },
+      assetPlan: plan('portrait', images.slice(0, 1)),
+      confidence: 0.87,
+      reason: 'person-focused biography signals with a portrait asset',
+    };
+  }
+  if (substantive && heading && images.length <= CONTENT_SPLIT_MAX_IMAGES) {
+    return {
+      type: 'content_split',
+      data: { heading, body: richText(body), actions },
+      assetPlan: plan('images', images),
+      confidence: 0.85,
+      reason: 'heading plus body copy beside one or two source images',
+    };
+  }
+  if (substantive) return null; // no asset-bearing type can carry this block's copy
+  if (images.length >= BRAND_ROW_MIN_LOGOS && actions.length >= 2) {
+    return {
+      type: 'brand_row',
+      data: { ...(heading ? { heading } : {}) },
+      assetPlan: plan('logos', images),
+      confidence: 0.84,
+      reason: 'linked logo or partner strip',
+    };
+  }
+  return {
+    type: 'media',
+    data: {
+      ...(heading ? { heading } : {}),
+      layout: images.length === 1 ? 'single' : images.length === 2 ? 'strip' : 'grid',
+    },
+    assetPlan: plan('items', images),
+    confidence: 0.86,
+    reason: `image evidence bound as a ${images.length === 1 ? 'single image' : 'gallery'}`,
+  };
+}
+
 function classifyBlock(context, forcedType) {
-  const { page, block, headings, actions, isFirst } = context;
+  const { page, block, headings, actions, isFirst, images, mediaRetentionAllowed } = context;
   const text = clean(block.text?.value);
   const assets = block.assetUrls?.length ?? 0;
   const lowercase = text.toLowerCase();
+  const styleNoise = lowercase.includes('--wix-color-') || lowercase.includes('{ --');
 
   if (forcedType && SUPPORTED_SECTION_TYPES.has(forcedType)) {
     const data = buildForType(forcedType, context);
     if (data) return { type: forcedType, data, confidence: 0.8, reason: 'validated_assisted_type_choice' };
   }
   if (!text) return { gap: ['empty_or_nontext_block', 'prose', 'meaningful textual or structured content'] };
-  if (lowercase.includes('--wix-color-') || lowercase.includes('{ --')) {
-    return { gap: ['embedded_builder_style_payload', 'media', 'clean semantic gallery data without injected CSS'] };
-  }
   if (/namee-?mailtopicmessagesend/i.test(lowercase) || /sent\. thank you/i.test(lowercase)) {
     return {
       type: 'contact_form',
@@ -261,14 +518,37 @@ function classifyBlock(context, forcedType) {
       ],
     };
   }
-  if (assets >= 2 && text.length < 220) {
-    return {
-      gap: [
-        actions.length >= 2 ? 'logo_or_partner_strip_requires_assets' : 'media_gallery_requires_assets',
-        actions.length >= 2 ? 'brand_row' : 'media',
-        'materialized first-party asset references and item-level text association',
-      ],
-    };
+  // A block whose evidence IS imagery is a candidate, not a decline. This runs
+  // ahead of the builder-CSS check on purpose: an injected style payload is a
+  // property of the block's TEXT, and the gallery underneath it is real semantic
+  // evidence. Only the images and their own alt text reach a field — the CSS
+  // never does, which is exactly what the "clean semantic gallery data without
+  // injected CSS" gap asked for.
+  if (assets >= 2 || (styleNoise && assets >= 1)) {
+    if (!mediaRetentionAllowed) {
+      return {
+        gap: [
+          'media_reuse_prohibited_by_policy',
+          images.length >= BRAND_ROW_MIN_LOGOS && actions.length >= 2 ? 'brand_row' : 'media',
+          'capture policy prohibits media reuse from this source; no asset field may be emitted',
+        ],
+      };
+    }
+    if (images.length === 0) {
+      return {
+        gap: [
+          'media_evidence_not_bindable',
+          'media',
+          'source images with a declared image kind and item-level alt text; ' +
+            'srcset variants and unlabelled images cannot occupy an asset field',
+        ],
+      };
+    }
+    const plan = assetSectionPlan({ ...context, styleNoise }, images);
+    if (plan) return plan;
+  }
+  if (styleNoise) {
+    return { gap: ['embedded_builder_style_payload', 'media', 'clean semantic gallery data without injected CSS'] };
   }
   if (isFirst && headings.length > 0) {
     const type = page.path === '/' && (actions.length > 0 || assets > 0) ? 'hero' : 'lede';
@@ -302,15 +582,102 @@ function classifyBlock(context, forcedType) {
   return { gap: ['insufficient_structure', 'prose', 'more semantic or textual evidence'] };
 }
 
-function visualGap(candidate, bindings) {
+/**
+ * Add an asset field to a candidate the TEXT path already classified, but only
+ * where nothing is lost: `bio` gains a portrait purely additively, and a
+ * heading-plus-body block can become `content_split` (which carries heading,
+ * body AND actions, so it is a superset of hero/lede/cta_banner data). A
+ * re-typing the PageType would refuse is not attempted — that would turn a
+ * mapped block into a gap. Returns null when no legal upgrade exists.
+ */
+function assetUpgrade(result, context, images, allowedSections) {
+  const permitted = (type) => allowedSections === 'any' || allowedSections.has(type);
+  if (result.type === 'bio') {
+    return {
+      ...result,
+      assetPlan: { target: 'portrait', entries: [{ manifestRef: images[0].manifestRef, alt: images[0].alt }] },
+      reason: `${result.reason}; portrait asset bound`,
+    };
+  }
+  if (!['hero', 'lede', 'cta_banner'].includes(result.type)) return null;
+  const plan = assetSectionPlan(context, images);
+  if (!plan || plan.type !== 'content_split' || !permitted('content_split')) return null;
+  // content_split carries heading + body + actions; refuse the upgrade if the
+  // text candidate held copy the target shape would not.
+  if (typeof result.data.body === 'string' && plan.data.body !== result.data.body) return null;
+  return { ...plan, reason: `${plan.reason} (re-typed from ${result.type} to carry its image evidence)` };
+}
+
+/**
+ * The residue an asset-aware candidate still leaves — enumerated, never hidden.
+ * A bound candidate can still carry a gap (T12.10 discipline: `mapped_with_gap`
+ * counts as mapped AND stays on the ledger); an unbindable one says exactly why.
+ */
+const SECTION_TYPES_WITHOUT_ACTIONS = new Set(['media', 'brand_row', 'bio']);
+
+function assetResidueGap(result, bindings, images, actions) {
+  const unlabelledImages = bindings.filter((asset) => asset.kind === 'image' && !asset.alt);
+  if (result.assetPlan) {
+    const bounds = ASSET_FIELD_BOUNDS[result.assetPlan.target];
+    const overflow = result.assetPlan.entries.length - bounds.max;
+    const droppedActions = SECTION_TYPES_WITHOUT_ACTIONS.has(result.type) ? actions.length : 0;
+    const residues = [
+      ...(overflow > 0
+        ? [
+            {
+              code: 'media_gallery_exceeds_section_capacity',
+              detail:
+                `${overflow} further source image(s) beyond the ${bounds.max}-item ${result.type} capacity ` +
+                '(a paginated or multi-section gallery placement)',
+            },
+          ]
+        : []),
+      ...(unlabelledImages.length > 0
+        ? [
+            {
+              code: 'image_missing_item_level_text_association',
+              detail:
+                `${unlabelledImages.length} source image(s) carry no alt text, and item-level text ` +
+                'association may not be invented',
+            },
+          ]
+        : []),
+      ...(droppedActions > 0
+        ? [
+            {
+              code: 'link_actions_not_carried_by_asset_section',
+              detail: `${droppedActions} source link action(s) that ${result.type} has no field for`,
+            },
+          ]
+        : []),
+    ];
+    if (residues.length === 0) return null;
+    return {
+      code: residues[0].code,
+      nearestType: result.type,
+      missingCapability: `a governed placement for evidence this ${result.type} cannot hold: ${residues
+        .map((residue) => residue.detail)
+        .join('; ')}`,
+    };
+  }
   if (bindings.length === 0) return null;
-  if (candidate.sectionType === 'contact_form' || candidate.sectionType === 'link_list') return null;
-  const nearestType = bindings.length >= 2 ? 'content_split' : candidate.sectionType === 'bio' ? 'bio' : 'media';
+  if (result.type === 'contact_form' || result.type === 'link_list') return null;
+  if (images.length === 0) {
+    return {
+      code: 'media_evidence_not_bindable',
+      nearestType: 'media',
+      missingCapability:
+        `asset evidence of kind ${[...new Set(bindings.map((asset) => asset.kind))].sort().join('/')} ` +
+        'with item-level alt text; srcset variants, documents, and unlabelled images cannot occupy an asset field',
+    };
+  }
+  const nearestType = images.length >= 2 ? 'content_split' : 'media';
   return {
-    code: 'unmaterialized_visual_evidence',
+    code: 'section_type_has_no_asset_field',
     nearestType,
     missingCapability:
-      'first-party artifact materialization plus a schema-safe asset field; source URLs cannot be emitted as hotlinks',
+      `${result.type} has no asset field, and re-typing it to ${nearestType} would drop extracted copy or ` +
+      'be refused by this PageType; a legal placement for the image evidence in this block',
   };
 }
 
@@ -318,7 +685,7 @@ function screenshotRef(block) {
   return block.screenshots?.find((screenshot) => screenshot.captured)?.path ?? null;
 }
 
-function mapPage(page, snapshot, threshold, assistanceByBlock) {
+function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed) {
   const origin = snapshot.capture.origin;
   const pageType = page.path === '/' ? 'home' : 'standard';
   const allowedSections = CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS[pageType];
@@ -328,8 +695,22 @@ function mapPage(page, snapshot, threshold, assistanceByBlock) {
   for (const [index, block] of reconciled.blocks.entries()) {
     const headings = blockHeadings(page, block);
     const actions = linkActions(block, origin);
-    const context = { page, block, headings, actions, route: page.path, isFirst: index === 0 };
-    const result = classifyBlock(context, assistanceByBlock.get(block.id)?.sectionType);
+    const bindings = assetBindings(page, block);
+    const images = mediaRetentionAllowed ? bindableImages(bindings) : [];
+    const context = {
+      page,
+      block,
+      headings,
+      actions,
+      route: page.path,
+      isFirst: index === 0,
+      images,
+      mediaRetentionAllowed,
+    };
+    let result = classifyBlock(context, assistanceByBlock.get(block.id)?.sectionType);
+    if (!result.gap && result.data && !result.assetPlan && images.length > 0) {
+      result = assetUpgrade(result, context, images, allowedSections) ?? result;
+    }
     if (result.gap || result.confidence < threshold || !result.data) {
       const [why, nearestType, missingCapability] = result.gap ?? [
         'below_confidence_threshold',
@@ -365,7 +746,6 @@ function mapPage(page, snapshot, threshold, assistanceByBlock) {
 
     const sectionId = `s_${hash(block.id, 10)}`;
     const candidateId = `candidate_${hash(`${block.id}:${result.type}`)}`;
-    const bindings = assetBindings(page, block);
     const candidate = {
       candidateId,
       sectionType: result.type,
@@ -376,10 +756,30 @@ function mapPage(page, snapshot, threshold, assistanceByBlock) {
       sourceBlockIds: [block.id],
       screenshotRefs: (block.screenshots ?? []).filter((item) => item.captured).map((item) => item.path),
       assetBindings: bindings,
-      provenance: { textFields: sourceProvenance(result.data, [block.id]) },
+      // The asset field is deliberately ABSENT from `data`/`section` until
+      // emission binds a materialized artifact into it. The plan below is the
+      // only channel between the two phases and it carries no source URL.
+      ...(result.assetPlan
+        ? { assetPlan: { ...result.assetPlan, sectionType: result.type }, assetBindingStatus: 'pending' }
+        : {}),
+      provenance: {
+        textFields: sourceProvenance(result.data, [block.id]),
+        // Alt text is extracted copy too — the "item-level text association"
+        // the gap report asked for, recorded per planned asset.
+        ...(result.assetPlan
+          ? {
+              assetFields: result.assetPlan.entries.map((entry, position) => ({
+                path: `data.${result.assetPlan.target}${result.assetPlan.target === 'portrait' ? '' : `.${position}`}.alt`,
+                source: 'extracted',
+                sourceBlockRefs: [block.id],
+                manifestRef: entry.manifestRef,
+              })),
+            }
+          : {}),
+      },
     };
     candidates.push(candidate);
-    const secondaryGap = visualGap(candidate, bindings);
+    const secondaryGap = assetResidueGap(result, bindings, images, actions);
     if (secondaryGap) {
       const gap = {
         gapId: `gap_${hash(`${block.id}:${secondaryGap.code}`)}`,
@@ -487,7 +887,14 @@ export function mapSnapshot(snapshot, options = {}) {
       .filter((suggestion) => suggestion && typeof suggestion.blockRef === 'string')
       .map((suggestion) => [suggestion.blockRef, suggestion])
   );
-  const pages = snapshot.pages.map((page) => mapPage(page, snapshot, threshold, assistanceByBlock));
+  // Media rights come from the policy the CRAWL recorded, and they fail closed:
+  // no recorded right means no asset may be planned. Emission independently
+  // re-reads the TARGET project registry's rights before binding anything, so a
+  // media asset has to clear both the source authorization and the target's.
+  const mediaRetentionAllowed = snapshot.capture?.policy?.rights?.media === MEDIA_RETENTION_RIGHT;
+  const pages = snapshot.pages.map((page) =>
+    mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed)
+  );
   const navigationCandidates = mapNavigation(snapshot);
   const allCandidates = pages.flatMap((page) => page.candidates);
   const allGaps = pages.flatMap((page) => page.gaps);
@@ -504,7 +911,10 @@ export function mapSnapshot(snapshot, options = {}) {
       confidenceThreshold: threshold,
       copyHandling: 'defer_to_target_project_capture_policy',
       emittedTextSource: 'extracted',
-      mediaHandling: 'manifest_refs_only_pending_artifact_materialization',
+      mediaHandling: mediaRetentionAllowed
+        ? 'asset_plans_bound_to_first_party_artifacts_at_emission'
+        : 'media_reuse_prohibited_by_capture_policy',
+      mediaRetentionAllowed,
       assistance: suggestions.length > 0 ? 'provided_type_suggestions_validated_by_builder' : 'none',
     },
     pages,
@@ -513,6 +923,7 @@ export function mapSnapshot(snapshot, options = {}) {
       pages: pages.length,
       sectionCandidates: allCandidates.length,
       navigationCandidates: navigationCandidates.length,
+      pendingAssetSections: allCandidates.filter((candidate) => candidate.assetPlan).length,
       gaps: allGaps.length,
       sourceBlocks: snapshot.pages.reduce((total, page) => total + page.blocks.length, 0),
       accountedBlocks: pages.reduce((total, page) => total + page.blockAccounting.length, 0),

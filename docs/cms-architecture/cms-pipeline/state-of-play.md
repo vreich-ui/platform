@@ -9,6 +9,85 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T12.14: captured clones bind images now (asset-aware mapping + media binding)
+
+The reason every captured clone came out text-only was structural, and it was
+two things, not one. The mapper had no way to put an image into a section, so it
+DECLINED every media block (that is 8 of the 14 recorded T12.6 gaps: 6 ×
+"first-party artifact materialization plus a schema-safe asset field" + 2 ×
+"materialized first-party asset references and item-level text association").
+And the emitter materialized its 10 artifacts **after** it created the 9 page
+objects, so the bodies could not have referenced them even in principle. No
+section type was missing — `media`, `content_split`, `brand_row` and `bio`
+(with both `portrait` and `portraitAssetRef`) were all already in the contract.
+
+What landed: a two-phase binding. The mapper now emits a media-shaped block as a
+real candidate whose section data is complete EXCEPT its asset field, plus an
+`assetPlan` naming the field and carrying, per item, the source asset's manifest
+identity and **its own alt text** — the "item-level text association" the gap
+report asked for. The plan carries no source URL at all. The emitter
+materializes artifacts FIRST, then `bindSectionAssets` fills the field; that
+function accepts ONLY a Major-Key artifact reference and derives the served
+`/img/{id}/{sha256}.{ext}` path itself, so it has no input that could be a
+hotlink. `bio` gets both idioms (the trusted ref for identity, the rendered pair
+for display). A section whose plan cannot be satisfied is DROPPED from its body
+and recorded in `assetGaps`; a repeated-media `section_template` whose blueprint
+cannot bind is quarantined rather than shipped with an empty gallery; and
+`assertAssetFieldsFirstParty` guards every body reaching `object_create` as a
+third, independent barrier (a positive allowlist over `src`/`*AssetRef`, so
+legitimate external link targets are untouched).
+
+Re-typing is constrained by a rule worth remembering: **it must not drop
+extracted copy.** `media` and `brand_row` carry no body, so a block with
+substantive body text can only become `content_split`/`bio`, or it keeps its
+text type and stays a recorded gap. That is why a `prose` block with one image
+and no heading is still a gap — the palette has no "body copy beside a single
+image, no heading" type, and the gap now says exactly that instead of
+"unmaterialized visual evidence".
+
+MEASURED, on the committed redacted fixture (the only replayable input):
+mapped coverage **3/19 = 15.79% → 10/19 = 52.63%**, +36.84pp; 7 pending asset
+sections planned and bound; no gap in the replayed ledger still names either
+asset-materialization capability. **The 52.94% in the T12.6 report is a
+different measurement** — the LIVE run's 9/17 against the site's real text. That
+snapshot is not committed (redaction replaces every text value with a length
+marker, and the mapper reads text), so the redacted fixture has 19 relevant
+blocks rather than 17 and a 15.79% baseline. Its live counterpart cannot be
+re-measured without re-crawling; the per-gap ledger replay carries the
+comparison instead, using the committed live report's own entries. Of the 8
+recorded asset gaps: 4 blocks now map with bound media (partners 003/004/006,
+filmography 003) and 4 carry a different, precisely-named gap — 3 are
+home-PageType placements (T12.6 backlog item 3, which this change reclassifies
+them to instead of hiding them under a media capability) and 1 is
+`section_type_has_no_asset_field`. The 2 "clean semantic gallery data without
+injected CSS" gaps close by the same rebinding: the asset branch now runs ahead
+of the builder-CSS check, because injected CSS is a property of the block's
+TEXT and the gallery underneath it is real evidence — only the images and their
+alt text reach a field, never the CSS.
+
+Rights are gated twice and fail closed: the mapper reads the rights the CRAWL
+recorded and plans nothing when none is recorded; the emitter independently
+re-reads the TARGET project registry. The 90% bar, the rubric, the PageType
+allowlists and the T12.10 defect discipline are all untouched — the new `assets`
+evidence channel in `score.mjs` mirrors the ratified visual-defect pattern
+(every unbound planned section is an enumerated defect with the emitter's own
+reason; the CLI exits non-zero; the verdict does not move).
+
+Suites: platform `npm run test` green at **2393 + 149 + 50** (baseline
+2387 + 149 + 45). The engine change was re-vendored into CMS-Agent
+(`map.mjs`/`emit.mjs`/`score.mjs` + their `.d.mts` declarations) with
+`provenance.ts` re-pinned and `captureEngineProvenance.test.ts` green in the
+same change; `score.mjs`'s recorded upstream hash was already stale there (the
+vendored copy predated T12.10), so this re-vendoring also brings the T12.10
+visual-defect accounting into that plane.
+
+Still open, deliberately: the T12.6 rerun (a `human_gate`, and it goes through
+`site.duplicate`) — coverage is still far below 90% on the fixture, and most of
+what remains is home-PageType placement (backlog item 3) and the event detail
+model (item 4), neither of which is this task.
+
+---
+
 ## 2026-08-14 — T12.12 EXECUTED: sites/zilberman is fleet tenant #4, live and registered
 
 The human_gate ran with Wolf's live delegation — he handed the session his
