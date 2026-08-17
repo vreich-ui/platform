@@ -292,3 +292,32 @@ T17.14c	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.14c-p
 # PDF's three: Wolf's ruling on Q1 keeps Exit always visible); record in
 # 17-canvas-ux-plan.md §7. Row kept, commented, for the audit trail.
 #T17.6b	checkpoint	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T17.6b-toolbar-reduction.md
+#
+# W18 — MEMBERSHIP: user management review + schema (Wolf, 2026-08-17).
+# Plan: docs/cms-architecture/18-membership-plan.md (findings F1-F12, schema §2,
+# flows §4, offboarding §5, matrix §6, tools §7, run order §10). Wolf's §9
+# decisions run on the recorded defaults (R8) — override any by editing the
+# brief + a comment here, not by halting the queue.
+# Sequencing: T18.0a -> T18.0b -> T18.0c is the SHIP-ALONE HOTFIX wave (F1/F2/F3):
+# release it before anything else. T18.1 (Fable) gates the rest. After T18.1:
+# T18.2 and T18.3a may run in PARALLEL worktrees (disjoint: server lib vs
+# AdminUsers.tsx); T18.3b needs both. T18.4 (Fable) after T18.2. T18.5 only
+# needs T18.0b+T18.1 and may run any time after T18.1. T18.6a (Fable, xhigh)
+# after T18.2+T18.4; T18.6b after T18.6a. T18.7 after T18.4. T18.8 last-but-one,
+# T18.9 last (Part A automatable, Part B = Wolf's credentialed run, halts).
+# Fable rows are `notify` (interactive, /model claude-fable-5, /effort as listed);
+# every other row is headless-safe under the runner's circuit breakers.
+T18.0a	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T18.0a-invite-endpoint-and-accept-verb.md
+T18.0b	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T18.0b-accept-page-and-token-router.md
+T18.0c	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T18.0c-identity-email-templates-and-provisioning.md
+T18.1	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T18.1-membership-store-v2-and-role-tiers.md
+T18.2	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T18.2-invitation-object-and-verbs.md
+T18.3a	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T18.3a-members-ui-tiers-and-status.md
+T18.3b	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T18.3b-invitations-tab-and-reconcile.md
+T18.4	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T18.4-offboarding-side-effects.md
+T18.5	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T18.5-welcome-onboarding-and-name-gate.md
+T18.6a	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T18.6a-membership-verbs-core-and-human-gate.md
+T18.6b	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T18.6b-membership-tools-mcp-and-chat.md
+T18.7	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T18.7-fleet-parity-and-probe.md
+T18.8	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T18.8-docs-closeout-and-shim-removal.md
+T18.9	notify	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T18.9-membership-e2e-and-credentialed-run.md
