@@ -27,6 +27,11 @@
 import { INTERNAL_ONLY_TOOLS, CHAT_TOOL_ALIASES } from '../mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART1 } from '../mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../mcp-tool-definitions-2.js';
+import {
+  MEMBERSHIP_TOOL_VERBS,
+  TOOL_DEFINITIONS_MEMBERSHIP,
+  isMembershipTool,
+} from '../mcp-tool-definitions-membership.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import { compileSchema, type CompiledSchema } from './json-schema-lite.js';
 import { chatToolByName, type ChatTool, type ToolContext, type ToolAutonomy } from './tools.js';
@@ -51,9 +56,53 @@ const ownerRequired = (name: string) => ({
 
 // ─── every TOOL_DEFINITION visible to chat (INTERNAL_ONLY excluded) ─────────
 
-const VISIBLE_DEFINITIONS: readonly ToolDefinition[] = [...TOOL_DEFINITIONS_PART1, ...TOOL_DEFINITIONS_PART2].filter(
-  (def) => !INTERNAL_ONLY_TOOLS.has(def.name)
-);
+const VISIBLE_DEFINITIONS: readonly ToolDefinition[] = [
+  ...TOOL_DEFINITIONS_PART1,
+  ...TOOL_DEFINITIONS_PART2,
+  // W18 T18.6b: the membership family — routed to ToolContext.membership
+  // (the T18.6a core with the run's captured HUMAN principal), never the verb
+  // or operational bridges.
+  ...TOOL_DEFINITIONS_MEMBERSHIP,
+].filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name));
+
+const MEMBERSHIP_UNAVAILABLE = {
+  content: json({
+    error: 'Membership tools are not wired for this chat session.',
+    error_code: 'membership_unavailable',
+  }),
+  is_error: true,
+};
+
+/** Human copy for the membership approval cards (plan §7). */
+const describeMembership = (name: string, args: Record<string, unknown>): string => {
+  const email = typeof args.email === 'string' ? args.email : '';
+  const role = typeof args.role === 'string' ? args.role : '';
+  const tier = role ? role.charAt(0).toUpperCase() + role.slice(1) : '';
+  switch (name) {
+    case 'member_invite':
+      return `Invite **${email}** as **${tier}** — an e-mail is sent by Netlify Identity`;
+    case 'invitation_resend':
+      return `Re-send the invitation to **${email || args.invite_id}**`;
+    case 'invitation_revoke':
+      return `Revoke the invitation for **${email || args.invite_id}**${args.reason ? ` — ${args.reason}` : ''}`;
+    case 'member_set_role':
+      return `Change **${email}** to **${tier}**`;
+    case 'member_suspend':
+      return `Suspend **${email}** — no access from now on; MCP grants revoked, locks released${args.reason ? ` — ${args.reason}` : ''}`;
+    case 'member_reinstate':
+      return `Reinstate **${email}**`;
+    case 'member_remove':
+      return `Remove **${email}** — keeps history, purges after the grace period${args.delete_identity === false ? ', keeps their login' : ', deletes their login'}`;
+    case 'member_purge':
+      return `PURGE **${email}** — irreversible: personal data scrubbed now`;
+    case 'ownership_transfer':
+      return `Transfer ownership to **${args.to_email}**${args.from_email ? ` from **${args.from_email}**` : ''} (${args.demote_to ?? 'admin'} afterwards)`;
+    case 'membership_policy_set':
+      return `Change the membership policy: ${Object.keys((args.policy as Record<string, unknown>) ?? {}).join(', ') || '(no fields)'}`;
+    default:
+      return `${name}${email ? ` ${email}` : ''}`;
+  }
+};
 
 const CHAT_DEFAULT_OFF_NAMES = new Set<string>(
   VISIBLE_DEFINITIONS.filter((def) => def.governance.chatDefaultOff).map((def) => def.name)
@@ -235,6 +284,7 @@ const DESCRIBE_OVERRIDES: Record<string, (args: Record<string, unknown>) => stri
 };
 
 const describeGenerated = (name: string, args: Record<string, unknown>): string => {
+  if (isMembershipTool(name)) return describeMembership(name, args);
   const override = DESCRIBE_OVERRIDES[name];
   if (override) return override(args);
   return `${name}${args.object_id ? ` ${args.object_id}` : ''}`;
@@ -244,10 +294,7 @@ const describeGenerated = (name: string, args: Record<string, unknown>): string 
 //     agent-authored-ops hook (ported verbatim from tools.ts's patch.parse —
 //     schema check first, then ops check) ───────────────────────────────────
 
-const buildParse = (
-  name: string,
-  validator: CompiledSchema
-): ChatTool['parse'] => {
+const buildParse = (name: string, validator: CompiledSchema): ChatTool['parse'] => {
   if (name === 'object_patch') {
     return (args, ctx) => {
       const schemaResult = validator(args);
@@ -278,6 +325,16 @@ const buildParse = (
 // ─── execute(): per §3's binding map ────────────────────────────────────────
 
 const buildExecute = (name: string, verbPayload: VerbPayloadBuilder | undefined): ChatTool['execute'] => {
+  if (isMembershipTool(name)) {
+    // The role wall is in the core (T18.6a): the run's captured human is
+    // re-resolved per call; agents and non-Owners are refused there.
+    return async (ctx, args) => {
+      if (!ctx.membership) return MEMBERSHIP_UNAVAILABLE;
+      const { idempotency_key: _idem, ...rest } = args;
+      const result = await ctx.membership.call(MEMBERSHIP_TOOL_VERBS[name], rest);
+      return { content: json(result.body), is_error: result.status !== 200 };
+    };
+  }
   if (name === 'object_contract') {
     return async (ctx, args) => ({ content: json(ctx.contract(args.object_type as ObjectType)), is_error: false });
   }
@@ -324,6 +381,14 @@ const buildDryRun = (
   if (preview.kind === 'validate_new_object') {
     return async (ctx, args) =>
       ctx.validateNewObject(args.object_type as ObjectType, args.body, args.requested_id as string | undefined);
+  }
+
+  if (preview.kind === 'verb_dry_run' && isMembershipTool(def.name)) {
+    return async (ctx, args) => {
+      if (!ctx.membership) return { error: 'Membership tools are not wired for this chat session.' };
+      const { idempotency_key: _idem, ...rest } = args;
+      return (await ctx.membership.call(MEMBERSHIP_TOOL_VERBS[def.name], { ...rest, dry_run: true })).body;
+    };
   }
 
   // 'verb_dry_run': run the SAME verb payload with dry_run: true, return .body
@@ -390,10 +455,7 @@ const defaultAutonomyForGenerated = (tool: ChatTool): ToolAutonomy => {
 };
 
 /** Resolve `map`'s value for `canonical`: an exact key wins; else the first stored key that CANONICALIZES to it. */
-const resolveFromMap = (
-  map: Record<string, ToolAutonomy> | undefined,
-  canonical: string
-): ToolAutonomy | undefined => {
+const resolveFromMap = (map: Record<string, ToolAutonomy> | undefined, canonical: string): ToolAutonomy | undefined => {
   if (!map) return undefined;
   if (Object.prototype.hasOwnProperty.call(map, canonical)) return map[canonical];
   for (const key of Object.keys(map)) {

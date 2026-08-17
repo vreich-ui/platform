@@ -538,3 +538,115 @@ test('a revoked access token stops working immediately', async () => {
     'revocation must take effect on the next request, with no cache to wait out'
   );
 });
+
+// ─── W18 T18.6b — the membership family over /mcp ─────────────────────────────
+
+const rpc = async (headers: Record<string, string>, method: string, params?: Record<string, unknown>) => {
+  const response = (await mcpHandler({
+    httpMethod: 'POST',
+    headers: { 'content-type': 'application/json', host: HOST, ...headers },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, ...(params ? { params } : {}) }),
+  })) as OAuthResponse;
+  return { response, body: JSON.parse(response.body) as { result?: Record<string, unknown>; error?: unknown } };
+};
+
+const oauthToken = async () => {
+  const { client, code, verifier } = await approvedCode();
+  return jsonBody(
+    await call(
+      postForm('/oauth/token', {
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: REDIRECT_URI,
+        client_id: client.client_id,
+        code_verifier: verifier,
+      })
+    )
+  ).access_token as string;
+};
+
+const MEMBERSHIP_TOOL_NAMES = [
+  'membership_contract',
+  'member_list',
+  'member_get',
+  'member_audit',
+  'membership_policy_get',
+  'member_invite',
+  'invitation_resend',
+  'invitation_revoke',
+  'member_set_role',
+  'member_suspend',
+  'member_reinstate',
+  'member_remove',
+  'member_purge',
+  'ownership_transfer',
+  'membership_policy_set',
+  'member_export',
+];
+
+test('tools/list: the 16 membership tools are listed to an OAuth-bound human and HIDDEN from a shared-token session (snapshot)', async () => {
+  process.env.MCP_HTTP_AUTH_TOKEN = 'the-shared-secret';
+  const shared = await rpc({ authorization: 'Bearer the-shared-secret' }, 'tools/list');
+  assert.equal(shared.response.statusCode, 200);
+  const sharedNames = (shared.body.result?.tools as Array<{ name: string }>).map((t) => t.name);
+  for (const name of MEMBERSHIP_TOOL_NAMES)
+    assert.ok(!sharedNames.includes(name), `${name} must be hidden from the shared token`);
+  assert.ok(sharedNames.includes('object_get'));
+
+  const token = await oauthToken();
+  const human = await rpc({ authorization: `Bearer ${token}` }, 'tools/list');
+  assert.equal(human.response.statusCode, 200);
+  const humanNames = (human.body.result?.tools as Array<{ name: string }>).map((t) => t.name);
+  for (const name of MEMBERSHIP_TOOL_NAMES)
+    assert.ok(humanNames.includes(name), `${name} must be listed to the OAuth human`);
+  assert.deepEqual(
+    humanNames.filter((n) => !sharedNames.includes(n)).sort(),
+    [...MEMBERSHIP_TOOL_NAMES].sort(),
+    'the ONLY difference between the two listings is the membership family'
+  );
+});
+
+test('tools/call: a shared-token session calling a membership tool gets 403 membership_requires_human (defence in depth); the OAuth human (an ADMIN_EMAILS owner) can read the contract, list, and dry-run an invite', async () => {
+  process.env.MCP_HTTP_AUTH_TOKEN = 'the-shared-secret';
+  const refused = await rpc({ authorization: 'Bearer the-shared-secret' }, 'tools/call', {
+    name: 'member_list',
+    arguments: { agent_name: 'owner@example.com' },
+  });
+  assert.equal(refused.response.statusCode, 200);
+  const refusedResult = refused.body.result as { isError?: boolean; structuredContent?: { error_code?: string } };
+  assert.equal(refusedResult.isError, true);
+  assert.equal(refusedResult.structuredContent?.error_code, 'membership_requires_human');
+
+  const token = await oauthToken();
+  const contract = await rpc({ authorization: `Bearer ${token}` }, 'tools/call', {
+    name: 'membership_contract',
+    arguments: {},
+  });
+  const contractResult = contract.body.result as {
+    isError?: boolean;
+    structuredContent?: { contract?: { gate?: { rule?: string } } };
+  };
+  assert.equal(contractResult.isError, undefined, JSON.stringify(contract.body).slice(0, 300));
+  assert.equal(contractResult.structuredContent?.contract?.gate?.rule, 'membership_requires_human');
+
+  const list = await rpc({ authorization: `Bearer ${token}` }, 'tools/call', { name: 'member_list', arguments: {} });
+  const listResult = list.body.result as {
+    isError?: boolean;
+    structuredContent?: { users?: Array<{ email: string; source: string }> };
+  };
+  assert.equal(listResult.isError, undefined, JSON.stringify(list.body).slice(0, 300));
+  assert.ok(listResult.structuredContent?.users?.some((u) => u.email === ADMIN_EMAIL && u.source === 'environment'));
+
+  const dry = await rpc({ authorization: `Bearer ${token}` }, 'tools/call', {
+    name: 'member_invite',
+    arguments: { email: 'newbie@example.com', role: 'editor', dry_run: true },
+  });
+  const dryResult = dry.body.result as {
+    isError?: boolean;
+    structuredContent?: { dry_run?: boolean; would?: string; gotrue_email?: boolean };
+  };
+  assert.equal(dryResult.isError, undefined, JSON.stringify(dry.body).slice(0, 300));
+  assert.equal(dryResult.structuredContent?.dry_run, true);
+  assert.equal(dryResult.structuredContent?.would, 'invite');
+  assert.equal(dryResult.structuredContent?.gotrue_email, false, 'no GoTrue admin token on an MCP request');
+});

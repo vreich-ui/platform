@@ -9,6 +9,59 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.6b: the membership tools — sixteen MCP definitions, the chat registry, approval cards, `membership_contract`
+
+W18 wave 4 (plan §7). NEW `packages/core/server/lib/mcp-tool-definitions-membership.ts`:
+`membership_contract, member_list, member_get, member_audit,
+membership_policy_get, member_invite, invitation_resend, invitation_revoke,
+member_set_role, member_suspend, member_reinstate, member_remove,
+member_purge, ownership_transfer, membership_policy_set, member_export` —
+args per plan §7 (writes take `idempotency_key?`, dry-runnable ones
+`dry_run?`, `member_purge` needs `confirm:'PURGE <email>'`), every
+description opening with the human-principal requirement / Owner tier /
+dry-run-first fact, `MEMBERSHIP_TOOL_VERBS` (name → core verb) as the ONE
+routing table, writes `toolClass:'membership'` + `autonomyFloor:'ask'`
+(+ `preview: verb_dry_run` where the core supports it, `input_echo`
+otherwise). **`/mcp`:** `TOOL_DEFINITIONS` gains the family;
+`visibleToolDefinitions(event)` lists it ONLY when `event.oauthPrincipal`
+is set (shared-token / per-agent sessions never see it); `callTool` routes
+`isMembershipTool(name)` → `callerPrincipalFromMcpEvent` →
+`handleMembershipVerb` (users store + governance/object stores for the
+offboarding effects; no GoTrue admin token off the Identity JWT, so identity
+deletes queue) with `withIdempotentToolCall` when `idempotency_key` is
+given; the core's 403 comes back as a tool error with `error_code`. **Chat:**
+`generated-tools.ts` builds the family from the same definitions —
+`execute` → `ctx.membership.call(verb, args)` (the T18.6a bridge; unavailable
+→ `membership_unavailable`), `dryRun` for `verb_dry_run` previews goes
+through the same bridge with `dry_run:true`, `describeMembership` renders
+the approval-card copy ("Invite **jane@x** as **Editor** — an e-mail is
+sent by Netlify Identity", "Remove **jane@x** — keeps history, purges after
+the grace period, deletes their login", "PURGE … irreversible", "Transfer
+ownership to …"). **R8 decision recorded:** the admin-chat wire is budgeted
+at 64 tools (`CMS_AGENT_BOUNDS.maxTools`; the registry-wiring test pins the
+default wire ≤ 64) — three reads (`membership_contract`, `member_list`,
+`member_get`) are on by default (wire = 64 with `present_candidates`), the
+other thirteen are `chatDefaultOff` and an Owner switches them on from
+/admin/settings/guardrails; the CMS-Agent engine now trims the membership
+family (only) with a logged `cms_agent_tools_trimmed` event when an enabled
+set would exceed the bound (`fitToolsToCmsAgentBound`, engine.ts) — the
+provider engine (mode `off`, the default) sends everything. **Governance
+page:** the chat-tools catalog gains the membership family (class
+"Members and roles" with the floor explained; `autonomy_floor` on catalog
+entries; the "Run automatically" option reads "locked: always asks first"
+for floored tools). Docs: `docs/agents/publishing-policy.md` §8.7 "Membership
+— a HUMAN-only family" + the "Manage members" recipe (`membership_contract →
+member_list → member_invite(dry_run) → member_invite`). Tests: `mcp-oauth.test.ts`
++2 (tools/list snapshot: the ONLY difference between a shared-token listing
+and an OAuth-human listing is the 16 membership tools; tools/call: shared
+token → `membership_requires_human`, OAuth ADMIN_EMAILS owner reads the
+contract, lists (env row present), dry-runs an invite with `gotrue_email:false`),
+`mcp-tool-definitions.test.ts` (86 definitions, floor-ask + verb_dry_run
+lists extended), `generated-tools.test.ts` (76-name registry; wire budget =
+60 non-membership + present_candidates ≤ 64; `fitToolsToCmsAgentBound` drops
+exactly the family), `registry-wiring` default wire still ≤ 64. `npm test`
+2470/150/50, eslint, prettier, `astro check` green. Next: T18.7 (fleet).
+
 ## 2026-08-17 — T18.6a: one membership verb core with the human gate; UI, MCP and chat all call it
 
 W18 wave 4 (Fable row, plan §7, F4). NEW

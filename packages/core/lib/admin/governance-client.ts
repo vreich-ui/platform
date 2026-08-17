@@ -22,7 +22,9 @@ export type ToolAutonomy = 'auto' | 'ask' | 'off';
  *  the single source, so the UI never drifts from the wired tools). */
 export interface ChatToolCatalogEntry {
   name: string;
-  tool_class: 'read' | 'draft' | 'creation' | 'publication' | 'privileged';
+  tool_class: 'read' | 'draft' | 'creation' | 'publication' | 'privileged' | 'membership';
+  /** W18 T18.6b: 'ask' = a hard floor — no override (here or per agent) can make the tool run automatically. */
+  autonomy_floor?: 'ask';
   default: ToolAutonomy;
   description: string;
 }

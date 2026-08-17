@@ -33,5 +33,7 @@ export const toolGroupLabel = (toolClass: ChatToolCatalogEntry['tool_class']): s
       return 'Publishing';
     case 'privileged':
       return 'Site-wide changes';
+    case 'membership':
+      return 'Members and roles';
   }
 };

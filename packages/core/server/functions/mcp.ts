@@ -122,7 +122,7 @@ export const deployStatusHandler: SiblingHandler = (event, context) =>
   requireSiblings().deployStatusHandler(event, context);
 export const verifyArticleImagesHandler: SiblingHandler = (event, context) =>
   requireOptional('verifyArticleImagesHandler')(event, context);
-import { getArtifactIndexBlobStore } from '../lib/blob-store.js';
+import { getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { getGovernanceBlobStore } from '../lib/governance-store.js';
 import { getCapabilityStatus } from '../lib/capability-status.js';
@@ -148,6 +148,14 @@ import { buildObjectContract, OBJECT_CONTRACT_TYPES } from '../../lib/registry/o
 import type { ObjectType } from '../../schema/object-record-v1.js';
 import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS } from '../lib/mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../lib/mcp-tool-definitions-2.js';
+import {
+  MEMBERSHIP_TOOL_VERBS,
+  TOOL_DEFINITIONS_MEMBERSHIP,
+  isMembershipTool,
+} from '../lib/mcp-tool-definitions-membership.js';
+import { handleMembershipVerb } from '../lib/membership/verbs.js';
+import { callerPrincipalFromMcpEvent } from '../lib/membership/caller-principal.js';
+import { getUsersBlobStore } from '../lib/users-store.js';
 import {
   getArtifactMetadata,
   listArtifactsByKind,
@@ -261,8 +269,8 @@ export type ToolPreviewBinding =
   | { kind: 'input_echo' }; // echo the exact args onto the approval card
 
 export type ToolGovernance = {
-  /** Chat risk class; drives default autonomy (read → auto, everything else → ask). */
-  toolClass: 'read' | 'draft' | 'creation' | 'publication' | 'privileged';
+  /** Chat risk class; drives default autonomy (read → auto, everything else → ask). `membership` (W18 T18.6b) is ask-floored by construction. */
+  toolClass: 'read' | 'draft' | 'creation' | 'publication' | 'privileged' | 'membership';
   /** Hard floor: no governance or profile override may promote this tool to 'auto'. */
   autonomyFloor?: 'ask';
   /** Approval-card preview strategy for non-read tools. Absent = card shows args + describe only. */
@@ -400,7 +408,12 @@ export const callPing = () =>
     instance_invocations: instanceInvocationCount,
   });
 
-const TOOL_DEFINITIONS: ToolDefinition[] = [...TOOL_DEFINITIONS_PART1, ...TOOL_DEFINITIONS_PART2];
+const TOOL_DEFINITIONS: ToolDefinition[] = [
+  ...TOOL_DEFINITIONS_PART1,
+  ...TOOL_DEFINITIONS_PART2,
+  // W18 T18.6b: listed only to OAuth HUMAN principals (visibleToolDefinitions).
+  ...TOOL_DEFINITIONS_MEMBERSHIP,
+];
 export const response = (statusCode: number, body: unknown, headers: Record<string, string> = jsonHeaders) => ({
   statusCode,
   headers,
@@ -1151,7 +1164,45 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       break;
   }
 
+  // W18 T18.6b: the membership family — one core, gated on a HUMAN principal.
+  // `callerPrincipalFromMcpEvent` mints a human ONLY from an OAuth-bound
+  // subject; everything else is an agent and the core answers 403
+  // membership_requires_human before any read.
+  if (isMembershipTool(name)) {
+    const run = () => callMembershipTool(event, name, input);
+    return typeof input.idempotency_key === 'string'
+      ? withIdempotentToolCall(event, name, input.idempotency_key, run)
+      : run();
+  }
+
   return toolError(`Unknown tool: ${String(name)}`);
+};
+
+const callMembershipTool = async (event: LambdaEvent, name: string, input: Record<string, unknown>) => {
+  const principal = callerPrincipalFromMcpEvent(
+    { oauthPrincipal: event.oauthPrincipal, verifiedAgentName: event.verifiedAgentName, requestId: event.requestId },
+    input.agent_name
+  );
+  const { idempotency_key: _idem, agent_name: _agent, ...args } = input;
+  const result = await handleMembershipVerb({
+    verb: MEMBERSHIP_TOOL_VERBS[name],
+    args,
+    principal,
+    deps: {
+      store: await getUsersBlobStore(event),
+      // no GoTrue admin token on an MCP request (it exists only on Identity-JWT
+      // requests) — invitation e-mails still go out via the store record + the
+      // next admin-UI action; identity deletes queue (T18.4).
+      oauthStore: async () => (await getGovernanceBlobStore(event)) as unknown as OAuthBlobStore,
+      objectStore: async () => (await getSiteObjectsBlobStore(event)) as never,
+    },
+  });
+  if (result.status >= 200 && result.status < 300) return toolResult(result.body);
+  return toolError(String(result.body.error ?? 'Membership request failed.'), {
+    ...(result.body.error_code ? { error_code: result.body.error_code } : {}),
+    status: result.status,
+    ...Object.fromEntries(Object.entries(result.body).filter(([k]) => k !== 'error' && k !== 'error_code')),
+  });
 };
 
 const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Promise<JsonRpcResponse | undefined> => {
@@ -1184,7 +1235,7 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
         serverInfo: { name: SERVER_NAME, version: '0.1.0' },
       });
     case 'tools/list':
-      return rpcResponse(request.id, { tools: visibleToolDefinitions() });
+      return rpcResponse(request.id, { tools: visibleToolDefinitions(event) });
     case 'tools/call':
       event.log?.({ event: 'rpc_tool_call_started', rpcMethod, slug, toolName: request.params?.name });
       return rpcResponse(
@@ -1202,10 +1253,15 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
  * that injects every optional handler; a site missing one omits the tools that
  * depend on it entirely.
  */
-export const visibleToolDefinitions = (): ToolDefinition[] =>
+export const visibleToolDefinitions = (event?: Pick<LambdaEvent, 'oauthPrincipal'>): ToolDefinition[] =>
   TOOL_DEFINITIONS.filter(
     (tool) =>
-      !INTERNAL_ONLY_TOOLS.has(tool.name) && (hasVerifyArticleImages() || !OPTIONAL_HANDLER_TOOLS.has(tool.name))
+      !INTERNAL_ONLY_TOOLS.has(tool.name) &&
+      (hasVerifyArticleImages() || !OPTIONAL_HANDLER_TOOLS.has(tool.name)) &&
+      // W18 T18.6b: membership tools exist only for an OAuth-bound HUMAN —
+      // shared-token / per-agent sessions never even see them (the core
+      // refuses them anyway: defence in depth).
+      (!isMembershipTool(tool.name) || Boolean(event?.oauthPrincipal))
   );
 
 export const _mcpInternal = {

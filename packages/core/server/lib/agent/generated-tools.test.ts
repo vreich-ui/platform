@@ -17,10 +17,16 @@ import {
   generatedChatToolByName,
   resolveGeneratedAutonomy,
 } from './generated-tools.js';
+import { isMembershipTool, TOOL_DEFINITIONS_MEMBERSHIP } from '../mcp-tool-definitions-membership.js';
+import { fitToolsToCmsAgentBound } from './engine.js';
 import { PRESENT_CANDIDATES_TOOL_NAME } from './candidates.js';
 import type { ToolContext } from './tools.js';
 
-const ALL_DEFINITIONS: readonly ToolDefinition[] = [...TOOL_DEFINITIONS_PART1, ...TOOL_DEFINITIONS_PART2];
+const ALL_DEFINITIONS: readonly ToolDefinition[] = [
+  ...TOOL_DEFINITIONS_PART1,
+  ...TOOL_DEFINITIONS_PART2,
+  ...TOOL_DEFINITIONS_MEMBERSHIP,
+];
 
 // A minimal stub ToolContext; individual tests override only what they use.
 const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
@@ -35,13 +41,15 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 // ─── registry shape ──────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 60 names: every visible TOOL_DEFINITION plus the 3 workspace tools, no INTERNAL_ONLY member', () => {
-  const expectedVisible = new Set(ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name));
-  assert.equal(expectedVisible.size, 57);
+test('the registry has exactly the expected 76 names: every visible TOOL_DEFINITION (57 + 16 membership, W18) plus the 3 workspace tools, no INTERNAL_ONLY member', () => {
+  const expectedVisible = new Set(
+    ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
+  );
+  assert.equal(expectedVisible.size, 73);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 60);
-  assert.equal(new Set(registryNames).size, 60, 'no duplicate names');
+  assert.equal(registryNames.length, 76);
+  assert.equal(new Set(registryNames).size, 76, 'no duplicate names');
 
   const workspaceNames = ['list_workspace_nodes', 'run_workspace_workflow', 'get_workspace_run'];
   for (const name of workspaceNames) {
@@ -59,12 +67,29 @@ test('the registry has exactly the expected 60 names: every visible TOOL_DEFINIT
   }
 });
 
-test('wire-tool budget: 60 + present_candidates <= 64, and the serialized registry stays under the 200_000 char budget', () => {
-  assert.ok(GENERATED_CHAT_TOOLS.length + 1 <= 64, 'registry + present_candidates must fit the wire-tool budget');
+test('wire-tool budget: the non-membership registry (60) + present_candidates <= 64; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
+  const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
+  assert.equal(nonMembership.length, 60);
+  assert.ok(nonMembership.length + 1 <= 64, 'core registry + present_candidates must fit the wire-tool budget');
+  const wire = GENERATED_CHAT_TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.input_schema,
+  }));
+  assert.equal(
+    fitToolsToCmsAgentBound(wire).length,
+    60,
+    'over the bound → the membership family is dropped, nothing else'
+  );
+  assert.equal(fitToolsToCmsAgentBound(wire.slice(0, 64)).length, 64, 'within the bound → untouched');
   assert.equal(PRESENT_CANDIDATES_TOOL_NAME, 'present_candidates');
 
   const serialized = JSON.stringify(
-    GENERATED_CHAT_TOOLS.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.input_schema }))
+    GENERATED_CHAT_TOOLS.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.input_schema,
+    }))
   );
   assert.ok(serialized.length <= 200_000, `serialized registry is ${serialized.length} chars, budget is 200000`);
 });
@@ -264,15 +289,22 @@ test('an operational tool answers with a clear error when no operational bridge 
 // ─── json-schema-lite ───────────────────────────────────────────────────────
 
 test('compileSchema throws at compile time on an unsupported keyword', () => {
-  assert.throws(() => compileSchema({ type: 'string', minItems: 1 } as unknown as Record<string, unknown>), /unsupported keyword/);
   assert.throws(
-    () => compileSchema({ type: 'object', properties: { x: { type: 'string', patternProperties: {} } } } as unknown as Record<string, unknown>),
+    () => compileSchema({ type: 'string', minItems: 1 } as unknown as Record<string, unknown>),
+    /unsupported keyword/
+  );
+  assert.throws(
+    () =>
+      compileSchema({
+        type: 'object',
+        properties: { x: { type: 'string', patternProperties: {} } },
+      } as unknown as Record<string, unknown>),
     /unsupported keyword/
   );
 });
 
-test('every one of the 70 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 70);
+test('every one of the 86 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 86);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }
