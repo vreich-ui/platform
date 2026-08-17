@@ -9,6 +9,67 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.6a: one membership verb core with the human gate; UI, MCP and chat all call it
+
+W18 wave 4 (Fable row, plan §7, F4). NEW
+`packages/core/server/lib/membership/verbs.ts` — `handleMembershipVerb({verb,
+args, principal, deps})` mirroring `handleObjectVerb`: **first line, before
+any store read or argument parsing, `principal.kind !== 'human'` → 403
+`membership_requires_human`** (the shared `MCP_HTTP_AUTH_TOKEN`, a verified
+or self-declared `agent_name` — `agent_name:'owner@site'` included — and a
+chat run without a captured human are all agents; `list` and `contract`
+refuse the same as `purge`); then the tier is re-resolved from the store on
+every call (`resolveRolesForPrincipalAsync` — a suspended/removed/absent
+human is 403 `admin_required`); `MEMBERSHIP_VERB_MIN_TIER` gives
+`list`/`get`/`contract`/`policy_get` to admin, `invite` to admin under
+`policy.who_can_invite`/`roles_admin_may_grant`, everything else to owner
+(403 `owner_required`); zod `MEMBERSHIP_VERB_SCHEMAS` per verb (400
+`invalid_args` with issues; `unknown_verb`); aliases `disable→suspend`,
+`member_audit→audit`, `export_person→export` (one release). Verbs: `list, get,
+audit, contract, policy_get, policy_set, invite, resend, revoke,
+list_invitations, unmanaged_identities, grant, set_role, suspend, reinstate,
+remove, purge, transfer_ownership, promote_bootstrap, export,
+delete_identity` — the T18.0a–T18.4 bodies lifted verbatim (guards, `last_owner`,
+offboarding side effects through injected `deps.oauthStore` /
+`deps.objectStore` / `deps.softDeleteAvatar`, queue drain on Owner requests
+with a token). **Every mutation → `AuditEvent{via, actor, request_id}`**;
+`dry_run:true` on invite / set_role / remove / transfer_ownership returns
+the would-be effect (and still runs the guards) and persists nothing;
+`contract` = `buildMembershipContract` derived from the enforcing tables
+(gate rule, tiers + `expandRole`, precedence, per-verb min tier / mutates /
+dry_run / JSON-schema args via `z.toJSONSchema`, aliases, live policy, the
+`MEMBERSHIP_ERROR_CATALOGUE`). **Front doors:** `functions/admin-users.ts`
+is now thin — session verbs (`me`, `update_me`, `accept`, `invite_preview`)
+stay, every management verb goes `auth → {kind:'human', id, email,
+via:'admin_ui'} → handleMembershipVerb → jsonResponse`; `ListedUser` /
+`listUsersWithEnvironment` moved into the core (re-exported). **MCP
+plumbing:** `ResolvedOAuthPrincipal` gains `subject_id`; `mcp.ts` stamps
+`event.oauthPrincipal`; NEW `membership/caller-principal.ts` —
+`callerPrincipalFromMcpEvent(event, selfDeclaredAgentName)` mints a human
+ONLY from an OAuth-bound subject (`via:'mcp'`, `client_id`, `request_id`),
+everything else is `{kind:'agent'}`; `callerPrincipalFromChatRun` likewise
+from the run's captured human (`via:'chat'`). **Chat plumbing:** `ToolClass`
+gains `'membership'` (definitions T18.6b, `autonomyFloor:'ask'`),
+`ToolContext.membership.call(verb, args)` is wired by `buildToolContext`
+when `deps.membershipStore` is given (both `admin-agent-chat` write paths and
+the background hop pass the `users` store; OAuth/lock side effects reuse the
+governance/object stores already on deps). Side effect of the tier rule:
+Admins now get the members list read-only (`AdminUsers.tsx` renders it with
+no row actions and no Invitations/Identities tabs; `memberActionsFor` →
+`[]` for non-owners). Tests: NEW `tests/netlify/membership-verbs.test.ts`
+(8, adversarial first: agent 403 on EVERY verb with zero store reads and
+nothing written, `agent_name:'owner@…'` still agent, MCP/chat principal
+builders never mint a human without an OAuth subject / captured human,
+suspended-removed-absent-viewer humans 403 even for list, OAuth admin
+list/get/contract/policy_get + invite editor only + all Owner verbs 403 +
+`invite_forbidden` under owner-only policy + aliases, every audit event
+carries `via`/actor/`request_id`, dry_run byte-identical store + guards,
+contract validates its own schemas + catalogue, chat bridge human/agent/none);
+the T18.0a–T18.5 suites run unchanged against the thin function (one
+assertion updated: an invited admin-tier caller can now `list`, still 403 on
+Owner verbs). `npm test` 2468/150/50, eslint, prettier, `astro check`
+green. Next: T18.6b (tool definitions).
+
 ## 2026-08-17 — T18.4: offboarding does what the members page promises — grants revoked, locks handed off, identity deleted (or queued), PII purged
 
 W18 wave 3 (Fable row, plan §5, F5, F12, §9-3). NEW

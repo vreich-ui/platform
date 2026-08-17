@@ -173,10 +173,11 @@ test('invite_preview needs no auth and returns only the site name/slug + passwor
   });
 });
 
-test('existing verbs are unchanged: an invited caller still cannot list, an anonymous me is 401', async () => {
+test('existing verbs are unchanged: an invited admin-tier caller cannot use Owner verbs, an anonymous me is 401', async () => {
   await withUsersStore({}, async (store) => {
     await putUserRecord(store, invitedRecord('jane@example.com'));
-    const list = await handler(post('list'), contextFor('jane@example.com'));
+    // T18.6a: `list` is admin-tier (plan §7 member_list min role admin); Owner verbs still 403
+    const list = await handler(post('list_invitations'), contextFor('jane@example.com'));
     assert.equal(list.statusCode, 403);
     const me = await handler(post('me'));
     assert.equal(me.statusCode, 401);

@@ -685,6 +685,8 @@ export type ResolvedOAuthPrincipal = {
   client_id: string;
   client_name: string;
   subject_email: string;
+  /** W18 T18.6a: the GoTrue user id of the approving human — the membership core's human principal id. */
+  subject_id: string;
   scope: string;
 };
 
@@ -709,6 +711,7 @@ export const resolveOAuthPrincipal = async (
     client_id: record.client_id,
     client_name: record.client_name,
     subject_email: record.subject_email,
+    subject_id: record.subject_id,
     scope: record.scope,
   };
 };

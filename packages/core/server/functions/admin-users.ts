@@ -19,62 +19,25 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { z } from 'zod';
 
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
-import {
-  environmentRoleEntries,
-  environmentRoleForEmail,
-  resolveRolesForPrincipalAsync,
-  isOwner,
-  type Role,
-  type RoleEnv,
-} from '../lib/roles.js';
+import { environmentRoleForEmail, resolveRolesForPrincipalAsync, isOwner } from '../lib/roles.js';
 import {
   getUsersBlobStore,
   getUserRecord,
-  memberToUserRecord as memberToUserRecordSafe,
   putUserRecord,
-  listUserRecords,
   normalizeUserEmail,
-  userRoleSchema,
   type UserRecord,
   type UsersBlobStore,
 } from '../lib/users-store.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
 import {
-  InvitationError,
   acceptInvitation,
   activateOnLogin,
-  assertMayInvite,
-  createInvitation,
-  listInvitations,
-  listUnmanagedIdentities,
   previewInvitationByToken,
-  resendInvitation,
-  revokeInvitation,
   type GoTrueIdentity,
 } from '../lib/membership/invitations.js';
-import { newMember, saveMember } from '../lib/membership/write.js';
-import {
-  appendAudit,
-  getPolicy,
-  listAuditForEmail,
-  removeMembership,
-  stampOnboarding,
-  wouldBreachMinOwners,
-} from '../lib/membership/write.js';
+import { appendAudit, getPolicy, stampOnboarding } from '../lib/membership/write.js';
 import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
-import {
-  OffboardingError,
-  deleteIdentity,
-  deleteOrQueueIdentity,
-  drainIdentityDeleteQueue,
-  exportPerson,
-  purgeConfirmMatches,
-  releaseLocksHeldBy,
-  revokeOAuthGrantsForSubject,
-  scrubPerson,
-  transferOwnership,
-} from '../lib/membership/offboarding.js';
-import { getMembershipByEmail } from '../lib/membership/read.js';
+import { handleMembershipVerb } from '../lib/membership/verbs.js';
 import { getNetlifyBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import type { OAuthBlobStore } from '../lib/oauth-store.js';
 import { softDeleteArtifact } from '../lib/mcp-artifact-admin.js';
@@ -103,7 +66,13 @@ const jsonResponse = (status: number, body: Record<string, unknown>) => ({
   body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
 });
 
-const requestSchema = z.discriminatedUnion('verb', [
+/**
+ * The SESSION verbs this function handles itself (they act on the caller's own
+ * record with their own auth shapes). Every other verb is a membership
+ * management verb and is parsed + executed by `handleMembershipVerb`
+ * (T18.6a) — this schema is only the front-door split.
+ */
+const sessionRequestSchema = z.discriminatedUnion('verb', [
   z.object({ verb: z.literal('me') }),
   z.object({
     verb: z.literal('update_me'),
@@ -113,71 +82,15 @@ const requestSchema = z.discriminatedUnion('verb', [
     // 'skipped' (step + completed_at).
     onboarding_step: z.enum(['name', 'tour', 'skipped']).optional(),
   }),
-  z.object({ verb: z.literal('list'), include_removed: z.boolean().optional() }),
-  z.object({
-    verb: z.literal('invite'),
-    email: z.string().min(3),
-    role: userRoleSchema,
-    message: z.string().max(1000).optional(),
-  }),
-  // T18.2 — invitations are first-class
-  z.object({ verb: z.literal('resend'), invite_id: z.string().min(1).optional(), email: z.string().min(3).optional() }),
-  z.object({
-    verb: z.literal('revoke'),
-    invite_id: z.string().min(1).optional(),
-    email: z.string().min(3).optional(),
-    reason: z.string().max(500).optional(),
-  }),
-  z.object({
-    verb: z.literal('list_invitations'),
-    status: z.enum(['pending', 'accepted', 'expired', 'revoked']).optional(),
-  }),
-  z.object({ verb: z.literal('unmanaged_identities') }),
-  // Owner grants a role to a Netlify-UI identity that has no membership (plan §4.2 "Grant role").
-  z.object({
-    verb: z.literal('grant'),
-    email: z.string().min(3),
-    role: userRoleSchema,
-    user_id: z.string().optional(),
-  }),
-  z.object({ verb: z.literal('set_role'), email: z.string().min(3), role: userRoleSchema }),
-  // T18.1: `suspend` is the verb; `disable` stays as an alias for one release (T18.8 removes it).
-  z.object({ verb: z.literal('suspend'), email: z.string().min(3), reason: z.string().max(500).optional() }),
-  z.object({ verb: z.literal('disable'), email: z.string().min(3), reason: z.string().max(500).optional() }),
-  z.object({ verb: z.literal('reinstate'), email: z.string().min(3) }),
-  // T18.3a: remove (membership → removed{purge_after}; T18.4 adds identity/OAuth/lock side effects)
-  z.object({
-    verb: z.literal('remove'),
-    email: z.string().min(3),
-    reason: z.string().max(500).optional(),
-    // T18.4 (§9-3): delete the GoTrue identity too; defaults to policy.delete_identity_on_remove (true)
-    delete_identity: z.boolean().optional(),
-  }),
-  // T18.4 — offboarding verbs (Owner-only)
-  z.object({ verb: z.literal('purge'), email: z.string().min(3), confirm: z.string() }),
-  z.object({
-    verb: z.literal('transfer_ownership'),
-    to_email: z.string().min(3),
-    from_email: z.string().min(3).optional(),
-    demote_to: z.enum(['admin', 'publisher', 'editor', 'viewer', 'keep']).optional(),
-  }),
-  z.object({ verb: z.literal('export_person'), email: z.string().min(3) }),
-  z.object({ verb: z.literal('delete_identity'), user_id: z.string().min(1), email: z.string().min(3) }),
-  // T18.3a: the audit stream for one person (Owner-only)
-  z.object({
-    verb: z.literal('member_audit'),
-    email: z.string().min(3),
-    limit: z.number().int().min(1).max(500).optional(),
-  }),
-  // T18.1: materialise a stored Owner membership for an ADMIN_EMAILS member so
-  // the env row can later be emptied (plan §4.3 / F10).
-  z.object({ verb: z.literal('promote_bootstrap'), email: z.string().min(3) }),
   // T18.0a — the accept page's two verbs. `token` is accepted but NOT
   // validated: only GoTrue can validate an invite token, and an unauthenticated
   // request has no admin token to ask with. See the verb handler comment.
   z.object({ verb: z.literal('invite_preview'), token: z.string().optional(), inv: z.string().optional() }),
   z.object({ verb: z.literal('accept'), display_name: z.string().min(1).max(200) }),
 ]);
+const SESSION_VERBS = new Set(['me', 'update_me', 'invite_preview', 'accept']);
+const managementRequestSchema = z.object({ verb: z.string().min(1) }).passthrough();
+const requestSchema = z.union([sessionRequestSchema, managementRequestSchema]);
 
 const safeJsonParse = (event: LambdaEvent): { ok: true; value: unknown } | { ok: false } => {
   if (!event.body) return { ok: false };
@@ -210,45 +123,8 @@ const synthesizedRecord = (email: string, owner: boolean, ts = nowIso()): UserRe
   };
 };
 
-export interface ListedUser extends Omit<UserRecord, 'role'> {
-  role: Role;
-  source: 'stored' | 'environment';
-}
-
-/** Merge every real access principal into the Owner-visible list without exposing env metadata. */
-export const listUsersWithEnvironment = async (
-  store: UsersBlobStore,
-  env: RoleEnv = process.env as RoleEnv
-): Promise<ListedUser[]> => {
-  const rows = new Map<string, ListedUser>();
-  for (const record of await listUserRecords(store)) {
-    rows.set(normalizeUserEmail(record.email), { ...record, source: 'stored' });
-  }
-
-  for (const [email, environmentRole] of environmentRoleEntries(env)) {
-    const stored = rows.get(email);
-    if (stored) {
-      rows.set(email, {
-        ...stored,
-        // ADMIN_EMAILS is the one environment grant that deliberately beats
-        // the store. Other environment roles retain the stored-role precedence.
-        role: environmentRole === 'owner' ? 'owner' : stored.role,
-        source: 'environment',
-      });
-      continue;
-    }
-
-    const record = synthesizedRecord(email, environmentRole === 'owner');
-    rows.set(email, {
-      ...record,
-      role: environmentRole,
-      invited_by: 'environment',
-      source: 'environment',
-    });
-  }
-
-  return [...rows.values()].sort((a, b) => a.email.localeCompare(b.email));
-};
+// T18.6a: `ListedUser` / `listUsersWithEnvironment` moved to membership/verbs.ts; re-exported for callers.
+export { listUsersWithEnvironment, type ListedUser } from '../lib/membership/verbs.js';
 
 const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
@@ -272,7 +148,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       // T18.2 path 2: an Owner-shared link may carry OUR accept token (`inv`),
       // which previews inviter/role before GoTrue accepts. Optional sugar.
       let invitation: Record<string, unknown> | undefined;
-      const inv = request.data.verb === 'invite_preview' ? request.data.inv : undefined;
+      const inv = (request.data as { inv?: string }).inv;
       if (inv) {
         try {
           const preview = await previewInvitationByToken(await getUsersBlobStore(event), inv);
@@ -310,7 +186,12 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     // caller's verified e-mail — never a body-supplied one.
     if (request.data.verb === 'accept') {
       const at = nowIso();
-      const accepted = await acceptInvitation(store, email, adminState.userId, request.data.display_name, at);
+      const acceptParsed = sessionRequestSchema.safeParse(request.data);
+      if (!acceptParsed.success) {
+        return jsonResponse(400, { error: 'Invalid request fields.', issues: acceptParsed.error.issues });
+      }
+      const acceptArgs = acceptParsed.data as { verb: 'accept'; display_name: string };
+      const accepted = await acceptInvitation(store, email, adminState.userId, acceptArgs.display_name, at);
       if (accepted) {
         if (accepted.status === 'disabled') return jsonResponse(403, { error: 'This membership is disabled.' });
         // T18.1/T18.2: acceptInvitation stamped onboarding (password + name),
@@ -322,7 +203,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         // unchanged (plus the name they just typed).
         const bootstrapOwner: UserRecord = {
           ...synthesizedRecord(email, true, at),
-          display_name: request.data.display_name,
+          display_name: acceptArgs.display_name,
           user_id: adminState.userId,
           last_seen_at: at,
           audit: [{ at, actor_email: email, action: 'bootstrap_activate' }],
@@ -342,8 +223,9 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     if (!roles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
     const owner = isOwner(roles);
 
-    // T18.4: the GoTrue admin token Netlify injects into Identity-JWT requests,
-    // the platform fetch, and the two side-effect stores (opened lazily).
+    // T18.4/T18.6a: the GoTrue admin token Netlify injects into Identity-JWT
+    // requests, the platform fetch, and the offboarding side-effect deps the
+    // membership core takes (opened lazily).
     const identityCtx = (context as { clientContext?: { identity?: GoTrueIdentity } } | undefined)?.clientContext
       ?.identity;
     const fetchImpl = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
@@ -351,45 +233,40 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     const oauthStore = () =>
       getNetlifyBlobStore({ name: 'governance', consistency: 'strong' }, event) as unknown as Promise<OAuthBlobStore>;
     const objectStore = () => getSiteObjectsBlobStore(event);
-    /** suspend/remove side effects: OAuth grants gone, locks handed off. */
-    const cutAccess = async (target: UserRecord, reason: 'suspend' | 'remove', at: string) => {
-      const [grants, locks] = await Promise.all([
-        oauthStore()
-          .then((s) => revokeOAuthGrantsForSubject(s, target.email))
-          .catch((e: unknown) => ({ revoked: 0, error: e instanceof Error ? e.message : 'oauth store unavailable' })),
-        objectStore()
-          .then((s) =>
-            releaseLocksHeldBy(s as never, {
-              person: {
-                email: target.email,
-                person_id: target.person_id ?? personIdForEmail(target.email),
-                user_id: target.user_id,
-              },
-              actor: principal,
-              at,
-              reason,
-            })
-          )
-          .catch(() => [] as Array<{ object_id: string; object_type: string }>),
-      ]);
-      return {
-        oauth_revoked: grants.revoked,
-        oauth_error: 'error' in grants ? grants.error : undefined,
-        locks_released: locks,
-      };
+    // avatar ref is image/<requestId>/<sha256>.<ext> (isTrustedAvatarRef) → soft-delete that artifact
+    const softDeleteAvatar = async (ref: string) => {
+      const m = /^image\/([^/]+)\/([0-9a-f]{64})\./i.exec(ref);
+      if (!m) return;
+      await softDeleteArtifact(event as never, { requestId: m[1], sha256: m[2], deletedBy: email });
     };
-    // Owner requests carrying an admin token drain queued identity deletes (the sweep cannot).
-    if (owner && identityCtx) {
-      await drainIdentityDeleteQueue(store, {
-        identity: identityCtx,
-        fetchImpl,
-        at: nowIso(),
-        actor: auditActorFromPrincipal(principal),
-      }).catch(() => undefined);
-    }
 
     const req = request.data;
-    switch (req.verb) {
+    const sessionParsed = SESSION_VERBS.has(req.verb) ? sessionRequestSchema.safeParse(req) : undefined;
+    if (sessionParsed && !sessionParsed.success) {
+      return jsonResponse(400, { error: 'Invalid request fields.', issues: sessionParsed.error.issues });
+    }
+    if (!sessionParsed) {
+      // W18 T18.6a: every management verb runs in the membership core with
+      // the human principal this function authenticated (`via:'admin_ui'`).
+      // The gate, tier checks, guards, side effects and audit live there.
+      const result = await handleMembershipVerb({
+        verb: req.verb,
+        args: parsed.value as Record<string, unknown>,
+        principal: { kind: 'human', id: adminState.userId ?? '', email, via: 'admin_ui' },
+        deps: {
+          store,
+          identity: identityCtx,
+          fetchImpl,
+          oauthStore,
+          objectStore: objectStore as never,
+          softDeleteAvatar,
+        },
+      });
+      return jsonResponse(result.status, result.body);
+    }
+    const session = sessionParsed.data;
+    switch (session.verb) {
+      // (req narrowed to the session union above)
       case 'invite_preview':
         // Answered above, before auth (and `accept` is narrowed out above);
         // unreachable — kept so the switch stays exhaustive.
@@ -444,7 +321,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       case 'update_me': {
         // T9.6: an avatar must be an uploaded image artifact reference
         // (image/<id>/<sha256>.<ext>) — never an arbitrary URL or data URI.
-        if (req.avatar_artifact !== undefined && !isTrustedAvatarRef(req.avatar_artifact)) {
+        if (session.avatar_artifact !== undefined && !isTrustedAvatarRef(session.avatar_artifact)) {
           return jsonResponse(400, {
             error: 'Avatar must be an uploaded image artifact reference, not a URL.',
           });
@@ -452,24 +329,24 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         const base = (await getUserRecord(store, email)) ?? synthesizedRecord(email, owner);
         const updated: UserRecord = {
           ...base,
-          display_name: req.display_name ?? base.display_name,
-          avatar_artifact: req.avatar_artifact ?? base.avatar_artifact,
+          display_name: session.display_name ?? base.display_name,
+          avatar_artifact: session.avatar_artifact ?? base.avatar_artifact,
           updated_at: nowIso(),
           last_seen_at: nowIso(),
           audit: [...base.audit, { at: nowIso(), actor_email: email, action: 'update_profile' }],
         };
         await putUserRecord(store, updated);
-        if (req.display_name) {
+        if (session.display_name) {
           await stampOnboarding(store, email, { steps: { name: nowIso() }, at: nowIso() }).catch(() => undefined);
         }
-        if (req.onboarding_step) {
+        if (session.onboarding_step) {
           const at = nowIso();
           await stampOnboarding(store, email, {
             steps:
-              req.onboarding_step === 'name'
+              session.onboarding_step === 'name'
                 ? { name: at }
-                : { tour: req.onboarding_step === 'skipped' ? 'skipped' : at },
-            ...(req.onboarding_step === 'name' ? {} : { completed_at: at }),
+                : { tour: session.onboarding_step === 'skipped' ? 'skipped' : at },
+            ...(session.onboarding_step === 'name' ? {} : { completed_at: at }),
             at,
           }).catch(() => undefined);
         }
@@ -482,506 +359,8 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         }).catch(() => undefined);
         return jsonResponse(200, { user: (await getUserRecord(store, email)) ?? updated });
       }
-
-      case 'list': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const users = await listUsersWithEnvironment(store);
-        // T18.1: `removed` memberships stay for audit/attribution but leave the
-        // default members list; `include_removed:true` shows them.
-        return jsonResponse(200, {
-          users: req.include_removed ? users : users.filter((u) => u.membership_status !== 'removed'),
-        });
-      }
-
-      case 'invite':
-      case 'resend':
-      case 'revoke':
-      case 'list_invitations':
-      case 'unmanaged_identities':
-      case 'grant': {
-        // T18.2: Owner-only except `invite`, which policy.who_can_invite may
-        // open to Admins for the roles in policy.roles_admin_may_grant.
-        const identity = (context as { clientContext?: { identity?: GoTrueIdentity } } | undefined)?.clientContext
-          ?.identity;
-        const fetchImpl = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
-          fetch(url, init);
-        const at = nowIso();
-        const actor = auditActorFromPrincipal(principal);
-        try {
-          if (req.verb === 'invite') {
-            const policy = await getPolicy(store);
-            assertMayInvite({ actorRoles: roles, role: req.role, policy });
-            if (environmentRoleForEmail(req.email)) {
-              return jsonResponse(409, {
-                error: 'This member is configured in site environment variables and cannot be changed here.',
-                error_code: 'env_managed_member',
-              });
-            }
-            const result = await createInvitation(store, {
-              email: req.email,
-              role: req.role,
-              invitedBy: { person_id: personIdForEmail(email), email },
-              actor,
-              at,
-              ...(req.message ? { message: req.message } : {}),
-              identity,
-              fetchImpl,
-            });
-            return jsonResponse(200, {
-              user: result.user,
-              invite: result.invite,
-              invitation: result.invitation,
-              accept_token: result.accept_token,
-            });
-          }
-          if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-          if (req.verb === 'resend') {
-            const result = await resendInvitation(store, {
-              invite_id: req.invite_id,
-              email: req.email,
-              actor,
-              actorEmail: email,
-              at,
-              identity,
-              fetchImpl,
-            });
-            return jsonResponse(200, {
-              invitation: result.invitation,
-              invite: result.invite,
-              accept_token: result.accept_token,
-            });
-          }
-          if (req.verb === 'revoke') {
-            const result = await revokeInvitation(store, {
-              invite_id: req.invite_id,
-              email: req.email,
-              actor,
-              actorEmail: email,
-              at,
-              reason: req.reason,
-            });
-            return jsonResponse(200, { invitation: result.invitation, membership: result.membership });
-          }
-          if (req.verb === 'list_invitations') {
-            return jsonResponse(200, { invitations: await listInvitations(store, { status: req.status, now: at }) });
-          }
-          if (req.verb === 'unmanaged_identities') {
-            const result = await listUnmanagedIdentities({ store, identity, fetchImpl });
-            // T18.4: the UI shows "Delete identity" only when a token is at hand
-            return jsonResponse(200, { ...result, capabilities: { delete_identity: Boolean(identity) } });
-          }
-          // grant: a Netlify-UI identity (no membership) gets an ACTIVE membership at the given role.
-          const target = normalizeUserEmail(req.email);
-          if (environmentRoleForEmail(target)) {
-            return jsonResponse(409, {
-              error: 'This member is configured in site environment variables and cannot be changed here.',
-              error_code: 'env_managed_member',
-            });
-          }
-          const existing = await getUserRecord(store, target);
-          if (existing && existing.membership_status !== 'removed') {
-            return jsonResponse(409, {
-              error: 'This person already has a membership. Change their role instead.',
-              error_code: 'member_exists',
-            });
-          }
-          const granted = newMember({
-            email: target,
-            display_name: existing?.display_name ?? friendlyNameFromEmail(target),
-            role: req.role,
-            status: 'active',
-            source: 'netlify_ui',
-            granted_by: { kind: 'human', person_id: personIdForEmail(email), email },
-            invited_by: email,
-            at,
-            user_id: req.user_id,
-            audit: [
-              ...(existing?.audit ?? []),
-              { at, actor_email: email, action: 'grant', detail: `role ${req.role}` },
-            ],
-          });
-          await saveMember(store, granted);
-          await appendAudit(store, {
-            at,
-            actor,
-            action: 'membership.grant',
-            target: { person_id: granted.person.person_id, email: target },
-            detail: { role: req.role, source: 'netlify_ui' },
-            via: 'admin_ui',
-          }).catch(() => undefined);
-          return jsonResponse(200, { user: await getUserRecord(store, target) });
-        } catch (error) {
-          if (error instanceof InvitationError) {
-            return jsonResponse(error.status, { error: error.message, error_code: error.code, ...error.extra });
-          }
-          throw error;
-        }
-      }
-
-      case 'promote_bootstrap': {
-        // T18.1 (plan §4.3, F10): give an ADMIN_EMAILS member a STORED Owner
-        // membership so the env row can be emptied later. Owner-only; the
-        // target must be an env Owner; idempotent when a stored owner exists.
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        if (environmentRoleForEmail(target) !== 'owner') {
-          return jsonResponse(409, {
-            error: 'Only an ADMIN_EMAILS (bootstrap) member can be promoted to a stored Owner.',
-          });
-        }
-        const at = nowIso();
-        const stored = await getUserRecord(store, target);
-        const promoted: UserRecord = stored
-          ? {
-              ...stored,
-              role: 'owner',
-              status: 'active',
-              updated_at: at,
-              audit: [
-                ...stored.audit,
-                {
-                  at,
-                  actor_email: email,
-                  action: 'promote_bootstrap',
-                  detail: `${stored.role}/${stored.status} → owner/active`,
-                },
-              ],
-            }
-          : {
-              ...synthesizedRecord(target, true, at),
-              audit: [{ at, actor_email: email, action: 'promote_bootstrap', detail: 'env → stored owner' }],
-            };
-        await putUserRecord(store, promoted);
-        await appendAudit(store, {
-          at,
-          actor: auditActorFromPrincipal(principal),
-          action: 'membership.promote_bootstrap',
-          target: { person_id: personIdForEmail(target), email: target },
-          via: 'admin_ui',
-        }).catch(() => undefined);
-        return jsonResponse(200, { user: await getUserRecord(store, target) });
-      }
-
-      case 'member_audit': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        const stored = await getUserRecord(store, target);
-        return jsonResponse(200, {
-          email: target,
-          events: await listAuditForEmail(store, target, req.limit ?? 100),
-          legacy_audit: stored?.audit ?? [],
-        });
-      }
-
-      case 'remove': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        if (target === email) return jsonResponse(409, { error: 'You cannot remove yourself.' });
-        if (environmentRoleForEmail(target)) {
-          return jsonResponse(409, {
-            error: 'This member is configured in site environment variables and cannot be changed here.',
-            error_code: 'env_managed_member',
-          });
-        }
-        const stored = await getUserRecord(store, target);
-        if (!stored) return jsonResponse(404, { error: 'No such member.' });
-        const at = nowIso();
-        if (stored.role === 'owner' && stored.status === 'active') {
-          const policy = await getPolicy(store);
-          const envOwners = environmentRoleEntries().filter(([, role]) => role === 'owner').length;
-          if (
-            await wouldBreachMinOwners(store, {
-              exceptPersonId: stored.person_id ?? personIdForEmail(target),
-              envOwnerCount: envOwners,
-              minOwners: policy.min_owners,
-            })
-          ) {
-            return jsonResponse(409, {
-              error: 'This is the last Owner. Promote another member to Owner first.',
-              error_code: 'last_owner',
-            });
-          }
-        }
-        const policy = await getPolicy(store);
-        // a pending invitation is revoked alongside
-        try {
-          await revokeInvitation(store, {
-            email: target,
-            actor: auditActorFromPrincipal(principal),
-            actorEmail: email,
-            at,
-            reason: req.reason ?? 'member removed',
-          });
-        } catch {
-          // no open invitation — fine
-        }
-        await removeMembership(store, {
-          email: target,
-          actorEmail: email,
-          at,
-          reason: req.reason,
-          purgeGraceDays: policy.purge_grace_days,
-        });
-        // T18.4: cut access now (OAuth grants + locks), then the identity (policy / flag).
-        const cut = await cutAccess(stored, 'remove', at);
-        const wantDelete = req.delete_identity ?? policy.delete_identity_on_remove;
-        const identityOutcome = wantDelete
-          ? await deleteOrQueueIdentity(store, {
-              person: {
-                person_id: stored.person_id ?? personIdForEmail(target),
-                email: target,
-                user_id: stored.user_id,
-              },
-              identity: identityCtx,
-              fetchImpl,
-              at,
-              reason: req.reason ?? 'member removed',
-            })
-          : { outcome: 'kept' as const };
-        await appendAudit(store, {
-          at,
-          actor: auditActorFromPrincipal(principal),
-          action: 'membership.remove',
-          target: { person_id: stored.person_id ?? personIdForEmail(target), email: target },
-          detail: {
-            ...(req.reason ? { reason: req.reason } : {}),
-            oauth_revoked: cut.oauth_revoked,
-            locks_released: cut.locks_released.length,
-            identity: identityOutcome.outcome,
-          },
-          via: 'admin_ui',
-        }).catch(() => undefined);
-        return jsonResponse(200, {
-          user: await getUserRecord(store, target),
-          offboarding: { ...cut, identity: identityOutcome },
-        });
-      }
-
-      case 'purge': {
-        // T18.4: PII scrub now (typed confirm verified server-side), no grace wait.
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        if (target === email) return jsonResponse(409, { error: 'You cannot purge yourself.' });
-        if (!purgeConfirmMatches(req.confirm, target)) {
-          return jsonResponse(400, { error: `Type "PURGE ${target}" to confirm.`, error_code: 'confirm_mismatch' });
-        }
-        const member = await getMembershipByEmail(store, target);
-        if (!member) return jsonResponse(404, { error: 'No such member.' });
-        if (member.membership.status !== 'removed') {
-          return jsonResponse(409, {
-            error: 'Remove the member first; purge only applies to removed members.',
-            error_code: 'not_removed',
-          });
-        }
-        const at = nowIso();
-        const view = memberToUserRecordSafe(member);
-        const cut = await cutAccess(view, 'remove', at);
-        const identityOutcome = await deleteOrQueueIdentity(store, {
-          person: { person_id: member.person.person_id, email: target, user_id: member.person.identity.user_id },
-          identity: identityCtx,
-          fetchImpl,
-          at,
-          reason: 'purge',
-        });
-        await scrubPerson(store, {
-          person: member.person,
-          membership: member.membership,
-          at,
-          // avatar ref is image/<requestId>/<sha256>.<ext> (isTrustedAvatarRef) → soft-delete that artifact
-          softDeleteAvatar: async (ref) => {
-            const m = /^image\/([^/]+)\/([0-9a-f]{64})\./i.exec(ref);
-            if (!m) return;
-            await softDeleteArtifact(event as never, { requestId: m[1], sha256: m[2], deletedBy: email });
-          },
-        });
-        await appendAudit(store, {
-          at,
-          actor: auditActorFromPrincipal(principal),
-          action: 'membership.purge',
-          target: { person_id: member.person.person_id, email: target },
-          detail: { oauth_revoked: cut.oauth_revoked, identity: identityOutcome.outcome },
-          via: 'admin_ui',
-        }).catch(() => undefined);
-        return jsonResponse(200, {
-          purged: true,
-          person_id: member.person.person_id,
-          offboarding: { ...cut, identity: identityOutcome },
-        });
-      }
-
-      case 'transfer_ownership': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const from = normalizeUserEmail(req.from_email ?? email);
-        const to = normalizeUserEmail(req.to_email);
-        if (environmentRoleForEmail(from) || environmentRoleForEmail(to)) {
-          return jsonResponse(409, {
-            error:
-              'Environment-configured members cannot take part in an ownership transfer; promote the stored Owner first.',
-            error_code: 'env_managed_member',
-          });
-        }
-        const at = nowIso();
-        try {
-          const result = await transferOwnership(store, {
-            from,
-            to,
-            actor: auditActorFromPrincipal(principal),
-            actorEmail: email,
-            at,
-            demoteTo: req.demote_to,
-          });
-          return jsonResponse(200, {
-            from: await getUserRecord(store, result.from.person.email),
-            to: await getUserRecord(store, result.to.person.email),
-          });
-        } catch (error) {
-          if (error instanceof OffboardingError) {
-            return jsonResponse(error.status, { error: error.message, error_code: error.code });
-          }
-          throw error;
-        }
-      }
-
-      case 'export_person': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        const bundle = await exportPerson(store, {
-          email: target,
-          at: nowIso(),
-          objectStore: (await objectStore().catch(() => undefined)) as never,
-        });
-        if (!bundle) return jsonResponse(404, { error: 'No such member.' });
-        return jsonResponse(200, { export: bundle });
-      }
-
-      case 'delete_identity': {
-        // T18.4: delete a Netlify Identity user that has NO membership here (the Identities tab).
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        if (target === email) return jsonResponse(409, { error: 'You cannot delete your own identity.' });
-        if (await getUserRecord(store, target)) {
-          return jsonResponse(409, {
-            error: 'This identity has a membership — remove the member instead.',
-            error_code: 'member_exists',
-          });
-        }
-        if (!identityCtx) {
-          return jsonResponse(503, {
-            error: 'Identity admin token unavailable.',
-            error_code: 'identity_admin_unavailable',
-          });
-        }
-        const res = await deleteIdentity({ identity: identityCtx, fetchImpl, gotrue_user_id: req.user_id });
-        if (!res.deleted)
-          return jsonResponse(502, { error: res.error ?? 'GoTrue delete failed.', error_code: 'gotrue_delete_failed' });
-        await appendAudit(store, {
-          at: nowIso(),
-          actor: auditActorFromPrincipal(principal),
-          action: 'person.sessions_revoked',
-          target: { email: target },
-          detail: { identity_deleted: true, gotrue_user_id: req.user_id, unmanaged: true },
-          via: 'admin_ui',
-        }).catch(() => undefined);
-        return jsonResponse(200, { deleted: true, user_id: req.user_id });
-      }
-
-      case 'set_role':
-      case 'suspend':
-      case 'disable':
-      case 'reinstate': {
-        if (!owner) return jsonResponse(403, { error: 'Owner access required' });
-        const target = normalizeUserEmail(req.email);
-        if (target === email) {
-          return jsonResponse(409, { error: 'You cannot change your own role or status.' });
-        }
-        if (environmentRoleForEmail(target)) {
-          return jsonResponse(409, {
-            error: 'This member is configured in site environment variables and cannot be changed here.',
-          });
-        }
-        const stored = await getUserRecord(store, target);
-        if (!stored) {
-          return jsonResponse(404, { error: 'No such member. Invite them first.' });
-        }
-        const at = nowIso();
-        const verb = req.verb === 'disable' ? 'suspend' : req.verb;
-
-        // T18.1 `last_owner` guard: demoting or suspending an active stored
-        // Owner must not leave fewer than policy.min_owners owners (stored
-        // active + ADMIN_EMAILS bootstrap owners).
-        const wouldLoseOwner =
-          stored.role === 'owner' &&
-          stored.status === 'active' &&
-          ((verb === 'set_role' && req.verb === 'set_role' && req.role !== 'owner') || verb === 'suspend');
-        if (wouldLoseOwner) {
-          const policy = await getPolicy(store);
-          const envOwners = environmentRoleEntries().filter(([, role]) => role === 'owner').length;
-          const breach = await wouldBreachMinOwners(store, {
-            exceptPersonId: stored.person_id ?? personIdForEmail(target),
-            envOwnerCount: envOwners,
-            minOwners: policy.min_owners,
-          });
-          if (breach) {
-            return jsonResponse(409, {
-              error: 'This is the last Owner. Promote another member to Owner first.',
-              error_code: 'last_owner',
-            });
-          }
-        }
-
-        let updated: UserRecord;
-        let auditAction: 'membership.role_change' | 'membership.suspend' | 'membership.reinstate';
-        if (verb === 'set_role' && req.verb === 'set_role') {
-          updated = {
-            ...stored,
-            role: req.role,
-            updated_at: at,
-            audit: [
-              ...stored.audit,
-              { at, actor_email: email, action: 'set_role', detail: `${stored.role} → ${req.role}` },
-            ],
-          };
-          auditAction = 'membership.role_change';
-        } else if (verb === 'suspend') {
-          const reason = req.verb === 'suspend' || req.verb === 'disable' ? req.reason : undefined;
-          updated = {
-            ...stored,
-            status: 'disabled',
-            updated_at: at,
-            audit: [
-              ...stored.audit,
-              { at, actor_email: email, action: 'suspend', ...(reason ? { detail: reason } : {}) },
-            ],
-          };
-          auditAction = 'membership.suspend';
-        } else {
-          if (stored.membership_status === 'removed') {
-            return jsonResponse(409, { error: 'This member was removed. Re-invite them instead.' });
-          }
-          if (stored.status !== 'disabled') return jsonResponse(200, { user: stored });
-          updated = {
-            ...stored,
-            status: 'active',
-            updated_at: at,
-            audit: [...stored.audit, { at, actor_email: email, action: 'reinstate' }],
-          };
-          auditAction = 'membership.reinstate';
-        }
-        await putUserRecord(store, updated);
-        // T18.4: suspending cuts access NOW — OAuth grants revoked, held locks handed off.
-        const cut = verb === 'suspend' ? await cutAccess(stored, 'suspend', at) : undefined;
-        await appendAudit(store, {
-          at,
-          actor: auditActorFromPrincipal(principal),
-          action: auditAction,
-          target: { person_id: stored.person_id ?? personIdForEmail(target), email: target },
-          ...(verb === 'set_role' && req.verb === 'set_role' ? { detail: { from: stored.role, to: req.role } } : {}),
-          ...(cut ? { detail: { oauth_revoked: cut.oauth_revoked, locks_released: cut.locks_released.length } } : {}),
-          via: 'admin_ui',
-        }).catch(() => undefined);
-        return jsonResponse(200, { user: await getUserRecord(store, target), ...(cut ? { offboarding: cut } : {}) });
-      }
     }
+    return jsonResponse(400, { error: 'Invalid request fields.' });
   } catch (error) {
     console.error('Admin_Users request failed.', error);
     return jsonResponse(500, { error: 'User request could not be processed.' });

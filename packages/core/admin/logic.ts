@@ -221,8 +221,9 @@ export function memberActionsFor(input: {
   actorEmail: string;
   actorRoles: readonly string[];
 }): MemberAction[] {
+  // T18.6a: an Admin sees the list read-only (the audit stream is Owner-only) — no row actions at all.
+  if (!input.actorRoles.includes('owner')) return [];
   const actions: MemberAction[] = ['view_audit'];
-  if (!input.actorRoles.includes('owner')) return actions;
   const isSelf = input.row.email === input.actorEmail;
   if (isSelf) return actions;
   if (input.row.source === 'environment') return ['promote_bootstrap', ...actions];

@@ -225,6 +225,8 @@ export type LambdaEvent = {
   slug?: string | null;
   /** W11 T11.10: set once per request when the Authorization bearer token resolves to a VERIFIED per-agent credential. */
   verifiedAgentName?: string;
+  /** W18 T18.6a: the OAuth principal (a Netlify Identity HUMAN + client) this request authenticated with, if any. */
+  oauthPrincipal?: ResolvedOAuthPrincipal;
   /**
    * QA-W16-3: set once per request, right after `getAuthResult` succeeds —
    * i.e. this request already cleared the platform's own MCP gate (the
@@ -254,9 +256,9 @@ type JsonRpcResponse = {
 };
 
 export type ToolPreviewBinding =
-  | { kind: 'verb_dry_run' }        // execute the same verb with dry_run: true
+  | { kind: 'verb_dry_run' } // execute the same verb with dry_run: true
   | { kind: 'validate_new_object' } // synthetic create preview (chat's validateNewObject)
-  | { kind: 'input_echo' };         // echo the exact args onto the approval card
+  | { kind: 'input_echo' }; // echo the exact args onto the approval card
 
 export type ToolGovernance = {
   /** Chat risk class; drives default autonomy (read → auto, everything else → ask). */
@@ -1296,6 +1298,10 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
   // `agent_name` for every tool call in this request — see callTool's use
   // of `event.verifiedAgentName` below.
   if (authResult.verifiedAgentName) event.verifiedAgentName = authResult.verifiedAgentName;
+  // W18 T18.6a: the OAuth-bound HUMAN, when present, is the only thing that
+  // lets a membership tool run over /mcp — `callerPrincipalFromMcpEvent`
+  // (membership/caller-principal.ts) reads it; everything else is an agent.
+  event.oauthPrincipal = authResult.oauthPrincipal;
   if (authResult.oauthPrincipal) {
     // Attribution, not authority: the log now names the CLIENT and the HUMAN
     // who approved it. The token grants exactly the same surface as the shared

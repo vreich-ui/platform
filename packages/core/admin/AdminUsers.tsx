@@ -202,7 +202,8 @@ export function AdminUsersBody() {
         setMeEmail(res.user.email);
         setMe(res.user);
         setRoles(res.roles);
-        if (res.roles.includes('owner')) await refresh(false);
+        // T18.6a: `list` is admin-tier (read-only for Admins); Owners get the actions.
+        if (res.roles.includes('admin')) await refresh(false);
         if (alive) setLoading(false);
       } catch (err) {
         if (alive) {
@@ -342,43 +343,7 @@ export function AdminUsersBody() {
       </Card>
     );
   }
-  if (!owner) {
-    // Admin: read-only list is served by the Owner-only `list` verb (403) — show a clear read-only notice instead.
-    return (
-      <Card>
-        <EmptyState
-          icon={<IconUser size={26} />}
-          title="Members are managed by Owners"
-          message="You can invite editors and viewers from the button below; the full members list is Owner-only."
-          action={
-            canInvite ? (
-              <Button leftIcon={<IconPlus size={16} />} onClick={() => setInviteOpen(true)}>
-                Invite
-              </Button>
-            ) : undefined
-          }
-        />
-        <InviteDialog
-          open={inviteOpen}
-          onClose={() => setInviteOpen(false)}
-          email={inviteEmail}
-          setEmail={setInviteEmail}
-          role={inviteRole}
-          setRole={setInviteRole}
-          onSubmit={doInvite}
-          busy={inviting}
-          actorRoles={roles}
-          policy={policy}
-          message={inviteMessage}
-          setMessage={setInviteMessage}
-          error={inviteError}
-        />
-        <CreatedLinkDialog created={createdLink} onClose={() => setCreatedLink(null)} />
-      </Card>
-    );
-  }
-
-  const columns: Column<UserView>[] = [
+  const allColumns: Column<UserView>[] = [
     {
       key: 'display_name',
       header: 'Member',
@@ -517,6 +482,7 @@ export function AdminUsersBody() {
     },
   ];
 
+  const columns = owner ? allColumns : allColumns.filter((c) => c.key !== 'actions');
   const removedCount = users.filter((u) => membershipStatus(u) === 'removed').length;
 
   const membersTab = (
@@ -527,7 +493,7 @@ export function AdminUsersBody() {
           {removedCount ? ` · ${removedCount} removed` : ''}
         </p>
         <div className="flex items-center gap-3">
-          {removedCount ? (
+          {owner && removedCount ? (
             <Switch
               checked={showRemoved}
               onCheckedChange={(v) => {
@@ -537,9 +503,11 @@ export function AdminUsersBody() {
               label="Show removed"
             />
           ) : null}
-          <Button leftIcon={<IconPlus size={16} />} onClick={() => setInviteOpen(true)}>
-            Invite
-          </Button>
+          {canInvite ? (
+            <Button leftIcon={<IconPlus size={16} />} onClick={() => setInviteOpen(true)}>
+              Invite
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -559,6 +527,35 @@ export function AdminUsersBody() {
       )}
     </div>
   );
+
+  if (!owner) {
+    // T18.6a: Admins see the members list read-only (no row actions, no
+    // Invitations/Identities tabs) and may invite when the policy allows.
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          Read-only — Owners manage members and invitations.
+        </p>
+        {membersTab}
+        <InviteDialog
+          open={inviteOpen}
+          onClose={() => setInviteOpen(false)}
+          email={inviteEmail}
+          setEmail={setInviteEmail}
+          role={inviteRole}
+          setRole={setInviteRole}
+          onSubmit={doInvite}
+          busy={inviting}
+          actorRoles={roles}
+          policy={policy}
+          message={inviteMessage}
+          setMessage={setInviteMessage}
+          error={inviteError}
+        />
+        <CreatedLinkDialog created={createdLink} onClose={() => setCreatedLink(null)} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">

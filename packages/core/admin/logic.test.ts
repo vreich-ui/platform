@@ -222,14 +222,14 @@ describe('memberActionsFor', () => {
       ['change_role', 'view_audit', 'reinstate', 'remove']
     );
   });
-  it('a non-owner gets audit only (read-only page)', () => {
+  it('a non-owner gets no row actions (read-only list; the audit stream is Owner-only)', () => {
     assert.deepEqual(
       memberActionsFor({
         row: { email: 'a@x.com', role: 'admin', status: 'active' },
         actorEmail: me,
         actorRoles: ['admin'],
       }),
-      ['view_audit']
+      []
     );
   });
   it('memberSourceLabel', () => {
