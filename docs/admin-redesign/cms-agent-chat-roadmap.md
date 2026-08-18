@@ -26,7 +26,7 @@
 ```
 ✅ CA1 ─ ✅ CA2 ─ ✅ CA3 (contract frozen in code, G1 unsigned) ─ ✅ CA4 ─ ✅ CA5 ─ ✅ turn GC ─ ✅ deployed
                                                      │
-   ⛔ CA6 prompt parity ──────────────────────────────┤  (must land before any site flips to `required`)
+   ⛔ CA6 prompt parity ────────────────────────────────────┤  (must land before any site flips to `required`)
    ☐ CA7 GC evidence producer + schedule ────────────┘  (non-blocking)
 
 ☐ PF0 scoped-token ops (Wolf) ──┐
@@ -186,6 +186,8 @@ Then per Netlify site set `CMS_AGENT_MCP_ENDPOINT` (the Cloud Run `/mcp` URL), `
 
 ### PF4 — Workspace orchestration tools (P3.1's surviving half; before or during cutover, Wolf's call)
 **Tasks/commits:** `PF4.1` `list_workspace_nodes` (read/auto) + `run_workspace_workflow` (privileged/ask, dry-run = input echo, riskLevel→autonomy floors: publish/admin never auto and excluded from the safe-run allow-list) + `get_workspace_run` (read/auto, bounded projection — never the ~500KB full record); raw CMS-Agent output rendered in a collapsed disclosure (P3.2's surviving idea); Guardrails catalog picks the tools up automatically. **Model/effort:** Terra + high. **Tests:** risk floors; dry-run card content; long-run polling across turns; blocked run surfaces as Needs-you.
+
+**PF4b (D2a, 2026-08-17) — publish/release from chat via ask-gated verbs.** Supersedes PF4's "publishing remains a separate human decision on the workspace surface" exclusion: three verbs now ride the same CMS-Agent bridge — `check_workspace_run_readiness` (read/auto → `workflow_publish_readiness`, approval omitted, `verifiedMediaRefs` from this site's artifact index in both blobKey and `/img|/pdf` forms), `publish_workspace_run` (privileged, autonomyFloor `ask`; the approval card IS the readiness result; refused outright unless status is `go`; on approval → `workflow_publish_run` with `approval{approvedBy: editor email, approvedAt, pinned:true}`, `releaseBehavior: publish_now`; idempotent per `publish:<runId>`), and `release_workspace_run` (privileged/ask, Owner-only → local `release_to_production` + one `deploy_status` read). `run_workspace_workflow` now mints/accepts the `req_agent_<slug>_<yyyymmdd>_<nn>` request id CMS-Agent requires and passes `budgetMs: 45000`. CMS-Agent's own gates still apply (D3): the readiness/publish decision is re-evaluated server-side by CMS-Agent; the chat verbs cannot widen it. Only the readiness check is safe to auto-run.
 
 ### PF5 — Staged cutover ⛔ **G3 per site, G4 before drlurie**
 **Prerequisites: PF0 done, CA6 landed and deployed.** Per site, in order **platform → fernwell (CA5 ✅ done) → drlurie**:

@@ -85,6 +85,18 @@ export interface ToolContext {
   membership?: {
     call(verb: string, args: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   };
+  /**
+   * D2a (2026-08-17): the run's captured HUMAN principal — the approver a
+   * chat-side publish pins into CMS-Agent's readiness `approval` block.
+   * Absent for contexts without a human (a publish then refuses).
+   */
+  principal?: { id: string; email: string };
+  /**
+   * D2a: stored-idempotency seam (the same `withIdempotentToolCall` ledger the
+   * MCP switch uses) for chat verbs whose downstream call is not itself
+   * idempotent (`publish_workspace_run`). Absent → the call runs unguarded.
+   */
+  idempotent?<T extends Record<string, unknown>>(toolName: string, key: string, run: () => Promise<T>): Promise<T>;
 }
 
 export interface ChatTool {
@@ -138,7 +150,7 @@ const objectRefJson = {
   object_id: { type: 'string' },
 };
 
-// ─── read tools ──────────────────────────────────────────────────────────────
+// ─── read tools ────────────────────────────────────────────────────────────────
 
 const getObject: ChatTool = {
   name: 'get_object',
@@ -257,7 +269,7 @@ const searchArtifacts: ChatTool = {
   describe: (args) => `List artifacts for ${args.request_id}`,
 };
 
-// ─── draft-write tools ───────────────────────────────────────────────────────
+// ─── draft-write tools ─────────────────────────────────────────────────────────────
 
 const checkout: ChatTool = {
   name: 'checkout',
@@ -354,7 +366,7 @@ const refreshLock: ChatTool = {
   describe: (args) => `Refresh the lock on ${args.object_type} ${args.object_id}`,
 };
 
-// ─── creation tools (dry-run first) ──────────────────────────────────────────
+// ─── creation tools (dry-run first) ──────────────────────────────────────────────────
 
 const createArgs = z.object({
   object_type: objectTypeSchema,
@@ -485,7 +497,7 @@ const instantiateSectionTemplate: ChatTool = {
   },
 };
 
-// ─── publication tools ───────────────────────────────────────────────────────
+// ─── publication tools ─────────────────────────────────────────────────────────────
 
 const submitReview: ChatTool = {
   name: 'submit_review',
@@ -544,7 +556,7 @@ const discard: ChatTool = {
   describe: (args) => `Discard drafted changes on ${args.object_type} ${args.object_id}`,
 };
 
-// ─── privileged ──────────────────────────────────────────────────────────────
+// ─── privileged ──────────────────────────────────────────────────────────────────
 
 const applyTheme: ChatTool = {
   name: 'apply_theme',
@@ -682,6 +694,15 @@ const runWorkspaceWorkflow: ChatTool = {
         enum: ['mock', 'openai'],
         description: 'mock = cheap structural placeholders; openai (default) = real model output.',
       },
+      request_id: {
+        type: 'string',
+        description:
+          'Reuse THIS request id (req_<flow>_<topic>_<yyyymmdd>_<nn>). Omit to have one minted from slug/title.',
+      },
+      slug: {
+        type: 'string',
+        description: 'Topic slug used to mint the request id (defaults to a slugified input.title / input.topic).',
+      },
     },
     additionalProperties: false,
   },
@@ -693,6 +714,8 @@ const runWorkspaceWorkflow: ChatTool = {
         workflow_id: z.string().min(1).optional(),
         budget_usd: z.number().nonnegative().optional(),
         execution_mode: z.enum(['mock', 'openai']).optional(),
+        request_id: z.string().regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>').optional(),
+        slug: z.string().min(1).optional(),
       })
       .refine((value) => Boolean(value.run_id) !== Boolean(value.input), {
         message: 'Provide exactly one of: input (start a new run) or run_id (advance an existing run).',
@@ -713,15 +736,28 @@ const runWorkspaceWorkflow: ChatTool = {
       if (!advanced.ok) return { content: json({ error: advanced.message, code: advanced.code }), is_error: true };
       return { content: json(projectWorkspaceRun(advanced.data)), is_error: false };
     }
+    // D2a: CMS-Agent's workflow_start_dry_run REQUIRES a caller request id
+    // for openai runs — mint one here (req_agent_<slug>_<yyyymmdd>_<nn>,
+    // bumping nn past any existing content_item) unless the caller passed one.
+    const requestId = (args.request_id as string | undefined) ?? (await mintWorkspaceRequestId(ctx, args));
     const started = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_start_dry_run', {
       projectId: ctx.cmsAgent.projectId,
       input: args.input,
+      requestId,
+      budgetMs: WORKSPACE_RUN_BUDGET_MS,
       ...(args.workflow_id ? { workflowId: args.workflow_id } : {}),
       ...(args.budget_usd !== undefined ? { budgetUsd: args.budget_usd } : {}),
       ...(args.execution_mode ? { executionMode: args.execution_mode } : {}),
     });
     if (!started.ok) return { content: json({ error: started.message, code: started.code }), is_error: true };
-    return { content: json(projectWorkspaceRun(started.data)), is_error: false };
+    return {
+      content: json({
+        ...projectWorkspaceRun(started.data),
+        request_id: requestId,
+        ...(started.data.continued !== undefined ? { continued: started.data.continued === true } : {}),
+      }),
+      is_error: false,
+    };
   },
   // The approval-card preview is an INPUT ECHO by design — no server call, so
   // the human approves exactly the bytes that will be sent.
@@ -732,8 +768,10 @@ const runWorkspaceWorkflow: ChatTool = {
     ...(args.input !== undefined ? { input_echo: args.input } : {}),
     ...(args.workflow_id ? { workflow_id: args.workflow_id } : {}),
     ...(args.budget_usd !== undefined ? { budget_usd: args.budget_usd } : {}),
+    ...(args.request_id ? { request_id: args.request_id } : {}),
+    ...(args.slug ? { slug: args.slug } : {}),
     execution_mode: args.execution_mode ?? 'openai',
-    note: 'A dry-run workflow has no publishing side effects; publishing remains a separate human decision.',
+    note: 'A dry-run workflow has no publishing side effects; publishing remains a separate human decision (publish_workspace_run, ask-gated).',
   }),
   describe: (args) =>
     args.run_id ? `Advance workspace run ${args.run_id}` : 'Start a workspace publishing workflow (dry-run)',
@@ -761,7 +799,308 @@ const getWorkspaceRun: ChatTool = {
   describe: (args) => `Check workspace run ${args.run_id}`,
 };
 
-// ─── registry ────────────────────────────────────────────────────────────────
+// ─── D2a (2026-08-17): request ids + publish/release verbs from chat ─────────
+
+/** CMS-Agent's bound for a caller-supplied request id (openai runs REQUIRE one). */
+export const REQUEST_ID_RE = /^req_[a-z0-9_]+_\d{8}_\d{2}$/;
+/** Per-call execution budget handed to workflow_start_dry_run (the run continues in the background; poll get_workspace_run). */
+export const WORKSPACE_RUN_BUDGET_MS = 45_000;
+
+const slugifyForRequestId = (value: unknown): string =>
+  String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_')
+    .slice(0, 48);
+
+const yyyymmdd = (date = new Date()): string =>
+  `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`;
+
+/**
+ * Mint `req_agent_<slug>_<yyyymmdd>_<nn>`: slug from args.slug, else a
+ * slugified input.title / input.topic; nn starts at 01 and bumps while a
+ * content_item with that id already exists (object get ≠ 404).
+ */
+export const mintWorkspaceRequestId = async (
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+  now: Date = new Date()
+): Promise<string> => {
+  const input = (args.input ?? {}) as Record<string, unknown>;
+  const slug = slugifyForRequestId(args.slug ?? input.slug ?? input.title ?? input.topic) || 'article';
+  const day = yyyymmdd(now);
+  for (let nn = 1; nn <= 99; nn += 1) {
+    const candidate = `req_agent_${slug}_${day}_${String(nn).padStart(2, '0')}`;
+    const existing = await ctx.verb({ action: 'get', object_type: 'content_item', object_id: candidate });
+    if (existing.status === 404) return candidate;
+  }
+  throw new Error(`Could not mint a free request id for slug "${slug}" today (01..99 all taken).`);
+};
+
+const readinessTagsSchema = z.array(z.string().min(1)).max(50).optional();
+
+/** Both reference forms — the raw blobKey AND its public /img|/pdf path — so CMS-Agent's verifier matches either. */
+const verifiedMediaRefsFor = async (ctx: ToolContext, requestId: string): Promise<string[]> => {
+  const listed = await ctx.listArtifacts(requestId);
+  const artifacts = Array.isArray(listed.artifacts) ? (listed.artifacts as Record<string, unknown>[]) : [];
+  const refs = new Set<string>();
+  for (const artifact of artifacts) {
+    const blobKey = typeof artifact.blobKey === 'string' ? artifact.blobKey : undefined;
+    const publicPath = typeof artifact.publicPath === 'string' ? artifact.publicPath : undefined;
+    if (blobKey) {
+      refs.add(blobKey);
+      if (blobKey.startsWith('image/')) refs.add(`/img/${blobKey.slice('image/'.length)}`);
+      else if (blobKey.startsWith('pdf/')) refs.add(`/pdf/${blobKey.slice('pdf/'.length)}`);
+    }
+    if (publicPath) refs.add(publicPath);
+  }
+  return [...refs];
+};
+
+type ReadinessInput = { runId: string; requestId?: string; tags?: string[] };
+
+const readinessPayload = async (ctx: ToolContext, args: ReadinessInput) => ({
+  releaseBehavior: 'publish_now' as const,
+  taxonomy: { tags: args.tags ?? [] },
+  verifiedMediaRefs: args.requestId ? await verifiedMediaRefsFor(ctx, args.requestId) : [],
+});
+
+const callReadiness = async (
+  ctx: ToolContext,
+  args: ReadinessInput
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; code: string; message: string }> => {
+  if (!ctx.cmsAgent) return { ok: false, code: 'cms_agent_unavailable', message: 'The workspace orchestration bridge is not configured for this site.' };
+  return ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_publish_readiness', {
+    projectId: ctx.cmsAgent.projectId,
+    runId: args.runId,
+    readiness: await readinessPayload(ctx, args),
+  });
+};
+
+/** Bounded, editor-safe readiness projection: status + checklist + blockers verbatim (they are already editor copy). */
+const projectReadiness = (data: Record<string, unknown>): Record<string, unknown> => ({
+  status: data.status,
+  ...(Array.isArray(data.checklist) ? { checklist: (data.checklist as unknown[]).slice(0, 64) } : {}),
+  ...(Array.isArray(data.blockers) ? { blockers: (data.blockers as unknown[]).slice(0, 64) } : {}),
+  ...(data.requestId !== undefined ? { request_id: data.requestId } : {}),
+});
+
+const checkWorkspaceRunReadiness: ChatTool = {
+  name: 'check_workspace_run_readiness',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'Check whether a workspace run is ready to publish: CMS-Agent evaluates its publish checklist (approval omitted — that is pinned at publish time) against this site\'s verified media artifacts for the request id. Returns status (go / no_go), the checklist and any blockers verbatim. Run this before publish_workspace_run.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      run_id: { type: 'string' },
+      request_id: { type: 'string', description: 'The req_* id the run was started with (media refs are looked up by it).' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Taxonomy tags the article will carry.' },
+    },
+    required: ['run_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(
+    z.object({
+      run_id: z.string().min(1),
+      request_id: z.string().regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>').optional(),
+      tags: readinessTagsSchema,
+    })
+  ),
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    const result = await callReadiness(ctx, {
+      runId: args.run_id as string,
+      requestId: args.request_id as string | undefined,
+      tags: args.tags as string[] | undefined,
+    });
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    return { content: json(projectReadiness(result.data)), is_error: false };
+  },
+  describe: (args) => `Check publish readiness of workspace run ${args.run_id}`,
+};
+
+const publishWorkspaceRun: ChatTool = {
+  name: 'publish_workspace_run',
+  toolClass: 'privileged',
+  autonomyFloor: 'ask',
+  discloseResult: true,
+  description:
+    'Publish a workspace run through CMS-Agent (workflow_publish_run) with the human approval pinned to YOU. Refused outright unless the readiness check reports status "go" (the approval card shows the readiness result). CMS-Agent\'s own gates still apply. Idempotent per run.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      run_id: { type: 'string' },
+      request_id: { type: 'string', description: 'The req_* id the run was started with.' },
+      tags: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['run_id', 'request_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(
+    z.object({
+      run_id: z.string().min(1),
+      request_id: z.string().regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>'),
+      tags: readinessTagsSchema,
+    })
+  ),
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    if (!ctx.principal) {
+      return { content: json({ error: 'publish_workspace_run requires a signed-in human approver.' }), is_error: true };
+    }
+    const cmsAgent = ctx.cmsAgent;
+    const input: ReadinessInput = {
+      runId: args.run_id as string,
+      requestId: args.request_id as string,
+      tags: args.tags as string[] | undefined,
+    };
+    // Re-check readiness at execution: the card previewed it, but the world
+    // may have moved — a no_go never reaches workflow_publish_run.
+    const readiness = await callReadiness(ctx, input);
+    if (!readiness.ok) return { content: json({ error: readiness.message, code: readiness.code }), is_error: true };
+    if (readiness.data.status !== 'go') {
+      return {
+        content: json({ error: 'Run is not ready to publish (readiness is not "go").', readiness: projectReadiness(readiness.data) }),
+        is_error: true,
+      };
+    }
+    const base = await readinessPayload(ctx, input);
+    const payload = {
+      runId: input.runId,
+      projectId: cmsAgent.projectId,
+      requestId: input.requestId,
+      approved: true,
+      live: true,
+      readiness: {
+        approval: { approvedBy: ctx.principal.email || ctx.principal.id, approvedAt: new Date().toISOString(), pinned: true },
+        releaseBehavior: base.releaseBehavior,
+        taxonomy: base.taxonomy,
+        verifiedMediaRefs: base.verifiedMediaRefs,
+      },
+    };
+    const run = async () => {
+      const published = await cmsAgent.callTool<Record<string, unknown>>('workflow_publish_run', payload);
+      return published.ok
+        ? { ok: true as const, data: published.data }
+        : { ok: false as const, isError: true, code: published.code, message: published.message };
+    };
+    const result = ctx.idempotent ? await ctx.idempotent('publish_workspace_run', `publish:${input.runId}`, run) : await run();
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    const data = result.data as Record<string, unknown>;
+    return {
+      content: json({
+        run_id: input.runId,
+        request_id: input.requestId,
+        published: data.published ?? data.status ?? true,
+        ...(data.commit !== undefined ? { commit: data.commit } : {}),
+        ...(data.receipt !== undefined ? { receipt: data.receipt } : {}),
+        ...(data.publishReceipt !== undefined ? { receipt: data.publishReceipt } : {}),
+        ...(data.articlePath !== undefined ? { article_path: data.articlePath } : {}),
+        approved_by: payload.readiness.approval.approvedBy,
+      }),
+      is_error: false,
+    };
+  },
+  // The approval card carries the readiness result: status + failing checks.
+  dryRun: async (ctx, args) => {
+    const readiness = await callReadiness(ctx, {
+      runId: args.run_id as string,
+      requestId: args.request_id as string | undefined,
+      tags: args.tags as string[] | undefined,
+    });
+    if (!readiness.ok) return { dry_run: true, action: 'publish_workspace_run', run_id: args.run_id, error: readiness.message, code: readiness.code };
+    const projected = projectReadiness(readiness.data);
+    const checklist = Array.isArray(projected.checklist) ? (projected.checklist as Record<string, unknown>[]) : [];
+    const failing = checklist.filter((check) => check && typeof check === 'object' && (check.ok === false || check.pass === false || check.status === 'fail'));
+    return {
+      dry_run: true,
+      action: 'publish_workspace_run',
+      run_id: args.run_id,
+      request_id: args.request_id,
+      readiness: projected,
+      ...(failing.length > 0 ? { failing_checks: failing } : {}),
+      approver: ctx.principal?.email ?? null,
+      note:
+        projected.status === 'go'
+          ? 'Approving publishes this run live via CMS-Agent with your approval pinned (publish_now).'
+          : 'Readiness is not "go" — the publish will be refused even if approved.',
+    };
+  },
+  describe: (args) => `Publish workspace run ${args.run_id}`,
+};
+
+const releaseWorkspaceRun: ChatTool = {
+  name: 'release_workspace_run',
+  toolClass: 'privileged',
+  autonomyFloor: 'ask',
+  discloseResult: true,
+  description:
+    'OWNER-ONLY. Release published content to production (the ONE paid Netlify build for everything published so far), then read deploy_status once. Idempotent per commit/run. Publishing is free; releasing costs money — batch first.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      commit: { type: 'string', description: 'Target commit (e.g. the publish receipt commit). Omitted = branch HEAD.' },
+      publish_receipt_from_run: { type: 'string', description: 'The workspace run id whose publish this release ships (used for the idempotency key).' },
+    },
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ commit: z.string().min(1).optional(), publish_receipt_from_run: z.string().min(1).optional() })),
+  execute: async (ctx, args) => {
+    if (!ctx.roles.includes('owner')) {
+      return { content: json({ error: 'release_workspace_run requires the Owner role.' }), is_error: true };
+    }
+    if (!ctx.operational) {
+      return { content: json({ error: 'The operational bridge is not configured for this site.' }), is_error: true };
+    }
+    const commit = args.commit as string | undefined;
+    const runRef = args.publish_receipt_from_run as string | undefined;
+    const idempotencyKey = `release:${runRef ?? commit ?? 'head'}`;
+    const released = await ctx.operational.call('release_to_production', {
+      ...(commit ? { commit } : {}),
+      idempotency_key: idempotencyKey,
+    });
+    if (released.is_error) return released;
+    const releaseBody = parseJson(released.content);
+    const targetCommit = (releaseBody.targetCommit as string | undefined) ?? commit;
+    const deploy = await ctx.operational.call('deploy_status', targetCommit ? { commit: targetCommit } : {});
+    const deployBody = deploy.is_error ? { error: deploy.content } : parseJson(deploy.content);
+    return {
+      content: json({
+        released: releaseBody.released === true,
+        status: releaseBody.status,
+        target_commit: targetCommit ?? null,
+        deploy: {
+          status: deployBody.deployStatus ?? deployBody.status ?? null,
+          production_confirmed: deployBody.productionConfirmed === true,
+          ...(deployBody.error !== undefined ? { error: deployBody.error } : {}),
+        },
+      }),
+      is_error: false,
+    };
+  },
+  dryRun: async (_ctx, args) => ({
+    dry_run: true,
+    action: 'release_workspace_run',
+    ...(args.commit ? { commit: args.commit } : { commit: 'branch HEAD' }),
+    ...(args.publish_receipt_from_run ? { run_id: args.publish_receipt_from_run } : {}),
+    note: 'Approving triggers ONE production build (paid) shipping every published commit up to the target, then reads deploy_status once.',
+  }),
+  describe: (args) => `Release to production${args.commit ? ` (commit ${String(args.commit).slice(0, 12)})` : ''}`,
+};
+
+const parseJson = (text: string): Record<string, unknown> => {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+
+// ─── registry ────────────────────────────────────────────────────────────────────
 
 export const CHAT_TOOLS: readonly ChatTool[] = [
   getObject,
@@ -785,6 +1124,9 @@ export const CHAT_TOOLS: readonly ChatTool[] = [
   listWorkspaceNodes,
   runWorkspaceWorkflow,
   getWorkspaceRun,
+  checkWorkspaceRunReadiness,
+  publishWorkspaceRun,
+  releaseWorkspaceRun,
 ];
 
 export const chatToolByName = (name: string): ChatTool | undefined => CHAT_TOOLS.find((tool) => tool.name === name);

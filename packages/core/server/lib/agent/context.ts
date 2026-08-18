@@ -258,6 +258,15 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
   return {
     roles: deps.roles,
     ...(deps.cmsAgent ? { cmsAgent: deps.cmsAgent } : {}),
+    // D2a: the human approver for chat-side publish; and the stored
+    // idempotency ledger (only when an operational event is available).
+    ...(deps.principal.kind === 'human' ? { principal: { id: deps.principal.id, email: deps.principal.email } } : {}),
+    ...(operationalEvent
+      ? {
+          idempotent: <T extends Record<string, unknown>>(toolName: string, key: string, run: () => Promise<T>) =>
+            withIdempotentToolCall(operationalEvent, toolName, key, run) as Promise<T>,
+        }
+      : {}),
     ...(membershipStore
       ? {
           membership: {
