@@ -57,9 +57,23 @@ function projectPolicy(target = 'fixture-target', rights = { content: 'retain_al
 }
 
 const MEDIA_ALLOWED = { content: 'retain_allowed_origin_content', media: 'retain_referenced_allowed_origin_media' };
-const SUPPORTED_ARTIFACT_KINDS = new Set(['image', 'document']);
-const distinctUploadableAssets = (plan) =>
-  new Set(plan.media.filter((asset) => SUPPORTED_ARTIFACT_KINDS.has(asset.kind)).map((asset) => asset.manifestRef)).size;
+/**
+ * T12.16: the mapper's `kind` no longer gates ingestion — the probed
+ * contentType does — so every DISTINCT planned asset is uploadable as long as
+ * its bytes resolve to a supported type. `kind` only decides where an asset was
+ * found, never what it is.
+ */
+const distinctUploadableAssets = (plan) => new Set(plan.media.map((asset) => asset.manifestRef)).size;
+
+/** A probe answer for the fixture's assets: Wix serves JPEG, the file link a DOCX. */
+const fixtureProbe = async (sourceUrl) => ({
+  sourceUrl,
+  contentType: /\.docx?(?:$|[?#])/i.test(sourceUrl)
+    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : 'image/jpeg',
+  expectedSizeBytes: 12,
+  expectedSha256: createHash('sha256').update(sourceUrl).digest('hex'),
+});
 
 /**
  * T12.14: with media rights PROHIBITED no asset field can be bound, so a
@@ -70,9 +84,17 @@ const distinctUploadableAssets = (plan) =>
 const attemptedCreates = (plan, report) =>
   plan.creates.length - report.quarantines.filter((item) => item.reason === 'asset_binding_unresolved').length;
 
-/** A well-formed Major-Key reference, the only value the binder accepts. */
-const artifactRefFor = (requestId, seed) =>
-  `image/${requestId}/${createHash('sha256').update(seed).digest('hex')}.jpg`;
+/**
+ * Exactly what the target server does with these arguments: createArtifactBlobKey
+ * (packages/core/server/lib/artifacts.ts) builds
+ * `<artifactKind>/<requestId>/<sha256><extension>`, and the extension comes from
+ * `filename` via getArtifactExtension — which is EMPTY when no filename is sent.
+ * The mock reproduces that faithfully, including the empty case, because that
+ * empty case IS the T12.16 defect (an unservable key that can never satisfy
+ * MAJOR_KEY_ARTIFACT_REF_RE).
+ */
+const serverBlobKey = (args) =>
+  `${args.artifactKind}/${args.requestId}/${String(args.expectedSha256).toLowerCase()}${path.extname(args.filename ?? '').toLowerCase()}`;
 
 /** Every value the section schemas treat as an asset field, wherever it sits. */
 function assetFieldValues(value, found = []) {
@@ -112,17 +134,7 @@ function mockTransport({
       if (verb === 'object_get' && args.object_type === 'page' && args.object_id === 'page_existing')
         return { record: { object_id: 'page_existing', body: { route: pageRoute } } };
       if (verb === 'create_artifact_from_url')
-        return {
-          artifact: {
-            blobKey: artifactBlobKey
-              ? artifactBlobKey(args)
-              : artifactRefFor(args.requestId, args.sourceUrl).replace(
-                  /^image\//,
-                  args.artifactKind === 'doc' ? 'pdf/' : 'image/'
-                ),
-            portable: false,
-          },
-        };
+        return { artifact: { blobKey: artifactBlobKey ? artifactBlobKey(args) : serverBlobKey(args), portable: false } };
       if (verb === 'object_create') {
         if (createFailure && !failed) {
           failed = true;
@@ -234,7 +246,7 @@ test('media is deduped, hash-enriched, scoped to its owning page, and portable f
   const report = await executeEmission({
     plan, mapping, transport,
     projectPolicyResolver: async (target) => projectPolicy(target, { content: 'retain_allowed_origin_content', media: 'retain_referenced_allowed_origin_media' }),
-    assetProbe: async () => ({ contentType: 'image/jpeg', expectedSizeBytes: 12, expectedSha256: 'a'.repeat(64) }),
+    assetProbe: fixtureProbe,
   });
   const uploads = transport.calls.filter((call) => call.verb === 'create_artifact_from_url');
   assert.equal(uploads.length, distinctUploadableAssets(plan));
@@ -481,4 +493,164 @@ test('a prohibited-media policy emits zero media and records the gap', async () 
   const wire = JSON.stringify(createdBodies);
   assert.equal(wire.includes('AssetRef'), false);
   assert.equal(wire.includes('static.wixstatic.com'), false);
+});
+
+// ─── T12.16 acceptance ───────────────────────────────────────────────────────
+// The live zilberman run (run_1787054978582_2o5xu5) ingested 30 artifacts and
+// bound NONE: 30 × artifact_reference_not_bindable (no filename → extensionless,
+// unservable blobKey) and 20 × unsupported_media_kind (`media` assets dropped
+// before a single byte was fetched). Both are fixed at the CALLER; neither
+// MAJOR_KEY_ARTIFACT_REF_RE nor PUBLIC_ARTIFACT_PATH_RE is loosened.
+
+/** The mapper's `kind` for an asset the emission plan already carries. */
+function retagPlannedAsset(plan, manifestRef, patch) {
+  const asset = plan.media.find((item) => item.manifestRef === manifestRef);
+  assert.ok(asset, `the fixture plan must carry ${manifestRef}`);
+  Object.assign(asset, patch);
+  return asset;
+}
+
+test('a gallery JPEG the mapper labelled `media` materializes as an image artifact and binds', async () => {
+  const plan = await fixturePlan();
+  const [firstPlan] = plan.assetPlans;
+  assert.ok(firstPlan?.entries?.length, 'the fixture must exercise the asset-binding path');
+  const { manifestRef } = firstPlan.entries[0];
+  // Exactly the zilberman shape: a real JPEG that reached the mapper through a
+  // <picture>/<source> variant rather than a bare <img>, so it was tagged `media`.
+  const asset = retagPlannedAsset(plan, manifestRef, { kind: 'media' });
+
+  const transport = mockTransport();
+  const report = await executeEmission({
+    plan,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: fixtureProbe,
+  });
+
+  // It was fetched, not dropped: no `unsupported_media_kind` for it, and it was
+  // ingested as the image its bytes say it is — not as the mapper's hint.
+  assert.equal(report.quarantines.filter((item) => item.asset === manifestRef).length, 0);
+  const upload = transport.calls.find(
+    (call) => call.verb === 'create_artifact_from_url' && call.args.sourceUrl === asset.sourceUrl
+  );
+  assert.ok(upload, '`media` kind must no longer be dropped before the fetch');
+  assert.equal(upload.args.artifactKind, 'image');
+  assert.equal(upload.args.contentType, 'image/jpeg');
+
+  // …and it BOUND: the section that needed it is emitted, not quarantined.
+  const bound = report.assetBindings.find((entry) => entry.manifestRefs?.includes(manifestRef));
+  assert.ok(bound, 'a materialized `media` JPEG must be bindable');
+  assert.equal(bound.status, 'bound');
+  assert.equal(report.assetGaps.filter((gap) => gap.sectionId === firstPlan.sectionId).length, 0);
+});
+
+test('every ingest call carries a deterministic <sha256><ext> filename, so every blobKey is a servable Major-Key ref', async () => {
+  const plan = await fixturePlan();
+  const transport = mockTransport();
+  const report = await executeEmission({
+    plan,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: fixtureProbe,
+  });
+  const uploads = transport.calls.filter((call) => call.verb === 'create_artifact_from_url');
+  assert.ok(uploads.length > 0);
+  for (const call of uploads) {
+    // Deterministic (the content hash), collision-free, path-free, and inside
+    // artifactReferenceLimits.originalFilename (160).
+    assert.equal(call.args.filename, `${call.args.expectedSha256.toLowerCase()}${call.args.artifactKind === 'doc' ? '' : path.extname(call.args.filename)}`);
+    assert.ok(call.args.filename.length <= 160);
+    assert.doesNotMatch(call.args.filename, /[/\\]/);
+    if (call.args.artifactKind !== 'doc') assert.match(call.args.filename, /^[0-9a-f]{64}\.(jpg|png|webp|gif|avif|svg|pdf)$/);
+  }
+  // The server-faithful key the mock derives from that filename is bindable —
+  // the exact test at emit.mjs that produced 30 quarantines on the live run.
+  const bindable = report.createdArtifacts.filter((entry) => entry.artifact.blobKey.startsWith('image/'));
+  assert.ok(bindable.length > 0);
+  for (const entry of bindable) {
+    assert.match(entry.artifact.blobKey, /^(image|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i);
+    // …and therefore servable at the public path the redirects expose.
+    assert.match(`/img/${entry.artifact.blobKey.slice('image/'.length)}`, /^\/(img|pdf)\/[^/]+\/[0-9a-f]{64}\.[a-z]+$/i);
+  }
+  // A DOCX still ingests (accounting) and still cannot bind: `doc/…` is not a
+  // Major-Key ref by construction.
+  const docs = report.createdArtifacts.filter((entry) => entry.artifact.blobKey.startsWith('doc/'));
+  assert.ok(docs.length > 0);
+  for (const entry of docs) assert.doesNotMatch(entry.artifact.blobKey, /^(image|pdf)\//);
+});
+
+test('a contentType with no known extension quarantines instead of minting an unservable key or hotlinking', async () => {
+  for (const [contentType, reason] of [
+    // Not an image and not a PDF: never ingestible as a bindable artifact.
+    ['video/mp4', 'unsupported_media_kind'],
+    ['application/octet-stream', 'unsupported_media_kind'],
+    // image/* but no extension we can honestly name: the extensionless-key trap.
+    ['image/tiff', 'unmappable_artifact_content_type'],
+    ['image/x-icon', 'unmappable_artifact_content_type'],
+  ]) {
+    const plan = await fixturePlan();
+    const transport = mockTransport();
+    const report = await executeEmission({
+      plan,
+      transport,
+      projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+      assetProbe: async (sourceUrl) => ({
+        sourceUrl,
+        contentType,
+        expectedSizeBytes: 12,
+        expectedSha256: createHash('sha256').update(sourceUrl).digest('hex'),
+      }),
+    });
+    // Nothing bindable was ingested and nothing was bound. The only ingests
+    // that may survive are the file-link `document` assets, which land as
+    // `doc` — accounted, never bindable (`doc/…` is not a Major-Key ref).
+    const uploads = transport.calls.filter((call) => call.verb === 'create_artifact_from_url');
+    assert.ok(uploads.every((call) => call.args.artifactKind === 'doc'));
+    assert.ok(report.createdArtifacts.every((entry) => !/^(image|pdf)\//.test(entry.artifact.blobKey)));
+    assert.equal(report.assetBindings.length, 0);
+    // The observed contentType is recorded on every quarantine, so the reason
+    // is diagnosable from the run report alone. (A `doc` that DID ingest still
+    // records its own `artifact_reference_not_bindable` — accurate and
+    // deliberate: `doc/…` is not a Major-Key ref — so it is excluded here.)
+    const quarantined = report.quarantines.filter(
+      (item) => item.asset && item.reason !== 'artifact_reference_not_bindable'
+    );
+    assert.ok(quarantined.length > 0);
+    assert.ok(quarantined.every((item) => item.reason === reason && item.contentType === contentType));
+    // Every planned section is a recorded gap — never a hotlink, never a
+    // half-bound section, never a coerced field.
+    assert.equal(report.assetGaps.filter((gap) => gap.pageRef).length, plan.assetPlans.length);
+    const createdBodies = transport.calls.filter((call) => call.verb === 'object_create').map((call) => call.args.body);
+    assert.deepEqual(assetFieldValues(createdBodies), []);
+    const wire = JSON.stringify(createdBodies);
+    assert.equal(wire.includes('static.wixstatic.com'), false);
+    assert.equal(wire.includes(plan.media[0].sourceUrl), false);
+  }
+});
+
+test('a Wix transform URL whose path ends in /v1/fill/w_146 still yields .jpg — from the contentType, never the path', async () => {
+  const plan = await fixturePlan();
+  const [firstPlan] = plan.assetPlans;
+  const { manifestRef } = firstPlan.entries[0];
+  const sourceUrl =
+    'https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146';
+  // The premise: the URL path is a transform recipe, so it carries no usable
+  // extension. Deriving one from the path would produce '' or garbage.
+  assert.equal(path.extname(new URL(sourceUrl).pathname), '');
+  retagPlannedAsset(plan, manifestRef, { kind: 'media', sourceUrl });
+
+  const transport = mockTransport();
+  const report = await executeEmission({
+    plan,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: fixtureProbe,
+  });
+  const upload = transport.calls.find((call) => call.verb === 'create_artifact_from_url' && call.args.sourceUrl === sourceUrl);
+  assert.ok(upload);
+  assert.equal(upload.args.artifactKind, 'image');
+  assert.match(upload.args.filename, /^[0-9a-f]{64}\.jpg$/);
+  const created = report.createdArtifacts.find((entry) => entry.manifestRef === manifestRef);
+  assert.match(created.artifact.blobKey, /^image\/[^/]+\/[0-9a-f]{64}\.jpg$/);
+  assert.ok(report.assetBindings.some((entry) => entry.artifactRefs?.includes(created.artifact.blobKey)));
 });

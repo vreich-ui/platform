@@ -481,10 +481,92 @@ function unpublished(record) {
   return publication?.published_time === null || record?.published_time === null;
 }
 
-function artifactKindForCapture(kind) {
-  if (kind === 'image') return 'image';
-  if (kind === 'document') return 'doc';
+/**
+ * The blobKey extension an artifact must carry, derived from its OWN content
+ * type.
+ *
+ * T12.16: the extension may NOT be taken from the source URL path. Wix — like
+ * every other transform CDN — serves
+ * `…/944663_fdac…~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/…`:
+ * the bytes are a JPEG, but the path's last segment is a transform recipe, so
+ * `extname()` returns '' or garbage. The probed (or declared) contentType is
+ * the only authoritative statement about the bytes.
+ *
+ * A contentType with no entry here yields null and the asset QUARANTINES. That
+ * is deliberate: without an extension the server mints
+ * `image/<requestId>/<sha256>` (createArtifactBlobKey, server/lib/artifacts.ts),
+ * which fails MAJOR_KEY_ARTIFACT_REF_RE and is genuinely unservable at
+ * `/img/<requestId>/<sha256>.<ext>` — and inventing an extension would be
+ * inventing a fact about the bytes. (GIF/AVIF/SVG are mapped because they are
+ * real image extensions; the ingest tool itself rejects those formats, which
+ * surfaces as an `artifact_ingest_failed` quarantine rather than a silent
+ * extensionless key.)
+ */
+const ARTIFACT_EXTENSION_BY_CONTENT_TYPE = new Map([
+  ['image/jpeg', '.jpg'],
+  // Non-standard alias some origins send for JPEG bytes; same extension.
+  ['image/jpg', '.jpg'],
+  ['image/png', '.png'],
+  ['image/webp', '.webp'],
+  ['image/gif', '.gif'],
+  ['image/avif', '.avif'],
+  ['image/svg+xml', '.svg'],
+  ['application/pdf', '.pdf'],
+]);
+
+/** The bare MIME type: parameters stripped, lower-cased. '' when absent. */
+export function normalizeContentType(contentType) {
+  return typeof contentType === 'string' ? contentType.split(';')[0].trim().toLowerCase() : '';
+}
+
+/** The blobKey extension for a contentType, or null when none is known. */
+export function artifactExtensionForContentType(contentType) {
+  return ARTIFACT_EXTENSION_BY_CONTENT_TYPE.get(normalizeContentType(contentType)) ?? null;
+}
+
+/**
+ * The artifact kind for a captured asset.
+ *
+ * T12.16: the mapper's `kind` records WHERE the asset was found (`image` = a
+ * bare <img>, `media` = a <picture>/<source> variant, `document` = a file
+ * link). It is a HINT, never a claim about the bytes — the zilberman run's 60
+ * `media` assets were ordinary gallery JPEGs, and the old kind-only mapping
+ * dropped every one of them before a single byte was fetched. The contentType
+ * decides:
+ *   image/*          → image  (bindable)
+ *   application/pdf  → pdf    (bindable)
+ *   anything else behind a file link (`document` hint) → doc: it still INGESTS,
+ *     so the capture is accounted, but `doc/…` fails MAJOR_KEY_ARTIFACT_REF_RE
+ *     by construction and can never reach an asset field. A DOCX must ingest
+ *     and must not bind; that is exactly this branch.
+ *   anything else    → null, i.e. quarantined with the observed contentType.
+ */
+export function artifactKindForContentType(contentType, kindHint) {
+  const type = normalizeContentType(contentType);
+  if (type === 'application/pdf') return 'pdf';
+  if (type.startsWith('image/')) return 'image';
+  if (kindHint === 'document') return 'doc';
   return null;
+}
+
+// Same safety envelope as `isSafeArtifactFilename` /
+// `artifactReferenceLimits.originalFilename` (server/lib/artifacts.ts),
+// restated here because this module is a standalone MCP client — it is also
+// vendored into CMS-Agent — and must not import server code.
+const ARTIFACT_FILENAME_MAX = 160;
+const SAFE_ARTIFACT_FILENAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * The filename the ingest tool needs in order to mint a SERVABLE blobKey:
+ * `<sha256><ext>`. Deterministic and collision-free by construction (it is the
+ * content hash), path-free, and well inside the originalFilename limit.
+ * Returns null if it would not be a safe filename — defence in depth; a 64-hex
+ * digest plus a mapped extension always is.
+ */
+export function artifactFilename(sha256, extension) {
+  const filename = `${String(sha256).toLowerCase()}${extension ?? ''}`;
+  if (filename.length > ARTIFACT_FILENAME_MAX || !SAFE_ARTIFACT_FILENAME_RE.test(filename)) return null;
+  return filename;
 }
 
 async function pageRouteRows(transport, inventory, trace) {
@@ -724,8 +806,9 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
   for (const asset of plan.media) {
     if (seen.has(asset.manifestRef)) continue;
     seen.add(asset.manifestRef);
-    const artifactKind = artifactKindForCapture(asset.kind);
-    if (!artifactKind) { report.quarantines.push({ asset: asset.manifestRef, reason: 'unsupported_media_kind' }); continue; }
+    // The rate-limit delay covers the PROBE too: it is the fetch, and it now
+    // happens before the kind decision (T12.16) because only the bytes'
+    // contentType can say what an asset actually is.
     const remainingDelay = assetDelayMs - (Date.now() - lastAssetStartedAt);
     if (remainingDelay > 0) await new Promise((resolve) => setTimeout(resolve, remainingDelay));
     lastAssetStartedAt = Date.now();
@@ -733,13 +816,29 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
     if (!asset.contentType || !Number.isInteger(asset.expectedSizeBytes) || !/^[a-f0-9]{64}$/i.test(asset.expectedSha256 ?? '')) {
       resolved = { ...asset, ...(await probe(asset.sourceUrl)) };
     }
-    if (
-      !resolved.contentType ||
-      (artifactKind === 'image' && !resolved.contentType.startsWith('image/')) ||
-      !Number.isInteger(resolved.expectedSizeBytes) ||
-      !/^[a-f0-9]{64}$/i.test(resolved.expectedSha256 ?? '')
-    ) {
+    const contentType = normalizeContentType(resolved.contentType);
+    if (!contentType || !Number.isInteger(resolved.expectedSizeBytes) || !/^[a-f0-9]{64}$/i.test(resolved.expectedSha256 ?? '')) {
       report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_metadata_missing' }); continue;
+    }
+    const artifactKind = artifactKindForContentType(contentType, asset.kind);
+    if (!artifactKind) {
+      report.quarantines.push({ asset: asset.manifestRef, reason: 'unsupported_media_kind', kind: asset.kind ?? null, contentType });
+      continue;
+    }
+    // Retained from the kind-only era, now a tautology and kept as one: an
+    // `image` artifact must always have image/* bytes.
+    if (artifactKind === 'image' && !contentType.startsWith('image/')) {
+      report.quarantines.push({ asset: asset.manifestRef, reason: 'artifact_metadata_missing' }); continue;
+    }
+    const extension = artifactExtensionForContentType(contentType);
+    // A bindable kind with no known extension would mint an extensionless,
+    // unservable blobKey: quarantine it with the observed contentType rather
+    // than invent one. `doc` is exempt — it can never be bindable, so an
+    // extensionless (still deterministic) filename is fine for it.
+    const filename = artifactKind !== 'doc' && !extension ? null : artifactFilename(resolved.expectedSha256, extension);
+    if (!filename) {
+      report.quarantines.push({ asset: asset.manifestRef, reason: 'unmappable_artifact_content_type', contentType });
+      continue;
     }
     try {
       const requestId = captureRequestId(plan, asset.pageRef);
@@ -747,6 +846,11 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
         requestId,
         artifactKind, contentType: resolved.contentType, sourceUrl: resolved.sourceUrl,
         expectedSizeBytes: resolved.expectedSizeBytes, expectedSha256: resolved.expectedSha256,
+        // T12.16: WITHOUT this the server's createArtifactBlobKey has no
+        // extension to append and mints `image/<requestId>/<sha256>`, which
+        // fails MAJOR_KEY_ARTIFACT_REF_RE below — every artifact ingested and
+        // not one bound (58 quarantines, 0 assetBindings; run_1787054978582_2o5xu5).
+        filename,
       });
       const value = payload(artifact);
       const reference = value.artifact ?? value;
