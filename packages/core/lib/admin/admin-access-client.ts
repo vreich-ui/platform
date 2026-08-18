@@ -19,6 +19,8 @@ export interface AdminAccessState {
   email?: string;
   checkFailed?: boolean;
   error?: string;
+  /** Full resolved tier (T18.1 five-tier model) — e.g. ['viewer'], ['owner','admin','publisher']. */
+  roles?: string[];
 }
 
 const NOT_SIGNED_IN: AdminAccessState = { authenticated: false, isAdmin: false };
