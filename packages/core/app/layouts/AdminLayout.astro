@@ -4,9 +4,11 @@
 // signed-in-but-not-admin, signed-in-admin), factored into a reusable layout.
 // The signed-in slot holds a page island (e.g. AdminHome) mounted by the page.
 // The real wall stays server-side in each function (getAdminStateFromEvent).
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
 import '~/styles/admin-tokens.css';
 import Layout from '~/layouts/Layout.astro';
 import LoginModal from '~/components/common/LoginModal.astro';
+import { getSiteIdentity } from '@core/lib/site-identity';
 
 interface Props {
   title?: string;
@@ -20,6 +22,12 @@ const metadata = {
     follow: false,
   },
 };
+
+// Wolf 2026-08-18: the "signed in, no role" panel below names the site the
+// person is a member of and links back to it — resolved server-side, same
+// D2 pattern as admin/index.astro (the browser has no process.env, so an env
+// override to SITE_BRAND_NAME would never reach a client-side call).
+const { brandName } = getSiteIdentity();
 ---
 
 <Layout metadata={metadata}>
@@ -46,9 +54,10 @@ const metadata = {
     <div data-admin-forbidden-prompt hidden class="admin-gate-panel">
       <p class="admin-gate-kicker">Access restricted</p>
       <p class="admin-gate-message">
-        You are signed in, but no role has been granted to this email on this site yet. Ask an Owner to grant you a
-        role.
+        You're signed in, but no workspace role has been granted to this email yet — ask an Owner to grant one. For
+        now your tier is <strong data-admin-tier-label>Member</strong> of {brandName}.
       </p>
+      <a class="btn-primary admin-gate-btn" href="/">Go to {brandName} home</a>
     </div>
 
     <!-- Signed-in admin: the workspace shell -->
@@ -116,6 +125,21 @@ const metadata = {
       const authStatus = document.querySelector('[data-auth-status]');
       const signinPrompt = document.querySelector('[data-admin-signin-prompt]');
       const forbiddenPrompt = document.querySelector('[data-admin-forbidden-prompt]');
+      const tierLabel = document.querySelector('[data-admin-tier-label]');
+
+      // Wolf 2026-08-18: the forbidden panel's copy names the caller's real
+      // tier instead of a flat "no role" dead end — admin-auth-state.ts now
+      // always defaults a truly unassigned login to 'viewer' server-side
+      // (ensureDefaultMembershipOnLogin), so `roles` here is normally
+      // non-empty by the time this state renders; the `owner`/`admin` cases
+      // never reach 'forbidden' at all (they render the shell instead).
+      const TIER_LABELS = { publisher: 'Publisher', editor: 'Editor', viewer: 'Member' };
+      const tierLabelFor = (roles) => {
+        for (const role of ['publisher', 'editor', 'viewer']) {
+          if (roles?.includes(role)) return TIER_LABELS[role];
+        }
+        return 'Member';
+      };
 
       const setShellVisible = (visible) => {
         if (shellContainer) shellContainer.hidden = !visible;
@@ -161,6 +185,7 @@ const metadata = {
           setAuthState('error');
           return;
         }
+        if (tierLabel) tierLabel.textContent = tierLabelFor(adminState.roles);
         setAuthState(adminState.isAdmin ? 'signed-in' : 'forbidden');
       };
 

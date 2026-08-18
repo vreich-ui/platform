@@ -696,6 +696,66 @@ export const activateOnLogin = async (
   return memberToUserRecord(saved);
 };
 
+/**
+ * Unassigned-login default (Wolf, 2026-08-18, admin gate follow-up): a
+ * signed-in human with NO membership record AND no env role
+ * (`ADMIN_EMAILS` / `ROLE_EMAILS_*`) used to resolve to zero roles forever —
+ * nothing ever created their record (F9's "becomes… nothing"), so the
+ * `/admin` gate showed a dead end ("Access restricted … ask an Owner") with
+ * no way out and the person stayed invisible on the members list. Every
+ * signed-in identity must land on a real, visible tier. Call this ONLY after
+ * confirming the caller has no env role (`environmentRoleForEmail`) — it does
+ * not re-check that itself, so it must never be reachable for a bootstrap
+ * Owner or a `ROLE_EMAILS_*` principal (a stored 'viewer' row would shadow
+ * their real role — store precedence beats env in `resolveRolesForPrincipalAsync`).
+ *
+ * Materializes a Person + Membership at `policy.default_role_for_external`
+ * (today: 'viewer', never anything higher — same field Flow B already grants
+ * when reconciling a Netlify-UI invite, `source:'netlify_ui'`). This never
+ * admits the person to the workspace shell by itself: `admin-auth-state.ts`'s
+ * `isAdmin` is `roles.includes('admin')`, which 'viewer' never satisfies — the
+ * gate still shows the restricted panel, now naming the person's real tier
+ * with a way out instead of a dead end. Returns null when a member record
+ * already exists (nothing to default — including a suspended/removed one,
+ * which must never be silently reactivated here).
+ */
+export const ensureDefaultMembershipOnLogin = async (
+  store: MembershipStore,
+  email: string,
+  userId: string | undefined,
+  at: string
+): Promise<UserRecord | null> => {
+  const normalized = normalizeEmail(email);
+  const existing = await getMembershipByEmail(store, normalized);
+  if (existing) return null;
+
+  const policy = await getPolicy(store);
+  const created = newMember({
+    email: normalized,
+    display_name: friendlyNameFromEmail(normalized),
+    role: policy.default_role_for_external,
+    status: 'active',
+    source: 'netlify_ui',
+    granted_by: { kind: 'system', reason: 'unassigned_login_default' },
+    invited_by: 'system',
+    at,
+    user_id: userId,
+    audit: [
+      { at, actor_email: normalized, action: 'grant', detail: `default role ${policy.default_role_for_external}` },
+    ],
+  });
+  const saved = await saveMember(store, created);
+  await appendAudit(store, {
+    at,
+    actor: { kind: 'system' },
+    action: 'membership.grant',
+    target: { person_id: saved.person.person_id, email: normalized },
+    detail: { role: policy.default_role_for_external, source: 'netlify_ui', reason: 'unassigned_login_default' },
+    via: 'system',
+  }).catch(() => undefined);
+  return memberToUserRecord(saved);
+};
+
 // ── preview (our token) / list / sweep ──────────────────────────────────────
 
 /** Path 2 sugar: an Owner-shared link carrying OUR accept token previews the invitation before GoTrue accepts. */
