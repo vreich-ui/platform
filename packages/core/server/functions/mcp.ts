@@ -1318,6 +1318,17 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
     });
   }
 
+  // MCP Streamable HTTP session termination. This handler holds no durable,
+  // per-session state to tear down (no in-memory or blob-backed session
+  // store keyed by Mcp-Session-Id exists anywhere in this module), so DELETE
+  // is a safe no-op: acknowledge with 204 rather than falling through to the
+  // POST-only branch below, which would 405 a method the CORS preflight
+  // above (jsonHeaders' Access-Control-Allow-Methods) already told the
+  // client was allowed.
+  if (event.httpMethod === 'DELETE') {
+    return emptyResponse(204);
+  }
+
   if (event.httpMethod !== 'POST') {
     return response(405, rpcError(null, -32000, 'Method not allowed.'), { ...jsonHeaders, Allow: 'POST' });
   }
