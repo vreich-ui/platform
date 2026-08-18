@@ -55,6 +55,50 @@ const activeSiteIdentityConfig = (): unknown => {
 
 const nonEmpty = z.string().trim().min(1);
 
+/** One aggression dial: a finite number in [0, 1]. */
+const dial = z.number().finite().min(0).max(1);
+
+/**
+ * Aggression ceiling (CMS-Agent WORK-ORDER-2026-08-12 W6 §2, Wolf's standing
+ * ruling): the per-site componentwise UPPER BOUND on how hard published copy
+ * may push, on four dials each in [0, 1]. Surfaced verbatim by
+ * `object_contract(content_item)` as `aggression_ceiling`; CMS-Agent resolves
+ * each dial as `min(placement_target, ceiling)`. It is a ceiling, not a target
+ * — copy may always be calmer.
+ */
+export const aggressionCeilingSchema = z.strictObject({
+  /** How strong/absolute claims may read (0 = hedged, 1 = categorical). */
+  claim_strength: dial,
+  /** Time pressure / scarcity framing. */
+  urgency: dial,
+  /** Emotional stirring — fear, shame, FOMO. */
+  emotional_agitation: dial,
+  /** How many/how prominent the calls to action are. */
+  cta_density: dial,
+});
+
+export type AggressionCeiling = z.infer<typeof aggressionCeilingSchema>;
+
+export const AGGRESSION_CEILING_DIALS = ['claim_strength', 'urgency', 'emotional_agitation', 'cta_density'] as const;
+
+/**
+ * Loader-side assert for a ceiling value (used by the resolver and by any
+ * override layer): every dial present, finite, and within [0, 1]. Throws a
+ * clear error naming the offending dial(s).
+ */
+export const assertAggressionCeiling = (value: unknown, source = 'site-identity config'): AggressionCeiling => {
+  const parsed = aggressionCeilingSchema.safeParse(value);
+  if (!parsed.success) {
+    const detail = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
+    throw new Error(
+      `Invalid aggressionCeiling in ${source}: each of ${AGGRESSION_CEILING_DIALS.join('/')} must be a finite number in [0, 1] (${detail}).`
+    );
+  }
+  return parsed.data;
+};
+
 export const siteIdentityConfigSchema = z.strictObject({
   /** Object id of the site singleton (`site_<shortId>`), per the site export. */
   siteId: nonEmpty.regex(/^site_[a-z0-9]+$/),
@@ -84,6 +128,13 @@ export const siteIdentityConfigSchema = z.strictObject({
   /** W11 T11.5: git committer fallback (env GITHUB_COMMIT_AUTHOR_* wins). */
   committerName: nonEmpty.optional(),
   committerEmail: nonEmpty.optional(),
+  /**
+   * W6 §2: the site's aggression ceiling. Optional in the TYPE (older
+   * scaffolds parse), but every committed site config MUST carry one — the
+   * client contract must never omit it (an absent ceiling is a CMS-Agent
+   * blocker by design). Validated 0..1 per dial at resolve time.
+   */
+  aggressionCeiling: aggressionCeilingSchema.optional(),
 });
 
 export type SiteIdentityConfig = z.infer<typeof siteIdentityConfigSchema>;
@@ -102,6 +153,8 @@ export type SiteIdentity = SiteIdentityConfig & {
   adminLabel: string;
   committerName: string;
   committerEmail: string;
+  /** The committed ceiling (undefined only for a config that omits it). */
+  aggressionCeiling?: AggressionCeiling;
 };
 
 type EnvSource = Record<string, string | undefined>;
@@ -123,6 +176,11 @@ export const resolveSiteIdentity = (
   env: EnvSource = processEnv(),
   config: unknown = activeSiteIdentityConfig()
 ): SiteIdentity => {
+  // Ceiling first, for the clearer per-dial error (the whole-schema parse
+  // below would also refuse it, with the generic zod message).
+  if (config && typeof config === 'object' && 'aggressionCeiling' in config) {
+    assertAggressionCeiling((config as { aggressionCeiling: unknown }).aggressionCeiling);
+  }
   const parsed = siteIdentityConfigSchema.safeParse(config);
   if (!parsed.success) {
     throw new Error(`Invalid site-identity config (src/config/site-identity.ts): ${parsed.error.message}`);
@@ -148,6 +206,7 @@ export const resolveSiteIdentity = (
     adminLabel: parsed.data.adminLabel ?? `${parsed.data.brandName} admin`,
     committerName: parsed.data.committerName ?? `${parsed.data.brandName} Publisher`,
     committerEmail: parsed.data.committerEmail ?? `publisher@${siteSlug}.local`,
+    ...(parsed.data.aggressionCeiling ? { aggressionCeiling: parsed.data.aggressionCeiling } : {}),
   };
 };
 

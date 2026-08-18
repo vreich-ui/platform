@@ -21,4 +21,8 @@ export const siteIdentityConfig = {
   assetHost: 'https://example-assets.netlify.app',
   assetFolder: 'zilberman',
   pdfToolProjectId: 'zilberman',
+  // W6 §2 (CMS-Agent WORK-ORDER-2026-08-12): componentwise aggression ceiling
+  // (each dial 0..1) surfaced by object_contract(content_item).aggression_ceiling.
+  // CMS-Agent resolves min(placement_target, ceiling); never omit it.
+  aggressionCeiling: { claim_strength: 0.55, urgency: 0.20, emotional_agitation: 0.20, cta_density: 0.30 },
 } satisfies SiteIdentityConfig;
