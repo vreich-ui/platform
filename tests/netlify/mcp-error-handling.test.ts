@@ -5,6 +5,19 @@ import test from 'node:test';
 import { handler } from '../../netlify/functions/mcp.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
 
+test('MCP handler answers DELETE (session termination) with 204 rather than 405', async () => {
+  // CORS preflight advertises DELETE (jsonHeaders' Access-Control-Allow-Methods),
+  // and this handler carries no durable per-session state to tear down — so
+  // DELETE must not fall through to the generic non-POST 405 branch.
+  const response = await handler({
+    httpMethod: 'DELETE',
+    headers: { 'mcp-session-id': 'test-session' },
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.body, '');
+});
+
 test('MCP handler reports parse errors only for request body parsing failures', async () => {
   const response = await handler({
     httpMethod: 'POST',
