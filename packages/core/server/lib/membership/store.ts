@@ -23,6 +23,7 @@ import { z } from 'zod';
 
 import type { Principal } from '../../../schema/object-record-v1.js';
 import { getNetlifyBlobStore } from '../blob-store.js';
+import type { BlobListResponse } from '../blob-list.js';
 
 export const MEMBERSHIP_SCHEMA_VERSION = 2;
 
@@ -213,10 +214,17 @@ export type MembershipPolicyOverride = z.infer<typeof membershipPolicyOverrideSc
 export interface MembershipStore {
   get(key: string): Promise<string | null>;
   setJSON(key: string, value: unknown): Promise<void | { modified: boolean; etag?: string }>;
-  list(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<{
-    blobs: { key: string }[];
-    directories?: string[];
-  }>;
+  /**
+   * MUST be consumed through `collectBlobListItems` — with `paginate: true`
+   * the real Netlify Blobs client returns a plain `AsyncIterable` of pages
+   * rather than a Promise of one page, so `(await list(...)).blobs` is
+   * `undefined` and every caller that reads it silently lists nothing.
+   */
+  list(options: {
+    prefix: string;
+    directories?: boolean;
+    paginate?: boolean;
+  }): BlobListResponse | Promise<BlobListResponse>;
   delete?(key: string): Promise<void>;
 }
 

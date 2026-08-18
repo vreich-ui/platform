@@ -22,6 +22,7 @@ import {
   type Person,
 } from './store.js';
 import { getSiteIdentity } from '../../../lib/site-identity.js';
+import { collectBlobListItems } from '../blob-list.js';
 
 /** The pre-T18.1 record shape (users-store.ts v1), accepted verbatim on read. */
 export const legacyUserRecordSchema = z.object({
@@ -157,8 +158,13 @@ export const getMembershipByIdentity = async (store: MembershipStore, userId: st
 export const listMembers = async (store: MembershipStore): Promise<Member[]> => {
   const byPerson = new Map<string, Member>();
 
-  const memberships = await store.list({ prefix: PREFIXES.membership, directories: false, paginate: true });
-  for (const blob of memberships.blobs ?? []) {
+  // `store.list({ paginate: true })` resolves to an AsyncIterable of PAGES, not
+  // to a single `{ blobs }` page — reading `.blobs` off it yields `undefined`
+  // and silently lists NOTHING (the 2026-08-06 hotfix class; see blob-list.ts).
+  const membershipItems = await collectBlobListItems(
+    await store.list({ prefix: PREFIXES.membership, directories: false, paginate: true })
+  );
+  for (const blob of membershipItems) {
     const membership = membershipSchema.safeParse(parseJson(await store.get(blob.key)));
     if (!membership.success) continue;
     const person = await getPerson(store, membership.data.person_id);
@@ -166,8 +172,10 @@ export const listMembers = async (store: MembershipStore): Promise<Member[]> => 
     byPerson.set(person.person_id, { person, membership: membership.data, legacy: false });
   }
 
-  const emails = await store.list({ prefix: PREFIXES.byEmail, directories: false, paginate: true });
-  for (const blob of emails.blobs ?? []) {
+  const emailItems = await collectBlobListItems(
+    await store.list({ prefix: PREFIXES.byEmail, directories: false, paginate: true })
+  );
+  for (const blob of emailItems) {
     const value = parseJson(await store.get(blob.key));
     if (!value || typeof value !== 'object') continue;
     if (!('schema_version' in value)) continue; // a v2 pointer — already covered above

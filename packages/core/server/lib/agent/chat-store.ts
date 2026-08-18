@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { getNetlifyBlobStore } from '../blob-store.js';
+import { collectBlobListItems, type BlobListResponse } from '../blob-list.js';
 
 export const AGENT_CHAT_SCHEMA_VERSION = 'agent-chat.v1';
 
@@ -235,10 +236,11 @@ export type ChatDoc = z.infer<typeof chatDocSchema>;
 export interface AgentChatStore {
   get(key: string): Promise<string | null>;
   setJSON(key: string, value: unknown): Promise<void | { modified: boolean; etag?: string }>;
-  list(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<{
-    blobs: { key: string }[];
-    directories?: string[];
-  }>;
+  list(options: {
+    prefix: string;
+    directories?: boolean;
+    paginate?: boolean;
+  }): BlobListResponse | Promise<BlobListResponse>;
 }
 
 const KEY_PREFIX = 'chats/by-id/';
@@ -260,9 +262,9 @@ export const saveChatDoc = async (store: AgentChatStore, doc: ChatDoc): Promise<
 
 /** List every chat doc (corpus is small; the hub sorts by updated_at). Corrupt docs are skipped. */
 export const listChatDocs = async (store: AgentChatStore): Promise<ChatDoc[]> => {
-  const listed = await store.list({ prefix: KEY_PREFIX, directories: false, paginate: true });
+  const items = await collectBlobListItems(await store.list({ prefix: KEY_PREFIX, directories: false, paginate: true }));
   const docs: ChatDoc[] = [];
-  for (const blob of listed.blobs ?? []) {
+  for (const blob of items) {
     const raw = await store.get(blob.key);
     if (!raw) continue;
     const parsed = chatDocSchema.safeParse(JSON.parse(raw));

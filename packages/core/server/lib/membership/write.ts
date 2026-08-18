@@ -25,6 +25,7 @@ import {
   type Person,
 } from './store.js';
 import { getSiteIdentity } from '../../../lib/site-identity.js';
+import { collectBlobListItems } from '../blob-list.js';
 
 export const putPerson = async (store: MembershipStore, person: Person): Promise<Person> => {
   const validated = personSchema.parse({ ...person, email: normalizeEmail(person.email) });
@@ -240,9 +241,9 @@ export const removeMembership = async (
 /** The audit stream filtered to one person (newest first), for the members page drawer / `member_audit`. */
 export const listAuditForEmail = async (store: MembershipStore, email: string, limit = 100): Promise<AuditEvent[]> => {
   const normalized = normalizeEmail(email);
-  const listed = await store.list({ prefix: 'audit/', directories: false, paginate: true });
+  const items = await collectBlobListItems(await store.list({ prefix: 'audit/', directories: false, paginate: true }));
   const events: AuditEvent[] = [];
-  for (const blob of listed.blobs ?? []) {
+  for (const blob of items) {
     const raw = await store.get(blob.key);
     if (!raw) continue;
     try {

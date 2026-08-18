@@ -31,6 +31,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 
+import type { BlobListResponse } from './blob-list.js';
+
 /** Every key this module owns lives under one prefix, so an operator can see the whole surface in one `list`. */
 export const OAUTH_KEY_PREFIX = 'oauth/';
 
@@ -152,7 +154,12 @@ export interface OAuthBlobStore {
   delete?(key: string): Promise<void>;
   del?(key: string): Promise<void>;
   /** W18 T18.4: needed only by revocation-by-subject (offboarding); absent on stores that cannot list. */
-  list?(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<{ blobs: { key: string }[] }>;
+  /** MUST be consumed through `collectBlobListItems` — see blob-list.ts. */
+  list?(options: {
+    prefix: string;
+    directories?: boolean;
+    paginate?: boolean;
+  }): BlobListResponse | Promise<BlobListResponse>;
 }
 
 /**

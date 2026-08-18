@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { CandidateOption } from './candidates.js';
 import type { AgentLearningRecord, ManualRichTextEdit } from '../../../lib/admin/agent-learning-trail.js';
+import { collectBlobListItems, type BlobListResponse } from '../blob-list.js';
 
 const candidateEvidenceSchema = z.object({
   candidate_id: z.string(),
@@ -35,7 +36,11 @@ export type PreferenceEvent = z.infer<typeof preferenceEventSchema>;
 export interface LearningEvidenceStore {
   get(key: string): Promise<string | null>;
   setJSON(key: string, value: unknown): Promise<void | { modified: boolean; etag?: string }>;
-  list(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<{ blobs: { key: string }[] }>;
+  list(options: {
+    prefix: string;
+    directories?: boolean;
+    paginate?: boolean;
+  }): BlobListResponse | Promise<BlobListResponse>;
 }
 
 const privateKey = /private|strategy|agentnotes|system[_-]?prompt|authorization|password|secret|token/i;
@@ -124,9 +129,9 @@ const listJson = async (
   store: LearningEvidenceStore,
   prefix: string
 ): Promise<Array<{ key: string; value: unknown }>> => {
-  const listed = await store.list({ prefix, directories: false, paginate: true });
+  const items = await collectBlobListItems(await store.list({ prefix, directories: false, paginate: true }));
   const values: Array<{ key: string; value: unknown }> = [];
-  for (const blob of listed.blobs ?? []) {
+  for (const blob of items) {
     const raw = await store.get(blob.key);
     if (!raw) continue;
     try {
