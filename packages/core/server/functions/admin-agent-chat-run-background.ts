@@ -4,15 +4,15 @@
  *
  * One hop of the agent loop. Authorization is the one-shot trigger token
  * minted into the chat doc by send/approve/deny — consumed on start, so
- * replays and forged POSTs are inert (T9.12 mechanic). The provider adapter
- * comes from the RUN's stamped profile (provider/model never hardcoded);
- * writes execute under the run's HUMAN principal with freshly-resolved roles.
+ * replays and forged POSTs are inert (T9.12 mechanic). Client Manager is the
+ * exclusive reasoning engine; writes execute under the run's HUMAN principal
+ * with freshly-resolved roles.
  */
 import type { SiteBinding } from '../lib/site-binding.js';
 import { getHeader } from '../lib/admin-auth.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
 import { getAgentLearningBlobStore, getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
-import { getGovernanceBlobStore, getGovernanceDoc } from '../lib/governance-store.js';
+import { getGovernanceBlobStore } from '../lib/governance-store.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
@@ -21,10 +21,9 @@ import { getAgentChatBlobStore, loadChatDoc } from '../lib/agent/chat-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
 import { ensureMcpSiblingsForChat } from '../lib/agent/mcp-siblings.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
-import { buildChatEngine, resolveEffectiveChatMode } from '../lib/agent/engine.js';
+import { buildChatEngine } from '../lib/agent/engine.js';
 import { runAgentLoop } from '../lib/agent/loop.js';
 import type { LearningEvidenceStore } from '../lib/agent/preferences.js';
-import { adapterForProfile } from '../lib/agent/provider.js';
 import { z } from 'zod';
 
 type LambdaEvent = {
@@ -104,20 +103,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     operationalEvent: eventWithDeadline,
   });
 
-  // PF2/PF3 — TurnEngine selection: governance override ?? CMS_AGENT_CHAT_MODE ?? 'off'.
-  // 'off' is the byte-identical legacy path; 'required' is CMS-Agent-only
-  // fail-fast; 'fallback' degrades to the provider path with a loud
-  // engine_fallback event (buildChatEngine). Resolved PER HOP deliberately:
-  // the PF5 rollback lever (override → 'off') must take effect instantly,
-  // including for a run paused behind an approval card — safe because the
-  // transcript is provider-neutral, so either engine can continue any run.
-  // A failed governance read degrades to the env default, the same
-  // never-brick doctrine as resolveActivePolicies.
-  const governanceDoc = await getGovernanceDoc(governanceStore).catch(() => null);
-  const { mode } = resolveEffectiveChatMode(governanceDoc?.cms_agent_chat_mode);
+  // PF5 permanent cutover: every background hop uses CMS-Agent's canonical
+  // Client Manager. There is no env or governance mode that can route a turn
+  // to Platform's provider adapters.
   const engine = buildChatEngine({
-    mode,
-    adapter: adapterForProfile(doc.run.profile),
     client: cmsAgentClient,
     projectId: getSiteIdentity().cmsAgentProjectId,
     siteId: binding.siteId,

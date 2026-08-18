@@ -33,11 +33,11 @@
 
 ## E. Failure, security, no-fallback
 
-- [ ] **E1 — Missing/invalid credentials.** Unset endpoint/token in `required` mode → clear `cms_agent_not_configured` at send; wrong token → `cms_agent_auth_failed` run error; chat remains usable (tests).
+- [ ] **E1 — Missing/invalid credentials.** Unset endpoint/token → clear `cms_agent_not_configured` at send; wrong token → `cms_agent_auth_failed` run error; chat remains usable (tests).
 - [ ] **E2 — Downtime/timeout/malformed.** Connection refused, 90s timeout, non-schema response → named `run_error` codes, no crash, retry succeeds when healthy (mock-server tests).
-- [ ] **E3 — No generic fallback in required mode.** With CMS-Agent down and mode `required`, the provider adapters are provably never invoked (spy test); in `fallback` mode every fallback emits a visible `engine_fallback` event.
+- [ ] **E3 — No generic fallback.** With CMS-Agent down, the run fails with a coded error and the production background hop has no provider-adapter construction path (test + source guard).
 - [ ] **E4 — No browser credential leakage.** `CMS_AGENT_*` values absent from all client bundles (extended protected-env guard test); sanitizer strips bearer/token keys from every logged/returned payload (unit test); no secret in any chat event payload (assertion over event fixtures).
-- [ ] **E5 — Legacy path removed (PF6).** Chat loop imports no provider adapter (guard test that fails on re-introduction).
+- [ ] **E5 — Legacy path removed.** The admin-chat background hop imports no provider adapter or mode resolver (guard test that fails on re-introduction).
 
 ## F. Migration & regression
 
@@ -53,14 +53,14 @@
 |---|---|---|
 | **G1 Contract freeze** | end of CA3 | Wolf reviews `CLIENT-MANAGER-CONTRACT.md`; A-section items green in CMS-Agent CI |
 | **G2 Integration proof** | end of PF2 | Real conversation + real approval on a branch deploy of the `platform` site against deployed CMS-Agent; evidence: transcript, screenshots, turn records, usage rollup |
-| **G3 Per-site go** | each PF5 stage | Soak with `engine_fallback = 0`; authenticated browser walkthrough of **all** chat entry points (Object Room rail, Templates rail, AgentsHub free chat): two-turn memory, approval, denial, cancel, injected failure; latency + cost sampled and reported |
-| **G4 Revenue-tenant go** | before drlurie `required` | G3 evidence **plus** per-conversation cost review and CMS-Agent usage attribution correct per site |
-| **G5 Retirement** | before PF6 merge | All sites ≥ agreed soak in `required` with zero fallback/error spikes; Wolf explicitly approves the removal commit |
-| **Post-deploy health** | every deploy in the program | CMS-Agent `/healthz` + `verify:deploy`; Platform: send→reply smoke on each deployed site; rollback rehearsed once at G3-platform (governance override → `off`, verify legacy path, flip back) |
+| **G3 Fleet release** | PF5 deploy | Healthy `agent_resolve` per site; authenticated browser walkthrough of **all** chat entry points (Object Room rail, Templates rail, AgentsHub free chat): two-turn memory, approval, denial, cancel, injected failure; latency + cost sampled and reported |
+| **G4 Revenue-tenant verification** | PF5 deploy | G3 evidence **plus** per-conversation cost review and CMS-Agent usage attribution correct per site |
+| **G5 Retirement** | PF5 permanent cutover | Admin-chat provider construction removed; rollback is a Platform revision rollback, not a runtime mode switch |
+| **Post-deploy health** | every deploy in the program | CMS-Agent `/health` + `verify:deploy`; Platform: send→reply smoke on each deployed site; Platform revision rollback rehearsed and followed by fresh health verification |
 
 ## H. Deployment ordering & rollback (checklist form)
 
 - [ ] CMS-Agent changes always deploy before the Platform milestone that consumes them; each is dark until called.
 - [ ] Cloud Run env changes use merge-style `--update-env-vars`/`--update-secrets` only (the `--set-env-vars` wipe is a known twice-hit trap); the six client-connection vars and `*_PUBLISH_ENABLED` survive every deploy (post-deploy `verify:deploy` asserts).
-- [ ] Rollback path verified at each stage: governance mode override → `off` is instant and requires no deploy; Cloud Run previous-revision pin rehearsed once.
+- [ ] Rollback path verified: roll back the Platform revision, then repeat CMS-Agent health and authenticated chat checks. Legacy mode values are not a rollback lever.
 - [ ] Fernwell cutover blocked on CA5 (project registration + health green).

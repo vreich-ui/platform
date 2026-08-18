@@ -173,7 +173,6 @@ const fakeEnvNames = {
   deployLookupToken: [],
   cmsAgentEndpoint: [],
   cmsAgentToken: [],
-  cmsAgentChatMode: [],
 } satisfies SiteBinding['env'];
 
 const multiTargetFetch = () => {

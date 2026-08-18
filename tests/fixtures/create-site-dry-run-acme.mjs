@@ -158,15 +158,13 @@ Env checklist:
       Bearer for the sink; pairs with TRACKING_SINK_URL.
   AI + integrations:
     ANTHROPIC_API_KEY                [fleet-shared]  reuse the fleet value — do not create a new one
-      AI provider key — reuse the fleet value. Admin-critical: the /admin agents hub and every per-object chat instantiate a provider adapter (both providers are v1 — Wolf 2026-07-16).
+      AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.
     OPENAI_API_KEY                   [fleet-shared]  reuse the fleet value — do not create a new one
-      AI provider key — reuse the fleet value (second v1 adapter).
+      AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.
     CMS_AGENT_MCP_ENDPOINT           [fleet-shared]  reuse the fleet value — do not create a new one
       The shared CMS-Agent Cloud Run Streamable-HTTP MCP URL (…/mcp) the admin chat's client_manager turns run through — one service for the whole fleet; reuse the fleet value.
     CMS_AGENT_MCP_TOKEN              [per-site]  ☐ human-supplied — see the provisioning runbook
       This site's OWN scoped CMS-Agent bearer — never fleet-shared and never MCP_API_TOKEN. Minted into the Secret Manager secret mcp-scoped-tokens-json, scoped to {projects: [this project], toolAllowlist: [agent_resolve, agent_converse]} — that scope is what makes one tenant structurally incapable of acting as another. Store Functions-only + secret so no value can reach a client bundle.
-    CMS_AGENT_CHAT_MODE              [per-site, optional]  ☐ human-supplied — see the provisioning runbook
-      off (default) | fallback | required — the admin-chat engine ladder. Unset, blank or unrecognized all resolve to off, so a typo can never promote a site. Cutover flips this per site (governance override is the instant, no-deploy rollback).
     CMS_AGENT_PROJECT_ID             [per-site, optional]  ☐ human-supplied — see the provisioning runbook
       Escape hatch for the canonical project id committed in sites/<client>/config/site-identity.ts.
     NETLIFY_AUTH_TOKEN               [fleet-shared]  reuse the fleet value — do not create a new one

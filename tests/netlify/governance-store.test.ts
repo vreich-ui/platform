@@ -74,6 +74,15 @@ test('learning mode is an explicit override and otherwise remains off', async ()
   assert.equal(active.provenance.learning_mode, 'override');
 });
 
+test('a legacy chat-mode field still parses but cannot affect active policies', async () => {
+  const store = memStore();
+  await putGovernanceDoc(store, doc({ cms_agent_chat_mode: 'off', learning_mode: true }));
+  assert.equal((await getGovernanceDoc(store))?.cms_agent_chat_mode, 'off');
+  const active = await resolveActivePolicies(store);
+  assert.equal('cms_agent_chat_mode' in active, false);
+  assert.equal(active.learning_mode, true, 'unrelated policy data remains active');
+});
+
 test('a corrupt governance doc falls back to committed (never applies)', async () => {
   const store = memStore();
   store.map.set(GOVERNANCE_DOC_KEY, '{ not json');

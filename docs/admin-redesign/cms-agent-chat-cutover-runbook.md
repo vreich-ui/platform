@@ -1,59 +1,50 @@
-# PF5 — Staged cutover runbook (prepared 2026-08-11; no site flipped yet)
+# PF5 — Permanent Client Manager cutover
 
-**State when this was written:** PF0 done (Wolf); PF1–PF4 committed on
-`codex/cms-agent-chat`; G2 passed live (see cms-agent-chat-G2-evidence.md);
-CA6 live at agent rev 2, so required mode is unblocked. Every site's env
-default is `CMS_AGENT_CHAT_MODE=off` — nothing changes until an Owner flips
-a mode.
+**Decision (2026-08-18):** Platform admin chat talks to CMS-Agent's canonical
+`client_manager` exclusively. The transitional `off → fallback → required`
+ladder is retired. `CMS_AGENT_CHAT_MODE` and the governance mode override do
+not select a chat engine.
 
-## The lever
+## Runtime contract
 
-Runtime, per site, no deploy: `POST /.netlify/functions/admin-governance`
-(Owner) with `{"verb":"set","cms_agent_chat_mode":"fallback"}` — or
-`"required"`, or `{"verb":"revert","target":"cms_agent_chat_mode"}` to fall
-back to the env default. Every write lands in the governance history with
-the actor. The same endpoint's `get` now returns a `cms_agent` block:
-configured (env NAMES only), effective mode + source, and a memoized 60s
-`agent_resolve` health probe — check it before and after every flip.
+- `CMS_AGENT_MCP_ENDPOINT` and the site's scoped `CMS_AGENT_MCP_TOKEN` are
+  mandatory server-side configuration.
+- `send` fails with `cms_agent_not_configured` before a run is created when
+  either value is missing.
+- Every background hop constructs `cmsAgentEngine`, resolves
+  `client_manager` for the site's committed `cmsAgentProjectId`, and calls
+  `agent_converse`.
+- A CMS-Agent transport, authentication, contract, timeout, or model failure
+  becomes a coded `run_error`. Platform never calls its provider adapters as
+  a fallback.
+- Existing governance documents may still contain `cms_agent_chat_mode` so
+  the rest of the document remains readable. That field is ignored; new mode
+  writes are rejected and the compatibility `revert` may clear it.
 
-## Pre-flip, once (ops, Wolf, ~5 min)
+## Pre-deploy verification
 
-PF4's orchestration tools call four more CMS-Agent tools through each
-site's scoped bearer. Extend `mcp-scoped-tokens-json` (Secret Manager) so
-every site's `toolAllowlist` reads exactly:
+For each site — `platform`, `fernwell`, and `drlurie`:
 
-```json
-["agent_resolve","agent_converse","workspace_get_nodes","workflow_start_dry_run","workflow_run_all","workflow_get_run"]
-```
+1. Confirm endpoint and the correct per-site scoped token are configured.
+2. Confirm the token permits at least `agent_resolve` and `agent_converse` for
+   exactly that site's CMS-Agent project id.
+3. Call governance `get`; require `cms_agent.configured === true`,
+   `cms_agent.mode === "required"`, and `cms_agent.health.ok === true`.
+4. Deploy the Platform revision containing this cutover.
+5. Perform an authenticated walkthrough of Object Room, Templates, and
+   AgentsHub chat: two-turn memory, approval, denial, cancel, and a controlled
+   failure followed by a healthy retry.
+6. Review latency, cost per conversation, and per-site CMS-Agent usage
+   attribution before declaring the release verified.
 
-Redeploy CMS-Agent with merge-style flags only. Until this lands, chat
-conversation works fully; only the three workspace orchestration tools
-answer 401 (mapped to a clean tool error, not a crash).
+## Rollback
 
-## Per site, in order: platform → fernwell → drlurie
+There is no runtime provider-mode rollback. Roll back the Platform deploy to a
+known-good revision while correcting the CMS-Agent service/configuration, then
+repeat the health probe and walkthrough. A rollback is release evidence and
+must not be described as a successful Client Manager cutover.
 
-1. Governance `get` → `cms_agent.health.ok === true`.
-2. Flip `cms_agent_chat_mode` to `fallback`. Soak (defaults 3d / 2d / 5d):
-   evidence required — `engine_fallback` events = 0 across the soak (they
-   are loud in the chat feed and in the event log), turn latency sampled,
-   per-conversation cost from CMS-Agent usage records
-   (`metadata.conversationId`).
-3. Flip to `required`. Authenticated browser walkthrough of EVERY chat
-   entry point (Object Room rail, Templates workspace rail, AgentsHub free
-   chat): two-turn memory, one approval cycle, one denial, one cancel, one
-   injected failure (revert the token env on a branch → expect the coded
-   run_error copy, then a clean retry).
-4. ⛔ **G3** — Wolf reviews the evidence and gives an explicit go before
-   the next site. ⛔ **G4** — before drlurie additionally review
-   cost-per-conversation and per-site usage attribution.
+## Scope boundary
 
-Rollback at any moment: `revert` the override (instant, per hop — a run
-paused behind an approval card resumes on the provider path) or set `off`.
-Rehearse once at G3-platform.
-
-## Deliberately not done
-
-PF6 legacy retirement (⛔ G5 — Wolf must approve the removal commit
-explicitly). The fallback mode's `invalidEnvValue` surfacing beyond the
-governance block, and CA7 (turn-GC scheduling), remain open per the
-roadmap.
+This cutover removes Platform provider adapters only from admin-chat routing.
+Other AI surfaces may still use `provider.ts` until separately migrated.

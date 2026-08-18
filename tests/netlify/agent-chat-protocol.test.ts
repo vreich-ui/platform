@@ -962,7 +962,7 @@ test('PF3: a CMS-Agent engine failure produces a coded run_error with human copy
   assert.equal(doc.runs[doc.runs.length - 1]!.outcome, 'completed');
 });
 
-test('PF3: the send path gates required mode on configuration (source-level assertion, house pattern)', async () => {
+test('PF5: send fails closed when unconfigured and the background hop cannot construct a provider engine', async () => {
   // Walk up to the repo root — the compiled test runs from .tmp, where only
   // .js exists (the admin-governance.test.ts pattern for source assertions).
   let root = path.dirname(fileURLToPath(import.meta.url));
@@ -971,12 +971,35 @@ test('PF3: the send path gates required mode on configuration (source-level asse
     root = path.dirname(root);
   }
   const source = await readFile(path.join(root, 'packages/core/server/functions/admin-agent-chat.ts'), 'utf8');
-  // The gate must check the effective mode, the configuration predicate, and
-  // answer 503 with the stable code BEFORE startRun can mint a doomed run.
-  assert.match(source, /resolveEffectiveChatMode\(policies\.cms_agent_chat_mode\)/);
-  assert.match(source, /chatEngineMode === 'required' && !isCmsAgentConfigured\(\)/);
+  const backgroundSource = await readFile(
+    path.join(root, 'packages/core/server/functions/admin-agent-chat-run-background.ts'),
+    'utf8'
+  );
+  // The gate must be unconditional and answer 503 with the stable code BEFORE
+  // startRun can mint a doomed run.
+  assert.match(source, /if \(!isCmsAgentConfigured\(\)\)/);
+  assert.doesNotMatch(source, /resolveEffectiveChatMode|CMS_AGENT_CHAT_MODE/);
   assert.match(source, /humanCopyForCmsAgentError\('cms_agent_not_configured'\)/);
   assert.ok(source.indexOf("!isCmsAgentConfigured()") < source.indexOf('await startRun('));
+  // The production hop imports neither the profile adapter nor a mode
+  // resolver. Its sole engine constructor is the CMS-Agent-backed one.
+  assert.match(backgroundSource, /const engine = buildChatEngine\(\{/);
+  assert.doesNotMatch(backgroundSource, /adapterForProfile|providerEngine|resolveEffectiveChatMode/);
+});
+
+test('PF5: admin chat always presents Client Manager as the reasoning identity', async () => {
+  let root = path.dirname(fileURLToPath(import.meta.url));
+  while (root !== path.dirname(root)) {
+    if (existsSync(path.join(root, 'netlify.toml')) && existsSync(path.join(root, 'packages/core/admin'))) break;
+    root = path.dirname(root);
+  }
+  const source = await readFile(path.join(root, 'packages/core/server/functions/admin-agent-chat.ts'), 'utf8');
+  const ui = await readFile(path.join(root, 'packages/core/admin/AgentsHub.tsx'), 'utf8');
+  assert.match(source, /name: 'Client Manager'/);
+  assert.match(source, /engine: 'cms_agent'/);
+  assert.doesNotMatch(source, /agentView\(doc\.run\.profile\)/);
+  assert.match(ui, /kicker="Reasoning agent" title="Client Manager"/);
+  assert.doesNotMatch(ui, /<RosterSection owner=\{owner\}/);
 });
 
 // ─── PF4: orchestration disclosure through the loop ─────────────────────────

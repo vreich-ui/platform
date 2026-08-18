@@ -5,6 +5,13 @@
 **Companion:** `cms-agent-chat-plan.md` (architecture — read first; this file only sequences it), `cms-agent-chat-done-criteria.md` (acceptance), `cms-agent-chat-STATE-2026-08-10.md` (evidence for the status below).
 **Repos:** `vreich-ui/CMS-Agent` (CA track) and `vreich-ui/platform` (PF track). Two repos, one program — cross-repo dependency order is explicit below.
 
+> **PF5 amendment (2026-08-18).** Wolf directed that admin chat talk to Client
+> Manager exclusively and that this remain the default behavior. The staged
+> `off/fallback/required` mode ladder and provider rollback are superseded.
+> Platform now has one fail-closed Client Manager construction path. This
+> repository change does not itself prove a deployment or authenticated live
+> walkthrough; those remain release evidence, not local-test evidence.
+
 ## Progress at a glance
 
 | Track | State |
@@ -41,7 +48,7 @@
                                               ☐ PF6 legacy retirement (⛔ G5)
 ```
 
-Deployment ordering rule: **CMS-Agent lands and deploys first at every seam** (its changes are additive and dark until Platform calls them); Platform integrates second behind `CMS_AGENT_CHAT_MODE=off`; cutover is a config change, not a deploy; retirement is the only destructive commit and comes last.
+Deployment ordering rule: **CMS-Agent lands and deploys first at every seam**. Platform requires a healthy endpoint and per-site scoped token before its permanent Client Manager cutover is deployed; missing configuration fails closed.
 
 ---
 
@@ -146,12 +153,12 @@ Verified 2026-08-10: no PF commit, branch, or file exists on `origin/main`, on a
 }
 ```
 
-Then per Netlify site set `CMS_AGENT_MCP_ENDPOINT` (the Cloud Run `/mcp` URL), `CMS_AGENT_MCP_TOKEN` (that site's bearer) and `CMS_AGENT_CHAT_MODE=off`. Redeploy CMS-Agent so the new secret version is picked up (merge-style flags only). Optional: set `MCP_SCOPED_MCP_TOKEN` + `MCP_SCOPED_PROJECT_ID` in the operator shell so `npm run verify:deploy` exercises the scoped path.
+Then per Netlify site set `CMS_AGENT_MCP_ENDPOINT` (the Cloud Run `/mcp` URL) and `CMS_AGENT_MCP_TOKEN` (that site's bearer). Redeploy CMS-Agent so the new secret version is picked up (merge-style flags only). Optional: set `MCP_SCOPED_MCP_TOKEN` + `MCP_SCOPED_PROJECT_ID` in the operator shell so `npm run verify:deploy` exercises the scoped path.
 
 ### PF1 — `cms-agent-client.ts` — contract is frozen; build against it directly
 **Goal:** a real Streamable-HTTP MCP client — the thing `pdf-tool-client.ts` is not.
 **Tasks/commits:**
-- `PF1.1` `packages/core/server/lib/agent/cms-agent-client.ts`: `initialize` handshake, `Mcp-Session-Id` propagation, `DELETE` on close, protocol-version header, `AbortController` timeouts (default 90s), typed error mapping, config from **new `SiteBindingEnvNames` keys** (`CMS_AGENT_MCP_ENDPOINT`/`CMS_AGENT_MCP_TOKEN`/`CMS_AGENT_CHAT_MODE`) read at call time, payload sanitizer (bearer + token-shaped keys) on every log/return path. Unconfigured → typed `cms_agent_not_configured`, never a throw at import time.
+- `PF1.1` `packages/core/server/lib/agent/cms-agent-client.ts`: `initialize` handshake, `Mcp-Session-Id` propagation, `DELETE` on close, protocol-version header, `AbortController` timeouts (default 90s), typed error mapping, config from **new `SiteBindingEnvNames` keys** (`CMS_AGENT_MCP_ENDPOINT`/`CMS_AGENT_MCP_TOKEN`) read at call time, payload sanitizer (bearer + token-shaped keys) on every log/return path. Unconfigured → typed `cms_agent_not_configured`, never a throw at import time.
 - `PF1.2` `create-site.mjs` + `admin-parity.mjs` env catalog entries; `site-identity.ts` gains `cmsAgentProjectId` (all three sites).
 **Model/effort:** Terra + high. **Tests:** handshake/session/DELETE against a local mock server; timeout/abort; sanitizer; unconfigured behavior; no new value reachable from client bundles (extend the protected-env guard test).
 
@@ -159,7 +166,7 @@ Then per Netlify site set `CMS_AGENT_MCP_ENDPOINT` (the Cloud Run `/mcp` URL), `
 **Goal:** the chat loop's provider call becomes an interface; the CMS-Agent engine implements it; nothing below the seam changes.
 **Tasks/commits:**
 - `PF2.1` Extract `TurnEngine` from the `adapterForProfile`/`adapter.chat` call site in `loop.ts`; `providerEngine` wraps the existing adapters byte-identically (golden-transcript test).
-- `PF2.2` `cmsAgentEngine`: builds `client_manager.turn.v1` from the run, calls `agent_converse` via PF1, maps response to the loop's expected shape; `ChatRun` gains `engine` + `agent_ref` (schema-additive, old docs parse); mode resolution `governanceOverride ?? env ?? 'off'`.
+- `PF2.2` `cmsAgentEngine`: builds `client_manager.turn.v1` from the run, calls `agent_converse` via PF1, maps response to the loop's expected shape; `ChatRun` gains `engine` + `agent_ref` (schema-additive, old docs parse). The initial mode seam was retired by the PF5 amendment above.
 
 **As-built constraints this engine must satisfy — each verified against the deployed contract, all cheap to design in and expensive to discover at integration time:**
 
@@ -179,25 +186,29 @@ Then per Netlify site set `CMS_AGENT_MCP_ENDPOINT` (the Cloud Run `/mcp` URL), `
 | 12 | OpenAI tool-call args that fail to parse degrade silently to `{}` | Platform's `tool.parse` will reject — ensure that surfaces as a normal tool error, not a crash |
 | 13 | CMS-Agent owns the system prompt; Platform stops sending one | **Depends on CA6.** Do not flip any site to `required` until prompt parity lands |
 
-**Model/effort:** Sol + high (the architectural run of this program). **Tests:** with a mocked `agent_converse`: full two-turn chat with an `ask` tool → approval card → approve → resume, transcript and events byte-compatible with the provider path; `auto` tool execution and write-refresh events unchanged; run caps still enforced; mode `off` leaves the provider path untouched; plus one test per constraint 1–8 above. **⛔ G2: live integration proof on a staging/branch deploy of the `platform` site against the deployed CMS-Agent — a real conversation with a real approval — reviewed by Wolf before any cutover work.**
+**Model/effort:** Sol + high (the architectural run of this program). **Tests:** with a mocked `agent_converse`: full two-turn chat with an `ask` tool → approval card → approve → resume, transcript and events byte-compatible with the earlier provider path; `auto` tool execution and write-refresh events unchanged; run caps still enforced; plus one test per constraint 1–8 above. **⛔ G2: live integration proof on a staging/branch deploy of the `platform` site against the deployed CMS-Agent — a real conversation with a real approval — reviewed by Wolf before any cutover work.**
 
 ### PF3 — Failure semantics, health, and honest UX
-**Tasks/commits:** `PF3.1` required-mode fail-fast (`run_error` with `cms_agent_*` codes, human copy, chat remains usable, retry works); `fallback` mode emits a loud `engine_fallback` event; memoized health probe surfaced on an owner surface; send-time `cms_agent_not_configured` clear error. **Model/effort:** Terra + medium. **Tests:** downtime (connection refused), timeout, malformed response, auth failure, missing env — each produces its named code, no silent provider fallback in `required`, and a subsequent send succeeds when the service returns.
+**Tasks/commits:** `PF3.1` fail-fast (`run_error` with `cms_agent_*` codes, human copy, chat remains usable, retry works); memoized health probe surfaced on an owner surface; send-time `cms_agent_not_configured` clear error. The transitional fallback event remains only as a historical chat-record variant. **Model/effort:** Terra + medium. **Tests:** downtime (connection refused), timeout, malformed response, auth failure, missing env — each produces its named code, no provider fallback, and a subsequent send succeeds when the service returns.
 
 ### PF4 — Workspace orchestration tools (P3.1's surviving half; before or during cutover, Wolf's call)
 **Tasks/commits:** `PF4.1` `list_workspace_nodes` (read/auto) + `run_workspace_workflow` (privileged/ask, dry-run = input echo, riskLevel→autonomy floors: publish/admin never auto and excluded from the safe-run allow-list) + `get_workspace_run` (read/auto, bounded projection — never the ~500KB full record); raw CMS-Agent output rendered in a collapsed disclosure (P3.2's surviving idea); Guardrails catalog picks the tools up automatically. **Model/effort:** Terra + high. **Tests:** risk floors; dry-run card content; long-run polling across turns; blocked run surfaces as Needs-you.
 
 **PF4b (D2a, 2026-08-17) — publish/release from chat via ask-gated verbs.** Supersedes PF4's "publishing remains a separate human decision on the workspace surface" exclusion: three verbs now ride the same CMS-Agent bridge — `check_workspace_run_readiness` (read/auto → `workflow_publish_readiness`, approval omitted, `verifiedMediaRefs` from this site's artifact index in both blobKey and `/img|/pdf` forms), `publish_workspace_run` (privileged, autonomyFloor `ask`; the approval card IS the readiness result; refused outright unless status is `go`; on approval → `workflow_publish_run` with `approval{approvedBy: editor email, approvedAt, pinned:true}`, `releaseBehavior: publish_now`; idempotent per `publish:<runId>`), and `release_workspace_run` (privileged/ask, Owner-only → local `release_to_production` + one `deploy_status` read). `run_workspace_workflow` now mints/accepts the `req_agent_<slug>_<yyyymmdd>_<nn>` request id CMS-Agent requires and passes `budgetMs: 45000`. CMS-Agent's own gates still apply (D3): the readiness/publish decision is re-evaluated server-side by CMS-Agent; the chat verbs cannot widen it. Only the readiness check is safe to auto-run.
 
-### PF5 — Staged cutover ⛔ **G3 per site, G4 before drlurie**
-**Prerequisites: PF0 done, CA6 landed and deployed.** Per site, in order **platform → fernwell (CA5 ✅ done) → drlurie**:
-1. Set mode `fallback` (endpoint + token already set by PF0); deploy; soak (defaults: 3d/2d/5d — Wolf sets) with required evidence: `engine_fallback` count = 0, turn latency and cost sampled.
-2. Flip governance override to `required`; authenticated browser walkthrough of **every** admin chat entry point (Object Room rail, Templates workspace rail, AgentsHub free chat) covering: two-turn memory, an approval cycle, a denial, a cancel, an error injection.
-3. ⛔ **G3:** evidence reviewed, explicit go before the next site. ⛔ **G4:** before drlurie, additionally review cost per conversation and CMS-Agent usage rollups (the money-attention gate).
-**Model/effort:** Terra + medium (ops + evidence). Rollback at any point: governance override → `off` (instant), env default corrected at next deploy.
+### PF5 — Permanent Client Manager cutover
+**Prerequisites: PF0 done, CA6 landed and deployed.** The production admin-chat
+hop constructs only `cmsAgentEngine`; `CMS_AGENT_CHAT_MODE` is not read, legacy
+governance mode values are ignored, and new mode writes are rejected. A missing
+endpoint/token fails at send; runtime failures produce coded `run_error` events
+without calling a Platform provider. Release evidence must still include a
+healthy `agent_resolve` and authenticated walkthrough of Object Room, Templates,
+and AgentsHub chat for every deployed site, plus cost/usage attribution review.
 
-### PF6 — Legacy retirement ⛔ **G5**
-After all three sites soak clean in `required`: remove the `providerEngine` path from the chat loop (`loop.ts` no longer imports provider adapters — guard test), remove `fallback` mode, update docs (`CLAUDE.md`, `docs/agents/*`, admin-plan register), re-label the profile roster per the product decision in plan §14.2. `provider.ts` itself remains until the Ask-AI scope decision. **Model/effort:** Terra + medium. ⛔ **G5: Wolf approves the removal commit explicitly — this is the point of no cheap return.**
+### PF6 — Legacy retirement (absorbed into PF5 for admin chat)
+The provider adapter remains for non-chat AI surfaces, but the admin-chat
+background hop no longer imports or constructs it. Historical provider-engine
+helpers and run labels remain only for tests and old chat records.
 
 ### PF7 (unscheduled, pending plan §14.1) — Ask-AI chips via `agent_converse`; `run-publisher-agent` disposition.
 
@@ -216,7 +227,7 @@ After all three sites soak clean in `required`: remove the `providerEngine` path
 | CA7 | CMS-Agent | evidence producer (site TBD), `src/agent/entrypoints/conversationTurnGcJob*.ts`, Cloud Scheduler config |
 | PF0 | ops | Secret Manager `mcp-scoped-tokens-json`; Netlify env per site |
 | PF1 | platform | `packages/core/server/lib/agent/cms-agent-client.ts` (new), `site-binding.ts`, `sites/*/config/site-identity.ts`, `cli/create-site.mjs`, `cli/admin-parity.mjs` |
-| PF2 | platform | `packages/core/server/lib/agent/loop.ts`, `engine.ts` (new), `chat-store.ts` (additive fields), `governance-store.ts` (mode override) |
+| PF2 | platform | `packages/core/server/lib/agent/loop.ts`, `engine.ts` (new), `chat-store.ts` (additive fields), `governance-store.ts` (legacy mode field compatibility) |
 | PF3 | platform | `loop.ts`, `admin-agent-chat.ts`, owner health surface, tests |
 | PF4 | platform | `packages/core/server/lib/agent/tools.ts`, `chat.tsx` (disclosure rendering) |
 | PF6 | platform | `loop.ts`, guard test, docs |

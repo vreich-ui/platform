@@ -40,10 +40,13 @@ export interface ChatEventView {
 }
 
 export interface AgentView {
-  profile_id: string;
   name: string;
-  provider: 'anthropic' | 'openai';
-  model: string;
+  agent_ref: string;
+  engine: 'cms_agent';
+  /** Pre-PF5 response fields retained as optional for rolling deploys. */
+  profile_id?: string;
+  provider?: 'anthropic' | 'openai';
+  model?: string;
   avatar_artifact?: string;
 }
 

@@ -37,9 +37,8 @@ export const governanceDocSchema = z.object({
   chat_tools: chatToolAutonomySchema.optional(),
   /** M2b: expensive candidate generation is explicitly Owner-governed and off by default. */
   learning_mode: z.boolean().optional(),
-  /** PF2 (schema-additive): runtime override for the chat TurnEngine mode —
-   *  `governance override ?? CMS_AGENT_CHAT_MODE env ?? 'off'`. Rollback to
-   *  the provider path is this one field → 'off', no deploy. */
+  /** PF2 legacy field retained only so pre-PF5 governance documents continue
+   *  to parse. PF5 ignores it: admin chat is permanently Client Manager-only. */
   cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
   /** Task 3 (schema-additive): which chat-tool registry new runs stamp.
    *  Effective default when unset is 'generated' (resolved by the caller,
@@ -85,8 +84,6 @@ export interface ActivePolicies {
   creation: CreationPolicy;
   chat_tools?: GovernanceDoc['chat_tools'];
   learning_mode: boolean;
-  /** PF3: the runtime chat-engine mode override, when one is set. */
-  cms_agent_chat_mode?: 'off' | 'fallback' | 'required';
   /** Task 3: the runtime chat-registry override, when one is set. Callers
    *  apply the effective default (`chat_registry ?? 'generated'`) themselves. */
   chat_registry?: 'legacy' | 'generated';
@@ -112,7 +109,6 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
     creation: doc?.creation ?? activeCreationPolicy(),
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
-    ...(doc?.cms_agent_chat_mode ? { cms_agent_chat_mode: doc.cms_agent_chat_mode } : {}),
     ...(doc?.chat_registry ? { chat_registry: doc.chat_registry } : {}),
     provenance: {
       approval: doc?.approval ? 'override' : 'committed',

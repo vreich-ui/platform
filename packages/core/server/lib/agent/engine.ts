@@ -1,36 +1,33 @@
 /**
  * PF2 — the TurnEngine seam (roadmap PF2.1/PF2.2).
  *
- * The chat loop's one provider call becomes an interface. Two implementations:
+ * The chat loop's one reasoning call is an interface. The production admin
+ * chat implementation is `cmsAgentEngine`, which calls the canonical Client
+ * Manager through CMS-Agent.
  *
- *   - `providerEngine` wraps the existing provider adapters byte-identically —
- *     same input, same output, nothing below the seam changes;
- *   - `cmsAgentEngine` builds a `client_manager.turn.v1` request from the run,
+ * `providerEngine` remains exported only as a test harness for loop-level
+ * fixtures. No production admin-chat construction path can select it.
+ * `cmsAgentEngine` builds a `client_manager.turn.v1` request from the run,
  *     calls `agent_converse` through the PF1 client, and maps the response to
  *     the loop's expected `ProviderTurnResult` shape.
  *
- * Which engine runs is mode resolution: governance override ?? env ?? 'off'
- * (`resolveEffectiveChatMode`). `off` leaves the provider path untouched;
- * `fallback` and `required` both select `cmsAgentEngine` here — the
- * fallback-on-error behavior and its loud `engine_fallback` event are PF3.
+ * PF5 permanently cut admin chat over to Client Manager. Missing or unhealthy
+ * CMS-Agent configuration fails closed; there is no provider fallback.
  *
  * Contract source: CLIENT-MANAGER-CONTRACT.md (CMS-Agent repo root) as
  * corrected by plan §5A. The PF1 client owns transport, bounds pre-flight,
  * error typing and the `retryableWithSameTurnId` rule — none of that is
  * re-derived here.
  */
-import { appendChatEvent, type ChatDoc, type ChatMsg, type ChatRun } from './chat-store.js';
+import type { ChatDoc, ChatMsg, ChatRun } from './chat-store.js';
 import type { ProviderAdapter, ProviderTurnResult, WireTool } from './provider.js';
 import {
   CMS_AGENT_BOUNDS,
   CMS_AGENT_DEFAULT_CONSTRAINTS,
-  resolveCmsAgentChatMode,
-  type CmsAgentChatMode,
   type CmsAgentClient,
   type CmsAgentContext,
   type CmsAgentError,
 } from './cms-agent-client.js';
-import type { SiteBindingEnvNames } from '../site-binding.js';
 import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
 
 // ─── the seam ────────────────────────────────────────────────────────────────
@@ -42,7 +39,7 @@ export type TurnEngineInput = {
    * The Platform-assembled system prompt. `providerEngine` sends it as today;
    * `cmsAgentEngine` deliberately does NOT — CMS-Agent owns the prompt (single
    * prompt owner, plan §5A constraint 13; the wire request has no system
-   * field). Required-mode cutover therefore depends on CA6 prompt parity.
+   * field). The permanent cutover therefore depends on CA6 prompt parity.
    */
   system: string;
   tools: WireTool[];
@@ -58,22 +55,6 @@ export const providerEngine =
   (adapter: ProviderAdapter): TurnEngine =>
   ({ system, run, tools }) =>
     adapter({ system, transcript: run.transcript, tools });
-
-// ─── mode resolution ─────────────────────────────────────────────────────────
-
-/**
- * `governance override ?? env ?? 'off'`. The env layer already fail-safes:
- * unset, blank or unrecognized values resolve to 'off' (with the raw value
- * reported via `invalidEnvValue` so PF3 can surface the typo).
- */
-export const resolveEffectiveChatMode = (
-  governanceOverride?: CmsAgentChatMode,
-  names?: SiteBindingEnvNames
-): { mode: CmsAgentChatMode; invalidEnvValue?: string } => {
-  if (governanceOverride) return { mode: governanceOverride };
-  const env = resolveCmsAgentChatMode(names);
-  return { mode: env.mode, ...(env.invalidValue === undefined ? {} : { invalidEnvValue: env.invalidValue }) };
-};
 
 // ─── failures ────────────────────────────────────────────────────────────────
 
@@ -287,58 +268,17 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
   };
 };
 
-// ─── PF3 — mode-aware engine assembly ────────────────────────────────────────
+// ─── PF5 — permanent Client Manager assembly ─────────────────────────────────
 
 export type ChatEngineOptions = {
-  mode: CmsAgentChatMode;
-  /** The run's stamped profile adapter — the legacy path and the fallback target. */
-  adapter: ProviderAdapter;
   client: CmsAgentTurnClient;
   projectId: string;
   siteId: string;
-  nowIso?: () => string;
 };
 
 /**
- * The one place a mode becomes an engine:
- *
- *   off      → providerEngine only; the CMS-Agent client is never touched.
- *   required → cmsAgentEngine only; a failure throws and the run errors —
- *              by construction no code path can reach the provider adapter,
- *              which is done-criteria E3's "provably never invoked".
- *   fallback → cmsAgentEngine first; an engine-class failure appends a LOUD
- *              `engine_fallback` event (code + human copy) to the doc and
- *              retries the same turn on the provider path, restamping
- *              run.engine. A non-engine error (a bug) still throws — only
- *              known CMS-Agent failures may degrade.
+ * The sole production admin-chat engine. A CMS-Agent failure throws and the
+ * run records a coded error; no direct provider call is available here.
  */
-export const buildChatEngine = (options: ChatEngineOptions): TurnEngine => {
-  const provider = providerEngine(options.adapter);
-  if (options.mode === 'off') return provider;
-  const cms = cmsAgentEngine({ client: options.client, projectId: options.projectId, siteId: options.siteId });
-  if (options.mode === 'required') return cms;
-  const at = options.nowIso ?? (() => new Date().toISOString());
-  // One engine instance serves one background hop. After the first
-  // degradation the REST OF THE HOP stays on the provider path: re-probing a
-  // dead service on every turn would add up to 90s latency per turn and spam
-  // duplicate engine_fallback events. The next hop retries CMS-Agent fresh.
-  let degradedThisHop = false;
-  return async (input) => {
-    if (degradedThisHop) return provider(input);
-    try {
-      return await cms(input);
-    } catch (error) {
-      if (!(error instanceof CmsAgentEngineError)) throw error;
-      degradedThisHop = true;
-      appendChatEvent(input.doc, at(), 'engine_fallback', {
-        run_id: input.run.run_id,
-        code: error.code,
-        message: humanCopyForCmsAgentError(error.code),
-      });
-      const turn = await provider(input);
-      // The provider answered this turn — record what actually reasoned it.
-      input.run.engine = 'provider';
-      return turn;
-    }
-  };
-};
+export const buildChatEngine = (options: ChatEngineOptions): TurnEngine =>
+  cmsAgentEngine({ client: options.client, projectId: options.projectId, siteId: options.siteId });

@@ -8,7 +8,6 @@ import {
   checkConverseBounds,
   cmsAgentMissingEnvVars,
   isCmsAgentConfigured,
-  resolveCmsAgentChatMode,
   resolveCmsAgentConfig,
   sanitizeCmsAgentPayload,
   type CmsAgentConverseRequest,
@@ -148,13 +147,11 @@ beforeEach(() => {
   state.toolCalls = [];
   process.env.CMS_AGENT_MCP_ENDPOINT = endpoint;
   process.env.CMS_AGENT_MCP_TOKEN = TOKEN;
-  process.env.CMS_AGENT_CHAT_MODE = 'required';
 });
 
 const clearEnv = () => {
   delete process.env.CMS_AGENT_MCP_ENDPOINT;
   delete process.env.CMS_AGENT_MCP_TOKEN;
-  delete process.env.CMS_AGENT_CHAT_MODE;
 };
 
 const validRequest = (overrides: Partial<CmsAgentConverseRequest> = {}): CmsAgentConverseRequest => ({
@@ -201,13 +198,12 @@ describe('configuration', () => {
     assert.equal(second.ok && second.data.token, 'second');
   });
 
-  it('mode defaults to off, and an unrecognized value can never promote a site', () => {
+  it('configuration contains only the endpoint and scoped token', () => {
+    process.env.CMS_AGENT_CHAT_MODE = 'off';
+    const config = resolveCmsAgentConfig();
+    assert.equal(config.ok, true);
+    if (config.ok) assert.deepEqual(Object.keys(config.data).sort(), ['endpoint', 'token']);
     delete process.env.CMS_AGENT_CHAT_MODE;
-    assert.deepEqual(resolveCmsAgentChatMode(), { mode: 'off' });
-    process.env.CMS_AGENT_CHAT_MODE = 'REQUIRED';
-    assert.equal(resolveCmsAgentChatMode().mode, 'required');
-    process.env.CMS_AGENT_CHAT_MODE = 'requried';
-    assert.deepEqual(resolveCmsAgentChatMode(), { mode: 'off', invalidValue: 'requried' });
   });
 });
 

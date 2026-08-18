@@ -82,15 +82,15 @@ describe('admin-governance source wiring — agent_keys_create/revoke are Owner-
   });
 });
 
-describe('admin-governance requestSchema — PF3 cms_agent_chat_mode override', () => {
-  it('accepts the three modes on set and the dedicated revert target', () => {
+describe('admin-governance requestSchema — PF5 permanent Client Manager cutover', () => {
+  it('rejects every retired mode write but keeps the cleanup revert target', () => {
     for (const mode of ['off', 'fallback', 'required']) {
-      assert.strictEqual(requestSchema.safeParse({ verb: 'set', cms_agent_chat_mode: mode }).success, true, mode);
+      assert.strictEqual(requestSchema.safeParse({ verb: 'set', cms_agent_chat_mode: mode }).success, false, mode);
     }
     assert.strictEqual(requestSchema.safeParse({ verb: 'revert', target: 'cms_agent_chat_mode' }).success, true);
   });
 
-  it('rejects an unknown mode — a typo can never become an override', () => {
+  it('also rejects unknown mode values', () => {
     assert.strictEqual(requestSchema.safeParse({ verb: 'set', cms_agent_chat_mode: 'reqired' }).success, false);
     assert.strictEqual(requestSchema.safeParse({ verb: 'set', cms_agent_chat_mode: 'on' }).success, false);
   });

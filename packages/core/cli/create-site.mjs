@@ -267,14 +267,12 @@ export const ENV_CHECKLIST = [
       {
         name: 'ANTHROPIC_API_KEY',
         cls: 'fleet-shared',
-        note:
-          'AI provider key — reuse the fleet value. Admin-critical: the /admin agents hub and every per-object ' +
-          'chat instantiate a provider adapter (both providers are v1 — Wolf 2026-07-16).',
+        note: 'AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.',
       },
       {
         name: 'OPENAI_API_KEY',
         cls: 'fleet-shared',
-        note: 'AI provider key — reuse the fleet value (second v1 adapter).',
+        note: 'AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.',
       },
       {
         name: 'CMS_AGENT_MCP_ENDPOINT',
@@ -291,14 +289,6 @@ export const ENV_CHECKLIST = [
           'the Secret Manager secret mcp-scoped-tokens-json, scoped to {projects: [this project], toolAllowlist: ' +
           '[agent_resolve, agent_converse]} — that scope is what makes one tenant structurally incapable of ' +
           'acting as another. Store Functions-only + secret so no value can reach a client bundle.',
-      },
-      {
-        name: 'CMS_AGENT_CHAT_MODE',
-        cls: 'per-site, optional',
-        note:
-          'off (default) | fallback | required — the admin-chat engine ladder. Unset, blank or ' +
-          'unrecognized all resolve to off, so a typo can never promote a site. Cutover flips this per site ' +
-          '(governance override is the instant, no-deploy rollback).',
       },
       {
         name: 'CMS_AGENT_PROJECT_ID',
