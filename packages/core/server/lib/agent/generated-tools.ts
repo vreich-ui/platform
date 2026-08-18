@@ -322,7 +322,7 @@ const buildParse = (name: string, validator: CompiledSchema): ChatTool['parse'] 
   };
 };
 
-// ─── execute(): per §3's binding map ────────────────────────────────────────
+// ─── execute(): per §3's binding map ────────────────────────────────────────────────────
 
 const buildExecute = (name: string, verbPayload: VerbPayloadBuilder | undefined): ChatTool['execute'] => {
   if (isMembershipTool(name)) {
@@ -360,7 +360,7 @@ const buildExecute = (name: string, verbPayload: VerbPayloadBuilder | undefined)
   };
 };
 
-// ─── dryRun(): per governance.preview ───────────────────────────────────────
+// ─── dryRun(): per governance.preview ───────────────────────────────────────────────────
 
 const buildDryRun = (
   def: ToolDefinition,
@@ -400,7 +400,7 @@ const buildDryRun = (
   return async (ctx, args) => (await ctx.verb({ ...builder(args), dry_run: true })).body;
 };
 
-// ─── assembly ────────────────────────────────────────────────────────────
+// ─── assembly ───────────────────────────────────────────────────────────────
 
 const buildGeneratedTool = (def: ToolDefinition): ChatTool => {
   const validator = compileSchema(def.inputSchema);
@@ -420,10 +420,18 @@ const buildGeneratedTool = (def: ToolDefinition): ChatTool => {
   };
 };
 
-const WORKSPACE_TOOL_NAMES = ['list_workspace_nodes', 'run_workspace_workflow', 'get_workspace_run'] as const;
+const WORKSPACE_TOOL_NAMES = [
+  'list_workspace_nodes',
+  'run_workspace_workflow',
+  'get_workspace_run',
+  // D2a (2026-08-17): readiness / publish / release from chat.
+  'check_workspace_run_readiness',
+  'publish_workspace_run',
+  'release_workspace_run',
+] as const;
 
 // Reused, not rebuilt — tools.ts stays the single source of truth for these
-// three (workspace orchestration rides the CMS-Agent bridge, not verbs).
+// six (workspace orchestration rides the CMS-Agent bridge, not verbs).
 const workspaceTools: ChatTool[] = WORKSPACE_TOOL_NAMES.map((name) => {
   const tool = chatToolByName(name);
   if (!tool) {
@@ -432,7 +440,7 @@ const workspaceTools: ChatTool[] = WORKSPACE_TOOL_NAMES.map((name) => {
   return tool;
 });
 
-/** One registry: every visible generated tool, plus the three reused workspace tools — 60 entries. */
+/** One registry: every visible generated tool, plus the six reused workspace tools — 63 entries. */
 export const GENERATED_CHAT_TOOLS: readonly ChatTool[] = [
   ...VISIBLE_DEFINITIONS.map(buildGeneratedTool),
   ...workspaceTools,
