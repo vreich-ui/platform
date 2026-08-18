@@ -58,6 +58,15 @@ calls specifically are the ones that blow it.
   configured to honor, the mismatch itself is a bug independent of pdf-tool
   or git-export latency.
 
+**D2a note (2026-08-17):** the two chat verbs `publish_workspace_run` and
+`release_workspace_run` execute in the chat run's BACKGROUND hop
+(`admin-agent-chat-run-background.ts`, after approval), never inline in the
+interactive function — so the write-timeout ceiling above applies to that
+hop's budget, not the approve request. `release_workspace_run` reuses the
+`release_to_production` idempotency ledger (`release:<runId|commit>`) and
+`publish_workspace_run` stores `publish:<runId>` through the same store, so a
+timed-out hop can be re-approved safely.
+
 ## 2. QA-W16-3 follow-up: four destructive admin tools share the same broken auth — RESOLVED (Option B)
 
 **Status:** RESOLVED 2026-08-10 on branch `fix/qa-w16-3-admin-gate`. Wolf
@@ -351,4 +360,3 @@ stored Owner per site — FLEET-STATUS "Membership footing per tenant", T18.9
 Part B. Known-and-accepted (not an issue): a suspended/removed member's JWT
 stays valid ≤ 1 h; every function re-resolves roles per call, so they cannot
 act — there is no server-side GoTrue logout.
-
