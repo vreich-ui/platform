@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { isRunSafeApproval } from '../../../lib/admin/approval-mode.js';
-import { chatToolByName, resolveAutonomy, type ToolContext } from './tools.js';
+import { chatToolByName, REQUEST_ID_RE, resolveAutonomy, type ToolContext } from './tools.js';
 
 const bridgeCtx = (
   respond: (name: string, args: Record<string, unknown>) => unknown,
@@ -33,7 +33,7 @@ const bridgeCtx = (
 
 const noBridgeCtx = (): ToolContext => ({ roles: ['admin'] }) as unknown as ToolContext;
 
-// ─── D2: the risk floor and the safe-run exclusion ──────────────────────────
+// ─── D2: the risk floor and the safe-run exclusion ──────────────────────────────
 
 test('run_workspace_workflow can NEVER resolve to auto — governance and profile overrides are clamped; off still works', () => {
   const byGovernance = resolveAutonomy({ run_workspace_workflow: 'auto' }, undefined);
@@ -57,7 +57,7 @@ test('run_workspace_workflow: the D2 risk floor (not the client-side safe-run ch
   assert.equal(isRunSafeApproval('run_workspace_workflow'), true);
 });
 
-// ─── bounded, editor-safe projections ───────────────────────────────────────
+// ─── bounded, editor-safe projections ───────────────────────────────────────────
 
 test('list_workspace_nodes projects nodes WITHOUT prompts, schemas or model config', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
@@ -148,9 +148,11 @@ test('list_workspace_nodes caps the projection at 100 nodes and reports the trun
 
 // ─── run_workspace_workflow: start/advance, no `approved`, input-echo dry-run ─
 
-test('run_workspace_workflow start mode sends projectId + input to workflow_start_dry_run and NEVER `approved`', async () => {
+test('run_workspace_workflow start mode sends projectId + input + a minted requestId + budgetMs to workflow_start_dry_run and NEVER `approved`', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const ctx = bridgeCtx(() => ({ runId: 'run_new', status: 'created' }), calls);
+  const ctx = bridgeCtx(() => ({ runId: 'run_new', status: 'created', continued: true }), calls);
+  // D2a: minting probes object get for content_item; none exist here.
+  (ctx as { verb?: unknown }).verb = async () => ({ status: 404, body: { not_found: true } });
   const tool = chatToolByName('run_workspace_workflow')!;
 
   const parsed = tool.parse({ input: { topic: 'retinol basics' }, budget_usd: 2 }, ctx);
@@ -158,9 +160,18 @@ test('run_workspace_workflow start mode sends projectId + input to workflow_star
   const result = await tool.execute(ctx, { input: { topic: 'retinol basics' }, budget_usd: 2 });
   assert.equal(result.is_error, false);
   assert.equal(calls[0]!.name, 'workflow_start_dry_run');
-  assert.deepEqual(calls[0]!.args, { projectId: 'platform', input: { topic: 'retinol basics' }, budgetUsd: 2 });
-  assert.equal('approved' in calls[0]!.args, false);
-  assert.equal((JSON.parse(result.content) as { run_id: string }).run_id, 'run_new');
+  const sent = calls[0]!.args;
+  assert.match(sent.requestId as string, /^req_agent_retinol_basics_\d{8}_01$/);
+  assert.match(sent.requestId as string, REQUEST_ID_RE);
+  assert.deepEqual(
+    { ...sent, requestId: undefined },
+    { projectId: 'platform', input: { topic: 'retinol basics' }, budgetUsd: 2, budgetMs: 45_000, requestId: undefined }
+  );
+  assert.equal('approved' in sent, false);
+  const body = JSON.parse(result.content) as { run_id: string; request_id: string; continued: boolean };
+  assert.equal(body.run_id, 'run_new');
+  assert.equal(body.request_id, sent.requestId);
+  assert.equal(body.continued, true);
 });
 
 test('run_workspace_workflow advance mode calls workflow_run_all WITHOUT approved — the CMS-Agent publish gate stays armed', async () => {
