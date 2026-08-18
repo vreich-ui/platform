@@ -39,19 +39,26 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   ...overrides,
 });
 
-// ─── registry shape ──────────────────────────────────────────────────────
+// ─── registry shape ────────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 76 names: every visible TOOL_DEFINITION (57 + 16 membership, W18) plus the 3 workspace tools, no INTERNAL_ONLY member', () => {
+test('the registry has exactly the expected 79 names: every visible TOOL_DEFINITION (57 + 16 membership, W18) plus the 6 workspace tools (3 orchestration + 3 D2a readiness/publish/release), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
     ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
   );
   assert.equal(expectedVisible.size, 73);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 76);
-  assert.equal(new Set(registryNames).size, 76, 'no duplicate names');
+  assert.equal(registryNames.length, 79);
+  assert.equal(new Set(registryNames).size, 79, 'no duplicate names');
 
-  const workspaceNames = ['list_workspace_nodes', 'run_workspace_workflow', 'get_workspace_run'];
+  const workspaceNames = [
+    'list_workspace_nodes',
+    'run_workspace_workflow',
+    'get_workspace_run',
+    'check_workspace_run_readiness',
+    'publish_workspace_run',
+    'release_workspace_run',
+  ];
   for (const name of workspaceNames) {
     assert.ok(registryNames.includes(name), `expected workspace tool ${name} in the registry`);
   }
@@ -67,9 +74,9 @@ test('the registry has exactly the expected 76 names: every visible TOOL_DEFINIT
   }
 });
 
-test('wire-tool budget: the non-membership registry (60) + present_candidates <= 64; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
+test('wire-tool budget: the non-membership registry (63) + present_candidates <= 64; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
   const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
-  assert.equal(nonMembership.length, 60);
+  assert.equal(nonMembership.length, 63);
   assert.ok(nonMembership.length + 1 <= 64, 'core registry + present_candidates must fit the wire-tool budget');
   const wire = GENERATED_CHAT_TOOLS.map((tool) => ({
     name: tool.name,
@@ -78,7 +85,7 @@ test('wire-tool budget: the non-membership registry (60) + present_candidates <=
   }));
   assert.equal(
     fitToolsToCmsAgentBound(wire).length,
-    60,
+    63,
     'over the bound → the membership family is dropped, nothing else'
   );
   assert.equal(fitToolsToCmsAgentBound(wire.slice(0, 64)).length, 64, 'within the bound → untouched');
@@ -232,7 +239,7 @@ test('release_to_production.dryRun is an input echo (no server call)', async () 
   });
 });
 
-// ─── owner gates ────────────────────────────────────────────────────────────
+// ─── owner gates ─────────────────────────────────────────────────────────────
 
 test('site_apply_theme.execute refuses without the owner role, proceeds with it', async () => {
   const tool = generatedChatToolByName('site_apply_theme')!;
@@ -286,7 +293,7 @@ test('an operational tool answers with a clear error when no operational bridge 
   assert.match(result.content, /operational tool bridge is not configured/);
 });
 
-// ─── json-schema-lite ───────────────────────────────────────────────────────
+// ─── json-schema-lite ─────────────────────────────────────────────────────────
 
 test('compileSchema throws at compile time on an unsupported keyword', () => {
   assert.throws(
@@ -310,7 +317,7 @@ test('every one of the 87 TOOL_DEFINITIONS inputSchemas compiles without throwin
   }
 });
 
-// ─── describe() overrides ───────────────────────────────────────────────────
+// ─── describe() overrides ─────────────────────────────────────────────────────
 
 test('object_patch.describe matches the old chat "patch" tool phrasing', () => {
   const tool = generatedChatToolByName('object_patch')!;
