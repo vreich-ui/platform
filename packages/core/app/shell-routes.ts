@@ -42,12 +42,18 @@ const ROUTES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'rout
 /** `pattern` → entrypoint file, relative to `packages/core/app/routes/`. */
 export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   { pattern: '/admin', entry: 'admin/index.astro' },
+  // T18.0b: where every Netlify Identity e-mail token lands (invite /
+  // confirmation / recovery / email change). No auth gate — the person has
+  // no session yet; the page creates one.
+  { pattern: '/admin/accept', entry: 'admin/accept.astro' },
   { pattern: '/admin/agents', entry: 'admin/agents.astro' },
   // W14 F10: the OAuth consent screen. Inside /admin because the decision needs
   // an authenticated admin, and that login already lives here.
   { pattern: '/admin/authorize', entry: 'admin/authorize.astro' },
   { pattern: '/admin/content', entry: 'admin/content/index.astro' },
   { pattern: '/admin/content/[objectId]', entry: 'admin/content/[objectId].astro' },
+  // T18.5: one-time onboarding (name + "what your role can do") — the AdminShell gate sends new members here.
+  { pattern: '/admin/welcome', entry: 'admin/welcome.astro' },
   { pattern: '/admin/templates', entry: 'admin/templates.astro' },
   { pattern: '/admin/media', entry: 'admin/media.astro' },
   { pattern: '/admin/release', entry: 'admin/release.astro' },

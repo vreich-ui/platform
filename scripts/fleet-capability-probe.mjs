@@ -33,7 +33,26 @@
  * a probe failure); 1 when any site could not be reached/authenticated/
  * answered with a malformed response; 2 on bad usage.
  */
-import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// The REAL repo root — walked up, not `..`, because this module is also imported
+// from the COMPILED test tree (.tmp/ci-test/scripts/…), same as admin-parity.mjs.
+const findRepoRoot = (startDir) => {
+  let dir = startDir;
+  for (;;) {
+    if (
+      fs.existsSync(path.join(dir, 'netlify.toml')) &&
+      fs.existsSync(path.join(dir, 'packages', 'core', 'app', 'shell-routes.ts'))
+    )
+      return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return path.resolve(startDir, '..');
+    dir = parent;
+  }
+};
+const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
 
 // ── the small committed fleet endpoints map (T16.5 brief) — `--all` iterates
 //    this. Endpoint is each site's OWN `/mcp` front door (per-client
@@ -44,6 +63,9 @@ export const FLEET_SITES = [
   { slug: 'drlurie', endpoint: 'https://drluriescience.netlify.app/.netlify/functions/mcp' },
   { slug: 'platform', endpoint: 'https://kugel-platform.netlify.app/.netlify/functions/mcp' },
   { slug: 'fernwell', endpoint: 'https://kugel-fernwell.netlify.app/.netlify/functions/mcp' },
+  // Fleet tenant #4 (T12.12, minted 2026-08-14) — added here by W18 T18.7 (P1: the probe map
+  // is part of what a tenant's existence must update).
+  { slug: 'zilberman', endpoint: 'https://zilbermanfilmfoundation.netlify.app/.netlify/functions/mcp' },
 ];
 
 // ── the ten families capability_status reports on. MUST stay in sync with
@@ -80,26 +102,37 @@ export const T11_7_ENV_COVERAGE = {
     reason:
       'internal intra-process secret gating almost every tool call in mcp.ts (object store proxy, save-artifact, deploy-status, verify-article-images), not an external-service family of its own; its absence fails EVERY real read this probe attempts, so a gap here is caught immediately rather than needing a dedicated family.',
   },
-  NETLIFY_SITE_ID: { family: 'blob_credentials', note: 'also the primary half of deploy_lookup (shared with NETLIFY_AUTH_TOKEN).' },
+  NETLIFY_SITE_ID: {
+    family: 'blob_credentials',
+    note: 'also the primary half of deploy_lookup (shared with NETLIFY_AUTH_TOKEN).',
+  },
   NETLIFY_BUILD_HOOK_URL: { family: 'build_hook' },
   GITHUB_REPOSITORY: { family: 'git_committer' },
   GITHUB_BRANCH: {
     family: null,
-    reason: "optional branch selector with a safe default ('main') per site-binding.ts — never gates configured/not-configured, only which branch a commit lands on.",
+    reason:
+      "optional branch selector with a safe default ('main') per site-binding.ts — never gates configured/not-configured, only which branch a commit lands on.",
   },
   GITHUB_CONTENT_TOKEN: { family: 'git_committer' },
   GITHUB_COMMIT_AUTHOR_EMAIL: {
     family: null,
-    reason: 'cosmetic git-author fallback with a site-identity default (object-git-committer.ts resolveAuthor) — never gates configured/not-configured.',
+    reason:
+      'cosmetic git-author fallback with a site-identity default (object-git-committer.ts resolveAuthor) — never gates configured/not-configured.',
   },
-  GITHUB_COMMIT_AUTHOR_NAME: { family: null, reason: 'same as GITHUB_COMMIT_AUTHOR_EMAIL — cosmetic, has a code default.' },
+  GITHUB_COMMIT_AUTHOR_NAME: {
+    family: null,
+    reason: 'same as GITHUB_COMMIT_AUTHOR_EMAIL — cosmetic, has a code default.',
+  },
 
   // Access, identity, governance
   MCP_HTTP_AUTH_TOKEN: {
     family: 'mcp_auth',
     note: 'trivially true if capability_status answered at all — a request that failed this gate never reaches a tool handler.',
   },
-  ADMIN_EMAILS: { family: null, reason: '/admin UI role bootstrap, not an MCP tool-call gate any capability_status family covers.' },
+  ADMIN_EMAILS: {
+    family: null,
+    reason: '/admin UI role bootstrap, not an MCP tool-call gate any capability_status family covers.',
+  },
   ROLE_EMAILS_ADMIN: { family: null, reason: '/admin UI role allowlist, not an MCP tool-call gate.' },
   ROLE_EMAILS_EDITOR: { family: null, reason: '/admin UI role allowlist, not an MCP tool-call gate.' },
   ROLE_EMAILS_PUBLISHER: { family: null, reason: '/admin UI role allowlist, not an MCP tool-call gate.' },
@@ -107,13 +140,15 @@ export const T11_7_ENV_COVERAGE = {
   ARTIFACT_UPLOAD_TOKEN_SECRET: { family: 'artifact_upload' },
   ARTIFACT_URL_INGEST_ALLOWED_HOSTS: {
     family: null,
-    reason: 'a policy allowlist consulted inside create_artifact_from_url (artifact-url-ingest.ts) — an empty/absent value narrows what URLs are accepted, it does not flip a configured/not-configured boolean the way a credential does.',
+    reason:
+      'a policy allowlist consulted inside create_artifact_from_url (artifact-url-ingest.ts) — an empty/absent value narrows what URLs are accepted, it does not flip a configured/not-configured boolean the way a credential does.',
   },
 
   // pdf-tool + tracking tenancy axes
   PDF_TOOL_PROJECT_ID: {
     family: null,
-    reason: 'resolver default falls back to the site slug (site-identity.ts) — changes the pdf-tool project namespace, never gates configured/not-configured.',
+    reason:
+      'resolver default falls back to the site slug (site-identity.ts) — changes the pdf-tool project namespace, never gates configured/not-configured.',
   },
   PDF_TOOL_BASE_URL: { family: 'pdf_bridge' },
   PDF_TOOL_AGENT_RUN_TOKEN: { family: 'pdf_bridge' },
@@ -129,42 +164,73 @@ export const T11_7_ENV_COVERAGE = {
   OPENAI_API_KEY: { family: null, reason: 'admin chat/agent surface credential, not an MCP tool-call gate.' },
   ANTHROPIC_MODEL: { family: null, reason: 'optional model override with a safe code default.' },
   OPENAI_CHATKIT_WORKFLOW_ID: { family: null, reason: 'admin ChatKit workflow config, not an MCP tool-call gate.' },
-  NETLIFY_AUTH_TOKEN: { family: 'deploy_lookup', note: 'also the secondary alias half of blob_credentials (NETLIFY_BLOBS_TOKEN preferred there).' },
+  NETLIFY_AUTH_TOKEN: {
+    family: 'deploy_lookup',
+    note: 'also the secondary alias half of blob_credentials (NETLIFY_BLOBS_TOKEN preferred there).',
+  },
   STRIPE_SECRET_KEY: { family: 'commerce' },
   STRIPE_SECRET_KEY_TEST: { family: 'commerce' },
   STRIPE_WEBHOOK_SECRET: {
     family: null,
-    reason: 'gates the inbound stripe-webhook function\'s signature verification, not any capability_status-probable MCP tool family — only a real Stripe event exercises it, never a cheap read.',
+    reason:
+      "gates the inbound stripe-webhook function's signature verification, not any capability_status-probable MCP tool family — only a real Stripe event exercises it, never a cheap read.",
   },
   STRIPE_WEBHOOK_SECRET_TEST: { family: null, reason: 'same as STRIPE_WEBHOOK_SECRET, test-mode counterpart.' },
-  STRIPE_MODE: { family: null, reason: "mode selector consumed INSIDE the commerce predicate itself (stripeMode()), not an independent gate." },
+  STRIPE_MODE: {
+    family: null,
+    reason: 'mode selector consumed INSIDE the commerce predicate itself (stripeMode()), not an independent gate.',
+  },
 
   // Not part of T11.7's provisioning checklist, but present in its table —
   // included here so "every var in the table" is genuinely exhaustive.
-  ARTIFACT_UPLOAD_MAX_BYTES: { family: null, reason: 'ops knob with a safe default; outside the T11.7 provisioning checklist.' },
-  HERO_IMAGE_REQUIRED: { family: null, reason: 'feature flag with a safe default; outside the T11.7 provisioning checklist.' },
-  MCP_ENABLE_ADMIN_TOOLS: { family: null, reason: 'feature flag with a safe default; outside the T11.7 provisioning checklist.' },
+  ARTIFACT_UPLOAD_MAX_BYTES: {
+    family: null,
+    reason: 'ops knob with a safe default; outside the T11.7 provisioning checklist.',
+  },
+  HERO_IMAGE_REQUIRED: {
+    family: null,
+    reason: 'feature flag with a safe default; outside the T11.7 provisioning checklist.',
+  },
+  MCP_ENABLE_ADMIN_TOOLS: {
+    family: null,
+    reason: 'feature flag with a safe default; outside the T11.7 provisioning checklist.',
+  },
   MCP_HTTP_HOST: { family: null, reason: 'self-hosted/local MCP transport knob; unused on Netlify functions.' },
   MCP_HTTP_PORT: { family: null, reason: 'self-hosted/local MCP transport knob; unused on Netlify functions.' },
   MCP_HTTP_PATH: { family: null, reason: 'self-hosted/local MCP transport knob; unused on Netlify functions.' },
   MCP_HTTP_HEALTH_PATH: { family: null, reason: 'self-hosted/local MCP transport knob; unused on Netlify functions.' },
   MCP_KEEPALIVE_DISABLED: { family: null, reason: 'ops knob; unused on Netlify functions.' },
   MCP_KEEPALIVE_TARGET_URL: { family: null, reason: 'ops knob; unused on Netlify functions.' },
-  SAVE_JSON_BLOB_BASE_URL: { family: null, reason: 'legacy — the save-json-blob pipeline was retired (OQ-W11-6); not provisioned for new clients.' },
+  SAVE_JSON_BLOB_BASE_URL: {
+    family: null,
+    reason: 'legacy — the save-json-blob pipeline was retired (OQ-W11-6); not provisioned for new clients.',
+  },
   NETLIFY_BLOBS_API_URL: { family: null, reason: 'platform-injected; not hand-set.' },
-  NETLIFY_BLOBS_TOKEN: { family: 'blob_credentials', note: 'the preferred alias read before NETLIFY_AUTH_TOKEN for blob_credentials.' },
+  NETLIFY_BLOBS_TOKEN: {
+    family: 'blob_credentials',
+    note: 'the preferred alias read before NETLIFY_AUTH_TOKEN for blob_credentials.',
+  },
   NETLIFY: { family: null, reason: 'platform-injected runtime flag; not hand-set.' },
   URL: { family: null, reason: 'platform-injected; not hand-set.' },
   BRANCH: { family: null, reason: 'platform-injected alias of GITHUB_BRANCH; not hand-set.' },
   CONTEXT: { family: null, reason: 'platform-injected; not hand-set.' },
-  SITE_ID: { family: 'blob_credentials', note: 'the Netlify-injected alias half of NETLIFY_SITE_ID (also feeds deploy_lookup).' },
+  SITE_ID: {
+    family: 'blob_credentials',
+    note: 'the Netlify-injected alias half of NETLIFY_SITE_ID (also feeds deploy_lookup).',
+  },
 
   // Site-identity overrides (transitional per T11.7 — escape hatch, source
   // of truth is sites/<client>/site.config.*)
   SITE_TAXONOMY_ID: { family: null, reason: 'transitional site-identity override, not an MCP tool-call gate.' },
   SITE_TRACKING_PROJECT_ID: { family: null, reason: 'transitional site-identity override, not an MCP tool-call gate.' },
-  MCP_SERVER_NAME: { family: null, reason: 'transitional site-identity override (serverInfo.name), not a capability gate.' },
-  MCP_SERVER_DIAGNOSTIC_NAME: { family: null, reason: 'transitional site-identity override (ping diagnostics), not a capability gate.' },
+  MCP_SERVER_NAME: {
+    family: null,
+    reason: 'transitional site-identity override (serverInfo.name), not a capability gate.',
+  },
+  MCP_SERVER_DIAGNOSTIC_NAME: {
+    family: null,
+    reason: 'transitional site-identity override (ping diagnostics), not a capability gate.',
+  },
   SITE_ASSET_HOST: { family: null, reason: 'transitional site-identity override, not a capability gate.' },
   SITE_ASSET_FOLDER: { family: null, reason: 'transitional site-identity override, not a capability gate.' },
 
@@ -172,7 +238,7 @@ export const T11_7_ENV_COVERAGE = {
   // risk this probe surfaces rather than hides (see the session report).
   PURCHASE_TOKEN_SECRET: {
     family: 'purchase_token',
-    note: 'NOT currently listed in T11.7-provisioning-cli.md\'s env table — a P2 (env law) gap: add it there so a new client\'s checklist actually provisions it.',
+    note: "NOT currently listed in T11.7-provisioning-cli.md's env table — a P2 (env law) gap: add it there so a new client's checklist actually provisions it.",
   },
 };
 
@@ -180,16 +246,102 @@ export const T11_7_ENV_COVERAGE = {
 //    exercise exists for this family (documented reason inline) — status
 //    only, no live call attempted. ──
 const REAL_READ_NOTES = {
-  pdf_bridge: 'list_pdf_templates {site_id, limit:1} — shared exercise with pdf_storage_grant (both must be configured for this call to succeed end to end).',
+  pdf_bridge:
+    'list_pdf_templates {site_id, limit:1} — shared exercise with pdf_storage_grant (both must be configured for this call to succeed end to end).',
   pdf_storage_grant: 'list_pdf_templates {site_id, limit:1} — see pdf_bridge.',
-  commerce: 'no safe read-only exercise exists: product_set_price mutates a live Stripe price and commerce_orders never touches Stripe at all. Status-only.',
+  commerce:
+    'no safe read-only exercise exists: product_set_price mutates a live Stripe price and commerce_orders never touches Stripe at all. Status-only.',
   purchase_token: 'no safe read-only exercise exists: order_reissue mutates order/fulfillment state. Status-only.',
-  build_hook: 'no safe read-only exercise exists: the only way to exercise this is to actually trigger a production build (a non-goal for a status probe). Status-only.',
+  build_hook:
+    'no safe read-only exercise exists: the only way to exercise this is to actually trigger a production build (a non-goal for a status probe). Status-only.',
   deploy_lookup: 'deploy_status {commit: <40 zero placeholder>} — a real, read-only Netlify deploy-receipt lookup.',
-  git_committer: 'no safe read-only exercise exists: every code path through object-git-committer.ts writes a commit. Status-only.',
+  git_committer:
+    'no safe read-only exercise exists: every code path through object-git-committer.ts writes a commit. Status-only.',
   blob_credentials: 'object_inventory {} — a real, read-only blob-store scan.',
-  mcp_auth: 'trivially true if capability_status answered at all — the call already cleared the MCP auth gate. Status-only.',
+  mcp_auth:
+    'trivially true if capability_status answered at all — the call already cleared the MCP auth gate. Status-only.',
   artifact_upload: 'create_artifact_upload_intent {…} — mints a signed token; never writes blob bytes.',
+};
+
+// ── identity (T18.0c): console-only prerequisites, NOT probed. Netlify Identity
+//    has no MCP tool-call gate and no env var of its own (IDENTITY_URL is an
+//    override), and this script never calls the Identity admin API — so the
+//    probe can only TELL a human what to click. Printed once per tenant so the
+//    output is the full truth about what a working invite flow needs. ──
+export const IDENTITY_CONSOLE_PREREQUISITES = [
+  'Identity enabled on the site (Project configuration → Identity → Enable)',
+  'Registration → Invite only',
+  'Emails → Invitation template path = /emails/identity/invitation.html',
+  'Emails → Confirmation template path = /emails/identity/confirmation.html',
+  'Emails → Recovery template path = /emails/identity/recovery.html',
+  'Emails → Email change template path = /emails/identity/email-change.html',
+  'ADMIN_EMAILS set (bootstrap Owner) — or the first Owner invited from /admin/settings/admins',
+];
+
+// ── membership (W18 T18.7): the `membership` family. Not a capability_status
+//    family (W18 introduced NO env var — asserted in the T18.7 commit body) so
+//    it is reported as its own block: the repo-side parity facts this probe can
+//    read without a network (sweep declared, templates present, committed
+//    policy override registered) and the two live reads a bearer-token probe
+//    CAN make — `membership_status` (internal-only, non-secret; the verbs
+//    themselves are human-only) and a HEAD on /admin/accept. ──
+export const IDENTITY_EMAIL_TEMPLATE_FILES = ['invitation', 'confirmation', 'recovery', 'email-change'];
+
+/** Root-deploy tenant: sites/<slug>/netlify.toml may not exist because the ROOT netlify.toml is that site's. */
+const tomlPathFor = (slug) => {
+  const own = path.join(repoRoot, 'sites', slug, 'netlify.toml');
+  if (fs.existsSync(own)) return own;
+  const root = path.join(repoRoot, 'netlify.toml');
+  return fs.existsSync(root) ? root : null;
+};
+
+/** Repo-side membership parity for one tenant — pure disk reads, non-secret, no network. */
+export const membershipRepoChecks = (slug) => {
+  const toml = tomlPathFor(slug);
+  const tomlText = toml ? fs.readFileSync(toml, 'utf8') : '';
+  const sweepDeclared = /\[functions\."membership-sweep"\]\s*\n\s*schedule = /.test(tomlText);
+  const templatesDir = path.join(repoRoot, 'packages', 'core', 'app', 'emails', 'identity');
+  const missingTemplates = IDENTITY_EMAIL_TEMPLATE_FILES.filter(
+    (f) => !fs.existsSync(path.join(templatesDir, `${f}.html`))
+  );
+  const configDir = path.join(repoRoot, 'sites', slug, 'config');
+  const policyStub = fs.existsSync(path.join(configDir, 'membership-policy.ts'));
+  const bindings = path.join(configDir, 'policy-bindings.ts');
+  const policyRegistered =
+    fs.existsSync(bindings) && /setActiveMembershipPolicyProvider\(/.test(fs.readFileSync(bindings, 'utf8'));
+  return {
+    sweep_declared: sweepDeclared
+      ? 'ok'
+      : `FAIL: no [functions."membership-sweep"] schedule in ${toml ? path.relative(repoRoot, toml) : 'netlify.toml (missing)'}`,
+    templates_present: missingTemplates.length
+      ? `FAIL: missing ${missingTemplates.join(', ')}`
+      : 'ok (4/4 under packages/core/app/emails/identity)',
+    policy_override:
+      policyStub && policyRegistered
+        ? 'ok (config/membership-policy.ts present + registered in policy-bindings)'
+        : `FAIL: ${[!policyStub && 'config/membership-policy.ts missing', !policyRegistered && 'policy-bindings does not register it'].filter(Boolean).join('; ')}`,
+  };
+};
+
+const acceptUrlFor = (endpoint) => {
+  try {
+    return new URL('/admin/accept', endpoint).toString();
+  } catch {
+    return null;
+  }
+};
+
+const printMembershipBlock = (result) => {
+  for (const [name, outcome] of Object.entries(result.membership ?? {})) {
+    console.log(`   membership/${name.padEnd(18)} ${outcome}`);
+  }
+};
+
+const printIdentityNote = () => {
+  console.log(
+    '   identity           (console-only, not probed)  human prerequisites for the invite flow — tick in FLEET-STATUS.md:'
+  );
+  for (const line of IDENTITY_CONSOLE_PREREQUISITES) console.log(`                      ☐ ${line}`);
 };
 
 // ── CLI ──────────────────────────────────────────────────────────────────
@@ -213,6 +365,9 @@ const parseArgs = (argv) => {
       opts.all = true;
     } else if (arg === '--markdown') {
       opts.markdown = true;
+    } else if (arg === '--repo-only') {
+      // W18 T18.7: print only the repo-side membership parity block per site — no token, no network.
+      opts.repoOnly = true;
     } else if (arg === '--help' || arg === '-h') {
       opts.help = true;
     }
@@ -223,6 +378,7 @@ const parseArgs = (argv) => {
 const usage =
   'usage: node scripts/fleet-capability-probe.mjs (--site <slug> --endpoint <url>)... [--markdown]\n' +
   '       node scripts/fleet-capability-probe.mjs --all [--markdown]\n' +
+  '       node scripts/fleet-capability-probe.mjs --all --repo-only   (W18 T18.7: membership parity from the repo, no token/network)\n' +
   '\n' +
   'Per-site token from env MCP_HTTP_AUTH_TOKEN__<SLUG> (never argv). --all reads the committed FLEET_SITES map in this file.';
 
@@ -238,7 +394,12 @@ const callTool = async (endpoint, token, name, args) => {
     response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name, arguments: args ?? {} } }),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: ++rpcId,
+        method: 'tools/call',
+        params: { name, arguments: args ?? {} },
+      }),
     });
   } catch (error) {
     return { ok: false, error: `network error: ${error instanceof Error ? error.message : String(error)}` };
@@ -362,7 +523,47 @@ export const probeSite = async (site) => {
     extraReads.capture_bridge = 'skipped (pdf_bridge reports unconfigured)';
   }
 
-  return { slug: site.slug, endpoint: site.endpoint, ok: true, siteObjectId, families, realReads, extraReads };
+  // ── W18 T18.7: the membership family ─────────────────────────────────────
+  const membership = { ...membershipRepoChecks(site.slug) };
+  const mstatus = await callTool(site.endpoint, token, 'membership_status', {});
+  if (mstatus.ok && mstatus.data && typeof mstatus.data.users_store === 'string') {
+    const policy = mstatus.data.policy ?? {};
+    membership.users_store =
+      mstatus.data.users_store === 'reachable' ? 'ok (reachable)' : 'FAIL: users store unreachable';
+    membership.policy =
+      `${policy.source ?? '?'}` +
+      (policy.committed_override_keys?.length ? ` committed[${policy.committed_override_keys.join(',')}]` : '') +
+      (policy.store_override_keys?.length ? ` store[${policy.store_override_keys.join(',')}]` : '') +
+      (policy.effective
+        ? ` min_owners=${policy.effective.min_owners} ttl=${policy.effective.invite_ttl_hours}h who_can_invite=${policy.effective.who_can_invite}`
+        : '');
+  } else {
+    membership.users_store = `FAIL: membership_status ${brief(mstatus.data ?? mstatus.error)}`;
+    membership.policy = 'unknown (membership_status failed — deployed core predates T18.7?)';
+  }
+  const acceptUrl = acceptUrlFor(site.endpoint);
+  if (acceptUrl) {
+    try {
+      const head = await fetch(acceptUrl, { method: 'HEAD', redirect: 'manual' });
+      membership.accept_page =
+        head.status === 200 ? `ok (HEAD ${acceptUrl} → 200)` : `FAIL: HEAD ${acceptUrl} → ${head.status}`;
+    } catch (error) {
+      membership.accept_page = `FAIL: HEAD ${acceptUrl}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  } else {
+    membership.accept_page = 'skipped (no site URL known)';
+  }
+
+  return {
+    slug: site.slug,
+    endpoint: site.endpoint,
+    ok: true,
+    siteObjectId,
+    families,
+    realReads,
+    extraReads,
+    membership,
+  };
 };
 
 // ── report ───────────────────────────────────────────────────────────────
@@ -389,6 +590,8 @@ const printMatrix = (results) => {
       // capability the fleet depends on cannot be load-bearing and unprobed. See T12.13.
       console.log(`   ${name.padEnd(18)} ${'(no env var of its own)'.padEnd(28)} real-read: ${outcome}`);
     }
+    printMembershipBlock(result);
+    printIdentityNote();
     console.log('');
   }
 };
@@ -430,6 +633,17 @@ export const main = async (argv) => {
         return site;
       });
   if (process.exitCode === 2) return;
+
+  if (opts.repoOnly) {
+    console.log(`fleet membership parity (repo-side, W18 T18.7) — ${new Date().toISOString()}`);
+    console.log('');
+    for (const site of targets) {
+      console.log(`[${site.slug}]`);
+      printMembershipBlock({ membership: membershipRepoChecks(site.slug) });
+      console.log('');
+    }
+    return;
+  }
 
   const results = [];
   for (const site of targets) {

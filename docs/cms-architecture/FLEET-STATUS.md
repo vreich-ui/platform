@@ -50,6 +50,43 @@ All three tenants still need the same three account-authority steps before `/adm
 - [ ] Set `ADMIN_EMAILS` on each tenant site — **Wolf is on this now**
 - [ ] Run one `create-site --provision-only --netlify-token …` per tenant to prove blob stores round-trip live
 
+### Identity e-mail templates set (console) — W18 T18.0c
+
+Every tenant's build publishes the four Netlify Identity e-mail templates at
+`/emails/identity/*.html` (core-owned, each linking to `/admin/accept`); the
+console **path** per template, and *Registration = Invite only*, are
+human clicks (runbook §admin, step 1). Wolf ticks these during T18.9:
+
+| Tenant | Identity enabled | Invite only | Invitation path | Confirmation path | Recovery path | Email-change path |
+| --- | --- | --- | --- | --- | --- | --- |
+| Dr-Lurie (root) | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| Platform | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| Fernwell | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| Zilberman | ☑ (via API, T12.12) | ☐ | ☐ | ☐ | ☐ | ☐ |
+
+Until the paths are set, the default templates still work — they link to
+`/`, and the site-wide router (T18.0b) forwards the token to `/admin/accept`.
+
+### Membership footing per tenant — W18 T18.7
+
+The repo-side columns are machine-checked (`node scripts/fleet-capability-probe.mjs --all --repo-only`,
+and `tests/netlify/membership-fleet.test.ts` fails the suite if any tenant regresses); the ☐ ones are
+Wolf's console clicks / first sign-ins, ticked during T18.9. "`ADMIN_EMAILS` still relied on" flips
+to ☐ once the first stored Owner exists on that tenant (`promote_bootstrap` — the env fallback then
+becomes redundant, not wrong).
+
+| Tenant | Sweep declared | Templates present | Committed policy override registered | `/admin/accept` route | Identity enabled | Invite-only | Templates set (console) | First stored Owner | `ADMIN_EMAILS` still relied on |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Dr-Lurie (root) | ✓ (`17 3 * * *`, root netlify.toml) | ✓ 4/4 | ✓ (`sites/drlurie/config/membership-policy.ts`, empty = fleet defaults) | ✓ shell route | ☐ | ☐ | ☐ | ☐ | ✓ |
+| Platform | ✓ | ✓ 4/4 | ✓ (empty) | ✓ | ☐ | ☐ | ☐ | ☐ | ✓ |
+| Fernwell | ✓ | ✓ 4/4 | ✓ (empty) | ✓ | ☐ | ☐ | ☐ | ☐ | ✓ |
+| Zilberman | ✓ | ✓ 4/4 | ✓ (empty) | ✓ | ☑ (via API, T12.12) | ☐ | ☐ | ☐ | ✓ |
+| Future clients | ✓ scaffold | ✓ core-owned | ✓ scaffold (`config/membership-policy.ts` + registration; `migrate-site --admin-parity --write` back-fills) | ✓ shell | ☐ | ☐ | ☐ | ☐ | ✓ |
+
+Live columns the probe adds once a tenant token is present (`--all`, non-secret): `users_store`
+reachable, `policy` provenance (`membership_status`, internal-only), and `HEAD /admin/accept → 200`.
+Zilberman was added to the probe's `FLEET_SITES` map in T18.7 (it was missing since T12.12).
+
 ## Remaining human steps, ordered by impact
 
 - [x] **Review and merge PR #521 (S4 Marginalia MVP)** — merged 2026-08-05.

@@ -88,6 +88,13 @@
 [functions."mcp-keepalive"]
   schedule = "*/5 * * * *"
 
+# W18 T18.4: daily membership housekeeping — expire stale invitations, purge
+# removed memberships past their grace period, report queued identity deletes.
+# A scheduled function only runs if its schedule is DECLARED here (P1: every
+# site carries this block; the parity audit checks it).
+[functions."membership-sweep"]
+  schedule = "17 3 * * *"
+
 [[redirects]]
   from = "/pdf/*"
   to = "/.netlify/functions/get-public-pdf?blobKey=pdf/:splat"

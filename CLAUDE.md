@@ -80,6 +80,26 @@ for. Sequencing is binding (plan §5): Batch B (T17.3 → T17.8 → T17.6) runs
 sequentially in ONE session with ONE agent, T17.4 before Batch C, T17.13 last.
 Execution: the W17 rows in queue.tsv.
 
+## W18 — MEMBERSHIP: INVITE → ACCEPT → ROLES → OFFBOARDING, HUMAN-ONLY WRITES (2026-08-17, GOVERNING)
+
+Membership is governed by
+[`docs/cms-architecture/18-membership-plan.md`](docs/cms-architecture/18-membership-plan.md)
+(§2 store v2 — Person / Membership / Invitation / Audit / policy in the per-site
+`users` store, five tiers `owner|admin|publisher|editor|viewer`; §6 permission
+matrix; §7 the AI/MCP surface; §8 what shipped, T18.0a–T18.7). The four §9
+defaults are rulings-by-default under R8, recorded in
+`docs/cms-architecture/decisions/2026-08-17-membership-defaults.md`. The two
+things you will hit in ordinary work: **membership WRITES require a human
+principal** — every verb goes through `handleMembershipVerb`, and an agent
+principal (bearer token, chat run without a human) gets
+`403 membership_requires_human` before anything else; over MCP the human is
+the OAuth-bound Owner/Admin. **Any e-mail from Netlify Identity lands on
+`/admin/accept`** — invite, confirmation, recovery, email-change tokens are
+consumed ONLY there (`HeaderAuthButton.astro` routes every token hash to it);
+never handle an Identity token on another page or in a function. Fleet law
+holds: a new tenant gets `config/membership-policy.ts` + the sweep from the
+scaffold; the probe's `membership` family says whether it did.
+
 ## Definition of "converted" — NO HALF MEASURES (Wolf, 2026-07-10, GOVERNING)
 
 The entire project goal is: **agents can change objects on every page — add

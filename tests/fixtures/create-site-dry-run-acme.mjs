@@ -16,12 +16,13 @@ create-site plan for 'acme' (Acme)
   theme id:       thm_acme_default
   canonical host: https://acme.netlify.app
 
-Files to create under sites/acme/ (80):
+Files to create under sites/acme/ (82):
   + sites/acme/config/site-identity.ts
   + sites/acme/config/site-binding.ts
   + sites/acme/config/approval-policy.ts
   + sites/acme/config/creation-policy.ts
   + sites/acme/config/media-policy.ts
+  + sites/acme/config/membership-policy.ts
   + sites/acme/config/policy-bindings.ts
   + sites/acme/site.config.ts
   + sites/acme/netlify.toml
@@ -83,6 +84,7 @@ Files to create under sites/acme/ (80):
   + sites/acme/netlify/functions/mcp.ts
   + sites/acme/netlify/functions/mcp-keepalive.ts
   + sites/acme/netlify/functions/mcp-oauth.ts
+  + sites/acme/netlify/functions/membership-sweep.ts
   + sites/acme/netlify/functions/object-store.ts
   + sites/acme/netlify/functions/run-publisher-agent.ts
   + sites/acme/netlify/functions/save-artifact.ts
@@ -184,10 +186,23 @@ Env checklist:
 
 ADMIN WORKSPACE BOOTSTRAP (human gate — runbook site-provisioning-runbook.md §admin):
   1. Enable Netlify Identity (GoTrue) on the new site — console-only; without it /admin login
-     has no identity service and every admin function 401s.
+     has no identity service and every admin function 401s. Then, still in the console
+     (Project configuration → Identity), the invite flow needs (T18.0c):
+     ☐ Registration → Invite only
+     ☐ Emails → Invitation   template path = /emails/identity/invitation.html
+     ☐ Emails → Confirmation template path = /emails/identity/confirmation.html
+     ☐ Emails → Recovery     template path = /emails/identity/recovery.html
+     ☐ Emails → Email change template path = /emails/identity/email-change.html
+     ☐ External providers → Google (optional)
+     (the four templates are core-owned and published by every build; each links to
+     /admin/accept/#<token>=…, the page that consumes Identity tokens — T18.0b)
   2. Set ADMIN_EMAILS on the site to the operator’s real email(s) — bootstrap Owners; the
      users store can be empty/wiped and these addresses still get in.
-  3. Invite the first Owner via /admin/settings/admins (or rely on ADMIN_EMAILS alone).
+  3. Sign in, invite the first Owner via /admin/settings/admins, accept from the e-mail on
+     /admin/accept (or rely on ADMIN_EMAILS alone).
+  4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in
+     config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).
+     Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only
   Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency.
   Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>
 `;

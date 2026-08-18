@@ -42,6 +42,7 @@ import { objectTypeLabel } from '@core/lib/admin/display-name';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
 import { avatarSrc } from '@core/lib/admin/users-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { welcomeGateDecision } from './logic';
 import { listChats } from '@core/lib/admin/chat-client';
 import { getWorkSummary } from '@core/lib/admin/work-summary';
 import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
@@ -188,6 +189,37 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0 });
   const objectsAttempted = useRef(false);
 
+  // W18 T18.5: the welcome gate. A member whose Person.onboarding is not
+  // completed (new invitee, Netlify-UI grant, first-time bootstrap Owner) is
+  // sent to /admin/welcome once, unless the policy turns the name gate off.
+  // `?skip_welcome=1` (Owner override) stamps completion and stays put.
+  // Pure decision: welcomeGateDecision (logic.ts). Never fires on the exempt
+  // pages, never for a caller without roles (the layout's forbidden panel).
+  useEffect(() => {
+    if (currentUser.loading || typeof window === 'undefined') return;
+    if (currentUser.onboarding === undefined) return; // an older server without the field — no gate
+    const params = new URLSearchParams(window.location.search);
+    if (
+      params.get('skip_welcome') === '1' &&
+      currentUser.roles.length > 0 &&
+      currentUser.onboarding &&
+      !currentUser.onboarding.completed_at
+    ) {
+      import('@core/lib/admin/users-client')
+        .then((m) => m.updateMe(shellToken, { onboarding_step: 'skipped' }))
+        .catch(() => undefined);
+      return;
+    }
+    const decision = welcomeGateDecision({
+      path: window.location.pathname,
+      roles: currentUser.roles,
+      hasRecord: currentUser.onboarding !== null,
+      completed: Boolean(currentUser.onboarding?.completed_at),
+      requireDisplayName: currentUser.requireDisplayName ?? true,
+    });
+    if (decision === 'redirect') window.location.replace('/admin/welcome');
+  }, [currentUser.loading, currentUser.onboarding, currentUser.roles, currentUser.requireDisplayName]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -300,7 +332,11 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
               {identity.adminLabel}
             </span>
           </a>
-          <NavList currentPath={currentPath} owner={owner} settingsLabel={settingsNavigationLabel(identity.brandName)} />
+          <NavList
+            currentPath={currentPath}
+            owner={owner}
+            settingsLabel={settingsNavigationLabel(identity.brandName)}
+          />
           <a
             href="/"
             target="_blank"

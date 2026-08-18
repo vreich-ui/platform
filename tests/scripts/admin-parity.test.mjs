@@ -26,6 +26,7 @@ import {
   ADMIN_CRITICAL_ENV,
   CANONICAL_INFRA_REDIRECTS,
   CANONICAL_TOML_POSTURE,
+  IDENTITY_EMAIL_TEMPLATE_FILES,
   STALE_ADMIN_CONTENT_FROM,
   computeAdminParity,
   parseNetlifyTomlRedirects,
@@ -121,8 +122,33 @@ test('the real shell-routes.ts carries the full admin route surface the audit re
     '/admin/templates',
     '/admin/media',
     '/admin/release',
+    '/admin/accept', // T18.0b — the Identity mail-token landing page
   ]) {
     assert.ok(patterns.includes(route), `expected shell route ${route}`);
+  }
+});
+
+test('T18.0c: core ships the four Identity e-mail templates, each landing on /admin/accept, and the audit checks them', () => {
+  assert.deepEqual(IDENTITY_EMAIL_TEMPLATE_FILES, [
+    'invitation.html',
+    'confirmation.html',
+    'recovery.html',
+    'email-change.html',
+  ]);
+  for (const file of IDENTITY_EMAIL_TEMPLATE_FILES) {
+    const src = fs.readFileSync(path.join(repoRoot, 'packages/core/app/emails/identity', file), 'utf8');
+    assert.match(
+      src,
+      /\{\{ \.SiteURL \}\}\/admin\/accept\/#(invite|confirmation|recovery|email_change)_token=\{\{ \.Token \}\}/
+    );
+  }
+  const shellConfig = fs.readFileSync(path.join(repoRoot, 'packages/core/app/site-astro-config.ts'), 'utf8');
+  assert.match(shellConfig, /identityEmailTemplates\(\)/);
+  for (const slug of ['drlurie', 'platform', 'fernwell', 'zilberman']) {
+    const checks = computeAdminParity(resolveAuditTarget(`sites/${slug}`));
+    const check = checks.find((c) => c.id === 'identity-email-templates');
+    assert.equal(check?.status, 'PASS', `${slug}: ${check?.detail}`);
+    assert.ok(checks.some((c) => c.id === 'identity-console-settings' && c.status === 'HUMAN'));
   }
 });
 

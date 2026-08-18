@@ -315,6 +315,16 @@ config PRs.
 
 ## 8. RBAC — two tiers on the existing machinery
 
+> **SUPERSEDED (W18, 2026-08-17).** The two-tier model, the users-store
+> schema below and the invite flow described here are history: membership
+> is now governed by [`18-membership-plan.md`](18-membership-plan.md) §2
+> (store v2 — Person / Membership / Invitation / Audit / policy, five tiers
+> `owner|admin|publisher|editor|viewer`) and §6 (the permission matrix),
+> with the AI/MCP surface in §7 and what shipped in §8 there. The `users`
+> store name survives; the record shape here does not (`users-store.ts` is
+> the v1 VIEW adapter over v2). §6's "Users store" and "Roles extension"
+> rows above are likewise superseded. Kept verbatim for the record.
+
 - **Owner** ("super-admin"): everything below + assign rights, guardrails,
   theme/template creation + `apply_theme`, maintenance/danger tools, lock
   takeover.
@@ -469,9 +479,10 @@ up when in doubt):**
    are current providers; the provider is SET per agent profile (§4a),
    never hardcoded. Both adapters are v1 requirements in T9.13; the canvas
    Ask-AI re-points through profile resolution in T9.26.
-4. **OQ-W9-4 — Third tier:** should `editor`/`publisher` become a visible
-   third workspace tier now, or stay env-only vocabulary under the
-   two-tier UI (recommended)?
+4. **OQ-W9-4 — RESOLVED / DONE (W18 T18.1 + T18.3a, 2026-08-17):**
+   `publisher`, `editor` and the new `viewer` are visible, assignable tiers
+   on `/admin/settings/admins` (store-backed, audited; `ROLE_EMAILS_*` env
+   rows remain break-glass) — see `18-membership-plan.md` §6.
 5. **OQ-W9-5 — RESOLVED (Wolf, via the T9.23 sign-off, 2026-07-23): retire
    without an object-model port.** `create_variant` lineage + Discard
    (history inverses) cover the intent; no canonical-input surface exists

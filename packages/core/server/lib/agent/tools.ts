@@ -30,7 +30,8 @@ import { z } from 'zod';
 import type { Role } from '../roles.js';
 import { objectTypeSchema, type ObjectType } from '../../../schema/object-record-v1.js';
 
-export type ToolClass = 'read' | 'draft' | 'creation' | 'publication' | 'privileged';
+/** W18 T18.6a: `membership` tools are `ask`-class by construction (autonomyFloor 'ask'; definitions in T18.6b). */
+export type ToolClass = 'read' | 'draft' | 'creation' | 'publication' | 'privileged' | 'membership';
 export type ToolAutonomy = 'auto' | 'ask' | 'off';
 
 export interface ToolResult {
@@ -74,6 +75,15 @@ export interface ToolContext {
    */
   operational?: {
     call(name: string, args: Record<string, unknown>): Promise<{ content: string; is_error: boolean }>;
+  };
+  /**
+   * W18 T18.6a: the membership core, reached with the run's captured HUMAN
+   * principal (`via:'chat'`). Absent when the hop has no membership store
+   * wired; a run without a captured human gets `403 membership_requires_human`
+   * from the core itself. Definitions land in T18.6b.
+   */
+  membership?: {
+    call(verb: string, args: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   };
 }
 
@@ -620,7 +630,9 @@ const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unkno
     run_id: run.runId ?? run.id,
     status: run.status,
     ...(mode !== undefined ? { live_output: mode.live === true || mode.executionMode === 'openai' } : {}),
-    ...(stall !== undefined ? { stalled: stall === true || (typeof stall === 'object' && stall?.stalled === true) } : {}),
+    ...(stall !== undefined
+      ? { stalled: stall === true || (typeof stall === 'object' && stall?.stalled === true) }
+      : {}),
     ...(typeof run.driverNote === 'string' ? { driver_note: truncate(run.driverNote, 500) } : {}),
     ...(nodes ? { nodes } : {}),
   };
@@ -665,7 +677,11 @@ const runWorkspaceWorkflow: ChatTool = {
       run_id: { type: 'string', description: 'Advance THIS existing run instead of starting a new one.' },
       workflow_id: { type: 'string' },
       budget_usd: { type: 'number', minimum: 0, description: 'Optional per-run cost ceiling.' },
-      execution_mode: { type: 'string', enum: ['mock', 'openai'], description: 'mock = cheap structural placeholders; openai (default) = real model output.' },
+      execution_mode: {
+        type: 'string',
+        enum: ['mock', 'openai'],
+        description: 'mock = cheap structural placeholders; openai (default) = real model output.',
+      },
     },
     additionalProperties: false,
   },
@@ -788,8 +804,7 @@ export const resolveAutonomy = (
 ): Record<string, ToolAutonomy> => {
   const autonomy: Record<string, ToolAutonomy> = {};
   for (const tool of CHAT_TOOLS) {
-    const resolved =
-      profileOverrides?.[tool.name] ?? governanceChatTools?.[tool.name] ?? defaultAutonomyFor(tool);
+    const resolved = profileOverrides?.[tool.name] ?? governanceChatTools?.[tool.name] ?? defaultAutonomyFor(tool);
     // PF4 hard floor: an override can disable a floored tool but can never
     // promote it to 'auto' — regardless of governance settings (D2).
     autonomy[tool.name] = tool.autonomyFloor === 'ask' && resolved === 'auto' ? 'ask' : resolved;

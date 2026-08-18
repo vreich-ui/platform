@@ -145,7 +145,7 @@ export const CANONICAL_TOML_POSTURE = {
   astroImmutableHeaders:
     '[[headers]]\n  for = "/_astro/*"\n  [headers.values]\n    Cache-Control = "public, max-age=31536000, immutable"\n',
   cspReportOnly:
-    '[[headers]]\n  for = "/*"\n  [headers.values]\n    Content-Security-Policy-Report-Only = "default-src \'self\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\' https://fonts.googleapis.com; font-src \'self\' https://fonts.gstatic.com; img-src \'self\' data: https:; connect-src \'self\'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src \'none\'; base-uri \'self\'"\n',
+    "[[headers]]\n  for = \"/*\"\n  [headers.values]\n    Content-Security-Policy-Report-Only = \"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'\"\n",
 };
 
 // ─── admin-critical env + blob stores ────────────────────────────────────────
@@ -300,9 +300,18 @@ export const parseShellRoutePatterns = (shellRoutesPath = path.join(repoRoot, 'p
   return [...src.matchAll(/pattern:\s*'([^']+)'/g)].map((m) => m[1]);
 };
 
+/** T18.0c: the Netlify Identity e-mail templates core publishes at /emails/identity/<file>. */
+export const IDENTITY_EMAIL_TEMPLATE_FILES = [
+  'invitation.html',
+  'confirmation.html',
+  'recovery.html',
+  'email-change.html',
+];
+
 /** The admin routes the workspace is not usable without. */
 export const REQUIRED_SHELL_ROUTES = [
   '/admin',
+  '/admin/accept', // T18.0b — the Identity mail-token landing page (invite/recovery/confirm/email-change)
   '/admin/agents',
   '/admin/authorize', // W14 F10 OAuth consent — inside /admin so the approver is a named admin
   '/admin/content',
@@ -312,6 +321,7 @@ export const REQUIRED_SHELL_ROUTES = [
   '/admin/settings/admins',
   '/admin/settings/guardrails',
   '/admin/studio',
+  '/admin/welcome', // T18.5 — the onboarding step the AdminShell gate redirects to
 ];
 
 // ─── audit targets ───────────────────────────────────────────────────────────
@@ -389,6 +399,35 @@ export const computeAdminParity = (target) => {
     'packages/core (fleet law)',
     missingRoutes.length ? 'GAP' : 'PASS',
     missingRoutes.length ? `missing: ${missingRoutes.join(', ')}` : `${patterns.length} routes injected`
+  );
+
+  // 1b. T18.0c: the four Netlify Identity e-mail templates exist in core and
+  //     the shell config publishes them into every build (/emails/identity/*).
+  //     The console PATH per site is a HUMAN step (see the human rows below).
+  const templateProblems = [];
+  for (const file of IDENTITY_EMAIL_TEMPLATE_FILES) {
+    const source = path.join(repoRoot, 'packages/core/app/emails/identity', file);
+    if (!fs.existsSync(source)) {
+      templateProblems.push(`missing packages/core/app/emails/identity/${file}`);
+      continue;
+    }
+    if (!fs.readFileSync(source, 'utf8').includes('/admin/accept/#')) {
+      templateProblems.push(`${file} does not link to /admin/accept/#`);
+    }
+  }
+  const shellConfigSrc = fs.readFileSync(path.join(repoRoot, 'packages/core/app/site-astro-config.ts'), 'utf8');
+  if (!/identityEmailTemplates\(\)/.test(shellConfigSrc)) {
+    templateProblems.push('site-astro-config.ts does not mount identityEmailTemplates()');
+  }
+  if (!patterns.includes('/admin/accept')) templateProblems.push('/admin/accept is not an injected shell route');
+  add(
+    'identity-email-templates',
+    'Core ships the four Identity e-mail templates (invitation/confirmation/recovery/email-change), every build publishes them at /emails/identity/*.html, each links to /admin/accept',
+    'packages/core (fleet law)',
+    templateProblems.length ? 'GAP' : 'PASS',
+    templateProblems.length
+      ? templateProblems.join('; ')
+      : `${IDENTITY_EMAIL_TEMPLATE_FILES.length} templates in core, published by the shell build, all landing on /admin/accept`
   );
 
   // 2. The site's build entry actually goes through the shell (which is what
@@ -469,10 +508,14 @@ export const computeAdminParity = (target) => {
     if (!/\[functions\."mcp-keepalive"\]/.test(toml) || !/schedule = /.test(toml)) {
       fnProblems.push('mcp-keepalive schedule not declared (deployed but never runs → cold /mcp)');
     }
+    // W18 T18.4: the daily membership sweep (invitation expiry, purge) must be declared too.
+    if (!/\[functions\."membership-sweep"\]\s*\n\s*schedule = /.test(toml)) {
+      fnProblems.push('membership-sweep schedule not declared (invitations never expire, removed members never purge)');
+    }
   }
   add(
     'netlify-functions-config',
-    'netlify.toml declares the functions directory and the mcp-keepalive schedule',
+    'netlify.toml declares the functions directory and the mcp-keepalive + membership-sweep schedules',
     'scaffold (create-site) | migrate-site --admin-parity',
     fnProblems.length ? 'GAP' : 'PASS',
     fnProblems.length ? fnProblems.join('; ') : 'functions directory + keepalive schedule declared'
@@ -572,15 +615,27 @@ export const computeAdminParity = (target) => {
     'approval-policy.ts',
     'creation-policy.ts',
     'media-policy.ts',
+    // W18 T18.7: the committed membership-policy override stub (fleet default = core's).
+    'membership-policy.ts',
     'policy-bindings.ts',
   ];
   const missingConfig = requiredConfig.filter((f) => !fs.existsSync(path.join(configDir, f)));
+  // W18 T18.7: the stub is inert unless policy-bindings registers it.
+  const bindingsPath = path.join(configDir, 'policy-bindings.ts');
+  const bindingsSrc = fs.existsSync(bindingsPath) ? fs.readFileSync(bindingsPath, 'utf8') : '';
+  const membershipRegistered = /setActiveMembershipPolicyProvider\(/.test(bindingsSrc);
+  const configProblems = [
+    ...(missingConfig.length ? [`missing: ${missingConfig.join(', ')}`] : []),
+    ...(!missingConfig.includes('policy-bindings.ts') && !membershipRegistered
+      ? ['policy-bindings.ts does not register the membership-policy override (setActiveMembershipPolicyProvider)']
+      : []),
+  ];
   add(
     'config-bundle',
-    'The per-site config bundle exists (identity, binding, approval/creation/media policy, policy-bindings)',
-    'scaffold (create-site)',
-    missingConfig.length ? 'GAP' : 'PASS',
-    missingConfig.length ? `missing: ${missingConfig.join(', ')}` : 'all 6 present'
+    'The per-site config bundle exists (identity, binding, approval/creation/media/membership policy, policy-bindings) and policy-bindings registers the membership override',
+    'scaffold (create-site) | migrate-site --admin-parity',
+    configProblems.length ? 'GAP' : 'PASS',
+    configProblems.length ? configProblems.join('; ') : 'all 7 present, membership override registered'
   );
 
   // 10. Reader route loaders for content_item (W14 F11) — without them,
@@ -711,6 +766,13 @@ export const computeAdminParity = (target) => {
     'human (Netlify console — runbook §admin)',
     'HUMAN',
     'Console-only: Site → Integrations/Identity → Enable. Without it /admin login has no identity service and every admin function 401s.'
+  );
+  add(
+    'identity-console-settings',
+    'Identity console: Registration = Invite only; Emails → Invitation/Confirmation/Recovery/Email-change template PATHS = /emails/identity/<file>.html (T18.0c)',
+    'human (Netlify console — runbook §Identity)',
+    'HUMAN',
+    'Console-only: Project configuration → Identity → Registration + Emails. Until the paths are set, the DEFAULT templates still work — they link to /, and the site-wide router (T18.0b) forwards the token to /admin/accept.'
   );
   add(
     'admin-env-values',
@@ -854,6 +916,11 @@ export const planAdminParityFixes = (siteDir, { write = false } = {}) => {
       toml = `${toml.trimEnd()}\n\n# W15 S2 admin parity: a scheduled function only runs if its schedule is DECLARED here.\n[functions."mcp-keepalive"]\n  schedule = "*/5 * * * *"\n`;
       changed = true;
     }
+    if (!/\[functions\."membership-sweep"\]/.test(toml)) {
+      note('netlify-functions-config', 'append the membership-sweep schedule block', target.tomlPath);
+      toml = `${toml.trimEnd()}\n\n# W18 T18.4: daily membership housekeeping (invitation expiry, purge) — a scheduled function only runs if DECLARED here.\n[functions."membership-sweep"]\n  schedule = "17 3 * * *"\n`;
+      changed = true;
+    }
 
     if (write && changed) fs.writeFileSync(target.tomlPath, toml);
   }
@@ -901,6 +968,39 @@ export const planAdminParityFixes = (siteDir, { write = false } = {}) => {
     if (write) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, route.content);
+    }
+  }
+
+  // 5. W18 T18.7: the committed membership-policy override stub + its
+  //    registration in policy-bindings (P1 — every tenant gets the same seam).
+  const membershipPolicyPath = path.join(target.siteDir, 'config', 'membership-policy.ts');
+  if (!fs.existsSync(membershipPolicyPath)) {
+    note('config-bundle', 'write the membership-policy.ts override stub', membershipPolicyPath);
+    if (write) {
+      const stub = buildPlan({ name: target.slug.replace(/[^a-z0-9-]/g, '-') }).files.find((f) =>
+        f.path.endsWith('/config/membership-policy.ts')
+      );
+      fs.mkdirSync(path.dirname(membershipPolicyPath), { recursive: true });
+      fs.writeFileSync(membershipPolicyPath, stub.content);
+    }
+  }
+  const bindingsPath = path.join(target.siteDir, 'config', 'policy-bindings.ts');
+  if (fs.existsSync(bindingsPath)) {
+    let src = fs.readFileSync(bindingsPath, 'utf8');
+    if (!/setActiveMembershipPolicyProvider\(/.test(src)) {
+      note('config-bundle', 'register the membership-policy override in policy-bindings.ts', bindingsPath);
+      const importLines =
+        `import { membershipPolicyConfig } from './membership-policy.js';\n` +
+        `import { setActiveMembershipPolicyProvider } from '../../../packages/core/lib/membership-policy.js';\n`;
+      // insert the imports after the last import statement
+      const lastImport = [...src.matchAll(/^import [^;]*;\n/gm)].pop();
+      src = lastImport
+        ? src.slice(0, lastImport.index + lastImport[0].length) +
+          importLines +
+          src.slice(lastImport.index + lastImport[0].length)
+        : importLines + src;
+      src = `${src.trimEnd()}\n\n// W18 T18.7: the committed membership-policy override (runtime store overrides layer on top).\nsetActiveMembershipPolicyProvider(() => membershipPolicyConfig);\n`;
+      if (write) fs.writeFileSync(bindingsPath, src);
     }
   }
 

@@ -312,3 +312,43 @@ It also has sharp edges that need explicit design, not a quick patch:
 Whoever picks this up should re-measure `/admin/content` load time against
 production after #527/#528/#530 (and #3, if done) are live, and only build
 this if the sweep is still the bottleneck.
+
+## 5. Membership: invite link lands on the offer page / platform invites send no mail / reset link dead — FIXED-BY T18.0a/b/c
+
+**Status:** fixed (W18 wave 0, 2026-08-17). Kept here so support searches find
+the symptoms.
+
+- **F1 — "the invite link lands on the home/offer page and nothing happens; I
+  can't set a name or password."** Netlify Identity's invite mail links to
+  `{{ .SiteURL }}/#invite_token=…`; nothing read that hash. **FIXED-BY
+  T18.0b:** every page routes an Identity token hash to `/admin/accept`,
+  which sets name + password and activates the membership.
+- **F2 — "I invited someone from `/admin/settings/admins` and the toast says
+  'invite email pending' forever; no e-mail ever arrives."** The platform
+  called GoTrue `POST /admin/users` (creates a user, needs a password, sends
+  nothing) instead of `POST /invite`. **FIXED-BY T18.0a.** Invites made
+  before the fix: re-send from the Netlify Identity tab (runbook §admin,
+  "Recovering a stuck invite").
+- **F3 — "Forgot password link does nothing."** The client expected
+  `#access_token=…&type=recovery`; GoTrue's default recovery mail sends
+  `#recovery_token=…`. **FIXED-BY T18.0b:** both shapes are consumed
+  (`/admin/accept` for the default, the modal for the customised form).
+- **Templates** — the default Netlify templates still work via the router;
+  the branded ones core publishes at `/emails/identity/*.html` need their
+  paths set once per site in the console. **T18.0c** wrote the checklist,
+  audit row (`identity-console-settings`) and FLEET-STATUS tick-box block.
+
+**W18 closeout (T18.8, 2026-08-17) — the rest of the plan's findings are
+CLOSED too** (`18-membership-plan.md` §1 status line, §8 what-shipped table):
+no AI/MCP membership surface (F4 → T18.6a/b, human principal required —
+agents get `membership_requires_human`), disable ≠ offboarding (F5 → T18.4:
+OAuth grants revoked, locks handed off, identity deleted-or-queued, purge
+sweep), re-invite didn't reactivate (F6), half-modelled roles (F7 → five
+tiers), no name capture (F8 → `/admin/welcome`), invitations not first-class
+(F9), bootstrap owners unmanageable (F10 → `promote_bootstrap`), fleet parity
+(F11 → T18.7). Still human: the per-tenant console clicks and the first
+stored Owner per site — FLEET-STATUS "Membership footing per tenant", T18.9
+Part B. Known-and-accepted (not an issue): a suspended/removed member's JWT
+stays valid ≤ 1 h; every function re-resolves roles per call, so they cannot
+act — there is no server-side GoTrue logout.
+

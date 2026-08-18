@@ -9,6 +9,730 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-17 — T18.9 Part A: the membership E2E harness (GoTrue mock) is green; Part B is Wolf's — HALT "T18.9 Part B — Wolf's turn"
+
+**Part A (agent) — DONE.** NEW `tests/e2e/gotrue-mock.mjs`: an in-process,
+stateful HTTP mock of every GoTrue endpoint this project uses (`/invite`,
+`/verify` signup|recovery|email_change, `/token` password|refresh, `/user`
+GET/PUT, `/recover`, `/logout`, `/admin/users` GET + `/:id` GET/DELETE,
+`/settings`), JWT-shaped unsigned tokens, an `outbox` of the mails GoTrue would
+send with Netlify's DEFAULT link shape (`${siteUrl}/#<kind>_token=…`),
+`consoleInvite()` for "the Identity tab". Injected the two ways the runtime
+does it: `IDENTITY_URL` (admin-auth's bearer fallback → `/user`) and
+`context.clientContext.identity` (the admin token). NEW
+`tests/e2e/membership.e2e.test.ts` (in `npm test`, ~0.7 s, 4 flows) drives
+the REAL functions — `admin-users`, `membership-sweep`, `/mcp` + `/oauth` —
+over memory blob stores per store name: **(1)** bootstrap Owner `me` →
+welcome name+tour → invite editor → mail → `/verify` (422 without password,
+then session) → `PUT /user full_name` → `accept` on the invitee's bare
+session → set_role publisher → OAuth grant + held lock → suspend (grant
+revoked, lock released, roles → []) → reinstate → remove with the admin token
+(GoTrue user deleted, session 401 at GoTrue and at `me`) → sweep purge (PII
+scrubbed, index gone) → audit stream retained; **(2)** Netlify-UI path:
+console invite → accept → `me` `needs_grant` → `unmanaged_identities` →
+`grant viewer` → reconciled, env address 409, viewer cannot invite; **(3)** MCP:
+OAuth-bound Owner `member_invite` for real (record `invited`, invitation
+`source:'mcp'`, no mail — no admin token on MCP; the Owner's UI `resend` sends
+it), shared token: hidden in `tools/list` + `membership_requires_human`;
+**(4)** recovery (`#recovery_token`) → new password → old password refused;
+e-mail change (`#email_change_token`) → session under the new e-mail.
+`tsconfig.test.json` now includes `tests/e2e/**`.
+
+**Browser smoke (Part A.3)** NEW `tests/e2e/accept-router.browser.mjs`
+(`npm run test:e2e:browser`, opt-in: needs a built site + Chromium;
+`playwright-core` is already a devDep): serves `sites/platform/dist` from
+loopback, real Chromium, 7 cases — the four token hashes on `/` land on
+`/admin/accept#<hash>`, a plain page / unrelated hash / the accept page itself
+are left alone. **Run here 2026-08-17 against a fresh platform build: 7/7 ok**
+(`--chromium /opt/pw-browsers/chromium-1194/chrome-linux/chrome`).
+
+**Found by the harness — one fix, one defect row.** Fix (in this commit, one
+line, `membership/verbs.ts`): an invitation created over MCP/chat recorded
+`source:'platform'` — now `source: via==='admin_ui' ? 'platform' : via`
+(plan §2.1). **DEFECT D1 → queue row T18.10** (`T18.10-tier-access-gates.md`,
+Fable, notify): every admin function's sign-in gate is still the pre-W18
+`roles.includes('admin')` (`request-roles.ts isAdmin`, `admin-users.ts:223`,
+`admin-object`, `admin-agent-chat`, `admin-audit`, `admin-taxonomy`,
+`admin-release`, `admin-governance`, `admin-auth-state` tier owner|admin|null,
+…) — so the assignable editor/publisher/viewer tiers accept, get an active
+membership, and are then locked out of `/admin` ("Admin access required");
+plan §6 promised them sign-in + own profile. Pinned in the E2E as two
+`D1/T18.10: flip to 200` assertions; Owners/Admins unaffected. Security-
+boundary work, not bundled here.
+
+**Part B (Wolf) — PREPARED, halts.** NEW `docs/cms-architecture/W18-acceptance.md`:
+per-tenant checklist (console → first Owner + welcome → invite editor → AI
+paths → suspend/reinstate/remove/purge → recovery → break-glass → record) with
+the D1 caveat up front and the recommendation to run T18.10 first; sign-off
+line. FLEET-STATUS ticks stay ☐ until his run.
+
+Tests 2479/150/50, eslint, prettier green (astro check unaffected — no app
+code). **W18 pipeline status: T18.0a → T18.9 Part A all committed on
+`w18/membership-plan`; next: T18.10 (D1), then Wolf's Part B.**
+
+---
+
+## 2026-08-17 — T18.8: docs closeout — plan §1/§8 flipped, CLAUDE.md W18 paragraph, OQ-W9-4 done, defaults recorded, one dead loader deleted
+
+W18 wave 5, docs + shim removal. **Shims:** `app/utils/netlifyIdentityLoader.ts`
+DELETED — zero importers (`grep -rn netlifyIdentityLoader packages sites netlify
+tests scripts src` → nothing; only docs mentioned it, updated). `user-invite.ts`
+was already deleted by T18.2. **`users-store.ts` KEPT** — it is not a dead shim:
+21 importers (`membership/{verbs,invitations,read}.ts`, `roles.ts`,
+`request-roles.ts`, `mcp-artifact-admin.ts`, `mcp-tool-definitions.ts`,
+`functions/{mcp,admin-users,mcp-oauth,admin-agent-chat,
+admin-agent-chat-run-background}.ts`, `cli/create-site.{mjs,test.ts}`, nine
+tests) use it as the v1 VIEW adapter over store v2 (`getUserRecord` /
+`putUserRecord` / `listUserRecords` / `memberToUserRecord`); removing it is a
+refactor of the role resolver, not a shim deletion — flagged, not bundled.
+
+**Docs:** `18-membership-plan.md` §1 gets a status line (F1–F12 ✅ with the
+closing row; F11 V2 fleet-admin ⏳ by design), §8 rewritten as the what-shipped
+table with bare short SHAs (`35006f9d` T18.0a … `c4240028` T18.7, this commit
+T18.8, T18.9 ⏳), References note the two deletions. `10-admin-workspace-plan.md`
+§8 → SUPERSEDED banner pointing at 18-plan §2/§6 (and §6's users-store/roles
+rows), OQ-W9-4 → RESOLVED / DONE (T18.1 + T18.3a). `KNOWN_ISSUES.md` §5 →
+W18 closeout paragraph (F4–F11 closed, the ≤1 h JWT lockout recorded as
+known-and-accepted). `site-provisioning-runbook.md` §admin: step 3 mentions
+Invitations/Identities tabs + the MCP verbs, new optional step 4 (membership
+policy, `--repo-only` probe). `15-fleet-admin-parity.md` item 11 no longer
+names the deleted loader. NEW
+`decisions/2026-08-17-membership-defaults.md`: the four §9 defaults as
+rulings-by-default under R8 (GoTrue wrapped ourselves; Owner+Admin invite
+editor|viewer; delete identity on remove, flag default true; deterministic
+`person_id`), each with where it lives and the queue-comment override
+mechanism, plus Wolf's signature line. `CLAUDE.md`: W18 governing paragraph
+(the plan, the defaults record, and the two rules — membership writes require
+a human principal / every Identity e-mail lands on `/admin/accept`).
+
+Tests 2475/150/50, eslint, prettier, astro check (0 errors) green. Next:
+T18.9 Part A (GoTrue-mock E2E); Part B is Wolf's credentialed run.
+
+---
+
+## 2026-08-17 — T18.7: fleet parity — every tenant at the same membership footing, the probe says so, the fleet-admin seam exists
+
+W18 wave 5 (plan F11, §2.2; laws P1/P2). Nothing member-facing changed; this
+row makes W18 UNIFORM across the four tenants and provable.
+
+**Committed policy override per site (P1).** NEW
+`sites/{drlurie,platform,fernwell,zilberman}/config/membership-policy.ts`
+(`membershipPolicyConfig = {} satisfies MembershipPolicyOverride` — empty =
+the fleet defaults) + each `policy-bindings.ts` registers it via the NEW
+optional provider seam `setActiveMembershipPolicyProvider` /
+`activeMembershipPolicyBase()` in `packages/core/lib/membership-policy.ts`
+(the W11 T11.2 pattern; no provider = defaults, so a pre-T18.7 tree keeps
+working). Effective policy is now DEFAULT ← committed override ← store
+`policy.json` (`getPolicy`/`setPolicy` in `membership/write.ts`).
+
+**create-site / migrate-site / parity.** The scaffold emits
+`config/membership-policy.ts` (`membershipPolicyTemplate`) and the
+policy-bindings template registers it (fixture 81 → 82 files; checklist row 4).
+`admin-parity.mjs` `config-bundle` now requires the stub AND the registration
+(7 files); `migrate-site --admin-parity --write` back-fills both onto an
+older tree (verified on a scratch copy of fernwell's pre-T18.7 shape). All
+four tenants + root: `config-bundle PASS`; platform/fernwell/zilberman full
+PASS; the drlurie GAP rows are the pre-existing root-deploy artefact (its
+functions/toml live at the repo root — `--root` is PASS).
+
+**Probe `membership` family.** `scripts/fleet-capability-probe.mjs` gains a
+`membership/*` block per tenant: repo-side `sweep_declared` (that site's
+netlify.toml, or the root toml for the root deploy), `templates_present` (4/4
+core-owned), `policy_override` (stub + registration); live `users_store` +
+`policy` provenance via the NEW INTERNAL-ONLY MCP tool `membership_status`
+(`packages/core/server/lib/membership/status.ts` — non-secret by construction:
+reachability, `source: default|committed_override|store_override`, override
+field NAMES, the effective non-secret numbers; needed because the membership
+verbs are human-only and a bearer probe cannot call them); and `HEAD
+/admin/accept → 200`. `--repo-only` prints the repo half with no token/network.
+Zilberman was MISSING from `FLEET_SITES` since T12.12 — added. Definitions
+86 → 87, `INTERNAL_ONLY_TOOLS` +1 (registry still 76, wire ≤ 64 untouched).
+
+**Cross-site person seam (§2.2, plan Q4 "yes").** NEW
+`packages/core/server/lib/membership/fleet.ts` →
+`listMembershipsForPerson(stores[], person_id)`: pure over injected stores,
+returns each site's membership + person and an `errors[]` for stores that
+threw, no caller yet by design. Plan §2.2 records why the deterministic
+`person_id` (`usr_`+base32(sha256(email))[:20]) is the whole seam and how it
+does not contradict `13-separation-plan.md`.
+
+**Env (P2): W18 introduced NO new env var** — asserted by grep over
+`membership/*`, `membership-sweep.ts`, `admin-users.ts`, `membership-policy.ts`
+(only the pre-existing `RoleEnv` names are read); ENV_CHECKLIST / T11.7 table
+untouched.
+
+**FLEET-STATUS.md**: new "Membership footing per tenant" table (sweep /
+templates / committed override / accept route ✓ for all four; Identity
+enabled, invite-only, templates set, first stored Owner ☐ = Wolf's T18.9
+clicks; `ADMIN_EMAILS` still relied on ✓ everywhere).
+
+Probe output (repo-side, non-secret — the live columns need a tenant token,
+Part B of T18.9):
+
+```
+fleet membership parity (repo-side, W18 T18.7) — 2026-08-17T18:18:55.827Z
+
+[drlurie]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+
+[platform]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+
+[fernwell]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+
+[zilberman]
+   membership/sweep_declared     ok
+   membership/templates_present  ok (4/4 under packages/core/app/emails/identity)
+   membership/policy_override    ok (config/membership-policy.ts present + registered in policy-bindings)
+```
+
+Tests: NEW `tests/netlify/membership-fleet.test.ts` (provider layering,
+`listMembershipsForPerson` across four stores incl. an unreachable one,
+`membership_status` provenance + internal-only over `/mcp`, and every
+`FLEET_SITES` tenant passing the repo-side membership checks — the suite now
+FAILS if a tenant regresses). `npm test` 2475/150/50 green; eslint, prettier,
+astro check (0 errors) green. Next: T18.8.
+
+---
+
+## 2026-08-17 — T18.6b: the membership tools — sixteen MCP definitions, the chat registry, approval cards, `membership_contract`
+
+W18 wave 4 (plan §7). NEW `packages/core/server/lib/mcp-tool-definitions-membership.ts`:
+`membership_contract, member_list, member_get, member_audit,
+membership_policy_get, member_invite, invitation_resend, invitation_revoke,
+member_set_role, member_suspend, member_reinstate, member_remove,
+member_purge, ownership_transfer, membership_policy_set, member_export` —
+args per plan §7 (writes take `idempotency_key?`, dry-runnable ones
+`dry_run?`, `member_purge` needs `confirm:'PURGE <email>'`), every
+description opening with the human-principal requirement / Owner tier /
+dry-run-first fact, `MEMBERSHIP_TOOL_VERBS` (name → core verb) as the ONE
+routing table, writes `toolClass:'membership'` + `autonomyFloor:'ask'`
+(+ `preview: verb_dry_run` where the core supports it, `input_echo`
+otherwise). **`/mcp`:** `TOOL_DEFINITIONS` gains the family;
+`visibleToolDefinitions(event)` lists it ONLY when `event.oauthPrincipal`
+is set (shared-token / per-agent sessions never see it); `callTool` routes
+`isMembershipTool(name)` → `callerPrincipalFromMcpEvent` →
+`handleMembershipVerb` (users store + governance/object stores for the
+offboarding effects; no GoTrue admin token off the Identity JWT, so identity
+deletes queue) with `withIdempotentToolCall` when `idempotency_key` is
+given; the core's 403 comes back as a tool error with `error_code`. **Chat:**
+`generated-tools.ts` builds the family from the same definitions —
+`execute` → `ctx.membership.call(verb, args)` (the T18.6a bridge; unavailable
+→ `membership_unavailable`), `dryRun` for `verb_dry_run` previews goes
+through the same bridge with `dry_run:true`, `describeMembership` renders
+the approval-card copy ("Invite **jane@x** as **Editor** — an e-mail is
+sent by Netlify Identity", "Remove **jane@x** — keeps history, purges after
+the grace period, deletes their login", "PURGE … irreversible", "Transfer
+ownership to …"). **R8 decision recorded:** the admin-chat wire is budgeted
+at 64 tools (`CMS_AGENT_BOUNDS.maxTools`; the registry-wiring test pins the
+default wire ≤ 64) — three reads (`membership_contract`, `member_list`,
+`member_get`) are on by default (wire = 64 with `present_candidates`), the
+other thirteen are `chatDefaultOff` and an Owner switches them on from
+/admin/settings/guardrails; the CMS-Agent engine now trims the membership
+family (only) with a logged `cms_agent_tools_trimmed` event when an enabled
+set would exceed the bound (`fitToolsToCmsAgentBound`, engine.ts) — the
+provider engine (mode `off`, the default) sends everything. **Governance
+page:** the chat-tools catalog gains the membership family (class
+"Members and roles" with the floor explained; `autonomy_floor` on catalog
+entries; the "Run automatically" option reads "locked: always asks first"
+for floored tools). Docs: `docs/agents/publishing-policy.md` §8.7 "Membership
+— a HUMAN-only family" + the "Manage members" recipe (`membership_contract →
+member_list → member_invite(dry_run) → member_invite`). Tests: `mcp-oauth.test.ts`
++2 (tools/list snapshot: the ONLY difference between a shared-token listing
+and an OAuth-human listing is the 16 membership tools; tools/call: shared
+token → `membership_requires_human`, OAuth ADMIN_EMAILS owner reads the
+contract, lists (env row present), dry-runs an invite with `gotrue_email:false`),
+`mcp-tool-definitions.test.ts` (86 definitions, floor-ask + verb_dry_run
+lists extended), `generated-tools.test.ts` (76-name registry; wire budget =
+60 non-membership + present_candidates ≤ 64; `fitToolsToCmsAgentBound` drops
+exactly the family), `registry-wiring` default wire still ≤ 64. `npm test`
+2470/150/50, eslint, prettier, `astro check` green. Next: T18.7 (fleet).
+
+## 2026-08-17 — T18.6a: one membership verb core with the human gate; UI, MCP and chat all call it
+
+W18 wave 4 (Fable row, plan §7, F4). NEW
+`packages/core/server/lib/membership/verbs.ts` — `handleMembershipVerb({verb,
+args, principal, deps})` mirroring `handleObjectVerb`: **first line, before
+any store read or argument parsing, `principal.kind !== 'human'` → 403
+`membership_requires_human`** (the shared `MCP_HTTP_AUTH_TOKEN`, a verified
+or self-declared `agent_name` — `agent_name:'owner@site'` included — and a
+chat run without a captured human are all agents; `list` and `contract`
+refuse the same as `purge`); then the tier is re-resolved from the store on
+every call (`resolveRolesForPrincipalAsync` — a suspended/removed/absent
+human is 403 `admin_required`); `MEMBERSHIP_VERB_MIN_TIER` gives
+`list`/`get`/`contract`/`policy_get` to admin, `invite` to admin under
+`policy.who_can_invite`/`roles_admin_may_grant`, everything else to owner
+(403 `owner_required`); zod `MEMBERSHIP_VERB_SCHEMAS` per verb (400
+`invalid_args` with issues; `unknown_verb`); aliases `disable→suspend`,
+`member_audit→audit`, `export_person→export` (one release). Verbs: `list, get,
+audit, contract, policy_get, policy_set, invite, resend, revoke,
+list_invitations, unmanaged_identities, grant, set_role, suspend, reinstate,
+remove, purge, transfer_ownership, promote_bootstrap, export,
+delete_identity` — the T18.0a–T18.4 bodies lifted verbatim (guards, `last_owner`,
+offboarding side effects through injected `deps.oauthStore` /
+`deps.objectStore` / `deps.softDeleteAvatar`, queue drain on Owner requests
+with a token). **Every mutation → `AuditEvent{via, actor, request_id}`**;
+`dry_run:true` on invite / set_role / remove / transfer_ownership returns
+the would-be effect (and still runs the guards) and persists nothing;
+`contract` = `buildMembershipContract` derived from the enforcing tables
+(gate rule, tiers + `expandRole`, precedence, per-verb min tier / mutates /
+dry_run / JSON-schema args via `z.toJSONSchema`, aliases, live policy, the
+`MEMBERSHIP_ERROR_CATALOGUE`). **Front doors:** `functions/admin-users.ts`
+is now thin — session verbs (`me`, `update_me`, `accept`, `invite_preview`)
+stay, every management verb goes `auth → {kind:'human', id, email,
+via:'admin_ui'} → handleMembershipVerb → jsonResponse`; `ListedUser` /
+`listUsersWithEnvironment` moved into the core (re-exported). **MCP
+plumbing:** `ResolvedOAuthPrincipal` gains `subject_id`; `mcp.ts` stamps
+`event.oauthPrincipal`; NEW `membership/caller-principal.ts` —
+`callerPrincipalFromMcpEvent(event, selfDeclaredAgentName)` mints a human
+ONLY from an OAuth-bound subject (`via:'mcp'`, `client_id`, `request_id`),
+everything else is `{kind:'agent'}`; `callerPrincipalFromChatRun` likewise
+from the run's captured human (`via:'chat'`). **Chat plumbing:** `ToolClass`
+gains `'membership'` (definitions T18.6b, `autonomyFloor:'ask'`),
+`ToolContext.membership.call(verb, args)` is wired by `buildToolContext`
+when `deps.membershipStore` is given (both `admin-agent-chat` write paths and
+the background hop pass the `users` store; OAuth/lock side effects reuse the
+governance/object stores already on deps). Side effect of the tier rule:
+Admins now get the members list read-only (`AdminUsers.tsx` renders it with
+no row actions and no Invitations/Identities tabs; `memberActionsFor` →
+`[]` for non-owners). Tests: NEW `tests/netlify/membership-verbs.test.ts`
+(8, adversarial first: agent 403 on EVERY verb with zero store reads and
+nothing written, `agent_name:'owner@…'` still agent, MCP/chat principal
+builders never mint a human without an OAuth subject / captured human,
+suspended-removed-absent-viewer humans 403 even for list, OAuth admin
+list/get/contract/policy_get + invite editor only + all Owner verbs 403 +
+`invite_forbidden` under owner-only policy + aliases, every audit event
+carries `via`/actor/`request_id`, dry_run byte-identical store + guards,
+contract validates its own schemas + catalogue, chat bridge human/agent/none);
+the T18.0a–T18.5 suites run unchanged against the thin function (one
+assertion updated: an invited admin-tier caller can now `list`, still 403 on
+Owner verbs). `npm test` 2468/150/50, eslint, prettier, `astro check`
+green. Next: T18.6b (tool definitions).
+
+## 2026-08-17 — T18.4: offboarding does what the members page promises — grants revoked, locks handed off, identity deleted (or queued), PII purged
+
+W18 wave 3 (Fable row, plan §5, F5, F12, §9-3). NEW
+`packages/core/server/lib/membership/offboarding.ts`:
+`revokeOAuthGrantsForSubject` (deletes every access/refresh/code record
+indexed for the subject and nothing else — `oauth-store.ts` now writes an
+`oauth/by-subject/<email>/<kind>-<hash>.json` index on every mint; a store
+without `list` revokes nothing and says so; a revoked token fails
+`resolveOAuthPrincipal` immediately), `releaseLocksHeldBy` (walks the
+active-status indexes of every object type, force-releases locks whose
+owner is the person by GoTrue id OR e-mail label, history
+`lock_forced_on_offboarding` attributed to the acting Owner with
+`on_behalf_of` {email, person_id, user_id}, version bumped),
+`deleteIdentity` (`DELETE {identity}/admin/users/{id}`, 404 idempotent),
+`deleteOrQueueIdentity` + `drainIdentityDeleteQueue` (**the identity-token
+constraint**, now in plan §5: the admin token exists only on Identity-JWT
+requests, so remove/purge delete now when the Owner's request has one,
+otherwise queue under `identity-delete-queue/<person_id>` and the next
+Owner request that has a token drains it — the sweep only reports),
+`scrubPerson` (person → `{schema_version, person_id, deleted:true,
+deleted_at}`, `by-email`/`by-identity` indexes removed FIRST, avatar
+soft-deleted via `softDeleteArtifact`, membership kept `removed` with a
+`purge` audit entry, stream audit kept), `purgeExpiredMemberships` (the
+sweep: `removed` past `purge_after` → scrub; idempotent),
+`transferOwnership` (both active; to → owner, from → admin unless
+`demote_to`; audits both), `exportPerson` (person, memberships,
+invitations, audit slice, authored object-history ids only — no third-party
+PII), `purgeConfirmMatches`. **Verbs (`admin-users`):** `suspend` now also
+revokes grants + hands off locks (response `offboarding:{oauth_revoked,
+locks_released}`); `remove` = those effects + `removed{purge_after}` +
+pending invitation revoked + identity per `delete_identity ??
+policy.delete_identity_on_remove` (`offboarding.identity.outcome:
+deleted|queued|failed|kept`); NEW `purge {email, confirm:'PURGE <email>'}`
+(server-verified typed confirm; removed members only; scrubs now), NEW
+`transfer_ownership {to_email, from_email?, demote_to?}` (env members 409),
+NEW `export_person {email}`, NEW `delete_identity {user_id, email}` (for
+the Identities tab; refuses members; 503 without a token), and
+`unmanaged_identities` now returns `capabilities.delete_identity` so
+T18.3b's hidden button appears exactly when a token is present; every
+Owner request that carries an admin token drains the identity queue first.
+NEW scheduled function `membership-sweep` (daily 03:17 UTC:
+`expireAll` + `purgeExpiredMemberships` + queue count) — core
+`server/functions/membership-sweep.ts`, shims for the root deploy and
+sites/{platform,fernwell,zilberman} (P1), `[functions."membership-sweep"]`
+declared in the root + three site `netlify.toml`s and the create-site
+scaffold, `admin-parity` requires the schedule (`netlify-functions-config`
+now names both) and `migrate-site --admin-parity` appends it; the acme
+dry-run fixture gained the shim (81 files). Tests: NEW
+`tests/netlify/membership-offboarding.test.ts` (7 cases: revoke exactly the
+subject + principal resolution fails + idempotent + no-list store; lock
+hand-off with on_behalf_of and other holders untouched; delete now / 404
+idempotent / lookup by e-mail / queue / sweep can't drain / Owner request
+drains + audits; purge scrubs PII, removes indexes, keeps audit, idempotent,
+sweep wrapper; transfer incl. keep/same/not-found/not-active; export shape
++ confirm matcher; and the handler end-to-end: suspend → grants gone + lock
+released, remove queues without a token and the next Owner list drains it,
+remove deletes with a token, `delete_identity:false` and policy-off keep
+it, `last_owner` on remove, purge confirm/not-removed/success,
+transfer, export, capabilities, delete_identity refusals, 403s). `npm test`
+2460/150/50, eslint, prettier, `astro check`, parity audit (root + 3 sites)
+green. Next: T18.6a (Fable/notify — human-principal gate + MCP/chat
+plumbing).
+
+## 2026-08-17 — T18.5: `/admin/welcome` — every new member sets a real name once and learns what their role can do
+
+W18 wave 2 (plan §3.3, §4.1 step 4, §4.3, F8). NEW fleet route
+`/admin/welcome` (`SHELL_ROUTES` + `REQUIRED_SHELL_ROUTES`;
+`routes/admin/welcome.astro` on AdminLayout, island `admin/Welcome.tsx`, no
+sidebar): three steps on one screen — (1) confirm/edit the display name
+(avatar shown; upload stays on Profile), (2) "What you can do here as
+**<Role>**" — one second-person paragraph per tier from plan §6 + the tier
+one-liner + two links (Content library, Edit on site), (3) "Open the
+workspace" → `update_me { display_name?, onboarding_step:'tour' }` →
+`Person.onboarding.steps.{name,tour}` + `completed_at` → `/admin`. **The
+gate** lives in `AdminShell` (every workspace page mounts it): once
+`useCurrentUser` has loaded, `welcomeGateDecision({path, roles, hasRecord,
+completed, requireDisplayName})` (pure, `admin/logic.ts`, 4 new
+`logic.test.ts` cases) → `redirect` does `location.replace('/admin/welcome')`;
+exempt paths `/admin/welcome`, `/admin/accept`, `/admin/authorize`; no roles
+→ `forbidden` (the layout panel — `needs_grant` users can never loop into
+welcome); no record → render; `policy.require_display_name:false` → render.
+Owner override `?skip_welcome=1` on any admin page stamps
+`steps.tour:'skipped'` + `completed_at` and stays put. **Bootstrap Owners:**
+their first `me` materialises the record with empty onboarding ⇒ they pass
+through welcome exactly once (F10); `me` now returns `onboarding` (null when
+no record) + `policy.require_display_name`, and the materialised record is
+re-read so the response carries the fresh onboarding block; `update_me`
+accepts `onboarding_step: 'name'|'tour'|'skipped'` (`name` stamps the step;
+`tour`/`skipped` also complete). The `UserRecord` view exposes `onboarding`
+(read-only; written only via `stampOnboarding`). `use-current-user.ts`
+carries `onboarding` + `requireDisplayName`. `AcceptInvite.tsx` now sends an
+accepted invitee straight to `/admin/welcome` (the HEAD probe from T18.0b is
+gone — the route is fleet law). `npm test` 2453/150/50, eslint, prettier,
+`astro check`, `sites/platform` build (dist/admin/welcome/index.html) green.
+Next: T18.4 (Fable/notify — offboarding side effects).
+
+## 2026-08-17 — T18.3b: Invitations tab, unmanaged-identity reconcile, accept-page preview
+
+W18 wave 2 (plan §4.1 step 5, §4.2, F9-UI). `/admin/settings/admins` is now
+three Owner tabs. **Members** (T18.3a, unchanged). **Invitations**
+(`InvitationsPanel`): pending / expired / revoked rows (accepted ones live
+in Members) — invitee + "invited by … · “message”", role badge, status
+pill with the live countdown (`formatExpiresIn`: "expires in 3d 4h" /
+"expired"), **E-mail** column = GoTrue send status (`Sent`/`Sent N×` ✓,
+`Already in Identity`, `Not sent` warning/danger) with a dotted-underline
+"How to fix" tooltip ("Enable Netlify Identity on this site … then Resend" /
+"re-send from the Netlify UI Identity tab"), last-sent relative time;
+actions **Resend** (disabled at `policy.max_resends` with the reason as
+title; a resend surfaces the NEW shareable link once) and **Revoke**
+(confirm; explains the pending membership is removed too). **Identities**
+(`IdentitiesPanel`): GoTrue users with no membership here (from
+`unmanaged_identities`), "confirmed" / "invited, not yet confirmed" + last
+sign-in, **Grant role…** (policy-filtered `RolePicker`, defaults to the
+lowest grantable tier → `grant` verb → active membership `source:'netlify_ui'`),
+**Delete identity** rendered only when the server reports
+`capabilities.delete_identity` (T18.4 — hidden until then); empty state
+"Everyone in Netlify Identity has a role here"; the
+`identity_admin_unavailable` degrade gets its own explanatory panel.
+**Invite dialog** upgrades: optional message (Textarea, ≤1000, stored on the
+invitation and shown on the accept page via the `?inv=` preview), inline
+error for domain-not-allowed / already-pending / already-active (other
+failures still toast), and a **"Invitation created" dialog shown ONCE** with
+the shareable `${origin}/admin/accept?inv=<token>` link + Copy button and the
+"after you close this the link is gone — Resend for a new one" note (we
+store only the token's hash). **AcceptInvite.tsx**: when the URL carries
+`?inv=` it calls `invite_preview {inv}` and renders "**Alex** invited you to
+**Dr Lurié** as **Editor**" (+ the message) above the form; an expired
+shared link says so but lets the e-mail token proceed; a shared link WITHOUT
+a GoTrue token explains that the e-mail's own link is still needed. Token-less
+path unchanged. Pure logic for the tab (`formatExpiresIn`,
+`invitationActionsFor`, `invitationSendStatus`) and its tests landed with
+T18.3a. `npm test` 2449/150/50, eslint, prettier, `astro check`,
+`sites/platform` build green. Next: T18.5 (welcome + name gate) then T18.4
+(Fable/notify) — plan order runs T18.5 before T18.4 in the wave table.
+
+## 2026-08-17 — T18.3a: the members page knows five tiers, the lifecycle, and the break-glass rows
+
+W18 wave 2 (plan §6, §3.2, F5-UI, F10, F12). `packages/core/admin/AdminUsers.tsx`
+rebuilt on the T18.1/T18.2 verbs: members table with role badge (five tiers,
+tooltip = the §6 one-liner), status badge (invited / active / suspended /
+removed — removed hidden by default behind a "Show removed" switch that
+re-lists with `include_removed`), provenance badge (`Break-glass (env)` for
+`ADMIN_EMAILS`/`ROLE_EMAILS_*` rows, `Bootstrap`, `Invitation`, `Netlify
+UI`, `MCP`, `Import`; no badge for ordinary pre-v2 members), last seen, and
+a row menu — **Change role…** (dialog: `RolePicker` over the five tiers with
+the description under the select; options the policy forbids or the current
+role are disabled with a reason), **Suspend** / **Reinstate**, **Remove…**
+(typed confirm — type the e-mail; "history kept, purged after the grace
+period, you can re-invite them"), **Promote to stored Owner…** (env rows
+only), **View audit trail** (drawer over the T18.1 audit stream via the NEW
+Owner-only `member_audit {email, limit}` verb, falling back to the legacy
+per-record array). Guards surfaced: self and removed rows are audit-only,
+env rows are promote+audit only, `last_owner` 409 → toast "This is the last
+Owner — promote another member to Owner first". Copy fixed: suspend "loses
+access within an hour (sessions expire) and cannot act from now on"; the
+re-invite line lives on Remove only. A non-Owner Admin sees a read-only
+notice plus (when policy allows) the Invite button; the invite dialog's role
+picker is filtered by `grantableTiers` (Owner: all five; Admin: `editor|viewer`
+under the default `owner_admin` policy). NEW server verb `remove {email,
+reason?}` (Owner-only; self 409; env 409; `last_owner` guard; revokes a
+pending invitation; membership → `removed{purge_after}` via
+`removeMembership` in `membership/write.ts`; audit `membership.remove` —
+T18.4 adds the identity/OAuth/lock side effects without UI change) and
+`member_audit` (`listAuditForEmail`). Pure logic extracted into
+`admin/logic.ts` — `MEMBERSHIP_TIERS`, `grantableTiers`, `roleOptionsFor`,
+`memberActionsFor`, `memberSourceLabel` (+ T18.3b's `formatExpiresIn`,
+`invitationActionsFor`, `invitationSendStatus`, landed here so 3b is
+UI-only) — with 8 new `logic.test.ts` cases (policy × actor × target role
+matrix, action availability by status/self/env/removed, source labels,
+countdown, resend cap, send-status mapping). `users-client.ts` gains
+`removeUser`, `memberAudit`, `AuditEventView`. `npm test` 2449/150/50,
+eslint, prettier, `astro check`, `sites/platform` build green. No screenshot
+(no browser pass this session — T18.9 / a human pass covers it). Next:
+T18.3b.
+
+## 2026-08-17 — T18.2: invitations are first-class — invite / resend / revoke / accept / expire / reconcile
+
+W18 wave 2 (plan §2.1 Invitation, §3.1, §4.1/§4.2, F9). NEW
+`packages/core/server/lib/membership/invitations.ts`: `createInvitation`
+(policy `allowed_email_domains`; 409 `invite_pending_exists` +
+`existing_invite_id`; 409 `member_active`; a suspended/removed/invited
+member is RE-invited with a new invitation and its status → invited, F6;
+writes `Invitation{pending}` + `invitation-by-email` pointer + Person +
+`Membership{invited, source:'invitation', invitation_id}`; fires GoTrue
+`POST /invite` with `data:{invited_by, role, invite_id}` best-effort and
+records the outcome on `invitation.gotrue`; audits `invitation.create`;
+returns OUR opaque accept token ONCE — `inv_`+32 random bytes, only its
+sha256 stored as `token_hash`), `resendInvitation` (re-fires GoTrue,
+`send_count`/`last_sent_at`, ROTATES our token, extends the TTL, audit
+`reinvite_email` on the membership + `invitation.resend`; 429 `resend_cap`
+at `policy.max_resends`), `revokeInvitation` (→ revoked, pointer cleared; a
+never-activated membership → `removed{purge_after = +purge_grace_days}`;
+audit `invitation.revoke`; a fresh invite afterwards is allowed),
+`acceptInvitation` (moved from user-invite.ts; now matches the pending
+invitation BY E-MAIL, copies its `role` onto the membership, marks it
+`accepted{at, person_id}`, stamps identity + onboarding, audits
+`invitation.accept` — or `membership.activate` when no Invitation object
+existed; idempotent), `activateOnLogin` (moved; also closes a pending
+invitation), lazy expiry on every read (`getOpenInvitationByEmail`,
+resend, preview, list) + `expireAll(store, now)` sweep (T18.4 schedules
+it; audit `invitation.expire` once), `listInvitations({status})`,
+`previewInvitationByToken` (path 2), `listUnmanagedIdentities` (`GET
+{identity}/admin/users?per_page=1000` with the injected admin token minus
+every known member; degrades to `[]` + `error_code:'identity_admin_unavailable'`),
+`assertMayInvite` (`policy.who_can_invite`: Owner always; `owner_admin`
+lets Admins invite only `roles_admin_may_grant` → 403 `invite_forbidden` /
+`role_not_grantable`) and the typed `InvitationError` catalogue (appended
+to plan §7 as a table). **Two accept paths documented in the file header:**
+(1) GoTrue's own mail carries only `{{ .Token }}` → `/admin/accept` →
+`accept` verb matches by e-mail (default; nothing of ours travels in the
+mail); (2) our token previews inviter/role via `invite_preview {inv}` when
+an Owner shares the link manually (optional sugar). **Verbs (`admin-users`):**
+`invite` (now Owner OR policy-permitted Admin; `message?`; returns `user`,
+`invite`, `invitation`, `accept_token`), `resend {invite_id|email}`,
+`revoke {invite_id|email, reason?}`, `list_invitations {status?}`,
+`unmanaged_identities`, `grant {email, role, user_id?}` (Owner gives a
+Netlify-UI identity an ACTIVE membership, `source:'netlify_ui'`, audit
+`membership.grant`; 409 `member_exists` unless removed), `invite_preview`
+gains `inv?`; every `InvitationError` maps to `{error, error_code, ...extra}`.
+`user-invite.ts` and `tests/netlify/user-invite.test.ts` DELETED (nothing
+imported them anymore); the T18.0a endpoint tests are ported into NEW
+`tests/netlify/membership-invitations.test.ts` (14 cases: /invite + bearer +
+data, 422→already_invited, create shape/pointer/audit/token-hash-only,
+duplicate 409, member_active + F6 re-invite, best-effort GoTrue, policy
+domain/who-may-invite, resend rotate/cap, revoke → removed + re-invite,
+lazy expiry + sweep, accept copies role + idempotent, activateOnLogin,
+unmanaged identities with/without token, and the handler end-to-end incl.
+grant + preview). `users-client.ts` gains `resendInvitation`,
+`revokeInvitation`, `listInvitations`, `listUnmanagedIdentities`,
+`grantRole`, `InvitationView`, and `invitePreview(token, inv)`. `npm test`
+2441/150/50, eslint/prettier/`astro check` green. Next: T18.3a ∥ T18.3b.
+
+## 2026-08-17 — T18.1: membership store v2 (Person / Membership / Audit / Policy), five tiers, `last_owner`, lazy migration — behind the unchanged v1 helpers
+
+W18 wave 1 (Fable row, plan §2/§3/§6, F6, F7, F9-store, F10, F12). **The
+store:** `packages/core/server/lib/membership/{store,read,write}.ts` — zod v2
+records (`schema_version: 2`) for Person, Membership, Invitation (records
+only; verbs are T18.2), AuditEvent (append-only stream at
+`audit/<yyyy-mm>/<ulid>.json`) and MembershipPolicy overrides
+(`policy.json` over the committed `DEFAULT_MEMBERSHIP_POLICY` in
+`packages/core/lib/membership-policy.ts`); keys exactly per plan §2.1 in the
+SAME `users` blob store; `person_id = 'usr_' + base32(sha256(email))[:20]`
+(deterministic, §9-4). **The read path** (`getMembershipByEmail`) tries the
+v2 pointer, then a v1 FULL record under `by-email/` upgraded IN MEMORY
+(`upgradeLegacyRecord`, no write; v1 `disabled` → `suspended`;
+`invited_by: bootstrap|environment` → `source: bootstrap_env`); `listMembers`
+merges v2 memberships with unmigrated v1 rows. **The write path**
+(`saveMember`/`putPerson`/`putMembership`/`appendAudit`/`upsertFromV1`/
+`stampOnboarding`) maintains the indexes, so the first write to a v1 row IS
+the migration (`by-email` becomes `{ person_id }`; `by-identity/<gotrue
+id>` appears). **Compatibility:** `users-store.ts` is now an `@deprecated`
+ADAPTER — `getUserRecord`/`putUserRecord`/`listUserRecords`/`userRoleSchema`
+keep their signatures and return a v1-shaped VIEW (+`person_id`,
+`membership_status`, `membership_source`; v2 `suspended`|`removed` view as
+`disabled`), so `admin-users.ts`, `user-invite.ts`, `request-roles.ts`,
+`admin-agent-chat*` and every existing test compile and pass unchanged (two
+tests that counted raw blobs now count members). **Roles:** `Role` gains
+`viewer`; `expandRole` owner→[owner,admin,publisher], admin→[admin],
+publisher→[publisher], editor→[editor], viewer→[viewer]; `canDecideReview`
+tightened to owner|admin|publisher|editor (viewer has no standing — closes
+the plan's "any role ⇒ viewer can decide" hole); resolver precedence
+UNCHANGED (agent → [], `ADMIN_EMAILS` → owner always, membership tier,
+suspended/removed → [], env fallback) and written as a table in `roles.ts`'s
+header; `publish-gate.ts` byte-untouched (`git diff --stat` empty).
+**Verbs (`admin-users`):** `set_role` takes all five tiers; `suspend` (with
+optional `reason`; `disable` kept as alias for one release), `reinstate`,
+`promote_bootstrap` (Owner-only, target must be an `ADMIN_EMAILS` member;
+materialises a stored Owner so the env row can be emptied — F10),
+`list {include_removed?}` returns v2 rows and hides `removed` by default;
+the **`last_owner` guard** (409 `error_code:'last_owner'`) on set_role
+(non-owner target role) and suspend when stored ACTIVE owners + env
+bootstrap owners would drop below `policy.min_owners`; `me`/`accept`/
+`update_me` stamp `Person.onboarding.steps` (password+name on accept, name
+on update_me) and every mutation also lands an `AuditEvent` in the stream
+(`membership.role_change|suspend|reinstate|promote_bootstrap|activate`,
+`invitation.accept`, `person.update_profile|login`). `users-client.ts`
+types/wrappers updated (`suspendUser`, `reinstateUser`,
+`promoteBootstrapOwner`, `listUsers({include_removed})`; UI is T18.3a).
+Tests: NEW `tests/netlify/membership-store-v2.test.ts` (17 cases: v1 read as
+v2 view, first write migrates + pointer, `upsertFromV1` idempotent + audit,
+list merge/skip-corrupt, env Owner over empty/corrupt/v1-suspended/v2-removed
+stores, five tiers, suspended/removed ⇒ [], agent ⇒ [], `canDecideReview`
+excludes viewer, policy defaults/merge/corrupt, set_role tiers + audit,
+`last_owner` with and without env owners incl. the handler 409, disable ==
+suspend + reinstate, `promote_bootstrap`, list v2 rows/removed hidden,
+onboarding stamps). `npm test` 2436/150/50 green, eslint/prettier/`astro
+check` green. Plan §2.3 gained an "as built" paragraph. Next: T18.2.
+
+## 2026-08-17 — T18.0c: Identity e-mail templates published from core; the console clicks are written down everywhere a human looks
+
+W18 wave 0, row 3 (plan §4.1 step 2, F10-doc, F11-part; P1/P2). **Templates
+are fleet law, not per-site files:** `packages/core/app/emails/identity/
+{invitation,confirmation,recovery,email-change}.html` (brand-neutral, only
+`{{ .SiteURL }}`/`{{ .Token }}`/`{{ .Email }}`/`{{ .NewEmail }}`; every link
+is `{{ .SiteURL }}/admin/accept/#<token>={{ .Token }}`) and a new Astro
+integration `identity-email-templates-integration.ts` mounted in
+`defineSiteAstroConfig` copies them into every tenant's build output at
+`/emails/identity/*.html` on `astro:build:done` (same shape as the redirects
+integration; a route would land as `…/index.html`). Nothing was added to any
+`sites/<client>/public/` — P1 by construction (a `sites/platform` build
+prints `published 4 Netlify Identity e-mail template(s)` and the four files
+sit in `dist/emails/identity/`). **Where the human steps now live:**
+`create-site`'s ADMIN WORKSPACE BOOTSTRAP block (step 1 grew the ☐ rows:
+Registration = Invite only, the four Emails template paths, Google optional;
+step 3 is now "invite yourself, accept from the e-mail on /admin/accept";
+fixture updated); the parity audit gained `identity-email-templates` (PASS —
+core files present, each links to /admin/accept, the shell config mounts the
+integration, `/admin/accept` is an injected route) and the human row
+`identity-console-settings`; `fleet-capability-probe.mjs` prints a
+non-gating `identity` note per tenant listing the console-only
+prerequisites (`IDENTITY_CONSOLE_PREREQUISITES`; it never calls the Identity
+admin API); the runbook's §admin step 1 is rewritten click-by-click
+(Project configuration → Identity → Enable / Registration → Invite only /
+Emails → paths table / Google optional), step 3 rewritten around
+`/admin/accept`, plus a "Recovering a stuck invite" box; `KNOWN_ISSUES.md`
+§5 lists F1/F2/F3 with the one-line symptom each, FIXED-BY T18.0a/b/c;
+`FLEET-STATUS.md` has the "Identity e-mail templates set (console)" ☐ block
+for the four tenants (Wolf ticks during T18.9). Audit: `--root`, platform,
+fernwell, zilberman all pass (drlurie's `--site` form has 6 pre-existing
+gaps unrelated to W18 — it deploys from `--root`). `npm test`, eslint,
+prettier, `astro check` green. Wave 0 (T18.0a–c) is complete and
+releasable on its own; next: T18.1 (store v2 — Fable/notify row).
+
+## 2026-08-17 — T18.0b: `/admin/accept` — every Identity e-mail token now lands somewhere that consumes it
+
+W18 wave 0, row 2 (plan §1 F1, F3, F8-min; flow §4.1 steps 2–4, §4.5).
+**The router:** `HeaderAuthButton.astro`'s `initializeHeaderAuthState` now
+starts with `shouldRouteToAccept(pathname, hash)` (pure, in
+`goTrueClient.ts`) — any page carrying `#invite_token=` /
+`#confirmation_token=` / `#recovery_token=` / `#email_change_token=` does
+`location.replace('/admin/accept' + hash)`; the hash survives, so the
+default Netlify templates (which link to `/`) work without any template
+change (T18.0c still switches them for a cleaner landing). **The page:**
+`packages/core/app/routes/admin/accept.astro` (injected fleet-wide via
+`SHELL_ROUTES`, added to `REQUIRED_SHELL_ROUTES` in the parity audit —
+P1 satisfied for all four tenants by construction) on the public `Layout`,
+noindex, NO AdminLayout gate; island `AcceptInvite.tsx` decides after
+hydration (`detectIdentityToken()` in an effect — deciding during render
+mismatched the token-less server HTML) and runs: **invite** → full name +
+password/confirm (show/hide, min from `invite_preview.policy`) →
+`acceptInvite(token,pw)` = `POST /verify {type:'signup'}` (session written,
+token never) → `PUT /user {data:{full_name}}` (best-effort) →
+`admin-users accept {display_name}` → `needs_grant` panel with Sign-out, else
+`/admin/welcome` if a HEAD probe finds it (T18.5) else `/admin`;
+**recovery** → new password → `exchangeRecoveryToken` (`/verify
+{type:'recovery'}`) → `updatePasswordWithToken` → `/admin`; **confirmation /
+email_change** → the matching `/verify` then `/admin` (email_change also
+calls `me` for last_seen; the by-email re-index is T18.1). No hash or a
+GoTrue 4xx → "This link can't be used … ask the person who invited you",
+raw token never rendered; the hash is stripped after success.
+`handleRecoveryCallback` is now async and accepts BOTH shapes (customised
+`type=recovery&access_token` unchanged; default `#recovery_token=` exchanged
+via `/verify`); `handleOAuthCallback` ignores all four token hashes.
+`users-client.ts` gains `acceptInvite(getToken,{display_name})` and the
+session-less `invitePreview()`. AdminLayout's forbidden panel now says "no
+role has been granted to this email on this site yet. Ask an Owner to grant
+you a role" (the old ADMIN_EMAILS wording described a break-glass detail).
+Tests: `goTrueClient.test.ts` +10 (all four hashes + none, the router
+predicate, `acceptInvite` posts signup+password and stores only the session,
+short-password refused offline, `exchangeRecoveryToken` posts recovery, 4xx
+carries status, both recovery hash shapes, OAuth callback ignores tokens).
+Smoke (built drlurie `dist/` served statically, headless Chromium):
+`/#invite_token=abc` → `/admin/accept#invite_token=abc` rendering "Set up
+your account" (Full name + Password + Confirm), `/admin/accept#recovery_token=`
+renders "Choose a new password", `/admin/accept` alone renders the error
+state, page HTML never contains the token, `localStorage` stays empty until a
+session exists, zero page errors. `astro build` green for `sites/drlurie`
+(root) and `sites/platform`; `npm test`/`check` green. Non-goals untouched:
+no template files (T18.0c), no welcome page (T18.5), no admin-users server
+change, no `@netlify/identity`. Next: T18.0c.
+
+## 2026-08-17 — T18.0a: platform invites hit the mail-sending GoTrue endpoint; `accept` + `invite_preview` verbs
+
+W18 wave 0, row 1 (plan §1 F2, F6-min, F8-min server half). **What changed:**
+`packages/core/server/lib/user-invite.ts` now POSTs `${identity.url}/invite`
+with `{ email, data: { invited_by, role } }` — `data` is informational
+GoTrue `user_metadata`, the store stays the only source of truth for roles.
+**The endpoint fact:** GoTrue's `POST /invite` (admin bearer) creates the
+unconfirmed user AND sends the Netlify Identity invitation e-mail; the
+`POST /admin/users` the code called before creates a user, requires a
+password (422 without one) and sends nothing — which is why every
+platform-originated invite showed "invite email pending" forever while
+`tests/netlify/user-invite.test.ts` pinned the wrong URL and stayed green
+(that assertion now pins `/invite`; `grep -rn "admin/users"
+packages/core/server/lib/user-invite.ts` → no hits). GoTrue 422 "already
+registered / already been invited" is now `invite:{sent:false,
+error:'already_invited'}`, not a failure. New `resendIfExisting` option:
+an existing `invited` record re-fires the GoTrue invite (GoTrue re-sends
+for an unconfirmed user) and audits `reinvite_email`; without it a
+re-invite is a role update only, no e-mail. F6-min: re-inviting a
+`disabled` record flips it to `invited` (audit `reinvite`, detail
+`disabled → invited`). **The accept verb contract** (`admin-users`, T18.0b
+consumes it): `invite_preview` is PUBLIC (answered before auth, before the
+store opens) — `{ token? }` accepted but NOT validated (only GoTrue can;
+an anonymous request has no admin token to ask with) → `{ site: { name,
+slug }, policy: { min_password: 8 } }`, nothing user-specific; the page
+shows the e-mail after GoTrue `/verify` from the session's `/user`.
+`accept` runs on that fresh JWT: authenticated, NOT role-gated (an
+invitee's roles come from the record it activates), body
+`{ display_name }` (1..200), caller's verified e-mail only. Record exists
+`invited` → `active`, `display_name` set, `user_id` + `last_seen_at`
+stamped, audit `accept`; idempotent (second call returns the same active
+record, no second audit); a `disabled` record → 403; no record → `200 {
+user: null, needs_grant: true }` and NOTHING is created or granted (Netlify-UI
+invitee — the layout's forbidden panel says "Ask an Owner to grant you a
+role"; T18.2 makes it the unmanaged-identity flow); a bootstrap
+`ADMIN_EMAILS` caller with no record takes the `me` materialization
+(`bootstrap:true`) with the typed name. New helper `acceptInvitation` in
+`user-invite.ts`; new `tests/netlify/admin-users-accept.test.ts` (7 cases
+through `createHandler(binding)` with a fake `clientContext.user` and an
+in-memory store); `user-invite.test.ts` +4 cases. Every pre-existing verb
+is byte-identical in behaviour (`invite` does not yet pass
+`resendIfExisting` — T18.2/T18.3b wire the Resend button). Non-goals
+untouched: no client code, no e-mail templates, no schema v2,
+`roles.ts` / `publish-gate.ts` / `admin-auth.ts` not modified. Next row:
+T18.0b (`/admin/accept` + site-wide token router).
+
 ## 2026-08-17 — T12.13: the capture bridge exists, and the per-site pdf-tool PAT is gone from the capture path
 
 W12's last blocker, and it was three failures stacked. `capture.crawl` called

@@ -24,6 +24,7 @@ import { approvalPolicyConfig } from './approval-policy.js';
 import { creationPolicyConfig } from './creation-policy.js';
 import { mediaPolicyConfig } from './media-policy.js';
 import { siteIdentityConfig } from './site-identity.js';
+import { membershipPolicyConfig } from './membership-policy.js';
 import {
   setActiveApprovalPolicyProvider,
   resolveApprovalPolicy,
@@ -40,6 +41,7 @@ import {
   type MediaPolicy,
 } from '../../../packages/core/lib/media-policy.js';
 import { setSiteIdentityConfigProvider } from '../../../packages/core/lib/site-identity.js';
+import { setActiveMembershipPolicyProvider } from '../../../packages/core/lib/membership-policy.js';
 
 let approvalPolicy: ApprovalPolicy | undefined;
 setActiveApprovalPolicyProvider((): ApprovalPolicy => (approvalPolicy ??= resolveApprovalPolicy(approvalPolicyConfig)));
@@ -53,3 +55,6 @@ setActiveMediaPolicyProvider((): MediaPolicy => (mediaPolicy ??= resolveMediaPol
 // site-identity resolves committed config + process env on each call (env may
 // change between calls); the provider just supplies the committed config.
 setSiteIdentityConfigProvider((): unknown => siteIdentityConfig);
+
+// W18 T18.7: the committed membership-policy override (runtime store overrides layer on top).
+setActiveMembershipPolicyProvider(() => membershipPolicyConfig);

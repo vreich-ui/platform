@@ -187,7 +187,7 @@ const UNATTRIBUTED_AGENT_SENTINEL = 'unattributed-agent';
 /**
  * D3 (2026-08-06): the pure email → friendly-name derivation, extracted out
  * of principalName() so the server-side default-display-name sites
- * (admin-users.ts's synthesizedRecord, user-invite.ts's first-invite record)
+ * (admin-users.ts's synthesizedRecord, membership/invitations.ts's first-invite record)
  * can reuse the SAME derivation instead of writing a second one. This module
  * has no client-only dependencies (no browser globals — see the imports
  * above), so it's safe to import from server function code; audit-feed.ts

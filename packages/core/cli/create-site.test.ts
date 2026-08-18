@@ -93,6 +93,8 @@ test('buildPlan scaffolds the full baseline pack: config bundle + empty export t
     'sites/acme/config/approval-policy.ts',
     'sites/acme/config/creation-policy.ts',
     'sites/acme/config/media-policy.ts',
+    // W18 T18.7: the committed membership-policy override stub, registered by policy-bindings.
+    'sites/acme/config/membership-policy.ts',
     'sites/acme/config/policy-bindings.ts',
     // W14 T14.1/T14.2: the build entry over the shared shell.
     'sites/acme/astro.config.ts',

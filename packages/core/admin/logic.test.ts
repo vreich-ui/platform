@@ -122,3 +122,206 @@ describe('relativeTimeFromNow', () => {
     assert.strictEqual(relativeTimeFromNow('not-a-date', now), '');
   });
 });
+
+// ─── W18 T18.3a/b — membership page logic ─────────────────────────────────────
+
+import {
+  DEFAULT_POLICY_VIEW,
+  formatExpiresIn,
+  grantableTiers,
+  invitationActionsFor,
+  invitationSendStatus,
+  memberActionsFor,
+  memberSourceLabel,
+  roleOptionsFor,
+} from './logic.js';
+
+describe('grantableTiers / roleOptionsFor (policy × actor role × target role)', () => {
+  it('owner may grant every tier; admin only roles_admin_may_grant under owner_admin; nobody else', () => {
+    assert.deepEqual(grantableTiers(['owner', 'admin', 'publisher']), [
+      'owner',
+      'admin',
+      'publisher',
+      'editor',
+      'viewer',
+    ]);
+    assert.deepEqual(grantableTiers(['admin']), ['editor', 'viewer']);
+    assert.deepEqual(grantableTiers(['admin'], { ...DEFAULT_POLICY_VIEW, who_can_invite: 'owner' }), []);
+    assert.deepEqual(
+      grantableTiers(['admin'], {
+        ...DEFAULT_POLICY_VIEW,
+        roles_admin_may_grant: ['admin', 'publisher', 'editor', 'viewer'],
+      }),
+      ['admin', 'publisher', 'editor', 'viewer']
+    );
+    assert.deepEqual(grantableTiers(['publisher']), []);
+    assert.deepEqual(grantableTiers([]), []);
+  });
+  it('roleOptionsFor disables the current role and the tiers the actor may not grant, with reasons', () => {
+    const opts = roleOptionsFor({ actorRoles: ['admin'], currentRole: 'viewer' });
+    assert.deepEqual(
+      opts.map((o) => [o.value, o.disabled, o.reason]),
+      [
+        ['owner', true, 'An Owner must grant this role'],
+        ['admin', true, 'An Owner must grant this role'],
+        ['publisher', true, 'An Owner must grant this role'],
+        ['editor', false, undefined],
+        ['viewer', true, 'Current role'],
+      ]
+    );
+    assert.equal(roleOptionsFor({ actorRoles: ['owner'] }).filter((o) => o.disabled).length, 0);
+  });
+});
+
+describe('memberActionsFor', () => {
+  const me = 'boss@x.com';
+  it('owner acting: env rows → promote + audit; self → audit; removed → audit; active → change_role/suspend/remove; suspended → reinstate', () => {
+    assert.deepEqual(
+      memberActionsFor({
+        row: { email: 'env@x.com', role: 'owner', status: 'active', source: 'environment' },
+        actorEmail: me,
+        actorRoles: ['owner'],
+      }),
+      ['promote_bootstrap', 'view_audit']
+    );
+    assert.deepEqual(
+      memberActionsFor({ row: { email: me, role: 'owner', status: 'active' }, actorEmail: me, actorRoles: ['owner'] }),
+      ['view_audit']
+    );
+    assert.deepEqual(
+      memberActionsFor({
+        row: { email: 'r@x.com', role: 'admin', status: 'disabled', membership_status: 'removed' },
+        actorEmail: me,
+        actorRoles: ['owner'],
+      }),
+      ['view_audit']
+    );
+    assert.deepEqual(
+      memberActionsFor({
+        row: { email: 'a@x.com', role: 'admin', status: 'active', membership_status: 'active' },
+        actorEmail: me,
+        actorRoles: ['owner'],
+      }),
+      ['change_role', 'view_audit', 'suspend', 'remove']
+    );
+    assert.deepEqual(
+      memberActionsFor({
+        row: { email: 's@x.com', role: 'admin', status: 'disabled', membership_status: 'suspended' },
+        actorEmail: me,
+        actorRoles: ['owner'],
+      }),
+      ['change_role', 'view_audit', 'reinstate', 'remove']
+    );
+    // v1 view without membership_status: disabled ⇒ suspended
+    assert.deepEqual(
+      memberActionsFor({
+        row: { email: 's@x.com', role: 'admin', status: 'disabled' },
+        actorEmail: me,
+        actorRoles: ['owner'],
+      }),
+      ['change_role', 'view_audit', 'reinstate', 'remove']
+    );
+  });
+  it('a non-owner gets no row actions (read-only list; the audit stream is Owner-only)', () => {
+    assert.deepEqual(
+      memberActionsFor({
+        row: { email: 'a@x.com', role: 'admin', status: 'active' },
+        actorEmail: me,
+        actorRoles: ['admin'],
+      }),
+      []
+    );
+  });
+  it('memberSourceLabel', () => {
+    assert.equal(memberSourceLabel({ source: 'environment' }), 'Break-glass (env)');
+    assert.equal(memberSourceLabel({ membership_source: 'bootstrap_env' }), 'Bootstrap');
+    assert.equal(memberSourceLabel({ membership_source: 'netlify_ui' }), 'Netlify UI');
+    assert.equal(memberSourceLabel({ membership_source: 'legacy_v1' }), null);
+    assert.equal(memberSourceLabel({}), null);
+  });
+});
+
+describe('invitations tab logic', () => {
+  const now = Date.parse('2026-08-17T12:00:00.000Z');
+  it('formatExpiresIn: countdown then "expired"', () => {
+    assert.equal(formatExpiresIn('2026-08-17T12:20:00.000Z', now), 'expires in 20m');
+    assert.equal(formatExpiresIn('2026-08-17T15:00:00.000Z', now), 'expires in 3h');
+    assert.equal(formatExpiresIn('2026-08-20T16:00:00.000Z', now), 'expires in 3d 4h');
+    assert.equal(formatExpiresIn('2026-08-24T12:00:00.000Z', now), 'expires in 7d');
+    assert.equal(formatExpiresIn('2026-08-17T11:59:59.000Z', now), 'expired');
+    assert.equal(formatExpiresIn('nonsense', now), '');
+  });
+  it('invitationActionsFor: pending → both; at cap → resend disabled with reason; non-pending → neither', () => {
+    assert.deepEqual(invitationActionsFor({ status: 'pending', send_count: 1, gotrue_invited: true }), {
+      resend: { enabled: true },
+      revoke: { enabled: true },
+    });
+    const capped = invitationActionsFor({ status: 'pending', send_count: 5, gotrue_invited: true });
+    assert.equal(capped.resend.enabled, false);
+    assert.match(capped.resend.reason ?? '', /max 5/);
+    assert.equal(capped.revoke.enabled, true);
+    const expired = invitationActionsFor({ status: 'expired', send_count: 1, gotrue_invited: true });
+    assert.equal(expired.resend.enabled, false);
+    assert.equal(expired.revoke.enabled, false);
+    assert.match(expired.resend.reason ?? '', /Expired/);
+    assert.equal(
+      invitationActionsFor({ status: 'revoked', send_count: 1, gotrue_invited: true }).revoke.enabled,
+      false
+    );
+  });
+  it('invitationSendStatus maps GoTrue outcomes to a label, tone and how-to-fix hint', () => {
+    assert.deepEqual(invitationSendStatus({ gotrue_invited: true, send_count: 1 }), { label: 'Sent', tone: 'success' });
+    assert.equal(invitationSendStatus({ gotrue_invited: true, send_count: 3 }).label, 'Sent 3×');
+    assert.equal(
+      invitationSendStatus({ gotrue_invited: true, gotrue_error: 'already_invited', send_count: 0 }).label,
+      'Already in Identity'
+    );
+    const noToken = invitationSendStatus({
+      gotrue_invited: false,
+      gotrue_error: 'Identity admin token unavailable; store record created, invite email not sent.',
+      send_count: 0,
+    });
+    assert.equal(noToken.tone, 'warning');
+    assert.match(noToken.hint ?? '', /Enable Netlify Identity/);
+    assert.equal(
+      invitationSendStatus({ gotrue_invited: false, gotrue_error: 'GoTrue invite failed (500).', send_count: 0 }).tone,
+      'danger'
+    );
+    assert.equal(invitationSendStatus({ gotrue_invited: false, send_count: 0 }).label, 'Not sent');
+  });
+});
+
+// ─── W18 T18.5 — welcome gate ─────────────────────────────────────────────────
+
+import { welcomeGateDecision } from './logic.js';
+
+describe('welcomeGateDecision', () => {
+  const base = {
+    path: '/admin/content',
+    roles: ['admin'],
+    hasRecord: true,
+    completed: false,
+    requireDisplayName: true,
+  };
+  it('redirects an incomplete member on any ordinary admin path, renders once completed', () => {
+    assert.equal(welcomeGateDecision(base), 'redirect');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin' }), 'redirect');
+    assert.equal(welcomeGateDecision({ ...base, completed: true }), 'render');
+  });
+  it('never redirects on the exempt pages (welcome itself, accept, authorize), trailing slash tolerant', () => {
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/welcome' }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/welcome/' }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/accept' }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, path: '/admin/authorize' }), 'render');
+  });
+  it('no roles → forbidden (needs_grant users see the panel, no loop); no record → render; policy off → render', () => {
+    assert.equal(welcomeGateDecision({ ...base, roles: [] }), 'forbidden');
+    assert.equal(welcomeGateDecision({ ...base, roles: [], hasRecord: false }), 'forbidden');
+    assert.equal(welcomeGateDecision({ ...base, hasRecord: false }), 'render');
+    assert.equal(welcomeGateDecision({ ...base, requireDisplayName: false }), 'render');
+  });
+  it('a bootstrap Owner (materialised record, empty onboarding) goes through welcome once', () => {
+    assert.equal(welcomeGateDecision({ ...base, roles: ['owner', 'admin', 'publisher'] }), 'redirect');
+    assert.equal(welcomeGateDecision({ ...base, roles: ['owner', 'admin', 'publisher'], completed: true }), 'render');
+  });
+});

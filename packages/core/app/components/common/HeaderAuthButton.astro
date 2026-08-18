@@ -157,6 +157,8 @@ const { variant = 'desktop' } = Astro.props;
     handleOAuthCallback,
     handleRecoveryCallback,
     getAccessToken,
+    shouldRouteToAccept,
+    acceptRouteFor,
   } from '@core/lib/admin/goTrueClient';
   import { fetchAdminAccessState } from '@core/lib/admin/admin-access-client';
   import { fetchMe } from '@core/lib/admin/users-client';
@@ -305,9 +307,21 @@ const { variant = 'desktop' } = Astro.props;
     };
 
     const initializeHeaderAuthState = async () => {
+      // T18.0b: the site-wide Identity token router. Whatever page a Netlify
+      // Identity e-mail lands on (the default templates link to `/`), an
+      // `#invite_token=` / `#confirmation_token=` / `#recovery_token=` /
+      // `#email_change_token=` hash is handed to /admin/accept intact — the
+      // hash survives `location.replace`. Nothing else on this page reads it.
+      if (shouldRouteToAccept(window.location.pathname, window.location.hash)) {
+        window.location.replace(acceptRouteFor(window.location.hash));
+        return;
+      }
       // Check for a Netlify Identity recovery hash first.
       // handleRecoveryCallback reads and clears the hash; handleOAuthCallback skips it.
-      const recovery = handleRecoveryCallback();
+      const recovery = await handleRecoveryCallback().catch((error) => {
+        console.error('Recovery callback processing failed.', error);
+        return null;
+      });
       if (recovery) {
         // Defer one tick so LoginModal's IIFE is guaranteed to have run first.
         setTimeout(() => window.__cmsLoginModal?.openForRecovery(recovery.recoveryToken), 0);

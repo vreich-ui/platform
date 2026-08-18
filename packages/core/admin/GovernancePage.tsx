@@ -508,6 +508,7 @@ const TOOL_CLASS_ORDER: ChatToolCatalogEntry['tool_class'][] = [
   'creation',
   'publication',
   'privileged',
+  'membership',
 ];
 const sameOverride = (a: Record<string, ToolAutonomy>, b: Record<string, ToolAutonomy>) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -619,6 +620,14 @@ function ChatToolAutonomyCard({
               <p className="mb-1 px-1 text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
                 {toolGroupLabel(group.cls)}
               </p>
+              {group.cls === 'membership' ? (
+                <p className="mb-2 px-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                  Inviting, changing roles, suspending and removing members from chat. Only the signed-in human&apos;s
+                  own authority applies (Owner for everything except inviting editors/viewers) and every change is
+                  audited. The writes always ask first — that floor is built in and cannot be lowered here or per agent.
+                  Off by default so the chat tool list stays small; switch on the ones you use.
+                </p>
+              ) : null}
               <div className="overflow-hidden rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)]">
                 {group.tools.map((tool) => {
                   const effective = draft[tool.name] ?? tool.default;
@@ -670,7 +679,9 @@ function ChatToolAutonomyCard({
                           onChange={(e) => setToolMode(tool.name, e.target.value as 'default' | ToolAutonomy)}
                           options={[
                             { value: 'default', label: `Use standard setting (${AUTONOMY_LABELS[tool.default]})` },
-                            { value: 'auto', label: 'Run automatically' },
+                            ...(tool.autonomy_floor === 'ask'
+                              ? [{ value: 'auto', label: 'Run automatically — locked: always asks first' }]
+                              : [{ value: 'auto', label: 'Run automatically' }]),
                             { value: 'ask', label: 'Ask me first' },
                             { value: 'off', label: 'Not allowed' },
                           ]}

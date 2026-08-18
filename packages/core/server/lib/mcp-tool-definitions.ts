@@ -46,6 +46,9 @@ export const INTERNAL_ONLY_TOOLS = new Set([
   // normal agent object editing — callable (the fleet capability probe uses
   // it) but not advertised, same rationale as the tools above it.
   'capability_status',
+  // W18 T18.7: the membership counterpart (users-store reachability + policy
+  // provenance) for the fleet probe's `membership` family. Same rationale.
+  'membership_status',
   // T12.13: the capture bridge. Present and identical on every tenant's /mcp (that is fleet
   // law), but deliberately not in a CLIENT'S admin-chat registry. Two reasons, both from
   // ruling R-C5: the duplication capability is operated from CMS-Agent, and a crawl's bounds
@@ -1060,6 +1063,13 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     name: 'capability_status',
     description:
       "Admin-only diagnostic (T16.5): reports this tenant's per-family env-gate status for every tool family that is env-gated at call time (pdf_bridge, pdf_storage_grant, commerce, purchase_token, build_hook, deploy_lookup, git_committer, blob_credentials, mcp_auth, artifact_upload). Each family reports {configured, missing} — missing is a list of env-var NAMES only, never values, lengths, or prefixes. Takes no arguments. Also returns this deployment's own site_id (non-secret) so a fleet probe can target the right site for the pdf-tool bridge families. Use this to find a tenant where a tool family lists in tools/list but 503s at call time — the class of gap docs/cms-architecture/16-genesis-parity-plan.md §1.1 records as previously undetected.",
+    inputSchema: objectSchema({}),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'membership_status',
+    description:
+      "Admin-only diagnostic (W18 T18.7): reports whether this tenant's `users` store is reachable and which membership policy is in force — {users_store: reachable|unreachable, policy: {source: default|committed_override|store_override, committed_override_keys, store_override_keys, effective: {min_owners, invite_ttl_hours, max_resends, purge_grace_days, who_can_invite, require_display_name, delete_identity_on_remove}}} plus this deployment's site_id. Non-secret by construction: field NAMES and policy numbers only — never a member, an e-mail, a token or a store value. Takes no arguments. Used by scripts/fleet-capability-probe.mjs (the `membership` family) because the membership verbs themselves are human-only (membership_requires_human) and a bearer-token probe cannot call them.",
     inputSchema: objectSchema({}),
     governance: { toolClass: 'read' },
   },

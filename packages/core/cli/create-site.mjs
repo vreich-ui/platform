@@ -328,9 +328,9 @@ export const ENV_CHECKLIST = [
         note:
           'Signs the expiring bearer download token (purchase-tokens.ts) that gates digital-goods delivery — ' +
           'get-purchase/order_reissue/stripe-webhook/claim-free all read it (free claims too, not only paid Stripe ' +
-          'orders). Needed only if this client\'s shop module delivers downloads. Unset (or <16 chars): those ' +
+          "orders). Needed only if this client's shop module delivers downloads. Unset (or <16 chars): those " +
           'endpoints 503 with a plain message, not a catalogued errorCode. Covered by the T16.5 capability probe ' +
-          "(purchase_token family)." ,
+          '(purchase_token family).',
       },
     ],
   },
@@ -647,6 +647,11 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 # turns probing off without a code change.
 [functions."mcp-keepalive"]
   schedule = "*/5 * * * *"
+
+# W18 T18.4: daily membership housekeeping — expire stale invitations, purge
+# removed memberships past their grace period, report queued identity deletes.
+[functions."membership-sweep"]
+  schedule = "17 3 * * *"
 
 [[redirects]]
   from = "/pdf/*"
@@ -1345,6 +1350,21 @@ export const mediaPolicyConfig = {
 } satisfies MediaPolicyConfig;
 `;
 
+const membershipPolicyTemplate = (ids) => `/**
+ * This site's committed membership-policy override (W18 T18.7). The LAW and
+ * the defaults live in packages/core/lib/membership-policy.ts
+ * (DEFAULT_MEMBERSHIP_POLICY); this file narrows them for '${ids.siteId}'.
+ * Owners can further override at runtime from the members page / MCP
+ * (\`membership_policy_set\` → the site's \`users\` store \`policy.json\`), which
+ * layers on top of this. Empty = the fleet defaults (Owner+Admin may invite
+ * editor|viewer, min_owners 1, 7-day invites, 30-day purge grace, delete the
+ * Identity login on remove).
+ */
+import type { MembershipPolicyOverride } from '../../../packages/core/lib/membership-policy.js';
+
+export const membershipPolicyConfig = {} satisfies MembershipPolicyOverride;
+`;
+
 const policyBindingsTemplate = (ids) => `/**
  * Site → core policy bindings for '${ids.siteId}'.
  *
@@ -1363,6 +1383,7 @@ import { approvalPolicyConfig } from './approval-policy.js';
 import { creationPolicyConfig } from './creation-policy.js';
 import { mediaPolicyConfig } from './media-policy.js';
 import { siteIdentityConfig } from './site-identity.js';
+import { membershipPolicyConfig } from './membership-policy.js';
 import {
   setActiveApprovalPolicyProvider,
   resolveApprovalPolicy,
@@ -1379,6 +1400,7 @@ import {
   type MediaPolicy,
 } from '../../../packages/core/lib/media-policy.js';
 import { setSiteIdentityConfigProvider } from '../../../packages/core/lib/site-identity.js';
+import { setActiveMembershipPolicyProvider } from '../../../packages/core/lib/membership-policy.js';
 
 let approvalPolicy: ApprovalPolicy | undefined;
 setActiveApprovalPolicyProvider((): ApprovalPolicy => (approvalPolicy ??= resolveApprovalPolicy(approvalPolicyConfig)));
@@ -1392,6 +1414,9 @@ setActiveMediaPolicyProvider((): MediaPolicy => (mediaPolicy ??= resolveMediaPol
 // site-identity resolves committed config + process env on each call (env may
 // change between calls); the provider just supplies the committed config.
 setSiteIdentityConfigProvider((): unknown => siteIdentityConfig);
+
+// W18 T18.7: the committed membership-policy override (runtime store overrides layer on top).
+setActiveMembershipPolicyProvider(() => membershipPolicyConfig);
 `;
 
 // ─── W14 T14.1/T14.2: the BUILD ENTRY ───
@@ -1850,6 +1875,7 @@ export const buildPlan = (opts) => {
     { path: `${dir}/config/approval-policy.ts`, content: approvalPolicyTemplate() },
     { path: `${dir}/config/creation-policy.ts`, content: creationPolicyTemplate() },
     { path: `${dir}/config/media-policy.ts`, content: mediaPolicyTemplate() },
+    { path: `${dir}/config/membership-policy.ts`, content: membershipPolicyTemplate(ids) },
     { path: `${dir}/config/policy-bindings.ts`, content: policyBindingsTemplate(ids) },
     { path: `${dir}/site.config.ts`, content: siteConfigTemplate(ids, brandName, canonicalHost) },
     { path: `${dir}/netlify.toml`, content: netlifyTomlTemplate(ids) },
@@ -1935,10 +1961,23 @@ export const renderAdminBootstrapChecklist = () =>
   [
     'ADMIN WORKSPACE BOOTSTRAP (human gate — runbook site-provisioning-runbook.md §admin):',
     '  1. Enable Netlify Identity (GoTrue) on the new site — console-only; without it /admin login',
-    '     has no identity service and every admin function 401s.',
+    '     has no identity service and every admin function 401s. Then, still in the console',
+    '     (Project configuration → Identity), the invite flow needs (T18.0c):',
+    '     ☐ Registration → Invite only',
+    '     ☐ Emails → Invitation   template path = /emails/identity/invitation.html',
+    '     ☐ Emails → Confirmation template path = /emails/identity/confirmation.html',
+    '     ☐ Emails → Recovery     template path = /emails/identity/recovery.html',
+    '     ☐ Emails → Email change template path = /emails/identity/email-change.html',
+    '     ☐ External providers → Google (optional)',
+    '     (the four templates are core-owned and published by every build; each links to',
+    '     /admin/accept/#<token>=…, the page that consumes Identity tokens — T18.0b)',
     '  2. Set ADMIN_EMAILS on the site to the operator’s real email(s) — bootstrap Owners; the',
     '     users store can be empty/wiped and these addresses still get in.',
-    '  3. Invite the first Owner via /admin/settings/admins (or rely on ADMIN_EMAILS alone).',
+    '  3. Sign in, invite the first Owner via /admin/settings/admins, accept from the e-mail on',
+    '     /admin/accept (or rely on ADMIN_EMAILS alone).',
+    '  4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in',
+    '     config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).',
+    '     Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only',
     `  Blob stores backing the workspace (probed automatically when a token is supplied): ${CORE_BLOB_STORES.join(', ')}.`,
     '  Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>',
   ].join('\n');
@@ -2380,11 +2419,7 @@ const jsonResult = (plan, fields) =>
     siteIdentityEnvOverrides: SITE_IDENTITY_ENV_OVERRIDES,
     coreBlobStores: CORE_BLOB_STORES,
     // The §admin human gate, machine-listed so a driver can surface it verbatim instead of parsing prose.
-    adminBootstrapHumanGate: [
-      'enable_netlify_identity',
-      'set_admin_emails',
-      'invite_first_owner',
-    ],
+    adminBootstrapHumanGate: ['enable_netlify_identity', 'set_admin_emails', 'invite_first_owner'],
     ...fields,
   });
 
@@ -2410,7 +2445,16 @@ export const main = async (argv) => {
 
   if (opts.dryRun) {
     if (opts.json) {
-      console.log(jsonResult(plan, { ok: true, mode: 'dry-run', scaffolded: false, alreadyScaffolded: null, netlify: null, netlifyPlanned: Boolean(netlifyToken) }));
+      console.log(
+        jsonResult(plan, {
+          ok: true,
+          mode: 'dry-run',
+          scaffolded: false,
+          alreadyScaffolded: null,
+          netlify: null,
+          netlifyPlanned: Boolean(netlifyToken),
+        })
+      );
       return;
     }
     console.log(renderPlan(plan, { netlifyToken: Boolean(netlifyToken) }));
@@ -2427,7 +2471,9 @@ export const main = async (argv) => {
 
   if (alreadyScaffolded && !opts.provisionOnly) {
     if (opts.json) {
-      console.log(jsonResult(plan, { ok: true, mode: 'noop-existing', scaffolded: false, alreadyScaffolded: true, netlify: null }));
+      console.log(
+        jsonResult(plan, { ok: true, mode: 'noop-existing', scaffolded: false, alreadyScaffolded: true, netlify: null })
+      );
       return;
     }
     console.log(`[create-site] ${plan.dir}/ already exists — leaving it untouched (idempotent re-run).`);
@@ -2477,9 +2523,7 @@ export const main = async (argv) => {
       );
     }
   } else {
-    say(
-      '[create-site] no --netlify-token supplied — scaffold only. Provide one to create the Netlify site + stores.'
-    );
+    say('[create-site] no --netlify-token supplied — scaffold only. Provide one to create the Netlify site + stores.');
   }
 
   if (opts.json) {

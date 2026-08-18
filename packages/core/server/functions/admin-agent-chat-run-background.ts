@@ -72,7 +72,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // module-level client; absent config → the tools answer with a clear error.
   const cmsAgentBridge = isCmsAgentConfigured()
     ? {
-        callTool: <T,>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
+        callTool: <T>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
         projectId: getSiteIdentity().cmsAgentProjectId,
       }
     : undefined;
@@ -96,6 +96,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     principal,
     roles,
     exportRoot: binding.dataRoot,
+    // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
+    membershipStore: await getUsersBlobStore(event),
     // Task 3 §5: so the generated registry's operational-bridge tools
     // (deploy_status, pdf-tool/image families, commerce, ...) execute in the
     // background hop too, not only on the interactive approve path.

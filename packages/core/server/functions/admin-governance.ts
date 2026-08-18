@@ -40,7 +40,8 @@ import {
   type AgentKeysBlobStore,
 } from '../lib/agent-keys.js';
 import { CHAT_TOOLS, defaultAutonomyFor } from '../lib/agent/tools.js';
-import { migrateAutonomyKeys } from '../lib/agent/generated-tools.js';
+import { migrateAutonomyKeys, generatedChatToolByName } from '../lib/agent/generated-tools.js';
+import { MEMBERSHIP_TOOL_NAMES } from '../lib/mcp-tool-definitions-membership.js';
 import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
 import { resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -81,7 +82,15 @@ export const requestSchema = z.discriminatedUnion('verb', [
   }),
   z.object({
     verb: z.literal('revert'),
-    target: z.enum(['approval', 'creation', 'chat_tools', 'learning_mode', 'cms_agent_chat_mode', 'chat_registry', 'all']),
+    target: z.enum([
+      'approval',
+      'creation',
+      'chat_tools',
+      'learning_mode',
+      'cms_agent_chat_mode',
+      'chat_registry',
+      'all',
+    ]),
   }),
   z.object({ verb: z.literal('agent_keys_list') }),
   z.object({ verb: z.literal('agent_keys_create'), agent_name: z.string().min(1), site: z.string().min(1) }),
@@ -130,9 +139,7 @@ const cmsAgentStatus = async (override?: 'off' | 'fallback' | 'required'): Promi
     const probe = await cmsAgentHealthClient.resolveAgent({ role: 'client_manager', project_id: projectId });
     cmsAgentHealthCache.set(projectId, {
       at: now,
-      health: probe.ok
-        ? { ok: true, agent_ref: probe.data }
-        : { ok: false, code: probe.code, message: probe.message },
+      health: probe.ok ? { ok: true, agent_ref: probe.data } : { ok: false, code: probe.code, message: probe.message },
     });
   }
   return { ...status, health: cmsAgentHealthCache.get(projectId)!.health };
@@ -142,12 +149,34 @@ const cmsAgentStatus = async (override?: 'off' | 'fallback' | 'required'): Promi
  *  CHAT_TOOLS, so the UI can never drift from the tools the run loop actually
  *  wires. Each entry carries the class-derived default the override layers on
  *  top of (resolveAutonomy in agent/tools.ts). Static, so computed once. */
-const chatToolsCatalog = CHAT_TOOLS.map((tool) => ({
-  name: tool.name,
-  tool_class: tool.toolClass,
-  default: defaultAutonomyFor(tool),
-  description: tool.description,
-}));
+const chatToolsCatalog = [
+  ...CHAT_TOOLS.map((tool) => ({
+    name: tool.name,
+    tool_class: tool.toolClass,
+    default: defaultAutonomyFor(tool),
+    description: tool.description,
+    ...(tool.autonomyFloor ? { autonomy_floor: tool.autonomyFloor } : {}),
+  })),
+  // W18 T18.6b: the membership family lives only in the generated registry;
+  // surface it here so an Owner can switch the off-by-default writes on and
+  // see that the `ask` floor cannot be lowered.
+  ...[...MEMBERSHIP_TOOL_NAMES].flatMap((name) => {
+    const tool = generatedChatToolByName(name);
+    if (!tool) return [];
+    return [
+      {
+        name: tool.name,
+        tool_class: tool.toolClass,
+        default:
+          tool.toolClass === 'read' && !['member_audit', 'membership_policy_get', 'member_export'].includes(name)
+            ? ('auto' as const)
+            : ('off' as const),
+        description: tool.description,
+        ...(tool.autonomyFloor ? { autonomy_floor: tool.autonomyFloor } : {}),
+      },
+    ];
+  }),
+];
 
 const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });

@@ -31,6 +31,7 @@ import {
   type CmsAgentError,
 } from './cms-agent-client.js';
 import type { SiteBindingEnvNames } from '../site-binding.js';
+import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
 
 // ─── the seam ────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,10 @@ export class CmsAgentEngineError extends Error {
 
 /** Wire codes become `cms_agent_<reason>` (plan §5.5); transport codes already carry the prefix. */
 const engineFailure = (failure: CmsAgentError): CmsAgentEngineError =>
-  new CmsAgentEngineError(failure.code.startsWith('cms_agent_') ? failure.code : `cms_agent_${failure.code}`, failure.message);
+  new CmsAgentEngineError(
+    failure.code.startsWith('cms_agent_') ? failure.code : `cms_agent_${failure.code}`,
+    failure.message
+  );
 
 /**
  * PF3 — the editor-facing sentence for each failure class. Editor-safe by the
@@ -188,6 +192,13 @@ const conversationContext = (doc: ChatDoc, run: ChatRun, siteId: string): CmsAge
  * NOT checked here — the client's pre-flight does that before any claim can
  * be written.
  */
+/** Trim the membership family (only) when the wire list exceeds the CMS-Agent bound. Pure. */
+export const fitToolsToCmsAgentBound = (tools: WireTool[], maxTools = CMS_AGENT_BOUNDS.maxTools): WireTool[] => {
+  if (tools.length <= maxTools) return tools;
+  const trimmed = tools.filter((tool) => !isMembershipTool(tool.name));
+  return trimmed.length <= maxTools ? trimmed : trimmed.slice(0, maxTools);
+};
+
 export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
   const { client, projectId, siteId } = options;
   return async ({ doc, run, tools }) => {
@@ -207,6 +218,23 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
 
     const messages = trimTranscriptForCmsAgent(run.transcript);
     const context = conversationContext(doc, run, siteId);
+    // W18 T18.6b: CMS-Agent bounds the wire to CMS_AGENT_BOUNDS.maxTools. The
+    // membership family (16 tools) is the newest and optional; when the run's
+    // wire list would exceed the bound, that family is trimmed here — logged,
+    // never a hard failure — and membership stays reachable from the admin UI,
+    // /mcp (OAuth) and the provider engine. Raise the bound to lift this.
+    const wireTools = fitToolsToCmsAgentBound(tools);
+    if (wireTools.length !== tools.length) {
+      console.warn(
+        JSON.stringify({
+          event: 'cms_agent_tools_trimmed',
+          run_id: run.run_id,
+          dropped: tools.length - wireTools.length,
+          bound: CMS_AGENT_BOUNDS.maxTools,
+          family: 'membership',
+        })
+      );
+    }
     const baseTurnId = `t_${run.run_id}_${run.provider_turns}`;
     let turnId = baseTurnId;
     let refreshedRef = false;
@@ -224,7 +252,7 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
         messages,
         // Constraint 8: sent exactly as Platform builds them today; the
         // client's pre-flight asserts count/size and non-empty descriptions.
-        tools,
+        tools: wireTools,
         constraints: { ...CMS_AGENT_DEFAULT_CONSTRAINTS },
       });
       if (result.ok) {

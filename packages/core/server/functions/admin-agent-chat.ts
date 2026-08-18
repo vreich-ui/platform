@@ -167,7 +167,7 @@ const cmsAgentClient = new CmsAgentClient();
 const cmsAgentToolBridge = () =>
   isCmsAgentConfigured()
     ? {
-        callTool: <T,>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
+        callTool: <T>(name: string, args: Record<string, unknown>) => cmsAgentClient.callTool<T>(name, args),
         projectId: getSiteIdentity().cmsAgentProjectId,
       }
     : undefined;
@@ -243,10 +243,7 @@ const migratedChatTools = async (
  * circuits repeat work), best-effort persisting the migrated doc back. A
  * failure to persist is non-fatal: the in-memory migrated doc is still used.
  */
-const migratedProfilesDoc = async (
-  store: AgentProfilesStore,
-  doc: AgentProfilesDoc
-): Promise<AgentProfilesDoc> => {
+const migratedProfilesDoc = async (store: AgentProfilesStore, doc: AgentProfilesDoc): Promise<AgentProfilesDoc> => {
   if (doc.keys_migrated) return doc;
   let changed = false;
   const profiles: AgentProfilesDoc['profiles'] = {};
@@ -461,6 +458,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const cmsAgent = cmsAgentToolBridge();
         const toolContext = buildToolContext({
           objectStore,
+          // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
+          membershipStore: await getUsersBlobStore(event),
           ...(cmsAgent ? { cmsAgent } : {}),
           governanceStore,
           artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
@@ -510,6 +509,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const cmsAgent = cmsAgentToolBridge();
         const toolContext = buildToolContext({
           objectStore,
+          // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
+          membershipStore: await getUsersBlobStore(event),
           ...(cmsAgent ? { cmsAgent } : {}),
           governanceStore: await getGovernanceBlobStore(event),
           artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as

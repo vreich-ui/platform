@@ -7,9 +7,13 @@ import type { GetToken } from '../edit-mode/verbs-client.js';
 
 const ENDPOINT = '/.netlify/functions/admin-users';
 
-export type UserRole = 'owner' | 'admin';
-export type UserViewRole = UserRole | 'publisher' | 'editor';
+/** The five workspace tiers (T18.1). */
+export type UserRole = 'owner' | 'admin' | 'publisher' | 'editor' | 'viewer';
+export type UserViewRole = UserRole;
+/** The v1 VIEW status; `membership_status` carries the real v2 state (suspended|removed both view as `disabled`). */
 export type UserStatus = 'invited' | 'active' | 'disabled';
+export type MembershipStatus = 'invited' | 'active' | 'suspended' | 'removed';
+export type MembershipSource = 'bootstrap_env' | 'invitation' | 'netlify_ui' | 'mcp' | 'import' | 'legacy_v1';
 
 export interface UserAuditEntry {
   at: string;
@@ -30,6 +34,11 @@ export interface UserView {
   updated_at?: string;
   last_seen_at?: string;
   audit?: UserAuditEntry[];
+  /** T18.1 (membership v2) */
+  person_id?: string;
+  onboarding?: OnboardingView;
+  membership_status?: MembershipStatus;
+  membership_source?: MembershipSource;
 }
 
 async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
@@ -44,25 +53,158 @@ async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promi
   return json as T;
 }
 
-export const fetchMe = (getToken: GetToken) =>
-  post<{ user: UserView; bootstrap: boolean; roles: string[] }>(getToken, { verb: 'me' });
+export interface OnboardingView {
+  completed_at?: string;
+  steps: { name?: string; password?: string; tour?: string };
+}
 
-export const updateMe = async (getToken: GetToken, fields: { display_name?: string; avatar_artifact?: string }) => {
+export const fetchMe = (getToken: GetToken) =>
+  post<{
+    user: UserView;
+    bootstrap: boolean;
+    roles: string[];
+    /** T18.5: null when the caller has no stored record (needs_grant / env-only before materialisation). */
+    onboarding?: OnboardingView | null;
+    policy?: { require_display_name: boolean };
+  }>(getToken, { verb: 'me' });
+
+export const updateMe = async (
+  getToken: GetToken,
+  fields: { display_name?: string; avatar_artifact?: string; onboarding_step?: 'name' | 'tour' | 'skipped' }
+) => {
   const result = await post<{ user: UserView }>(getToken, { verb: 'update_me', ...fields });
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cms:user-updated', { detail: result.user }));
   return result;
 };
 
-export const listUsers = (getToken: GetToken) => post<{ users: UserView[] }>(getToken, { verb: 'list' });
+export const listUsers = (getToken: GetToken, opts: { include_removed?: boolean } = {}) =>
+  post<{ users: UserView[] }>(getToken, { verb: 'list', ...opts });
 
-export const inviteUser = (getToken: GetToken, email: string, role: UserRole) =>
-  post<{ user: UserView; invite: { sent: boolean } }>(getToken, { verb: 'invite', email, role });
+export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
+export interface InvitationView {
+  invite_id: string;
+  email: string;
+  role: UserRole;
+  status: InvitationStatus;
+  gotrue: { invited: boolean; error?: string; last_sent_at?: string; send_count: number };
+  invited_by: { person_id?: string; email: string };
+  message?: string;
+  source: 'platform' | 'netlify_ui' | 'mcp' | 'chat';
+  expires_at: string;
+  accepted?: { at: string; person_id: string };
+  revoked?: { at: string; by: string; reason?: string };
+  created_at: string;
+  updated_at: string;
+}
+export interface UnmanagedIdentityView {
+  id: string;
+  email: string;
+  confirmed: boolean;
+  invited_at?: string;
+  created_at?: string;
+  last_sign_in_at?: string;
+}
+
+/** T18.2: creates the Invitation + Membership{invited}; `accept_token` is OUR opaque preview token, returned once. */
+export const inviteUser = (getToken: GetToken, email: string, role: UserRole, message?: string) =>
+  post<{ user: UserView; invite: { sent: boolean; error?: string }; invitation: InvitationView; accept_token: string }>(
+    getToken,
+    { verb: 'invite', email, role, ...(message ? { message } : {}) }
+  );
+
+export const resendInvitation = (getToken: GetToken, ref: { invite_id?: string; email?: string }) =>
+  post<{ invitation: InvitationView; invite: { sent: boolean; error?: string }; accept_token: string }>(getToken, {
+    verb: 'resend',
+    ...ref,
+  });
+
+export const revokeInvitation = (getToken: GetToken, ref: { invite_id?: string; email?: string }, reason?: string) =>
+  post<{ invitation: InvitationView; membership: unknown }>(getToken, {
+    verb: 'revoke',
+    ...ref,
+    ...(reason ? { reason } : {}),
+  });
+
+export const listInvitations = (getToken: GetToken, status?: InvitationStatus) =>
+  post<{ invitations: InvitationView[] }>(getToken, { verb: 'list_invitations', ...(status ? { status } : {}) });
+
+export const listUnmanagedIdentities = (getToken: GetToken) =>
+  post<{ identities: UnmanagedIdentityView[]; error_code?: 'identity_admin_unavailable'; error?: string }>(getToken, {
+    verb: 'unmanaged_identities',
+  });
+
+/** Owner grants a role to a Netlify-UI identity that has no membership (plan §4.2). */
+export const grantRole = (getToken: GetToken, email: string, role: UserRole, user_id?: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'grant', email, role, ...(user_id ? { user_id } : {}) });
 
 export const setUserRole = (getToken: GetToken, email: string, role: UserRole) =>
   post<{ user: UserView }>(getToken, { verb: 'set_role', email, role });
 
-export const disableUser = (getToken: GetToken, email: string) =>
-  post<{ user: UserView }>(getToken, { verb: 'disable', email });
+/** T18.1: `suspend` (roles → [] until reinstated). `disableUser` remains as the alias for one release. */
+export const suspendUser = (getToken: GetToken, email: string, reason?: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'suspend', email, ...(reason ? { reason } : {}) });
+
+export const disableUser = (getToken: GetToken, email: string) => suspendUser(getToken, email);
+
+export const reinstateUser = (getToken: GetToken, email: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'reinstate', email });
+
+/** T18.3a: remove — membership → removed (kept for audit, purged after the grace period); a pending invitation is revoked. */
+export const removeUser = (getToken: GetToken, email: string, reason?: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'remove', email, ...(reason ? { reason } : {}) });
+
+export interface AuditEventView {
+  event_id: string;
+  at: string;
+  actor: { kind: 'human'; id?: string; email: string } | { kind: 'agent'; agent_name: string } | { kind: 'system' };
+  action: string;
+  target: { person_id?: string; email: string; invite_id?: string };
+  detail?: Record<string, unknown>;
+  via: 'admin_ui' | 'mcp' | 'chat' | 'system';
+}
+
+/** T18.3a: the audit stream for one person (Owner-only), newest first, plus the legacy per-record array. */
+export const memberAudit = (getToken: GetToken, email: string, limit?: number) =>
+  post<{ email: string; events: AuditEventView[]; legacy_audit: UserAuditEntry[] }>(getToken, {
+    verb: 'member_audit',
+    email,
+    ...(limit ? { limit } : {}),
+  });
+
+/** T18.1: give an ADMIN_EMAILS member a stored Owner membership (so the env row can be emptied later). */
+export const promoteBootstrapOwner = (getToken: GetToken, email: string) =>
+  post<{ user: UserView }>(getToken, { verb: 'promote_bootstrap', email });
+
+/**
+ * T18.0b — the accept page's verbs (server contract: T18.0a).
+ * `acceptInvite` runs on the fresh session GoTrue's /verify returned: flips the
+ * caller's invited record to active with the typed name; `needs_grant:true`
+ * (user null) means no record exists — nothing was created or granted.
+ */
+export const acceptInvite = (getToken: GetToken, fields: { display_name: string }) =>
+  post<{ user: UserView | null; needs_grant: boolean; bootstrap?: boolean }>(getToken, {
+    verb: 'accept',
+    display_name: fields.display_name,
+  });
+
+export interface InvitePreview {
+  site: { name: string; slug: string };
+  policy: { min_password: number };
+  /** T18.2 path 2: present only when the page carried OUR `inv` token (Owner-shared link). */
+  invitation?: { email: string; role: UserRole; invited_by: string; expires_at: string; expired: boolean };
+}
+
+/** Public (no session): site name + password policy for the accept page. The token is not validated server-side. */
+export const invitePreview = async (token?: string, inv?: string): Promise<InvitePreview> => {
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verb: 'invite_preview', ...(token ? { token } : {}), ...(inv ? { inv } : {}) }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  return json as unknown as InvitePreview;
+};
 
 /** Resolve an image artifact reference (image/<id>/<sha>.<ext>) to its servable path. */
 export const avatarSrc = (ref: string | undefined): string | undefined =>

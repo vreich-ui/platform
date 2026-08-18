@@ -136,10 +136,10 @@ signed off the `HUMAN` rows.
     all. Not synthesizable by repair (identity carries per-client facts) —
     a gap here means re-scaffold. Who: **scaffold**. Audit: `config-bundle`.
 11. **Netlify Identity (GoTrue) ENABLED on the site** — `/admin` login is
-    the Identity widget (`netlifyIdentityLoader.ts` →
-    `identity.netlify.com` widget → the site's `/.netlify/identity`
-    GoTrue); server-side auth verifies tokens against the same endpoint
-    (`admin-auth.ts`). No CLI can enable Identity. Who: **Netlify console
+    the hand-rolled GoTrue client (`lib/admin/goTrueClient.ts` → the site's
+    `/.netlify/identity` GoTrue; the unused `netlifyIdentityLoader.ts` widget
+    loader was deleted in W18 T18.8); server-side auth verifies tokens
+    against the same endpoint (`admin-auth.ts`). No CLI can enable Identity. Who: **Netlify console
     (human)** — runbook §admin, step 1. Audit: `identity-enabled` (HUMAN).
 12. **`ADMIN_EMAILS` set** — the bootstrap-Owner allowlist
     (`roles.ts`): members are implicit Owners forever, the env fallback

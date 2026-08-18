@@ -18,6 +18,11 @@ import {
 import { buildStoreValidationContext } from '../object-validation-context.js';
 import { summarizeValidation, validateObject } from '../object-validate.js';
 import type { Role } from '../roles.js';
+import { handleMembershipVerb } from '../membership/verbs.js';
+import { callerPrincipalFromChatRun } from '../membership/caller-principal.js';
+import type { MembershipStore } from '../membership/store.js';
+import type { OAuthBlobStore } from '../oauth-store.js';
+import type { ObjectLockSweepStore } from '../membership/offboarding.js';
 import { buildObjectContract } from '../../../lib/registry/object-contract.js';
 import { mintId, MintIdError } from '../../../lib/object-ids-mint.js';
 import { validateObjectIdForType } from '../../../lib/object-ids.js';
@@ -87,6 +92,14 @@ export interface ToolContextDeps {
    * `publishObject`, same as every other exportRoot-required call site.
    */
   exportRoot?: string;
+  /**
+   * W18 T18.6a: the membership store (the site's `users` blob store). When
+   * present, ToolContext.membership routes membership verbs through
+   * `handleMembershipVerb` with the run's captured human principal
+   * (`via:'chat'`). Offboarding side effects reuse `objectStore` (locks) and
+   * `governanceStore` (OAuth grants) already on this deps object.
+   */
+  membershipStore?: MembershipStore;
   /**
    * PF4: the CMS-Agent bridge for the workspace orchestration tools —
    * provided by callers that hold the module-level client; when absent (or
@@ -241,9 +254,29 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
     });
   };
 
+  const membershipStore = deps.membershipStore;
   return {
     roles: deps.roles,
     ...(deps.cmsAgent ? { cmsAgent: deps.cmsAgent } : {}),
+    ...(membershipStore
+      ? {
+          membership: {
+            call: (verb: string, args: Record<string, unknown>) =>
+              handleMembershipVerb({
+                verb,
+                args,
+                principal: callerPrincipalFromChatRun(deps.principal),
+                deps: {
+                  store: membershipStore,
+                  ...(deps.governanceStore
+                    ? { oauthStore: async () => deps.governanceStore as unknown as OAuthBlobStore }
+                    : {}),
+                  objectStore: async () => deps.objectStore as unknown as ObjectLockSweepStore,
+                },
+              }),
+          },
+        }
+      : {}),
     ...(operationalEvent
       ? {
           operational: {
