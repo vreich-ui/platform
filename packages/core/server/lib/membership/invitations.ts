@@ -50,6 +50,7 @@ import {
 } from './store.js';
 import { appendAudit, getPolicy, newMember, saveMember, stampOnboarding } from './write.js';
 import { memberToUserRecord, type UserRecord } from '../users-store.js';
+import { collectBlobListItems } from '../blob-list.js';
 
 // ── GoTrue seam ─────────────────────────────────────────────────────────────
 
@@ -710,8 +711,10 @@ export const previewInvitationByToken = async (
   expired: boolean;
 } | null> => {
   const hash = hashToken(token);
-  const listed = await store.list({ prefix: PREFIXES.invitation, directories: false, paginate: true });
-  for (const blob of listed.blobs ?? []) {
+  const items = await collectBlobListItems(
+    await store.list({ prefix: PREFIXES.invitation, directories: false, paginate: true })
+  );
+  for (const blob of items) {
     const parsed = invitationSchema.safeParse(parseJson(await store.get(blob.key)));
     if (!parsed.success || parsed.data.token_hash !== hash) continue;
     const invitation = await expireIfStale(store, parsed.data, now);
@@ -731,9 +734,11 @@ export const listInvitations = async (
   opts: { status?: Invitation['status']; now?: string } = {}
 ): Promise<Invitation[]> => {
   const now = opts.now ?? new Date().toISOString();
-  const listed = await store.list({ prefix: PREFIXES.invitation, directories: false, paginate: true });
+  const items = await collectBlobListItems(
+    await store.list({ prefix: PREFIXES.invitation, directories: false, paginate: true })
+  );
   const out: Invitation[] = [];
-  for (const blob of listed.blobs ?? []) {
+  for (const blob of items) {
     const parsed = invitationSchema.safeParse(parseJson(await store.get(blob.key)));
     if (!parsed.success) continue;
     const current = await expireIfStale(store, parsed.data, now);
@@ -745,9 +750,11 @@ export const listInvitations = async (
 
 /** Sweep: expire every stale pending invitation (T18.4 wires the scheduled function). Returns the ids expired. */
 export const expireAll = async (store: MembershipStore, now = new Date().toISOString()): Promise<string[]> => {
-  const listed = await store.list({ prefix: PREFIXES.invitation, directories: false, paginate: true });
+  const items = await collectBlobListItems(
+    await store.list({ prefix: PREFIXES.invitation, directories: false, paginate: true })
+  );
   const expired: string[] = [];
-  for (const blob of listed.blobs ?? []) {
+  for (const blob of items) {
     const parsed = invitationSchema.safeParse(parseJson(await store.get(blob.key)));
     if (!parsed.success || parsed.data.status !== 'pending') continue;
     const current = await expireIfStale(store, parsed.data, now);

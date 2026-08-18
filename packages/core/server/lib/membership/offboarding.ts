@@ -36,6 +36,7 @@
 import type { Principal } from '../../../schema/object-record-v1.js';
 import { objectTypes, type ObjectRecord } from '../../../schema/object-record-v1.js';
 import { isObjectLockActive } from '../object-lock.js';
+import { collectBlobListItems, type BlobListItem, type BlobListResponse } from '../blob-list.js';
 import { objectRecordKey, objectStatusIndexPrefix } from '../object-store-keys.js';
 import { subjectIndexEntrySchema, subjectIndexPrefix, type OAuthBlobStore } from '../oauth-store.js';
 import { getMembershipByEmail, listMembers, type Member } from './read.js';
@@ -77,14 +78,16 @@ export const revokeOAuthGrantsForSubject = async (
   if (typeof store.list !== 'function') {
     return { revoked: 0, kinds, error: 'oauth store cannot list; nothing revoked' };
   }
-  let listed: { blobs: { key: string }[] };
+  let items: BlobListItem[];
   try {
-    listed = await store.list({ prefix: subjectIndexPrefix(subjectEmail), directories: false, paginate: true });
+    items = await collectBlobListItems(
+      await store.list({ prefix: subjectIndexPrefix(subjectEmail), directories: false, paginate: true })
+    );
   } catch (e) {
     return { revoked: 0, kinds, error: e instanceof Error ? e.message : 'oauth index list failed' };
   }
   let revoked = 0;
-  for (const blob of listed.blobs ?? []) {
+  for (const blob of items) {
     let entry: { kind: 'token' | 'refresh' | 'code'; key: string } | null = null;
     try {
       const raw = await store.get(blob.key);
@@ -109,7 +112,7 @@ export const revokeOAuthGrantsForSubject = async (
 export interface ObjectLockSweepStore {
   get(key: string): Promise<string | null>;
   setJSON(key: string, value: unknown): Promise<unknown>;
-  list(options: { prefix: string; directories?: boolean; paginate?: boolean }): Promise<{ blobs: { key: string }[] }>;
+  list(options: { prefix: string; directories?: boolean; paginate?: boolean }): BlobListResponse | Promise<BlobListResponse>;
 }
 
 const parseRecord = (raw: string | null): ObjectRecord | undefined => {
@@ -140,17 +143,19 @@ export const releaseLocksHeldBy = async (
   const nowMs = Date.parse(input.at);
   const email = normalizeEmail(input.person.email);
   for (const objectType of objectTypes) {
-    let listed: { blobs: { key: string }[] };
+    let items: BlobListItem[];
     try {
-      listed = await store.list({
-        prefix: objectStatusIndexPrefix(objectType, 'active'),
-        directories: false,
-        paginate: true,
-      });
+      items = await collectBlobListItems(
+        await store.list({
+          prefix: objectStatusIndexPrefix(objectType, 'active'),
+          directories: false,
+          paginate: true,
+        })
+      );
     } catch {
       continue;
     }
-    for (const blob of listed.blobs ?? []) {
+    for (const blob of items) {
       const objectId = blob.key.split('/').pop() ?? '';
       if (!objectId) continue;
       const key = objectRecordKey(objectType, objectId);
@@ -287,10 +292,17 @@ export const drainIdentityDeleteQueue = async (
   store: MembershipStore,
   input: { identity?: GoTrueIdentity; fetchImpl?: FetchLike; at: string; actor?: AuditActor }
 ): Promise<{ drained: number; remaining: number }> => {
-  const listed = await store
-    .list({ prefix: IDENTITY_QUEUE_PREFIX, directories: false, paginate: true })
-    .catch(() => ({ blobs: [] }));
-  const blobs = listed.blobs ?? [];
+  // NOTE: `.catch()` must NOT be chained off `store.list(...)` — with
+  // `paginate: true` it returns a plain AsyncIterable, so `.catch` is not a
+  // function and the call throws SYNCHRONOUSLY. Await first, then collect.
+  let blobs: BlobListItem[];
+  try {
+    blobs = await collectBlobListItems(
+      await store.list({ prefix: IDENTITY_QUEUE_PREFIX, directories: false, paginate: true })
+    );
+  } catch {
+    blobs = [];
+  }
   if (!input.identity || !input.fetchImpl) return { drained: 0, remaining: blobs.length };
   let drained = 0;
   for (const blob of blobs) {
@@ -481,17 +493,19 @@ export const exportPerson = async (
   if (input.objectStore) {
     for (const objectType of objectTypes) {
       for (const status of ['active', 'archived'] as const) {
-        let listed: { blobs: { key: string }[] };
+        let items: BlobListItem[];
         try {
-          listed = await input.objectStore.list({
-            prefix: objectStatusIndexPrefix(objectType, status),
-            directories: false,
-            paginate: true,
-          });
+          items = await collectBlobListItems(
+            await input.objectStore.list({
+              prefix: objectStatusIndexPrefix(objectType, status),
+              directories: false,
+              paginate: true,
+            })
+          );
         } catch {
           continue;
         }
-        for (const blob of listed.blobs ?? []) {
+        for (const blob of items) {
           const objectId = blob.key.split('/').pop() ?? '';
           const record = parseRecord(
             await input.objectStore.get(objectRecordKey(objectType, objectId)).catch(() => null)

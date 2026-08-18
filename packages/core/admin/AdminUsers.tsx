@@ -83,6 +83,21 @@ type Confirm =
   | { kind: 'promote'; user: UserView }
   | null;
 
+/**
+ * W18 review ruling (Wolf, 2026-08-18): the **Identities** tab is HIDDEN.
+ * Every member on this platform arrives through the platform invite flow, so
+ * a "GoTrue users with no membership here" reconcile view is noise on a good
+ * day — and while `listMembers` was returning nothing (the `paginate: true`
+ * defect this review fixed) it listed every real member as "unmanaged" and
+ * offered *Delete identity* on them.
+ *
+ * `IdentitiesPanel` and its `unmanaged_identities` / `grant` / `delete_identity`
+ * verbs are deliberately KEPT — flip this flag to bring the tab back once
+ * Netlify-UI-invited users are a real path again. Typed `boolean` (not the
+ * `false` literal) so the tab body stays type-checked and lint-clean.
+ */
+const SHOW_IDENTITIES_TAB: boolean = false;
+
 const errorMessage = (err: unknown, fallback = 'Something went wrong.') =>
   err instanceof Error ? err.message : fallback;
 
@@ -493,7 +508,11 @@ export function AdminUsersBody() {
           {removedCount ? ` · ${removedCount} removed` : ''}
         </p>
         <div className="flex items-center gap-3">
-          {owner && removedCount ? (
+          {/* W18 review (2026-08-18): this was gated on `removedCount`, which is
+              computed from a list the server filters `removed` OUT of unless
+              `include_removed` is set — so the toggle that loads them could
+              never appear. Owners always get it. */}
+          {owner ? (
             <Switch
               checked={showRemoved}
               onCheckedChange={(v) => {
@@ -580,19 +599,23 @@ export function AdminUsersBody() {
               />
             ),
           },
-          {
-            id: 'identities',
-            label: 'Identities',
-            content: (
-              <IdentitiesPanel
-                actorRoles={roles}
-                policy={policy}
-                onGranted={() => {
-                  void refresh();
-                }}
-              />
-            ),
-          },
+          ...(SHOW_IDENTITIES_TAB
+            ? [
+                {
+                  id: 'identities',
+                  label: 'Identities',
+                  content: (
+                    <IdentitiesPanel
+                      actorRoles={roles}
+                      policy={policy}
+                      onGranted={() => {
+                        void refresh();
+                      }}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 

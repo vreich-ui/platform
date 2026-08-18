@@ -22,15 +22,25 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { getMembershipStore } from '../lib/membership/store.js';
 import { expireAll } from '../lib/membership/invitations.js';
 import { purgeExpiredMemberships } from '../lib/membership/offboarding.js';
+import { collectBlobListItems } from '../lib/blob-list.js';
 
 export const runMembershipSweep = async (event: unknown, now = new Date().toISOString()) => {
   const store = await getMembershipStore(event);
   const expired = await expireAll(store, now);
   const purged = await purgeExpiredMemberships(store, { now });
-  const queued = await store
-    .list({ prefix: 'identity-delete-queue/', directories: false, paginate: true })
-    .then((r) => (r.blobs ?? []).length)
-    .catch(() => 0);
+  // `.then()`/`.catch()` must NOT be chained off `store.list(...)` — with
+  // `paginate: true` it returns a plain AsyncIterable, so `.then` is not a
+  // function and the whole sweep threw synchronously on every run.
+  let queued = 0;
+  try {
+    queued = (
+      await collectBlobListItems(
+        await store.list({ prefix: 'identity-delete-queue/', directories: false, paginate: true })
+      )
+    ).length;
+  } catch {
+    queued = 0;
+  }
   return { ok: true, at: now, expired_invitations: expired, purged_persons: purged, identity_deletes_queued: queued };
 };
 

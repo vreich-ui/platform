@@ -3,10 +3,18 @@
  * Each implements its WAI-ARIA Authoring Practices keyboard pattern:
  *   Tabs           — roving tabindex, Arrow/Home/End, aria-selected + tabpanel.
  *   DropdownMenu   — menu button, Arrow navigation, Escape, outside-click close.
+ *                    The panel is PORTALED to <body> and positioned `fixed`
+ *                    from the trigger's rect: an `absolute` panel inside a
+ *                    scroll container (DataTable is `overflow-x-auto`, which
+ *                    forces `overflow-y: visible → auto`) counts as scrollable
+ *                    overflow, so opening a row menu grew the table and made
+ *                    it jump (W18 review, 2026-08-18). Native <dialog> modals
+ *                    live in the real top layer and still sit above it.
  *   CommandPalette — combobox+listbox, aria-activedescendant, Arrow/Enter/Esc.
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import { cn } from './utils';
 import { filterCommands, type CommandLike } from './logic';
@@ -125,10 +133,24 @@ export interface DropdownMenuProps {
   className?: string;
 }
 
+/** Fixed-position coordinates for the portaled panel, in viewport space. */
+interface MenuPosition {
+  top: number;
+  left?: number;
+  right?: number;
+  maxHeight: number;
+}
+
+/** Gap between the trigger and the panel, and the margin kept off the viewport edge. */
+const MENU_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
 export function DropdownMenu({ trigger, items, align = 'start', className }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [position, setPosition] = useState<MenuPosition | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const baseId = useId();
@@ -153,11 +175,51 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // The panel is portaled out of `rootRef`, so it must be tested separately.
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
+
+  /**
+   * Place the panel from the trigger's viewport rect, flipping above the
+   * trigger when there is more room there. Measured AFTER paint (the panel is
+   * rendered off-screen for one frame at `top: -9999` so its height is real).
+   */
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    const place = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const panelHeight = menuRef.current?.offsetHeight ?? 0;
+      const below = window.innerHeight - rect.bottom - MENU_GAP - VIEWPORT_MARGIN;
+      const above = rect.top - MENU_GAP - VIEWPORT_MARGIN;
+      const flip = panelHeight > below && above > below;
+      setPosition({
+        top: flip ? Math.max(VIEWPORT_MARGIN, rect.top - MENU_GAP - panelHeight) : rect.bottom + MENU_GAP,
+        ...(align === 'end'
+          ? { right: Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.right) }
+          : { left: Math.max(VIEWPORT_MARGIN, rect.left) }),
+        maxHeight: Math.max(120, flip ? above : below),
+      });
+    };
+    place();
+    // A fixed panel does not travel with its trigger — close rather than drift.
+    const dismiss = () => setOpen(false);
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+    };
+  }, [open, align, items.length]);
 
   const move = (dir: 1 | -1) => {
     const pos = enabledIndexes.indexOf(activeIndex);
@@ -192,6 +254,56 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
     close();
   };
 
+  const panel = (
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-orientation="vertical"
+      id={`${baseId}-menu`}
+      onKeyDown={onMenuKeyDown}
+      style={
+        position
+          ? { top: position.top, left: position.left, right: position.right, maxHeight: position.maxHeight }
+          : // First paint: off-screen so the panel can be measured without a
+            // flash. `opacity` (not `visibility`) — a visibility:hidden panel
+            // is not focusable, and the open effect focuses its first item.
+            { top: 0, left: 0, opacity: 0 }
+      }
+      className={cn(
+        'adm-root adm-animate-in fixed z-[55] min-w-[12rem] overflow-y-auto rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-raised)] p-1 shadow-[var(--adm-shadow-md)]'
+      )}
+    >
+      {items.map((item, index) => (
+        <div key={item.id} className={item.separatorBefore ? 'mt-1 border-t border-[var(--adm-border)] pt-1' : ''}>
+          <button
+            ref={(el) => {
+              itemRefs.current[index] = el;
+            }}
+            role="menuitem"
+            type="button"
+            tabIndex={index === activeIndex ? 0 : -1}
+            disabled={item.disabled}
+            title={item.title}
+            onClick={() => select(item)}
+            onMouseEnter={() => !item.disabled && setActiveIndex(index)}
+            className={cn(
+              'adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-sm)] px-2.5 py-1.5 text-left text-[length:var(--adm-text-sm)] disabled:cursor-not-allowed disabled:opacity-40',
+              item.tone === 'danger' ? 'text-[var(--adm-danger)]' : 'text-[var(--adm-text)]',
+              index === activeIndex && !item.disabled
+                ? item.tone === 'danger'
+                  ? 'bg-[var(--adm-danger-soft)]'
+                  : 'bg-[var(--adm-accent-soft)]'
+                : ''
+            )}
+          >
+            {item.icon ? <span className="shrink-0">{item.icon}</span> : null}
+            {item.label}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div ref={rootRef} className={cn('relative inline-block', className)}>
       {trigger({
@@ -199,47 +311,7 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
         ref: triggerRef,
         onToggle: () => setOpen((o) => !o),
       })}
-      {open ? (
-        <div
-          role="menu"
-          aria-orientation="vertical"
-          id={`${baseId}-menu`}
-          onKeyDown={onMenuKeyDown}
-          className={cn(
-            'adm-root adm-animate-in absolute z-50 mt-1 min-w-[12rem] rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-raised)] p-1 shadow-[var(--adm-shadow-md)]',
-            align === 'end' ? 'right-0' : 'left-0'
-          )}
-        >
-          {items.map((item, index) => (
-            <div key={item.id} className={item.separatorBefore ? 'mt-1 border-t border-[var(--adm-border)] pt-1' : ''}>
-              <button
-                ref={(el) => {
-                  itemRefs.current[index] = el;
-                }}
-                role="menuitem"
-                type="button"
-                tabIndex={index === activeIndex ? 0 : -1}
-                disabled={item.disabled}
-                title={item.title}
-                onClick={() => select(item)}
-                onMouseEnter={() => !item.disabled && setActiveIndex(index)}
-                className={cn(
-                  'adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-sm)] px-2.5 py-1.5 text-left text-[length:var(--adm-text-sm)] disabled:cursor-not-allowed disabled:opacity-40',
-                  item.tone === 'danger' ? 'text-[var(--adm-danger)]' : 'text-[var(--adm-text)]',
-                  index === activeIndex && !item.disabled
-                    ? item.tone === 'danger'
-                      ? 'bg-[var(--adm-danger-soft)]'
-                      : 'bg-[var(--adm-accent-soft)]'
-                    : ''
-                )}
-              >
-                {item.icon ? <span className="shrink-0">{item.icon}</span> : null}
-                {item.label}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      {open && typeof document !== 'undefined' ? createPortal(panel, document.body) : null}
     </div>
   );
 }
