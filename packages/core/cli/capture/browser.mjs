@@ -308,7 +308,7 @@ export async function extractPageModel(page) {
     }
     for (const element of document.querySelectorAll('*')) {
       const background = getComputedStyle(element).backgroundImage;
-      for (const match of background.matchAll(/url\(("'?)?([^"')]+)["']?\)/g))
+      for (const match of background.matchAll(/url\(["']?([^"')]+)["']?\)/g))
         addAsset(match[1], 'background-image', element);
     }
 
