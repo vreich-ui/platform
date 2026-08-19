@@ -66,7 +66,7 @@ export const argsHash = (args: Record<string, unknown>): string =>
 export interface LoopDeps {
   chatStore: AgentChatStore;
   toolContext: ToolContext;
-  /** PF2: the TurnEngine seam — providerEngine (legacy adapters) or cmsAgentEngine. */
+  /** PF5: the TurnEngine seam — production admin chat always injects cmsAgentEngine. */
   engine: TurnEngine;
   nowIso?: () => string;
   /** Remaining invocation budget (context.getRemainingTimeInMillis); absent locally. */

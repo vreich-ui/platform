@@ -69,7 +69,10 @@ const OBJECT_TYPES = [
   'theme',
 ];
 
-function RosterSection({ owner }: { owner: boolean }) {
+/** Compatibility editor for the profile records that still carry per-tool
+ * autonomy overrides. PF5 deliberately does not render it as a reasoning-
+ * agent selector; it can move to a policy surface in a later scoped change. */
+export function LegacyProfilePolicyEditor({ owner }: { owner: boolean }) {
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<AgentProfileView[] | null>(null);
   const [assignments, setAssignments] = useState<AgentAssignmentsView | null>(null);
@@ -385,7 +388,12 @@ function HubBody() {
           </div>
         </Card>
 
-        <RosterSection owner={owner} />
+        <Card kicker="Reasoning agent" title="Client Manager">
+          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+            Every admin conversation runs through CMS-Agent. If Client Manager is unavailable, the chat stops safely
+            instead of switching to another model.
+          </p>
+        </Card>
 
         <Card
           kicker="Conversations"

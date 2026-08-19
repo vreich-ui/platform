@@ -5,6 +5,13 @@
 **Verified against:** `vreich-ui/platform` main `e0c8827` (architecture audit) and `f819fe5` (2026-08-10 re-check); `vreich-ui/CMS-Agent` main `c519f02` (audit) and `3047992` (as-built), plus a live `agent_resolve` probe of the deployed Cloud Run endpoint.
 **Companions:** `cms-agent-chat-roadmap.md` (execution order and current progress), `cms-agent-chat-done-criteria.md` (acceptance), `cms-agent-chat-STATE-2026-08-10.md` (state evidence), and the mirrored CMS-Agent handoff.
 
+> **PF5 amendment (2026-08-18).** Admin chat is permanently Client
+> Manager-only. The transitional `off → fallback → required` ladder and its
+> provider rollback have been retired. `CMS_AGENT_MCP_ENDPOINT` and the
+> per-site scoped `CMS_AGENT_MCP_TOKEN` are mandatory; missing or unhealthy
+> CMS-Agent configuration fails closed with a coded chat error. Historical
+> mode fields remain readable only so existing governance documents parse.
+
 > **Reading order note.** §5 below is the *designed* contract. It shipped essentially intact, but the implementation is stricter in several places and differs in a few. **§5A records the as-built deltas and is authoritative where the two disagree.**
 
 ---
@@ -52,10 +59,10 @@ ChatThread / ApprovalCard  ──poll──▶    admin-agent-chat.ts        (un
                                         chat-store.ts              (ChatDoc = authority)
                                         loop.ts                    (turn driver, approvals)
                                           │ TurnEngine seam (new)
-                                          ├─ cmsAgentEngine ────MCP agent_converse────▶      conversational runner
-                                          │    (required mode: the only engine)               client_manager agent def
-                                          │                                                   (store-backed: prompt,
-                                          └─ providerEngine (legacy; deleted at PF6)           modelConfig, skills)
+                                          └─ cmsAgentEngine ────MCP agent_converse────▶      conversational runner
+                                               (the only admin-chat engine)                    client_manager agent def
+                                                                                              (store-backed: prompt,
+                                                                                               modelConfig, skills)
                                         tools.ts + ToolContext     (tool exec stays local)    turn records + usage
                                         site-binding (env NAMES)                              project registry (knowledge)
 ```
@@ -120,7 +127,7 @@ A **workspace-stored conversational agent definition** — a new object kind, no
 
 ### 5.5 Error taxonomy (wire)
 
-`unknown_project | project_disabled | agent_unresolved | transcript_too_large | model_timeout | model_error | budget_exceeded | invalid_turn_request`. Platform maps any of these — and transport failure, auth failure, timeout — to a `run_error` event with a stable `code: 'cms_agent_<reason>'` and human copy ("The Publishing Agent service is unavailable — nothing was changed. Try again or contact the owner."). In `required` mode there is **no fallback**; the run errors cleanly and the chat stays usable for retry.
+`unknown_project | project_disabled | agent_unresolved | transcript_too_large | model_timeout | model_error | budget_exceeded | invalid_turn_request`. Platform maps any of these — and transport failure, auth failure, timeout — to a `run_error` event with a stable `code: 'cms_agent_<reason>'` and human copy ("The Publishing Agent service is unavailable — nothing was changed. Try again or contact the owner."). There is **no fallback**; the run errors cleanly and the chat stays usable for retry.
 
 ## 5A. As-built deltas (authoritative — verified at CMS-Agent `3047992`)
 
@@ -178,9 +185,7 @@ CMS-Agent orchestration tools (PF4) map `WorkspaceRiskLevel` onto Platform auton
 |---|---|---|
 | `cmsAgentEndpoint: ['CMS_AGENT_MCP_ENDPOINT']` | new keys in `PLATFORM_ENV_NAMES` (`site-binding.ts`) | Cloud Run `/mcp` URL |
 | `cmsAgentToken: ['CMS_AGENT_MCP_TOKEN']` | same | per-site scoped bearer |
-| `cmsAgentChatMode: ['CMS_AGENT_CHAT_MODE']` | same | `off \| fallback \| required` (default `off`) |
 | `cmsAgentProjectId` | `sites/<site>/config/site-identity.ts` (committed, non-secret — the `pdfToolProjectId` precedent) | `dr-lurie`, `platform`, `fernwell` |
-| Runtime mode override | governance store (`overrides.v1`), Owner-set | instant rollback without redeploy (§11) |
 | Provisioning catalog | `packages/core/cli/create-site.mjs` + `admin-parity.mjs` | new vars documented |
 
 **CMS-Agent — ✅ all done as of `3047992`.** `client_manager` seeded and deletion-guarded; `fernwell` registered (`FERNWELL_MCP_ENDPOINT`/`FERNWELL_MCP_TOKEN`, read-only tool set — but no publish executor, so a live publish there would hit `no_publish_executor`); manifest regenerated (137 tools); `verify:deploy` now asserts `agent_resolve` returns an active definition for both `dr-lurie` and `fernwell`; deploy uses merge-style flags only and fails the build on a health-probe error.
@@ -196,15 +201,21 @@ CMS-Agent orchestration tools (PF4) map `WorkspaceRiskLevel` onto Platform auton
 5. **Object context and editor identity:** Platform sends a structured `context` block (site, object type/id, focus, learning-mode) and an `actor` block per turn; CMS-Agent stamps both onto turn records; the object *binding* sentence the model sees is composed CMS-Agent-side from `context`, so prompt ownership is single-sided.
 6. **Approval mapping:** tenant tools — Platform's existing model, untouched; CMS-Agent orchestration tools — riskLevel floors (`publish`/`admin` never auto, never safe-run); CMS-Agent server-side gates remain the second wall (§7).
 7. **Long-running work:** a chat *turn* is one bounded model call (≤ ~90s, well inside every budget). Node/workflow executions are started by an approval-gated tool that returns `{runId}` immediately; later turns (or the user) poll via `get_workspace_run`; publish gates surface as approval cards; cancellation maps to `workflow.pause_run`/`cancel`; blocked/waiting runs appear in the existing "Needs you" surface. Nothing ever holds a Netlify function open across a 1–5-minute node run.
-8. **Downtime / missing config:** `off` → legacy behavior; `fallback` (transitional only) → CMS-Agent first, provider fallback **loudly recorded** as a `engine_fallback` event; `required` → typed `run_error`, no fallback, chat remains usable, health surfaced to owners (memoized `/healthz` + `agent_resolve` probe). Missing env in `required` → the send action itself returns a clear 503-style error (`cms_agent_not_configured`), mirroring `pdf_tool_bridge_not_configured`.
+8. **Downtime / missing config:** typed `run_error`, no fallback, and the chat remains usable for retry. Health is surfaced to owners through the memoized `agent_resolve` probe. Missing endpoint/token makes the send action return a clear 503-style `cms_agent_not_configured` error before a run is created.
 9. **Existing chats:** retained in place; zero transcript migration (the neutral `ChatMsg` shape is already what `agent_converse` consumes). New runs on old chats simply use the new engine; `ChatRun` gains `engine: 'cms-agent' | 'provider'` + `agent_ref` stamped at `startRun`, so history is honestly labeled.
-10. **Disabling legacy without an outage:** the mode ladder per site (`off → fallback → required`), env-defaulted with an Owner-settable governance override for instant flips; staged site-by-site (§11); the provider path is physically removed from the chat loop only at the final milestone, after every site has soaked in `required`.
+10. **Disabling legacy:** PF5 makes Client Manager the only construction path for admin-chat turns. Old mode env values and stored governance overrides cannot select Platform providers.
 11. **Env & bindings:** table in §9.
-12. **Deployment order & rollback:** CMS-Agent first (additive tools + manifest + seeds + tokens), Platform client second (dark, `off`), cutover site-by-site, retirement last. Rollback at every stage = mode flip (governance override, instant) or Cloud Run revision pin; nothing destructive until the final removal commit (§11, roadmap gates).
+12. **Deployment order & rollback:** CMS-Agent first (additive tools + manifest + seeds + scoped tokens), then the Platform revision with its permanent Client Manager route. Rollback is a Platform revision rollback or CMS-Agent previous-revision pin, followed by fresh health and chat verification (§11).
 
 ## 11. Cutover and rollback (summary; full sequencing in the roadmap)
 
-Stage order: **platform** site (the agency's own, lowest blast radius) → **fernwell** (synthetic tenant; requires fernwell project registration) → **drlurie** (production revenue tenant). Each stage: `fallback` for a soak window with `engine_fallback` count required to be zero → `required` → authenticated browser walkthrough of every admin chat entry point (Object Room rail, Templates workspace rail, AgentsHub free chat) → explicit go from Wolf before the next site. Rollback is always: governance override → `off` (instant), then env default correction at the next deploy. CMS-Agent rollback: pin the previous Cloud Run revision (auto-deploy trigger's verify step already enforces image↔revision consistency). The legacy provider path is deleted from the chat loop (PF6) only after all three sites have run `required` cleanly for the agreed soak period; `provider.ts` itself survives until the Ask-AI decision (§14) is made.
+PF5 now deploys one fleet-wide behavior: **platform**, **fernwell**, and
+**drlurie** admin chat all require the canonical Client Manager. Deployment
+readiness is therefore endpoint/token configuration plus a healthy
+`agent_resolve` for each site's committed project id, followed by an
+authenticated walkthrough of Object Room, Templates, and AgentsHub chat.
+Rollback is a code/revision rollback, not a mode switch. `provider.ts` remains
+for non-chat AI surfaces until the Ask-AI decision (§14) is made.
 
 ## 12. What this does NOT change
 

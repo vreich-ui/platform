@@ -3,7 +3,8 @@
  *
  * Handler level (real local file-backed stores; unique ids per run):
  * assignment CRUD is Owner-only (store-tier admin 403s but can read);
- * resolution lands in a NEW chat's run record. Lib level: askAiForObject
+ * resolution lands in a NEW chat's policy-only run record while the public
+ * reasoning identity remains Client Manager. Lib level: askAiForObject
  * speaks the ASSIGNED profile's provider — both transports mocked and
  * conformance-checked (Anthropic forced-tool vs OpenAI function-calling).
  */
@@ -12,9 +13,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 process.env.ADMIN_EMAILS = 'wolf@example.com';
+process.env.CMS_AGENT_MCP_ENDPOINT = 'https://cms-agent.test/mcp';
+process.env.CMS_AGENT_MCP_TOKEN = 'test-token';
 
 import { handler as chatHandler } from '../../netlify/functions/admin-agent-chat.js';
 import { askAiForObject, type AskAiObjectStore } from '../../packages/core/server/lib/ask-ai-object.js';
+import { getAgentChatBlobStore, loadChatDoc } from '../../packages/core/server/lib/agent/chat-store.js';
 import { getUsersBlobStore, putUserRecord } from '../../packages/core/server/lib/users-store.js';
 import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import type { ObjectRecord } from '../../packages/core/schema/object-record-v1.js';
@@ -29,7 +33,7 @@ const call = async (body: Record<string, unknown>, context?: unknown) =>
 
 const parse = (res: { body: string }) => JSON.parse(res.body) as Record<string, unknown>;
 
-test('roster RBAC + §4a resolution: owner manages, store-tier admin reads, a new run stamps the assigned profile', async () => {
+test('roster RBAC + §4a policy resolution: a new run freezes the profile while Client Manager remains the reasoning identity', async () => {
   // Seed a store-tier ADMIN (not in ADMIN_EMAILS): passes the admin wall, is not an owner.
   const usersStore = await getUsersBlobStore({});
   await putUserRecord(usersStore, {
@@ -74,7 +78,9 @@ test('roster RBAC + §4a resolution: owner manages, store-tier admin reads, a ne
   );
   assert.equal(deniedAssign.statusCode, 403);
 
-  // A NEW object chat on a content_item resolves the TYPE assignment into the run record.
+  // A NEW object chat on a content_item resolves the TYPE assignment into the
+  // compatibility policy record. It cannot replace Client Manager as the
+  // public reasoning identity.
   const objectId = `req_roster_demo_20260719_${RUN.slice(-2)}`;
   const created = await call(
     { action: 'create_chat', kind: 'object', object_type: 'content_item', object_id: objectId },
@@ -84,9 +90,13 @@ test('roster RBAC + §4a resolution: owner manages, store-tier admin reads, a ne
   const chatId = (parse(created).chat as { chat_id: string }).chat_id;
   const sent = await call({ action: 'send', chat_id: chatId, text: 'Hello agent.' }, OWNER_CTX);
   assert.equal(sent.statusCode, 200, sent.body);
+  const doc = await loadChatDoc(await getAgentChatBlobStore({}), chatId);
+  assert.equal(doc?.run?.profile.profile_id, profileId);
+  assert.equal(doc?.run?.profile.provider, 'openai');
   const view = parse(await call({ action: 'get_chat', chat_id: chatId }, OWNER_CTX));
-  assert.equal((view.agent as { profile_id: string }).profile_id, profileId);
-  assert.equal((view.agent as { provider: string }).provider, 'openai');
+  assert.equal((view.agent as { name: string }).name, 'Client Manager');
+  assert.equal((view.agent as { agent_ref: string }).agent_ref, 'agt_client_manager');
+  assert.equal((view.agent as { engine: string }).engine, 'cms_agent');
 
   // Unknown profile id on assign → 404.
   const missing = await call(

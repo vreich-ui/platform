@@ -24,7 +24,6 @@ import {
   CmsAgentEngineError,
   humanCopyForCmsAgentError,
   providerEngine,
-  resolveEffectiveChatMode,
   trimTranscriptForCmsAgent,
   type CmsAgentTurnClient,
 } from './engine.js';
@@ -301,31 +300,7 @@ test('trimTranscriptForCmsAgent enforces the serialized-size bound too, and leav
   assert.deepEqual(trimmed[trimmed.length - 1], { role: 'user', text: 'the newest message' });
 });
 
-// ─── mode resolution: governance override ?? env ?? off ──────────────────────
-
-test('resolveEffectiveChatMode: override wins, env is the fallback, default is off, garbage is off + reported', () => {
-  const saved = process.env.CMS_AGENT_CHAT_MODE;
-  try {
-    delete process.env.CMS_AGENT_CHAT_MODE;
-    assert.deepEqual(resolveEffectiveChatMode(undefined), { mode: 'off' });
-    assert.deepEqual(resolveEffectiveChatMode('required'), { mode: 'required' });
-
-    process.env.CMS_AGENT_CHAT_MODE = 'fallback';
-    assert.deepEqual(resolveEffectiveChatMode(undefined), { mode: 'fallback' });
-    assert.deepEqual(resolveEffectiveChatMode('off'), { mode: 'off' }, 'governance override beats env');
-
-    process.env.CMS_AGENT_CHAT_MODE = 'REQUIRED';
-    assert.deepEqual(resolveEffectiveChatMode(undefined), { mode: 'required' }, 'case-insensitive env');
-
-    process.env.CMS_AGENT_CHAT_MODE = 'garbage';
-    assert.deepEqual(resolveEffectiveChatMode(undefined), { mode: 'off', invalidEnvValue: 'garbage' });
-  } finally {
-    if (saved === undefined) delete process.env.CMS_AGENT_CHAT_MODE;
-    else process.env.CMS_AGENT_CHAT_MODE = saved;
-  }
-});
-
-// ─── PF3: buildChatEngine — mode wiring, fail-fast, loud fallback ────────────
+// ─── PF5: buildChatEngine — permanent Client Manager, fail closed ────────────
 
 const failingClient = (): CmsAgentTurnClient => ({
   async resolveAgent() {
@@ -337,41 +312,22 @@ const failingClient = (): CmsAgentTurnClient => ({
   invalidateAgentRef() {},
 });
 
-const spyAdapter = () => {
-  let calls = 0;
-  const adapter = async () => {
-    calls += 1;
-    return { text: 'provider answered', toolCalls: [], outputTokens: 3 };
-  };
-  return { adapter, count: () => calls };
-};
-
-test('buildChatEngine off: provider only, the CMS-Agent client is never touched', async () => {
-  const { adapter, count } = spyAdapter();
-  let clientTouched = 0;
-  const client: CmsAgentTurnClient = {
-    async resolveAgent() {
-      clientTouched += 1;
-      return { ok: true, data: 'agt_client_manager@1' };
-    },
-    async converse() {
-      clientTouched += 1;
-      return okTurn();
-    },
-    invalidateAgentRef() {},
-  };
-  const engine = buildChatEngine({ mode: 'off', adapter, client, projectId: 'platform', siteId: 'site_platform' });
-  const turn = await engine({ doc: chatDoc(), run: chatRun(), system: 'SYS', tools: [] });
-  assert.equal(turn.text, 'provider answered');
-  assert.equal(count(), 1);
-  assert.equal(clientTouched, 0);
+test('buildChatEngine always uses Client Manager and records the CMS-Agent engine', async () => {
+  const stub = stubClient([okTurn()]);
+  const engine = buildChatEngine({
+    client: stub.client,
+    projectId: 'platform',
+    siteId: 'site_platform',
+  });
+  const run = chatRun();
+  const turn = await engine({ doc: chatDoc(), run, system: 'ignored Platform prompt', tools: [] });
+  assert.equal(turn.text, 'Here is a proposal.');
+  assert.equal(stub.converseCalls.length, 1);
+  assert.equal(run.engine, 'cms_agent');
 });
 
-test('buildChatEngine required: E3 — a CMS-Agent failure throws its named code and the provider adapter is provably never invoked', async () => {
-  const { adapter, count } = spyAdapter();
+test('buildChatEngine fails closed when CMS-Agent is unavailable', async () => {
   const engine = buildChatEngine({
-    mode: 'required',
-    adapter,
     client: failingClient(),
     projectId: 'platform',
     siteId: 'site_platform',
@@ -380,47 +336,6 @@ test('buildChatEngine required: E3 — a CMS-Agent failure throws its named code
     () => engine({ doc: chatDoc(), run: chatRun(), system: '', tools: [] }),
     (error: unknown) => error instanceof CmsAgentEngineError && error.code === 'cms_agent_unreachable'
   );
-  assert.equal(count(), 0, 'no silent provider fallback in required mode');
-});
-
-test('buildChatEngine fallback: degrades to the provider with a LOUD engine_fallback event and restamps run.engine', async () => {
-  const { adapter, count } = spyAdapter();
-  const engine = buildChatEngine({
-    mode: 'fallback',
-    adapter,
-    client: failingClient(),
-    projectId: 'platform',
-    siteId: 'site_platform',
-    nowIso: () => NOW_ISO,
-  });
-  const doc = chatDoc();
-  const run = chatRun({ engine: 'cms_agent' });
-  const turn = await engine({ doc, run, system: 'SYS', tools: [] });
-  assert.equal(turn.text, 'provider answered');
-  assert.equal(count(), 1);
-  assert.equal(run.engine, 'provider', 'the engine that actually reasoned the turn is recorded');
-  const event = doc.events.find((entry) => entry.type === 'engine_fallback');
-  assert.ok(event, 'the degradation is loud, never silent');
-  assert.equal(event!.detail!.code, 'cms_agent_unreachable');
-  assert.equal(typeof event!.detail!.message, 'string');
-});
-
-test('buildChatEngine fallback: a healthy CMS-Agent turn emits no fallback event and never calls the provider', async () => {
-  const { adapter, count } = spyAdapter();
-  const stub = stubClient([okTurn()]);
-  const engine = buildChatEngine({
-    mode: 'fallback',
-    adapter,
-    client: stub.client,
-    projectId: 'platform',
-    siteId: 'site_platform',
-    nowIso: () => NOW_ISO,
-  });
-  const doc = chatDoc();
-  const turn = await engine({ doc, run: chatRun(), system: '', tools: [] });
-  assert.equal(turn.text, 'Here is a proposal.');
-  assert.equal(count(), 0);
-  assert.equal(doc.events.some((entry) => entry.type === 'engine_fallback'), false);
 });
 
 test('humanCopyForCmsAgentError: every named class gets editor-safe copy; unknown codes get the generic sentence', () => {
@@ -438,35 +353,4 @@ test('humanCopyForCmsAgentError: every named class gets editor-safe copy; unknow
     assert.ok(copy.length > 20);
     assert.equal(/gpt|openai|anthropic|claude|agt_|schema/i.test(copy), false, `no internals in copy for ${code}`);
   }
-});
-
-test('buildChatEngine fallback: after one degradation the REST OF THE HOP stays on the provider — one loud event, no repeat probing', async () => {
-  const { adapter, count } = spyAdapter();
-  let cmsAttempts = 0;
-  const client: CmsAgentTurnClient = {
-    async resolveAgent() {
-      cmsAttempts += 1;
-      return { ok: false, code: 'cms_agent_unreachable', message: 'down', retryableWithSameTurnId: true };
-    },
-    async converse() {
-      return { ok: false, code: 'cms_agent_unreachable', message: 'down', retryableWithSameTurnId: true };
-    },
-    invalidateAgentRef() {},
-  };
-  const engine = buildChatEngine({
-    mode: 'fallback',
-    adapter,
-    client,
-    projectId: 'platform',
-    siteId: 'site_platform',
-    nowIso: () => NOW_ISO,
-  });
-  const doc = chatDoc();
-  const run = chatRun();
-  await engine({ doc, run, system: '', tools: [] });
-  await engine({ doc, run, system: '', tools: [] });
-  await engine({ doc, run, system: '', tools: [] });
-  assert.equal(count(), 3, 'every turn is answered by the provider');
-  assert.equal(cmsAttempts, 1, 'the dead service is probed once per hop, not per turn');
-  assert.equal(doc.events.filter((entry) => entry.type === 'engine_fallback').length, 1, 'one loud event, not three');
 });

@@ -6,9 +6,9 @@
  *       approve_tool / deny_tool / cancel.
  *
  * `send` verifies identity, captures the human Principal into the run record
- * SERVER-SIDE, resolves the object's dedicated agent profile (object → type →
- * site default, plan §4a) and the frozen autonomy map (defaults + governance
- * chat_tools + profile overrides), stamps both into the run, and enqueues the
+ * SERVER-SIDE, resolves the object's legacy profile solely as an execution-
+ * policy input (object → type → site default) and freezes the resulting
+ * autonomy map, then enqueues the
  * background hop with a one-shot trigger token. Approve executes the STORED
  * pending call (or a human-edited, re-validated variant) — client args are
  * never trusted on a plain resume.
@@ -34,7 +34,7 @@ import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
 import { ensureMcpSiblingsForChat } from '../lib/agent/mcp-siblings.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
-import { humanCopyForCmsAgentError, resolveEffectiveChatMode } from '../lib/agent/engine.js';
+import { humanCopyForCmsAgentError } from '../lib/agent/engine.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import {
   approvePendingTool,
@@ -61,7 +61,6 @@ import {
   getProfilesDoc,
   putProfilesDoc,
   resolveProfile,
-  type AgentProfile,
   type AgentProfilesDoc,
   type AgentProfilesStore,
 } from '../lib/agent/profiles.js';
@@ -188,19 +187,16 @@ const triggerBackground = async (chatId: string, triggerToken: string): Promise<
   }
 };
 
-const agentView = (p: Pick<AgentProfile, 'profile_id' | 'name' | 'provider' | 'model' | 'avatar_artifact'>) => ({
-  profile_id: p.profile_id,
-  name: p.name,
-  provider: p.provider,
-  model: p.model,
-  ...(p.avatar_artifact ? { avatar_artifact: p.avatar_artifact } : {}),
+/** PF5: the only reasoning identity available to admin chat. The versioned
+ *  ref is filled by CMS-Agent after its first successful resolution; the
+ *  stable base ref keeps idle and historical chats truthful before then. */
+const clientManagerView = (doc: ChatDoc) => ({
+  name: 'Client Manager',
+  agent_ref: doc.run?.agent_ref ?? 'agt_client_manager',
+  engine: 'cms_agent' as const,
 });
 
-/** `idleProfile` is the §4a-resolved agent to name when NO run exists yet — so
- *  the chip shows the real agent (name + provider) before the first message,
- *  not the generic fallback (T9.16 idle-chip finding). A run (live or last)
- *  always wins, since its frozen profile is the agent that actually ran. */
-const chatSummary = (doc: ChatDoc, idleProfile?: AgentProfile) => ({
+const chatSummary = (doc: ChatDoc) => ({
   chat_id: doc.chat_id,
   kind: doc.kind,
   ...(doc.object_type ? { object_type: doc.object_type } : {}),
@@ -209,13 +205,8 @@ const chatSummary = (doc: ChatDoc, idleProfile?: AgentProfile) => ({
   status: doc.status,
   updated_at: doc.updated_at,
   last_outcome: doc.runs[doc.runs.length - 1] ?? null,
-  ...(doc.run ? { agent: agentView(doc.run.profile) } : idleProfile ? { agent: agentView(idleProfile) } : {}),
+  agent: clientManagerView(doc),
 });
-
-/** Resolve the agent to display for an idle (never-run) chat; a chat that has
- *  a run carries its own frozen agent, so none is needed. */
-const idleProfileFor = (profilesDoc: AgentProfilesDoc, doc: ChatDoc): AgentProfile | undefined =>
-  doc.run ? undefined : resolveProfile(profilesDoc, { objectId: doc.object_id, objectType: doc.object_type });
 
 /**
  * Task 3 §6 — canonicalize governance `chat_tools` through `migrateAutonomyKeys`
@@ -314,7 +305,6 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
     switch (request.data.action) {
       case 'create_chat': {
-        const profilesDoc = await getProfilesDoc(await getAgentProfilesBlobStore(event), nowIso());
         if (request.data.kind === 'object') {
           if (!request.data.object_type || !request.data.object_id) {
             return jsonResponse(400, { error: 'object chats need object_type and object_id.' });
@@ -323,7 +313,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           const existing = await loadChatDoc(chatStore, chatId);
           if (existing)
             return jsonResponse(200, {
-              chat: chatSummary(existing, idleProfileFor(profilesDoc, existing)),
+              chat: chatSummary(existing),
               existed: true,
             });
           const doc: ChatDoc = {
@@ -342,7 +332,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             runs: [],
           };
           await saveChatDoc(chatStore, doc);
-          return jsonResponse(200, { chat: chatSummary(doc, idleProfileFor(profilesDoc, doc)), existed: false });
+          return jsonResponse(200, { chat: chatSummary(doc), existed: false });
         }
         const doc: ChatDoc = {
           schema_version: 'agent-chat.v1',
@@ -358,7 +348,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           runs: [],
         };
         await saveChatDoc(chatStore, doc);
-        return jsonResponse(200, { chat: chatSummary(doc, idleProfileFor(profilesDoc, doc)), existed: false });
+        return jsonResponse(200, { chat: chatSummary(doc), existed: false });
       }
 
       case 'list_chats': {
@@ -372,9 +362,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           Boolean(request.data.include_all),
           isOwner(callerRoles)
         );
-        const profilesDoc = await getProfilesDoc(await getAgentProfilesBlobStore(event), nowIso());
         return jsonResponse(200, {
-          chats: visibleDocs.map((doc) => chatSummary(doc, idleProfileFor(profilesDoc, doc))),
+          chats: visibleDocs.map((doc) => chatSummary(doc)),
         });
       }
 
@@ -382,11 +371,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found' });
         const since = request.data.since_seq ?? 0;
-        const profilesDoc = doc.run
-          ? undefined
-          : await getProfilesDoc(await getAgentProfilesBlobStore(event), nowIso());
         return jsonResponse(200, {
-          ...chatSummary(doc, profilesDoc ? idleProfileFor(profilesDoc, doc) : undefined),
+          ...chatSummary(doc),
           seq: doc.seq,
           events: doc.events.filter((eventItem) => eventItem.seq > since),
           ...(doc.status === 'awaiting_approval' && doc.run?.pending
@@ -415,10 +401,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         // Task 3 §1: the rollback lever — unset resolves to 'generated'.
         const registryKind: RegistryKind = policies.chat_registry ?? 'generated';
 
-        // PF3: in required mode a missing bridge config fails AT SEND with a
-        // clear error instead of queueing a run that can only die in the hop.
-        const { mode: chatEngineMode } = resolveEffectiveChatMode(policies.cms_agent_chat_mode);
-        if (chatEngineMode === 'required' && !isCmsAgentConfigured()) {
+        // PF5 permanent cutover: a missing bridge always fails AT SEND. No
+        // mode can queue a run for Platform's generic provider adapters.
+        if (!isCmsAgentConfigured()) {
           return jsonResponse(503, {
             error: humanCopyForCmsAgentError('cms_agent_not_configured'),
             code: 'cms_agent_not_configured',
@@ -433,7 +418,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const profilesStore = await getAgentProfilesBlobStore(event);
         const profilesDoc = await migratedProfilesDoc(profilesStore, await getProfilesDoc(profilesStore, nowIso()));
 
-        // §4a: resolve the dedicated agent AT SEND TIME and stamp it into the run.
+        // Compatibility profile resolution is policy-only: its autonomy
+        // overrides still apply, but it cannot select a reasoning engine.
         const profile = resolveProfile(profilesDoc, {
           objectId: doc.object_id,
           objectType: doc.object_type,

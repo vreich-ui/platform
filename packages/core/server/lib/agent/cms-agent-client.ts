@@ -53,10 +53,7 @@ export const CMS_AGENT_DEFAULT_TIMEOUT_MS = 90_000;
 /** `agent_resolve` results are cached per (project, role) for this long. */
 export const AGENT_REF_TTL_MS = 5 * 60_000;
 
-// ─── modes + errors ──────────────────────────────────────────────────────────
-
-export type CmsAgentChatMode = 'off' | 'fallback' | 'required';
-const CHAT_MODES: readonly CmsAgentChatMode[] = ['off', 'fallback', 'required'];
+// ─── errors ──────────────────────────────────────────────────────────────────
 
 /** The eight frozen CMS-Agent tool-error codes, read at `error.data.error.code`. */
 export const CMS_AGENT_WIRE_ERROR_CODES = [
@@ -159,23 +156,7 @@ export const cmsAgentMissingEnvVars = (names: SiteBindingEnvNames = PLATFORM_ENV
 export const isCmsAgentConfigured = (names: SiteBindingEnvNames = PLATFORM_ENV_NAMES): boolean =>
   cmsAgentMissingEnvVars(names).length === 0;
 
-/**
- * `off` is the fail-safe default: unset, blank or unrecognized all resolve to
- * `off` so a typo can never silently promote a site to `required`. The raw
- * value is returned alongside so PF3 can surface "you set a mode we don't
- * understand" instead of swallowing it.
- */
-export const resolveCmsAgentChatMode = (
-  names: SiteBindingEnvNames = PLATFORM_ENV_NAMES
-): { mode: CmsAgentChatMode; invalidValue?: string } => {
-  const raw = nonEmpty(readBoundEnv(names.cmsAgentChatMode));
-  if (raw === undefined) return { mode: 'off' };
-  const candidate = raw.toLowerCase();
-  if ((CHAT_MODES as readonly string[]).includes(candidate)) return { mode: candidate as CmsAgentChatMode };
-  return { mode: 'off', invalidValue: raw };
-};
-
-export type CmsAgentConfig = { endpoint: string; token: string; mode: CmsAgentChatMode };
+export type CmsAgentConfig = { endpoint: string; token: string };
 
 /**
  * Never throws and never caches: a missing variable is a typed
@@ -197,7 +178,6 @@ export const resolveCmsAgentConfig = (
     data: {
       endpoint: nonEmpty(readBoundEnv(names.cmsAgentEndpoint))!.replace(/\/+$/, ''),
       token: nonEmpty(readBoundEnv(names.cmsAgentToken))!,
-      mode: resolveCmsAgentChatMode(names).mode,
     },
   };
 };
@@ -532,7 +512,7 @@ export class CmsAgentClient {
     this.now = options.now ?? (() => Date.now());
   }
 
-  /** Exposed so PF3's health probe and PF2's mode resolution share one source. */
+  /** Exposed so the health probe and the turn client share one config source. */
   config(): CmsAgentResult<CmsAgentConfig> {
     return resolveCmsAgentConfig(this.names);
   }

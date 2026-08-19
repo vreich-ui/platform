@@ -50,8 +50,6 @@ export type SiteBindingEnvNames = {
   readonly cmsAgentEndpoint: readonly string[];
   /** This site's scoped CMS-Agent bearer — one project, one tool allow-list. */
   readonly cmsAgentToken: readonly string[];
-  /** `off | fallback | required`; unset or unrecognized resolves to `off`. */
-  readonly cmsAgentChatMode: readonly string[];
 };
 
 export type SiteBinding = {
@@ -88,7 +86,6 @@ export const PLATFORM_ENV_NAMES: SiteBindingEnvNames = {
   deployLookupToken: ['NETLIFY_AUTH_TOKEN', 'NETLIFY_BLOBS_TOKEN'],
   cmsAgentEndpoint: ['CMS_AGENT_MCP_ENDPOINT'],
   cmsAgentToken: ['CMS_AGENT_MCP_TOKEN'],
-  cmsAgentChatMode: ['CMS_AGENT_CHAT_MODE'],
 };
 
 /**

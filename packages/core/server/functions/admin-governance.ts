@@ -43,7 +43,6 @@ import { CHAT_TOOLS, defaultAutonomyFor } from '../lib/agent/tools.js';
 import { migrateAutonomyKeys, generatedChatToolByName } from '../lib/agent/generated-tools.js';
 import { MEMBERSHIP_TOOL_NAMES } from '../lib/mcp-tool-definitions-membership.js';
 import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
-import { resolveEffectiveChatMode } from '../lib/agent/engine.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { approvalPolicyConfigSchema, activeApprovalPolicy } from '../../lib/approval-policy.js';
 import { creationPolicyConfigSchema, activeCreationPolicy } from '../../lib/creation-policy.js';
@@ -74,8 +73,8 @@ export const requestSchema = z.discriminatedUnion('verb', [
     creation: creationPolicyConfigSchema.optional(),
     chat_tools: chatToolAutonomySchema.optional(),
     learning_mode: z.boolean().optional(),
-    /** PF3/PF5: the chat TurnEngine mode override — the cutover/rollback lever. */
-    cms_agent_chat_mode: z.enum(['off', 'fallback', 'required']).optional(),
+    /** PF5 permanent cutover: explicitly reject the retired mode lever. */
+    cms_agent_chat_mode: z.never().optional(),
     /** Task 3: the chat-tool registry override — the no-deploy rollback lever
      *  back to the legacy (tools.ts) registry. Unset resolves to 'generated'. */
     chat_registry: z.enum(['legacy', 'generated']).optional(),
@@ -118,18 +117,17 @@ const cmsAgentHealthClient = new CmsAgentClient();
  *  cache removes the whole cross-tenant-staleness class outright. */
 const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string, unknown> }>();
 
-/** Config + effective mode + a memoized live `agent_resolve` probe. Env NAMES
+/** Config + permanent mode + a memoized live `agent_resolve` probe. Env NAMES
  *  only, never values; the probe is read-only and cached for a minute so the
  *  governance page cannot hammer the service. */
-const cmsAgentStatus = async (override?: 'off' | 'fallback' | 'required'): Promise<Record<string, unknown>> => {
+const cmsAgentStatus = async (legacyOverride?: 'off' | 'fallback' | 'required'): Promise<Record<string, unknown>> => {
   const missing = cmsAgentMissingEnvVars();
-  const effective = resolveEffectiveChatMode(override);
   const status: Record<string, unknown> = {
     configured: missing.length === 0,
     ...(missing.length > 0 ? { missing_env: missing } : {}),
-    mode: effective.mode,
-    mode_source: override ? 'governance_override' : 'env_default',
-    ...(effective.invalidEnvValue === undefined ? {} : { invalid_env_value: effective.invalidEnvValue }),
+    mode: 'required',
+    mode_source: 'permanent_default',
+    ...(legacyOverride ? { legacy_mode_override_ignored: legacyOverride } : {}),
   };
   if (missing.length > 0) return status;
   const projectId = getSiteIdentity().cmsAgentProjectId;
@@ -263,7 +261,6 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         req.creation && 'creation',
         req.chat_tools && 'chat_tools',
         req.learning_mode !== undefined && 'learning_mode',
-        req.cms_agent_chat_mode !== undefined && `cms_agent_chat_mode=${req.cms_agent_chat_mode}`,
         req.chat_registry !== undefined && `chat_registry=${req.chat_registry}`,
       ]
         .filter(Boolean)
@@ -279,7 +276,6 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         ...(req.creation !== undefined ? { creation: req.creation } : {}),
         ...(req.chat_tools !== undefined ? { chat_tools: canonicalChatTools, chat_tools_migrated: true } : {}),
         ...(req.learning_mode !== undefined ? { learning_mode: req.learning_mode } : {}),
-        ...(req.cms_agent_chat_mode !== undefined ? { cms_agent_chat_mode: req.cms_agent_chat_mode } : {}),
         ...(req.chat_registry !== undefined ? { chat_registry: req.chat_registry } : {}),
         updated_by: email,
         updated_at: nowIso(),

@@ -286,7 +286,7 @@ export function AgentChip({ agent }: { agent: AgentView | undefined }) {
         </span>
       )}
       <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-        {agent?.name ?? 'Site Agent'}
+        {agent?.name ?? 'Client Manager'}
       </span>
     </span>
   );
