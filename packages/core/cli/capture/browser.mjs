@@ -267,9 +267,33 @@ export async function extractPageModel(page) {
     for (const image of document.querySelectorAll('img')) {
       addAsset(image.currentSrc || image.getAttribute('src'), 'image', image, { srcset: image.getAttribute('srcset') });
     }
+    // T12.17: a srcset candidate URL may itself contain commas — every Wix transform URL does
+    // (`.../v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/file.jpg 1x, ...`). Splitting the
+    // attribute on ',' truncated each candidate to `.../v1/fill/w_146`, a prefix Wix answers with
+    // HTTP 403, so emission's bounded asset probe refused the whole run. Parse per the HTML
+    // srcset grammar instead: a candidate's URL is the leading non-whitespace run with trailing
+    // commas stripped, and its descriptor runs to the next comma.
+    const srcsetCandidates = (value) => {
+      const text = String(value ?? '');
+      const urls = [];
+      let index = 0;
+      while (index < text.length) {
+        while (index < text.length && /[\s,]/.test(text[index])) index += 1;
+        if (index >= text.length) break;
+        const start = index;
+        while (index < text.length && !/\s/.test(text[index])) index += 1;
+        const raw = text.slice(start, index);
+        const url = raw.replace(/,+$/, '');
+        // A token that ended in a comma WAS the whole candidate (no descriptor); otherwise the
+        // descriptor still has to be consumed before the next candidate begins.
+        if (raw === url) while (index < text.length && text[index] !== ',') index += 1;
+        if (url) urls.push(url);
+      }
+      return urls;
+    };
     for (const source of document.querySelectorAll('source')) {
       addAsset(source.getAttribute('src'), 'media', source);
-      const firstSrcset = source.getAttribute('srcset')?.split(',')[0]?.trim().split(/\s+/)[0];
+      const firstSrcset = srcsetCandidates(source.getAttribute('srcset'))[0];
       addAsset(firstSrcset, 'media', source, { srcset: source.getAttribute('srcset') });
     }
     for (const video of document.querySelectorAll('video')) {
@@ -284,7 +308,7 @@ export async function extractPageModel(page) {
     }
     for (const element of document.querySelectorAll('*')) {
       const background = getComputedStyle(element).backgroundImage;
-      for (const match of background.matchAll(/url\(["']?([^"')]+)["']?\)/g))
+      for (const match of background.matchAll(/url\(("'?)?([^"')]+)["']?\)/g))
         addAsset(match[1], 'background-image', element);
     }
 

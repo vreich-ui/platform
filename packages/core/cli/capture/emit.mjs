@@ -814,7 +814,21 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
     lastAssetStartedAt = Date.now();
     let resolved = asset;
     if (!asset.contentType || !Number.isInteger(asset.expectedSizeBytes) || !/^[a-f0-9]{64}$/i.test(asset.expectedSha256 ?? '')) {
-      resolved = { ...asset, ...(await probe(asset.sourceUrl)) };
+      // T12.17: ONE unreachable asset must not refuse a whole emission. Every other failure in
+      // this loop quarantines its asset and continues (which quarantines the section that wanted
+      // it rather than hotlinking); an unfetchable source URL is the same class of fact, so it is
+      // recorded the same way instead of throwing past the loop. The refusal path stays for
+      // failures that invalidate the PLAN itself, not one row of it.
+      try {
+        resolved = { ...asset, ...(await probe(asset.sourceUrl)) };
+      } catch (error) {
+        report.quarantines.push({
+          asset: asset.manifestRef,
+          reason: 'asset_probe_failed',
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
     }
     const contentType = normalizeContentType(resolved.contentType);
     if (!contentType || !Number.isInteger(resolved.expectedSizeBytes) || !/^[a-f0-9]{64}$/i.test(resolved.expectedSha256 ?? '')) {

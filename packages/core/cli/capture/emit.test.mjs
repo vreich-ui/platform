@@ -495,6 +495,59 @@ test('a prohibited-media policy emits zero media and records the gap', async () 
   assert.equal(wire.includes('static.wixstatic.com'), false);
 });
 
+// ─── T12.17 acceptance ───────────────────────────────────────────────────────
+
+test('a single asset probe failure quarantines only that asset; every sibling asset still materializes and binds', async () => {
+  const plan = await fixturePlan();
+  const [firstPlan, secondPlan] = plan.assetPlans;
+  assert.ok(
+    firstPlan?.entries?.length && secondPlan?.entries?.length,
+    'the fixture must carry at least two independent asset plans'
+  );
+  const failingRef = firstPlan.entries[0].manifestRef;
+  const failingAsset = plan.media.find((item) => item.manifestRef === failingRef);
+  assert.ok(failingAsset, 'the fixture plan must carry the failing asset');
+  const survivingRef = secondPlan.entries[0].manifestRef;
+  const survivingAsset = plan.media.find((item) => item.manifestRef === survivingRef);
+  assert.ok(survivingAsset, 'the fixture plan must carry a sibling asset');
+
+  const transport = mockTransport();
+  const report = await executeEmission({
+    plan,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: async (sourceUrl) => {
+      if (sourceUrl === failingAsset.sourceUrl) throw new Error('boom: asset host unreachable');
+      return fixtureProbe(sourceUrl);
+    },
+  });
+
+  // The failing asset is quarantined by T12.17's own reason, not thrown past the loop.
+  const quarantine = report.quarantines.find((item) => item.asset === failingRef);
+  assert.ok(quarantine, 'the failing asset must be recorded as a quarantine');
+  assert.equal(quarantine.reason, 'asset_probe_failed');
+  assert.match(quarantine.detail, /boom: asset host unreachable/);
+  assert.equal(
+    transport.calls.some(
+      (call) => call.verb === 'create_artifact_from_url' && call.args.sourceUrl === failingAsset.sourceUrl
+    ),
+    false,
+    'a failed probe must never reach the artifact bridge'
+  );
+
+  // The emission itself did not throw or abort: creates still ran.
+  assert.ok(transport.calls.some((call) => call.verb === 'object_create'));
+
+  // Every OTHER asset in the same plan still materializes and binds.
+  const survivingUpload = transport.calls.find(
+    (call) => call.verb === 'create_artifact_from_url' && call.args.sourceUrl === survivingAsset.sourceUrl
+  );
+  assert.ok(survivingUpload, 'a sibling asset must still be ingested despite the failing probe');
+  const survivingBinding = report.assetBindings.find((entry) => entry.manifestRefs?.includes(survivingRef));
+  assert.ok(survivingBinding, 'a sibling asset must still bind');
+  assert.equal(survivingBinding.status, 'bound');
+});
+
 // ─── T12.16 acceptance ───────────────────────────────────────────────────────
 // The live zilberman run (run_1787054978582_2o5xu5) ingested 30 artifacts and
 // bound NONE: 30 × artifact_reference_not_bindable (no filename → extensionless,
