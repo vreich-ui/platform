@@ -161,10 +161,10 @@ Env checklist:
       AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.
     OPENAI_API_KEY                   [fleet-shared]  reuse the fleet value — do not create a new one
       AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.
-    CMS_AGENT_MCP_ENDPOINT           [fleet-shared]  reuse the fleet value — do not create a new one
-      The shared CMS-Agent Cloud Run Streamable-HTTP MCP URL (…/mcp) the admin chat's client_manager turns run through — one service for the whole fleet; reuse the fleet value.
-    CMS_AGENT_MCP_TOKEN              [per-site]  ☐ human-supplied — see the provisioning runbook
-      This site's OWN scoped CMS-Agent bearer — never fleet-shared and never MCP_API_TOKEN. Minted into the Secret Manager secret mcp-scoped-tokens-json, scoped to {projects: [this project], toolAllowlist: [agent_resolve, agent_converse]} — that scope is what makes one tenant structurally incapable of acting as another. Store Functions-only + secret so no value can reach a client bundle.
+    CMS_AGENT_MCP_ENDPOINT           [fleet-shared]  managed automatically by CMS-Agent genesis/cloning
+      The shared CMS-Agent Cloud Run Streamable-HTTP MCP URL (…/mcp) the admin chat's client_manager turns run through. CMS-Agent genesis/cloning installs it directly on every site.
+    CMS_AGENT_MCP_TOKEN              [per-site]  managed automatically by CMS-Agent genesis/cloning
+      This site's OWN scoped CMS-Agent bearer — never fleet-shared and never MCP_API_TOKEN. CMS-Agent genesis/cloning mints it internally, persists only its digest and {projects: [this project], toolAllowlist: [agent_resolve, agent_converse]} policy, installs it as a secret/function-only Netlify variable, verifies initialize, then discards the raw value. No person copies or pastes it.
     CMS_AGENT_PROJECT_ID             [per-site, optional]  ☐ human-supplied — see the provisioning runbook
       Escape hatch for the canonical project id committed in sites/<client>/config/site-identity.ts.
     NETLIFY_AUTH_TOKEN               [fleet-shared]  reuse the fleet value — do not create a new one
