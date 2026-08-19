@@ -114,8 +114,14 @@ For everything NOT auto-generated in step 2:
   `docs/agents/pdf-tool-storage-grant.md`'s "Parity enforcement" section.
 - **AI keys** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `NETLIFY_AUTH_TOKEN`):
   fleet-shared — reuse the existing fleet values, never mint per-client
-  copies. `OPENAI_CHATKIT_WORKFLOW_ID` IS per-site — create a ChatKit
-  workflow for this client's admin chat if it uses one.
+  copies. Admin chat does not use a per-site model key: CMS-Agent
+  genesis/cloning installs `CMS_AGENT_MCP_ENDPOINT` and mints the site's own
+  scoped `CMS_AGENT_MCP_TOKEN` directly into Netlify as a secret/function-only
+  value. Only its digest and `{project, toolAllowlist}` policy persist in
+  CMS-Agent; the raw bearer is never printed, returned, committed, or handed
+  to an operator. The same CMS-Agent reconciliation job rotates every existing
+  registered tenant, so this is a fleet birth/retrofit invariant rather than a
+  per-site console step.
 - **Shop, only if this client sells** (`STRIPE_SECRET_KEY[_TEST]`,
   `STRIPE_WEBHOOK_SECRET[_TEST]`, `STRIPE_MODE`): the client's own Stripe
   account, not the fleet's.

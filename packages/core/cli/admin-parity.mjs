@@ -199,13 +199,13 @@ export const ADMIN_CRITICAL_ENV = [
   },
   {
     name: 'CMS_AGENT_MCP_ENDPOINT',
-    provisioner: 'human (fleet-shared)',
+    provisioner: 'CMS-Agent genesis/cloning (auto)',
     checklist: true,
     why: "The CMS-Agent Cloud Run /mcp URL the admin chat's client_manager turns run through. Absent, chat fails closed with cms_agent_not_configured.",
   },
   {
     name: 'CMS_AGENT_MCP_TOKEN',
-    provisioner: 'human (secret custody, per-site scoped bearer)',
+    provisioner: 'CMS-Agent genesis/cloning (auto, raw value never exposed)',
     checklist: true,
     why: "This site's scoped CMS-Agent bearer, pinned to its own project and tool allow-list. Never MCP_API_TOKEN and never another tenant's — the scope is the tenant-isolation boundary, enforced at the door rather than by careful coding.",
   },
