@@ -54,7 +54,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'object_create',
     description:
-      'Create a CMS object from object_type, site, and the per-type body. requested_id is optional — omit it to have a valid id minted server-side. For recipe types (template / section_template / theme): REUSE FIRST — object_inventory lists existing recipes with self-describing summaries; create only when none fits, and include description/whenToUse/scope (required to publish). Creation may be restricted per type by the committed creation policy — check object_contract(<type>).creation_policy; a denial is a 403 with code creation_restricted. content_item (articles) is creatable since W7.3: the body is the annotated node list (per-node private.strategy/intent — hook/agitation/resolution etc. — plus commercial/rendering/chat metadata) with plain-text or rich_text.v1 node bodies; read object_contract("content_item") first. Committed legacy posts stay on the old article tools. tracking_config (W13) is the per-site tracker-registry SINGLETON: creation is human/seed-only and a second active registry is refused (409) — read object_contract("tracking_config") and edit the existing trk_* object instead. If this call itself times out or 502s (ambiguous whether the object was created), retry with the SAME idempotency_key to get back the original created object instead of creating a duplicate — this matters most when requested_id is omitted, since a fresh id is minted on every genuinely new call.',
+      'Create a CMS object from object_type, site, and the per-type body. requested_id is optional — omit it to have a valid id minted server-side. For recipe types (template / section_template / theme): REUSE FIRST — object_inventory lists existing recipes with self-describing summaries; create only when none fits, and include description/whenToUse/scope (required to publish). Creation may be restricted per type by the committed creation policy — check object_contract(<type>).creation_policy; a denial is a 403 with code creation_restricted. content_item (articles) is NOT created here from admin chat (ART-1) — a new article is produced by the publishing workflow (run_workspace_workflow → check_workspace_run_readiness → publish_workspace_run → release_workspace_run), which is what builds the sourcing/claim/compliance record ART-2 requires to publish and applies the aggression ceiling. The chat registry refuses object_create for content_item and tells you this; to revise an article that already exists use object_checkout + object_patch. Committed legacy posts stay on the old article tools. tracking_config (W13) is the per-site tracker-registry SINGLETON: creation is human/seed-only and a second active registry is refused (409) — read object_contract("tracking_config") and edit the existing trk_* object instead. If this call itself times out or 502s (ambiguous whether the object was created), retry with the SAME idempotency_key to get back the original created object instead of creating a duplicate — this matters most when requested_id is omitted, since a fresh id is minted on every genuinely new call.',
     inputSchema: objectSchema(
       {
         object_type: objectTypeEnumSchema(),
@@ -66,7 +66,10 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'site', 'body']
     ),
-    governance: { toolClass: 'creation', preview: { kind: 'validate_new_object' } },
+    // ART-3: floored like its two instantiate_* siblings. Without a floor a
+    // frozen or owner-set 'auto' survives `autonomyForCall`'s re-clamp, so a
+    // creation write could run un-asked in chat.
+    governance: { toolClass: 'creation', autonomyFloor: 'ask', preview: { kind: 'validate_new_object' } },
   },
   {
     name: 'object_instantiate_template',
@@ -434,7 +437,12 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       },
       ['object_type', 'object_id', 'lock_token']
     ),
-    governance: { toolClass: 'publication' },
+    // ART-3: object_retire and object_review_decide are floored but going
+    // LIVE to readers was not. The floor is a chat-approval rule only — it
+    // does not touch the publish gate, so an `all-autonomous` posture still
+    // publishes without approval over /mcp and through the workflow's own
+    // publish_workspace_run; it only means a human in a chat sees the card.
+    governance: { toolClass: 'publication', autonomyFloor: 'ask' },
   },
   {
     name: 'object_inventory',

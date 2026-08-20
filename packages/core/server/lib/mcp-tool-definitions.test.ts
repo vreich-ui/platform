@@ -48,8 +48,22 @@ describe('Tool definitions', () => {
     }
   });
 
-  it('exactly these tools have floor "ask": object_instantiate_template, object_instantiate_section_template, object_retire, object_review_decide, all privileged tools, and every membership write', () => {
+  // ART-3 added object_create and object_publish. Both were unfloored while
+  // their neighbours were not: the two instantiate_* verbs create and are
+  // floored, object_retire takes a page DOWN and is floored — but minting a
+  // governed object, and pushing one LIVE to readers, were both overridable
+  // to 'auto'. Without a floor `autonomyForCall`'s re-clamp has nothing to
+  // clamp against, so a frozen or owner-set 'auto' runs the write un-asked.
+  //
+  // The floor is a CHAT-approval rule only. It does not touch the publish
+  // gate, so an `all-autonomous` approval posture still publishes without a
+  // human approval over /mcp and through the workflow's own publish verbs —
+  // it only means a human sitting in a chat sees the card first.
+  it('exactly these tools have floor "ask": object_create, object_publish, object_instantiate_template, object_instantiate_section_template, object_retire, object_review_decide, all privileged tools, and every membership write', () => {
     const expectedFloorAsk = new Set([
+      // ART-3: creating a governed object, and taking one live.
+      'object_create',
+      'object_publish',
       'object_instantiate_template',
       'object_instantiate_section_template',
       'object_retire',

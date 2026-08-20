@@ -294,6 +294,29 @@ const describeGenerated = (name: string, args: Record<string, unknown>): string 
 //     agent-authored-ops hook (ported verbatim from tools.ts's patch.parse —
 //     schema check first, then ops check) ───────────────────────────────────
 
+/**
+ * ART-1 — articles have ONE production path from admin chat.
+ *
+ * `content_item` carries the judge/score substrate the publishing workflow
+ * exists to produce (claims / sources / compliance / scores, the per-node
+ * private.strategy+intent annotations, and the aggression ceiling, which is
+ * enforced ONLY in CMS-Agent's publish readiness — Platform never checks it).
+ * A direct `object_create` from chat produces a schema-valid article with
+ * NONE of it, and on an `all-autonomous` tenant that article can then be
+ * published without an approval, a pin, or a review.
+ *
+ * So the chat registry refuses the direct create and names the governed
+ * entry point instead. This is a CHAT-registry rule only: the verb itself is
+ * untouched, so /mcp operators, tests and the workspace publisher keep it.
+ * Editing an EXISTING article from chat (object_patch) is unaffected — only
+ * minting a new one is redirected.
+ */
+export const CHAT_ARTICLE_CREATE_REFUSAL =
+  'Articles are not created directly. An article carries the sourcing, claim and compliance record that only the ' +
+  'publishing workflow produces, so start production with run_workspace_workflow (pass the editor’s brief verbatim ' +
+  'as input.instructions) and follow it with check_workspace_run_readiness → publish_workspace_run → ' +
+  'release_workspace_run. To revise an article that already exists, use object_checkout + object_patch instead.';
+
 const buildParse = (name: string, validator: CompiledSchema): ChatTool['parse'] => {
   if (name === 'object_patch') {
     return (args, ctx) => {
@@ -312,6 +335,16 @@ const buildParse = (name: string, validator: CompiledSchema): ChatTool['parse'] 
               `Permitted: ${[...allowed].join(', ')}.`,
           };
         }
+      }
+      return { ok: true, value: args };
+    };
+  }
+  if (name === 'object_create') {
+    return (args) => {
+      const schemaResult = validator(args);
+      if (!schemaResult.ok) return { ok: false, error: `Invalid arguments: ${schemaResult.error}` };
+      if ((args.object_type as ObjectType) === 'content_item') {
+        return { ok: false, error: CHAT_ARTICLE_CREATE_REFUSAL };
       }
       return { ok: true, value: args };
     };

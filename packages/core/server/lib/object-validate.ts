@@ -2081,7 +2081,104 @@ const checkContentItemStructure = (
     );
   }
 
+  criteria.push(...checkContentItemClaimSubstrate(article, atPublish));
+
   criteria.push(...checkContentItemMedia(article, context, atPublish));
+
+  return criteria;
+};
+
+/**
+ * ART-2 — visibility on the claim substrate, deliberately NOT a publish block.
+ *
+ * The problem this was written for is real: before ART-1 an article needed
+ * only `slug`, `title` and one public content node to publish, so an
+ * unsourced therapeutic claim validated `ready` on a skincare tenant.
+ *
+ * The obvious hardening — require sources+claims at the gate — CANNOT ship as
+ * a blocker, and the reason is a ruling, not an oversight. D7 (Wolf,
+ * alignment board 2026-07-28, CMS-Agent `projects/objectDialect.ts`): the
+ * engine must NEVER write the judgement substrate (`scores`, `claims`,
+ * `sources`, `compliance`, `emotional_strategy`, `lineage`) into a client
+ * object — judgements stay workspace-side. `buildArticleCandidatePatch`
+ * strips all six before patching. So a gate keyed on those fields would
+ * block every article the publishing workflow produces, which is the exact
+ * opposite of the intent.
+ *
+ * What ships instead:
+ *
+ *   article_claim_substrate    — WARNS, never blocks. Surfaces the absence in
+ *                                the readiness checklist an editor and an
+ *                                agent both read, without gating a path that
+ *                                is designed not to carry it.
+ *   article_claim_verification — BLOCKS at publish, but only ever fires on a
+ *                                body that actually carries claims. Under D7
+ *                                the engine writes none, so this is free on
+ *                                the governed path and real for a hand-built
+ *                                body that asserts something high-risk.
+ *
+ * ART-1 (chat refuses a direct article create) is what actually closes the
+ * hole for admin chat. The residual — an operator hand-building an unsourced
+ * article over /mcp — stays open by design until either D7 is revisited or
+ * Platform is given a provenance signal it can check at the gate. Both are
+ * product decisions; neither belongs in a bug fix.
+ *
+ * `risk` and `status` are optional in the schema, so an unannotated claim is
+ * read at its most cautious: absent `status` is treated as `unverified`.
+ * High risk is the only tier gated — low/medium are the editor's judgement.
+ */
+const checkContentItemClaimSubstrate = (
+  article: { sources?: unknown; claims?: unknown },
+  atPublish: boolean
+): ReadinessCriterion[] => {
+  const sourceList = isRecord(article.sources) && Array.isArray(article.sources.source_list) ? article.sources.source_list : [];
+  const claimList = isRecord(article.claims) && Array.isArray(article.claims.claim_list) ? article.claims.claim_list : [];
+  const criteria: ReadinessCriterion[] = [];
+
+  const missing: string[] = [];
+  if (sourceList.length === 0) missing.push('no sources recorded');
+  if (claimList.length === 0) missing.push('no claims recorded');
+
+  if (missing.length === 0) {
+    criteria.push(crit('article_claim_substrate', 'Sourcing and claim record', 'complete', ''));
+  } else {
+    criteria.push(
+      // Warns at BOTH stages (D7): never a blocker, because the governed path
+      // is designed not to carry these fields on the client object.
+      crit(
+        'article_claim_substrate',
+        'Sourcing and claim record',
+        'warning',
+        `${missing.join(' and ')} on the article body — under D7 the publishing workflow keeps the sourcing and ` +
+          `claim record workspace-side, so check the run's readiness report for the evidence behind this article.`
+      )
+    );
+  }
+
+  const UNSAFE_STATUSES = new Set(['unverified', 'disputed', 'retracted']);
+  const unsafeHighRisk = claimList
+    .filter(isRecord)
+    .filter((claim) => claim.risk === 'high')
+    .filter((claim) => {
+      const status = typeof claim.status === 'string' ? claim.status : 'unverified';
+      const sourceIds = Array.isArray(claim.source_ids) ? claim.source_ids : [];
+      return UNSAFE_STATUSES.has(status) || sourceIds.length === 0;
+    })
+    .map((claim) => (typeof claim.claim_id === 'string' ? claim.claim_id : String(claim.text ?? '(untitled claim)')));
+
+  if (unsafeHighRisk.length === 0) {
+    criteria.push(crit('article_claim_verification', 'High-risk claim verification', 'complete', ''));
+  } else {
+    criteria.push(
+      crit(
+        'article_claim_verification',
+        'High-risk claim verification',
+        atPublish ? 'missing' : 'warning',
+        `High-risk claims are not cleared to publish (each needs status "verified" and at least one source): ` +
+          `${unsafeHighRisk.slice(0, 5).join('; ')}${unsafeHighRisk.length > 5 ? `; +${unsafeHighRisk.length - 5} more` : ''}.`
+      )
+    );
+  }
 
   return criteria;
 };

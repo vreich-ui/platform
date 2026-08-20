@@ -681,7 +681,7 @@ const runWorkspaceWorkflow: ChatTool = {
   autonomyFloor: 'ask',
   discloseResult: true,
   description:
-    'Start a workspace publishing workflow run (a dry-run: no publishing side effects), or advance an existing run by run_id. Long executions never block the chat — poll with get_workspace_run. Publishing itself always remains a separate human decision on the workspace surface.',
+    'THE way a new ARTICLE is written (ART-1). Start a workspace publishing workflow run — this is what researches, drafts and annotates a content_item, and what produces the sourcing, claim, compliance and score record an article needs before it can publish, plus the aggression-ceiling clamp that exists nowhere else. Use this whenever an editor asks for a new article, post or piece of content; object_create is refused for content_item in chat. Pass the editor’s brief VERBATIM as input.instructions (never summarised), set trafficSource and awarenessStage, and carry any media requirement into input.mediaRequest. Also advances an existing run by run_id. Long executions never block the chat — poll with get_workspace_run, then check_workspace_run_readiness → publish_workspace_run → release_workspace_run. Publishing itself always remains a separate human decision on the workspace surface.',
   input_schema: {
     type: 'object',
     properties: {

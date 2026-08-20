@@ -12,6 +12,7 @@ import { TOOL_DEFINITIONS_PART2 } from '../mcp-tool-definitions-2.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import { compileSchema } from './json-schema-lite.js';
 import {
+  CHAT_ARTICLE_CREATE_REFUSAL,
   GENERATED_CHAT_TOOLS,
   canonicalToolName,
   generatedChatToolByName,
@@ -207,6 +208,47 @@ test('object_create.dryRun calls ctx.validateNewObject', async () => {
   const preview = await tool.dryRun!(ctx, { object_type: 'page', site: 'site_acme', body: { title: 'x' } });
   assert.equal(calls.length, 1);
   assert.deepEqual(preview, { dry_run: true, object_id_preview: 'page_x' });
+});
+
+// ─── ART-1: articles have ONE production path from chat ────────────────────
+
+test('ART-1: object_create refuses content_item in chat and names the workflow, while every other governed type still creates', () => {
+  const tool = generatedChatToolByName('object_create')!;
+  const ctx = stubCtx();
+
+  const refused = tool.parse({ object_type: 'content_item', site: 'site_acme', body: { slug: 'x', title: 'X', nodes: [] } }, ctx);
+  assert.equal(refused.ok, false, 'a direct article create must not reach the verb');
+  assert.equal(refused.ok === false && refused.error, CHAT_ARTICLE_CREATE_REFUSAL);
+  // The refusal has to be actionable: it names the governed entry point and the
+  // revise-an-existing-article escape hatch, or the model just retries.
+  assert.match(refused.ok === false ? refused.error : '', /run_workspace_workflow/);
+  assert.match(refused.ok === false ? refused.error : '', /object_patch/);
+
+  // Not a blanket ban on creation — the guard is type-scoped.
+  const page = tool.parse({ object_type: 'page', site: 'site_acme', body: { route: '/x', title: 'X' } }, ctx);
+  assert.equal(page.ok, true, 'other governed types must still be creatable from chat');
+
+  // Schema errors still win over the type guard, so a malformed call reads as malformed.
+  const malformed = tool.parse({ object_type: 'content_item' }, ctx);
+  assert.equal(malformed.ok, false);
+  assert.match(malformed.ok === false ? malformed.error : '', /Invalid arguments/);
+
+  // Deriving a variant from an article that ALREADY carries the record stays open.
+  const variant = generatedChatToolByName('object_create_variant')!.parse({ source_object_id: 'req_1' }, ctx);
+  assert.equal(variant.ok, true, 'object_create_variant must stay available for judge/score/A-B work');
+});
+
+test('ART-3: object_create and object_publish carry an ask floor, so a frozen or owner-set auto cannot run them un-asked', () => {
+  for (const name of ['object_create', 'object_publish']) {
+    assert.equal(generatedChatToolByName(name)!.autonomyFloor, 'ask', `${name} must be floored`);
+    assert.equal(
+      resolveGeneratedAutonomy(undefined, { [name]: 'auto' })[name],
+      'ask',
+      `${name}: an explicit 'auto' override must be re-clamped to 'ask'`
+    );
+    // A floored tool may still be turned OFF entirely — the floor is one-directional.
+    assert.equal(resolveGeneratedAutonomy(undefined, { [name]: 'off' })[name], 'off');
+  }
 });
 
 test('object_create_variant.dryRun sends dry_run: true through ctx.verb', async () => {
