@@ -519,6 +519,27 @@ const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
             'At least one public (non-internal, non-hidden) content node is required to publish (warns while drafting).',
         },
         {
+          id: 'article_claim_substrate',
+          severity: 'warns',
+          enforced_live: true,
+          description:
+            'ART-2: warns when the body carries no sources.source_list / claims.claim_list. Deliberately a WARNING ' +
+            'and never a blocker — under D7 the publishing workflow keeps the judgement substrate (scores, claims, ' +
+            'sources, compliance, emotional_strategy, lineage) workspace-side and strips it before patching, so ' +
+            'gating on it here would block every article the workflow produces. The evidence behind a governed ' +
+            'article lives in its run readiness report, not on the object.',
+        },
+        {
+          id: 'article_claim_verification',
+          severity: 'blocks_publish',
+          enforced_live: true,
+          description:
+            'ART-2: IF the body carries claims, no claim marked risk "high" may go live while its status is ' +
+            'unverified, disputed or retracted, or while it carries no source_ids. An omitted status is read as ' +
+            '"unverified" — annotate a high-risk claim explicitly to clear it. Low/medium claims are the editor’s ' +
+            'judgement. Under D7 the workflow writes no claims here, so this bites a hand-authored body only.',
+        },
+        {
           id: 'article_rich_text',
           severity: 'blocks_write',
           enforced_live: true,
@@ -894,12 +915,22 @@ const workflow = (objectType: ObjectType, policy: ApprovalPolicy) => ({
           `REUSE FIRST: object_inventory({object_type: "${objectType}"}) lists every existing ${objectType} with a self-describing recipe summary (description, whenToUse, scope) — pick one and object_get it; create a NEW recipe only when none fits, and give it description/whenToUse/scope so the next agent can reuse yours.`,
         ]
       : []),
-    'object_contract (this call) → read the schema, ops, constraints',
-    `object_validate (object_type: "${objectType}" + body, NO object_id) — dry-run the candidate body BEFORE creating it: the identical checks object_create runs (id pattern/availability, singleton conflict where applicable, body schema, id discipline, reference integrity, PageType/route/slug/taxonomy law where applicable), read-only, zero writes.`,
-    'object_create (omit requested_id to mint one) — for a new object',
+    // ART-1: articles have ONE production path. The sequence says so FIRST,
+    // before the generic create step, because the contract is the only place
+    // an agent reliably reads before writing.
     ...(objectType === 'content_item'
       ? [
-          'object_create_variant (source_object_id [+ requested_id]) — alternative create: clone an article as a draft variant (lineage.parent_content_id set, node ids re-minted, annotations carried) for judge/score/A-B work',
+          'START PRODUCTION, DO NOT HAND-BUILD: a NEW article is produced by the publishing workflow — run_workspace_workflow (the editor’s brief verbatim as input.instructions) → check_workspace_run_readiness → publish_workspace_run → release_workspace_run. The workflow is what produces the sourcing, claim, compliance and score record ART-2 requires to publish, and the aggression ceiling is enforced only on that path. A direct object_create of a content_item is REFUSED in admin chat; the steps below apply to an article that already exists.',
+        ]
+      : []),
+    'object_contract (this call) → read the schema, ops, constraints',
+    `object_validate (object_type: "${objectType}" + body, NO object_id) — dry-run the candidate body BEFORE creating it: the identical checks object_create runs (id pattern/availability, singleton conflict where applicable, body schema, id discipline, reference integrity, PageType/route/slug/taxonomy law where applicable), read-only, zero writes.`,
+    objectType === 'content_item'
+      ? 'object_create (omit requested_id to mint one) — operator/workflow path only; refused in admin chat, see the production step above'
+      : 'object_create (omit requested_id to mint one) — for a new object',
+    ...(objectType === 'content_item'
+      ? [
+          'object_create_variant (source_object_id [+ requested_id]) — alternative create: clone an EXISTING article as a draft variant (lineage.parent_content_id set, node ids re-minted, annotations carried) for judge/score/A-B work. Permitted in chat: it derives from an article that already carries the record.',
         ]
       : []),
     // W2.5, design-principles rule 5: templates are recipes — instantiation
