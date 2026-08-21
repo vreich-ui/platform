@@ -636,12 +636,15 @@ const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unkno
         status: node.status,
       }))
     : undefined;
-  const mode = run.mode as { live?: boolean; executionMode?: string } | undefined;
+  // `mode` is nullable on the wire, not merely absent: a compact run view omits it
+  // and some records carry an explicit null. `!== undefined` admits null and then
+  // dereferences it, so this reads truthiness instead.
+  const mode = run.mode as { live?: boolean; executionMode?: string } | null | undefined;
   const stall = run.stall as { stalled?: boolean } | boolean | undefined;
   return {
     run_id: run.runId ?? run.id,
     status: run.status,
-    ...(mode !== undefined ? { live_output: mode.live === true || mode.executionMode === 'openai' } : {}),
+    ...(mode ? { live_output: mode.live === true || mode.executionMode === 'openai' } : {}),
     ...(stall !== undefined
       ? { stalled: stall === true || (typeof stall === 'object' && stall?.stalled === true) }
       : {}),
