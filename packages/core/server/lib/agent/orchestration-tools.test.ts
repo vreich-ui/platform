@@ -148,7 +148,7 @@ test('list_workspace_nodes caps the projection at 100 nodes and reports the trun
 
 // ─── run_workspace_workflow: start/advance, no `approved`, input-echo dry-run ─
 
-test('run_workspace_workflow start mode sends projectId + input + a minted requestId + budgetMs to workflow_start_dry_run and NEVER `approved`', async () => {
+test('run_workspace_workflow start mode sends projectId + input + a minted requestId to workflow_start_dry_run and NEVER `approved`', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const ctx = bridgeCtx(() => ({ runId: 'run_new', status: 'created', continued: true }), calls);
   // D2a: minting probes object get for content_item; none exist here.
@@ -163,9 +163,12 @@ test('run_workspace_workflow start mode sends projectId + input + a minted reque
   const sent = calls[0]!.args;
   assert.match(sent.requestId as string, /^req_agent_retinol_basics_\d{8}_01$/);
   assert.match(sent.requestId as string, REQUEST_ID_RE);
+  // budgetMs is NOT sent here: workflow_start_dry_run declares budgetUsd and is
+  // additionalProperties:false, so an unknown key fails the whole call. It belongs
+  // to workflow_run_all (asserted in the advance-mode test below).
   assert.deepEqual(
     { ...sent, requestId: undefined },
-    { projectId: 'platform', input: { topic: 'retinol basics' }, budgetUsd: 2, budgetMs: 45_000, requestId: undefined }
+    { projectId: 'platform', input: { topic: 'retinol basics' }, budgetUsd: 2, requestId: undefined }
   );
   assert.equal('approved' in sent, false);
   const body = JSON.parse(result.content) as { run_id: string; request_id: string; continued: boolean };
@@ -181,7 +184,7 @@ test('run_workspace_workflow advance mode calls workflow_run_all WITHOUT approve
   const result = await tool.execute(ctx, { run_id: 'run_1' });
   assert.equal(result.is_error, false);
   assert.equal(calls[0]!.name, 'workflow_run_all');
-  assert.deepEqual(calls[0]!.args, { runId: 'run_1' });
+  assert.deepEqual(calls[0]!.args, { runId: 'run_1', budgetMs: 45_000 });
 });
 
 test('run_workspace_workflow parse requires exactly one of input / run_id', () => {
