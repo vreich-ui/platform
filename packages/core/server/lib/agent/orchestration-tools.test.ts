@@ -129,6 +129,20 @@ test('get_workspace_run returns a bounded projection — a huge run record never
   assert.equal(result.content.includes('openai'), false, 'no provider names in editor-facing output');
 });
 
+test('get_workspace_run survives a null mode block — the projection must never crash on it', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = bridgeCtx(() => ({ runId: 'run_1', status: 'blocked', mode: null, stall: null }), calls);
+  const tool = chatToolByName('get_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1' });
+  assert.equal(result.is_error, false);
+  const payload = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(payload.run_id, 'run_1');
+  assert.equal(payload.status, 'blocked');
+  // A null mode is not an unknown mode with a readable `live` field - it carries no
+  // execution information at all, so live_output is omitted rather than guessed.
+  assert.equal('live_output' in payload, false);
+});
+
 test('list_workspace_nodes caps the projection at 100 nodes and reports the truncation', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const many = Array.from({ length: 150 }, (_, index) => ({
