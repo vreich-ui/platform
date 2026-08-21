@@ -732,6 +732,7 @@ const runWorkspaceWorkflow: ChatTool = {
       // stopping the run before publish-risk nodes (the second wall).
       const advanced = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_run_all', {
         runId: args.run_id,
+        budgetMs: WORKSPACE_RUN_BUDGET_MS,
       });
       if (!advanced.ok) return { content: json({ error: advanced.message, code: advanced.code }), is_error: true };
       return { content: json(projectWorkspaceRun(advanced.data)), is_error: false };
@@ -744,7 +745,6 @@ const runWorkspaceWorkflow: ChatTool = {
       projectId: ctx.cmsAgent.projectId,
       input: args.input,
       requestId,
-      budgetMs: WORKSPACE_RUN_BUDGET_MS,
       ...(args.workflow_id ? { workflowId: args.workflow_id } : {}),
       ...(args.budget_usd !== undefined ? { budgetUsd: args.budget_usd } : {}),
       ...(args.execution_mode ? { executionMode: args.execution_mode } : {}),
