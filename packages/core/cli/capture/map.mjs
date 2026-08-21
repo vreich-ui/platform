@@ -10,7 +10,29 @@ import { writeJson } from './snapshot-v1.mjs';
 export const CAPTURE_MAP_SCHEMA_VERSION = 'capture-map.v1';
 export const DEFAULT_CONFIDENCE_THRESHOLD = 0.72;
 
-const SUPPORTED_SECTION_TYPES = new Set(['hero', 'lede', 'prose', 'bio', 'contact_form', 'cta_banner', 'link_list']);
+// EVERY type `buildForType` below can actually build — and nothing else. This set is what gates a
+// block_classifier suggestion, so a name that is not here is rejected as unregistered. It used to
+// list seven text types while the platform shipped 24, which is why the one node meant to rescue a
+// declined block could only ever offer it the same handful of shapes the heuristic had already
+// tried. T12.23 adds the seven structured types; keep this list and the switch in lockstep — the
+// focused mapper test asserts they match, so a builder without a vocabulary entry (or the reverse)
+// fails closed rather than silently never being suggested.
+export const SUPPORTED_SECTION_TYPES = new Set([
+  'hero',
+  'lede',
+  'prose',
+  'bio',
+  'contact_form',
+  'cta_banner',
+  'link_list',
+  'faq',
+  'comparison_table',
+  'testimonial',
+  'stats',
+  'timeline',
+  'steps',
+  'checklist',
+]);
 // Keep this capture-side guard aligned with the governed PageType registry.
 // The focused mapper test compares it to the live definition so registry drift
 // fails closed before a capture artifact can be emitted.
@@ -390,6 +412,205 @@ function stripHeadingAndLinks(text, headings, actions) {
   return body;
 }
 
+
+// ─── T12.23 structured section types ─────────────────────────────────────────
+//
+// Seven section types your platform has shipped since W6 that capture could never produce, because
+// each is a SHAPE (`faq`, `testimonial`, `stats`, `timeline`, `steps`, `checklist`,
+// `comparison_table`) and the crawl used to flatten every shape into `textContent`. browser.mjs now
+// keeps `block.structure`; these read it.
+//
+// DETERMINISTIC, NOT INFERRED. Every builder below reads a real DOM structure — a <dl>, a
+// <blockquote>, an <ol>, a <table>. None of them regexes prose looking for something quote-shaped.
+// The one place a pattern is applied (a leading year for a timeline, a leading figure for a stat) it
+// is applied to a LIST ITEM that is already its own element, so the boundary comes from the
+// document, never from a guess about where a sentence ends.
+//
+// SILENT ON OLD SNAPSHOTS. No `structure` key means every function here returns null and the mapper
+// behaves exactly as it did before — replaying a pre-T12.23 snapshot produces the same mapping it
+// always did, which is what makes this safe to land ahead of the crawl deploy that fills the key in.
+const STATS_MAX = 6;
+const TIMELINE_MAX = 8;
+const COMPARISON_MAX_COLUMNS = 4;
+const COMPARISON_MAX_ROWS = 12;
+const CHECKLIST_ITEM_MAX_CHARS = 120;
+const STRUCTURED_MIN_LIST_ITEMS = 2;
+
+const cap = (value, max) => {
+  const text = clean(value);
+  return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + '…';
+};
+
+/** A stat reads "1,200 trees planted": a short leading figure, then what it counts. */
+const STAT_ITEM_RE = /^([€$£]?\d[\d.,]*\s*(?:%|k|m|bn|\+)?)\s+(.{2,})$/i;
+/**
+ * A BARE four-digit year is a date, not a quantity. Without this, "1998 Founded in Berlin" matched
+ * the stat pattern — 1998 is a leading figure — and a foundation's history came out as a stats
+ * strip reading "1998 / Founded in Berlin". A figure that carries a separator, a unit or a currency
+ * ("1,200", "20%", "$4m") is unaffected, so the only thing excluded is the shape that was never a
+ * stat in the first place.
+ */
+const BARE_YEAR_RE = /^(?:19|20)\d{2}$/;
+/** A milestone leads with a year or a year range, optionally followed by a separator. */
+const TIMELINE_ITEM_RE = /^((?:19|20)\d{2}(?:\s*[–—-]\s*(?:(?:19|20)\d{2}|present))?)\s*[:.–—-]?\s+(.{3,})$/i;
+
+const listsOf = (block) => block?.structure?.lists ?? [];
+
+/** Split "Title. The rest of it" into a bounded title and whatever remains. */
+const splitTitle = (text, titleMax) => {
+  const value = clean(text);
+  const boundary = value.search(/[.:—–]\s/);
+  if (boundary > 0 && boundary <= titleMax) {
+    return { title: cap(value.slice(0, boundary), titleMax), description: clean(value.slice(boundary + 1)) };
+  }
+  if (value.length <= titleMax) return { title: value, description: '' };
+  return { title: cap(value, titleMax), description: value };
+};
+
+function buildFaq(context) {
+  const entries = context.block?.structure?.qa ?? [];
+  if (entries.length === 0) return null;
+  const items = entries
+    .filter((entry) => clean(entry.q) && clean(entry.a))
+    .map((entry) => ({ q: clean(entry.q), a: richText(clean(entry.a)) }));
+  if (items.length === 0) return null;
+  return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), items };
+}
+
+function buildTestimonial(context) {
+  const entries = context.block?.structure?.quotes ?? [];
+  const quotes = entries
+    .filter((entry) => clean(entry.quote))
+    .map((entry) => ({ quote: clean(entry.quote), ...(clean(entry.attribution) ? { attribution: clean(entry.attribution) } : {}) }));
+  if (quotes.length === 0) return null;
+  return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), quotes };
+}
+
+function buildStats(context) {
+  for (const list of listsOf(context.block)) {
+    const items = list.items
+      .map((item) => STAT_ITEM_RE.exec(clean(item)))
+      .filter(Boolean)
+      .filter((match) => !BARE_YEAR_RE.test(clean(match[1])))
+      .map((match) => ({ value: cap(match[1], 24), label: cap(match[2], 64) }))
+      .slice(0, STATS_MAX);
+    // The schema's own floor is 2; a single figure is a sentence, not a stat strip.
+    if (items.length >= 2) return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), items };
+  }
+  return null;
+}
+
+function buildTimeline(context) {
+  for (const list of listsOf(context.block)) {
+    const milestones = list.items
+      .map((item) => TIMELINE_ITEM_RE.exec(clean(item)))
+      .filter(Boolean)
+      .map((match) => {
+        const { title, description } = splitTitle(match[2], 64);
+        return { label: title, period: cap(match[1], 48), description: clean(description) || title };
+      })
+      .slice(0, TIMELINE_MAX);
+    if (milestones.length >= 2) return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), milestones };
+  }
+  return null;
+}
+
+function buildSteps(context) {
+  // ORDERED lists only. An <ol> is the author stating that sequence matters; inferring steps from a
+  // <ul> would silently re-order-ify a plain bullet list.
+  for (const list of listsOf(context.block)) {
+    if (!list.ordered) continue;
+    const items = list.items
+      .map((item) => splitTitle(item, 80))
+      .filter((entry) => entry.title)
+      .map((entry) => ({ title: entry.title, ...(entry.description && entry.description !== entry.title ? { description: entry.description } : {}) }));
+    if (items.length >= 1) return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), items };
+  }
+  return null;
+}
+
+function buildChecklist(context) {
+  for (const list of listsOf(context.block)) {
+    if (list.ordered) continue;
+    const items = list.items.map((item) => clean(item)).filter(Boolean);
+    // Short, self-contained bullets. Long ones are prose that happens to be in a <ul>, and a list of
+    // links belongs in link_list where the hrefs survive.
+    if (items.length < STRUCTURED_MIN_LIST_ITEMS) continue;
+    if (items.some((item) => item.length > CHECKLIST_ITEM_MAX_CHARS)) continue;
+    if (context.actions.length >= items.length) continue;
+    return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), items };
+  }
+  return null;
+}
+
+function buildComparisonTable(context) {
+  for (const table of context.block?.structure?.tables ?? []) {
+    const headers = (table.headers ?? []).map((header) => clean(header)).filter(Boolean);
+    // The first header names the row axis, so the comparison columns are the rest.
+    if (headers.length < 3) continue;
+    const columns = headers.slice(1, 1 + COMPARISON_MAX_COLUMNS).map((label) => ({ label: cap(label, 32) }));
+    const rows = (table.rows ?? [])
+      .map((row) => row.map((cell) => clean(cell)))
+      .filter((row) => row.length >= 2 && row[0])
+      .slice(0, COMPARISON_MAX_ROWS)
+      .map((row) => ({
+        label: cap(row[0], 64),
+        // A tick or a cross is a boolean in every comparison table ever printed; carrying it as one
+        // lets the renderer draw its own mark instead of echoing whatever glyph the source used.
+        cells: row.slice(1, 1 + columns.length).map((cell) => (/^(?:✓|✔|yes|included)$/i.test(cell) ? true : /^(?:✕|✗|×|—|-|no|not included)$/i.test(cell) ? false : cap(cell, 48))),
+      }));
+    if (columns.length >= 2 && rows.length >= 1) {
+      return { ...(context.headings[0]?.text ? { heading: context.headings[0].text } : {}), columns, rows };
+    }
+  }
+  return null;
+}
+
+/**
+ * The structured builders, in descending order of how specific their evidence is. `faq` before
+ * `checklist` because a <dl> of questions is unambiguous where a <ul> of short lines is not;
+ * `comparison_table` before anything list-shaped because a <table> says the most of all.
+ */
+export const STRUCTURED_BUILDERS = [
+  ['faq', buildFaq],
+  ['comparison_table', buildComparisonTable],
+  ['testimonial', buildTestimonial],
+  // Timeline BEFORE stats: "1998 Founded in Berlin" satisfies both patterns, and a leading year is
+  // the more specific claim. Stats additionally refuses a bare year (BARE_YEAR_RE), so the two no
+  // longer compete for the same list at all — the ordering is the belt, that filter is the braces.
+  ['timeline', buildTimeline],
+  ['stats', buildStats],
+  ['steps', buildSteps],
+  ['checklist', buildChecklist],
+];
+
+const STRUCTURED_CONFIDENCE = {
+  faq: 0.92,
+  comparison_table: 0.9,
+  testimonial: 0.88,
+  stats: 0.87,
+  timeline: 0.87,
+  steps: 0.84,
+  checklist: 0.8,
+};
+
+/**
+ * Choose the structured type a block's RECOVERED SHAPE warrants. Returns null for a block with no
+ * `structure` key at all — i.e. every pre-T12.23 snapshot — so this can never change how an old
+ * capture maps.
+ */
+function structuredCandidate(context, permitted) {
+  if (!context.block?.structure) return null;
+  for (const [type, build] of STRUCTURED_BUILDERS) {
+    if (!permitted(type)) continue;
+    const data = build(context);
+    if (data) {
+      return { type, data, confidence: STRUCTURED_CONFIDENCE[type], reason: `recovered ${type} structure from the source DOM` };
+    }
+  }
+  return null;
+}
+
 function buildForType(type, context) {
   const { block, headings, actions, route } = context;
   const text = clean(block.text?.value);
@@ -417,6 +638,23 @@ function buildForType(type, context) {
     case 'link_list':
       if (actions.length === 0) return null;
       return { ...(heading ? { heading } : {}), links: actions };
+    // The structured seven. Each returns null without a `structure` key, so an assisted suggestion
+    // of one of these against an old snapshot is REJECTED (the block stays declined) rather than
+    // coerced into an empty section — the re-validation contract block_classifier is promised.
+    case 'faq':
+      return buildFaq(context);
+    case 'comparison_table':
+      return buildComparisonTable(context);
+    case 'testimonial':
+      return buildTestimonial(context);
+    case 'stats':
+      return buildStats(context);
+    case 'timeline':
+      return buildTimeline(context);
+    case 'steps':
+      return buildSteps(context);
+    case 'checklist':
+      return buildChecklist(context);
     default:
       return null;
   }
@@ -491,6 +729,7 @@ function assetSectionPlan(context, images) {
 
 function classifyBlock(context, forcedType) {
   const { page, block, headings, actions, isFirst, images, mediaRetentionAllowed } = context;
+  const allowedSections = context.allowedSections ?? 'any';
   const text = clean(block.text?.value);
   const assets = block.assetUrls?.length ?? 0;
   const lowercase = text.toLowerCase();
@@ -559,6 +798,13 @@ function classifyBlock(context, forcedType) {
       reason: 'first semantic block carries the page heading',
     };
   }
+  // Recovered DOM shape outranks every text heuristic below it: a <dl> of questions, a
+  // <blockquote>, an <ol> or a <table> is the author STATING the shape, where "compact multi-link
+  // block" and "explanatory text fallback" are this mapper guessing from length. A type the page
+  // type disallows is skipped here rather than returned — returning it would turn a mappable block
+  // into a `section_not_allowed_for_page_type` gap when the text path could still have mapped it.
+  const structured = structuredCandidate(context, (type) => allowedSections === 'any' || allowedSections.has(type));
+  if (structured) return structured;
   if (/in memory of|our trustees|founder|biograph|trustee/i.test(lowercase) && headings.length > 0) {
     const data = buildForType('bio', context);
     if (data) return { type: 'bio', data, confidence: 0.86, reason: 'person-focused biography signals detected' };
@@ -706,6 +952,7 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       isFirst: index === 0,
       images,
       mediaRetentionAllowed,
+      allowedSections,
     };
     let result = classifyBlock(context, assistanceByBlock.get(block.id)?.sectionType);
     if (!result.gap && result.data && !result.assetPlan && images.length > 0) {

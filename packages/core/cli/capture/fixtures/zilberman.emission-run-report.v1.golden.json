@@ -140,13 +140,13 @@
       {
         "kind": "section_template",
         "objectType": "section_template",
-        "requestedId": "stpl_capture_7ebf831f7132fd3409",
-        "idempotencyKey": "t12.4:fixture-target:section-template:ed801ce3c9bdc88e",
-        "reason": "shape repeated 2 times (threshold 2)",
+        "requestedId": "stpl_capture_e134fa9d31a8eb58f9",
+        "idempotencyKey": "t12.4:fixture-target:section-template:e9313bae236f67e0",
+        "reason": "shape repeated 2 times (threshold 2); fields heading",
         "body": {
-          "name": "Captured lede recipe",
-          "description": "Draft recipe extracted from 2 repeated lede shapes.",
-          "whenToUse": "Use for the repeated lede shape discovered in this capture.",
+          "name": "Captured lede recipe (heading)",
+          "description": "Draft recipe extracted from 2 repeated lede shapes carrying heading.",
+          "whenToUse": "Use for the repeated lede shape discovered in this capture, where the section carries heading.",
           "scope": "one_off",
           "blueprint": {
             "id": "s_7f8b34f814",
@@ -161,13 +161,13 @@
       {
         "kind": "section_template",
         "objectType": "section_template",
-        "requestedId": "stpl_capture_895c6e31f08c25d2f2",
-        "idempotencyKey": "t12.4:fixture-target:section-template:721c9525ade2ea89",
-        "reason": "shape repeated 7 times (threshold 2)",
+        "requestedId": "stpl_capture_7f623aa8eae4db2f53",
+        "idempotencyKey": "t12.4:fixture-target:section-template:96392a317a2999db",
+        "reason": "shape repeated 7 times (threshold 2); fields layout",
         "body": {
-          "name": "Captured media recipe",
-          "description": "Draft recipe extracted from 7 repeated media shapes.",
-          "whenToUse": "Use for the repeated media shape discovered in this capture.",
+          "name": "Captured media recipe (layout)",
+          "description": "Draft recipe extracted from 7 repeated media shapes carrying layout.",
+          "whenToUse": "Use for the repeated media shape discovered in this capture, where the section carries layout.",
           "scope": "one_off",
           "blueprint": {
             "id": "s_d92603a71c",

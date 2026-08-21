@@ -132,29 +132,55 @@ export function captureRequestId(plan, pageRef) {
   return `req_capture_${captureRequestTopic(plan)}_${captureRequestDate(plan)}_${String(ordinal).padStart(2, '0')}`;
 }
 
+// T12.23 — group repeated shapes by their SHAPE, not merely by their type name.
+//
+// This grouped on `candidate.sectionType` alone, so every `prose` section on the site — a one-line
+// caption and a four-paragraph essay alike — collapsed into a single "Captured prose recipe" whose
+// blueprint was whichever candidate happened to be first. A recipe like that is worse than no
+// recipe: it is data-not-code, so an agent WILL stamp it, and what it stamps is arbitrary.
+//
+// The fingerprint is the type plus the set of data fields that are actually populated (arrays
+// marked as such). "hero with heading + body + actions" and "hero with heading only" are then two
+// recipes, each with an exemplar that genuinely represents its group, and each only minted when
+// THAT shape repeats. Fewer, truer recipes — and the structured types T12.23 added (faq, stats,
+// testimonial, timeline) are exactly the shapes worth having one for.
+export function shapeFingerprint(section) {
+  const data = section?.data;
+  if (!data || typeof data !== 'object') return `${section?.type ?? 'unknown'}:∅`;
+  const fields = Object.entries(data)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '' && !(Array.isArray(value) && value.length === 0))
+    .map(([key, value]) => (Array.isArray(value) ? `${key}[]` : key))
+    .sort();
+  return `${section.type}:${fields.join(',') || '∅'}`;
+}
+
 function templatePlans(mapping, target, threshold) {
   const grouped = new Map();
   for (const page of mapping.pages ?? []) {
     for (const candidate of page.candidates ?? []) {
-      const key = candidate.sectionType;
+      const key = shapeFingerprint(candidate.section ?? { type: candidate.sectionType, data: candidate.data });
       grouped.set(key, [...(grouped.get(key) ?? []), candidate]);
     }
   }
   return [...grouped.entries()]
     .filter(([, candidates]) => candidates.length >= threshold)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([sectionType, candidates]) => {
+    .map(([fingerprint, candidates]) => {
+      const sectionType = candidates[0].sectionType;
+      const fields = fingerprint.slice(fingerprint.indexOf(':') + 1);
       const exemplar = clone(candidates[0].section);
       return {
         kind: 'section_template',
         objectType: 'section_template',
-        requestedId: requestedId('stpl_capture', target, sectionType),
-        idempotencyKey: `t12.4:${target}:section-template:${sha(sectionType)}`,
-        reason: `shape repeated ${candidates.length} times (threshold ${threshold})`,
+        // Keyed on the FINGERPRINT so two shapes of one type cannot collide on one id — with the
+        // type-only key they silently did, and the second shape was dropped as a duplicate.
+        requestedId: requestedId('stpl_capture', target, fingerprint),
+        idempotencyKey: `t12.4:${target}:section-template:${sha(fingerprint)}`,
+        reason: `shape repeated ${candidates.length} times (threshold ${threshold}); fields ${fields}`,
         body: {
-          name: `Captured ${sectionType.replaceAll('_', ' ')} recipe`,
-          description: `Draft recipe extracted from ${candidates.length} repeated ${sectionType} shapes.`,
-          whenToUse: `Use for the repeated ${sectionType} shape discovered in this capture.`,
+          name: `Captured ${sectionType.replaceAll('_', ' ')} recipe (${fields})`,
+          description: `Draft recipe extracted from ${candidates.length} repeated ${sectionType} shapes carrying ${fields}.`,
+          whenToUse: `Use for the repeated ${sectionType} shape discovered in this capture, where the section carries ${fields}.`,
           scope: 'one_off',
           blueprint: exemplar,
         },
