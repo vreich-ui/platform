@@ -89,6 +89,56 @@
                 "accessibleName": { "type": ["string", "null"] },
                 "selector": { "type": "string" },
                 "text": { "type": "object" },
+            "structure": {
+              "type": "object",
+              "description": "T12.23: the block's recovered DOM shape — the lists, tables, quotes and question/answer pairs that `text` melts into one flat string. Optional and purely additive: a snapshot without this key maps exactly as it did before, so old snapshots stay replayable. Present only when the block actually contains one of these structures, and bounded at capture time (<=6 groups, <=24 items, <=400 chars per string) because a snapshot is stored and re-read.",
+              "properties": {
+                "lists": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["ordered", "items"],
+                    "properties": {
+                      "ordered": { "type": "boolean" },
+                      "items": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                },
+                "tables": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["headers", "rows"],
+                    "properties": {
+                      "headers": { "type": "array", "items": { "type": "string" } },
+                      "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } }
+                    }
+                  }
+                },
+                "quotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["quote"],
+                    "properties": {
+                      "quote": { "type": "string" },
+                      "attribution": { "type": "string" }
+                    }
+                  }
+                },
+                "qa": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["q", "a"],
+                    "properties": {
+                      "q": { "type": "string" },
+                      "a": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            },
                 "links": { "type": "array", "items": { "type": "object" } },
                 "boundingBoxes": { "type": "object" },
                 "computedStyles": { "type": "object" },

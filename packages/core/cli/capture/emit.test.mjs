@@ -6,14 +6,17 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  EmissionError,
   assertAssetFieldsFirstParty,
   buildDryRunReport,
   buildEmissionPlan,
   captureRequestId,
   createMcpTransport,
-  EmissionError,
   executeEmission,
+  shapeFingerprint,
 } from './emit.mjs';
+
+const sha = (value) => createHash('sha256').update(value).digest('hex');
 
 async function fixture(name) {
   const directory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -706,4 +709,57 @@ test('a Wix transform URL whose path ends in /v1/fill/w_146 still yields .jpg �
   const created = report.createdArtifacts.find((entry) => entry.manifestRef === manifestRef);
   assert.match(created.artifact.blobKey, /^image\/[^/]+\/[0-9a-f]{64}\.jpg$/);
   assert.ok(report.assetBindings.some((entry) => entry.artifactRefs?.includes(created.artifact.blobKey)));
+});
+
+// ─── T12.23: recipes are grouped by SHAPE, not by type name ──────────────────────────────────────
+test('two different shapes of the same section type become two recipes, not one arbitrary one', () => {
+  const section = (type, data) => ({ id: `s_${sha(JSON.stringify(data))}`.slice(0, 12), type, data });
+  const candidate = (type, data) => ({
+    candidateId: `candidate_${sha(JSON.stringify(data))}`.slice(0, 20),
+    sectionType: type,
+    data,
+    section: section(type, data),
+    confidence: 0.9,
+    mappingReason: 'test',
+    sourceBlockIds: [],
+    screenshotRefs: [],
+    assetBindings: [],
+  });
+  const rich = { heading: 'Give', body: '<p>Support us.</p>', actions: [{ label: 'Give', href: '/give' }] };
+  const bare = { heading: 'Notices' };
+  const mapping = {
+    schemaVersion: 'capture-map.v1',
+    source: { targetUrl: 'https://example.test/' },
+    generatedAt: '2026-08-21T10:00:00.000Z',
+    pages: [
+      {
+        pageRef: 'p1',
+        sourceUrl: 'https://example.test/',
+        pageBody: { route: '/', pageType: 'standard', title: 'Home', seo: {}, sections: [] },
+        candidates: [candidate('hero', rich), candidate('hero', { ...rich }), candidate('hero', bare), candidate('hero', { ...bare })],
+        gaps: [],
+      },
+    ],
+    navigationCandidates: [],
+  };
+  const plan = buildEmissionPlan({ target: 'fixture-target', mapping, theme: { name: 'T', tokens: { color: {} } } });
+  const templates = plan.creates.filter((item) => item.objectType === 'section_template');
+
+  // Type-only grouping produced ONE recipe here, blueprinted from whichever hero came first — so
+  // half the site's heroes would have been stamped from a recipe that does not describe them.
+  assert.equal(templates.length, 2);
+  const fields = templates.map((item) => item.reason.replace(/^.*fields /, '')).sort();
+  assert.deepEqual(fields, ['actions[],body,heading', 'heading']);
+  // Distinct ids, or the second recipe collides with the first and is silently lost.
+  assert.equal(new Set(templates.map((item) => item.requestedId)).size, 2);
+  // Each blueprint actually belongs to its own group.
+  const byFields = Object.fromEntries(templates.map((item) => [item.reason.replace(/^.*fields /, ''), item.body.blueprint.data]));
+  assert.deepEqual(byFields.heading, bare);
+  assert.deepEqual(byFields['actions[],body,heading'], rich);
+});
+
+test('a shape that appears once is still not worth a recipe', () => {
+  assert.equal(shapeFingerprint({ type: 'hero', data: { heading: 'x', actions: [] } }), 'hero:heading');
+  // An empty array is not a populated field — otherwise `actions: []` would split every hero in two.
+  assert.equal(shapeFingerprint({ type: 'hero', data: { heading: 'x' } }), 'hero:heading');
 });

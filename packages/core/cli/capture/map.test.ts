@@ -18,6 +18,7 @@ import {
   FIRST_PARTY_ASSET_PATH_RE,
   firstPartyAssetPath,
   mapSnapshot,
+  SUPPORTED_SECTION_TYPES,
 } from './map.mjs';
 
 const sha256Of = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -523,5 +524,180 @@ test('an injected builder-CSS payload no longer declines the gallery underneath 
   assert.deepEqual(
     bound.pageBody.sections[0].data.items.map((item: { alt: string }) => item.alt),
     ['Still 1', 'Still 2', 'Still 3']
+  );
+});
+
+// ─── T12.23: the structured section types, validated against the REAL schemas ────────────────────
+//
+// map.structured.test.mjs proves the mapper CHOOSES these types. This proves the data it builds for
+// them is actually acceptable to the platform — the only question emit cares about, because emit
+// calls object_validate before and after every create. A builder that produces a plausible-looking
+// object the Zod schema rejects would pass every test in the .mjs file and then fail live, one
+// object_create at a time, on a real tenant.
+const structuredSnapshot = (block: Record<string, unknown>, path = '/about') => ({
+  schemaVersion: 'snapshot.v1',
+  capture: {
+    targetUrl: `https://example.test${path}`,
+    origin: 'https://example.test',
+    capturedAt: '2026-08-21T10:00:00.000Z',
+    policy: { rights: { content: 'retain_allowed_origin_content', media: 'retain_referenced_allowed_origin_media' } },
+  },
+  pages: [
+    {
+      pageId: 'page_1',
+      requestedUrl: `https://example.test${path}`,
+      url: `https://example.test${path}`,
+      path,
+      status: 200,
+      title: 'About',
+      outline: [{ tag: 'h1', level: 1, text: 'About us', selector: '#h1' }],
+      blocks: [
+        {
+          id: 'block_intro',
+          ordinal: 0,
+          tag: 'section',
+          selector: '#intro',
+          text: { value: 'About us We exist to do a thing.', length: 32, truncated: false },
+          links: [],
+          boundingBoxes: {},
+          computedStyles: {},
+          screenshots: [],
+          assetUrls: [],
+        },
+        {
+          id: 'block_under_test',
+          ordinal: 1,
+          tag: 'section',
+          selector: '#target',
+          links: [],
+          boundingBoxes: {},
+          computedStyles: {},
+          screenshots: [],
+          assetUrls: [],
+          ...block,
+        },
+      ],
+      assets: [],
+      navigation: [],
+      discoveredLinks: [],
+      screenshots: [],
+    },
+  ],
+  diagnostics: {},
+});
+
+const flatText = (value: string) => ({ value, length: value.length, truncated: false });
+
+const STRUCTURED_CASES: Array<{ expected: string; block: Record<string, unknown> }> = [
+  {
+    expected: 'faq',
+    block: {
+      text: flatText('Do you fund students? Yes, every spring. Where are you based? Berlin.'),
+      structure: {
+        qa: [
+          { q: 'Do you fund students?', a: 'Yes, every spring.' },
+          { q: 'Where are you based?', a: 'Berlin.' },
+        ],
+      },
+    },
+  },
+  {
+    expected: 'testimonial',
+    block: {
+      text: flatText('They changed how we work. Dana Reyes, Director'),
+      structure: { quotes: [{ quote: 'They changed how we work.', attribution: 'Dana Reyes, Director' }] },
+    },
+  },
+  {
+    expected: 'stats',
+    block: {
+      text: flatText('1,200 films preserved 48 countries reached'),
+      structure: { lists: [{ ordered: false, items: ['1,200 films preserved', '48 countries reached'] }] },
+    },
+  },
+  {
+    expected: 'timeline',
+    block: {
+      text: flatText('1998 Founded in Berlin. 2004 First archive opened.'),
+      structure: { lists: [{ ordered: false, items: ['1998 Founded in Berlin. The first office opened.', '2004 First archive opened.'] }] },
+    },
+  },
+  {
+    expected: 'steps',
+    block: {
+      text: flatText('Apply. Interview. Decide.'),
+      structure: { lists: [{ ordered: true, items: ['Apply: send the form.', 'Interview: we call you.', 'Decide.'] }] },
+    },
+  },
+  {
+    expected: 'checklist',
+    block: {
+      text: flatText('Open access Peer reviewed Free to submit'),
+      structure: { lists: [{ ordered: false, items: ['Open access', 'Peer reviewed', 'Free to submit'] }] },
+    },
+  },
+  {
+    expected: 'comparison_table',
+    block: {
+      text: flatText('Plan Basic Pro Archive access Bulk export'),
+      structure: {
+        tables: [
+          {
+            headers: ['Plan', 'Basic', 'Pro'],
+            rows: [
+              ['Archive access', '✓', '✓'],
+              ['Bulk export', '✕', 'Up to 50/mo'],
+            ],
+          },
+        ],
+      },
+    },
+  },
+];
+
+for (const { expected, block } of STRUCTURED_CASES) {
+  test(`T12.23: a mapped ${expected} section satisfies sectionInstanceSchema`, () => {
+    const mapping = mapSnapshot(structuredSnapshot(block) as never);
+    const section = mapping.pages[0].pageBody.sections.find((entry: { type: string }) => entry.type === expected);
+    assert.ok(section, `the mapper did not produce a ${expected} section`);
+    const parsed = sectionInstanceSchema.safeParse(section);
+    assert.equal(
+      parsed.success,
+      true,
+      `${expected} failed the platform schema: ${parsed.success ? '' : JSON.stringify(parsed.error.issues)}`
+    );
+  });
+}
+
+test('T12.23: every structured page still satisfies pageBodySchema end to end', () => {
+  for (const { block } of STRUCTURED_CASES) {
+    const mapping = mapSnapshot(structuredSnapshot(block) as never);
+    const parsed = pageBodySchema.safeParse(mapping.pages[0].pageBody);
+    assert.equal(parsed.success, true, parsed.success ? '' : JSON.stringify(parsed.error.issues));
+  }
+});
+
+test('T12.23: the classifier vocabulary contains only types the platform actually registers', () => {
+  // The vocabulary is handed to block_classifier as the set it may choose from. A name in it that
+  // the platform does not register would be a suggestion the builder accepts and object_validate
+  // then rejects — a failure that only ever surfaces against a live tenant.
+  for (const type of SUPPORTED_SECTION_TYPES) {
+    assert.ok(
+      (REGISTERED_SECTION_TYPES as readonly string[]).includes(type),
+      `${type} is offered to the classifier but is not a registered section type`
+    );
+  }
+});
+
+test('T12.23: the capture-side home allowlist still mirrors the governed PageType registry', () => {
+  // Unchanged by T12.23 and asserted here so it stays that way: capture must not quietly widen a
+  // page type's allowlist to make a clone look better. `home` is narrow on purpose.
+  const lookup = getPageTypeDefinition('home');
+  assert.equal(lookup.ok, true);
+  const governed = (lookup as { ok: true; definition: { allowedSections: readonly string[] | 'any' } }).definition;
+  assert.notEqual(governed.allowedSections, 'any');
+  assert.deepEqual(
+    [...(CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS.home as Set<string>)].sort(),
+    [...(governed.allowedSections as readonly string[])].sort()
   );
 });
