@@ -100,6 +100,28 @@ never handle an Identity token on another page or in a function. Fleet law
 holds: a new tenant gets `config/membership-policy.ts` + the sweep from the
 scaffold; the probe's `membership` family says whether it did.
 
+## W19 — EDITORIAL REQUESTS: A JOB IS A RECORD, NOT A CHAT (2026-08-22, GOVERNING)
+
+Editorial work in progress is governed by
+[`docs/cms-architecture/19-editorial-requests-plan.md`](docs/cms-architecture/19-editorial-requests-plan.md)
+(findings F1–F10, the `editorial-request.v1` schema §3, surfaces §4, the
+sweeper and status derivation §5, the three notification channels §6, the agent
+contract §7, permissions §8, decisions §9, run order §10). Wolf's four scoping
+answers are governing; D1–D7 are rulings-by-default under R8. The three things
+you will hit in ordinary work: **a request is the editorial job, not the
+conversation** — `req_<flow>_<topic>_<yyyymmdd>_<nn>` is the correlation key
+(it is also the eventual `content_item` id and the artifact request id), it
+lives in the per-site `editorial-requests` store, and chats attach to it rather
+than owning it. **Only the sweeper writes a running request's status** —
+`editorial-request-sweep` derives it from CMS-Agent's run state through one
+pure function (plan §5.1); no surface, tool or chat path may set `running`,
+`stalled`, `failed` or `done` by hand. **A run that ends must say so** — the
+`run_finished → null` render (`admin/chat.tsx`) was F1 and is not to be
+reintroduced; a `caps` ending in particular must tell the editor the job is
+still alive. Fleet law holds: the sweep is a scheduled function, so its
+schedule block belongs in every `sites/<client>/netlify.toml`, and the W19 mail
+env carries the full P2 obligation. Execution: the W19 rows in queue.tsv.
+
 ## Definition of "converted" — NO HALF MEASURES (Wolf, 2026-07-10, GOVERNING)
 
 The entire project goal is: **agents can change objects on every page — add
