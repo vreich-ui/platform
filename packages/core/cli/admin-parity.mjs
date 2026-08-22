@@ -115,10 +115,21 @@ export const CANONICAL_INFRA_REDIRECTS = [
   // static content library index at /admin/content (the "Back to library"
   // dead-end loop). This is the only sanctioned form of the admin rewrite.
   { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200, force: false },
+  // W19 T19.4: the same single-segment, UNFORCED form for the request detail
+  // page — /admin/requests must keep serving its own static list index.
+  { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200, force: false },
 ];
 
-/** The S1 admin-workspace rewrite, singled out for detection/repair. */
-export const ADMIN_CONTENT_REWRITE = CANONICAL_INFRA_REDIRECTS[CANONICAL_INFRA_REDIRECTS.length - 1];
+/**
+ * The S1 admin-workspace rewrite, singled out for detection/repair.
+ *
+ * Found BY `from`, not by position: it was the last row until W19 appended the
+ * request rewrite, and a positional lookup would have silently started
+ * repairing the wrong rule.
+ */
+export const ADMIN_CONTENT_REWRITE = CANONICAL_INFRA_REDIRECTS.find(
+  (redirect) => redirect.from === '/admin/content/:objectId'
+);
 
 /**
  * The pre-S1 form: the splat matched `/admin/content/` itself and (forced)
@@ -312,6 +323,8 @@ export const REQUIRED_SHELL_ROUTES = [
   '/admin/content/[objectId]',
   '/admin/maintenance',
   '/admin/profile',
+  '/admin/requests', // W19 T19.4 — the editorial request list; the shell's three pills all deep-link to it
+  '/admin/requests/[requestId]',
   '/admin/settings/admins',
   '/admin/settings/guardrails',
   '/admin/studio',

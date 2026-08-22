@@ -35,6 +35,8 @@ export interface ChatEventView {
     | 'run_finished'
     | 'run_error'
     | 'run_cancelled'
+    /** W19 T19.3: sweeper-appended job progress. */
+    | 'request_progress'
     | 'events_trimmed';
   detail?: Record<string, unknown>;
 }

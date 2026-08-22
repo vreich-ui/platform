@@ -23,6 +23,7 @@ import { callerPrincipalFromChatRun } from '../membership/caller-principal.js';
 import type { MembershipStore } from '../membership/store.js';
 import type { OAuthBlobStore } from '../oauth-store.js';
 import type { ObjectLockSweepStore } from '../membership/offboarding.js';
+import { attachChat, createRequest, type EditorialRequestStore } from '../requests/store.js';
 import { buildObjectContract } from '../../../lib/registry/object-contract.js';
 import { mintId, MintIdError } from '../../../lib/object-ids-mint.js';
 import { validateObjectIdForType } from '../../../lib/object-ids.js';
@@ -122,6 +123,24 @@ export interface ToolContextDeps {
    * clear "not configured" error instead of crashing.
    */
   operationalEvent?: LambdaEvent;
+  /**
+   * W19 T19.1: the site's `editorial-requests` store. When present,
+   * ToolContext.requests registers a job the moment a chat tool starts one,
+   * and attaches THIS chat to it (`chatId`). Absent for callers that never
+   * start a job — those tools then simply do not register.
+   */
+  requestStore?: EditorialRequestStore;
+  /** W19 T19.1: the chat this context is running for — attached to any request it registers. */
+  chatId?: string;
+  /** W19 T19.1: the chat's kind, for the attached chat link. */
+  chatKind?: 'object' | 'free';
+  /**
+   * W19 T19.1: who the request is recorded as coming from when the run's
+   * principal is not a human (the chat doc's own owner). Plan §3.3 wants an
+   * e-mail here — `created_by` gates the creator-cancel path, so 'agent' would
+   * make the request uncancellable by the person who asked for it.
+   */
+  createdByFallback?: string;
 }
 
 // T9.13/PF5: name → the already-exported call* handler it delegates to,
@@ -381,6 +400,40 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
         return { error: error instanceof Error ? error.message : 'artifact listing failed' };
       }
     },
+
+    ...(deps.requestStore
+      ? {
+          requests: {
+            /**
+             * Failure-swallowing by design (T19.1 scope item 5): a registry
+             * write that throws is logged, never propagated — losing the
+             * record of a job is far better than not starting the job.
+             */
+            register: async (input) => {
+              try {
+                const store = deps.requestStore!;
+                await createRequest(store, {
+                  ...input,
+                  created_by:
+                    deps.principal.kind === 'human' ? deps.principal.email : (deps.createdByFallback ?? 'agent'),
+                  ...(deps.chatId ? { chat: { chat_id: deps.chatId, kind: deps.chatKind ?? 'free' } } : {}),
+                });
+                if (deps.chatId) {
+                  await attachChat(store, input.request_id, {
+                    chat_id: deps.chatId,
+                    kind: deps.chatKind ?? 'free',
+                  });
+                }
+              } catch (error) {
+                console.error('editorial request registration failed', {
+                  request_id: input.request_id,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
+            },
+          },
+        }
+      : {}),
 
     agentAuthoredOps: (objectType) => {
       const cached = opsCache.get(objectType);

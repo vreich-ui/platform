@@ -35,6 +35,7 @@ import {
   IconLogout,
   IconSearch,
   IconRocket,
+  IconClock,
   IconExternalLink,
   type IconProps,
 } from './icons';
@@ -43,8 +44,8 @@ import type { LibraryRow } from '@core/lib/admin/library-logic';
 import { avatarSrc } from '@core/lib/admin/users-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { welcomeGateDecision } from './logic';
-import { listChats } from '@core/lib/admin/chat-client';
-import { getWorkSummary } from '@core/lib/admin/work-summary';
+import { listRequests } from '@core/lib/admin/requests-client';
+import { summarizeRequestRows } from '@core/lib/admin/request-logic';
 import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
 import { settingsNavigationLabel } from '@core/lib/admin/admin-navigation';
 
@@ -72,6 +73,7 @@ export const NAV: NavGroup[] = [
   {
     items: [
       { label: 'Editorial', href: '/admin', icon: IconHome },
+      { label: 'Requests', href: '/admin/requests', icon: IconClock },
       { label: 'Templates', href: '/admin/templates', icon: IconPalette },
       { label: 'Media', href: '/admin/media', icon: IconLibrary },
       { label: 'Content', href: '/admin/content', icon: IconLibrary },
@@ -186,7 +188,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const [mobileNav, setMobileNav] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [objectRows, setObjectRows] = useState<LibraryRow[]>([]);
-  const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0 });
+  const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0, stalled: 0 });
   const objectsAttempted = useRef(false);
 
   // W18 T18.5: the welcome gate. A member whose Person.onboarding is not
@@ -255,13 +257,11 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     let alive = true;
     const load = async () => {
       try {
-        const [{ fetchInventoryRows }, chatResult] = await Promise.all([
-          import('@core/lib/admin/library-client'),
-          listChats(shellToken),
-        ]);
-        const rows = await fetchInventoryRows(shellToken);
-        const summary = getWorkSummary(rows, chatResult.chats);
-        if (alive) setWorkCounts({ working: summary.workingCount, needsYou: summary.needsYouCount });
+        // W19 T19.2: ONE blob GET (the request index), not the O(N) chat scan
+        // this used to run every 15 s per signed-in admin (plan F7).
+        const { requests } = await listRequests(shellToken, { limit: 100 });
+        const summary = summarizeRequestRows(requests);
+        if (alive) setWorkCounts(summary);
       } catch {
         // Global utilities are progressive enhancement; page work remains usable.
       }
@@ -360,9 +360,12 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             <h1 className="flex-1 truncate text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]">
               {title ?? 'Workspace'}
             </h1>
+            {/* W19: the three pills deep-link to the matching /admin/requests
+                filter — they used to point at /admin/release, which is not a
+                request list. */}
             {workCounts.working > 0 ? (
               <a
-                href="/admin/release"
+                href="/admin/requests?status=running%2Cqueued"
                 className="adm-focusable hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-info-soft)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-info-text)] sm:inline-flex"
               >
                 Working · {workCounts.working}
@@ -370,10 +373,18 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             ) : null}
             {workCounts.needsYou > 0 ? (
               <a
-                href="/admin/release"
+                href="/admin/requests?status=needs_you"
                 className="adm-focusable hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-warning-soft)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-warning-text)] sm:inline-flex"
               >
                 Needs you · {workCounts.needsYou}
+              </a>
+            ) : null}
+            {workCounts.stalled > 0 ? (
+              <a
+                href="/admin/requests?status=stalled%2Cfailed"
+                className="adm-focusable hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-danger-soft)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-danger-text)] sm:inline-flex"
+              >
+                Stalled · {workCounts.stalled}
               </a>
             ) : null}
             <button

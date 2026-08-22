@@ -16,7 +16,7 @@ create-site plan for 'acme' (Acme)
   theme id:       thm_acme_default
   canonical host: https://acme.netlify.app
 
-Files to create under sites/acme/ (82):
+Files to create under sites/acme/ (85):
   + sites/acme/config/site-identity.ts
   + sites/acme/config/site-binding.ts
   + sites/acme/config/approval-policy.ts
@@ -71,6 +71,7 @@ Files to create under sites/acme/ (82):
   + sites/acme/netlify/functions/admin-object.ts
   + sites/acme/netlify/functions/admin-release.ts
   + sites/acme/netlify/functions/admin-release-state.ts
+  + sites/acme/netlify/functions/admin-requests.ts
   + sites/acme/netlify/functions/admin-taxonomy.ts
   + sites/acme/netlify/functions/admin-users.ts
   + sites/acme/netlify/functions/artifact-upload.ts
@@ -78,6 +79,8 @@ Files to create under sites/acme/ (82):
   + sites/acme/netlify/functions/claim-free.ts
   + sites/acme/netlify/functions/create-checkout-session.ts
   + sites/acme/netlify/functions/deploy-status.ts
+  + sites/acme/netlify/functions/editorial-request-sweep.ts
+  + sites/acme/netlify/functions/editorial-request-sweep-background.ts
   + sites/acme/netlify/functions/get-public-image.ts
   + sites/acme/netlify/functions/get-public-pdf.ts
   + sites/acme/netlify/functions/get-purchase.ts
@@ -201,6 +204,6 @@ ADMIN WORKSPACE BOOTSTRAP (human gate â€” runbook site-provisioning-runbook.md Â
   4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in
      config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).
      Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only
-  Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency.
+  Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency, editorial-requests.
   Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>
 `;

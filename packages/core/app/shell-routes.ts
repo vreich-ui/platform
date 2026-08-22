@@ -51,6 +51,12 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   // an authenticated admin, and that login already lives here.
   { pattern: '/admin/authorize', entry: 'admin/authorize.astro' },
   { pattern: '/admin/content', entry: 'admin/content/index.astro' },
+  // W19 T19.4: the editorial request list, and its deep link. `[requestId]`
+  // is the T9.9 placeholder pattern — the netlify.toml rewrite serves the
+  // `__request` page for every /admin/requests/<id> and the island reads the
+  // id client-side.
+  { pattern: '/admin/requests', entry: 'admin/requests.astro' },
+  { pattern: '/admin/requests/[requestId]', entry: 'admin/requests/[requestId].astro' },
   { pattern: '/admin/content/[objectId]', entry: 'admin/content/[objectId].astro' },
   // T18.5: one-time onboarding (name + "what your role can do") — the AdminShell gate sends new members here.
   { pattern: '/admin/welcome', entry: 'admin/welcome.astro' },

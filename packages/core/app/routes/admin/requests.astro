@@ -1,0 +1,15 @@
+---
+// W19 T19.4 — the editorial request list: every job with any status unless
+// archived, attention-first, with a spinner on the live ones.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import RequestsWorkspace from '~/admin/RequestsWorkspace';
+
+// D2: resolve identity once, server-side, where process.env is real.
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Requests">
+  <RequestsWorkspace client:load identity={identity} />
+</AdminLayout>

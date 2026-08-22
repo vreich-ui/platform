@@ -1,0 +1,22 @@
+---
+// W19 T19.4 — one request, deep-linkable. Same pattern as the object
+// workspace (T9.9): ONE placeholder page, a netlify.toml rewrite serves it for
+// every /admin/requests/<id>, and the island reads the id client-side from the
+// URL. The state lives in the store, never in the tab, so a cold load from any
+// device shows the same thing.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import RequestsWorkspace from '~/admin/RequestsWorkspace';
+
+export function getStaticPaths() {
+  return [{ params: { requestId: '__request' } }];
+}
+
+// D2: resolve identity once, server-side, where process.env is real.
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Request">
+  <RequestsWorkspace client:load identity={identity} />
+</AdminLayout>
