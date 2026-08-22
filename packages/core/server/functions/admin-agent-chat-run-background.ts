@@ -11,7 +11,12 @@
 import type { SiteBinding } from '../lib/site-binding.js';
 import { getHeader } from '../lib/admin-auth.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
-import { getAgentLearningBlobStore, getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import {
+  getAgentLearningBlobStore,
+  getArtifactIndexBlobStore,
+  getEditorialRequestsBlobStore,
+  getSiteObjectsBlobStore,
+} from '../lib/blob-store.js';
 import { getGovernanceBlobStore } from '../lib/governance-store.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
@@ -101,6 +106,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     // (deploy_status, pdf-tool/image families, commerce, ...) execute in the
     // background hop too, not only on the interactive approve path.
     operationalEvent: eventWithDeadline,
+    // W19 T19.1: the hop that STARTS a job registers it, and attaches this chat.
+    requestStore: await getEditorialRequestsBlobStore(event),
+    chatId: doc.chat_id,
+    chatKind: doc.kind,
+    createdByFallback: doc.created_by,
   });
 
   // PF5 permanent cutover: every background hop uses CMS-Agent's canonical

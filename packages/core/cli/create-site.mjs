@@ -383,6 +383,11 @@ export const CORE_BLOB_STORES = [
   // a same-key retry after a timeout/502 replays it instead of re-running
   // the write.
   'idempotency',
+  // W19 T19.1: the editorial request registry — one doc per job plus the
+  // index every admin tab polls. Strongly consistent: the sweeper is the
+  // single writer of a running request's status and must never read its own
+  // stale write.
+  'editorial-requests',
 ];
 
 // T16.0: derived from the genesis manifest, the one staged source of truth
@@ -543,6 +548,7 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     // W15 S1: one path segment, so /admin/content itself keeps serving the
     // static content library (the splat form swallowed the library index).
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
+    { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
   ],
 });
 
@@ -645,6 +651,13 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [functions."membership-sweep"]
   schedule = "17 3 * * *"
 
+# W19 T19.3: the editorial-request sweep — derives every running request's
+# status from CMS-Agent's run state, appends progress to the attached chats,
+# and nudges a genuinely dead driver at most three times. Without this block
+# a request never leaves \`queued\` on this tenant.
+[functions."editorial-request-sweep"]
+  schedule = "*/5 * * * *"
+
 [[redirects]]
   from = "/pdf/*"
   to = "/.netlify/functions/get-public-pdf?blobKey=pdf/:splat"
@@ -736,6 +749,11 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [[redirects]]
   from = "/admin/content/:objectId"
   to = "/admin/content/__workspace"
+  status = 200
+
+[[redirects]]
+  from = "/admin/requests/:requestId"
+  to = "/admin/requests/__request"
   status = 200
 `;
 

@@ -86,6 +86,23 @@ export interface ToolContext {
     call(verb: string, args: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   };
   /**
+   * W19 T19.1: the editorial-request registry, reached by the tools that
+   * START a job. `register` is deliberately failure-swallowing (see
+   * context.ts): losing the RECORD of a job is bad, failing to START the job
+   * because the record could not be written is worse. Absent when the hop has
+   * no request store wired — the tools then simply do not register.
+   */
+  requests?: {
+    register(input: {
+      request_id: string;
+      kind: 'article' | 'page' | 'section' | 'theme' | 'media' | 'capture' | 'other';
+      title: string;
+      brief_excerpt?: string;
+      workflow?: { run_id: string; workflow_id: string; project_id: string; node_total?: number };
+      object?: { object_type: string; object_id: string };
+    }): Promise<void>;
+  };
+  /**
    * D2a (2026-08-17): the run's captured HUMAN principal — the approver a
    * chat-side publish pins into CMS-Agent's readiness `approval` block.
    * Absent for contexts without a human (a publish then refuses).
@@ -717,7 +734,10 @@ const runWorkspaceWorkflow: ChatTool = {
         workflow_id: z.string().min(1).optional(),
         budget_usd: z.number().nonnegative().optional(),
         execution_mode: z.enum(['mock', 'openai']).optional(),
-        request_id: z.string().regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>').optional(),
+        request_id: z
+          .string()
+          .regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>')
+          .optional(),
         slug: z.string().min(1).optional(),
       })
       .refine((value) => Boolean(value.run_id) !== Boolean(value.input), {
@@ -753,9 +773,38 @@ const runWorkspaceWorkflow: ChatTool = {
       ...(args.execution_mode ? { executionMode: args.execution_mode } : {}),
     });
     if (!started.ok) return { content: json({ error: started.message, code: started.code }), is_error: true };
+    // W19 T19.1: register the job the instant it starts, so the record exists
+    // even if this chat turn ends on caps two minutes from now. Deliberately
+    // scoped to THIS tool in the T19.1–T19.4 delivery: it is the only chat
+    // tool that starts work an editor then waits on. Plan D7's non-workflow
+    // creators (template instantiation, retheme, media jobs) complete inline
+    // and have no `req_…` id of their own yet; they register when their id
+    // minting is designed, alongside the T19.10 backfill.
+    const startedRun = projectWorkspaceRun(started.data);
+    const briefInput = (args.input ?? {}) as Record<string, unknown>;
+    // A run id we did not actually get back is NOT a workflow block: a record
+    // carrying `run_id: ''` would derive `queued` for ever and be polled for
+    // ever. Register the request without one and let the poll say so.
+    const startedRunId = typeof startedRun.run_id === 'string' ? startedRun.run_id : '';
+    await ctx.requests?.register({
+      request_id: requestId,
+      kind: 'article',
+      title: requestTitleFrom(briefInput, requestId),
+      ...(typeof briefInput.instructions === 'string' ? { brief_excerpt: briefInput.instructions.slice(0, 240) } : {}),
+      ...(startedRunId
+        ? {
+            workflow: {
+              run_id: startedRunId,
+              workflow_id: (args.workflow_id as string | undefined) ?? 'publishing_conductor',
+              project_id: ctx.cmsAgent.projectId,
+              ...(Array.isArray(startedRun.nodes) ? { node_total: startedRun.nodes.length } : {}),
+            },
+          }
+        : {}),
+    });
     return {
       content: json({
-        ...projectWorkspaceRun(started.data),
+        ...startedRun,
         request_id: requestId,
         ...(started.data.continued !== undefined ? { continued: started.data.continued === true } : {}),
       }),
@@ -817,6 +866,17 @@ const slugifyForRequestId = (value: unknown): string =>
     .replace(/_+/g, '_')
     .slice(0, 48);
 
+/** The editor-facing title for a registered request: the brief's own words where it has them. */
+export const requestTitleFrom = (input: Record<string, unknown>, fallback: string): string => {
+  for (const key of ['title', 'topic', 'slug']) {
+    const value = input[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 200);
+  }
+  const instructions = input.instructions;
+  if (typeof instructions === 'string' && instructions.trim()) return instructions.trim().slice(0, 80);
+  return fallback;
+};
+
 const yyyymmdd = (date = new Date()): string =>
   `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`;
 
@@ -873,7 +933,12 @@ const callReadiness = async (
   ctx: ToolContext,
   args: ReadinessInput
 ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; code: string; message: string }> => {
-  if (!ctx.cmsAgent) return { ok: false, code: 'cms_agent_unavailable', message: 'The workspace orchestration bridge is not configured for this site.' };
+  if (!ctx.cmsAgent)
+    return {
+      ok: false,
+      code: 'cms_agent_unavailable',
+      message: 'The workspace orchestration bridge is not configured for this site.',
+    };
   return ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_publish_readiness', {
     projectId: ctx.cmsAgent.projectId,
     runId: args.runId,
@@ -894,12 +959,15 @@ const checkWorkspaceRunReadiness: ChatTool = {
   toolClass: 'read',
   discloseResult: true,
   description:
-    'Check whether a workspace run is ready to publish: CMS-Agent evaluates its publish checklist (approval omitted — that is pinned at publish time) against this site\'s verified media artifacts for the request id. Returns status (go / no_go), the checklist and any blockers verbatim. Run this before publish_workspace_run.',
+    "Check whether a workspace run is ready to publish: CMS-Agent evaluates its publish checklist (approval omitted — that is pinned at publish time) against this site's verified media artifacts for the request id. Returns status (go / no_go), the checklist and any blockers verbatim. Run this before publish_workspace_run.",
   input_schema: {
     type: 'object',
     properties: {
       run_id: { type: 'string' },
-      request_id: { type: 'string', description: 'The req_* id the run was started with (media refs are looked up by it).' },
+      request_id: {
+        type: 'string',
+        description: 'The req_* id the run was started with (media refs are looked up by it).',
+      },
       tags: { type: 'array', items: { type: 'string' }, description: 'Taxonomy tags the article will carry.' },
     },
     required: ['run_id'],
@@ -908,7 +976,10 @@ const checkWorkspaceRunReadiness: ChatTool = {
   parse: zodParse(
     z.object({
       run_id: z.string().min(1),
-      request_id: z.string().regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>').optional(),
+      request_id: z
+        .string()
+        .regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>')
+        .optional(),
       tags: readinessTagsSchema,
     })
   ),
@@ -966,7 +1037,10 @@ const publishWorkspaceRun: ChatTool = {
     if (!readiness.ok) return { content: json({ error: readiness.message, code: readiness.code }), is_error: true };
     if (readiness.data.status !== 'go') {
       return {
-        content: json({ error: 'Run is not ready to publish (readiness is not "go").', readiness: projectReadiness(readiness.data) }),
+        content: json({
+          error: 'Run is not ready to publish (readiness is not "go").',
+          readiness: projectReadiness(readiness.data),
+        }),
         is_error: true,
       };
     }
@@ -978,7 +1052,11 @@ const publishWorkspaceRun: ChatTool = {
       approved: true,
       live: true,
       readiness: {
-        approval: { approvedBy: ctx.principal.email || ctx.principal.id, approvedAt: new Date().toISOString(), pinned: true },
+        approval: {
+          approvedBy: ctx.principal.email || ctx.principal.id,
+          approvedAt: new Date().toISOString(),
+          pinned: true,
+        },
         releaseBehavior: base.releaseBehavior,
         taxonomy: base.taxonomy,
         verifiedMediaRefs: base.verifiedMediaRefs,
@@ -990,7 +1068,9 @@ const publishWorkspaceRun: ChatTool = {
         ? { ok: true as const, data: published.data }
         : { ok: false as const, isError: true, code: published.code, message: published.message };
     };
-    const result = ctx.idempotent ? await ctx.idempotent('publish_workspace_run', `publish:${input.runId}`, run) : await run();
+    const result = ctx.idempotent
+      ? await ctx.idempotent('publish_workspace_run', `publish:${input.runId}`, run)
+      : await run();
     if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
     const data = result.data as Record<string, unknown>;
     return {
@@ -1014,10 +1094,20 @@ const publishWorkspaceRun: ChatTool = {
       requestId: args.request_id as string | undefined,
       tags: args.tags as string[] | undefined,
     });
-    if (!readiness.ok) return { dry_run: true, action: 'publish_workspace_run', run_id: args.run_id, error: readiness.message, code: readiness.code };
+    if (!readiness.ok)
+      return {
+        dry_run: true,
+        action: 'publish_workspace_run',
+        run_id: args.run_id,
+        error: readiness.message,
+        code: readiness.code,
+      };
     const projected = projectReadiness(readiness.data);
     const checklist = Array.isArray(projected.checklist) ? (projected.checklist as Record<string, unknown>[]) : [];
-    const failing = checklist.filter((check) => check && typeof check === 'object' && (check.ok === false || check.pass === false || check.status === 'fail'));
+    const failing = checklist.filter(
+      (check) =>
+        check && typeof check === 'object' && (check.ok === false || check.pass === false || check.status === 'fail')
+    );
     return {
       dry_run: true,
       action: 'publish_workspace_run',
@@ -1045,12 +1135,20 @@ const releaseWorkspaceRun: ChatTool = {
   input_schema: {
     type: 'object',
     properties: {
-      commit: { type: 'string', description: 'Target commit (e.g. the publish receipt commit). Omitted = branch HEAD.' },
-      publish_receipt_from_run: { type: 'string', description: 'The workspace run id whose publish this release ships (used for the idempotency key).' },
+      commit: {
+        type: 'string',
+        description: 'Target commit (e.g. the publish receipt commit). Omitted = branch HEAD.',
+      },
+      publish_receipt_from_run: {
+        type: 'string',
+        description: 'The workspace run id whose publish this release ships (used for the idempotency key).',
+      },
     },
     additionalProperties: false,
   },
-  parse: zodParse(z.object({ commit: z.string().min(1).optional(), publish_receipt_from_run: z.string().min(1).optional() })),
+  parse: zodParse(
+    z.object({ commit: z.string().min(1).optional(), publish_receipt_from_run: z.string().min(1).optional() })
+  ),
   execute: async (ctx, args) => {
     if (!ctx.roles.includes('owner')) {
       return { content: json({ error: 'release_workspace_run requires the Owner role.' }), is_error: true };

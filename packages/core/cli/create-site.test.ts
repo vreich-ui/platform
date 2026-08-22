@@ -164,6 +164,7 @@ test('CORE_BLOB_STORES matches the store-name literals in blob-store.ts/governan
       'artifacts',
       'commerce',
       'commerce-events',
+      'editorial-requests', // W19 T19.1: the editorial request registry (one doc per job + the polled index)
       'governance',
       'idempotency', // QA-W16-1: idempotency-key bridge (idempotency-store.ts / getIdempotencyBlobStore)
       'marginalia', // W15 S4 (MVP): comment threads, independent of the object substrate's lock/version lifecycle

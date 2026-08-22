@@ -50,6 +50,15 @@
 [functions."membership-sweep"]
   schedule = "17 3 * * *"
 
+# W19 T19.3: the editorial-request sweep — derives every running request's
+# status from CMS-Agent's run state, appends progress to the attached chats,
+# and nudges a genuinely dead driver at most three times. This is what makes
+# "close the window and come back" true; without it a request never leaves
+# `queued`. A scheduled function only runs if its schedule is DECLARED here
+# (P1: every site carries this block; the parity audit checks it).
+[functions."editorial-request-sweep"]
+  schedule = "*/5 * * * *"
+
 
 [[redirects]]
   from = "/pdf/*"
@@ -150,6 +159,16 @@
   from = "/admin/content/:objectId"
   to = "/admin/content/__workspace"
   status = 200
+
+# W19 T19.4: serve the request detail for /admin/requests/<id> — ONE path
+# segment (`:requestId`), never the splat, exactly as the object workspace
+# above. status 200 without force, so the static list index and the __request
+# placeholder page are never shadowed; the island reads the id client-side.
+[[redirects]]
+  from = "/admin/requests/:requestId"
+  to = "/admin/requests/__request"
+  status = 200
+
 
 [[redirects]]
   from = "/blog"
