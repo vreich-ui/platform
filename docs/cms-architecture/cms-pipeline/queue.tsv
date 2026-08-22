@@ -327,3 +327,32 @@ T18.9	notify	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T18.9-membe
 # tiers are locked out of /admin. Security-boundary work (Fable). Runs BEFORE Wolf's
 # T18.9 Part B, whose step 3 hits it on the first editor invite.
 T18.10	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T18.10-tier-access-gates.md
+#
+# W19 — EDITORIAL REQUESTS: progress, resumability, notifications (Wolf, 2026-08-22).
+# Plan: docs/cms-architecture/19-editorial-requests-plan.md (findings F1-F10, schema
+# §3, surfaces §4, lifecycle + sweeper §5, notifications §6, agent contract §7,
+# permissions §8, decisions §9, run order §10, difficulty §11). Wolf's four scoping
+# answers are governing (§9); the D1-D7 defaults run under R8 — override one by
+# editing the brief + a comment here, not by halting the queue.
+# Sequencing: T19.1 gates everything (registry + single-writer discipline). Then
+# T19.2. After T19.2, T19.3 and T19.4 may run in PARALLEL worktrees (disjoint:
+# server sweeper vs the React surface); T19.5 needs both. Then T19.6 and T19.8 may
+# run in PARALLEL. T19.7 may start any time after T19.2 but must land before
+# T19.11; T19.9 after T19.7 (it carries T19.7's env rows). T19.10 second-to-last,
+# T19.11 last (Part A automatable, Part B = Wolf's credentialed run + the mail
+# domain verification, halts).
+# T19.7 answers the open question T17.10 (W17 notifications/digests) is parked on:
+# the mail seam is built once, there, and T17.10 becomes marginalia digests over it.
+# Fable rows are `notify` (interactive, /model claude-fable-5, /effort as listed);
+# every other row is headless-safe under the runner's circuit breakers.
+T19.1	notify	claude-fable-5	xhigh	docs/cms-architecture/cms-pipeline/T19.1-request-registry-and-store.md
+T19.2	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.2-requests-endpoint-and-client.md
+T19.3	notify	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T19.3-request-sweeper-and-status.md
+T19.4	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.4-requests-surface.md
+T19.5	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.5-request-aware-chat.md
+T19.6	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T19.6-in-app-and-browser-notifications.md
+T19.7	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.7-mail-seam-and-env.md
+T19.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T19.8-request-tools-agent-and-mcp.md
+T19.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T19.9-fleet-parity-and-probe.md
+T19.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T19.10-backfill-and-records.md
+T19.11	notify	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.11-e2e-and-credentialed-run.md
