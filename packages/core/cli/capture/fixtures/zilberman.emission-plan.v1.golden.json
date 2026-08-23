@@ -6,6 +6,8 @@
     "theme",
     "section_template",
     "section_template",
+    "section_template",
+    "section_template",
     "navigation",
     "navigation",
     "page",
@@ -16,8 +18,10 @@
   ],
   "createIds": [
     "thm_capture_3a980f55e7a9df2378",
+    "stpl_capture_b51f7eca672c808b1a",
     "stpl_capture_e134fa9d31a8eb58f9",
     "stpl_capture_7f623aa8eae4db2f53",
+    "stpl_capture_7396ac993926999e24",
     "nav_capture_b9cfafd65ac61976c1",
     "nav_capture_e1b3d6b6cd9d58f1f0",
     "page_capture_0dab20cec74b87733e",
@@ -38,7 +42,7 @@
     "object_inventory",
     "object_get"
   ],
-  "mediaCount": 48,
-  "assetPlanCount": 7,
-  "gapCount": 14
+  "mediaCount": 65,
+  "assetPlanCount": 10,
+  "gapCount": 12
 }

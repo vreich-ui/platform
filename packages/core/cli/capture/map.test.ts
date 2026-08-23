@@ -146,7 +146,17 @@ test('every source block is accounted exactly once and every copy field is tagge
       page.blockAccounting.length
     );
     for (const candidate of page.candidates) {
-      assert.ok(candidate.provenance.textFields.length > 0);
+      // T12.29: image-only sections now reach '/' (brand_row is a logo strip — images, no copy), so
+      // "has text provenance" is no longer universal. The assertion that matters is unchanged and
+      // now sharper: every copy field present is tagged `extracted`, AND a candidate with no copy
+      // must be carrying imagery. That way "no text fields" can never quietly mean "the copy was
+      // lost" — it has to mean "this section is not made of copy".
+      const carriesImagery =
+        (candidate.assetBindings?.length ?? 0) > 0 || (candidate.assetPlan?.entries?.length ?? 0) > 0;
+      assert.ok(
+        candidate.provenance.textFields.length > 0 || carriesImagery,
+        `${candidate.sectionType} has neither extracted copy nor imagery`
+      );
       assert.ok(candidate.provenance.textFields.every((field: { source: string }) => field.source === 'extracted'));
       assert.ok(
         candidate.assetBindings.every(
@@ -297,9 +307,14 @@ test('the recorded asset-capability gaps close: no gap in the replayed ledger st
   assert.ok(boundWithMedia.length >= 4, `expected at least 4 of the 8 to bind media, got ${boundWithMedia.length}`);
 });
 
-test('mapped coverage on the committed fixture is the recorded 10/19 = 52.63%', async () => {
-  // The before/after recorded in the T12.14 brief: 3/19 = 15.79% before this
-  // task, 10/19 = 52.63% after. The 90% bar is untouched and still unmet.
+test('mapped coverage on the committed fixture is the recorded 17/19 = 89.47%', async () => {
+  // The recorded progression on this one fixture:
+  //   T12.14 brief:  3/19 = 15.79%  ->  10/19 = 52.63%  (asset-aware mapping)
+  //   T12.29:       10/19 = 52.63%  ->  17/19 = 89.47%  (captured pages declare pageType 'clone')
+  // The seven blocks recovered here are the ones the DTC `home` family used to discard from '/':
+  // media, brand_row, content_split and prose all had nowhere legal to sit on a homepage. The 90%
+  // bar is untouched and STILL unmet — deliberately: this asserts what the mapper does, not what
+  // we would like it to do.
   const snapshot = await readFixture('zilberman.snapshot.v1.redacted.json');
   const mapping = mapSnapshot(snapshot);
   const relevant = mapping.pages.flatMap((page: { blockAccounting: Array<{ status: string }> }) =>
@@ -309,9 +324,12 @@ test('mapped coverage on the committed fixture is the recorded 10/19 = 52.63%', 
   );
   const mapped = relevant.filter((entry: { status: string }) => ['mapped', 'mapped_with_gap'].includes(entry.status));
   assert.equal(relevant.length, 19);
-  assert.equal(mapped.length, 10);
-  assert.equal(Number((mapped.length / relevant.length).toFixed(4)), 0.5263);
-  assert.equal(mapping.summary.pendingAssetSections, 7);
+  assert.equal(mapped.length, 17);
+  assert.equal(Number((mapped.length / relevant.length).toFixed(4)), 0.8947);
+  // 7 -> 10 with T12.29: three more asset-bearing sections now survive on '/', where the `home`
+  // family had been discarding them. They are PENDING by design — a section with an asset plan is
+  // deliberately incomplete until emission binds a materialized first-party artifact into it.
+  assert.equal(mapping.summary.pendingAssetSections, 10);
 });
 
 test('alt text is carried from the source block’s own item-level text association', async () => {

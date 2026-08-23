@@ -301,26 +301,34 @@ test('an existing recipe is reused, and an existing page ROUTE is patched in pla
   if (lastRemove >= 0) assert.ok(lastRemove < firstUpsert, 'removals come before upserts');
   // sections are refused inside set_page_meta by schema; the section ops are its only writer.
   assert.equal(ops.some((op) => op.op === 'set_page_meta' && 'sections' in (op.fields ?? {})), false);
+  // T12.29: the page type must travel, or a reused '/' keeps pageType 'home' and validation rejects
+  // the very media this path just bound.
+  const meta = ops.find((op) => op.op === 'set_page_meta');
+  assert.equal(meta?.fields?.pageType, 'clone');
 });
 
 test('a capture that mapped NO sections must not blank the live page at that route', async () => {
-  // The redacted fixture's `/` maps to zero sections while the live page there is the hand-built
-  // homepage. Without this guard the reuse path removes every existing section and writes nothing
-  // back — a published page silently emptied by a re-run. An empty capture is a failed mapping,
-  // never a delete instruction.
+  // An empty capture is a FAILED MAPPING, never a delete instruction. Without this guard the reuse
+  // path removes every existing section and writes nothing back — a published page silently emptied
+  // by a re-run. Built explicitly rather than leaning on a fixture: T12.29 gave the redacted '/'
+  // seven sections, so the fixture no longer exercises the case the guard exists for.
   const plan = await fixturePlan();
   const mapping = await fixture('zilberman.mapping.v1.redacted.json');
-  const transport = mockTransport({ pageRoute: '/', pageRouteInDetail: true });
+  const emptyPage = plan.creates.find((item) => item.objectType === 'page');
+  assert.ok(emptyPage, 'the plan has a page to empty');
+  emptyPage.body = { ...emptyPage.body, route: '/empty-capture', sections: [] };
+
+  const transport = mockTransport({ pageRoute: '/empty-capture', pageRouteInDetail: true });
   const report = await executeEmission({ plan, mapping, transport, projectPolicyResolver: async (target) => projectPolicy(target) });
 
   assert.ok(
     report.quarantines.some((item) => item.reason === 'reuse_would_empty_page' && item.objectId === 'page_existing'),
     'the empty capture is quarantined'
   );
-  assert.equal(report.reusedObjects.some((item) => item.objectType === 'page' && item.route === '/'), false);
-  // Nothing was patched, so nothing was removed.
+  assert.equal(report.reusedObjects.some((item) => item.objectId === 'page_existing'), false);
+  // Nothing was patched, so nothing was removed — and no lease was taken on a live page.
   assert.equal(transport.calls.some((call) => call.verb === 'object_patch' && call.args.object_id === 'page_existing'), false);
-  assert.equal(transport.calls.some((call) => call.verb === 'object_checkout'), false);
+  assert.equal(transport.calls.some((call) => call.verb === 'object_checkout' && call.args.object_id === 'page_existing'), false);
 });
 
 test('an existing navigation ROLE is patched rather than colliding on its requested id', async () => {

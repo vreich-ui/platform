@@ -66,8 +66,11 @@ test('fixture score is deterministic and records the ratified coverage-based rub
   // blocks instead of declining them. The bar is untouched at 90%: the verdict
   // is still `needs_governed_iteration`, and the residue is still enumerated.
   assert.deepEqual(first.rubric.coverage, {
-    score: 0.5263,
-    mappedBlocks: 10,
+    // 10/19 -> 17/19 with T12.29: captured pages declare pageType 'clone', so the seven blocks
+    // the DTC `home` family used to discard from '/' (media, brand_row, content_split, prose) are
+    // mapped instead of gapped. Still short of the 0.9 bar, deliberately unmoved.
+    score: 0.8947,
+    mappedBlocks: 17,
     relevantBlocks: 19,
     minimum: 0.9,
     met: false,
@@ -330,12 +333,14 @@ test('a preview manifest that names no screenshot leaves every comparison a defe
 test('unbound asset sections are enumerated defects and the rubric is untouched', async () => {
   const mapping = await fixture('zilberman.mapping.v1.redacted.json');
   const planned = mapping.pages.flatMap((page) => page.candidates.filter((candidate) => candidate.assetPlan));
-  assert.equal(planned.length, 7);
+  // 7 -> 10 with T12.29: three more asset-bearing sections survive on '/', where the DTC `home`
+  // family had been discarding them before they could ever reach an asset plan.
+  assert.equal(planned.length, 10);
 
   // Without an emission report the binding is simply not verified — reported as
   // such, never as clean.
   const unverified = await scoreFixture();
-  assert.equal(unverified.assets.plannedSections, 7);
+  assert.equal(unverified.assets.plannedSections, 10);
   assert.equal(unverified.assets.evidenceComplete, null);
   assert.equal(unverified.assets.reason, 'no_emission_report_supplied_binding_not_verified');
 
@@ -353,7 +358,7 @@ test('unbound asset sections are enumerated defects and the rubric is untouched'
     },
   });
   assert.equal(nothingBound.assets.evidenceComplete, false);
-  assert.equal(nothingBound.assets.defectCount, 7);
+  assert.equal(nothingBound.assets.defectCount, 10);
   assert.equal(nothingBound.assets.boundSections, 0);
   assert.ok(
     nothingBound.assets.defects.every(
@@ -371,11 +376,11 @@ test('unbound asset sections are enumerated defects and the rubric is untouched'
   });
   assert.equal(allBound.assets.evidenceComplete, true);
   assert.equal(allBound.assets.defectCount, 0);
-  assert.equal(allBound.assets.boundSections, 7);
+  assert.equal(allBound.assets.boundSections, 10);
   assert.deepEqual(allBound.rubric, unverified.rubric);
 
   // A section emission never mentioned at all is still a defect, not a silence.
   const silent = await scoreFixture({ emissionReport: { assetBindings: [], assetGaps: [] } });
-  assert.equal(silent.assets.defectCount, 7);
+  assert.equal(silent.assets.defectCount, 10);
   assert.ok(silent.assets.defects.every((defect) => defect.code === ASSET_DEFECT_CODE_UNEMITTED));
 });
