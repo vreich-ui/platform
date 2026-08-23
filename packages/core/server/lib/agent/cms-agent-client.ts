@@ -20,11 +20,7 @@
  * (wire version `client_manager.turn.v1`), mirrored in
  * `docs/admin-redesign/cms-agent-chat-plan.md` §5/§5A.
  */
-import {
-  PLATFORM_ENV_NAMES,
-  readBoundEnv,
-  type SiteBindingEnvNames,
-} from '../site-binding.js';
+import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBindingEnvNames } from '../site-binding.js';
 import type { ChatMsg, ChatToolCall } from './chat-store.js';
 import type { WireTool } from './provider.js';
 
@@ -38,7 +34,20 @@ export const MCP_FALLBACK_PROTOCOL_VERSION = '2025-03-26';
 export const CMS_AGENT_BOUNDS = {
   maxMessages: 200,
   maxMessagesChars: 256_000,
-  maxTools: 64,
+  /**
+   * W19 T19.8 (coordinated with CMS-Agent's `MAX_CONVERSATION_TOOLS`): raised
+   * from 64. Platform's registry had grown to exactly 63 tools + the
+   * learning-mode `present_candidates`, i.e. the old ceiling with ZERO
+   * headroom — adding a single tool would have silently truncated the wire.
+   *
+   * 64 was never a provider limit; it was this contract's own number. The
+   * bound that actually protects cost is `maxToolsChars`, which is unchanged.
+   * `cmsAgentEngine` falls back to 64 once, automatically, if the other side
+   * is still on the old bound — so the two repos can land in either order.
+   */
+  maxTools: 96,
+  /** The previous ceiling, kept as the automatic fallback (see engine.ts). */
+  legacyMaxTools: 64,
   maxToolsChars: 256_000,
   maxContextChars: 64_000,
   maxTokensCeiling: 32_000,
@@ -148,7 +157,8 @@ const nonEmpty = (value: string | undefined): string | undefined => {
  */
 export const cmsAgentMissingEnvVars = (names: SiteBindingEnvNames = PLATFORM_ENV_NAMES): string[] => {
   const missing: string[] = [];
-  if (!nonEmpty(readBoundEnv(names.cmsAgentEndpoint))) missing.push(names.cmsAgentEndpoint[0] ?? 'CMS_AGENT_MCP_ENDPOINT');
+  if (!nonEmpty(readBoundEnv(names.cmsAgentEndpoint)))
+    missing.push(names.cmsAgentEndpoint[0] ?? 'CMS_AGENT_MCP_ENDPOINT');
   if (!nonEmpty(readBoundEnv(names.cmsAgentToken))) missing.push(names.cmsAgentToken[0] ?? 'CMS_AGENT_MCP_TOKEN');
   return missing;
 };
@@ -405,14 +415,18 @@ export const checkConverseBounds = (request: CmsAgentConverseRequest): CmsAgentE
   }
   const toolsChars = serializedLength(request.tools);
   if (toolsChars > CMS_AGENT_BOUNDS.maxToolsChars) {
-    return invalid(`tools list serializes to ${toolsChars} characters; the bound is ${CMS_AGENT_BOUNDS.maxToolsChars}.`);
+    return invalid(
+      `tools list serializes to ${toolsChars} characters; the bound is ${CMS_AGENT_BOUNDS.maxToolsChars}.`
+    );
   }
   if (request.tools.some((tool) => tool.description.trim().length === 0)) {
     return invalid('every tool description must be non-empty (contract: min(1)).');
   }
   const contextChars = serializedLength(request.context);
   if (contextChars > CMS_AGENT_BOUNDS.maxContextChars) {
-    return invalid(`context serializes to ${contextChars} characters; the bound is ${CMS_AGENT_BOUNDS.maxContextChars}.`);
+    return invalid(
+      `context serializes to ${contextChars} characters; the bound is ${CMS_AGENT_BOUNDS.maxContextChars}.`
+    );
   }
   // Paired or absent — never one without the other.
   if ((request.context.object_type === undefined) !== (request.context.object_id === undefined)) {
@@ -548,7 +562,9 @@ export class CmsAgentClient {
     } catch (error) {
       const aborted = controller.signal.aborted || (error as { name?: string } | undefined)?.name === 'AbortError';
       return aborted
-        ? fail('cms_agent_timeout', `CMS-Agent did not respond within ${timeoutMs}ms.`, { retryableWithSameTurnId: true })
+        ? fail('cms_agent_timeout', `CMS-Agent did not respond within ${timeoutMs}ms.`, {
+            retryableWithSameTurnId: true,
+          })
         : fail('cms_agent_unreachable', 'CMS-Agent is unreachable from Platform.', { retryableWithSameTurnId: true });
     } finally {
       clearTimeout(timer);

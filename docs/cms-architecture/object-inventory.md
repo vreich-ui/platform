@@ -669,3 +669,19 @@ surfaces CONVERTED: PRs #408/#409 merged + Wolf's credentialed
 round-tripped, published, `released:true`; 37 objects converted total).
 Prior: 2026-07-10 evening, `claude/home-page-conversion-state-6wsc2r`
 (home-page family CONVERTED)._
+
+## Editorial requests (W19, 2026-08-23)
+
+Not a governed content object — a per-site **record store**, deliberately
+outside the object substrate for the same reason Marginalia is: it is written
+by a background sweeper many times a minute and must never take an object's
+edit lock.
+
+| Thing | Where | Notes |
+|---|---|---|
+| `editorial-request.v1` | blob store `editorial-requests`, `requests/by-id/<request_id>.json` | One doc per editorial job. `request_id` is the `req_<flow>_<topic>_<yyyymmdd>_<nn>` Platform mints — also the eventual `content_item` id and the artifact request id, so it is the correlation key for the whole job. |
+| `RequestIndex` | `requests/index.json` | The single blob every admin tab polls. Projected from the docs; `rebuildIndex` regenerates it at any time. |
+| `NotifyState` | `requests/notify/<person>.json` | Per person: mute list, the `last_notified` dedup map, and the e-mail preference. |
+
+Only the sweeper writes a running request's status. Archive and cancel have
+their own writers; there is no general-purpose save.

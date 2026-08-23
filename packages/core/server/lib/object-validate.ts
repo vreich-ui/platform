@@ -2152,8 +2152,10 @@ const checkContentItemClaimSubstrate = (
   article: { sources?: unknown; claims?: unknown },
   atPublish: boolean
 ): ReadinessCriterion[] => {
-  const sourceList = isRecord(article.sources) && Array.isArray(article.sources.source_list) ? article.sources.source_list : [];
-  const claimList = isRecord(article.claims) && Array.isArray(article.claims.claim_list) ? article.claims.claim_list : [];
+  const sourceList =
+    isRecord(article.sources) && Array.isArray(article.sources.source_list) ? article.sources.source_list : [];
+  const claimList =
+    isRecord(article.claims) && Array.isArray(article.claims.claim_list) ? article.claims.claim_list : [];
   const criteria: ReadinessCriterion[] = [];
 
   const missing: string[] = [];

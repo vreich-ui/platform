@@ -35,7 +35,16 @@ import {
   type RequestIndexRow,
 } from '../lib/requests/store.js';
 import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../lib/admin/request-logic.js';
-import { loadNotifyState, muteRequest, unmuteRequest } from '../lib/requests/notify-state.js';
+import {
+  ackNotifications,
+  emailModeFor,
+  emailModeSchema,
+  loadNotifyState,
+  loadSeenLedger,
+  muteRequest,
+  setEmailMode,
+  unmuteRequest,
+} from '../lib/requests/notify-state.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -92,6 +101,13 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('cancel'), request_id: z.string().min(1), reason: z.string().max(2000).optional() }),
   z.object({ action: z.literal('mute'), request_id: z.string().min(1) }),
   z.object({ action: z.literal('unmute'), request_id: z.string().min(1) }),
+  /**
+   * T19.6: the client says what it has now shown this person. Stored
+   * server-side so the dedup holds across tabs, devices and reloads — browser
+   * storage would re-announce an approval on every new tab.
+   */
+  z.object({ action: z.literal('notify_ack'), acked: z.record(z.string(), z.string()) }),
+  z.object({ action: z.literal('set_email_mode'), mode: emailModeSchema }),
 ]);
 
 /** Archive/unarchive: Owner, or the W18 publisher tier (plan §8). Exported for the gating test. */
@@ -153,6 +169,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         const page = matched.slice(start, start + limit);
         const nextCursor = start + limit < matched.length ? String(start + limit) : undefined;
         const notify = await loadNotifyState(store, callerEmail);
+        const seen = await loadSeenLedger(store, callerEmail, notify);
         return jsonResponse(200, {
           requests: page,
           total: matched.length,
@@ -160,6 +177,17 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
           ...(nextCursor ? { next_cursor: nextCursor } : {}),
           ...(rebuilt ? { rebuilt: true } : {}),
           muted: notify?.muted ?? [],
+          last_notified: seen,
+          /**
+           * First contact. An empty ledger and a NEVER-WRITTEN ledger look
+           * identical on the wire, and the browser treats every difference as
+           * news — so on the day this ships, and on every new team member's
+           * first visit, each of them would get a toast and a desktop
+           * notification for every finished, failed and waiting job on the
+           * site at once. The flag lets the first ingest ack silently.
+           */
+          ...(Object.keys(seen).length === 0 ? { notify_first_contact: true } : {}),
+          email_mode: emailModeFor(notify),
         });
       }
 
@@ -205,6 +233,16 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
           request: doc,
           ...(runCancelFailure ? { run_cancel_failed: runCancelFailure } : {}),
         });
+      }
+
+      case 'set_email_mode': {
+        const state = await setEmailMode(store, callerEmail, request.data.mode);
+        return jsonResponse(200, { email_mode: emailModeFor(state) });
+      }
+
+      case 'notify_ack': {
+        const entries = await ackNotifications(store, callerEmail, request.data.acked);
+        return jsonResponse(200, { last_notified: entries });
       }
 
       case 'mute':

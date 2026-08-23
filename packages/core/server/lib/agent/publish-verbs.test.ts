@@ -79,7 +79,7 @@ const makeCtx = (
 
 // ─── request ids ─────────────────────────────────────────────────────────────────
 
-test('REQUEST_ID_RE matches CMS-Agent\'s bound and mintWorkspaceRequestId bumps nn past an existing content_item', async () => {
+test("REQUEST_ID_RE matches CMS-Agent's bound and mintWorkspaceRequestId bumps nn past an existing content_item", async () => {
   assert.match('req_agent_retinol_basics_20260817_01', REQUEST_ID_RE);
   assert.doesNotMatch('req_agent_Retinol_20260817_1', REQUEST_ID_RE);
   assert.doesNotMatch('retinol_20260817_01', REQUEST_ID_RE);
@@ -104,7 +104,11 @@ test('REQUEST_ID_RE matches CMS-Agent\'s bound and mintWorkspaceRequestId bumps 
   assert.deepEqual(probed, ['req_agent_retinol_basics_20260817_01', 'req_agent_retinol_basics_20260817_02']);
   // args.slug wins over the title.
   assert.equal(
-    await mintWorkspaceRequestId(makeCtx(() => ({}), []), { slug: 'sun-care', input: { title: 'x' } }, new Date('2026-08-17T00:00:00Z')),
+    await mintWorkspaceRequestId(
+      makeCtx(() => ({}), []),
+      { slug: 'sun-care', input: { title: 'x' } },
+      new Date('2026-08-17T00:00:00Z')
+    ),
     'req_agent_sun_care_20260817_01'
   );
   assert.equal(WORKSPACE_RUN_BUDGET_MS, 45_000);
@@ -112,9 +116,15 @@ test('REQUEST_ID_RE matches CMS-Agent\'s bound and mintWorkspaceRequestId bumps 
 
 test('run_workspace_workflow rejects a malformed request_id at parse time', () => {
   const tool = chatToolByName('run_workspace_workflow')!;
-  const bad = tool.parse({ input: { title: 't' }, request_id: 'req_agent_x_2026_1' }, makeCtx(() => ({}), []));
+  const bad = tool.parse(
+    { input: { title: 't' }, request_id: 'req_agent_x_2026_1' },
+    makeCtx(() => ({}), [])
+  );
   assert.equal(bad.ok, false);
-  const good = tool.parse({ input: { title: 't' }, request_id: REQ }, makeCtx(() => ({}), []));
+  const good = tool.parse(
+    { input: { title: 't' }, request_id: REQ },
+    makeCtx(() => ({}), [])
+  );
   assert.equal(good.ok, true);
 });
 
@@ -195,7 +205,8 @@ test('publish_workspace_run on "go" sends the exact workflow_publish_run payload
   const calls: Call[] = [];
   const idempotentCalls: Array<{ tool: string; key: string }> = [];
   const ctx = makeCtx(
-    (name) => (name === 'workflow_publish_readiness' ? GO : { published: true, commit: 'abc1234', receipt: { id: 'rcpt_1' } }),
+    (name) =>
+      name === 'workflow_publish_readiness' ? GO : { published: true, commit: 'abc1234', receipt: { id: 'rcpt_1' } },
     calls,
     {
       idempotent: async (toolName: string, key: string, run: () => Promise<Record<string, unknown>>) => {
@@ -216,7 +227,10 @@ test('publish_workspace_run on "go" sends the exact workflow_publish_run payload
     readiness: { approval: { approvedBy: string; approvedAt: string; pinned: boolean } };
   } & Record<string, unknown>;
   const approvedAt = sent.readiness.approval.approvedAt;
-  assert.ok(Date.parse(approvedAt) >= before - 1000 && Date.parse(approvedAt) <= Date.now() + 1000, 'approvedAt is now (ISO)');
+  assert.ok(
+    Date.parse(approvedAt) >= before - 1000 && Date.parse(approvedAt) <= Date.now() + 1000,
+    'approvedAt is now (ISO)'
+  );
   assert.deepEqual(sent, {
     runId: 'run_1',
     projectId: 'platform',
@@ -262,7 +276,10 @@ test('release_workspace_run: ask floor + Owner-only; on approval calls release_t
     call: async (name: string, args: Record<string, unknown>) => {
       opCalls.push({ name, args });
       if (name === 'release_to_production') {
-        return { content: JSON.stringify({ released: true, status: 'released', targetCommit: 'abc1234' }), is_error: false };
+        return {
+          content: JSON.stringify({ released: true, status: 'released', targetCommit: 'abc1234' }),
+          is_error: false,
+        };
       }
       return { content: JSON.stringify({ deployStatus: 'ready', productionConfirmed: true }), is_error: false };
     },

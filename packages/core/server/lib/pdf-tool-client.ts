@@ -379,8 +379,7 @@ export const deletePlatformPdfTemplate = (
  * projectId key (`storage` is stripped upstream, `projectId` is not), so health
  * is the one bridge call that forwards no grant and no project scope at all.
  */
-export const healthPlatformPdfTool = (options: PdfToolClientOptions = {}) =>
-  postPdfTool('health', {}, options);
+export const healthPlatformPdfTool = (options: PdfToolClientOptions = {}) => postPdfTool('health', {}, options);
 
 /**
  * B3: the image-search / image-model policy bridge -- pdf-tool's own image

@@ -23,7 +23,15 @@ import { getAgentChatBlobStore, appendChatEvent, loadChatDoc, saveChatDoc } from
 import { getEditorialRequestsBlobStore } from '../lib/blob-store.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { consumeSweepToken } from '../lib/requests/store.js';
-import { runSweep, sweepRequest, type SweepBridge, type SweepChatSink } from '../lib/requests/sweep.js';
+import {
+  runSweep,
+  sweepRequest,
+  type SweepBridge,
+  type SweepChatSink,
+  type SweepMailer,
+} from '../lib/requests/sweep.js';
+import { resolveMailSender, requestMail } from '../lib/mail/send.js';
+import { isMailConfigured } from '../lib/mail/index.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -50,6 +58,34 @@ const bridge = (): SweepBridge | undefined =>
           cmsAgentClient.callTool<Record<string, unknown>>('workflow_run_all', { runId, budgetMs }),
       }
     : undefined;
+
+/**
+ * T19.7: mail, only where a provider is actually configured. An unconfigured
+ * tenant gets NO mailer at all rather than a null one that logs a refusal on
+ * every transition — unconfigured is the normal state, not an incident.
+ */
+const mailer = (): SweepMailer | undefined => {
+  if (!isMailConfigured()) return undefined;
+  const sender = resolveMailSender();
+  return {
+    notify: async (input) => {
+      const { subject, text } = requestMail({
+        requestId: input.requestId,
+        title: input.title,
+        status: input.status,
+        ...(input.statusReason ? { statusReason: input.statusReason } : {}),
+        ...(process.env.URL ? { origin: process.env.URL } : {}),
+      });
+      const result = await sender.send({
+        to: input.to,
+        subject,
+        text,
+        tags: { kind: 'editorial_request', status: input.status },
+      });
+      return result.ok ? { ok: true } : { ok: false, code: result.code };
+    },
+  };
+};
 
 const chatSink = async (event: unknown): Promise<SweepChatSink> => {
   const chatStore = await getAgentChatBlobStore(event);
@@ -89,6 +125,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
   const deps = {
     store,
     ...(bridge() ? { bridge: bridge()! } : {}),
+    ...(mailer() ? { mailer: mailer()! } : {}),
     chats: await chatSink(event),
     ...(context?.getRemainingTimeInMillis ? { remainingMs: () => context.getRemainingTimeInMillis!() } : {}),
   };

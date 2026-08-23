@@ -93,6 +93,17 @@ export interface ToolContext {
    * no request store wired — the tools then simply do not register.
    */
   requests?: {
+    /** T19.8: the request registry's read/manage surface, for the four tools below. */
+    list?(filters: {
+      status?: string[];
+      kind?: string[];
+      mine?: boolean;
+      archived?: boolean;
+      q?: string;
+    }): Promise<Record<string, unknown>>;
+    get?(requestId: string): Promise<Record<string, unknown> | undefined>;
+    retry?(requestId: string): Promise<Record<string, unknown>>;
+    archive?(requestId: string): Promise<Record<string, unknown> | undefined>;
     register(input: {
       request_id: string;
       kind: 'article' | 'page' | 'section' | 'theme' | 'media' | 'capture' | 'other';
@@ -1203,6 +1214,153 @@ const parseJson = (text: string): Record<string, unknown> => {
 
 // ─── registry ────────────────────────────────────────────────────────────────────
 
+// ─── W19 T19.8: the editorial request registry, from chat ────────────────────
+//
+// These read and manage the RECORD of a job. Advancing a job is still
+// `run_workspace_workflow`; publishing is still a separate human decision.
+// Wolf's original ask — "be able to inquire on all running requests" — is what
+// `list_requests` exists for.
+
+const REQUESTS_UNAVAILABLE: ToolResult = {
+  content: json({ error: 'The editorial request registry is not available in this session.' }),
+  is_error: true,
+};
+
+const listRequestsTool: ChatTool = {
+  name: 'list_requests',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'List editorial requests — the RECORD of every job on this site (articles being written, and anything else registered), with status, progress and who asked. This is how you answer "what is running", "what needs me", "what stalled". It reads the record only; to ADVANCE a job use run_workspace_workflow, and publishing always remains a separate human decision. Default shows everything active; pass archived:true for the archive.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'array',
+        items: { type: 'string', enum: ['queued', 'running', 'needs_you', 'stalled', 'failed', 'done', 'cancelled'] },
+      },
+      kind: { type: 'array', items: { type: 'string' } },
+      mine: { type: 'boolean', description: "Only the requests this run's human asked for." },
+      archived: { type: 'boolean' },
+      q: { type: 'string', description: 'Free text over title and request id.' },
+    },
+    additionalProperties: false,
+  },
+  parse: zodParse(
+    z.object({
+      status: z.array(z.string()).optional(),
+      kind: z.array(z.string()).optional(),
+      mine: z.boolean().optional(),
+      archived: z.boolean().optional(),
+      q: z.string().max(200).optional(),
+    })
+  ),
+  execute: async (ctx, args) => {
+    if (!ctx.requests?.list) return REQUESTS_UNAVAILABLE;
+    return {
+      content: json(await ctx.requests.list(args as Parameters<NonNullable<typeof ctx.requests.list>>[0])),
+      is_error: false,
+    };
+  },
+  describe: () => 'List editorial requests',
+};
+
+const getRequestTool: ChatTool = {
+  name: 'get_request',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'Read ONE editorial request: its status and the reason for it, workflow progress, blockers, the conversations attached to it, and the article it produced if it has one. Use it before answering a question about a specific job, and before offering to retry one.',
+  input_schema: {
+    type: 'object',
+    properties: { request_id: { type: 'string' } },
+    required: ['request_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ request_id: z.string().min(1) })),
+  execute: async (ctx, args) => {
+    if (!ctx.requests?.get) return REQUESTS_UNAVAILABLE;
+    const doc = await ctx.requests.get(args.request_id as string);
+    if (!doc) return { content: json({ error: `No request ${args.request_id}.` }), is_error: true };
+    return { content: json(doc), is_error: false };
+  },
+  describe: (args) => `Read request ${args.request_id}`,
+};
+
+const retryRequestTool: ChatTool = {
+  name: 'retry_request',
+  toolClass: 'privileged',
+  autonomyFloor: 'ask',
+  discloseResult: true,
+  description:
+    'Nudge a STALLED or FAILED editorial request back into motion — one bounded attempt at the step that stopped, reusing everything already completed. Refused on a request that is waiting for a human decision: a gate is not a stall, and pushing it would not open it. Never starts a new job.',
+  input_schema: {
+    type: 'object',
+    properties: { request_id: { type: 'string' } },
+    required: ['request_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ request_id: z.string().min(1) })),
+  execute: async (ctx, args) => {
+    if (!ctx.requests?.retry) return REQUESTS_UNAVAILABLE;
+    return { content: json(await ctx.requests.retry(args.request_id as string)), is_error: false };
+  },
+  dryRun: async (ctx, args) => {
+    const doc = ctx.requests?.get ? await ctx.requests.get(args.request_id as string) : undefined;
+    return {
+      dry_run: true,
+      action: 'retry_request',
+      request_id: args.request_id,
+      ...(doc ? { current_status: doc.status, title: doc.title } : {}),
+      note: 'One more attempt at the step that stopped. Everything already completed is kept and is not recomputed.',
+    };
+  },
+  describe: (args) => `Retry request ${args.request_id}`,
+};
+
+const archiveRequestTool: ChatTool = {
+  name: 'archive_request',
+  toolClass: 'privileged',
+  autonomyFloor: 'ask',
+  discloseResult: true,
+  description:
+    'Take a finished editorial request out of the active list. Nothing is deleted — the record, its history and any article it produced all remain, and the archive filter still shows it. Owner or publisher only.',
+  input_schema: {
+    type: 'object',
+    properties: { request_id: { type: 'string' } },
+    required: ['request_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ request_id: z.string().min(1) })),
+  execute: async (ctx, args) => {
+    if (!ctx.requests?.archive) return REQUESTS_UNAVAILABLE;
+    // The same wall `admin-requests` enforces (plan §8). Autonomy `ask` means
+    // the human clicks approve — it says nothing about WHICH human, so without
+    // this an editor- or viewer-tier principal could archive anything,
+    // including a RUNNING request, which is terminal to the sweeper.
+    if (!ctx.roles.includes('owner') && !ctx.roles.includes('publisher')) {
+      return {
+        content: json({ error: 'Archiving a request requires the Owner or publisher role.' }),
+        is_error: true,
+      };
+    }
+    const doc = await ctx.requests.archive(args.request_id as string);
+    if (!doc) return { content: json({ error: `No request ${args.request_id}.` }), is_error: true };
+    return { content: json(doc), is_error: false };
+  },
+  dryRun: async (ctx, args) => {
+    const doc = ctx.requests?.get ? await ctx.requests.get(args.request_id as string) : undefined;
+    return {
+      dry_run: true,
+      action: 'archive_request',
+      request_id: args.request_id,
+      ...(doc ? { title: doc.title, current_status: doc.status } : {}),
+      note: 'Removes it from the active list. Nothing is deleted and it can be restored.',
+    };
+  },
+  describe: (args) => `Archive request ${args.request_id}`,
+};
+
 export const CHAT_TOOLS: readonly ChatTool[] = [
   getObject,
   getContract,
@@ -1228,6 +1386,10 @@ export const CHAT_TOOLS: readonly ChatTool[] = [
   checkWorkspaceRunReadiness,
   publishWorkspaceRun,
   releaseWorkspaceRun,
+  listRequestsTool,
+  getRequestTool,
+  retryRequestTool,
+  archiveRequestTool,
 ];
 
 export const chatToolByName = (name: string): ChatTool | undefined => CHAT_TOOLS.find((tool) => tool.name === name);

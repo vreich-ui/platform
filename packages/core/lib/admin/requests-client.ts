@@ -83,7 +83,14 @@ export interface RequestListView {
   next_cursor?: string;
   rebuilt?: boolean;
   muted: string[];
+  /** T19.6: request_id → the status this person was last told about, server-side so the dedup crosses tabs and devices. */
+  last_notified: Record<string, string>;
+  /** This person has never been told anything: the first ingest acks in silence rather than announcing the whole backlog. */
+  notify_first_contact?: boolean;
+  email_mode: EmailMode;
 }
+
+export type EmailMode = 'immediate' | 'daily' | 'off';
 
 async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
   const token = await getToken();
@@ -115,6 +122,13 @@ export const cancelRequest = (getToken: GetToken, requestId: string, reason?: st
     request_id: requestId,
     ...(reason ? { reason } : {}),
   });
+
+/** Record what has now been shown to this person, so nothing announces twice. */
+export const ackNotifications = (getToken: GetToken, acked: Record<string, string>) =>
+  post<{ last_notified: Record<string, string> }>(getToken, { action: 'notify_ack', acked });
+
+export const setEmailMode = (getToken: GetToken, mode: EmailMode) =>
+  post<{ email_mode: EmailMode }>(getToken, { action: 'set_email_mode', mode });
 
 export const muteRequest = (getToken: GetToken, requestId: string) =>
   post<{ muted: string[] }>(getToken, { action: 'mute', request_id: requestId });

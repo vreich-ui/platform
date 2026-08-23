@@ -14,6 +14,7 @@ import {
   projectIndexRow,
   rebuildIndex,
   recordProgress,
+  requeueRequest,
   REQUEST_ID_PATTERN,
   REQUEST_INDEX_KEY,
   requestDocKey,
@@ -651,5 +652,87 @@ describe('concurrency without compare-and-swap', () => {
     const rebuilt = await rebuildIndex(store, iso(4));
     assert.deepEqual(rebuilt.rows, [projectIndexRow(doc)]);
     assert.deepEqual((await loadIndex(store))!.rows, [projectIndexRow(doc)]);
+  });
+});
+
+// ─── retry ───────────────────────────────────────────────────────────────────
+
+describe('requeueRequest — what "Retry" actually does', () => {
+  const stall = async (store: FakeStore) => {
+    await seedWorkflowRequest(store);
+    await setStatus(store, ID, { status: 'running' }, iso(1));
+    await recordProgress(
+      store,
+      ID,
+      { node_total: 23, node_done: 19, node_failed: 0, stalled: true, nudges: 3 },
+      iso(2)
+    );
+    await setStatus(store, ID, { status: 'stalled', status_reason: 'no dispatch heartbeat' }, iso(3));
+  };
+
+  it('puts a stalled run back in the sweeper\u2019s way, and clears the nudge count with it', async () => {
+    const store = new FakeStore();
+    await stall(store);
+
+    const result = await requeueRequest(store, ID, iso(4));
+    assert.equal(result.ok, true);
+    const doc = await loadRequest(store, ID);
+    assert.equal(doc?.status, 'queued', 'a retry that leaves the row stalled is a button that lies');
+    assert.equal(doc?.workflow?.nudges, 0, 'the nudge budget is what stalled it; retrying must restore it');
+    assert.equal(doc?.workflow?.stalled, false);
+    assert.equal(doc?.history.at(-1)?.status, 'queued');
+    assert.equal((await loadIndex(store))?.rows.find((r) => r.request_id === ID)?.status, 'queued');
+  });
+
+  it('refuses a request that is already over — there is nothing left to push', async () => {
+    const store = new FakeStore();
+    await seedWorkflowRequest(store);
+    await setStatus(store, ID, { status: 'running' }, iso(1));
+    await setStatus(store, ID, { status: 'done' }, iso(2));
+
+    const result = await requeueRequest(store, ID, iso(3));
+    assert.equal(result.ok, false);
+    assert.equal((await loadRequest(store, ID))?.status, 'done', 'a finished job is not reopened by a retry');
+  });
+
+  it('refuses a request that is waiting on a HUMAN — retrying would not open that gate', async () => {
+    const store = new FakeStore();
+    await seedWorkflowRequest(store);
+    await setStatus(store, ID, { status: 'running' }, iso(1));
+    await setStatus(store, ID, { status: 'needs_you', status_reason: 'Publication needs your approval.' }, iso(2));
+
+    const result = await requeueRequest(store, ID, iso(3));
+    assert.equal(result.ok, false);
+    assert.match(result.ok === false ? result.reason : '', /human decision/i);
+    assert.equal((await loadRequest(store, ID))?.status, 'needs_you');
+  });
+
+  it('refuses a request that is still MOVING — the sweeper owns that row', async () => {
+    const store = new FakeStore();
+    await seedWorkflowRequest(store);
+    await setStatus(store, ID, { status: 'running' }, iso(1));
+
+    const result = await requeueRequest(store, ID, iso(2));
+    assert.equal(result.ok, false);
+    assert.match(result.ok === false ? result.reason : '', /has not stopped/i);
+    assert.equal((await loadRequest(store, ID))?.status, 'running', 'a human write here can lose the sweeper\u2019s');
+  });
+
+  it('refuses when there is no run behind the row at all', async () => {
+    const store = new FakeStore();
+    await createRequest(
+      store,
+      { request_id: ID_B, kind: 'article', title: 'No run', created_by: 'editor@example.com' },
+      iso(0)
+    );
+    await setStatus(store, ID_B, { status: 'failed', status_reason: 'nothing ever dispatched' }, iso(1));
+    const result = await requeueRequest(store, ID_B, iso(2));
+    assert.equal(result.ok, false);
+    assert.match(result.ok === false ? result.reason : '', /no workflow run/i);
+  });
+
+  it('reports a request that does not exist rather than inventing one', async () => {
+    const result = await requeueRequest(new FakeStore(), ID_C, iso(0));
+    assert.equal(result.ok, false);
   });
 });

@@ -112,7 +112,11 @@ export const revokeOAuthGrantsForSubject = async (
 export interface ObjectLockSweepStore {
   get(key: string): Promise<string | null>;
   setJSON(key: string, value: unknown): Promise<unknown>;
-  list(options: { prefix: string; directories?: boolean; paginate?: boolean }): BlobListResponse | Promise<BlobListResponse>;
+  list(options: {
+    prefix: string;
+    directories?: boolean;
+    paginate?: boolean;
+  }): BlobListResponse | Promise<BlobListResponse>;
 }
 
 const parseRecord = (raw: string | null): ObjectRecord | undefined => {

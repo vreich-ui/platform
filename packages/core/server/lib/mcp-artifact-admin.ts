@@ -16,11 +16,7 @@
  * evaluation completes for both files before either's exported functions
  * are invoked by a real request).
  */
-import {
-  getArtifactBlobStore,
-  getArtifactIndexBlobStore,
-  getWorkflowBlobStore,
-} from './blob-store.js';
+import { getArtifactBlobStore, getArtifactIndexBlobStore, getWorkflowBlobStore } from './blob-store.js';
 import { collectBlobListItems } from './blob-list.js';
 import {
   listArtifactIndexKeys,
@@ -275,10 +271,7 @@ const getAdminToolState = async (event: LambdaEvent) => {
   const adminState = await getAdminStateFromEvent(event);
 
   if (!adminState.authenticated) {
-    return toolError(
-      adminState.error || 'A valid admin session token is required.',
-      { error_code: 'admin_required' }
-    );
+    return toolError(adminState.error || 'A valid admin session token is required.', { error_code: 'admin_required' });
   }
   if (!adminState.isAdmin) {
     return toolError('This user is not authorized to browse artifacts.', { error_code: 'admin_required' });

@@ -989,7 +989,12 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       </div>
 
       <div className={cn('mb-3 flex items-center justify-between gap-2', WORKSPACE_COMPACT_PANEL_CLASS)}>
-        <Button size="sm" variant="secondary" leftIcon={<IconLibrary size={16} />} onClick={() => setPublicationOpen(true)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          leftIcon={<IconLibrary size={16} />}
+          onClick={() => setPublicationOpen(true)}
+        >
           Publication
         </Button>
         <Button size="sm" variant="secondary" leftIcon={<IconSparkles size={16} />} onClick={() => setAgentOpen(true)}>
@@ -1174,7 +1179,13 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       </div>
 
       {!expandedWorkspace ? (
-        <Drawer open={publicationOpen} onClose={() => setPublicationOpen(false)} title="Publication" side="left" width={360}>
+        <Drawer
+          open={publicationOpen}
+          onClose={() => setPublicationOpen(false)}
+          title="Publication"
+          side="left"
+          width={360}
+        >
           {publicationOpen ? <ObjectBrowser activeId={record.object_id} refreshSignal={browserRefresh} /> : null}
         </Drawer>
       ) : null}

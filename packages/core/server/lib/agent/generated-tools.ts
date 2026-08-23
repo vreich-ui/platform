@@ -461,10 +461,18 @@ const WORKSPACE_TOOL_NAMES = [
   'check_workspace_run_readiness',
   'publish_workspace_run',
   'release_workspace_run',
+  // W19 T19.8: the editorial request registry. Reused for the same reason as
+  // the workspace tools — these ride a blob store, not the object verbs the
+  // generated definitions are built from.
+  'list_requests',
+  'get_request',
+  'retry_request',
+  'archive_request',
 ] as const;
 
 // Reused, not rebuilt — tools.ts stays the single source of truth for these
-// six (workspace orchestration rides the CMS-Agent bridge, not verbs).
+// (workspace orchestration and the request registry ride their own stores and
+// bridges, not the object verbs).
 const workspaceTools: ChatTool[] = WORKSPACE_TOOL_NAMES.map((name) => {
   const tool = chatToolByName(name);
   if (!tool) {
@@ -473,7 +481,7 @@ const workspaceTools: ChatTool[] = WORKSPACE_TOOL_NAMES.map((name) => {
   return tool;
 });
 
-/** One registry: every visible generated tool, plus the six reused workspace tools — 63 entries. */
+/** One registry: every visible generated tool, plus the reused workspace + request tools. */
 export const GENERATED_CHAT_TOOLS: readonly ChatTool[] = [
   ...VISIBLE_DEFINITIONS.map(buildGeneratedTool),
   ...workspaceTools,

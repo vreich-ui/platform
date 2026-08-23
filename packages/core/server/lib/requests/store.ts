@@ -217,8 +217,27 @@ export const requestDocKey = (requestId: string) => `${KEY_PREFIX}${requestId.re
 
 export const REQUEST_INDEX_KEY = 'requests/index.json';
 
-/** Per-person delivery + mute state (plan §6). Key reserved here; the NotifyState schema and writers land in T19.6. */
-export const notifyStateKey = (personId: string) => `requests/notify/${personId.replaceAll(':', '__')}.json`;
+/**
+ * Per-person notification state (plan §6), split across THREE keys by writer.
+ *
+ * Blob storage has no compare-and-swap, so the fleet's answer to concurrency
+ * is that each document has exactly one writing component. These three had one
+ * document and three writers — the person's own settings (mute, mail mode),
+ * every open tab's delivery ack, and the sweeper's mail ledger — which is a
+ * read-modify-write race between components, not within one. A person clicking
+ * Mute while their other tab acked a transition could have the mute silently
+ * reverted; the sweeper's mail ledger could be clobbered by a tab mid-send and
+ * the same e-mail sent twice.
+ *
+ * One key per writer, and the race is gone:
+ *   notify/       — the PERSON's settings. Written only by an explicit click.
+ *   notify-seen/  — what the browser has shown. Written only by the ack path.
+ *   notify-mailed/— what the mailer has sent. Written only by the sweeper.
+ */
+const personSlug = (personId: string) => personId.replaceAll(':', '__');
+export const notifyStateKey = (personId: string) => `requests/notify/${personSlug(personId)}.json`;
+export const notifySeenKey = (personId: string) => `requests/notify-seen/${personSlug(personId)}.json`;
+export const notifyMailedKey = (personId: string) => `requests/notify-mailed/${personSlug(personId)}.json`;
 
 // ─── reads ───────────────────────────────────────────────────────────────────
 
@@ -621,6 +640,58 @@ export const unarchiveRequest = async (
   doc.updated_at = at;
   appendHistory(doc, at, restored, `unarchived by ${unarchivedBy}`);
   return commitRequest(store, doc, at);
+};
+
+/**
+ * Re-open a stopped request so the sweeper will look at it again.
+ *
+ * WRITER: the human retry path (`retry_request`, and the surface's Retry
+ * button). It exists because `failed` is deliberately NOT in the sweeper's
+ * selection — a dead run is not polled forever — so clearing the nudge counter
+ * alone was a no-op that reported success. Moving the row back to `queued` is
+ * what actually puts it in front of the sweeper again.
+ *
+ * Refuses anything a retry cannot help: a terminal request, and a request
+ * waiting on a human (a gate is not a stall; pushing it will not open it).
+ */
+export const requeueRequest = async (
+  store: EditorialRequestStore,
+  requestId: string,
+  at: string = nowIso()
+): Promise<{ ok: true; doc: EditorialRequest } | { ok: false; reason: string; status?: RequestStatus }> => {
+  const doc = await loadRequest(store, requestId);
+  if (!doc) return { ok: false, reason: `No request ${requestId}.` };
+  if ((TERMINAL_REQUEST_STATUSES as readonly RequestStatus[]).includes(doc.status)) {
+    return { ok: false, reason: `This request is ${doc.status}; there is nothing left to retry.`, status: doc.status };
+  }
+  if (doc.status === 'needs_you') {
+    return {
+      ok: false,
+      reason: 'This request is waiting for a human decision, not stalled — retrying would not open the gate.',
+      status: doc.status,
+    };
+  }
+  // `stalled` and `failed` ONLY. A `running` or `queued` request is the
+  // sweeper's to write (§3.4 writer assignment); rewriting its status from the
+  // human path can land inside a sweep's load→commit window and lose one of
+  // the two writes. There is also nothing to retry — a job that is still
+  // moving has not stopped.
+  if (doc.status !== 'stalled' && doc.status !== 'failed') {
+    return {
+      ok: false,
+      reason: `This request is ${doc.status} — it has not stopped, so there is nothing to retry yet.`,
+      status: doc.status,
+    };
+  }
+  if (!doc.workflow?.run_id) {
+    return { ok: false, reason: 'This request has no workflow run behind it to retry.', status: doc.status };
+  }
+  doc.status = 'queued';
+  doc.status_reason = 'Retried — waiting for the next sweep to push the run.';
+  doc.workflow = { ...doc.workflow, nudges: 0, stalled: false };
+  doc.updated_at = at;
+  appendHistory(doc, at, 'queued', 'retried by a human');
+  return { ok: true, doc: await commitRequest(store, doc, at) };
 };
 
 /**

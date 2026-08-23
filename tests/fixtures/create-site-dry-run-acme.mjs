@@ -183,6 +183,15 @@ Env checklist:
       Shop test webhook secret.
     PURCHASE_TOKEN_SECRET            [per-site, optional]  ☐ human-supplied — see the provisioning runbook
       Signs the expiring bearer download token (purchase-tokens.ts) that gates digital-goods delivery — get-purchase/order_reissue/stripe-webhook/claim-free all read it (free claims too, not only paid Stripe orders). Needed only if this client's shop module delivers downloads. Unset (or <16 chars): those endpoints 503 with a plain message, not a catalogued errorCode. Covered by the T16.5 capability probe (purchase_token family).
+  Notifications (W19):
+    MAIL_PROVIDER                    [per-site]  ☐ human-supplied — see the provisioning runbook
+      'resend' to send editorial-request notification e-mail from this tenant; 'none' (or unset) opts out. Opting out is a supported state, not a gap: the in-app and browser channels are unaffected and the capability probe reports mail as unconfigured rather than failing.
+    MAIL_API_KEY                     [fleet-shared]  reuse the fleet value — do not create a new one
+      Provider API key. Reuse the fleet value — do not mint one per tenant.
+    MAIL_FROM                        [per-site]  ☐ human-supplied — see the provisioning runbook
+      Verified sender for THIS tenant's domain (e.g. editorial@<client-domain>). The domain must be verified with the provider first — that is a human console step, see the provisioning runbook.
+    MAIL_REPLY_TO                    [per-site]  ☐ human-supplied — see the provisioning runbook
+      Optional; defaults to MAIL_FROM.
   Transitional site-identity env overrides (escape hatch only; prefer the config file):
     SITE_OBJECT_ID, SITE_SLUG, SITE_BRAND_NAME, SITE_TAXONOMY_ID, SITE_TRACKING_PROJECT_ID, MCP_SERVER_NAME, MCP_SERVER_DIAGNOSTIC_NAME, SITE_ASSET_HOST, SITE_ASSET_FOLDER, PDF_TOOL_PROJECT_ID, CMS_AGENT_PROJECT_ID
 

@@ -47,7 +47,13 @@ const readBody = async (req: IncomingMessage): Promise<string> => {
   return Buffer.concat(chunks).toString('utf8');
 };
 
-const send = (res: ServerResponse, status: number, payload: unknown, sse: boolean, extra: Record<string, string> = {}) => {
+const send = (
+  res: ServerResponse,
+  status: number,
+  payload: unknown,
+  sse: boolean,
+  extra: Record<string, string> = {}
+) => {
   if (sse) {
     res.writeHead(status, { 'content-type': 'text/event-stream', ...extra });
     res.end(`event: message\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -93,7 +99,11 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     send(
       res,
       200,
-      { jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'cms-agent', version: '1' } } },
+      {
+        jsonrpc: '2.0',
+        id: rpc.id,
+        result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'cms-agent', version: '1' } },
+      },
       Boolean(state.behavior.sse),
       extra
     );
@@ -211,7 +221,13 @@ describe('configuration', () => {
 
 describe('Streamable-HTTP transport', () => {
   it('handshakes once, propagates Mcp-Session-Id and the protocol header, then DELETEs', async () => {
-    state.behavior.toolData = { agent_ref: 'agt_client_manager@2', name: 'Client Manager', rev: 2, model: 'gpt-4.1', status: 'active' };
+    state.behavior.toolData = {
+      agent_ref: 'agt_client_manager@2',
+      name: 'Client Manager',
+      rev: 2,
+      model: 'gpt-4.1',
+      status: 'active',
+    };
     const client = new CmsAgentClient();
 
     const first = await client.resolveAgent({ role: 'client_manager', project_id: 'platform' });
@@ -227,7 +243,12 @@ describe('Streamable-HTTP transport', () => {
     assert.equal(call?.headers['mcp-protocol-version'], '2025-06-18');
 
     // A second call reuses the session — exactly one handshake.
-    state.behavior.toolData = { assistant_text: 'ok', usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 }, agent_rev: 2, model: 'gpt-4.1' };
+    state.behavior.toolData = {
+      assistant_text: 'ok',
+      usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 },
+      agent_rev: 2,
+      model: 'gpt-4.1',
+    };
     await client.converse(validRequest());
     assert.equal(state.requests.filter((entry) => entry.rpcMethod === 'initialize').length, 1);
 
@@ -239,7 +260,12 @@ describe('Streamable-HTTP transport', () => {
 
   it('opens exactly one session when several turns start at once', async () => {
     state.behavior.delayMs = 40;
-    state.behavior.toolData = { assistant_text: 'ok', usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 }, agent_rev: 2, model: 'gpt-4.1' };
+    state.behavior.toolData = {
+      assistant_text: 'ok',
+      usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 },
+      agent_rev: 2,
+      model: 'gpt-4.1',
+    };
     const client = new CmsAgentClient();
     await Promise.all([
       client.converse(validRequest({ turn_id: 't_a' })),
@@ -283,7 +309,12 @@ describe('Streamable-HTTP transport', () => {
 
   it('parses an SSE-framed response as well as application/json', async () => {
     state.behavior.sse = true;
-    state.behavior.toolData = { assistant_text: 'streamed', usage: { input_tokens: 2, output_tokens: 3, cost_usd: 0.1 }, agent_rev: 2, model: 'gpt-4.1' };
+    state.behavior.toolData = {
+      assistant_text: 'streamed',
+      usage: { input_tokens: 2, output_tokens: 3, cost_usd: 0.1 },
+      agent_rev: 2,
+      model: 'gpt-4.1',
+    };
     const result = await new CmsAgentClient().converse(validRequest());
     assert.equal(result.ok, true);
     assert.equal(result.ok === true && result.data.assistant_text, 'streamed');
@@ -405,7 +436,11 @@ describe('agent_ref resolution', () => {
   });
 
   it('drops the cached ref when the agent no longer resolves', async () => {
-    state.behavior.toolError = { code: -32000, message: 'agent_unresolved', data: { error: { code: 'agent_unresolved' } } };
+    state.behavior.toolError = {
+      code: -32000,
+      message: 'agent_unresolved',
+      data: { error: { code: 'agent_unresolved' } },
+    };
     const client = new CmsAgentClient();
     const result = await client.resolveAgent({ role: 'client_manager', project_id: 'platform' });
     assert.equal(result.ok === false && result.code, 'agent_unresolved');
@@ -434,10 +469,7 @@ describe('bounds pre-flight', () => {
       checkConverseBounds(validRequest({ context: { site_id: 's', object_type: 'page' } }))?.code,
       'invalid_turn_request'
     );
-    assert.equal(
-      checkConverseBounds(validRequest({ actor: { kind: 'human', id: '' } }))?.code,
-      'invalid_turn_request'
-    );
+    assert.equal(checkConverseBounds(validRequest({ actor: { kind: 'human', id: '' } }))?.code, 'invalid_turn_request');
     assert.equal(
       checkConverseBounds(validRequest({ actor: { kind: 'human', id: 'wolf@example.com' } }))?.code,
       'invalid_turn_request'
@@ -477,10 +509,7 @@ describe('bounds pre-flight', () => {
       ['object_id', validRequest({ context: { site_id: 's', object_type: 't', object_id: 'o'.repeat(257) } })],
       ['focus', validRequest({ context: { site_id: 's', focus: 'f'.repeat(501) } })],
       ['approval_note', validRequest({ context: { site_id: 's', approval_note: 'n'.repeat(1001) } })],
-      [
-        'description',
-        validRequest({ tools: [{ name: 'patch', description: 'd'.repeat(16_001), input_schema: {} }] }),
-      ],
+      ['description', validRequest({ tools: [{ name: 'patch', description: 'd'.repeat(16_001), input_schema: {} }] })],
     ];
     for (const [label, request] of cases) {
       assert.equal(checkConverseBounds(request)?.code, 'invalid_turn_request', `${label} must be bounded`);
