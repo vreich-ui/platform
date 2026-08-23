@@ -1,0 +1,19 @@
+{
+  "__generated": {
+    "at": "2026-08-23T13:53:49.305Z",
+    "from": "objects/section_template/by-id/stpl_capture_62ec033a9719bf60ac.json",
+    "record_version": 2
+  },
+  "blueprint": {
+    "data": {
+      "actions": [],
+      "heading": "OUR PARTNERS"
+    },
+    "id": "s_3bf9b659b0",
+    "type": "lede"
+  },
+  "description": "Draft recipe extracted from 2 repeated lede shapes carrying heading.",
+  "name": "Captured lede recipe (heading)",
+  "scope": "one_off",
+  "whenToUse": "Use for the repeated lede shape discovered in this capture, where the section carries heading."
+}
