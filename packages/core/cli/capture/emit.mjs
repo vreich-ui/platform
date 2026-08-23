@@ -685,6 +685,11 @@ function reuseOpsForPage(existingRecord, body) {
   const fields = {};
   if (typeof body.title === 'string') fields.title = body.title;
   if (body.seo && typeof body.seo === 'object') fields.seo = body.seo;
+  // T12.29: the page type travels with the patch. Without it a reused page keeps whatever type it
+  // had — the hand-built `/` stays 'home', whose family forbids `media` and `content_split`, and
+  // the imagery this whole path exists to deliver is rejected by validation after being bound.
+  // `set_page_meta` forbids only `sections` and `tracking`, so this is the sanctioned writer.
+  if (typeof body.pageType === 'string') fields.pageType = body.pageType;
   if (Object.keys(fields).length > 0) ops.unshift({ op: 'set_page_meta', fields });
   return ops;
 }

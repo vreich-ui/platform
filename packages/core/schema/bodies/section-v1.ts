@@ -109,6 +109,10 @@ export type ProductPreviewSource = z.infer<typeof productPreviewSourceSchema>;
 // data never carries a playable URL (the write+render safety posture).
 export const MEDIA_MAX_ITEMS = 8;
 export const BRAND_ROW_MAX_LOGOS = 8;
+/** `composition` bounds — a residue section, not a page builder. */
+export const COMPOSITION_MAX_IMAGES = 12;
+export const COMPOSITION_MAX_BLOCKS = 24;
+
 export const STATS_MAX_ITEMS = 6;
 export const TIMELINE_MAX_MILESTONES = 8;
 export const COMPARISON_MAX_COLUMNS = 4;
@@ -364,6 +368,56 @@ export const sectionInstanceSchema = z.discriminatedUnion('type', [
   // Text + media split (W5 shop-preview conversion, plan §4): kicker/heading/
   // paragraph body/actions beside 1–2 images. `reverse` flips the columns —
   // the repointable generic the bespoke shop-hero markup becomes.
+  // ─── `composition` (T12.31) ────────────────────────────────────────────────
+  //
+  // The one COMPOSABLE section. Every other type in this union is a named shape
+  // with a fixed field set, which is exactly what makes them predictable to
+  // author and render — and exactly what a SITE CAPTURE cannot always fit. On
+  // 2026-08-22 two thirds of the residual capture gaps on the reference site
+  // were one problem stated twice:
+  //
+  //   section_type_has_no_asset_field            a block with copy AND images,
+  //                                              typed by its copy, so its
+  //                                              images had nowhere to go
+  //   link_actions_not_carried_by_asset_section   a block with images AND links,
+  //                                              typed by its images, so its
+  //                                              links were dropped
+  //
+  // Both are "one source block holds more than any single named type can". The
+  // answer is not fourteen more named types; it is one type whose body is an
+  // ORDERED SEQUENCE, so copy, imagery and calls-to-action can interleave in the
+  // order the source had them.
+  //
+  // IT IS NOT AN ESCAPE HATCH FROM THE DESIGN SYSTEM. `blocks` is a closed union
+  // of three kinds — there is no raw HTML, no arbitrary attributes, no styling,
+  // no nesting. Text is the same allowlisted rich text every other section uses;
+  // actions are the same `linkActionSchema` the hero uses; images are the same
+  // {src, alt} pair, and they live in a FLAT `images` array exactly like
+  // content_split's so the asset binder's first-party guarantee applies to them
+  // unchanged. A block referencing an image does so BY INDEX into that array —
+  // an image can never arrive as a URL inside a block.
+  //
+  // Prefer a named type whenever one fits. This is for the residue.
+  sectionVariant('composition', {
+    kicker: z.string().optional(),
+    heading: z.string().optional(),
+    images: z
+      .array(z.object({ src: z.string().min(1), alt: z.string().min(1) }).strict())
+      .max(COMPOSITION_MAX_IMAGES),
+    blocks: z
+      .array(
+        z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('text'), body: richTextSchema }).strict(),
+          z.object({ kind: z.literal('actions'), actions: z.array(linkActionSchema).min(1) }).strict(),
+          // By INDEX into `images`, never by URL. An out-of-range index is a
+          // validation failure, not a broken picture.
+          z.object({ kind: z.literal('image'), imageIndex: z.number().int().min(0) }).strict(),
+        ])
+      )
+      .min(1)
+      .max(COMPOSITION_MAX_BLOCKS),
+    anchor: z.string().optional(),
+  }),
   sectionVariant('content_split', {
     kicker: z.string().optional(),
     heading: z.string().min(1),

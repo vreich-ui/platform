@@ -193,6 +193,16 @@ const resolvedFor = (type: SectionType, data: unknown, deps: ResolvePageDeps): u
     const logos = (data as { logos?: Array<{ target?: NavTarget }> }).logos ?? [];
     return { logoHrefs: logos.map((logo) => (logo.target ? deps.resolveActionHref(logo.target) : undefined)) };
   }
+  // composition (T12.31): one href list per ACTION BLOCK, in block order. See
+  // CompositionResolved for why it is not indexed by position in `blocks`.
+  if (type === 'composition') {
+    const blocks = (data as { blocks?: Array<{ kind?: string; actions?: Array<{ target: NavTarget }> }> }).blocks ?? [];
+    return {
+      actionHrefs: blocks
+        .filter((block) => block?.kind === 'actions')
+        .map((block) => (block.actions ?? []).map((action) => deps.resolveActionHref(action.target))),
+    };
+  }
   // content_split shares the action-hrefs policy.
   if (type === 'content_split') {
     return {

@@ -39,6 +39,11 @@ export const SUPPORTED_SECTION_TYPES = new Set([
 export const CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS = {
   home: new Set(['hero', 'checklist', 'content_grid', 'bio', 'newsletter_signup', 'shared_ref']),
   standard: 'any',
+  // T12.29: captured pages declare pageType 'clone', which permits any registered section. `home`
+  // stays exactly as narrow as it is — it is a product decision (C§1.1), not an obstacle to route
+  // around — and is kept here only because the focused mapper test pins it against the governed
+  // registry so capture can never quietly widen a page type to flatter a clone.
+  clone: 'any',
 };
 
 // ─── T12.14 asset-aware mapping ──────────────────────────────────────────────
@@ -64,6 +69,8 @@ export const CONTENT_SPLIT_MAX_IMAGES = 2;
 export const MEDIA_MAX_ITEMS = 8;
 export const BRAND_ROW_MIN_LOGOS = 2;
 export const BRAND_ROW_MAX_LOGOS = 8;
+/** Mirrors COMPOSITION_MAX_IMAGES in the governed section schema; the focused test pins the pair. */
+export const COMPOSITION_MAX_IMAGES = 12;
 /** `capturePolicy.rights.media` value that permits retaining source media. */
 export const MEDIA_RETENTION_RIGHT = 'retain_referenced_allowed_origin_media';
 /** A body shorter than this is a label, not copy a section has to preserve. */
@@ -103,6 +110,9 @@ export const ASSET_FIELD_BOUNDS = {
   images: { min: 1, max: CONTENT_SPLIT_MAX_IMAGES },
   logos: { min: BRAND_ROW_MIN_LOGOS, max: BRAND_ROW_MAX_LOGOS },
   portrait: { min: 1, max: 1 },
+  // T12.31: `composition` keeps its images in a FLAT array exactly like content_split's, so the
+  // first-party guarantee below applies to them unchanged. Its blocks address that array by index.
+  composition: { min: 1, max: COMPOSITION_MAX_IMAGES },
 };
 
 /**
@@ -153,6 +163,24 @@ export function bindSectionAssets(section, assetPlan, resolveArtifactRef) {
     data.images = used.map(({ src, alt }) => ({ src, alt }));
   } else if (assetPlan.target === 'logos') {
     data.logos = used.map(({ src, alt }) => ({ src, alt }));
+  } else if (assetPlan.target === 'composition') {
+    data.images = used.map(({ src, alt }) => ({ src, alt }));
+    // REPAIR THE INDEXES. A composition's image blocks address `images` by position, and binding
+    // can drop an image the plan expected — one that never materialized, or one beyond the cap. If
+    // the surviving images simply shifted up, every later block would silently point at the WRONG
+    // picture, which is worse than pointing at none. So the blocks are rewritten against the images
+    // that actually survived, and any block whose image did not is removed outright.
+    const survivingIndex = new Map(used.map((entry, position) => [entry.manifestRef, position]));
+    const plannedRefs = entries.map((entry) => entry.manifestRef);
+    let seen = -1;
+    data.blocks = (data.blocks ?? [])
+      .map((block) => {
+        if (block?.kind !== 'image') return block;
+        seen += 1;
+        const position = survivingIndex.get(plannedRefs[seen]);
+        return position === undefined ? null : { ...block, imageIndex: position };
+      })
+      .filter(Boolean);
   } else {
     // `bio` offers BOTH idioms: the trusted raw reference (validated against the
     // artifact index, unrendered) and the rendered {src, alt} pair. Bind both —
@@ -705,7 +733,43 @@ function assetSectionPlan(context, images) {
       reason: 'heading plus body copy beside one or two source images',
     };
   }
-  if (substantive) return null; // no asset-bearing type can carry this block's copy
+  // T12.31 — the residue, and the reason `composition` exists.
+  //
+  // Everything above is a NAMED type and is preferred; this is what happens when no named type can
+  // hold what the block actually has. Two shapes reach here, and they were the two largest
+  // remaining gap classes on the reference site:
+  //
+  //   substantive copy + more images than content_split's two   -> `section_type_has_no_asset_field`
+  //                                                                (the block kept its text type and
+  //                                                                 every image became a gap)
+  //   images + links, where media/brand_row carry no actions     -> `link_actions_not_carried_by_asset_section`
+  //                                                                (the links were dropped)
+  //
+  // A composition keeps all three. Block order is copy, then imagery, then calls-to-action: the
+  // crawl flattens a block to text, so the true interleaving is NOT observable, and inventing one
+  // would be a guess dressed as fidelity. This order is stated, deterministic and reproducible.
+  const compositionImages = images.slice(0, COMPOSITION_MAX_IMAGES);
+  if (substantive || (images.length > 0 && actions.length > 0)) {
+    if (compositionImages.length === 0) return null;
+    const blocks = [
+      ...(substantive ? [{ kind: 'text', body: richText(body) }] : []),
+      ...compositionImages.map((_, index) => ({ kind: 'image', imageIndex: index })),
+      ...(actions.length > 0 ? [{ kind: 'actions', actions }] : []),
+    ];
+    return {
+      type: 'composition',
+      data: { ...(heading ? { heading } : {}), blocks },
+      assetPlan: plan('composition', compositionImages),
+      // Below the named types on purpose: a composition is the honest fallback, not a better answer.
+      confidence: 0.79,
+      reason:
+        substantive && actions.length > 0
+          ? 'copy, imagery and links together — no single named section carries all three'
+          : substantive
+            ? `copy beside ${compositionImages.length} images — beyond content_split's capacity`
+            : 'imagery with links — the gallery types carry no actions',
+    };
+  }
   if (images.length >= BRAND_ROW_MIN_LOGOS && actions.length >= 2) {
     return {
       type: 'brand_row',
@@ -725,6 +789,67 @@ function assetSectionPlan(context, images) {
     confidence: 0.86,
     reason: `image evidence bound as a ${images.length === 1 ? 'single image' : 'gallery'}`,
   };
+}
+
+// ─── T12.30 gallery splitting ────────────────────────────────────────────────
+//
+// A source gallery larger than its section's capacity used to be TRUNCATED to the cap, with the
+// remainder recorded as `media_gallery_exceeds_section_capacity` — a gap whose own text proposed
+// the answer: "a paginated or multi-section gallery placement". On the Zilberman filmography that
+// silently dropped most of the images.
+//
+// One source gallery is not one section by necessity; it is one section by assumption. Breaking it
+// into consecutive sections is both what the schema allows and, as Wolf put it, usually the logical
+// reading of the page.
+//
+// Split ONLY pure galleries. `content_split` carries copy beside its images, so splitting it would
+// duplicate the body text across every part; `portrait` is one image by definition. `media` and
+// `brand_row` carry images and an optional heading, and nothing else — those divide cleanly.
+const SPLITTABLE_ASSET_TARGETS = new Set(['items', 'logos']);
+
+/**
+ * Divide EVENLY rather than greedily. Greedy chunking of 9 images at a cap of 8 yields 8 + 1 — a
+ * second "gallery" containing a single picture, which looks like a mistake on the page and, for
+ * `brand_row`, is actually invalid (its floor is 2 logos). Even division yields 5 + 4.
+ */
+function splitOversizedGallery(result) {
+  const planned = result.assetPlan;
+  if (!planned || !SPLITTABLE_ASSET_TARGETS.has(planned.target)) return [result];
+  const bounds = ASSET_FIELD_BOUNDS[planned.target];
+  const entries = planned.entries ?? [];
+  if (!bounds || entries.length <= bounds.max) return [result];
+
+  const partCount = Math.ceil(entries.length / bounds.max);
+  const perPart = Math.ceil(entries.length / partCount);
+  const parts = [];
+  for (let index = 0; index < entries.length; index += perPart) parts.push(entries.slice(index, index + perPart));
+  // Any part below the field's floor means this shape cannot be divided legally; keep the single
+  // capped section and let the residue gap report the overflow, exactly as before.
+  if (parts.some((part) => part.length < bounds.min)) return [result];
+
+  return parts.map((part, index) => {
+    // The heading belongs to the gallery, not to each of its parts. Repeating it reads as several
+    // different galleries that happen to share a title.
+    //
+    // Written as an explicit delete rather than the `const { heading, ...rest }` omit idiom: this
+    // config does not enable `ignoreRestSiblings`, so that idiom is a no-unused-vars error, and
+    // relaxing a project-wide rule to accommodate one line is the wrong trade. This reads better
+    // anyway — it says what it does instead of saying it by omission.
+    const data = { ...result.data };
+    if (index > 0) delete data.heading;
+    // Layout describes THIS part's item count, not the original total.
+    if (planned.target === 'items' && 'layout' in data) {
+      data.layout = part.length === 1 ? 'single' : part.length === 2 ? 'strip' : 'grid';
+    }
+    return {
+      ...result,
+      data,
+      assetPlan: { ...planned, entries: part },
+      reason: `${result.reason}; part ${index + 1} of ${parts.length} of a ${entries.length}-image source gallery`,
+      splitPart: index,
+      splitTotal: parts.length,
+    };
+  });
 }
 
 function classifyBlock(context, forcedType) {
@@ -845,13 +970,49 @@ function assetUpgrade(result, context, images, allowedSections) {
       reason: `${result.reason}; portrait asset bound`,
     };
   }
-  if (!['hero', 'lede', 'cta_banner'].includes(result.type)) return null;
   const plan = assetSectionPlan(context, images);
-  if (!plan || plan.type !== 'content_split' || !permitted('content_split')) return null;
-  // content_split carries heading + body + actions; refuse the upgrade if the
-  // text candidate held copy the target shape would not.
-  if (typeof result.data.body === 'string' && plan.data.body !== result.data.body) return null;
-  return { ...plan, reason: `${plan.reason} (re-typed from ${result.type} to carry its image evidence)` };
+  if (['hero', 'lede', 'cta_banner'].includes(result.type) && plan?.type === 'content_split' && permitted('content_split')) {
+    // content_split carries heading + body + actions; refuse the upgrade if the
+    // text candidate held copy the target shape would not.
+    if (typeof result.data.body !== 'string' || plan.data.body === result.data.body) {
+      return { ...plan, reason: `${plan.reason} (re-typed from ${result.type} to carry its image evidence)` };
+    }
+  }
+
+  // T12.31 — the LAST resort, and the other half of `section_type_has_no_asset_field`.
+  //
+  // A text-typed block with imagery that no named upgrade fits used to keep its text type and log
+  // every image as a gap: `prose` and `cta_banner` have no asset field at all, and `content_split`
+  // needs a heading the block may not have. The picture was simply lost.
+  //
+  // A composition carries the block's own copy, its images and its actions together, so the upgrade
+  // discards nothing. It is attempted only after every named option has been refused above — and
+  // only when the copy survives verbatim, which is the same rule the content_split upgrade obeys:
+  // a re-type that silently rewrites extracted copy is worse than a recorded gap.
+  if (!permitted('composition') || images.length === 0) return null;
+  const compositionImages = images.slice(0, COMPOSITION_MAX_IMAGES);
+  const body = typeof result.data.body === 'string' ? result.data.body : null;
+  const actions = Array.isArray(result.data.actions) ? result.data.actions : [];
+  const heading = typeof result.data.heading === 'string' ? result.data.heading : null;
+  const blocks = [
+    ...(body ? [{ kind: 'text', body }] : []),
+    ...compositionImages.map((_, index) => ({ kind: 'image', imageIndex: index })),
+    ...(actions.length > 0 ? [{ kind: 'actions', actions }] : []),
+  ];
+  // A composition of images alone is just a `media` section; if the text type carried no copy and
+  // no actions there is nothing this re-type preserves that media would not.
+  if (!body && actions.length === 0) return null;
+  return {
+    ...result,
+    type: 'composition',
+    data: { ...(heading ? { heading } : {}), blocks },
+    assetPlan: {
+      target: 'composition',
+      entries: compositionImages.map((asset) => ({ manifestRef: asset.manifestRef, alt: asset.alt })),
+    },
+    confidence: Math.min(result.confidence, 0.79),
+    reason: `${result.reason}; re-typed from ${result.type} to a composition so its copy and image evidence both survive`,
+  };
 }
 
 /**
@@ -933,7 +1094,11 @@ function screenshotRef(block) {
 
 function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed) {
   const origin = snapshot.capture.origin;
-  const pageType = page.path === '/' ? 'home' : 'standard';
+  // T12.29: every captured page is a CLONE, including the one at '/'. Typing it 'home' put it under
+  // the DTC homepage family, which allows neither `media` nor `content_split` — so a cloned
+  // homepage lost its imagery to a section_not_allowed_for_page_type gap while the mapper had
+  // mapped it perfectly well. The page says what it is and is governed accordingly.
+  const pageType = 'clone';
   const allowedSections = CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS[pageType];
   const reconciled = reconcileBlocks(page);
   const candidates = [];
@@ -991,8 +1156,18 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       continue;
     }
 
-    const sectionId = `s_${hash(block.id, 10)}`;
-    const candidateId = `candidate_${hash(`${block.id}:${result.type}`)}`;
+    // T12.30: one block can now yield several sections when its gallery exceeds a single section's
+    // capacity. The single-section case returns a one-element list, so nothing else changes.
+    const parts = splitOversizedGallery(result);
+    // Block accounting is per SOURCE BLOCK, so a split gallery is still one accounted block and is
+    // represented by its first part.
+    let primaryCandidateId = null;
+    for (const result of parts) {
+    // Part 0 keeps the block's original ids so an unsplit gallery — and the first part of a split
+    // one — stay stable across runs; only the additional parts mint new ones.
+    const splitSuffix = result.splitPart ? `#${result.splitPart}` : '';
+    const sectionId = `s_${hash(`${block.id}${splitSuffix}`, 10)}`;
+    const candidateId = `candidate_${hash(`${block.id}${splitSuffix}:${result.type}`)}`;
     const candidate = {
       candidateId,
       sectionType: result.type,
@@ -1026,7 +1201,13 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       },
     };
     candidates.push(candidate);
-    const secondaryGap = assetResidueGap(result, bindings, images, actions);
+    primaryCandidateId ??= candidateId;
+    }
+    // Residue is judged against a part, not against the pre-split whole: once a gallery is divided
+    // every part is inside its field's capacity, so there is no overflow left to report. The other
+    // residues this checks — unlabelled images, actions a type cannot carry — are properties of the
+    // block and are unchanged by the division.
+    const secondaryGap = assetResidueGap(parts[0], bindings, images, actions);
     if (secondaryGap) {
       const gap = {
         gapId: `gap_${hash(`${block.id}:${secondaryGap.code}`)}`,
@@ -1040,11 +1221,11 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       reconciled.account.set(block.id, {
         blockRef: block.id,
         status: 'mapped_with_gap',
-        candidateId,
+        candidateId: primaryCandidateId,
         gapId: gap.gapId,
       });
     } else {
-      reconciled.account.set(block.id, { blockRef: block.id, status: 'mapped', candidateId });
+      reconciled.account.set(block.id, { blockRef: block.id, status: 'mapped', candidateId: primaryCandidateId });
     }
   }
 

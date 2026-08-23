@@ -37,6 +37,7 @@ import { checklistDefinition } from './components/checklist.js';
 import { contactFormDefinition } from './components/contact-form.js';
 import { contentEmbedDefinition } from './components/content-embed.js';
 import { contentGridDefinition } from './components/content-grid.js';
+import { compositionDefinition } from './components/composition.js';
 import { contentSplitDefinition } from './components/content-split.js';
 import { ctaBannerDefinition } from './components/cta-banner.js';
 import { faqDefinition } from './components/faq.js';
@@ -124,6 +125,7 @@ const SECTION_EDITORS = {
   form_confirmation: formConfirmationDefinition.editor,
   steps: stepsDefinition.editor,
   content_split: contentSplitDefinition.editor,
+  composition: compositionDefinition.editor,
   pricing_table: pricingTableDefinition.editor,
   media: mediaDefinition.editor,
   brand_row: brandRowDefinition.editor,
