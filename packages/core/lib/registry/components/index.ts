@@ -18,6 +18,7 @@ import Checklist from '../../../components/sections/Checklist.astro';
 import ContactForm from '../../../components/sections/ContactForm.astro';
 import ContentEmbed from '../../../components/sections/ContentEmbed.astro';
 import ContentGrid from '../../../components/sections/ContentGrid.astro';
+import Composition from '../../../components/sections/Composition.astro';
 import ContentSplit from '../../../components/sections/ContentSplit.astro';
 import CtaBanner from '../../../components/sections/CtaBanner.astro';
 import Faq from '../../../components/sections/Faq.astro';
@@ -43,6 +44,7 @@ import { checklistDefinition } from './checklist.js';
 import { contactFormDefinition } from './contact-form.js';
 import { contentEmbedDefinition } from './content-embed.js';
 import { contentGridDefinition } from './content-grid.js';
+import { compositionDefinition } from './composition.js';
 import { contentSplitDefinition } from './content-split.js';
 import { ctaBannerDefinition } from './cta-banner.js';
 import { faqDefinition } from './faq.js';
@@ -107,6 +109,7 @@ export const componentRegistry: Record<RegisteredSectionType, RegisteredComponen
   timeline: bind(timelineDefinition, Timeline),
   comparison_table: bind(comparisonTableDefinition, ComparisonTable),
   content_split: bind(contentSplitDefinition, ContentSplit),
+  composition: bind(compositionDefinition, Composition),
   pricing_table: bind(pricingTableDefinition, PricingTable),
 };
 

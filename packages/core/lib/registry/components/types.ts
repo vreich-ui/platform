@@ -94,6 +94,18 @@ export type ProductPreviewResolved = {
   cards?: ProductPreviewCard[];
   cardHrefs?: Array<string | undefined>;
 };
+/**
+ * composition (T12.31): hrefs for every ACTION BLOCK's actions.
+ *
+ * Indexed by the block's position among ACTION BLOCKS — not by its position in
+ * `blocks`. A composition interleaves text, images and actions freely, so a
+ * blocks-indexed array would be mostly holes and would shift whenever a text
+ * block was added. `actionHrefs[n][m]` is the m-th action of the n-th action
+ * block, and both indexes are stable under edits to the other kinds.
+ */
+export type CompositionResolved = {
+  actionHrefs: string[][];
+};
 /** content_split: hrefs for data.actions, aligned by index (the hero policy). */
 export type ContentSplitResolved = {
   actionHrefs: string[];

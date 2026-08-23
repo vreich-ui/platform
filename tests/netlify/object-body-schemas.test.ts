@@ -347,6 +347,25 @@ const sectionFixtures: SectionInstance[] = [
     },
   },
   {
+    id: 's_composition1',
+    type: 'composition',
+    // T12.31: the residue section — copy, imagery and links interleaved in source
+    // order, which is what no single named type can hold. Images live in a FLAT
+    // array and blocks address them by index, so an image can never arrive as a
+    // URL inside a block.
+    data: {
+      kicker: 'From the archive',
+      heading: 'A mixed block',
+      images: [{ src: '/images/still-1.jpg', alt: 'A still from the film' }],
+      blocks: [
+        { kind: 'text', body: '<p>Copy that arrived above the picture.</p>' },
+        { kind: 'image', imageIndex: 0 },
+        { kind: 'text', body: '<p>And copy that arrived below it.</p>' },
+        { kind: 'actions', actions: [{ label: 'Read more', target: { kind: 'route', href: '/filmography' } }] },
+      ],
+    },
+  },
+  {
     id: 's_brandrow1',
     type: 'brand_row',
     data: {
@@ -407,6 +426,9 @@ test('sections: every union member parses from a seed fixture', () => {
     'card',
     'checklist',
     'comparison_table',
+    // T12.31 — the residue section. Pinned in this sorted list on purpose: adding a section type is
+    // adding to the design system, and it has to be a deliberate edit here rather than a silent one.
+    'composition',
     'contact_form',
     'content_embed',
     'content_grid',

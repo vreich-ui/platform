@@ -499,7 +499,10 @@ test('materialized artifacts bind into the schema asset fields, first-party only
     report.assetBindings.filter((entry) => entry.objectType !== 'section_template').length,
     plan.assetPlans.length
   );
-  assert.equal(report.assetBindings.filter((entry) => entry.objectType === 'section_template').length, 1);
+  // 1 -> 2 with T12.31: `composition` gives repeated mixed-content shapes a type of their own, so a
+  // second recipe now has an asset-bearing blueprint. Recipes are grouped by shape fingerprint
+  // (T12.23), so this counts distinct shapes, not occurrences.
+  assert.equal(report.assetBindings.filter((entry) => entry.objectType === 'section_template').length, 2);
   assert.ok(report.assetBindings.every((entry) => entry.status === 'bound'));
   assert.deepEqual(
     report.mediaPolicy.mediaRetention,

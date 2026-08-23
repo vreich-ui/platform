@@ -69,6 +69,8 @@ export const CONTENT_SPLIT_MAX_IMAGES = 2;
 export const MEDIA_MAX_ITEMS = 8;
 export const BRAND_ROW_MIN_LOGOS = 2;
 export const BRAND_ROW_MAX_LOGOS = 8;
+/** Mirrors COMPOSITION_MAX_IMAGES in the governed section schema; the focused test pins the pair. */
+export const COMPOSITION_MAX_IMAGES = 12;
 /** `capturePolicy.rights.media` value that permits retaining source media. */
 export const MEDIA_RETENTION_RIGHT = 'retain_referenced_allowed_origin_media';
 /** A body shorter than this is a label, not copy a section has to preserve. */
@@ -108,6 +110,9 @@ export const ASSET_FIELD_BOUNDS = {
   images: { min: 1, max: CONTENT_SPLIT_MAX_IMAGES },
   logos: { min: BRAND_ROW_MIN_LOGOS, max: BRAND_ROW_MAX_LOGOS },
   portrait: { min: 1, max: 1 },
+  // T12.31: `composition` keeps its images in a FLAT array exactly like content_split's, so the
+  // first-party guarantee below applies to them unchanged. Its blocks address that array by index.
+  composition: { min: 1, max: COMPOSITION_MAX_IMAGES },
 };
 
 /**
@@ -158,6 +163,24 @@ export function bindSectionAssets(section, assetPlan, resolveArtifactRef) {
     data.images = used.map(({ src, alt }) => ({ src, alt }));
   } else if (assetPlan.target === 'logos') {
     data.logos = used.map(({ src, alt }) => ({ src, alt }));
+  } else if (assetPlan.target === 'composition') {
+    data.images = used.map(({ src, alt }) => ({ src, alt }));
+    // REPAIR THE INDEXES. A composition's image blocks address `images` by position, and binding
+    // can drop an image the plan expected — one that never materialized, or one beyond the cap. If
+    // the surviving images simply shifted up, every later block would silently point at the WRONG
+    // picture, which is worse than pointing at none. So the blocks are rewritten against the images
+    // that actually survived, and any block whose image did not is removed outright.
+    const survivingIndex = new Map(used.map((entry, position) => [entry.manifestRef, position]));
+    const plannedRefs = entries.map((entry) => entry.manifestRef);
+    let seen = -1;
+    data.blocks = (data.blocks ?? [])
+      .map((block) => {
+        if (block?.kind !== 'image') return block;
+        seen += 1;
+        const position = survivingIndex.get(plannedRefs[seen]);
+        return position === undefined ? null : { ...block, imageIndex: position };
+      })
+      .filter(Boolean);
   } else {
     // `bio` offers BOTH idioms: the trusted raw reference (validated against the
     // artifact index, unrendered) and the rendered {src, alt} pair. Bind both —
@@ -710,7 +733,43 @@ function assetSectionPlan(context, images) {
       reason: 'heading plus body copy beside one or two source images',
     };
   }
-  if (substantive) return null; // no asset-bearing type can carry this block's copy
+  // T12.31 — the residue, and the reason `composition` exists.
+  //
+  // Everything above is a NAMED type and is preferred; this is what happens when no named type can
+  // hold what the block actually has. Two shapes reach here, and they were the two largest
+  // remaining gap classes on the reference site:
+  //
+  //   substantive copy + more images than content_split's two   -> `section_type_has_no_asset_field`
+  //                                                                (the block kept its text type and
+  //                                                                 every image became a gap)
+  //   images + links, where media/brand_row carry no actions     -> `link_actions_not_carried_by_asset_section`
+  //                                                                (the links were dropped)
+  //
+  // A composition keeps all three. Block order is copy, then imagery, then calls-to-action: the
+  // crawl flattens a block to text, so the true interleaving is NOT observable, and inventing one
+  // would be a guess dressed as fidelity. This order is stated, deterministic and reproducible.
+  const compositionImages = images.slice(0, COMPOSITION_MAX_IMAGES);
+  if (substantive || (images.length > 0 && actions.length > 0)) {
+    if (compositionImages.length === 0) return null;
+    const blocks = [
+      ...(substantive ? [{ kind: 'text', body: richText(body) }] : []),
+      ...compositionImages.map((_, index) => ({ kind: 'image', imageIndex: index })),
+      ...(actions.length > 0 ? [{ kind: 'actions', actions }] : []),
+    ];
+    return {
+      type: 'composition',
+      data: { ...(heading ? { heading } : {}), blocks },
+      assetPlan: plan('composition', compositionImages),
+      // Below the named types on purpose: a composition is the honest fallback, not a better answer.
+      confidence: 0.79,
+      reason:
+        substantive && actions.length > 0
+          ? 'copy, imagery and links together — no single named section carries all three'
+          : substantive
+            ? `copy beside ${compositionImages.length} images — beyond content_split's capacity`
+            : 'imagery with links — the gallery types carry no actions',
+    };
+  }
   if (images.length >= BRAND_ROW_MIN_LOGOS && actions.length >= 2) {
     return {
       type: 'brand_row',
@@ -906,13 +965,49 @@ function assetUpgrade(result, context, images, allowedSections) {
       reason: `${result.reason}; portrait asset bound`,
     };
   }
-  if (!['hero', 'lede', 'cta_banner'].includes(result.type)) return null;
   const plan = assetSectionPlan(context, images);
-  if (!plan || plan.type !== 'content_split' || !permitted('content_split')) return null;
-  // content_split carries heading + body + actions; refuse the upgrade if the
-  // text candidate held copy the target shape would not.
-  if (typeof result.data.body === 'string' && plan.data.body !== result.data.body) return null;
-  return { ...plan, reason: `${plan.reason} (re-typed from ${result.type} to carry its image evidence)` };
+  if (['hero', 'lede', 'cta_banner'].includes(result.type) && plan?.type === 'content_split' && permitted('content_split')) {
+    // content_split carries heading + body + actions; refuse the upgrade if the
+    // text candidate held copy the target shape would not.
+    if (typeof result.data.body !== 'string' || plan.data.body === result.data.body) {
+      return { ...plan, reason: `${plan.reason} (re-typed from ${result.type} to carry its image evidence)` };
+    }
+  }
+
+  // T12.31 — the LAST resort, and the other half of `section_type_has_no_asset_field`.
+  //
+  // A text-typed block with imagery that no named upgrade fits used to keep its text type and log
+  // every image as a gap: `prose` and `cta_banner` have no asset field at all, and `content_split`
+  // needs a heading the block may not have. The picture was simply lost.
+  //
+  // A composition carries the block's own copy, its images and its actions together, so the upgrade
+  // discards nothing. It is attempted only after every named option has been refused above — and
+  // only when the copy survives verbatim, which is the same rule the content_split upgrade obeys:
+  // a re-type that silently rewrites extracted copy is worse than a recorded gap.
+  if (!permitted('composition') || images.length === 0) return null;
+  const compositionImages = images.slice(0, COMPOSITION_MAX_IMAGES);
+  const body = typeof result.data.body === 'string' ? result.data.body : null;
+  const actions = Array.isArray(result.data.actions) ? result.data.actions : [];
+  const heading = typeof result.data.heading === 'string' ? result.data.heading : null;
+  const blocks = [
+    ...(body ? [{ kind: 'text', body }] : []),
+    ...compositionImages.map((_, index) => ({ kind: 'image', imageIndex: index })),
+    ...(actions.length > 0 ? [{ kind: 'actions', actions }] : []),
+  ];
+  // A composition of images alone is just a `media` section; if the text type carried no copy and
+  // no actions there is nothing this re-type preserves that media would not.
+  if (!body && actions.length === 0) return null;
+  return {
+    ...result,
+    type: 'composition',
+    data: { ...(heading ? { heading } : {}), blocks },
+    assetPlan: {
+      target: 'composition',
+      entries: compositionImages.map((asset) => ({ manifestRef: asset.manifestRef, alt: asset.alt })),
+    },
+    confidence: Math.min(result.confidence, 0.79),
+    reason: `${result.reason}; re-typed from ${result.type} to a composition so its copy and image evidence both survive`,
+  };
 }
 
 /**

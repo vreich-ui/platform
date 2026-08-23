@@ -6,6 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { navigationBodySchema } from '../../schema/bodies/navigation-v1.js';
+import { COMPOSITION_MAX_IMAGES } from '../../schema/bodies/section-v1.js';
 import { pageBodySchema } from '../../schema/bodies/page-v1.js';
 import { sectionInstanceSchema } from '../../schema/bodies/section-v1.js';
 import { REGISTERED_SECTION_TYPES } from '../../lib/registry/components/registered-types.js';
@@ -17,6 +18,7 @@ import {
   CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS,
   FIRST_PARTY_ASSET_PATH_RE,
   firstPartyAssetPath,
+  COMPOSITION_MAX_IMAGES as CAPTURE_COMPOSITION_MAX_IMAGES,
   mapSnapshot,
   SUPPORTED_SECTION_TYPES,
 } from './map.mjs';
@@ -326,10 +328,10 @@ test('mapped coverage on the committed fixture is the recorded 17/19 = 89.47%', 
   assert.equal(relevant.length, 19);
   assert.equal(mapped.length, 17);
   assert.equal(Number((mapped.length / relevant.length).toFixed(4)), 0.8947);
-  // 7 -> 10 with T12.29: three more asset-bearing sections now survive on '/', where the `home`
-  // family had been discarding them. They are PENDING by design — a section with an asset plan is
-  // deliberately incomplete until emission binds a materialized first-party artifact into it.
-  assert.equal(mapping.summary.pendingAssetSections, 10);
+  // 7 -> 10 (T12.29: asset-bearing sections survive on '/') -> 14 (T12.31: `composition` carries
+  // imagery for blocks whose named type had no asset field at all). PENDING by design — a section
+  // with an asset plan is deliberately incomplete until emission binds a first-party artifact.
+  assert.equal(mapping.summary.pendingAssetSections, 14);
 });
 
 test('alt text is carried from the source block’s own item-level text association', async () => {
@@ -718,4 +720,92 @@ test('T12.23: the capture-side home allowlist still mirrors the governed PageTyp
     [...(CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS.home as Set<string>)].sort(),
     [...(governed.allowedSections as readonly string[])].sort()
   );
+});
+
+// ─── T12.31: the composable section ──────────────────────────────────────────────────────────────
+
+test('T12.31: the capture-side image cap mirrors the governed schema', () => {
+  // map.mjs is a standalone .mjs and cannot import the schema, so the bound is restated there. A
+  // silent divergence would let the mapper plan more images than a composition can legally hold —
+  // which surfaces only as a validation failure against a live tenant.
+  assert.equal(CAPTURE_COMPOSITION_MAX_IMAGES, COMPOSITION_MAX_IMAGES);
+});
+
+test('T12.31: a BOUND composition satisfies sectionInstanceSchema', () => {
+  // The question that matters: not whether the mapper produces compositions, but whether what it
+  // produces is acceptable to the platform once emission binds its artifacts.
+  const urls = ['https://example.test/a.jpg', 'https://example.test/b.jpg', 'https://example.test/c.jpg'];
+  const snapshot = structuredSnapshot({
+    text: flatText(
+      'Our partners include several institutions, described at length below in copy that is clearly substantive.'
+    ),
+    links: [{ label: 'Read more', href: 'https://example.test/partners' }],
+    assetUrls: urls,
+  }) as unknown as { pages: Array<{ assets: unknown[] }> };
+  // Images are only bindable when the page manifest declares them WITH alt text — the mapper's own
+  // rule, so the fixture has to satisfy it rather than route around it.
+  snapshot.pages[0].assets = urls.map((url, index) => ({ url, kind: 'image', alt: `Partner ${index + 1}` }));
+  const mapping = mapSnapshot(snapshot as never);
+  const page = mapping.pages[0];
+  const candidate = page.candidates.find((entry: { sectionType: string }) => entry.sectionType === 'composition');
+  assert.ok(candidate, 'the mixed block became a composition');
+
+  // Unbound it is deliberately INCOMPLETE — the two-phase contract.
+  assert.equal(sectionInstanceSchema.safeParse(candidate.section).success, false);
+
+  const bound = bindSectionAssets(
+    candidate.section,
+    candidate.assetPlan,
+    (manifestRef: string) => `image/capture/${'a'.repeat(64)}.jpg`.replace('aaaa', manifestRef.slice(-4).padEnd(4, 'a'))
+  );
+  assert.ok(!bound.error, `binding failed: ${JSON.stringify(bound.error)}`);
+  const parsed = sectionInstanceSchema.safeParse(bound.section);
+  assert.equal(parsed.success, true, parsed.success ? '' : JSON.stringify(parsed.error.issues));
+
+  // Its image blocks address real positions in the bound images array.
+  const data = bound.section.data as { images: unknown[]; blocks: Array<{ kind: string; imageIndex?: number }> };
+  for (const block of data.blocks) {
+    if (block.kind !== 'image') continue;
+    assert.ok(typeof block.imageIndex === 'number' && block.imageIndex < data.images.length);
+  }
+  // Nothing was dropped: the copy and the link both survived the re-type.
+  assert.ok(data.blocks.some((block) => block.kind === 'text'));
+  assert.ok(data.blocks.some((block) => block.kind === 'actions'));
+});
+
+test('T12.31: binding REPAIRS image indexes when a planned image does not materialize', () => {
+  // The hazard: if a planned image is missing and the survivors simply shift up, every later block
+  // points at the WRONG picture — worse than pointing at none. Blocks are rewritten against what
+  // actually survived, and a block whose image did not is removed.
+  const section = {
+    id: 's_comp',
+    type: 'composition',
+    data: {
+      blocks: [
+        { kind: 'text', body: '<p>Copy.</p>' },
+        { kind: 'image', imageIndex: 0 },
+        { kind: 'image', imageIndex: 1 },
+        { kind: 'image', imageIndex: 2 },
+      ],
+    },
+  };
+  const assetPlan = {
+    target: 'composition',
+    entries: [
+      { manifestRef: 'asset_one', alt: 'One' },
+      { manifestRef: 'asset_two', alt: 'Two' },
+      { manifestRef: 'asset_three', alt: 'Three' },
+    ],
+  };
+  // The MIDDLE image fails to materialize — the case that would corrupt a naive shift.
+  const bound = bindSectionAssets(section as never, assetPlan as never, (ref: string) =>
+    ref === 'asset_two' ? null : `image/capture/${'b'.repeat(64)}.jpg`
+  );
+  assert.ok(!bound.error);
+  const data = bound.section.data as { images: unknown[]; blocks: Array<{ kind: string; imageIndex?: number }> };
+  assert.equal(data.images.length, 2);
+  const imageBlocks = data.blocks.filter((block) => block.kind === 'image');
+  assert.equal(imageBlocks.length, 2, 'the block for the unmaterialized image was removed');
+  assert.deepEqual(imageBlocks.map((block) => block.imageIndex), [0, 1]);
+  assert.ok(data.blocks[0].kind === 'text', 'the copy is untouched');
 });

@@ -4,92 +4,12 @@
     {
       "pageRef": "page_9563b8e16278",
       "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-      "gapId": "gap_f17327c62c93",
-      "blockRef": "page_9563b8e16278_block_001",
-      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
-      "why": "section_type_has_no_asset_field",
-      "nearestType": "media",
-      "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-    },
-    {
-      "pageRef": "page_9563b8e16278",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-      "gapId": "gap_5e8f8645fd8e",
-      "blockRef": "page_9563b8e16278_block_007",
-      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
-      "why": "section_type_has_no_asset_field",
-      "nearestType": "media",
-      "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-    },
-    {
-      "pageRef": "page_9563b8e16278",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-      "gapId": "gap_02825896f914",
-      "blockRef": "page_9563b8e16278_block_011",
-      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
-      "why": "section_type_has_no_asset_field",
-      "nearestType": "media",
-      "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-    },
-    {
-      "pageRef": "page_9563b8e16278",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-      "gapId": "gap_ced43a55bb41",
-      "blockRef": "page_9563b8e16278_block_012",
-      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
-      "why": "link_actions_not_carried_by_asset_section",
-      "nearestType": "media",
-      "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-    },
-    {
-      "pageRef": "page_9563b8e16278",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
       "gapId": "gap_8515975a683d",
       "blockRef": "page_9563b8e16278_block_014",
       "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
       "why": "insufficient_structure",
       "nearestType": "prose",
       "missingCapability": "more semantic or textual evidence"
-    },
-    {
-      "pageRef": "page_9563b8e16278",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/",
-      "gapId": "gap_7b5cc403e100",
-      "blockRef": "page_9563b8e16278_block_017",
-      "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
-      "why": "link_actions_not_carried_by_asset_section",
-      "nearestType": "brand_row",
-      "missingCapability": "a governed placement for evidence this brand_row cannot hold: 3 source link action(s) that brand_row has no field for"
-    },
-    {
-      "pageRef": "page_593efe6a40c0",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/blank-1/moye-sobytiye",
-      "gapId": "gap_c354f48f1e21",
-      "blockRef": "page_593efe6a40c0_block_001",
-      "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
-      "why": "link_actions_not_carried_by_asset_section",
-      "nearestType": "media",
-      "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-    },
-    {
-      "pageRef": "page_79c515d4cebf",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-      "gapId": "gap_fa7b10668327",
-      "blockRef": "page_79c515d4cebf_block_004",
-      "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
-      "why": "link_actions_not_carried_by_asset_section",
-      "nearestType": "media",
-      "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-    },
-    {
-      "pageRef": "page_79c515d4cebf",
-      "sourceUrl": "https://www.zilbermanfilmfoundation.com/partners",
-      "gapId": "gap_a04da85fad4d",
-      "blockRef": "page_79c515d4cebf_block_005",
-      "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
-      "why": "section_type_has_no_asset_field",
-      "nearestType": "media",
-      "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
     },
     {
       "pageRef": "page_79c515d4cebf",
@@ -108,8 +28,8 @@
       "blockRef": "page_79c515d4cebf_block_007",
       "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
       "why": "image_missing_item_level_text_association",
-      "nearestType": "media",
-      "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented; 1 source link action(s) that media has no field for"
+      "nearestType": "composition",
+      "missingCapability": "a governed placement for evidence this composition cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented"
     },
     {
       "pageRef": "page_3ee57ccd5fac",
@@ -124,23 +44,6 @@
   ],
   "byCapability": [
     {
-      "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for",
-      "count": 3,
-      "gapIds": [
-        "gap_c354f48f1e21",
-        "gap_ced43a55bb41",
-        "gap_fa7b10668327"
-      ]
-    },
-    {
-      "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block",
-      "count": 2,
-      "gapIds": [
-        "gap_5e8f8645fd8e",
-        "gap_f17327c62c93"
-      ]
-    },
-    {
       "missingCapability": "more semantic or textual evidence",
       "count": 2,
       "gapIds": [
@@ -149,18 +52,10 @@
       ]
     },
     {
-      "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block",
-      "count": 2,
-      "gapIds": [
-        "gap_02825896f914",
-        "gap_a04da85fad4d"
-      ]
-    },
-    {
-      "missingCapability": "a governed placement for evidence this brand_row cannot hold: 3 source link action(s) that brand_row has no field for",
+      "missingCapability": "a governed placement for evidence this composition cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented",
       "count": 1,
       "gapIds": [
-        "gap_7b5cc403e100"
+        "gap_2f5bd371ee0b"
       ]
     },
     {
@@ -168,13 +63,6 @@
       "count": 1,
       "gapIds": [
         "gap_18aa3971f2f4"
-      ]
-    },
-    {
-      "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented; 1 source link action(s) that media has no field for",
-      "count": 1,
-      "gapIds": [
-        "gap_2f5bd371ee0b"
       ]
     }
   ]

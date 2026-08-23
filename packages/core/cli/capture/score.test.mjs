@@ -333,14 +333,14 @@ test('a preview manifest that names no screenshot leaves every comparison a defe
 test('unbound asset sections are enumerated defects and the rubric is untouched', async () => {
   const mapping = await fixture('zilberman.mapping.v1.redacted.json');
   const planned = mapping.pages.flatMap((page) => page.candidates.filter((candidate) => candidate.assetPlan));
-  // 7 -> 10 with T12.29: three more asset-bearing sections survive on '/', where the DTC `home`
-  // family had been discarding them before they could ever reach an asset plan.
-  assert.equal(planned.length, 10);
+  // 7 -> 10 (T12.29: asset-bearing sections survive on '/') -> 14 (T12.31: `composition` gives a
+  // block with copy AND imagery, or imagery AND links, a type that carries all of it).
+  assert.equal(planned.length, 14);
 
   // Without an emission report the binding is simply not verified — reported as
   // such, never as clean.
   const unverified = await scoreFixture();
-  assert.equal(unverified.assets.plannedSections, 10);
+  assert.equal(unverified.assets.plannedSections, 14);
   assert.equal(unverified.assets.evidenceComplete, null);
   assert.equal(unverified.assets.reason, 'no_emission_report_supplied_binding_not_verified');
 
@@ -358,7 +358,7 @@ test('unbound asset sections are enumerated defects and the rubric is untouched'
     },
   });
   assert.equal(nothingBound.assets.evidenceComplete, false);
-  assert.equal(nothingBound.assets.defectCount, 10);
+  assert.equal(nothingBound.assets.defectCount, 14);
   assert.equal(nothingBound.assets.boundSections, 0);
   assert.ok(
     nothingBound.assets.defects.every(
@@ -376,11 +376,11 @@ test('unbound asset sections are enumerated defects and the rubric is untouched'
   });
   assert.equal(allBound.assets.evidenceComplete, true);
   assert.equal(allBound.assets.defectCount, 0);
-  assert.equal(allBound.assets.boundSections, 10);
+  assert.equal(allBound.assets.boundSections, 14);
   assert.deepEqual(allBound.rubric, unverified.rubric);
 
   // A section emission never mentioned at all is still a defect, not a silence.
   const silent = await scoreFixture({ emissionReport: { assetBindings: [], assetGaps: [] } });
-  assert.equal(silent.assets.defectCount, 10);
+  assert.equal(silent.assets.defectCount, 14);
   assert.ok(silent.assets.defects.every((defect) => defect.code === ASSET_DEFECT_CODE_UNEMITTED));
 });
