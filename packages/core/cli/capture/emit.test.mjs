@@ -119,8 +119,10 @@ function mockTransport({
   pageRouteInDetail = false,
   recipeSummary = null,
   artifactBlobKey = null,
+  navRole = null,
 } = {}) {
   const calls = [];
+  const heldLocks = new Map();
   let failed = false;
   let ordinal = 0;
   return {
@@ -132,10 +134,43 @@ function mockTransport({
       if (verb === 'object_inventory' && args.object_type === 'page')
         return { objects: pageRoute ? [{ object_id: 'page_existing', object_type: 'page', status: 'active', ...(pageRouteInDetail ? {} : { route: pageRoute }) }] : [] };
       if (verb === 'object_inventory' && args.object_type === 'section_template') return { objects: recipeSummary ? [{ recipe_summary: { name: recipeSummary } }] : [] };
+      if (verb === 'object_inventory' && args.object_type === 'navigation')
+        return { objects: navRole ? [{ object_id: 'nav_existing', object_type: 'navigation', status: 'active', role: navRole }] : [] };
+      if (verb === 'object_get' && args.object_type === 'navigation' && args.object_id === 'nav_existing')
+        return { record: { object_id: 'nav_existing', record_version: 3, body: { role: navRole, groups: [{ id: 'g_seed', items: [] }] } } };
       if (verb === 'object_inventory') return { objects: [] };
       if (verb === 'object_validate') return { summary: { eligible: true, blockers: [], warnings: [] } };
       if (verb === 'object_get' && args.object_type === 'page' && args.object_id === 'page_existing')
-        return { record: { object_id: 'page_existing', body: { route: pageRoute } } };
+        return {
+          record: {
+            object_id: 'page_existing',
+            record_version: 7,
+            // A page that already has content — the hand-built seed case. The reuse path must clear
+            // these before writing the captured list, or the result is an interleaving of both.
+            body: { route: pageRoute, sections: [{ id: 's_preexisting01', type: 'prose', data: { body: '<p>seed</p>' } }] },
+          },
+        };
+      // T12.28 reuse path. Modelled with the same strictness as the server: a patch without a valid
+      // held lock is a 423, and checkin must present the matching token — so a bug that skips the
+      // lease or leaks it shows up here as a failure rather than as a silently-stranded lock.
+      if (verb === 'object_checkout') {
+        heldLocks.set(args.object_id, 'lock_fixture_token');
+        return { record: { object_id: args.object_id, lockToken: 'lock_fixture_token', record_version: 7 } };
+      }
+      if (verb === 'object_patch') {
+        if (heldLocks.get(args.object_id) !== args.lock_token) {
+          const error = new Error('lock not held');
+          error.status = 423;
+          throw error;
+        }
+        if (!Array.isArray(args.ops) || args.ops.length === 0) throw new Error('object_patch requires ops');
+        return { record: { object_id: args.object_id, record_version: 8, publication: { published_time: null } } };
+      }
+      if (verb === 'object_checkin') {
+        if (heldLocks.get(args.object_id) !== args.lock_token) throw new Error('object_checkin without the matching lock');
+        heldLocks.delete(args.object_id);
+        return { record: { object_id: args.object_id } };
+      }
       if (verb === 'create_artifact_from_url')
         return { artifact: { blobKey: artifactBlobKey ? artifactBlobKey(args) : serverBlobKey(args), portable: false } };
       if (verb === 'object_create') {
@@ -218,20 +253,101 @@ test('a project response for any other target fails before contracts or writes',
   assert.deepEqual(transport.calls.map((call) => call.verb), []);
 });
 
-test('actual inventory recipe_summary is reused and existing page routes quarantine before creation', async () => {
+test('an existing recipe is reused, and an existing page ROUTE is patched in place rather than refused', async () => {
+  // T12.28 changed this contract deliberately. It used to assert `route_collision`, which was the
+  // emitter refusing to write into a route it had already written — the defect that produced
+  // createdObjects: 0 and bound 0 of 132 planned media on a live run. What must STILL hold is that
+  // nothing is CREATED at an occupied route; the change is what happens instead of the refusal.
   const plan = await fixturePlan();
   const mapping = await fixture('zilberman.mapping.v1.redacted.json');
   const recipeSummary = plan.creates.find((item) => item.objectType === 'section_template').body.name;
-  const transport = mockTransport({ recipeSummary, pageRoute: '/', pageRouteInDetail: true });
+  // /partners is the route with real captured content (6 sections); / maps to zero and is
+  // covered by its own test below.
+  const transport = mockTransport({ recipeSummary, pageRoute: '/partners', pageRouteInDetail: true });
   const report = await executeEmission({ plan, mapping, transport, projectPolicyResolver: async (target) => projectPolicy(target) });
+
   assert.ok(report.reusedObjects.some((item) => item.reason === 'matching_recipe_summary'));
   assert.equal(report.quarantines.some((item) => item.reason === 'reuse_existing_recipe'), false);
-  assert.ok(report.quarantines.some((item) => item.reason === 'route_collision' && item.route === '/'));
-  assert.equal(transport.calls.filter((call) => call.verb === 'object_create' && call.args.requested_id === plan.creates.find((item) => item.body.route === '/')?.requestedId).length, 0);
-  assert.deepEqual(
-    transport.calls.find((call) => call.verb === 'object_get')?.args,
-    { object_type: 'page', object_id: 'page_existing' }
+
+  // The occupied route is now reused by patch, and is NOT quarantined.
+  const reusedRoute = report.reusedObjects.find((item) => item.objectType === 'page' && item.route === '/partners');
+  assert.ok(reusedRoute, 'the page at an existing route is reused');
+  assert.equal(reusedRoute.mode, 'patched');
+  assert.equal(reusedRoute.reason, 'route_already_present');
+  assert.equal(report.quarantines.some((item) => item.reason === 'route_collision'), false);
+
+  // Unchanged and non-negotiable: no create against an occupied route.
+  const collidingCreate = plan.creates.find((item) => item.body.route === '/partners');
+  assert.equal(
+    transport.calls.filter((call) => call.verb === 'object_create' && call.args.requested_id === collidingCreate?.requestedId).length,
+    0
   );
+
+  // The governed path, in order: lease, typed ops, release. A patch without a checkin strands a
+  // lock on a live page and blocks the tenant's own admin chat from editing it.
+  const patch = transport.calls.find((call) => call.verb === 'object_patch');
+  assert.ok(patch, 'the reuse went through object_patch');
+  assert.equal(patch.args.object_id, 'page_existing');
+  assert.ok(typeof patch.args.lock_token === 'string' && patch.args.lock_token.length > 0);
+  assert.ok(transport.calls.some((call) => call.verb === 'object_checkout' && call.args.object_id === 'page_existing'));
+  assert.ok(transport.calls.some((call) => call.verb === 'object_checkin' && call.args.object_id === 'page_existing'));
+
+  // Removals precede upserts, so the result is the captured section list in the source's order —
+  // not an interleaving with whatever was on the page before.
+  const ops = patch.args.ops;
+  const firstUpsert = ops.findIndex((op) => op.op === 'upsert_section');
+  const lastRemove = ops.map((op) => op.op).lastIndexOf('remove_section');
+  assert.ok(firstUpsert >= 0, 'the captured sections are written');
+  if (lastRemove >= 0) assert.ok(lastRemove < firstUpsert, 'removals come before upserts');
+  // sections are refused inside set_page_meta by schema; the section ops are its only writer.
+  assert.equal(ops.some((op) => op.op === 'set_page_meta' && 'sections' in (op.fields ?? {})), false);
+});
+
+test('a capture that mapped NO sections must not blank the live page at that route', async () => {
+  // The redacted fixture's `/` maps to zero sections while the live page there is the hand-built
+  // homepage. Without this guard the reuse path removes every existing section and writes nothing
+  // back — a published page silently emptied by a re-run. An empty capture is a failed mapping,
+  // never a delete instruction.
+  const plan = await fixturePlan();
+  const mapping = await fixture('zilberman.mapping.v1.redacted.json');
+  const transport = mockTransport({ pageRoute: '/', pageRouteInDetail: true });
+  const report = await executeEmission({ plan, mapping, transport, projectPolicyResolver: async (target) => projectPolicy(target) });
+
+  assert.ok(
+    report.quarantines.some((item) => item.reason === 'reuse_would_empty_page' && item.objectId === 'page_existing'),
+    'the empty capture is quarantined'
+  );
+  assert.equal(report.reusedObjects.some((item) => item.objectType === 'page' && item.route === '/'), false);
+  // Nothing was patched, so nothing was removed.
+  assert.equal(transport.calls.some((call) => call.verb === 'object_patch' && call.args.object_id === 'page_existing'), false);
+  assert.equal(transport.calls.some((call) => call.verb === 'object_checkout'), false);
+});
+
+test('an existing navigation ROLE is patched rather than colliding on its requested id', async () => {
+  // Navigation has no route; its identity is its role, and header+footer is the whole space. The
+  // live run's two `requested_id_unavailable` quarantines were this emitter discovering that the
+  // hand-built navs already occupy it — so the site kept a menu that did not match the clone.
+  const plan = await fixturePlan();
+  const mapping = await fixture('zilberman.mapping.v1.redacted.json');
+  const transport = mockTransport({ navRole: 'header' });
+  const report = await executeEmission({ plan, mapping, transport, projectPolicyResolver: async (target) => projectPolicy(target) });
+
+  const reusedNav = report.reusedObjects.find((item) => item.objectType === 'navigation');
+  assert.ok(reusedNav, 'the header navigation is reused');
+  assert.equal(reusedNav.reason, 'navigation_role_already_present');
+  assert.equal(reusedNav.objectId, 'nav_existing');
+
+  const patch = transport.calls.find((call) => call.verb === 'object_patch' && call.args.object_id === 'nav_existing');
+  assert.ok(patch, 'the nav went through the governed patch path');
+  const ops = patch.args.ops.map((op) => op.op);
+  assert.ok(ops.includes('remove_group'), 'the seed group is cleared');
+  assert.ok(ops.includes('upsert_group'), 'the captured groups are written');
+  assert.ok(ops.lastIndexOf('remove_group') < ops.indexOf('upsert_group'), 'removals precede upserts');
+  assert.ok(transport.calls.some((call) => call.verb === 'object_checkin' && call.args.object_id === 'nav_existing'));
+
+  // The FOOTER nav has a different role, so it is still created — reuse must be role-scoped, not
+  // "any navigation will do".
+  assert.ok(transport.calls.some((call) => call.verb === 'object_create' && call.args.object_type === 'navigation'));
 });
 
 test('media is deduped, hash-enriched, scoped to its owning page, and portable false remains valid for that request', async () => {
