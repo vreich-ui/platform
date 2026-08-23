@@ -177,7 +177,9 @@ test("registry_get('page_type') serves the T3.1 definitions with the JSON-schema
   const definitions = res.structuredContent?.definitions as Array<{ id: string; reviewPolicy: { required: boolean } }>;
   assert.deepEqual(
     definitions.map((definition) => definition.id),
-    ['home', 'standard', 'system', 'listing', 'content_detail']
+    // 'clone' (T12.29) is the captured-page type. Its position follows definition order in
+    // page-types.ts, where it sits ahead of 'standard'.
+    ['home', 'clone', 'standard', 'system', 'listing', 'content_detail']
   );
   assert.ok(definitions.every((definition) => definition.reviewPolicy.required === true));
   assert.deepEqual(res.structuredContent?.not_yet_implemented, []);

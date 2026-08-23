@@ -591,7 +591,9 @@ test('page: the page_home-shaped fixture parses cleanly', () => {
   const parsed = pageBodySchema.parse(pageHomeFixture);
   assert.equal(PAGE_SCHEMA_VERSION, 'page.v1');
   assert.deepEqual(parsed, pageHomeFixture);
-  assert.deepEqual(pageTypeIds, ['home', 'standard', 'listing', 'content_detail', 'system']);
+  // 'clone' (T12.29) is the captured-page type — see page-v1.ts. Pinned here on purpose: this list
+  // is the governed set, and a silent addition to it is a silent widening of what any page may be.
+  assert.deepEqual(pageTypeIds, ['home', 'standard', 'listing', 'content_detail', 'system', 'clone']);
 });
 
 test('page: unknown pageType, unknown section types, and code-override keys are rejected', () => {
