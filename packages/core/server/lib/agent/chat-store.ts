@@ -75,6 +75,12 @@ export const chatEventTypeSchema = z.enum([
   'run_finished',
   'run_error',
   'run_cancelled',
+  /**
+   * W19 T19.3: a progress line appended by the editorial-request sweeper, so
+   * an editor who reloads sees the history of the job and not only its
+   * current state. Schema-additive — pre-W19 docs never carry it.
+   */
+  'request_progress',
   /** Historical PF3 event retained so pre-PF5 chat documents still parse. */
   'engine_fallback',
   'events_trimmed',

@@ -72,6 +72,7 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     // W15 S1: one path segment, so /admin/content itself keeps serving the
     // static content library (the splat form swallowed the library index).
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
+    { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
   ],
 });
 

@@ -312,3 +312,18 @@ export const getAgentLearningBlobStore = async (event: unknown, binding?: SiteBi
 export const getMarginaliaBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
   return getNetlifyBlobStore('marginalia', event, binding);
 };
+
+/**
+ * W19 T19.1 (19-editorial-requests-plan §3.2): the per-site editorial request
+ * registry — `requests/by-id/<request_id>.json` (one doc per job),
+ * `requests/index.json` (the polled summary list), and `requests/notify/…`
+ * (reserved for T19.6). Strong consistency for the same reason as
+ * `agent-chats`: no CAS exists, so every writer (a chat tool at creation, the
+ * sweeper on transitions, a human on archive/cancel) read-modify-writes the
+ * doc and must see the latest committed state, or the single-writer-per-
+ * transition guards in requests/store.ts cannot hold. See that module for the
+ * write discipline; there is no other write path into this store.
+ */
+export const getEditorialRequestsBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
+  return getNetlifyBlobStore({ name: 'editorial-requests', consistency: 'strong' }, event, binding);
+};
