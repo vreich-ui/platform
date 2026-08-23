@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  CLONE_INTAKE_CAP_CHARS,
+  CLONE_INTAKE_TARGET_CHARS,
   CloneError,
   buildCloneIntake,
   buildCloneRunReport,
@@ -117,14 +119,14 @@ function baseIntakeArgs(overrides = {}) {
   return {
     captureRunId: 'run_abc',
     target: 'fixture-target',
-    snapshot: { schemaVersion: 'snapshot.v1', pages: [] },
     mapping: mapping(),
-    theme: { name: 'Captured theme', tokens: { colors: {}, fonts: {} } },
+    // The object_get BODY of the site, not its inventory row — CLONE-INTAKE-FIX.md Defect A.
+    siteBody: siteBodyFixture(),
+    theme: { object_id: 'thm_captured', body: { name: 'Captured theme', tokens: { colors: {}, fonts: {} } } },
     emissionReport: emissionReport(),
     inventory: inventory(),
     componentRegistry: componentRegistry(),
     pageTypeRegistry: pageTypeRegistry(),
-    policy: { rights: { content: 'retain_allowed_origin_content', media: 'prohibited' } },
     ...overrides,
   };
 }
@@ -141,33 +143,358 @@ function siteBodyFixture() {
   };
 }
 
+// A section-type vocabulary the size of a real platform's, with realistic field names. The REGISTRY
+// argument is always the raw `registry_get` response — JSON Schema and all — because that is what the
+// caller actually fetches; reducing it to field names is this module's job, not the caller's.
+const SECTION_TYPE_NAMES = [
+  'hero',
+  'faq',
+  'composition',
+  'media_gallery',
+  'testimonial',
+  'pricing_table',
+  'cta_banner',
+  'rich_text',
+  'feature_grid',
+  'team_grid',
+  'logo_wall',
+  'stat_band',
+  'timeline',
+  'accordion',
+  'contact_form',
+  'map_embed',
+  'video_embed',
+  'pull_quote',
+  'breadcrumb_trail',
+  'product_grid',
+  'article_list',
+  'newsletter_signup',
+  'split_feature',
+  'footer_cta',
+];
+const FIELD_NAMES = [
+  'heading',
+  'subheading',
+  'body',
+  'items',
+  'images',
+  'blocks',
+  'tone',
+  'alignment',
+  'ctaLabel',
+  'ctaHref',
+];
+
+function generatedComponentRegistry({ typeCount = SECTION_TYPE_NAMES.length, fieldCount = 4 } = {}) {
+  return {
+    registry: 'component',
+    definitions: Array.from({ length: typeCount }, (_, index) => {
+      const properties = {};
+      for (let field = 0; field < fieldCount; field += 1) {
+        // Names cycle through the realistic list and then extend it, so a deliberately oversized
+        // registry stays made of plausible identifiers rather than filler.
+        const name =
+          field < FIELD_NAMES.length ? FIELD_NAMES[field] : `${FIELD_NAMES[field % FIELD_NAMES.length]}${field}`;
+        properties[name] = { type: 'string', description: 'A description that has no business in a briefing.' };
+      }
+      return {
+        type: SECTION_TYPE_NAMES[index] ?? `${SECTION_TYPE_NAMES[index % SECTION_TYPE_NAMES.length]}_${index}`,
+        component_bound: true,
+        data_schema: { type: 'object', properties, required: ['heading'], additionalProperties: false },
+      };
+    }),
+  };
+}
+
+const pseudoHash = (seed, length = 16) => (seed + 1).toString(16).padStart(length, '0').slice(-length);
+
+/** A mapping + emission-report pair of a given size, shaped exactly like the real ones: emit.mjs's
+ *  page requestedIds, map.mjs's candidateIds and gapIds. */
+function generatedCapture({ pageCount, sectionsPerPage, gapsPerPage }) {
+  const pages = [];
+  const creates = [];
+  const createdObjects = [];
+  for (let index = 0; index < pageCount; index += 1) {
+    const pageRef = `page_${pseudoHash(index, 12)}`;
+    const objectId = `page_capture_${pseudoHash(index)}`;
+    const sections = Array.from({ length: sectionsPerPage }, (_, slot) => ({
+      id: `s_${pseudoHash(index * 100 + slot, 10)}`,
+      type: SECTION_TYPE_NAMES[(index + slot) % SECTION_TYPE_NAMES.length],
+      data: { heading: `Section ${slot} of page ${index}` },
+    }));
+    pages.push({
+      pageRef,
+      sourceUrl: `https://example.com/page-${index}`,
+      pageBody: { route: index === 0 ? '/' : `/page-${index}`, pageType: 'clone', title: `Page ${index}`, sections },
+      candidates: sections.map((section, slot) => ({
+        candidateId: `candidate_${pseudoHash(index * 100 + slot)}`,
+        sectionType: section.type,
+        data: section.data,
+        section,
+        confidence: 0.9,
+        mappingReason: 'a mapping reason string that the briefing has no room for',
+      })),
+      gaps: Array.from({ length: gapsPerPage }, (_, gap) => ({
+        gapId: `gap_${pseudoHash(index * 100 + gap)}`,
+        blockRef: `block_${index}_${gap}`,
+        screenshotRef: `screenshots/page-${index}-block-${gap}.png`,
+        why: 'no_matching_section_type',
+        nearestType: SECTION_TYPE_NAMES[gap % SECTION_TYPE_NAMES.length],
+        missingCapability: 'a long prose explanation of what the platform would need to build for this',
+      })),
+    });
+    creates.push({
+      kind: 'page',
+      objectType: 'page',
+      requestedId: objectId,
+      body: { route: index === 0 ? '/' : `/page-${index}`, sections },
+      pageRef,
+    });
+    createdObjects.push({ objectType: 'page', objectId, draftVerified: true });
+  }
+  return {
+    mapping: {
+      schemaVersion: 'capture-map.v1',
+      generatedAt: '2026-08-01T00:00:00.000Z',
+      pages,
+      navigationCandidates: [],
+    },
+    emissionReport: { target: 'fixture-target', creates, createdObjects, reusedObjects: [], quarantines: [] },
+  };
+}
+
+function generatedRecipeRows(count) {
+  return {
+    section_template: Array.from({ length: count }, (_, index) => ({
+      object_id: `stpl_${pseudoHash(index)}`,
+      object_type: 'section_template',
+      recipe: {
+        name: `Section recipe ${index}`,
+        scope: 'one_off',
+        blueprint_type: SECTION_TYPE_NAMES[index % SECTION_TYPE_NAMES.length],
+        description: 'prose the briefing does not carry',
+        when_to_use: 'more prose the briefing does not carry',
+      },
+    })),
+    template: Array.from({ length: count }, (_, index) => ({
+      object_id: `tpl_${pseudoHash(index)}`,
+      object_type: 'template',
+      recipe: { name: `Page template ${index}`, scope: 'evergreen', applies_to: ['clone'], slot_count: 4 },
+    })),
+  };
+}
+
+/** A capture the size of a real small-site clone: 10 pages of 6 sections, a gap apiece, 24 live
+ *  section types, 8 recipes already on the site, and a whole captured theme (the live run measured
+ *  its own at 895 chars — the ONE thing in the old 637KB envelope that was the right size). */
+function realisticThemeTokens() {
+  return {
+    colors: {
+      primary: 'rgb(46 111 149)',
+      secondary: 'rgb(37 90 120)',
+      accent: '#5e8c8a',
+      surface: '#f7f5f1',
+      surfaceMuted: '#ece7df',
+      ink: '#1d2733',
+      inkMuted: '#5a6672',
+      border: '#d8d2c8',
+      success: '#2f7d4f',
+      warning: '#b8791f',
+      danger: '#a83232',
+      inverse: '#ffffff',
+    },
+    fonts: {
+      sans: "'Inter Variable', system-ui, sans-serif",
+      serif: "'Source Serif 4', Georgia, serif",
+      heading: "'Playfair Display', Georgia, serif",
+      mono: "'IBM Plex Mono', ui-monospace, monospace",
+    },
+    layout: { containerWidth: 'default', sectionRhythm: 'roomy' },
+    shape: { radius: 'round', borderWeight: 'hairline' },
+  };
+}
+
+function realisticIntakeArgs() {
+  const capture = generatedCapture({ pageCount: 10, sectionsPerPage: 6, gapsPerPage: 1 });
+  return baseIntakeArgs({
+    ...capture,
+    theme: { object_id: 'thm_captured', body: { name: 'Captured theme', tokens: realisticThemeTokens() } },
+    componentRegistry: generatedComponentRegistry({ fieldCount: 5 }),
+    inventory: { ...inventory(), ...generatedRecipeRows(8) },
+  });
+}
+
+/** Deliberately far over the cap in every degradable dimension at once, so all four documented steps
+ *  have to run and the ledger records all four. */
+function oversizedIntakeArgs({ pageCount = 60, recipeCount = 100, sectionTypeCount = 60, fieldCount = 40 } = {}) {
+  const capture = generatedCapture({ pageCount, sectionsPerPage: 3, gapsPerPage: 40 });
+  return baseIntakeArgs({
+    ...capture,
+    theme: {
+      object_id: 'thm_captured',
+      body: { name: 'Captured theme', tokens: { colors: { primary: '#204060' }, fonts: {} } },
+    },
+    componentRegistry: generatedComponentRegistry({ typeCount: sectionTypeCount, fieldCount }),
+    inventory: { ...inventory(), ...generatedRecipeRows(recipeCount) },
+  });
+}
+
 // ─── 1. buildCloneIntake ──────────────────────────────────────────────────────────────────────────
 
-test('buildCloneIntake assembles the envelope and never mutates its arguments', () => {
+test('buildCloneIntake emits a bounded briefing and never mutates its arguments', () => {
   const args = baseIntakeArgs();
-  const pristineMapping = JSON.parse(JSON.stringify(args.mapping));
+  const pristineSiteBody = JSON.parse(JSON.stringify(args.siteBody));
   const pristineInventory = JSON.parse(JSON.stringify(args.inventory));
 
   const intake = buildCloneIntake(args);
 
-  assert.equal(intake.schemaVersion, 'clone-intake.v1');
+  assert.equal(intake.artifact, 'clone_intake.v1');
   assert.equal(intake.captureRunId, 'run_abc');
   assert.equal(intake.target, 'fixture-target');
-  assert.deepEqual(intake.source.mapping, args.mapping);
-  assert.deepEqual(intake.emitted.pages, [
-    { pageRef: 'page_home', objectId: 'page_capture_abc123', route: '/', sectionTypes: ['hero'] },
-  ]);
-  assert.deepEqual(intake.inventory.site, { object_id: 'site_0', object_type: 'site', status: 'active' });
-  assert.deepEqual(intake.registry.sectionTypes, { hero: HERO_DATA_SCHEMA, faq: FAQ_DATA_SCHEMA });
+  assert.match(intake.summary, /fixture-target/);
+
+  // Defect A: the site's own palette slots reach the envelope, from the object_get BODY. The site's
+  // layout/shape tokens do not — no stage downstream may propose them.
+  assert.deepEqual(intake.site, {
+    objectId: 'site_0',
+    brandTokens: {
+      colors: { primary: 'rgb(46 111 149)', secondary: 'rgb(37 90 120)', accent: '#5e8c8a' },
+      fonts: { sans: "'Inter Variable', system-ui", serif: 'Georgia, serif', heading: 'Playfair Display, serif' },
+    },
+  });
+  assert.deepEqual(intake.theme, {
+    objectId: 'thm_captured',
+    name: 'Captured theme',
+    tokens: { colors: {}, fonts: {} },
+  });
+
+  // Defect B, the heart of it: FIELD NAMES, never the JSON Schema those names came from.
+  assert.deepEqual(intake.registry.sectionTypes, {
+    hero: { fields: ['body', 'heading', 'tone'], required: ['heading'] },
+    faq: { fields: ['heading', 'items'], required: ['items'] },
+  });
+  assert.equal(JSON.stringify(intake.registry.sectionTypes).includes('additionalProperties'), false);
   assert.deepEqual(intake.registry.pageTypes.clone, { allowed: 'any', required: [] });
   assert.deepEqual(intake.registry.pageTypes.home, { allowed: ['hero'], required: ['hero'] });
 
-  // Deep clone, not a reference: mutating the caller's own objects after the call must not reach back
-  // into the returned intake, and the arguments themselves must read exactly as they did going in.
-  intake.source.mapping.pages[0].pageBody.title = 'MUTATED';
-  assert.equal(args.mapping.pages[0].pageBody.title, 'Home');
-  assert.deepEqual(args.mapping, pristineMapping);
+  assert.deepEqual(intake.pages, [
+    {
+      pageRef: 'page_home',
+      objectId: 'page_capture_abc123',
+      route: '/',
+      sourceShape: ['hero'],
+      emittedShape: ['hero'],
+      gaps: [],
+      candidateIds: ['candidate_hero01'],
+    },
+  ]);
+  assert.deepEqual(intake.recipes, { section_template: [], template: [] });
+
+  // The envelope measures ITSELF: `budget.chars` describes the string that contains it.
+  assert.equal(intake.budget.chars, JSON.stringify(intake).length);
+  assert.equal(intake.budget.cap, CLONE_INTAKE_CAP_CHARS);
+  assert.deepEqual(intake.budget.truncated, []);
+
+  // Nothing excluded by CLONE-INTAKE-FIX.md rides along under another name.
+  const serialized = JSON.stringify(intake);
+  for (const excluded of ['snapshot', 'createdArtifacts', 'assetBindings', 'assetPlans', 'preflight', 'inventory']) {
+    assert.equal(serialized.includes(excluded), false, `${excluded} must not appear in the briefing`);
+  }
+
+  // Deep clone, not a reference: mutating the returned intake must not reach back into the caller's
+  // own objects, and the arguments themselves must read exactly as they did going in.
+  intake.site.brandTokens.colors.primary = 'MUTATED';
+  intake.theme.tokens.colors.invented = '#000000';
+  assert.deepEqual(args.siteBody, pristineSiteBody);
   assert.deepEqual(args.inventory, pristineInventory);
+});
+
+test('buildCloneIntake keeps a realistic capture briefing under the 12,000-char target', () => {
+  const intake = buildCloneIntake(realisticIntakeArgs());
+
+  assert.ok(
+    intake.budget.chars < CLONE_INTAKE_TARGET_CHARS,
+    `realistic briefing measured ${intake.budget.chars} chars, over the ${CLONE_INTAKE_TARGET_CHARS} target`
+  );
+  assert.equal(intake.budget.chars, JSON.stringify(intake).length);
+  assert.deepEqual(intake.budget.truncated, []);
+  // Bounded, not gutted: every page, every registry entry, the whole palette and the whole captured
+  // theme are still there.
+  assert.equal(intake.pages.length, 10);
+  assert.deepEqual(intake.theme.tokens, realisticThemeTokens());
+  assert.equal(Object.keys(intake.registry.sectionTypes).length, 24);
+  assert.equal(Object.keys(intake.site.brandTokens.colors).length, 3);
+  assert.ok(intake.pages.some((page) => page.gaps.length > 0));
+});
+
+test('buildCloneIntake degrades in the documented order and records every drop in budget.truncated', () => {
+  const intake = buildCloneIntake(oversizedIntakeArgs());
+
+  assert.ok(intake.budget.chars <= CLONE_INTAKE_CAP_CHARS);
+  assert.equal(intake.budget.chars, JSON.stringify(intake).length);
+  assert.deepEqual(
+    intake.budget.truncated.map((entry) => entry.field),
+    ['pages[].gaps', 'pages', 'recipes.section_template', 'recipes.template', 'registry.sectionTypes[].fields']
+  );
+  assert.deepEqual(
+    intake.budget.truncated.map((entry) => entry.reason),
+    [
+      'gaps_capped_at_5_per_page',
+      'pages_capped_at_20',
+      'recipes_capped_at_20',
+      'recipes_capped_at_20',
+      'fields_replaced_with_count',
+    ]
+  );
+
+  const [gapDrop, pageDrop, sectionTemplateDrop, templateDrop, fieldDrop] = intake.budget.truncated;
+  assert.equal(gapDrop.total, 60 * 40);
+  assert.equal(gapDrop.kept, 60 * 5);
+  assert.ok(intake.pages.every((page) => page.gaps.length <= 5));
+  assert.equal(pageDrop.total, 60);
+  assert.equal(pageDrop.kept, 20);
+  assert.equal(intake.pages.length, 20);
+  assert.equal(sectionTemplateDrop.kept, 20);
+  assert.equal(intake.recipes.section_template.length, 20);
+  assert.equal(templateDrop.kept, 20);
+  assert.equal(fieldDrop.kept, 0);
+
+  // Step 4 replaces the field NAMES with a count and keeps the type itself: a designer that cannot see
+  // a type exists invents one, which is the failure `unknown_section_type` exists to prevent.
+  const contract = Object.values(intake.registry.sectionTypes)[0];
+  assert.equal(contract.fields, undefined);
+  assert.equal(typeof contract.fieldCount, 'number');
+
+  // NEVER dropped, at any size.
+  assert.equal(Object.keys(intake.site.brandTokens.colors).length, 3);
+  assert.deepEqual(intake.theme.tokens, { colors: { primary: '#204060' }, fonts: {} });
+  assert.equal(Object.keys(intake.registry.pageTypes).length, 2);
+});
+
+test('buildCloneIntake degrades no further than it must — one step, one ledger entry', () => {
+  const args = oversizedIntakeArgs({ pageCount: 14, recipeCount: 4, sectionTypeCount: 6, fieldCount: 6 });
+  const intake = buildCloneIntake(args);
+
+  assert.deepEqual(
+    intake.budget.truncated.map((entry) => entry.field),
+    ['pages[].gaps']
+  );
+  assert.equal(intake.pages.length, 14);
+  assert.ok(Array.isArray(Object.values(intake.registry.sectionTypes)[0].fields));
+});
+
+test('buildCloneIntake THROWS intake_cannot_be_bounded when every documented drop still leaves it over cap', () => {
+  // A registry with more section TYPES than the cap can hold names for. Types are never dropped (only
+  // their field names are), so no legal degradation can rescue this — and a silently truncated
+  // briefing is exactly what this rewrite exists to make unreachable.
+  const definitions = Array.from({ length: 4000 }, (_, index) => ({
+    type: `section_type_${index}`,
+    data_schema: { type: 'object', properties: { heading: { type: 'string' } }, required: ['heading'] },
+  }));
+  assert.throws(
+    () => buildCloneIntake(baseIntakeArgs({ componentRegistry: { definitions } })),
+    (error) => error instanceof CloneError && error.message === 'intake_cannot_be_bounded'
+  );
 });
 
 test('buildCloneIntake drops a page that emission never actually wrote (quarantined)', () => {
@@ -181,7 +508,7 @@ test('buildCloneIntake drops a page that emission never actually wrote (quaranti
     },
   });
   const intake = buildCloneIntake(args);
-  assert.deepEqual(intake.emitted.pages, []);
+  assert.deepEqual(intake.pages, []);
 });
 
 test('buildCloneIntake correlates a REUSED page by route, not by requestedId', () => {
@@ -195,8 +522,124 @@ test('buildCloneIntake correlates a REUSED page by route, not by requestedId', (
     },
   });
   const intake = buildCloneIntake(args);
-  assert.deepEqual(intake.emitted.pages, [
-    { pageRef: 'page_home', objectId: 'page_existing_home', route: '/', sectionTypes: ['hero'] },
+  assert.equal(intake.pages.length, 1);
+  assert.equal(intake.pages[0].objectId, 'page_existing_home');
+});
+
+test('buildCloneIntake reports emittedShape from the emitted body, not from the mapping', () => {
+  // Emission wrote only the hero: the faq the mapping recognized never made it onto the page. That
+  // difference is the mismatch `layout_analyst` exists to notice, so the two shapes must not be the
+  // same array read twice.
+  const args = baseIntakeArgs({
+    mapping: mapping({
+      pages: [
+        {
+          pageRef: 'page_home',
+          sourceUrl: 'https://example.com/',
+          pageBody: {
+            route: '/',
+            pageType: 'clone',
+            title: 'Home',
+            sections: [
+              { id: 's_hero01', type: 'hero', data: { heading: 'Welcome' } },
+              { id: 's_faq01', type: 'faq', data: { items: [] } },
+            ],
+          },
+          candidates: [
+            { candidateId: 'candidate_hero01', sectionType: 'hero' },
+            { candidateId: 'candidate_faq01', sectionType: 'faq' },
+          ],
+          gaps: [
+            {
+              gapId: 'gap_abc',
+              blockRef: 'block_9',
+              screenshotRef: 'x.png',
+              why: 'no_matching_type',
+              nearestType: 'hero',
+              missingCapability: 'a long explanation nobody needs in a briefing',
+            },
+          ],
+        },
+      ],
+    }),
+    emissionReport: {
+      target: 'fixture-target',
+      creates: [
+        {
+          kind: 'page',
+          objectType: 'page',
+          requestedId: 'page_capture_abc123',
+          body: { route: '/', sections: [{ id: 's_hero01', type: 'hero' }] },
+          pageRef: 'page_home',
+        },
+      ],
+      createdObjects: [{ objectType: 'page', objectId: 'page_capture_abc123', draftVerified: true }],
+      reusedObjects: [],
+      quarantines: [],
+    },
+  });
+  const intake = buildCloneIntake(args);
+  assert.deepEqual(intake.pages[0].sourceShape, ['hero', 'faq']);
+  assert.deepEqual(intake.pages[0].emittedShape, ['hero']);
+  // A gap is briefed by id, reason and nearest type — never by its screenshot ref or its prose.
+  assert.deepEqual(intake.pages[0].gaps, [{ gapId: 'gap_abc', why: 'no_matching_type', nearestType: 'hero' }]);
+});
+
+test('buildCloneIntake reads sourceShape from the block ledger, marking unmapped blocks as gaps', () => {
+  const args = baseIntakeArgs({
+    mapping: mapping({
+      pages: [
+        {
+          pageRef: 'page_home',
+          sourceUrl: 'https://example.com/',
+          pageBody: {
+            route: '/',
+            pageType: 'clone',
+            title: 'Home',
+            sections: [{ id: 's_hero01', type: 'hero', data: { heading: 'Welcome' } }],
+          },
+          candidates: [{ candidateId: 'candidate_hero01', sectionType: 'hero' }],
+          gaps: [{ gapId: 'gap_two', why: 'below_confidence_threshold', nearestType: 'faq' }],
+          blockAccounting: [
+            { blockRef: 'block_0', status: 'ignored_noncontent', reason: 'not_selected_after_reconciliation' },
+            { blockRef: 'block_1', status: 'mapped', candidateId: 'candidate_hero01' },
+            { blockRef: 'block_2', status: 'gap', gapId: 'gap_two' },
+          ],
+        },
+      ],
+    }),
+  });
+  const intake = buildCloneIntake(args);
+  assert.deepEqual(intake.pages[0].sourceShape, ['hero', 'gap']);
+});
+
+test('buildCloneIntake summarizes existing recipes as a reuse index, never as recipe bodies', () => {
+  const intake = buildCloneIntake(
+    baseIntakeArgs({
+      inventory: {
+        ...inventory(),
+        section_template: [
+          {
+            object_id: 'stpl_existing',
+            object_type: 'section_template',
+            recipe: { name: 'Captured hero recipe', scope: 'one_off', blueprint_type: 'hero', description: 'x' },
+          },
+        ],
+        template: [
+          {
+            object_id: 'tpl_existing',
+            object_type: 'template',
+            recipe: { name: 'Home template', scope: 'evergreen', applies_to: ['home'], slot_count: 3 },
+          },
+        ],
+      },
+    })
+  );
+  assert.deepEqual(intake.recipes.section_template, [
+    { objectId: 'stpl_existing', name: 'Captured hero recipe', scope: 'one_off', blueprint_type: 'hero' },
+  ]);
+  assert.deepEqual(intake.recipes.template, [
+    { objectId: 'tpl_existing', name: 'Home template', scope: 'evergreen', applies_to: ['home'], slot_count: 3 },
   ]);
 });
 
@@ -217,6 +660,16 @@ test('buildCloneIntake throws CloneError when inventory has zero active sites', 
 
 test('buildCloneIntake throws CloneError when inventory has more than one active site', () => {
   assert.throws(() => buildCloneIntake(baseIntakeArgs({ inventory: inventory({ activeSites: 2 }) })), CloneError);
+});
+
+test('buildCloneIntake throws CloneError when handed an inventory ROW instead of the site BODY', () => {
+  // The exact Defect A failure: an object_inventory row has no brandTokens, so a run built on one
+  // gives theme_reconciler nothing to enumerate. Refused here, three stages before the symptom.
+  assert.throws(
+    () =>
+      buildCloneIntake(baseIntakeArgs({ siteBody: { object_id: 'site_0', object_type: 'site', status: 'active' } })),
+    CloneError
+  );
 });
 
 // ─── 2. validateSectionTemplateDesign / validateTemplateDesign ───────────────────────────────────
@@ -260,12 +713,25 @@ test('validateSectionTemplateDesign REJECTS blueprint_schema_mismatch for an unk
   assert.ok(result.detail.some((line) => line.includes('extra')));
 });
 
-test('validateSectionTemplateDesign REJECTS blueprint_schema_mismatch for an illegal enum member', () => {
+test('validateSectionTemplateDesign defers an illegal ENUM MEMBER to object_validate — the documented cost of a names-only registry', () => {
+  // CLONE-INTAKE-FIX.md Defect B: the briefing carries field NAMES, never the schema those names came
+  // from, because that schema was 32,694 chars — 68% of the whole dependency budget — and it starved
+  // both AI nodes on the live run. An enum's members are values, not field names, so this one check of
+  // CLONE-ENGINE-API.md §2's three is no longer answerable here. `tone` IS a legal field, so the
+  // design passes this stage and is refused one stage later by `object_validate` against the real zod
+  // schema, which was always the authority on it. This test pins that boundary so it stays deliberate.
   const intake = intakeFixture();
   const design = { name: 'Off-tone hero', blueprint: { type: 'hero', data: { heading: 'Hi', tone: 'ultraviolet' } } };
   const result = validateSectionTemplateDesign(design, intake);
-  assert.equal(result.reason, 'blueprint_schema_mismatch');
-  assert.ok(result.detail.some((line) => line.includes('ultraviolet')));
+  assert.equal(result.ok, true);
+  // The two checks a field-name list CAN answer are unchanged — see the two tests above.
+  assert.equal(
+    validateSectionTemplateDesign(
+      { ...design, name: 'Invented field', blueprint: { type: 'hero', data: { heading: 'Hi', nope: 1 } } },
+      intake
+    ).reason,
+    'blueprint_schema_mismatch'
+  );
 });
 
 test('validateSectionTemplateDesign REJECTS name_collision against an existing recipe', () => {
@@ -458,7 +924,7 @@ test('buildRecipeMintPlan exposes the same forbiddenVerbs set emit.mjs uses', ()
 test('validateThemeProposal applies legal tokens and names the still-uncovered color slots', () => {
   const result = validateThemeProposal({
     proposal: { colors: { primary: '#204060' }, fonts: { sans: "'New Sans', system-ui" } },
-    siteBody: siteBodyFixture(),
+    intake: intakeFixture(),
   });
   assert.deepEqual(result.applied, { colors: { primary: '#204060' }, fonts: { sans: "'New Sans', system-ui" } });
   assert.deepEqual(result.dropped, []);
@@ -471,7 +937,7 @@ test('validateThemeProposal applies legal tokens and names the still-uncovered c
 test('validateThemeProposal DROPS unknown_slot', () => {
   const result = validateThemeProposal({
     proposal: { colors: { tertiary: '#204060', primary: '#204060' } },
-    siteBody: siteBodyFixture(),
+    intake: intakeFixture(),
   });
   assert.deepEqual(result.dropped, [{ slot: 'tertiary', value: '#204060', reason: 'unknown_slot' }]);
   assert.deepEqual(result.applied.colors, { primary: '#204060' });
@@ -485,7 +951,7 @@ test('validateThemeProposal DROPS external_reference_forbidden for url() and @im
       colors: { primary: 'url(https://evil.example/bg.png)', secondary: '#204060' },
       fonts: { sans: "@import url('https://evil.example/f.css')" },
     },
-    siteBody: siteBodyFixture(),
+    intake: intakeFixture(),
   });
   assert.deepEqual(result.dropped.map((d) => d.reason).sort(), [
     'external_reference_forbidden',
@@ -497,7 +963,7 @@ test('validateThemeProposal DROPS external_reference_forbidden for url() and @im
 test('validateThemeProposal DROPS not_a_color', () => {
   const result = validateThemeProposal({
     proposal: { colors: { primary: 'kind of blueish', secondary: '#204060' } },
-    siteBody: siteBodyFixture(),
+    intake: intakeFixture(),
   });
   assert.deepEqual(result.dropped, [{ slot: 'primary', value: 'kind of blueish', reason: 'not_a_color' }]);
 });
@@ -505,26 +971,25 @@ test('validateThemeProposal DROPS not_a_color', () => {
 test('validateThemeProposal DROPS no_fallback_stack for a single named family', () => {
   const result = validateThemeProposal({
     proposal: { fonts: { sans: 'Helvetica Neue', serif: 'Georgia, serif' } },
-    siteBody: siteBodyFixture(),
+    intake: intakeFixture(),
   });
   assert.deepEqual(result.dropped, [{ slot: 'sans', value: 'Helvetica Neue', reason: 'no_fallback_stack' }]);
 });
 
 test('validateThemeProposal accepts a single GENERIC font family with no further fallback', () => {
-  const result = validateThemeProposal({ proposal: { fonts: { sans: 'serif' } }, siteBody: siteBodyFixture() });
+  const result = validateThemeProposal({ proposal: { fonts: { sans: 'serif' } }, intake: intakeFixture() });
   assert.deepEqual(result.applied.fonts, { sans: 'serif' });
 });
 
 test('validateThemeProposal THROWS CloneError when every proposed token drops', () => {
   assert.throws(
-    () =>
-      validateThemeProposal({ proposal: { colors: { primary: 'not a color at all' } }, siteBody: siteBodyFixture() }),
+    () => validateThemeProposal({ proposal: { colors: { primary: 'not a color at all' } }, intake: intakeFixture() }),
     CloneError
   );
 });
 
 test('validateThemeProposal does not throw on a genuinely empty proposal, but still names every color slot as missing', () => {
-  const result = validateThemeProposal({ proposal: {}, siteBody: siteBodyFixture() });
+  const result = validateThemeProposal({ proposal: {}, intake: intakeFixture() });
   assert.deepEqual(result, {
     applied: { colors: {}, fonts: {} },
     dropped: [],
@@ -535,7 +1000,7 @@ test('validateThemeProposal does not throw on a genuinely empty proposal, but st
 test('validateThemeProposal returns an empty missingKeys when every site color slot is covered', () => {
   const result = validateThemeProposal({
     proposal: { colors: { primary: '#111111', secondary: '#222222', accent: '#333333' } },
-    siteBody: siteBodyFixture(),
+    intake: intakeFixture(),
   });
   assert.deepEqual(result.missingKeys, []);
 });
@@ -656,30 +1121,21 @@ function restampIntake(overrides = {}) {
   return buildCloneIntake(baseIntakeArgs(overrides));
 }
 
+/** The page bodies the restamp stage now `object_get`s for itself (CLONE-INTAKE-FIX.md Defect B):
+ *  one `{ objectId, body }` per page it is about to patch, never read out of the envelope. */
+const pageBodiesFor = (objectId, sections) => [{ objectId, body: { route: '/', sections } }];
+
 test('buildRestampOps carries an already-bound first-party asset src through byte-identical', () => {
   const boundSrc = '/img/req_capture_fixture/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg';
-  const intake = restampIntake({
-    mapping: mapping({
-      pages: [
-        {
-          pageRef: 'page_home',
-          sourceUrl: 'https://example.com/',
-          pageBody: {
-            route: '/',
-            pageType: 'clone',
-            title: 'Home',
-            sections: [
-              { id: 's_media01', type: 'media', data: { items: [{ kind: 'image', src: boundSrc, alt: 'A photo' }] } },
-            ],
-          },
-          candidates: [{ candidateId: 'candidate_media01', sectionType: 'media' }],
-          gaps: [],
-        },
-      ],
-    }),
+  const sections = [
+    { id: 's_media01', type: 'media', data: { items: [{ kind: 'image', src: boundSrc, alt: 'A photo' }] } },
+  ];
+  const intake = restampIntake();
+  const result = buildRestampOps({
+    intake,
+    mintReport: { rejected: [] },
+    pageBodies: pageBodiesFor('page_capture_abc123', sections),
   });
-  const mintReport = { rejected: [] };
-  const result = buildRestampOps({ intake, mintReport });
   assert.equal(result.skipped.length, 0);
   assert.equal(result.restamp.length, 1);
   assert.equal(result.restamp[0].objectId, 'page_capture_abc123');
@@ -690,10 +1146,16 @@ test('buildRestampOps carries an already-bound first-party asset src through byt
       section: { id: 's_media01', type: 'media', data: { items: [{ kind: 'image', src: boundSrc, alt: 'A photo' }] } },
     },
   ]);
+  // Never mutates the fetched body it was handed.
+  result.restamp[0].ops[0].section.data.items[0].src = 'MUTATED';
+  assert.equal(sections[0].data.items[0].src, boundSrc);
 });
 
 test('buildRestampOps SKIPS (never half-restamps) a page whose recipe was rejected at mint', () => {
   const intake = restampIntake();
+  // The briefing publishes each page's candidateIds precisely so a rejected design can be traced back
+  // to the page that depended on it once the mapping is no longer in the envelope.
+  assert.deepEqual(intake.pages[0].candidateIds, ['candidate_hero01']);
   const mintReport = {
     rejected: [
       {
@@ -704,92 +1166,84 @@ test('buildRestampOps SKIPS (never half-restamps) a page whose recipe was reject
       },
     ],
   };
-  const result = buildRestampOps({ intake, mintReport });
+  const result = buildRestampOps({
+    intake,
+    mintReport,
+    pageBodies: pageBodiesFor('page_capture_abc123', [{ id: 's_hero01', type: 'hero', data: { heading: 'Welcome' } }]),
+  });
   assert.deepEqual(result.restamp, []);
   assert.deepEqual(result.skipped, [{ objectId: 'page_capture_abc123', reason: 'recipe_rejected_at_mint' }]);
 });
 
-test('buildRestampOps SKIPS a page with no source mapping entry', () => {
+test('buildRestampOps SKIPS a page whose body was never fetched', () => {
   const intake = restampIntake();
-  intake.emitted.pages.push({
+  intake.pages.push({
     pageRef: 'page_missing',
     objectId: 'page_missing_obj',
     route: '/missing',
-    sectionTypes: [],
+    sourceShape: [],
+    emittedShape: [],
+    gaps: [],
+    candidateIds: [],
   });
-  const result = buildRestampOps({ intake, mintReport: { rejected: [] } });
+  const result = buildRestampOps({
+    intake,
+    mintReport: { rejected: [] },
+    pageBodies: pageBodiesFor('page_capture_abc123', [{ id: 's_hero01', type: 'hero', data: { heading: 'Welcome' } }]),
+  });
   assert.ok(
     result.skipped.some((entry) => entry.objectId === 'page_missing_obj' && entry.reason === 'source_page_missing')
   );
 });
 
-test('buildRestampOps SKIPS rather than emptying a page whose captured section list is empty', () => {
-  const intake = restampIntake({
-    mapping: mapping({
-      pages: [
-        {
-          pageRef: 'page_home',
-          sourceUrl: 'https://example.com/',
-          pageBody: { route: '/', pageType: 'clone', title: 'Home', sections: [] },
-          candidates: [],
-          gaps: [],
-        },
-      ],
-    }),
+test('buildRestampOps SKIPS rather than emptying a page whose fetched section list is empty', () => {
+  const intake = restampIntake();
+  const result = buildRestampOps({
+    intake,
+    mintReport: { rejected: [] },
+    pageBodies: pageBodiesFor('page_capture_abc123', []),
   });
-  const result = buildRestampOps({ intake, mintReport: { rejected: [] } });
   assert.deepEqual(result.restamp, []);
   assert.deepEqual(result.skipped, [{ objectId: 'page_capture_abc123', reason: 'would_empty_page' }]);
 });
 
 test('buildRestampOps THROWS CloneError when a section carries a remote URL in an asset field', () => {
-  const intake = restampIntake({
-    mapping: mapping({
-      pages: [
-        {
-          pageRef: 'page_home',
-          sourceUrl: 'https://example.com/',
-          pageBody: {
-            route: '/',
-            pageType: 'clone',
-            title: 'Home',
-            sections: [
-              {
-                id: 's_media01',
-                type: 'media',
-                data: { items: [{ kind: 'image', src: 'https://evil.example/hotlink.jpg', alt: 'stolen' }] },
-              },
-            ],
+  const intake = restampIntake();
+  assert.throws(
+    () =>
+      buildRestampOps({
+        intake,
+        mintReport: { rejected: [] },
+        pageBodies: pageBodiesFor('page_capture_abc123', [
+          {
+            id: 's_media01',
+            type: 'media',
+            data: { items: [{ kind: 'image', src: 'https://evil.example/hotlink.jpg', alt: 'stolen' }] },
           },
-          candidates: [],
-          gaps: [],
-        },
-      ],
-    }),
-  });
-  assert.throws(() => buildRestampOps({ intake, mintReport: { rejected: [] } }), CloneError);
+        ]),
+      }),
+    CloneError
+  );
 });
 
 test('buildRestampOps THROWS CloneError for a remote URL under an *AssetRef field too', () => {
-  const intake = restampIntake({
-    mapping: mapping({
-      pages: [
-        {
-          pageRef: 'page_home',
-          sourceUrl: 'https://example.com/',
-          pageBody: {
-            route: '/',
-            pageType: 'clone',
-            title: 'Home',
-            sections: [{ id: 's_bio01', type: 'bio', data: { portraitAssetRef: 'https://evil.example/portrait.jpg' } }],
-          },
-          candidates: [],
-          gaps: [],
-        },
-      ],
-    }),
-  });
-  assert.throws(() => buildRestampOps({ intake, mintReport: { rejected: [] } }), CloneError);
+  const intake = restampIntake();
+  assert.throws(
+    () =>
+      buildRestampOps({
+        intake,
+        mintReport: { rejected: [] },
+        pageBodies: pageBodiesFor('page_capture_abc123', [
+          { id: 's_bio01', type: 'bio', data: { portraitAssetRef: 'https://evil.example/portrait.jpg' } },
+        ]),
+      }),
+    CloneError
+  );
+});
+
+test('buildRestampOps throws CloneError without a briefing to restamp against', () => {
+  assert.throws(() => buildRestampOps({ intake: {}, mintReport: {}, pageBodies: [] }), CloneError);
+  assert.throws(() => buildRestampOps({ intake: restampIntake(), mintReport: undefined, pageBodies: [] }), CloneError);
 });
 
 // ─── 6. buildCloneRunReport ───────────────────────────────────────────────────────────────────────

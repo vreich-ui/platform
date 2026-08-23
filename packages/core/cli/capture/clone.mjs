@@ -1,5 +1,7 @@
 /**
- * T13.1 clone_conductor engine — Side A (CLONE-ENGINE-API.md).
+ * T13.1 clone_conductor engine — Side A (CLONE-ENGINE-API.md), amended by T13.2 (CLONE-INTAKE-FIX.md):
+ * `buildCloneIntake` now emits a BOUNDED BRIEFING DOCUMENT rather than a data bus, and the stages that
+ * need whole bodies fetch them with `object_get` instead of riding on the envelope. See §1.
  *
  * Pure functions only: no network, no fs, no Date.now(), no Math.random(). Everything a caller needs
  * that isn't already an argument (site/registry state, prior-stage reports) is READ, never fetched,
@@ -31,6 +33,67 @@ const FORBIDDEN_VERBS = new Set(['object_publish', 'release_to_production', 'tri
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 /**
+ * T13.2 (CLONE-INTAKE-FIX.md): the intake envelope is a BRIEFING DOCUMENT for the three AI nodes, not
+ * a data bus.
+ *
+ * The live run measured the old envelope at 637,769 chars against the executor's 48,000-char
+ * dependency bound — 13x over. Both AI nodes reported the starvation honestly instead of inventing,
+ * so the prompts and the refusals held; the DATA was the defect. Its composition said everything:
+ * `source.snapshot` 241,558, `source.mapping` 156,239, `emitted.report.media` 114,908 (295 records),
+ * `registry` 32,694 — and `source.theme`, the part the theme node actually needed, 895.
+ *
+ * The correction: the deterministic stages (`recipe_mint`, `theme_bind`, `layout_restamp`) run in
+ * engine code that HAS transport, so they `object_get` the page / site / theme bodies they need. Only
+ * the AI nodes read this envelope, and they only ever needed shapes, slots and vocabulary — never the
+ * raw snapshot, never the full mapping, never 295 media records, and never 32KB of Zod-derived JSON
+ * Schema. `registry.sectionTypes` therefore carries FIELD NAMES ONLY: a designer composing a
+ * blueprint needs to know that a `composition` holds `images[]` and `blocks[]`; it does not need the
+ * schema of either to know that.
+ */
+const INTAKE_ARTIFACT = 'clone_intake.v1';
+/** What a healthy briefing lands under. NOT enforced — exceeding it is legal and `budget.chars`
+ *  reports the truth either way; it is the number a reviewer should look at first. Exported so a
+ *  caller (and this module's own tests) can assert the target without re-typing the number. */
+export const CLONE_INTAKE_TARGET_CHARS = 12000;
+/** Enforced. Sits well inside the executor's 48,000-char dependency bound
+ *  (DEFAULT_DEPENDENCY_OUTPUT_MAX_CHARS) with room for the prompt scaffolding a node wraps around it. */
+export const CLONE_INTAKE_CAP_CHARS = 32000;
+const MAX_GAPS_PER_PAGE = 5;
+const MAX_PAGES = 20;
+const MAX_RECIPES_PER_KIND = 20;
+
+const sectionShape = (sections) =>
+  (Array.isArray(sections) ? sections : []).map((section) => section?.type ?? 'unknown');
+
+/**
+ * The SOURCE page's own block sequence as the mapping accounted for it: the section type each source
+ * block became, or the token `'gap'` where a block could not be mapped at all. Blocks the reconciler
+ * dropped as non-content (nav chrome, cookie banners) are left out — they are not part of a page's
+ * shape, and carrying them would only pad the briefing with noise the analyst must skip.
+ */
+function sourceShape(mappingPage) {
+  const candidateTypes = new Map(
+    (mappingPage?.candidates ?? []).map((candidate) => [candidate?.candidateId, candidate?.sectionType ?? 'unknown'])
+  );
+  const accounting = mappingPage?.blockAccounting;
+  if (!Array.isArray(accounting)) {
+    // A mapping without the per-block ledger (an older map, or a focused fixture) still orders its
+    // candidates by source block, so reading them directly loses nothing except the gap positions —
+    // which `pages[].gaps` reports anyway.
+    return [...candidateTypes.values()];
+  }
+  const shape = [];
+  for (const entry of accounting) {
+    if (entry?.status === 'gap') {
+      shape.push('gap');
+      continue;
+    }
+    if (candidateTypes.has(entry?.candidateId)) shape.push(candidateTypes.get(entry.candidateId));
+  }
+  return shape;
+}
+
+/**
  * Correlate the mapping's page-level shape with what emission actually wrote, using ONLY what the
  * emission report already carries — this function never re-derives a requestedId scheme that lives
  * in emit.mjs (a private, unexported implementation detail there).
@@ -44,7 +107,7 @@ const FORBIDDEN_VERBS = new Set(['object_publish', 'release_to_production', 'tri
  * requestedId appears in neither list — is simply not carried into the clone workspace: there is
  * nothing at that pageRef for later stages to restamp.
  */
-function pagesEmitted(mapping, emissionReport) {
+function briefingPages(mapping, emissionReport) {
   const pageCreates = (emissionReport?.creates ?? []).filter(
     (entry) => entry?.objectType === 'page' && typeof entry?.pageRef === 'string'
   );
@@ -67,21 +130,82 @@ function pagesEmitted(mapping, emissionReport) {
       ? entry.requestedId
       : (route && reusedPageIdByRoute.get(route)) || null;
     if (!objectId) continue;
-    const sectionTypes = [...new Set((mappingPage?.pageBody?.sections ?? []).map((section) => section.type))].sort();
-    pages.push({ pageRef: entry.pageRef, objectId, route, sectionTypes });
+    pages.push({
+      pageRef: entry.pageRef,
+      objectId,
+      route,
+      sourceShape: sourceShape(mappingPage),
+      // ORDERED, from the body emission actually wrote — not from the mapping. The two differ
+      // precisely where emission dropped something (a section the platform refused, an asset that
+      // never bound), and that difference is the whole reason `layout_analyst` reads this envelope.
+      emittedShape: sectionShape(entry.body?.sections ?? mappingPage?.pageBody?.sections),
+      gaps: (mappingPage?.gaps ?? []).map((gap) => ({
+        gapId: gap?.gapId ?? null,
+        why: gap?.why ?? null,
+        nearestType: gap?.nearestType ?? null,
+      })),
+      // NOT in CLONE-INTAKE-FIX.md's sketch of the page shape; added deliberately, because without it
+      // a documented behaviour dies silently. `buildRecipeMintPlan` carries a design's
+      // `sourceCandidateIds` onto `rejected[]`, and `buildRestampOps` uses exactly those ids to SKIP a
+      // page whole rather than half-restamp it (CLONE-ENGINE-API.md §5). A design can only cite an
+      // identifier the briefing showed it — the mapping it used to come from is gone from this
+      // envelope — so a briefing that hides the candidate ids makes `recipe_rejected_at_mint`
+      // unreachable. One short id per emitted section is a cheap price for a refusal that works.
+      candidateIds: (mappingPage?.candidates ?? [])
+        .map((candidate) => candidate?.candidateId)
+        .filter((candidateId) => typeof candidateId === 'string'),
+    });
   }
   return pages;
 }
 
-/** `registry_get(registry:'component')`'s `definitions` reduced to `{ [type]: dataSchema }`. Field
- *  names (`type`, `data_schema`) matched against the real handler, `callRegistryGet` ->
+/** One section type's data schema flattened to the two things a designer needs: which fields the type
+ *  HAS and which of them it REQUIRES. Anything reachable through `$ref` is resolved first, and a type
+ *  whose schema is a union contributes the union of its branches' fields but only the required keys
+ *  EVERY branch demands — a key one legal shape can do without is not required of the type. */
+function fieldContract(dataSchema) {
+  const branches = schemaBranches(dataSchema, dataSchema, new Set());
+  const fields = new Set();
+  const requiredTally = new Map();
+  for (const branch of branches) {
+    for (const key of Object.keys(branch.properties ?? {})) fields.add(key);
+    for (const key of branch.required ?? []) requiredTally.set(key, (requiredTally.get(key) ?? 0) + 1);
+  }
+  const required = [...requiredTally.entries()]
+    .filter(([, count]) => count === branches.length)
+    .map(([key]) => key)
+    .sort();
+  return { fields: [...fields].sort(), required };
+}
+
+/** The top-level object shapes a schema node can legally be, `$ref`s resolved and `anyOf`/`oneOf`
+ *  flattened. `seen` guards the self-referential schemas a recursive component (a nested block list)
+ *  produces — a briefing builder that can be made to hang by a legal registry is not a safe one. */
+function schemaBranches(node, rootSchema, seen) {
+  if (!isPlainObject(node)) return [];
+  if (typeof node.$ref === 'string' && node.$ref.startsWith('#/')) {
+    if (seen.has(node.$ref)) return [];
+    seen.add(node.$ref);
+    let resolved = rootSchema;
+    for (const part of node.$ref.slice(2).split('/')) {
+      resolved = isPlainObject(resolved) ? resolved[part] : undefined;
+    }
+    return schemaBranches(resolved, rootSchema, seen);
+  }
+  const alternatives = Array.isArray(node.anyOf) ? node.anyOf : Array.isArray(node.oneOf) ? node.oneOf : null;
+  if (alternatives) return alternatives.flatMap((branch) => schemaBranches(branch, rootSchema, seen));
+  return [node];
+}
+
+/** `registry_get(registry:'component')`'s `definitions` reduced to `{ [type]: {fields, required} }`.
+ *  Field names (`type`, `data_schema`) matched against the real handler, `callRegistryGet` ->
  *  `listSectionTypeContracts()` in packages/core/lib/registry/object-contract.ts — not guessed. */
 function sectionTypesFromRegistry(componentRegistry) {
   const definitions = Array.isArray(componentRegistry) ? componentRegistry : (componentRegistry?.definitions ?? []);
   const sectionTypes = {};
   for (const definition of definitions) {
     if (typeof definition?.type !== 'string' || !definition.type) continue;
-    sectionTypes[definition.type] = clone(definition.data_schema ?? definition.dataSchema ?? null);
+    sectionTypes[definition.type] = fieldContract(definition.data_schema ?? definition.dataSchema ?? null);
   }
   return sectionTypes;
 }
@@ -105,24 +229,190 @@ function pageTypesFromRegistry(pageTypeRegistry) {
   return pageTypes;
 }
 
+/** The reuse-first recipe index, straight off `object_inventory`'s own `recipe` summary
+ *  (`recipeSummaryFromBody`, packages/core/server/lib/object-inventory.ts) — the row already carries
+ *  exactly the four or five fields a designer needs to decide "does this already exist?", so nothing
+ *  here re-reads a recipe body it was never given. */
+const recipeRowName = (row) =>
+  row?.recipe?.name ?? row?.recipe_summary?.name ?? row?.recipeSummary?.name ?? row?.body?.name ?? row?.name ?? null;
+const recipeRowField = (row, field) =>
+  row?.recipe?.[field] ?? row?.recipe_summary?.[field] ?? row?.recipeSummary?.[field] ?? null;
+
+function recipeIndex(rows, objectType) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const summary = {
+      objectId: row?.object_id ?? row?.objectId ?? null,
+      name: recipeRowName(row),
+      scope: recipeRowField(row, 'scope') ?? row?.body?.scope ?? null,
+    };
+    if (objectType === 'section_template') {
+      return {
+        ...summary,
+        blueprint_type: recipeRowField(row, 'blueprint_type') ?? row?.body?.blueprint?.type ?? null,
+      };
+    }
+    return {
+      ...summary,
+      applies_to: clone(recipeRowField(row, 'applies_to') ?? row?.body?.appliesTo ?? []),
+      slot_count: recipeRowField(row, 'slot_count') ?? (Array.isArray(row?.body?.slots) ? row.body.slots.length : null),
+    };
+  });
+}
+
+/** The site BODY's palette slots, unwrapped whether the caller handed over the `object_get` RECORD or
+ *  the body itself. Only `colors` and `fonts` travel: they are the only slots a theme proposal may
+ *  address (`validateThemeProposal` below), and the site's layout/shape tokens would be briefing
+ *  weight nothing downstream reads. */
+function brandTokensFromSiteBody(siteBody) {
+  const outer = isPlainObject(siteBody) ? siteBody : {};
+  const body = isPlainObject(outer.brandTokens) ? outer : isPlainObject(outer.body) ? outer.body : outer;
+  if (!isPlainObject(body.brandTokens)) return null;
+  return {
+    colors: clone(isPlainObject(body.brandTokens.colors) ? body.brandTokens.colors : {}),
+    fonts: clone(isPlainObject(body.brandTokens.fonts) ? body.brandTokens.fonts : {}),
+  };
+}
+
+/** The captured theme, unwrapped the same way, with its objectId taken from the record when the
+ *  caller `object_get`'s one and from inventory when there is exactly one theme to mean. */
+function themeBriefing(theme, themeRows) {
+  const outer = isPlainObject(theme) ? theme : {};
+  const body = isPlainObject(outer.tokens) ? outer : isPlainObject(outer.body) ? outer.body : outer;
+  const inventoryThemeId = themeRows.length === 1 ? (themeRows[0]?.object_id ?? themeRows[0]?.objectId ?? null) : null;
+  return {
+    objectId: outer.object_id ?? outer.objectId ?? inventoryThemeId,
+    name: typeof body.name === 'string' ? body.name : null,
+    // Whole, never degraded: it is ~900 chars, and it is the one thing `theme_reconciler` exists to
+    // read. The 637KB envelope carried it faithfully and starved the node of everything around it.
+    tokens: clone(isPlainObject(body.tokens) ? body.tokens : { colors: {}, fonts: {} }),
+  };
+}
+
 /**
- * Assemble the clone workspace envelope from already-fetched pieces (CLONE-ENGINE-API.md §1).
+ * Restate `budget.chars` until it describes the string that CONTAINS it. Writing the number changes
+ * the serialized length by up to one digit, so this settles in a pass or two; the loop is bounded and
+ * never lets the claim fall BELOW the measured length, because a briefing that under-reports its own
+ * size is the exact failure this whole rewrite exists to make impossible.
+ */
+function settleBudgetChars(envelope) {
+  let claimed = JSON.stringify(envelope).length;
+  for (let pass = 0; pass < 5; pass += 1) {
+    envelope.budget.chars = claimed;
+    const actual = JSON.stringify(envelope).length;
+    if (actual === claimed) return claimed;
+    claimed = Math.max(actual, claimed);
+  }
+  envelope.budget.chars = claimed;
+  return claimed;
+}
+
+// The FIXED degradation order (CLONE-INTAKE-FIX.md). Each step records what it removed in
+// `budget.truncated` before the next is even considered, and the envelope is re-measured between
+// steps so nothing is dropped that did not have to be. `site.brandTokens`, `theme.tokens` and
+// `registry.pageTypes` appear in no step: they are never dropped, at any size.
+const DEGRADATION_STEPS = [
+  function dropGapsBeyondFivePerPage(envelope) {
+    let kept = 0;
+    let total = 0;
+    for (const page of envelope.pages) {
+      total += page.gaps.length;
+      if (page.gaps.length > MAX_GAPS_PER_PAGE) page.gaps = page.gaps.slice(0, MAX_GAPS_PER_PAGE);
+      kept += page.gaps.length;
+    }
+    if (kept !== total) {
+      envelope.budget.truncated.push({
+        field: 'pages[].gaps',
+        kept,
+        total,
+        reason: 'gaps_capped_at_5_per_page',
+      });
+    }
+  },
+  function dropPagesBeyondTwenty(envelope) {
+    const total = envelope.pages.length;
+    if (total <= MAX_PAGES) return;
+    envelope.pages = envelope.pages.slice(0, MAX_PAGES);
+    envelope.budget.truncated.push({ field: 'pages', kept: MAX_PAGES, total, reason: 'pages_capped_at_20' });
+  },
+  function dropRecipesBeyondTwenty(envelope) {
+    for (const kind of ['section_template', 'template']) {
+      const total = envelope.recipes[kind].length;
+      if (total <= MAX_RECIPES_PER_KIND) continue;
+      envelope.recipes[kind] = envelope.recipes[kind].slice(0, MAX_RECIPES_PER_KIND);
+      envelope.budget.truncated.push({
+        field: `recipes.${kind}`,
+        kept: MAX_RECIPES_PER_KIND,
+        total,
+        reason: 'recipes_capped_at_20',
+      });
+    }
+  },
+  function replaceSectionTypeFieldsWithACount(envelope) {
+    let total = 0;
+    for (const [type, contract] of Object.entries(envelope.registry.sectionTypes)) {
+      if (!Array.isArray(contract.fields)) continue;
+      total += contract.fields.length;
+      // `required` survives — it is the shorter list and the one a blueprint is actually checked
+      // against. The type itself never disappears: a designer that cannot see a type exists will
+      // invent one, which is the failure `unknown_section_type` exists to prevent.
+      envelope.registry.sectionTypes[type] = { fieldCount: contract.fields.length, required: contract.required };
+    }
+    if (total > 0) {
+      envelope.budget.truncated.push({
+        field: 'registry.sectionTypes[].fields',
+        kept: 0,
+        total,
+        reason: 'fields_replaced_with_count',
+      });
+    }
+  },
+];
+
+/**
+ * Measure, degrade in the FIXED documented order, and refuse rather than ship a silently truncated
+ * briefing. Steps run only while the envelope is still over cap, so a run that needs one drop takes
+ * one drop; a run that needs none takes none and `budget.truncated` stays empty.
+ */
+function boundIntake(envelope) {
+  if (settleBudgetChars(envelope) <= CLONE_INTAKE_CAP_CHARS) return envelope;
+  for (const degrade of DEGRADATION_STEPS) {
+    degrade(envelope);
+    if (settleBudgetChars(envelope) <= CLONE_INTAKE_CAP_CHARS) return envelope;
+  }
+  // Every legal drop has been taken and it is still too big. A silently truncated briefing is exactly
+  // what produced two starved AI nodes on run_1787508397978_8fyyst; it must not be reachable twice.
+  throw new CloneError('intake_cannot_be_bounded');
+}
+
+/**
+ * Assemble the bounded clone BRIEFING from already-fetched pieces (CLONE-ENGINE-API.md §1, amended by
+ * CLONE-INTAKE-FIX.md).
  *
  * This is intake, not discovery: every argument is a value the CALLER already fetched (an emission
- * report, an inventory listing, a `registry_get` response). Nothing here reaches out for anything —
- * that is exactly what makes it safe to call repeatedly while a Side-B node retries.
+ * report, an inventory listing, a `registry_get` response, the `object_get` bodies of the site and the
+ * captured theme). Nothing here reaches out for anything — that is exactly what makes it safe to call
+ * repeatedly while a Side-B node retries.
+ *
+ * `siteBody` is the object_get BODY of the site, not its inventory row (CLONE-INTAKE-FIX.md Defect A):
+ * an `object_inventory` row carries no `brandTokens`, so the live run's `theme_reconciler` had no
+ * slots to enumerate and correctly refused with `theme_not_total` against an empty palette. The row
+ * still supplies the site's objectId — and still has to be the ONE active site — but the palette now
+ * comes from the body, and a body without one is refused here rather than three stages later.
+ *
+ * DROPPED ARGUMENTS: `snapshot` and `policy`. Neither appears anywhere in the briefing shape — the
+ * snapshot was 241,558 of the 637,769 chars and no AI node ever read it, and the rights policy governs
+ * capture and emission, both already finished by the time this envelope exists.
  */
 export function buildCloneIntake({
   captureRunId,
   target,
-  snapshot,
   mapping,
+  siteBody,
   theme,
   emissionReport,
   inventory,
   componentRegistry,
   pageTypeRegistry,
-  policy,
 }) {
   if (!target || typeof target !== 'string') throw new CloneError('A named clone target is required.');
   if (!captureRunId || typeof captureRunId !== 'string') {
@@ -150,111 +440,85 @@ export function buildCloneIntake({
     );
   }
 
-  return {
-    schemaVersion: 'clone-intake.v1',
+  const brandTokens = brandTokensFromSiteBody(siteBody);
+  // Fail closed, same posture as the empty registry above: without the site's own palette slots there
+  // is nothing for a theme proposal to be TOTAL against, and `theme_not_total` becomes a refusal about
+  // a missing fetch rather than about a missing color. That mistake has already been made once.
+  if (!brandTokens) {
+    throw new CloneError(
+      'Clone intake requires the site BODY (object_get) carrying brandTokens; an object_inventory row has none.'
+    );
+  }
+
+  const envelope = {
+    artifact: INTAKE_ARTIFACT,
+    summary:
+      `Bounded clone briefing for "${target}" from capture run ${captureRunId}. Shapes, slots and ` +
+      'vocabulary only: the deterministic stages object_get the full page, site and theme bodies ' +
+      'themselves. budget.truncated names everything this briefing had to leave out.',
     captureRunId,
     target,
-    source: { snapshot: clone(snapshot ?? null), mapping: clone(mapping), theme: clone(theme ?? null) },
-    emitted: { report: clone(emissionReport ?? null), pages: pagesEmitted(mapping, emissionReport) },
-    inventory: {
-      page: clone(inventory?.page ?? []),
-      template: clone(inventory?.template ?? []),
-      section_template: clone(inventory?.section_template ?? []),
-      theme: clone(inventory?.theme ?? []),
-      navigation: clone(inventory?.navigation ?? []),
-      // Collapsed to the ONE row, not the array it came in as — every later stage (theme bind,
-      // review-queue assembly) needs "the site", and re-deriving the singleton from an array at every
-      // call site is exactly the kind of repeated judgment call this envelope exists to make once.
-      site: clone(activeSites[0]),
-    },
+    site: { objectId: activeSites[0].object_id ?? activeSites[0].objectId ?? null, brandTokens },
+    theme: themeBriefing(theme, Array.isArray(inventory?.theme) ? inventory.theme : []),
     registry: { sectionTypes, pageTypes },
-    policy: clone(policy ?? null),
+    pages: briefingPages(mapping, emissionReport),
+    recipes: {
+      section_template: recipeIndex(inventory?.section_template, 'section_template'),
+      template: recipeIndex(inventory?.template, 'template'),
+    },
+    budget: { chars: 0, cap: CLONE_INTAKE_CAP_CHARS, truncated: [] },
   };
+
+  return boundIntake(envelope);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // 2. RECIPE VALIDATION
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-function resolveRef(node, rootSchema) {
-  if (!isPlainObject(node) || typeof node.$ref !== 'string') return node;
-  if (!node.$ref.startsWith('#/')) return node;
-  let target = rootSchema;
-  for (const part of node.$ref.slice(2).split('/')) {
-    target = isPlainObject(target) ? target[part] : undefined;
-  }
-  return isPlainObject(target) ? resolveRef(target, rootSchema) : node;
-}
-
 /**
- * Structural-only re-validation of `value` against one live section type's JSON-schema fragment.
+ * Structural re-validation of a blueprint's `data` against one live section type's FIELD CONTRACT —
+ * the `{fields, required}` pair `intake.registry.sectionTypes` now carries (CLONE-INTAKE-FIX.md
+ * Defect B), not a JSON Schema.
  *
- * Deliberately NOT a full JSON-schema engine. CLONE-ENGINE-API.md asks for exactly three checks —
- * required keys present, no unknown key where the schema forbids it, enum members legal — because
- * full semantic validation (string formats, numeric bounds, cross-field refinements) is
- * `object_validate`'s job against the real zod schema server-side. Re-implementing that here in a
- * network-free module would either drift from the live schema the moment either side changes, or
- * require vendoring zod itself — both worse than the bounded, honest check the contract actually asks
- * for. A design that passes here can still be refused by `object_validate` later; a design that fails
- * here is refused before a single MCP call is made.
+ * WHAT THIS STILL CATCHES, and why that is the right line to draw. CLONE-ENGINE-API.md §2 asks for
+ * three checks: required keys present, no unknown key, enum members legal. The first two are exactly
+ * what a list of field names can answer, and they are answered here, before a single MCP call is made.
+ * The third is not: an enum's members are values, not field names, and the briefing that used to
+ * carry them was 32,694 chars — 68% of the entire dependency budget — which is what starved both AI
+ * nodes on the live run. An enum-illegal value now travels one stage further and is refused by
+ * `object_validate` against the real zod schema server-side, which was always the authority on it
+ * (see the note on drift below); a wrong FIELD, the far commoner design error, is still refused here.
+ *
+ * Deliberately NOT a JSON-schema engine, for the same reason it never was one: full semantic
+ * validation (string formats, numeric bounds, cross-field refinements) belongs to `object_validate`,
+ * and re-implementing it in a network-free module would either drift from the live schema the moment
+ * either side changes or require vendoring zod itself.
  */
-function structuralErrors(value, schemaNode, rootSchema, path = 'data') {
-  const schema = resolveRef(schemaNode, rootSchema);
-  if (!isPlainObject(schema)) return [];
+function fieldContractErrors(value, contract, path = 'data') {
+  if (!isPlainObject(contract)) return [];
+  if (!isPlainObject(value)) return [`${path}: expected an object`];
   const errors = [];
-
-  if (Array.isArray(schema.enum)) {
-    if (!schema.enum.includes(value))
-      errors.push(`${path}: "${value}" is not a legal enum member (${schema.enum.join(', ')})`);
-    return errors;
+  for (const key of contract.required ?? []) {
+    if (!(key in value)) errors.push(`${path}.${key}: required key is missing`);
   }
-  const branches = Array.isArray(schema.anyOf) ? schema.anyOf : Array.isArray(schema.oneOf) ? schema.oneOf : null;
-  if (branches) {
-    const branchErrors = branches.map((branch) => structuralErrors(value, branch, rootSchema, path));
-    if (!branchErrors.some((list) => list.length === 0))
-      errors.push(`${path}: value matches none of ${branches.length} legal shapes`);
-    return errors;
+  // `fields` is absent only when the briefing was degraded to a bare `fieldCount` (step 4 of the
+  // documented degradation order) — there is then no list to check a key against, and inventing one
+  // would reject every legal design. The count still tells a reader the names were withheld, and
+  // `budget.truncated` says so explicitly.
+  if (Array.isArray(contract.fields) && contract.fields.length > 0) {
+    for (const key of Object.keys(value)) {
+      if (!contract.fields.includes(key)) errors.push(`${path}.${key}: is not a field of this section type`);
+    }
   }
-  if (schema.type === 'object' || isPlainObject(schema.properties)) {
-    if (!isPlainObject(value)) {
-      errors.push(`${path}: expected an object`);
-      return errors;
-    }
-    for (const key of schema.required ?? []) {
-      if (!(key in value)) errors.push(`${path}.${key}: required key is missing`);
-    }
-    const properties = schema.properties ?? {};
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(value)) {
-        if (!(key in properties)) errors.push(`${path}.${key}: key is not permitted by the schema`);
-      }
-    }
-    for (const [key, propertySchema] of Object.entries(properties)) {
-      if (key in value) errors.push(...structuralErrors(value[key], propertySchema, rootSchema, `${path}.${key}`));
-    }
-    return errors;
-  }
-  if (schema.type === 'array') {
-    if (!Array.isArray(value)) {
-      errors.push(`${path}: expected an array`);
-      return errors;
-    }
-    if (schema.items)
-      value.forEach((item, index) =>
-        errors.push(...structuralErrors(item, schema.items, rootSchema, `${path}.${index}`))
-      );
-    return errors;
-  }
-  // Scalars with no enum (string/number/boolean): structurally there is nothing further to say.
   return errors;
 }
 
-const recipeRowName = (row) =>
-  row?.recipe?.name ?? row?.recipe_summary?.name ?? row?.recipeSummary?.name ?? row?.body?.name ?? row?.name ?? null;
-const existingRecipeObjectId = (rows, name) => {
-  const row = (rows ?? []).find((candidate) => recipeRowName(candidate) === name);
-  return row ? (row.object_id ?? row.objectId ?? null) : null;
-};
+/** The reuse-first lookup CLONE-ENGINE-API.md §2's `name_collision` rule needs. Reads the briefing's
+ *  own recipe index — already normalized to `{objectId, name, ...}` at intake — rather than raw
+ *  inventory rows, so the several shapes an inventory row can take are decoded exactly once. */
+const existingRecipeObjectId = (rows, name) =>
+  (Array.isArray(rows) ? rows : []).find((row) => row?.name === name)?.objectId ?? null;
 
 /** A deterministic placeholder section id. Re-minted at instantiation (section-template-v1.ts's own
  *  documented contract), so its exact value carries no meaning beyond "syntactically legal" — deriving
@@ -279,19 +543,19 @@ export function validateSectionTemplateDesign(design, intake) {
   // Reuse-first, same discipline as emit.mjs T12.28: a name collision is resolved by referencing the
   // object that already carries it, never by re-validating (and possibly rejecting) a design whose
   // shape the platform already has an answer for.
-  if (existingRecipeObjectId(intake.inventory.section_template, design.name)) {
+  if (existingRecipeObjectId(intake.recipes?.section_template, design.name)) {
     return { ok: false, reason: 'name_collision', detail: `a section_template named "${design.name}" already exists` };
   }
 
-  const dataSchema = intake.registry.sectionTypes[blueprint.type];
-  if (dataSchema === undefined) {
+  const contract = intake.registry.sectionTypes[blueprint.type];
+  if (contract === undefined) {
     return {
       ok: false,
       reason: 'unknown_section_type',
       detail: `"${blueprint.type}" is not in the live component registry`,
     };
   }
-  const errors = structuralErrors(blueprint.data ?? {}, dataSchema, dataSchema);
+  const errors = fieldContractErrors(blueprint.data ?? {}, contract);
   if (errors.length > 0) return { ok: false, reason: 'blueprint_schema_mismatch', detail: errors };
 
   const normalized = clone(design);
@@ -316,7 +580,7 @@ export function validateTemplateDesign(design, intake) {
   if (appliesTo.length === 0) throw new CloneError('A template design requires at least one appliesTo page type.');
   const slots = Array.isArray(design.slots) ? design.slots : [];
 
-  if (existingRecipeObjectId(intake.inventory.template, design.name)) {
+  if (existingRecipeObjectId(intake.recipes?.template, design.name)) {
     return { ok: false, reason: 'name_collision', detail: `a template named "${design.name}" already exists` };
   }
 
@@ -331,8 +595,8 @@ export function validateTemplateDesign(design, intake) {
   }
 
   for (const slot of slots) {
-    const dataSchema = intake.registry.sectionTypes[slot.sectionType];
-    if (dataSchema === undefined) {
+    const contract = intake.registry.sectionTypes[slot.sectionType];
+    if (contract === undefined) {
       return {
         ok: false,
         reason: 'unknown_section_type',
@@ -340,7 +604,7 @@ export function validateTemplateDesign(design, intake) {
       };
     }
     if (slot.blueprint) {
-      const errors = structuralErrors(slot.blueprint.data ?? {}, dataSchema, dataSchema);
+      const errors = fieldContractErrors(slot.blueprint.data ?? {}, contract);
       if (errors.length > 0) return { ok: false, reason: 'blueprint_schema_mismatch', detail: errors };
     }
     for (const pageType of appliesTo) {
@@ -465,7 +729,7 @@ export function buildRecipeMintPlan({ intake, design }) {
 
       if (!outcome.ok) {
         if (outcome.reason === 'name_collision') {
-          reused.push({ objectType, name, objectId: existingRecipeObjectId(intake.inventory[objectType], name) });
+          reused.push({ objectType, name, objectId: existingRecipeObjectId(intake.recipes?.[objectType], name) });
         } else {
           rejected.push({
             kind: objectType,
@@ -709,19 +973,29 @@ function hasFontFallbackStack(value) {
 
 /**
  * Re-validate a proposed theme token set against the site's OWN declared slots (CLONE-ENGINE-API.md
- * §4). `siteBody.brandTokens` is the authority on which slots exist — the proposal supplies values,
+ * §4). `intake.site.brandTokens` is the authority on which slots exist — the proposal supplies values,
  * never new slot names, because inventing a slot the renderer's CustomStyles.astro never emits a CSS
  * variable for would be a token nothing on the site ever reads.
+ *
+ * SIGNATURE (CLONE-INTAKE-FIX.md Defect A). The contract used to take `{ proposal, siteBody }` and the
+ * caller was left to fetch a site body of its own; on the live run nobody did, the stage was handed an
+ * `object_inventory` ROW instead — which carries no `brandTokens` at all — and the totality check
+ * refused a palette it could not see. Reconciled by making the BRIEFING the single authority: intake
+ * fetches the site body once, refuses outright if it has no palette, and publishes it as
+ * `intake.site.brandTokens`; this function reads it from there. There is now exactly one place a site
+ * palette can enter a clone run, and it is the same place `buildCloneRunReport` reads the site's id
+ * from — so a caller cannot validate a proposal against one site and report against another.
  */
-export function validateThemeProposal({ proposal, siteBody }) {
+export function validateThemeProposal({ proposal, intake }) {
   if (!isPlainObject(proposal)) throw new CloneError('A theme proposal is required.');
-  if (!isPlainObject(siteBody?.brandTokens))
-    throw new CloneError('A siteBody with brandTokens is required to validate a theme proposal against.');
+  if (!isPlainObject(intake?.site?.brandTokens)) {
+    throw new CloneError('A clone intake carrying site.brandTokens is required to validate a theme proposal against.');
+  }
 
   const applied = { colors: {}, fonts: {} };
   const dropped = [];
-  const existingColorSlots = siteBody.brandTokens.colors ?? {};
-  const existingFontSlots = siteBody.brandTokens.fonts ?? {};
+  const existingColorSlots = intake.site.brandTokens.colors ?? {};
+  const existingFontSlots = intake.site.brandTokens.fonts ?? {};
 
   for (const [slot, value] of Object.entries(proposal.colors ?? {})) {
     if (!(slot in existingColorSlots)) {
@@ -768,7 +1042,7 @@ export function validateThemeProposal({ proposal, siteBody }) {
   // whatever the theme record ends up holding after a merge patch. Re-deriving "will the merged
   // theme end up total" here would mean re-implementing `set_theme_fields`' own deep-merge semantics
   // (object-patch-ops.ts) a second time in a network-free module, which is exactly the kind of
-  // drift-prone duplication this file avoids elsewhere (see `structuralErrors`'s doc comment). A
+  // drift-prone duplication this file avoids elsewhere (see `fieldContractErrors`'s doc comment). A
   // proposal that is itself total is a strictly stronger, and simpler to verify, guarantee.
   const missingKeys = Object.keys(existingColorSlots)
     .filter((slot) => !(slot in applied.colors))
@@ -917,43 +1191,56 @@ function assertNoRemoteAssetValues(value, path) {
  * synthesize an asset field. `assertNoRemoteAssetValues` is the belt to that braces: a regression
  * anywhere upstream that let a remote URL through is caught here, not shipped.
  *
+ * SIGNATURE (CLONE-INTAKE-FIX.md Defect B): the page bodies arrive as an explicit `pageBodies`
+ * argument, not through the envelope. The briefing carries page SHAPES — an ordered list of section
+ * type names — because that is all the AI nodes ever read; full page bodies were part of the 156,239
+ * chars of `source.mapping` that starved them. This stage is deterministic engine code WITH transport,
+ * so it `object_get`s each body it is about to patch, which is also the more correct source: it
+ * restamps what the page holds NOW, not what a mapping said it held when capture ran.
+ *
+ * `pageBodies` is `[{ objectId, body }]` (a bare `{ objectId, sections }` or a whole `object_get`
+ * record are both accepted and unwrapped) — one entry per page the caller fetched, in any order.
+ *
  * A page is SKIPPED — not partially restamped — when:
- *   - its source page is missing from the mapping (`source_page_missing`): nothing to restamp from;
- *   - its captured section list is empty (`would_empty_page`): the same T12.28 refusal emit.mjs's
- *     `reuseOpsForPage` makes — an empty capture is a mapping failure, never an instruction to blank a
- *     live page;
+ *   - no body was supplied for it (`source_page_missing`): nothing to restamp from, exactly as when
+ *     the mapping used to be missing its source page;
+ *   - its section list is empty (`would_empty_page`): the same T12.28 refusal emit.mjs's
+ *     `reuseOpsForPage` makes — an empty body is a fetch or mapping failure, never an instruction to
+ *     blank a live page;
  *   - ANY of its capture-map candidates was the source of a recipe design that got REJECTED at mint
  *     (`recipe_rejected_at_mint`, keyed by the `sourceCandidateIds` `buildRecipeMintPlan` carries
- *     through onto `rejected[]`): restamping the rest of the page while quietly leaving out the piece
- *     that depended on the failed recipe is exactly the "half-restamped" outcome the contract forbids,
- *     so the whole page is left untouched instead.
+ *     through onto `rejected[]`, matched against the `candidateIds` the briefing publishes per page):
+ *     restamping the rest of the page while quietly leaving out the piece that depended on the failed
+ *     recipe is exactly the "half-restamped" outcome the contract forbids, so the whole page is left
+ *     untouched instead.
  */
-export function buildRestampOps({ intake, mintReport }) {
-  if (!isPlainObject(intake) || !isPlainObject(intake.emitted) || !isPlainObject(intake.source?.mapping)) {
-    throw new CloneError('Restamp requires a clone intake with emitted pages and its source mapping.');
+export function buildRestampOps({ intake, mintReport, pageBodies }) {
+  if (!isPlainObject(intake) || !Array.isArray(intake.pages)) {
+    throw new CloneError('Restamp requires a clone intake carrying its briefed pages.');
   }
   if (!isPlainObject(mintReport)) throw new CloneError('Restamp requires an executed mint report.');
 
-  const mappingPageByRef = new Map((intake.source.mapping.pages ?? []).map((page) => [page.pageRef, page]));
+  const sectionsByObjectId = new Map(
+    (Array.isArray(pageBodies) ? pageBodies : []).map((entry) => {
+      const body = isPlainObject(entry?.body) ? entry.body : entry;
+      return [entry?.objectId ?? entry?.object_id ?? null, Array.isArray(body?.sections) ? body.sections : []];
+    })
+  );
   const blockedCandidateIds = new Set((mintReport.rejected ?? []).flatMap((entry) => entry.sourceCandidateIds ?? []));
 
   const restamp = [];
   const skipped = [];
 
-  for (const page of intake.emitted.pages ?? []) {
-    const mappingPage = mappingPageByRef.get(page.pageRef);
-    if (!mappingPage) {
+  for (const page of intake.pages) {
+    const sections = sectionsByObjectId.get(page.objectId);
+    if (!sections) {
       skipped.push({ objectId: page.objectId, reason: 'source_page_missing' });
       continue;
     }
-    const blockedCandidate = (mappingPage.candidates ?? []).find((candidate) =>
-      blockedCandidateIds.has(candidate.candidateId)
-    );
-    if (blockedCandidate) {
+    if ((page.candidateIds ?? []).some((candidateId) => blockedCandidateIds.has(candidateId))) {
       skipped.push({ objectId: page.objectId, reason: 'recipe_rejected_at_mint' });
       continue;
     }
-    const sections = mappingPage.pageBody?.sections ?? [];
     if (sections.length === 0) {
       skipped.push({ objectId: page.objectId, reason: 'would_empty_page' });
       continue;
@@ -995,7 +1282,7 @@ export function buildCloneRunReport({ intake, mintReport, themeReport, restampRe
   if (!isPlainObject(themeReport)) throw new CloneError('A clone run report requires a theme bind report.');
   if (!isPlainObject(restampReport)) throw new CloneError('A clone run report requires a restamp report.');
 
-  const siteId = intake.inventory?.site?.object_id ?? intake.inventory?.site?.objectId ?? null;
+  const siteId = intake.site?.objectId ?? null;
   const themeTokensApplied =
     Object.keys(themeReport.applied?.colors ?? {}).length + Object.keys(themeReport.applied?.fonts ?? {}).length;
 
