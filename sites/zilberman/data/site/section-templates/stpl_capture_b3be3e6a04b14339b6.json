@@ -1,0 +1,60 @@
+{
+  "__generated": {
+    "at": "2026-08-23T13:57:52.072Z",
+    "from": "objects/section_template/by-id/stpl_capture_b3be3e6a04b14339b6.json",
+    "record_version": 2
+  },
+  "blueprint": {
+    "data": {
+      "items": [
+        {
+          "alt": "Film_01.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/2721fd84c59a43195113a938e4161456289dea47dd69dacff4b075fdccc25e54.jpg"
+        },
+        {
+          "alt": "Film_02.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/ab9596608cdd1b9122366e76c191737a6ab6df6e77fdf92987ffbcedf8b2a07b.jpg"
+        },
+        {
+          "alt": "Film_15.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/492dc1aa0ea87771f50d587e11177175f8dc7a3ec1c924a9e7387079ee9079de.jpg"
+        },
+        {
+          "alt": "Film_03.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/44bed446056b170acdd65de16e874e26cd0c25791f3612efc7648eddfcc4c063.jpg"
+        },
+        {
+          "alt": "Film_04.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/7dfed97a044f85e4995a973b2b78ccb3e6610b235c653a87792969c82aab681a.jpg"
+        },
+        {
+          "alt": "Film_05.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/432fc3b9fcc6f2682cb9348c702d225a4cb7fe14c68cb9639120489bd9d3e620.jpg"
+        },
+        {
+          "alt": "Film_06.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/7808c5f7e8aed0dc60c2743b034c042a53c48c13cfa5b2db31c919242467ce2a.jpg"
+        },
+        {
+          "alt": "Film_07.jpg",
+          "kind": "image",
+          "src": "/img/req_capture_zilberman_20260819_04/e9a4b43442a7fc9b9be4aa90c24c70d6f49909af6e356a485b3439dece126f4d.jpg"
+        }
+      ],
+      "layout": "grid"
+    },
+    "id": "s_4d8f62e8c4",
+    "type": "media"
+  },
+  "description": "Draft recipe extracted from 2 repeated media shapes.",
+  "name": "Captured media recipe",
+  "scope": "one_off",
+  "whenToUse": "Use for the repeated media shape discovered in this capture."
+}
