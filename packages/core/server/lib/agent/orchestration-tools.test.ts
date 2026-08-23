@@ -181,7 +181,11 @@ test('list_workspace_nodes caps the projection at 100 nodes and reports the trun
 
 test('run_workspace_workflow start mode sends projectId + input + a minted requestId to workflow_start_dry_run and NEVER `approved`', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const ctx = bridgeCtx(() => ({ runId: 'run_new', status: 'created', continued: true }), calls);
+  // THE WIRE SHAPE, not a convenient flat one: CMS-Agent answers
+  // `ok({ run: … })`, and `continued` is a SIBLING of `run`. A fake that
+  // returned the run row flat is what hid the envelope defect that left every
+  // registered request without a `run_id` (see runRowFrom in tools.ts).
+  const ctx = bridgeCtx(() => ({ run: { runId: 'run_new', status: 'created' }, continued: true }), calls);
   // D2a: minting probes object get for content_item; none exist here.
   (ctx as { verb?: unknown }).verb = async () => ({ status: 404, body: { not_found: true } });
   const tool = chatToolByName('run_workspace_workflow')!;
@@ -208,10 +212,45 @@ test('run_workspace_workflow start mode sends projectId + input + a minted reque
   assert.equal(body.continued, true);
 });
 
+test('run_workspace_workflow REGISTERS the request with the run_id from CMS-Agent\'s {run:…} envelope', async () => {
+  // The W19 regression this file previously could not catch. `callTool` unwraps
+  // only the `{ok,data}` envelope, so `data` is `{ run, continued }` — reading
+  // `data.runId` gave `undefined`, the tool registered the request with NO
+  // workflow block, and the sweeper then had nothing to poll: the request sat
+  // at `queued` for ever while its run failed unseen. Assert the LINK, not just
+  // the echoed run_id.
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = bridgeCtx(
+    () => ({ run: { runId: 'run_env', status: 'created', nodes: [{ nodeId: 'a' }, { nodeId: 'b' }] }, continued: true }),
+    calls
+  );
+  (ctx as { verb?: unknown }).verb = async () => ({ status: 404, body: { not_found: true } });
+  (ctx as { requests?: unknown }).requests = {
+    register: async (input: Record<string, unknown>) => {
+      registered.push(input);
+    },
+  };
+
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, { input: { topic: 'retinol basics' } });
+  assert.equal(result.is_error, false);
+
+  assert.equal(registered.length, 1);
+  const workflow = registered[0]!.workflow as { run_id: string; workflow_id: string; project_id: string; node_total?: number } | undefined;
+  assert.ok(workflow, 'the request must be registered WITH a workflow block — without one it can never leave `queued`');
+  assert.equal(workflow.run_id, 'run_env');
+  assert.equal(workflow.workflow_id, 'publishing_conductor');
+  assert.equal(workflow.project_id, 'platform');
+  assert.equal(workflow.node_total, 2);
+
+  const body = JSON.parse(result.content) as { run_id: string };
+  assert.equal(body.run_id, 'run_env');
+});
+
 test('run_workspace_workflow advance mode calls workflow_run_all WITHOUT approved — the CMS-Agent publish gate stays armed', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const ctx = bridgeCtx(
-    () => ({ runId: 'run_1', status: 'running', driverNote: 'stopped before publish-risk' }),
+    () => ({ run: { runId: 'run_1', status: 'running' }, driverNote: 'stopped before publish-risk' }),
     calls
   );
   const tool = chatToolByName('run_workspace_workflow')!;

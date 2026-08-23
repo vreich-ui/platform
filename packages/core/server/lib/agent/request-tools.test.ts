@@ -165,7 +165,8 @@ const RUN = {
 test('get_request_activity resolves the run from the REQUEST and reports every step', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const ctx = bridgeCtx(
-    (name) => (name === 'workflow_get_run' ? RUN : { ledger: { stages: [] }, plan: {} }),
+    // `ok({ run, mode, stall })` — the shape the wire actually carries.
+    (name) => (name === 'workflow_get_run' ? { run: RUN, mode: null, stall: null } : { ledger: { stages: [] }, plan: {} }),
     { get: async () => ({ title: 'Retinol after 40', workflow: { run_id: 'run_123' } }) },
     calls
   );
@@ -208,7 +209,7 @@ test('get_request_activity separates "no run YET" from "no run EVER", and says w
 
 test('get_request_activity takes a bare run_id, for a run with no request behind it', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const ctx = bridgeCtx((name) => (name === 'workflow_get_run' ? RUN : {}), {}, calls);
+  const ctx = bridgeCtx((name) => (name === 'workflow_get_run' ? { run: RUN } : {}), {}, calls);
   const payload = body(await tool('get_request_activity').execute(ctx, { run_id: 'run_123' }));
   assert.equal(payload.run_id, 'run_123');
   assert.equal(calls[0]!.args.runId, 'run_123');
@@ -216,7 +217,7 @@ test('get_request_activity takes a bare run_id, for a run with no request behind
 
 test('get_request_activity is a READ — it can never advance or publish a run', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const ctx = bridgeCtx((name) => (name === 'workflow_get_run' ? RUN : {}), {}, calls);
+  const ctx = bridgeCtx((name) => (name === 'workflow_get_run' ? { run: RUN } : {}), {}, calls);
   await tool('get_request_activity').execute(ctx, { run_id: 'run_123' });
   for (const call of calls) {
     assert.match(call.name, /^workflow_get_run/, `${call.name} is not a read`);
