@@ -43,6 +43,22 @@ import {
 } from './candidates.js';
 import { addPostEditDelta, createPreferenceEvent, type LearningEvidenceStore } from './preferences.js';
 
+/**
+ * W19 (review fix): an ERROR tool result must carry its own body.
+ *
+ * `discloseResult && !is_error` meant no failing tool ever put its message on
+ * the event, so the surface had nothing to classify and painted every one of
+ * them red — including a publish refused because the readiness checklist said
+ * `no_go`, which is the guardrail working. Wolf's ruling (2026-08-22) is that
+ * red means a step died; honouring it requires the reason to reach the client.
+ *
+ * Bounded hard: this rides a persisted event log whose trim is count-based,
+ * not byte-based, so an unbounded body would be a slow leak.
+ */
+export const ERROR_OUTPUT_MAX = 2_000;
+const errorOutput = (content: string): string =>
+  content.length > ERROR_OUTPUT_MAX ? `${content.slice(0, ERROR_OUTPUT_MAX)}…` : content;
+
 export const RUN_CAPS = {
   maxProviderTurns: 12,
   maxToolCalls: 16,
@@ -289,7 +305,12 @@ export const runAgentLoop = async (
               content: `Tool "${call.name}" is not a capability of this workspace.`,
               is_error: true,
             });
-            appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
+            appendChatEvent(doc, at, 'tool_result', {
+              call_id: call.id,
+              tool: call.name,
+              is_error: true,
+              output: JSON.stringify({ error: `Tool "${call.name}" is not a capability of this workspace.` }),
+            });
             await persist();
             continue;
           }
@@ -316,6 +337,9 @@ export const runAgentLoop = async (
             is_error: result.is_error,
             ...(created ?? {}),
             ...(approvedTool.discloseResult && !result.is_error ? { output: result.content } : {}),
+            // Always on error, whatever the tool's disclosure policy: the
+            // client cannot tell a held gate from a dead step without it.
+            ...(result.is_error ? { output: errorOutput(result.content) } : {}),
           });
           if (
             !result.is_error &&
@@ -395,7 +419,12 @@ export const runAgentLoop = async (
             content: `Tool "${call.name}" is not a capability of this workspace.`,
             is_error: true,
           });
-          appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
+          appendChatEvent(doc, at, 'tool_result', {
+            call_id: call.id,
+            tool: call.name,
+            is_error: true,
+            output: JSON.stringify({ error: `Tool "${call.name}" is not a capability of this workspace.` }),
+          });
           await persist();
           continue;
         }
@@ -409,7 +438,16 @@ export const runAgentLoop = async (
             content: `Tool "${call.name}" is disabled by policy for this chat.`,
             is_error: true,
           });
-          appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
+          appendChatEvent(doc, at, 'tool_result', {
+            call_id: call.id,
+            tool: call.name,
+            is_error: true,
+            // A policy refusal is the system working — never a red failure.
+            output: JSON.stringify({
+              error: `Tool "${call.name}" is disabled by policy for this chat.`,
+              code: 'not_permitted',
+            }),
+          });
           await persist();
           continue;
         }
@@ -419,7 +457,12 @@ export const runAgentLoop = async (
         if (!parsed.ok) {
           run.call_queue.shift();
           run.transcript.push({ role: 'tool', tool_call_id: call.id, content: parsed.error, is_error: true });
-          appendChatEvent(doc, at, 'tool_result', { call_id: call.id, tool: call.name, is_error: true });
+          appendChatEvent(doc, at, 'tool_result', {
+            call_id: call.id,
+            tool: call.name,
+            is_error: true,
+            output: JSON.stringify({ error: parsed.error }),
+          });
           await persist();
           continue;
         }
@@ -481,6 +524,7 @@ export const runAgentLoop = async (
           // PF4: bounded orchestration output rides the event so the UI can
           // offer a collapsed raw-output disclosure.
           ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),
+          ...(result.is_error ? { output: errorOutput(result.content) } : {}),
         });
         await persist();
         if (await cancelledCheck()) return { ok: true, status: doc.status };

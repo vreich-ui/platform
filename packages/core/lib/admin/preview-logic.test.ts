@@ -147,7 +147,10 @@ describe('pageSectionLabel (D3-sharedref)', () => {
   });
 
   it('a shared_ref whose sectionName is somehow null at read time (defensive — the write path never stamps null; see object-verbs.ts) still degrades to the ref/index fallback, never "shared_ref" and never "null"', () => {
-    const label = pageSectionLabel({ id: 's_1', type: 'shared_ref', data: { section: 'sec_gone', sectionName: null } }, 2);
+    const label = pageSectionLabel(
+      { id: 's_1', type: 'shared_ref', data: { section: 'sec_gone', sectionName: null } },
+      2
+    );
     assert.equal(label, 'Section 3');
   });
 

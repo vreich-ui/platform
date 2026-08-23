@@ -29,6 +29,7 @@ import {
   loadIndex,
   loadRequest,
   rebuildIndex,
+  recordObject,
   recordProgress,
   repairIndexRow,
   setStatus,
@@ -145,6 +146,31 @@ const approvalsFrom = (derived: DerivedRequestState, existing: RequestWorkflow |
       };
     });
   return approvals.length ? approvals : undefined;
+};
+
+/**
+ * True once the node that builds the client-shaped article has completed. The
+ * request id doubles as the `content_item` id (see the call site), so this is
+ * the moment the object it names is real.
+ */
+const articleBodyCompleted = (run: RunSnapshot | undefined): boolean => {
+  const nodes = Array.isArray(run?.nodes) ? run.nodes : [];
+  // `content_item_shell_failed` means the object was never created, even
+  // though the run carried on. Claiming it anyway would put a permanent link
+  // to a 404 in the Requests list — `recordObject` never overwrites.
+  const shellFailed = nodes.some((node) =>
+    (Array.isArray((node as { warnings?: unknown })?.warnings) ? (node as { warnings: unknown[] }).warnings : []).some(
+      (warning) => typeof warning === 'string' && warning.startsWith('content_item_shell_failed')
+    )
+  );
+  if (shellFailed) return false;
+  return nodes.some(
+    (node) =>
+      node !== null &&
+      typeof node === 'object' &&
+      ((node as { nodeId?: string }).nodeId === 'article_body' || (node as { id?: string }).id === 'article_body') &&
+      (node as { status?: string }).status === 'completed'
+  );
 };
 
 const isTerminal = (status: RequestStatus): boolean =>
@@ -268,6 +294,18 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
     // The index row that made us poll a closed request is the thing to fix.
     await repairIndexRow(deps.store, updated, nowIso()).catch(() => false);
     return { request_id: requestId, from, to, changed: false, nudged: false, repaired: true };
+  }
+
+  // W19: the article the run produced. By construction the request id IS the
+  // `content_item` id — `mintWorkspaceRequestId` bumps until no content_item
+  // holds it, then hands it to CMS-Agent as the run's requestId, and the shell
+  // is created under exactly that id. Recorded only once `article_body` has
+  // actually completed, so a run whose shell creation failed does not claim an
+  // object that is not there.
+  if (updated && !updated.object && articleBodyCompleted(run)) {
+    await recordObject(deps.store, requestId, { object_type: 'content_item', object_id: requestId }, nowIso()).catch(
+      () => undefined
+    );
   }
 
   if (changed && lastChat && deps.chats && updated) {

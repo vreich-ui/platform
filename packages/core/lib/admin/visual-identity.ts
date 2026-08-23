@@ -3,7 +3,8 @@ import type { StudioRecord } from './studio-client.js';
 
 type Bag = Record<string, unknown>;
 
-const asBag = (value: unknown): Bag => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Bag) : {});
+const asBag = (value: unknown): Bag =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Bag) : {};
 const stringValue = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined;
 
@@ -74,7 +75,10 @@ export function buildVisualIdentityViewModel({
   }));
   const activeTheme = resolvedThemes.find((theme) => theme.active);
   const previewCandidate = stringValue(asBag(body.urls).base);
-  const previewUrl = previewCandidate && (/^https:\/\//i.test(previewCandidate) || previewCandidate.startsWith('/')) ? previewCandidate : undefined;
+  const previewUrl =
+    previewCandidate && (/^https:\/\//i.test(previewCandidate) || previewCandidate.startsWith('/'))
+      ? previewCandidate
+      : undefined;
 
   return {
     publicationName: stringValue(body.name) ?? fallbackName,

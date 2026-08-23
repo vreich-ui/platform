@@ -221,9 +221,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async () => {
 
   console.log(JSON.stringify({ ts: new Date().toISOString(), event: 'mcp_keepalive_probe', ...mcpResult }));
   for (const adminResult of adminResults) {
-    console.log(
-      JSON.stringify({ ts: new Date().toISOString(), event: 'admin_keepalive_probe', ...adminResult })
-    );
+    console.log(JSON.stringify({ ts: new Date().toISOString(), event: 'admin_keepalive_probe', ...adminResult }));
   }
 
   const ok = mcpResult.ok && adminResults.every((result) => result.ok);

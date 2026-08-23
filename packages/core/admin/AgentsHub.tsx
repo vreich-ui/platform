@@ -14,6 +14,7 @@ import { Avatar, Badge, Button, Card, EmptyState, Skeleton, StatusPill } from '.
 import { Input, Select, Textarea } from './forms';
 import { Dialog, useToast } from './overlays';
 import { AgentChip, ChatComposer, ChatThread, useChat } from './chat';
+import { RequestActivity } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
@@ -459,7 +460,18 @@ function HubBody() {
         {activeId ? (
           <>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--adm-border)] pb-3">
-              <AgentChip agent={chat.agent} />
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <AgentChip agent={chat.agent} />
+                {chat.request ? (
+                  <a
+                    href={`/admin/requests/${encodeURIComponent(chat.request.request_id)}`}
+                    className="adm-focusable truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+                    title={chat.request.request_id}
+                  >
+                    on “{chat.request.title}”
+                  </a>
+                ) : null}
+              </span>
               {active?.kind === 'object' && active.object_id ? (
                 <a
                   href={`/admin/content/${encodeURIComponent(active.object_id)}?type=${encodeURIComponent(active.object_type ?? '')}`}
@@ -469,6 +481,14 @@ function HubBody() {
                 </a>
               ) : null}
             </div>
+            {/* W19: the live view of the job this conversation is about —
+                one line until expanded, and the place an editor watches a
+                23-node article being written instead of asking for an update. */}
+            {chat.request ? (
+              <div className="mb-3">
+                <RequestActivity requestId={chat.request.request_id} />
+              </div>
+            ) : null}
             {createdObjects.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
                 {createdObjects.map((created) => (

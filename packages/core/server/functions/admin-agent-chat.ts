@@ -19,7 +19,12 @@
 import type { SiteBinding } from '../lib/site-binding.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
-import { getAgentLearningBlobStore, getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import {
+  getAgentLearningBlobStore,
+  getArtifactIndexBlobStore,
+  getEditorialRequestsBlobStore,
+  getSiteObjectsBlobStore,
+} from '../lib/blob-store.js';
 import {
   getGovernanceBlobStore,
   getGovernanceDoc,
@@ -32,6 +37,7 @@ import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
+import { composeRequestFocus, requestRowForChat } from '../lib/requests/chat-binding.js';
 import { ensureMcpSiblingsForChat } from '../lib/agent/mcp-siblings.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { humanCopyForCmsAgentError } from '../lib/agent/engine.js';
@@ -100,6 +106,15 @@ const requestSchema = z.discriminatedUnion('action', [
     action: z.literal('get_chat'),
     chat_id: z.string().min(1),
     since_seq: z.number().int().nonnegative().optional(),
+    /**
+     * W19 (review fix): the client asks for the editorial-request binding
+     * until it HAS one, and then stops asking. Resolving only on the first
+     * poll was wrong for the flow this whole wave exists for: an editor asks
+     * for an article, the tool registers the request seconds later mid-run,
+     * and by then `since_seq` has moved past 0 — so the activity view never
+     * appeared until the page was reloaded.
+     */
+    want_request: z.boolean().optional(),
   }),
   z.object({
     action: z.literal('send'),
@@ -371,8 +386,28 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found' });
         const since = request.data.since_seq ?? 0;
+        // W19 T19.5: resolve which editorial request this conversation is
+        // about — on the FIRST poll only. The client holds it for the session,
+        // so a live run polling every 1.2 s never pays for it again.
+        // Self-limiting: the client sets `want_request` only while unbound, so
+        // a bound chat polling every 1.2 s pays nothing.
+        const wantsRequest = request.data.want_request ?? since === 0;
+        const boundRequest = wantsRequest
+          ? await requestRowForChat(await getEditorialRequestsBlobStore(event), doc.chat_id).catch(() => undefined)
+          : undefined;
         return jsonResponse(200, {
           ...chatSummary(doc),
+          ...(boundRequest
+            ? {
+                request: {
+                  request_id: boundRequest.request_id,
+                  title: boundRequest.title,
+                  status: boundRequest.status,
+                  ...(boundRequest.status_reason ? { status_reason: boundRequest.status_reason } : {}),
+                  ...(boundRequest.object_id ? { object_id: boundRequest.object_id } : {}),
+                },
+              }
+            : {}),
           seq: doc.seq,
           events: doc.events.filter((eventItem) => eventItem.seq > since),
           ...(doc.status === 'awaiting_approval' && doc.run?.pending
@@ -394,6 +429,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       case 'send': {
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found — create_chat first.' });
+
+        const boundRow = await requestRowForChat(await getEditorialRequestsBlobStore(event), doc.chat_id).catch(
+          () => undefined
+        );
+        const requestFocus = boundRow ? composeRequestFocus(boundRow, request.data.focus) : undefined;
 
         const governanceStore = await getGovernanceBlobStore(event);
         const policies = await resolveActivePolicies(governanceStore);
@@ -470,7 +510,13 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           },
           autonomy,
           learning_mode,
-          request.data.focus,
+          // W19 T19.5 (plan §7.1): when this conversation is about a registered
+          // request, the run's `focus` LEADS with that request's identity and
+          // state, so Client Manager can tell an old job from a new one and a
+          // stalled one from a running one without being told. The workspace's
+          // own focus is appended, not replaced, and the composer drops the
+          // least useful part first to stay inside the wire's 500-char bound.
+          requestFocus ?? request.data.focus,
           roles.includes('owner'),
           registryKind
         );

@@ -25,7 +25,13 @@ test('visual identity lens treats site tokens as active and finds a matching nam
       {
         object_id: 'thm_default',
         object_type: 'theme',
-        body: { name: 'Default editorial', tokens: { fonts: { sans: 'Example Sans', heading: 'Example Serif' }, colors: { accent: '#abcdef', primary: '#123456' } } },
+        body: {
+          name: 'Default editorial',
+          tokens: {
+            fonts: { sans: 'Example Sans', heading: 'Example Serif' },
+            colors: { accent: '#abcdef', primary: '#123456' },
+          },
+        },
       } as unknown as import('./studio-client.js').StudioRecord,
     ],
     artifacts: [],
@@ -44,7 +50,11 @@ test('visual identity lens treats site tokens as active and finds a matching nam
 
 test('visual identity lens is safe with partial site data and only uses an available logo as a preview', () => {
   const model = buildVisualIdentityViewModel({
-    site: { object_id: 'site_example', object_type: 'site', body: {} } as unknown as import('./studio-client.js').StudioRecord,
+    site: {
+      object_id: 'site_example',
+      object_type: 'site',
+      body: {},
+    } as unknown as import('./studio-client.js').StudioRecord,
     fallbackName: 'Fallback publication',
     themes: [],
     artifacts: [

@@ -12,10 +12,11 @@ describe('normalizeSiteIdDiagnostic', () => {
   });
 
   it('passes through the real server shape ({envVar, present, redacted})', () => {
-    assert.deepStrictEqual(
-      normalizeSiteIdDiagnostic({ envVar: 'NETLIFY_SITE_ID', present: true, redacted: '…ab12' }),
-      { envVar: 'NETLIFY_SITE_ID', present: true, redacted: '…ab12' }
-    );
+    assert.deepStrictEqual(normalizeSiteIdDiagnostic({ envVar: 'NETLIFY_SITE_ID', present: true, redacted: '…ab12' }), {
+      envVar: 'NETLIFY_SITE_ID',
+      present: true,
+      redacted: '…ab12',
+    });
   });
 
   it('treats an absent site id (envVar undefined, present false) as unset', () => {
@@ -27,10 +28,11 @@ describe('normalizeSiteIdDiagnostic', () => {
   });
 
   it('rejects an envVar outside the known union rather than trusting the payload', () => {
-    assert.deepStrictEqual(
-      normalizeSiteIdDiagnostic({ envVar: 'SOME_OTHER_VAR', present: true, redacted: '…zz99' }),
-      { envVar: undefined, present: true, redacted: '…zz99' }
-    );
+    assert.deepStrictEqual(normalizeSiteIdDiagnostic({ envVar: 'SOME_OTHER_VAR', present: true, redacted: '…zz99' }), {
+      envVar: undefined,
+      present: true,
+      redacted: '…zz99',
+    });
   });
 
   it('narrows a plain string (older server build) to a renderable diagnostic', () => {
