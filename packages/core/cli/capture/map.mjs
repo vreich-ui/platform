@@ -830,8 +830,13 @@ function splitOversizedGallery(result) {
   return parts.map((part, index) => {
     // The heading belongs to the gallery, not to each of its parts. Repeating it reads as several
     // different galleries that happen to share a title.
-    const { heading, ...rest } = result.data ?? {};
-    const data = index === 0 ? { ...result.data } : { ...rest };
+    //
+    // Written as an explicit delete rather than the `const { heading, ...rest }` omit idiom: this
+    // config does not enable `ignoreRestSiblings`, so that idiom is a no-unused-vars error, and
+    // relaxing a project-wide rule to accommodate one line is the wrong trade. This reads better
+    // anyway — it says what it does instead of saying it by omission.
+    const data = { ...result.data };
+    if (index > 0) delete data.heading;
     // Layout describes THIS part's item count, not the original total.
     if (planned.target === 'items' && 'layout' in data) {
       data.layout = part.length === 1 ? 'single' : part.length === 2 ? 'strip' : 'grid';
