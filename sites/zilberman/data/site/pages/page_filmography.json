@@ -1,53 +1,384 @@
 {
   "__generated": {
-    "at": "2026-08-15T11:22:40.760Z",
+    "at": "2026-08-23T16:54:20.351Z",
     "from": "objects/page/by-id/page_filmography.json",
-    "record_version": 2
+    "record_version": 37
   },
-  "pageType": "standard",
+  "pageType": "clone",
   "route": "/filmography",
   "sections": [
     {
       "data": {
         "actions": [],
-        "body": "<p>A lifetime in cinema, across more than forty feature films.</p>",
         "heading": "Misha's Filmography"
       },
-      "id": "s_filmlede",
+      "id": "s_7f8b34f814",
       "type": "lede"
     },
     {
       "data": {
-        "heading": "Films",
         "items": [
-          "The Little Princess",
-          "House with the ghosts",
-          "Mio mein Mio",
-          "Sisters Liberty",
-          "Two Moons, Three Suns",
-          "I Want to go Prison",
-          "Come Look at me",
-          "Captain's Daughter",
-          "Give me Moonlight",
-          "A Driver for Vera",
-          "Papa",
-          "Striped Happiness",
-          "Yankovsky",
-          "The Dust of Time",
-          "The Gromovs",
-          "Stubborn Khutziev",
-          "The Cavaliers of the Starfish",
-          "One against all",
-          "Ulianov on Ulianov",
-          "Recluse",
-          "Russian Singer",
-          "Border 1918",
-          "The circus burned down and the clowns fled",
-          "The joys and sorrows of the little prince"
+          {
+            "alt": "Film_01.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/2721fd84c59a43195113a938e4161456289dea47dd69dacff4b075fdccc25e54.jpg"
+          },
+          {
+            "alt": "Film_02.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/ab9596608cdd1b9122366e76c191737a6ab6df6e77fdf92987ffbcedf8b2a07b.jpg"
+          },
+          {
+            "alt": "Film_15.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/492dc1aa0ea87771f50d587e11177175f8dc7a3ec1c924a9e7387079ee9079de.jpg"
+          },
+          {
+            "alt": "Film_03.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/44bed446056b170acdd65de16e874e26cd0c25791f3612efc7648eddfcc4c063.jpg"
+          },
+          {
+            "alt": "Film_04.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/7dfed97a044f85e4995a973b2b78ccb3e6610b235c653a87792969c82aab681a.jpg"
+          },
+          {
+            "alt": "Film_05.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/432fc3b9fcc6f2682cb9348c702d225a4cb7fe14c68cb9639120489bd9d3e620.jpg"
+          },
+          {
+            "alt": "Film_06.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/7808c5f7e8aed0dc60c2743b034c042a53c48c13cfa5b2db31c919242467ce2a.jpg"
+          }
+        ],
+        "layout": "grid"
+      },
+      "id": "s_4d8f62e8c4",
+      "type": "media"
+    },
+    {
+      "data": {
+        "items": [
+          {
+            "alt": "Film_07.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/e9a4b43442a7fc9b9be4aa90c24c70d6f49909af6e356a485b3439dece126f4d.jpg"
+          },
+          {
+            "alt": "Film_08.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/48e2bdbeb3518b9c3655072e61555e25fe749f12415e5576d8c59a8e1b382873.jpg"
+          },
+          {
+            "alt": "Film_09.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/a1ff2fc4f7ea936eed6e1075da2bf8a8a71acd1f2d45aa4617f6be95adb1e734.jpg"
+          },
+          {
+            "alt": "Film_10.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/424515c615154350ec187a2dc55af3c31ac0e6545646a790303aa7dc7e313426.jpg"
+          },
+          {
+            "alt": "Film_12.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/16a556a99e76f0e5ff4e15f0c11dee2867165ba02316371f248fa747edfd62b9.jpg"
+          },
+          {
+            "alt": "Film_13.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/d19b8c1d8e6bd7bb9ab8746b9165db9e93450a1a89a5f2e6a19d5e9aaf6ffcec.jpg"
+          },
+          {
+            "alt": "Film_14.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/67925bc92118a6350b4bc54aa46bdd8a62c955ea8d2a81a6f0e11e040ade7141.jpg"
+          }
+        ],
+        "layout": "grid"
+      },
+      "id": "s_9649a2b5b1",
+      "type": "media"
+    },
+    {
+      "data": {
+        "items": [
+          {
+            "alt": "Gromovy.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/d8c9a72d310ff97cb0d01b662f8c908334b1d343d9099f47710e2c0001d96512.jpg"
+          },
+          {
+            "alt": "Hutciev.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/6eb5c8903a1f701604c053d3f2f16a366d225e904c1fdddace20b7f17926acc2.jpg"
+          },
+          {
+            "alt": "Kavalery_morskoy_zvezdy.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/5aa69c907bf50e5452b64138f5ae79f1148dd7e86f36bcb39441ced50a84be7b.jpg"
+          },
+          {
+            "alt": "Odin_protiv_vseh.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/f38d081f234f627327d30fb7f547aa3f610d1d3bf4a2e0aa454ce4857166837c.jpg"
+          },
+          {
+            "alt": "Ulianov_pro_ulianova.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/5d3a7355a3b6e16e873e7c4da8012c8fadfe6694aa6a6ec69d4ae943ca88fd04.jpg"
+          },
+          {
+            "alt": "Zatvornik.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/935cb8e61e10dc2ac3b9eca5d23f380918e19db27bb5003d14f7430e4ffbec66.jpg"
+          }
+        ],
+        "layout": "grid"
+      },
+      "id": "s_f345c37833",
+      "type": "media"
+    },
+    {
+      "data": {
+        "blocks": [
+          {
+            "body": "<p>The LIttle PrincessHouse with the ghostsMio mein MioSisters LibertyTwo Moons, Three SunsI Want to go PrisonCome Look at meCaptain’s DaughterGive me MoonlightA Driver for VeraPapaStriped HappinessYankovskyThe Dust of Time The GromovsStubborn KhutzievThe Cavaliers of the StarfishOne against allUlianov on Ulianov Recluse</p>",
+            "kind": "text"
+          },
+          {
+            "imageIndex": 0,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 1,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 2,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 3,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 4,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 5,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 6,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 7,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 8,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 9,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 10,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 11,
+            "kind": "image"
+          }
+        ],
+        "images": [
+          {
+            "alt": "Film_01.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/2721fd84c59a43195113a938e4161456289dea47dd69dacff4b075fdccc25e54.jpg"
+          },
+          {
+            "alt": "Film_02.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/ab9596608cdd1b9122366e76c191737a6ab6df6e77fdf92987ffbcedf8b2a07b.jpg"
+          },
+          {
+            "alt": "Film_15.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/492dc1aa0ea87771f50d587e11177175f8dc7a3ec1c924a9e7387079ee9079de.jpg"
+          },
+          {
+            "alt": "Film_03.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/44bed446056b170acdd65de16e874e26cd0c25791f3612efc7648eddfcc4c063.jpg"
+          },
+          {
+            "alt": "Film_04.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/7dfed97a044f85e4995a973b2b78ccb3e6610b235c653a87792969c82aab681a.jpg"
+          },
+          {
+            "alt": "Film_05.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/432fc3b9fcc6f2682cb9348c702d225a4cb7fe14c68cb9639120489bd9d3e620.jpg"
+          },
+          {
+            "alt": "Film_06.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/7808c5f7e8aed0dc60c2743b034c042a53c48c13cfa5b2db31c919242467ce2a.jpg"
+          },
+          {
+            "alt": "Film_07.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/e9a4b43442a7fc9b9be4aa90c24c70d6f49909af6e356a485b3439dece126f4d.jpg"
+          },
+          {
+            "alt": "Film_08.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/48e2bdbeb3518b9c3655072e61555e25fe749f12415e5576d8c59a8e1b382873.jpg"
+          },
+          {
+            "alt": "Film_09.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/a1ff2fc4f7ea936eed6e1075da2bf8a8a71acd1f2d45aa4617f6be95adb1e734.jpg"
+          },
+          {
+            "alt": "Film_10.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/424515c615154350ec187a2dc55af3c31ac0e6545646a790303aa7dc7e313426.jpg"
+          },
+          {
+            "alt": "Film_12.jpg",
+            "src": "/img/req_capture_zilberman_20260823_05/16a556a99e76f0e5ff4e15f0c11dee2867165ba02316371f248fa747edfd62b9.jpg"
+          }
         ]
       },
-      "id": "s_filmlist",
-      "type": "checklist"
+      "id": "s_0eeef6da1d",
+      "type": "composition"
+    },
+    {
+      "data": {
+        "heading": "Misha's Filmography",
+        "items": [
+          {
+            "alt": "Film_01.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/2721fd84c59a43195113a938e4161456289dea47dd69dacff4b075fdccc25e54.jpg"
+          },
+          {
+            "alt": "Film_02.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/ab9596608cdd1b9122366e76c191737a6ab6df6e77fdf92987ffbcedf8b2a07b.jpg"
+          },
+          {
+            "alt": "Film_15.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/492dc1aa0ea87771f50d587e11177175f8dc7a3ec1c924a9e7387079ee9079de.jpg"
+          },
+          {
+            "alt": "Film_03.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/44bed446056b170acdd65de16e874e26cd0c25791f3612efc7648eddfcc4c063.jpg"
+          },
+          {
+            "alt": "Film_04.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/7dfed97a044f85e4995a973b2b78ccb3e6610b235c653a87792969c82aab681a.jpg"
+          },
+          {
+            "alt": "Film_05.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/432fc3b9fcc6f2682cb9348c702d225a4cb7fe14c68cb9639120489bd9d3e620.jpg"
+          },
+          {
+            "alt": "Film_06.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/7808c5f7e8aed0dc60c2743b034c042a53c48c13cfa5b2db31c919242467ce2a.jpg"
+          }
+        ],
+        "layout": "grid"
+      },
+      "id": "s_643ec1c31a",
+      "type": "media"
+    },
+    {
+      "data": {
+        "items": [
+          {
+            "alt": "Film_07.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/e9a4b43442a7fc9b9be4aa90c24c70d6f49909af6e356a485b3439dece126f4d.jpg"
+          },
+          {
+            "alt": "Film_08.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/48e2bdbeb3518b9c3655072e61555e25fe749f12415e5576d8c59a8e1b382873.jpg"
+          },
+          {
+            "alt": "Film_09.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/a1ff2fc4f7ea936eed6e1075da2bf8a8a71acd1f2d45aa4617f6be95adb1e734.jpg"
+          },
+          {
+            "alt": "Film_10.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/424515c615154350ec187a2dc55af3c31ac0e6545646a790303aa7dc7e313426.jpg"
+          },
+          {
+            "alt": "Film_12.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/16a556a99e76f0e5ff4e15f0c11dee2867165ba02316371f248fa747edfd62b9.jpg"
+          },
+          {
+            "alt": "Film_13.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/d19b8c1d8e6bd7bb9ab8746b9165db9e93450a1a89a5f2e6a19d5e9aaf6ffcec.jpg"
+          },
+          {
+            "alt": "Film_14.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/67925bc92118a6350b4bc54aa46bdd8a62c955ea8d2a81a6f0e11e040ade7141.jpg"
+          }
+        ],
+        "layout": "grid"
+      },
+      "id": "s_1d96cd17aa",
+      "type": "media"
+    },
+    {
+      "data": {
+        "items": [
+          {
+            "alt": "Gromovy.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/d8c9a72d310ff97cb0d01b662f8c908334b1d343d9099f47710e2c0001d96512.jpg"
+          },
+          {
+            "alt": "Hutciev.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/6eb5c8903a1f701604c053d3f2f16a366d225e904c1fdddace20b7f17926acc2.jpg"
+          },
+          {
+            "alt": "Kavalery_morskoy_zvezdy.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/5aa69c907bf50e5452b64138f5ae79f1148dd7e86f36bcb39441ced50a84be7b.jpg"
+          },
+          {
+            "alt": "Odin_protiv_vseh.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/f38d081f234f627327d30fb7f547aa3f610d1d3bf4a2e0aa454ce4857166837c.jpg"
+          },
+          {
+            "alt": "Ulianov_pro_ulianova.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/5d3a7355a3b6e16e873e7c4da8012c8fadfe6694aa6a6ec69d4ae943ca88fd04.jpg"
+          },
+          {
+            "alt": "Zatvornik.jpg",
+            "kind": "image",
+            "src": "/img/req_capture_zilberman_20260823_05/935cb8e61e10dc2ac3b9eca5d23f380918e19db27bb5003d14f7430e4ffbec66.jpg"
+          }
+        ],
+        "layout": "grid"
+      },
+      "id": "s_1603d1c8c3",
+      "type": "media"
     }
   ],
   "seo": {
@@ -57,5 +388,5 @@
       "index": true
     }
   },
-  "title": "Filmography"
+  "title": "Misha's Filmography"
 }
