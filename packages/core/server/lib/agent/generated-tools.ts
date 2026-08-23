@@ -466,6 +466,7 @@ const WORKSPACE_TOOL_NAMES = [
   // generated definitions are built from.
   'list_requests',
   'get_request',
+  'get_request_activity',
   'retry_request',
   'archive_request',
 ] as const;

@@ -28,6 +28,8 @@ import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { z } from 'zod';
 
 import type { Role } from '../roles.js';
+import { projectActivityForChat } from '../requests/activity-for-chat.js';
+import { nodeLabel } from '../../../lib/admin/request-logic.js';
 import { objectTypeSchema, type ObjectType } from '../../../schema/object-record-v1.js';
 
 /** W18 T18.6a: `membership` tools are `ask`-class by construction (autonomyFloor 'ask'; definitions in T18.6b). */
@@ -658,11 +660,23 @@ const projectWorkspaceNode = (node: Record<string, unknown>): Record<string, unk
  *  provider (executionMode: 'openai'), which editor-facing output must
  *  never carry. `stall` reduces to a boolean for the same reason. */
 const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unknown> => {
+  // T19.8c: id + status alone was not enough to say anything an editor could
+  // use — "node_7 is running" is not an answer. The LABEL and the timing cost
+  // a few bytes each and turn the same call into a sentence. Anything richer
+  // than this belongs in get_request_activity, which is built for it.
   const nodes = Array.isArray(run.nodes)
-    ? (run.nodes as Record<string, unknown>[]).slice(0, 64).map((node) => ({
-        id: node.nodeId ?? node.id,
-        status: node.status,
-      }))
+    ? (run.nodes as Record<string, unknown>[]).slice(0, 64).map((node) => {
+        const id = String(node.nodeId ?? node.id ?? '');
+        const startedAt = typeof node.startedAt === 'string' ? node.startedAt : undefined;
+        const completedAt = typeof node.completedAt === 'string' ? node.completedAt : undefined;
+        return {
+          id,
+          step: nodeLabel(id),
+          status: node.status,
+          ...(startedAt ? { started_at: startedAt } : {}),
+          ...(completedAt ? { completed_at: completedAt } : {}),
+        };
+      })
     : undefined;
   // `mode` is nullable on the wire, not merely absent: a compact run view omits it
   // and some records carry an explicit null. `!== undefined` admits null and then
@@ -1318,6 +1332,91 @@ const retryRequestTool: ChatTool = {
   describe: (args) => `Retry request ${args.request_id}`,
 };
 
+/**
+ * T19.8c — the tool that answers "where is it?".
+ *
+ * `get_workspace_run` returns node ids and states, which is enough to say
+ * "running" and nothing more. This returns the SAME projection the Requests
+ * page draws its timeline from: every step in order, in editor words, with
+ * what it produced, how long it took, how long it usually takes, its warnings
+ * and its errors.
+ */
+const getRequestActivityTool: ChatTool = {
+  name: 'get_request_activity',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'THE tool for "where is it up to?", "what is it doing now?", "why is this taking so long?", "what went wrong?" and any question about a job IN PROGRESS. Returns every step of the run in order — the step that is running right now, what each finished step produced, how long each took against how long it usually takes, a real time-remaining estimate, the running cost, and any warnings or failures in editor language. Always prefer this over get_workspace_run and over answering from the request status alone: the status says "running", this says which of the twenty-three steps it is on. Read-only; it never advances the run.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      request_id: { type: 'string', description: 'The editorial request. Preferred — its run is resolved for you.' },
+      run_id: { type: 'string', description: 'A workflow run directly, when there is no request behind it.' },
+    },
+    additionalProperties: false,
+  },
+  parse: zodParse(
+    z
+      .object({ request_id: z.string().min(1).optional(), run_id: z.string().min(1).optional() })
+      .refine((value) => Boolean(value.request_id || value.run_id), {
+        message: 'Provide request_id or run_id.',
+      })
+  ),
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    let runId = args.run_id as string | undefined;
+    let title: string | undefined;
+    if (args.request_id) {
+      if (!ctx.requests?.get) return REQUESTS_UNAVAILABLE;
+      const doc = await ctx.requests.get(args.request_id as string);
+      if (!doc) return { content: json({ error: `No request ${args.request_id}.` }), is_error: true };
+      title = typeof doc.title === 'string' ? doc.title : undefined;
+      const workflow = doc.workflow as { run_id?: string } | undefined;
+      runId = workflow?.run_id ?? runId;
+      if (!runId) {
+        // Not an error, and the difference matters: a job still starting will
+        // have a run in a moment; a non-workflow request never will. Saying
+        // "no activity" for both would have the agent report a starting job as
+        // one that produces nothing.
+        const status = String(doc.status ?? '');
+        return {
+          content: json({
+            activity: null,
+            reason: 'no_workflow_run',
+            status,
+            ...(title ? { title } : {}),
+            note:
+              status === 'queued' || status === 'running'
+                ? 'This job has not been handed to the workflow engine yet. Say it is still starting and offer to check again.'
+                : 'This request has no workflow behind it, so there are no steps to report.',
+          }),
+          is_error: false,
+        };
+      }
+    }
+
+    const [run, cost] = await Promise.all([
+      ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_get_run', { runId }),
+      // The cost ledger carries the timing history the estimate is built from.
+      // Optional: losing it costs the estimate, not the answer.
+      ctx.cmsAgent
+        .callTool<Record<string, unknown>>('workflow_get_run_cost', { runId })
+        .catch(() => ({ ok: false as const, code: 'cost_unavailable', message: '' })),
+    ]);
+    if (!run.ok) return { content: json({ error: run.message, code: run.code }), is_error: true };
+
+    const activity = projectActivityForChat(run.data, cost.ok ? cost.data : undefined);
+    if (!activity) {
+      return {
+        content: json({ activity: null, reason: 'run_not_readable', run_id: runId }),
+        is_error: false,
+      };
+    }
+    return { content: json({ ...(title ? { title } : {}), ...activity }), is_error: false };
+  },
+  describe: (args) => `Check progress of ${args.request_id ?? args.run_id}`,
+};
+
 const archiveRequestTool: ChatTool = {
   name: 'archive_request',
   toolClass: 'privileged',
@@ -1388,6 +1487,7 @@ export const CHAT_TOOLS: readonly ChatTool[] = [
   releaseWorkspaceRun,
   listRequestsTool,
   getRequestTool,
+  getRequestActivityTool,
   retryRequestTool,
   archiveRequestTool,
 ];

@@ -21,6 +21,23 @@ type RequestsCtx = NonNullable<ToolContext['requests']>;
 const ctxWith = (roles: string[], requests: Partial<RequestsCtx> = {}): ToolContext =>
   ({ roles, requests: { register: async () => undefined, ...requests } }) as unknown as ToolContext;
 
+const bridgeCtx = (
+  respond: (name: string, args: Record<string, unknown>) => unknown,
+  requests: Partial<RequestsCtx> = {},
+  calls: Array<{ name: string; args: Record<string, unknown> }> = []
+): ToolContext =>
+  ({
+    roles: ['editor'],
+    requests: { register: async () => undefined, ...requests },
+    cmsAgent: {
+      projectId: 'platform',
+      async callTool(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return { ok: true, data: respond(name, args) };
+      },
+    },
+  }) as unknown as ToolContext;
+
 const body = (result: { content: string }) => JSON.parse(result.content) as Record<string, unknown>;
 
 const tool = (name: string) => {
@@ -130,4 +147,86 @@ test('list_requests hands the filters straight to the registry — one filter, o
   });
   await tool('list_requests').execute(ctx, { status: ['running', 'needs_you'], mine: true });
   assert.deepEqual(seen, { status: ['running', 'needs_you'], mine: true });
+});
+
+// ─── T19.8c: the tool that answers "where is it?" ────────────────────────────
+
+const RUN = {
+  runId: 'run_123',
+  status: 'running',
+  nodeCount: 3,
+  nodes: [
+    { nodeId: 'topic_researcher', status: 'completed', durationMs: 120_000, produces: ['research_brief'] },
+    { nodeId: 'article_body', status: 'running', startedAt: '2026-08-22T11:58:00.000Z' },
+    { nodeId: 'publication_controller', status: 'pending' },
+  ],
+};
+
+test('get_request_activity resolves the run from the REQUEST and reports every step', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = bridgeCtx(
+    (name) => (name === 'workflow_get_run' ? RUN : { ledger: { stages: [] }, plan: {} }),
+    { get: async () => ({ title: 'Retinol after 40', workflow: { run_id: 'run_123' } }) },
+    calls
+  );
+  const payload = body(await tool('get_request_activity').execute(ctx, { request_id: REQUEST_ID }));
+  assert.equal(payload.title, 'Retinol after 40');
+  assert.equal(payload.run_id, 'run_123');
+  assert.equal((payload.steps as unknown[]).length, 3);
+  assert.deepEqual(calls.map((call) => call.name).sort(), ['workflow_get_run', 'workflow_get_run_cost']);
+  assert.deepEqual(calls[0]!.args, { runId: 'run_123' });
+});
+
+test('get_request_activity still answers when the cost ledger is unavailable — it costs the estimate, not the answer', async () => {
+  const ctx = {
+    roles: ['editor'],
+    requests: { register: async () => undefined, get: async () => ({ workflow: { run_id: 'run_123' } }) },
+    cmsAgent: {
+      projectId: 'platform',
+      async callTool(name: string) {
+        if (name === 'workflow_get_run_cost') throw new Error('ledger down');
+        return { ok: true, data: RUN };
+      },
+    },
+  } as unknown as ToolContext;
+  const payload = body(await tool('get_request_activity').execute(ctx, { request_id: REQUEST_ID }));
+  assert.equal((payload.steps as unknown[]).length, 3);
+  assert.equal(payload.remaining, undefined);
+});
+
+test('get_request_activity separates "no run YET" from "no run EVER", and says which', async () => {
+  const starting = bridgeCtx(() => RUN, { get: async () => ({ title: 'Just asked', status: 'queued' }) }, []);
+  const startingBody = body(await tool('get_request_activity').execute(starting, { request_id: REQUEST_ID }));
+  assert.equal(startingBody.activity, null);
+  assert.equal(startingBody.reason, 'no_workflow_run');
+  assert.match(String(startingBody.note), /still starting/i);
+
+  const never = bridgeCtx(() => RUN, { get: async () => ({ title: 'A theme change', status: 'done' }) }, []);
+  const neverBody = body(await tool('get_request_activity').execute(never, { request_id: REQUEST_ID }));
+  assert.match(String(neverBody.note), /no workflow behind it/i);
+});
+
+test('get_request_activity takes a bare run_id, for a run with no request behind it', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = bridgeCtx((name) => (name === 'workflow_get_run' ? RUN : {}), {}, calls);
+  const payload = body(await tool('get_request_activity').execute(ctx, { run_id: 'run_123' }));
+  assert.equal(payload.run_id, 'run_123');
+  assert.equal(calls[0]!.args.runId, 'run_123');
+});
+
+test('get_request_activity is a READ — it can never advance or publish a run', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = bridgeCtx((name) => (name === 'workflow_get_run' ? RUN : {}), {}, calls);
+  await tool('get_request_activity').execute(ctx, { run_id: 'run_123' });
+  for (const call of calls) {
+    assert.match(call.name, /^workflow_get_run/, `${call.name} is not a read`);
+  }
+  assert.equal(tool('get_request_activity').toolClass, 'read');
+  assert.equal(resolveAutonomy(undefined, undefined).get_request_activity, 'auto');
+});
+
+test('get_request_activity refuses without a request_id or a run_id rather than guessing', () => {
+  const ctx = ctxWith(['editor']);
+  assert.equal(tool('get_request_activity').parse({}, ctx).ok, false);
+  assert.equal(tool('get_request_activity').parse({ run_id: 'run_123' }, ctx).ok, true);
 });

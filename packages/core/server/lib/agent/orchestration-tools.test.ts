@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { isRunSafeApproval } from '../../../lib/admin/approval-mode.js';
+import { nodeLabel } from '../../../lib/admin/request-logic.js';
 import { chatToolByName, REQUEST_ID_RE, resolveAutonomy, type ToolContext } from './tools.js';
 
 const bridgeCtx = (
@@ -103,7 +104,13 @@ test('get_workspace_run returns a bounded projection — a huge run record never
       mode: { executionMode: 'openai', live: true },
       driverNote: 'advancing',
       nodes: [
-        { nodeId: 'draft_writer', status: 'completed', output: huge },
+        {
+          nodeId: 'draft_writer',
+          status: 'completed',
+          output: huge,
+          startedAt: '2026-08-22T10:00:00.000Z',
+          completedAt: '2026-08-22T10:02:00.000Z',
+        },
         { nodeId: 'article_body', status: 'pending' },
       ],
       internalLedger: huge,
@@ -119,10 +126,20 @@ test('get_workspace_run returns a bounded projection — a huge run record never
   const payload = JSON.parse(result.content) as Record<string, unknown>;
   assert.equal(payload.run_id, 'run_1');
   assert.equal(payload.status, 'running');
+  // T19.8c: the LABEL rides along. `node_7 is running` is not an answer an
+  // editor can use, and the label is the difference between a status and a
+  // sentence. The node's output still never crosses this boundary.
   assert.deepEqual(payload.nodes, [
-    { id: 'draft_writer', status: 'completed' },
-    { id: 'article_body', status: 'pending' },
+    {
+      id: 'draft_writer',
+      step: nodeLabel('draft_writer'),
+      status: 'completed',
+      started_at: '2026-08-22T10:00:00.000Z',
+      completed_at: '2026-08-22T10:02:00.000Z',
+    },
+    { id: 'article_body', step: nodeLabel('article_body'), status: 'pending' },
   ]);
+  assert.equal(result.content.includes(huge.slice(0, 100)), false, 'no node output may pass through');
   // The raw mode block names the provider — only the live/mock boolean may pass.
   assert.equal(payload.live_output, true);
   assert.equal('mode' in payload, false);

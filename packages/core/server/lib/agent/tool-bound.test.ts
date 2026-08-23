@@ -21,7 +21,9 @@ const tool = (name: string): WireTool => ({ name, description: `d ${name}`, inpu
 const wire = (count: number, prefix = 'tool'): WireTool[] =>
   Array.from({ length: count }, (_, index) => tool(`${prefix}_${index}`));
 
-const REQUEST_TOOLS = ['list_requests', 'get_request', 'retry_request', 'archive_request'].map(tool);
+const REQUEST_TOOLS = ['list_requests', 'get_request', 'get_request_activity', 'retry_request', 'archive_request'].map(
+  tool
+);
 const MEMBERSHIP_TOOLS = ['member_list', 'member_invite', 'member_remove'].map(tool);
 
 describe('the family-ordered trim', () => {
@@ -46,7 +48,7 @@ describe('the family-ordered trim', () => {
     assert.deepEqual(result.dropped, ['membership', 'editorial_requests']);
     // Half a family — a `list_requests` the agent can call and a `get_request`
     // it cannot — is worse than none of it.
-    for (const name of ['list_requests', 'get_request', 'retry_request', 'archive_request']) {
+    for (const name of ['list_requests', 'get_request', 'get_request_activity', 'retry_request', 'archive_request']) {
       assert.ok(!result.tools.some((entry) => entry.name === name), `${name} must go with its family`);
     }
   });
