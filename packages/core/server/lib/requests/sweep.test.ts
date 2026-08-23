@@ -513,3 +513,61 @@ describe('the sweep trigger token', () => {
     );
   });
 });
+
+describe('the article a run produced', () => {
+  const nowIso = '2026-08-22T10:05:00.000Z';
+
+  it('is recorded once article_body completes, so a finished request opens its article', async () => {
+    const store = memoryStore();
+    await seed(store);
+    const { bridge } = bridgeFor({
+      runId: 'run_1',
+      status: 'running',
+      updatedAt: nowIso,
+      nodes: [
+        { nodeId: 'draft_writer', status: 'completed' },
+        { nodeId: 'article_body', status: 'completed' },
+        { nodeId: 'publish_payload', status: 'running', lastDispatch: { dispatchedAt: nowIso } },
+      ],
+    });
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    const doc = await loadRequest(store, REQUEST_ID);
+    // The request id IS the content_item id, by the minting convention.
+    assert.deepEqual(doc?.object, { object_type: 'content_item', object_id: REQUEST_ID });
+    const index = await loadIndex(store);
+    assert.equal(index?.rows[0]?.object_id, REQUEST_ID, 'and the list row can link to it');
+  });
+
+  it('claims no object when the run says the shell was never created', async () => {
+    const store = memoryStore();
+    await seed(store);
+    const { bridge } = bridgeFor({
+      runId: 'run_1',
+      status: 'running',
+      updatedAt: nowIso,
+      nodes: [
+        { nodeId: 'artifact_plan', status: 'completed', warnings: ['content_item_shell_failed:create_failed'] },
+        { nodeId: 'article_body', status: 'completed' },
+      ],
+    });
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    // A link to an object that does not exist would be permanent — recordObject never overwrites.
+    assert.equal((await loadRequest(store, REQUEST_ID))?.object, undefined);
+  });
+
+  it('claims no object while article_body has not finished', async () => {
+    const store = memoryStore();
+    await seed(store);
+    const { bridge } = bridgeFor({
+      runId: 'run_1',
+      status: 'running',
+      updatedAt: nowIso,
+      nodes: [
+        { nodeId: 'article_body', status: 'failed', errors: ['output_validation_failed'] },
+        { nodeId: 'draft_writer', status: 'completed' },
+      ],
+    });
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    assert.equal((await loadRequest(store, REQUEST_ID))?.object, undefined);
+  });
+});

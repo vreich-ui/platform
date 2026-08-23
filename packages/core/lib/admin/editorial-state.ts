@@ -134,8 +134,9 @@ export function resolveReleaseAwareLifecycle(
 }
 
 /** Status-pill presentation for a `ReleaseAwareLifecycle`, including the unknown case. */
-export function releaseAwareLifecyclePresentation(
-  lifecycle: ReleaseAwareLifecycle
-): { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' } {
+export function releaseAwareLifecyclePresentation(lifecycle: ReleaseAwareLifecycle): {
+  label: string;
+  tone: 'neutral' | 'info' | 'success' | 'warning';
+} {
   return lifecycle === 'unknown' ? RELEASE_UNKNOWN_PRESENTATION : EDITORIAL_STATE_PRESENTATION[lifecycle];
 }

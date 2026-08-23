@@ -93,7 +93,11 @@ describe('reviewerAvailableActions — autonomous types (policy: no approval req
       policy: ALL_REQUIRE,
       requiresApprovalOverride: false,
     });
-    assert.equal(autonomousByOverride.requiresApproval, false, 'override frees Publish even though the policy is gated');
+    assert.equal(
+      autonomousByOverride.requiresApproval,
+      false,
+      'override frees Publish even though the policy is gated'
+    );
     assert.equal(autonomousByOverride.canPublish, true);
   });
 });

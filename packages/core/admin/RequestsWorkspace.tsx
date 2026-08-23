@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Badge, Button, Card, EmptyState, Skeleton, StatusPill } from './primitives';
+import { RequestActivity } from './RequestActivity';
 import { Input, Select } from './forms';
 import { useToast } from './overlays';
 import { IconAlertTriangle, IconExternalLink, IconSparkles } from './icons';
@@ -355,6 +356,17 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
 
         {error ? <p className="mb-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{error}</p> : null}
 
+        {/* W19: on a single request, the full node timeline is the page — an
+            editor who opened THIS request wants the detail, not a summary. */}
+        {selectedId ? (
+          <div className="mb-3">
+            <RequestActivity
+              requestId={selectedId}
+              defaultExpanded
+              onSettled={() => void load(generationRef.current)}
+            />
+          </div>
+        ) : null}
         {rows === null ? (
           <Skeleton variant="rect" height={160} />
         ) : visible.length === 0 ? (

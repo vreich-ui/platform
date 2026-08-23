@@ -520,6 +520,30 @@ export const setStatus = async (
 };
 
 /**
+ * Record the object a workflow produced. WRITER: the sweeper, when it first
+ * sees the run name a `content_item`.
+ *
+ * Without this the Requests list can show a finished article but not open it —
+ * `object_id` was in the schema and the row projection from day one, and
+ * nothing ever set it. Idempotent, and never overwrites an object already
+ * recorded: the first one a run produced is the one the request is about.
+ */
+export const recordObject = async (
+  store: EditorialRequestStore,
+  requestId: string,
+  object: { object_type: string; object_id: string },
+  at: string = nowIso()
+): Promise<EditorialRequest | undefined> => {
+  const doc = await loadRequest(store, requestId);
+  if (!doc) return undefined;
+  if (doc.object) return doc;
+  doc.object = object;
+  doc.updated_at = at;
+  appendHistory(doc, at, doc.status, `produced ${object.object_id}`);
+  return commitRequest(store, doc, at);
+};
+
+/**
  * Chat attach. WRITER: the chat send path, when a chat first references a
  * request (T19.5). A chat_id already attached is a no-op returning the
  * current doc — attach is idempotent by design, since every send re-asserts

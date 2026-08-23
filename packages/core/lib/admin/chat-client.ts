@@ -79,7 +79,18 @@ export interface ChatSummaryView {
   agent?: AgentView;
 }
 
+/** W19 T19.5: the editorial request this conversation is about, resolved server-side on the first poll. */
+export interface ChatRequestBindingView {
+  request_id: string;
+  title: string;
+  status: string;
+  status_reason?: string;
+  object_id?: string;
+}
+
 export interface ChatView extends ChatSummaryView {
+  /** Present only on the first poll of a session (since_seq 0) — the client holds it thereafter. */
+  request?: ChatRequestBindingView;
   seq: number;
   events: ChatEventView[];
   pending?: PendingView;
@@ -117,8 +128,13 @@ export const createFreeChat = (getToken: GetToken, title?: string) =>
 export const listChats = (getToken: GetToken, includeAll = false) =>
   post<{ chats: ChatSummaryView[] }>(getToken, { action: 'list_chats', ...(includeAll ? { include_all: true } : {}) });
 
-export const getChat = (getToken: GetToken, chatId: string, sinceSeq?: number) =>
-  post<ChatView>(getToken, { action: 'get_chat', chat_id: chatId, ...(sinceSeq ? { since_seq: sinceSeq } : {}) });
+export const getChat = (getToken: GetToken, chatId: string, sinceSeq?: number, wantRequest?: boolean) =>
+  post<ChatView>(getToken, {
+    action: 'get_chat',
+    chat_id: chatId,
+    ...(sinceSeq ? { since_seq: sinceSeq } : {}),
+    ...(wantRequest ? { want_request: true } : {}),
+  });
 
 export const sendChatMessage = (getToken: GetToken, chatId: string, text: string, focus?: string) =>
   post<{ chat_id: string; run_id: string }>(getToken, {

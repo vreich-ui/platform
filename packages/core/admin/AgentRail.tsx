@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { EmptyState } from './primitives';
 import { ChatComposer, ChatThread, type UseChatState } from './chat';
+import { RequestActivity } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
 
 export function AgentRail({
@@ -42,6 +43,13 @@ export function AgentRail({
           Working on {focus}
         </p>
       </header>
+      {/* W19: what the job is doing, above the transcript. Collapsed to one
+          live line until the editor asks for the detail. */}
+      {chat.request ? (
+        <div className="shrink-0 pt-3">
+          <RequestActivity requestId={chat.request.request_id} />
+        </div>
+      ) : null}
       <ChatThread
         events={chat.events}
         status={chat.status}

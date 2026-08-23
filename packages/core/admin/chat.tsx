@@ -12,7 +12,7 @@ import { Markdown } from './Markdown';
 import { Textarea } from './forms';
 import { useToast } from './overlays';
 import { ControlsCard } from './ControlsCard';
-import { IconAlertTriangle, IconCheck, IconRobot, IconSend, IconX } from './icons';
+import { IconAlertTriangle, IconCheck, IconInfo, IconRobot, IconSend, IconX } from './icons';
 import {
   approveTool,
   cancelChatRun,
@@ -25,12 +25,14 @@ import {
   type AgentView,
   type ChatEventView,
   type ChatStatus,
+  type ChatRequestBindingView,
   type ChatView,
   type PendingView,
 } from '@core/lib/admin/chat-client';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import { groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
+import { DENIED_SEVERITY, classifyToolResult, type Severity } from '@core/lib/admin/activity-severity';
 import { createApprovalClaim } from '@core/lib/admin/object-context-actions';
 import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/chat-quote';
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
@@ -44,6 +46,8 @@ export interface UseChatState {
   candidateSet: CandidateSetView | undefined;
   previewCandidate: CandidateOptionView | undefined;
   agent: AgentView | undefined;
+  /** W19 T19.5: the editorial request this conversation is about, once the server has resolved it. */
+  request: ChatRequestBindingView | undefined;
   error: string | undefined;
   busy: boolean;
   send: (text: string, focus?: string) => Promise<void>;
@@ -90,6 +94,9 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const [candidateSet, setCandidateSet] = useState<CandidateSetView | undefined>(undefined);
   const [previewCandidateId, setPreviewCandidateId] = useState<string | undefined>(undefined);
   const [agent, setAgent] = useState<AgentView | undefined>(undefined);
+  const [request, setRequest] = useState<ChatRequestBindingView | undefined>(undefined);
+  /** Read inside `poll`'s closure, which must not re-create on every binding change. */
+  const requestRef = useRef<ChatRequestBindingView | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [writeStamp, setWriteStamp] = useState(0);
@@ -113,6 +120,11 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
         : undefined
     );
     if (view.agent) setAgent(view.agent);
+    // Sent on the first poll only; keep it for the rest of the session.
+    if (view.request) {
+      requestRef.current = view.request;
+      setRequest(view.request);
+    }
     if (view.events.length > 0) {
       seqRef.current = Math.max(seqRef.current, ...view.events.map((event) => event.seq));
       setEvents((prior) => [...prior, ...view.events.filter((event) => !prior.some((p) => p.seq === event.seq))]);
@@ -130,7 +142,9 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const poll = useCallback(async () => {
     if (!chatId || !liveRef.current) return;
     try {
-      const view = await getChat(getToken, chatId, seqRef.current);
+      // Keep asking for the request binding until we have one: the job is
+      // registered mid-run, after this chat's first poll.
+      const view = await getChat(getToken, chatId, seqRef.current, !requestRef.current);
       if (!liveRef.current) return;
       ingest(view);
       setError(undefined);
@@ -150,6 +164,8 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     setPending(undefined);
     setCandidateSet(undefined);
     setPreviewCandidateId(undefined);
+    setRequest(undefined);
+    requestRef.current = undefined;
     claimRef.current = createApprovalClaim();
     if (chatId) void poll();
     return () => {
@@ -215,6 +231,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     candidateSet,
     previewCandidate: candidateSet?.candidates.find((candidate) => candidate.candidate_id === previewCandidateId),
     agent,
+    request,
     error,
     busy,
     writeStamp,
@@ -468,18 +485,80 @@ function JsonDisclosure({ label, value }: { label: string; value: unknown }) {
   );
 }
 
+/**
+ * W19 F1: a run that ends now SAYS SO.
+ *
+ * This event rendered as `null`, so a run that completed, one that failed and
+ * one that simply exhausted its turn budget all left the transcript
+ * byte-identical — the editor watched a pulsing dot disappear and had no way
+ * to tell success from silence. The `caps` case is the one that mattered most
+ * and read worst: for a long article it is the NORMAL ending of a turn, and it
+ * does not mean the job stopped.
+ */
+function RunFinishedLine({ event }: { event: ChatEventView }) {
+  // `reason` is the loop's own vocabulary (agent/loop.ts): `caps` and
+  // `wall_clock` both mean the TURN ran out of budget — never that the job
+  // did. `end_turn` is the agent finishing what it was asked.
+  const reason = String(event.detail?.reason ?? 'end_turn');
+  const budgetSpent = reason === 'caps' || reason === 'wall_clock';
+  const text = budgetSpent
+    ? "I paused this turn — anything already running keeps going without me, and I'll pick it up from here."
+    : 'Done for now.';
+  return <p className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{text}</p>;
+}
+
+/**
+ * W19 (Wolf, 2026-08-22): red is for a step that actually died.
+ *
+ * This card used to paint EVERY `is_error` tool result red and label it
+ * "<tool> failed" — including a publish refused because the readiness
+ * checklist said `no_go`, which is the guardrail doing its job. Wolf's words
+ * on seeing it: *"the cross is given to proper agent behaviour, it should be a
+ * warning in this case, nothing is broken and it continues."* Classification
+ * now comes from `lib/admin/activity-severity.ts`, shared with the request
+ * activity view so the two surfaces can never disagree about what red means.
+ */
 export function ToolCallCard({ event }: { event: ChatEventView }) {
   const isError = Boolean(event.detail?.is_error);
   const summary = toolLabel(event);
   const denied = event.type === 'tool_denied';
   const approved = event.type === 'tool_approved';
-  const icon = denied || isError ? <IconX size={14} /> : approved ? <IconCheck size={14} /> : <IconCheck size={14} />;
-  const tone = denied || isError ? 'text-[var(--adm-danger)]' : 'text-[var(--adm-success)]';
+
+  const classified =
+    event.type === 'tool_result'
+      ? classifyToolResult({
+          tool: String(event.detail?.tool ?? 'tool'),
+          isError,
+          output: event.detail?.output,
+        })
+      : undefined;
+  // Declining a proposed write is a normal outcome of the approval protocol,
+  // not an error — it has always rendered as a red ✗ too.
+  const severity: Severity = classified?.severity ?? (denied ? DENIED_SEVERITY : 'ok');
+
+  const icon =
+    severity === 'failure' ? (
+      <IconX size={14} />
+    ) : severity === 'attention' ? (
+      <IconAlertTriangle size={14} />
+    ) : severity === 'notice' ? (
+      <IconInfo size={14} />
+    ) : (
+      <IconCheck size={14} />
+    );
+  const tone =
+    severity === 'failure'
+      ? 'text-[var(--adm-danger)]'
+      : severity === 'attention'
+        ? 'text-[var(--adm-warning-text)]'
+        : severity === 'notice'
+          ? 'text-[var(--adm-text-muted)]'
+          : 'text-[var(--adm-success)]';
   const label =
     event.type === 'tool_call'
       ? summary
       : event.type === 'tool_result'
-        ? `${String(event.detail?.tool ?? 'tool')} ${isError ? 'failed' : 'finished'}`
+        ? (classified?.label ?? summary)
         : denied
           ? `Declined by ${String(event.detail?.by ?? 'the human')}`
           : approved
@@ -503,6 +582,9 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
         <span className={tone}>{icon}</span>
         <span className="truncate">{label}</span>
       </div>
+      {classified?.detail ? (
+        <p className="pl-6 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{classified.detail}</p>
+      ) : null}
       {rawOutput ? <JsonDisclosure label="Raw workspace output" value={parsedOutput} /> : null}
     </div>
   );
@@ -889,7 +971,7 @@ export function ChatThread({
             />
           );
         }
-        if (event.type === 'run_finished') return null;
+        if (event.type === 'run_finished') return <RunFinishedLine key={event.seq} event={event} />;
         if (event.type === 'run_error') {
           return (
             <p key={event.seq} className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">

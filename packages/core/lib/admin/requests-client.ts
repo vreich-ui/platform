@@ -149,3 +149,129 @@ export const requestStatusLabel = (status: RequestStatus): string =>
     cancelled: 'Cancelled',
     archived: 'Archived',
   })[status];
+
+// ─── W19: the live watch path (admin-request-activity) ───────────────────────
+
+const ACTIVITY_ENDPOINT = '/.netlify/functions/admin-request-activity';
+
+export type ActivitySeverity = 'failure' | 'attention' | 'notice' | 'ok';
+
+export interface ActivityToolCallView {
+  id: string;
+  status: string;
+  severity: ActivitySeverity;
+  duration_ms?: number;
+  error_code?: string;
+}
+
+export interface ActivityNodeView {
+  id: string;
+  label: string;
+  status: string;
+  severity: ActivitySeverity;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  typical_ms?: number;
+  overrunning?: boolean;
+  produces?: string;
+  skip_reason?: string;
+  warnings: Array<{ severity: ActivitySeverity; label: string; raw: string }>;
+  errors: string[];
+  tools: ActivityToolCallView[];
+  cost?: { tokens: number; usd: number };
+}
+
+export interface ActivityView {
+  run_id: string;
+  status: string;
+  /** Narrowed on purpose: the placeholder badge compares against 'mock', and a silent rename must break the build, not the warning. */
+  execution_mode?: 'mock' | 'openai';
+  live_output?: boolean;
+  severity: ActivitySeverity;
+  headline: string;
+  progress: { done: number; total: number; failed: number; running: number; skipped: number };
+  eta?: { p50_ms: number; p95_ms: number; based_on_runs: number };
+  cost?: { input_tokens: number; output_tokens: number; usd: number; most_expensive_node?: string };
+  recovery?: { strategy: string; node_id?: string; sentence: string; reusable_stages: number };
+  approvals: Array<{ node_id: string; reason: string; requested_at?: string }>;
+  nodes: ActivityNodeView[];
+}
+
+export interface ActivityResponse {
+  activity: ActivityView | null;
+  title?: string;
+  /** Why there is nothing to show: `no_workflow_run`, `cms_agent_unavailable`, or a read failure code. */
+  reason?: string;
+  /**
+   * How long the client should wait before asking again, decided SERVER-side
+   * because only the server knows whether a request without a run yet is one
+   * that is about to start or one that will never have one. Absent means "stop".
+   */
+  retry_ms?: number;
+}
+
+export const getRequestActivity = async (
+  getToken: GetToken,
+  target: { request_id?: string; run_id?: string }
+): Promise<ActivityResponse> => {
+  const token = await getToken();
+  const res = await fetch(ACTIVITY_ENDPOINT, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(target),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  return json as unknown as ActivityResponse;
+};
+
+/**
+ * The watch cadence. Fast while a node can move under us; a terminal run is
+ * polled once more and then left alone — an editor rereading a finished run
+ * must not keep a poll alive.
+ *
+ * Takes the whole RESPONSE, not just the activity: a null activity can mean
+ * three different things and they need three different answers. "The bridge
+ * blinked" must not permanently freeze the live view of a still-running
+ * article, and "no run yet" must not freeze one that is about to start — the
+ * server says which via `retry_ms`.
+ */
+export const activityPollIntervalFor = (response: ActivityResponse | null): number | undefined => {
+  if (!response) return undefined;
+  if (!response.activity) return response.retry_ms;
+  const { status } = response.activity;
+  if (status === 'running' || status === 'queued') return 3_000;
+  if (status === 'blocked' || status === 'paused') return 15_000;
+  return undefined;
+};
+
+/** "2m 14s", "48s", "3h 20m" — durations an editor reads, not milliseconds. */
+export const formatDuration = (ms: number): string => {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+};
+
+/** "~2 min left", and nothing at all when there is no history to base it on. */
+export const formatEta = (eta: ActivityView['eta']): string | undefined => {
+  if (!eta || eta.p50_ms <= 0) return undefined;
+  return `~${formatDuration(eta.p50_ms)} left`;
+};
+
+/**
+ * Tool-call durations, where sub-second resolution is the entire point —
+ * `formatDuration` rounds a 530 ms fetch to "1s" and a 200 ms one to "0s".
+ */
+export const formatShortDuration = (ms: number): string => {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  return formatDuration(ms);
+};
+
+export const formatUsd = (usd: number): string => (usd >= 0.01 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(3)}`);
