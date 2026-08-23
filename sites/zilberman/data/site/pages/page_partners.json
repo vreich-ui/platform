@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-23T16:56:44.882Z",
+    "at": "2026-08-23T18:02:54.563Z",
     "from": "objects/page/by-id/page_partners.json",
-    "record_version": 34
+    "record_version": 40
   },
   "pageType": "clone",
   "route": "/partners",
@@ -18,7 +18,7 @@
     {
       "data": {
         "actions": [],
-        "body": "<p>The Zilberman Foundation is excited to be supporting Young Vic Theatre in the heart of Lambeth and Southwark, and in particular the work Young Vic is doing in young community engagement and young talent development. The Young Vic’s local communities in Southwark and Lambeth are our greatest stakeholders. They are the people we invite to see our work; they are our source of inspiration and the people who give us our unique identity. Taking Part’s activity engages 15,000 participants annually and we give out over 5,000 free tickets to young people and people in our communities who may not usually attend. Taking Part includes three programme strands:0102LearningParticipationSchools, university and college-based projects. Each year, we work with 15 local schools to deliver various creative projects and workshops with young people aged 11-25. We are also at the tail end of our two year flagship schools project INNOVATE, aiming to create a model that brings cultural learning into the wider curriculum with Royal Holloway.Workshops, productions and programming for young people aged 14-25 years. This includes our Young Associates programme offering 4 aspiring theatre-makers (aged 16 -25) a 9-month placement at the YV. 03Neighbourhood TheatreWriting, movement and acting programming for 25+ years. Includes our Neighbourhood Theatre Company, consisting of people from our local community who stage one key production a year at YV, and Neighbourhood Play performance programme for those aged 55+.</p>",
+        "body": "<p>The Zilberman Foundation is excited to be supporting Old Vic Theatre in the heart of Lambeth and Southwark, and in particular the work Young Vic is doing in young community engagement and young talent development. The Young Vic’s local communities in Southwark and Lambeth are our greatest stakeholders. They are the people we invite to see our work; they are our source of inspiration and the people who give us our unique identity. Taking Part’s activity engages 15,000 participants annually and we give out over 5,000 free tickets to young people and people in our communities who may not usually attend. Taking Part includes three programme strands:0102LearningParticipationSchools, university and college-based projects. Each year, we work with 15 local schools to deliver various creative projects and workshops with young people aged 11-25. We are also at the tail end of our two year flagship schools project INNOVATE, aiming to create a model that brings cultural learning into the wider curriculum with Royal Holloway.Workshops, productions and programming for young people aged 14-25 years. This includes our Young Associates programme offering 4 aspiring theatre-makers (aged 16 -25) a 9-month placement at the YV. 03Neighbourhood TheatreWriting, movement and acting programming for 25+ years. Includes our Neighbourhood Theatre Company, consisting of people from our local community who stage one key production a year at YV, and Neighbourhood Play performance programme for those aged 55+.</p>",
         "heading": "Learning",
         "images": [
           {
