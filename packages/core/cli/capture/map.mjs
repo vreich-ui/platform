@@ -732,6 +732,62 @@ function assetSectionPlan(context, images) {
   };
 }
 
+// ─── T12.30 gallery splitting ────────────────────────────────────────────────
+//
+// A source gallery larger than its section's capacity used to be TRUNCATED to the cap, with the
+// remainder recorded as `media_gallery_exceeds_section_capacity` — a gap whose own text proposed
+// the answer: "a paginated or multi-section gallery placement". On the Zilberman filmography that
+// silently dropped most of the images.
+//
+// One source gallery is not one section by necessity; it is one section by assumption. Breaking it
+// into consecutive sections is both what the schema allows and, as Wolf put it, usually the logical
+// reading of the page.
+//
+// Split ONLY pure galleries. `content_split` carries copy beside its images, so splitting it would
+// duplicate the body text across every part; `portrait` is one image by definition. `media` and
+// `brand_row` carry images and an optional heading, and nothing else — those divide cleanly.
+const SPLITTABLE_ASSET_TARGETS = new Set(['items', 'logos']);
+
+/**
+ * Divide EVENLY rather than greedily. Greedy chunking of 9 images at a cap of 8 yields 8 + 1 — a
+ * second "gallery" containing a single picture, which looks like a mistake on the page and, for
+ * `brand_row`, is actually invalid (its floor is 2 logos). Even division yields 5 + 4.
+ */
+function splitOversizedGallery(result) {
+  const planned = result.assetPlan;
+  if (!planned || !SPLITTABLE_ASSET_TARGETS.has(planned.target)) return [result];
+  const bounds = ASSET_FIELD_BOUNDS[planned.target];
+  const entries = planned.entries ?? [];
+  if (!bounds || entries.length <= bounds.max) return [result];
+
+  const partCount = Math.ceil(entries.length / bounds.max);
+  const perPart = Math.ceil(entries.length / partCount);
+  const parts = [];
+  for (let index = 0; index < entries.length; index += perPart) parts.push(entries.slice(index, index + perPart));
+  // Any part below the field's floor means this shape cannot be divided legally; keep the single
+  // capped section and let the residue gap report the overflow, exactly as before.
+  if (parts.some((part) => part.length < bounds.min)) return [result];
+
+  return parts.map((part, index) => {
+    // The heading belongs to the gallery, not to each of its parts. Repeating it reads as several
+    // different galleries that happen to share a title.
+    const { heading, ...rest } = result.data ?? {};
+    const data = index === 0 ? { ...result.data } : { ...rest };
+    // Layout describes THIS part's item count, not the original total.
+    if (planned.target === 'items' && 'layout' in data) {
+      data.layout = part.length === 1 ? 'single' : part.length === 2 ? 'strip' : 'grid';
+    }
+    return {
+      ...result,
+      data,
+      assetPlan: { ...planned, entries: part },
+      reason: `${result.reason}; part ${index + 1} of ${parts.length} of a ${entries.length}-image source gallery`,
+      splitPart: index,
+      splitTotal: parts.length,
+    };
+  });
+}
+
 function classifyBlock(context, forcedType) {
   const { page, block, headings, actions, isFirst, images, mediaRetentionAllowed } = context;
   const allowedSections = context.allowedSections ?? 'any';
@@ -1000,8 +1056,18 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       continue;
     }
 
-    const sectionId = `s_${hash(block.id, 10)}`;
-    const candidateId = `candidate_${hash(`${block.id}:${result.type}`)}`;
+    // T12.30: one block can now yield several sections when its gallery exceeds a single section's
+    // capacity. The single-section case returns a one-element list, so nothing else changes.
+    const parts = splitOversizedGallery(result);
+    // Block accounting is per SOURCE BLOCK, so a split gallery is still one accounted block and is
+    // represented by its first part.
+    let primaryCandidateId = null;
+    for (const result of parts) {
+    // Part 0 keeps the block's original ids so an unsplit gallery — and the first part of a split
+    // one — stay stable across runs; only the additional parts mint new ones.
+    const splitSuffix = result.splitPart ? `#${result.splitPart}` : '';
+    const sectionId = `s_${hash(`${block.id}${splitSuffix}`, 10)}`;
+    const candidateId = `candidate_${hash(`${block.id}${splitSuffix}:${result.type}`)}`;
     const candidate = {
       candidateId,
       sectionType: result.type,
@@ -1035,7 +1101,13 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       },
     };
     candidates.push(candidate);
-    const secondaryGap = assetResidueGap(result, bindings, images, actions);
+    primaryCandidateId ??= candidateId;
+    }
+    // Residue is judged against a part, not against the pre-split whole: once a gallery is divided
+    // every part is inside its field's capacity, so there is no overflow left to report. The other
+    // residues this checks — unlabelled images, actions a type cannot carry — are properties of the
+    // block and are unchanged by the division.
+    const secondaryGap = assetResidueGap(parts[0], bindings, images, actions);
     if (secondaryGap) {
       const gap = {
         gapId: `gap_${hash(`${block.id}:${secondaryGap.code}`)}`,
@@ -1049,11 +1121,11 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       reconciled.account.set(block.id, {
         blockRef: block.id,
         status: 'mapped_with_gap',
-        candidateId,
+        candidateId: primaryCandidateId,
         gapId: gap.gapId,
       });
     } else {
-      reconciled.account.set(block.id, { blockRef: block.id, status: 'mapped', candidateId });
+      reconciled.account.set(block.id, { blockRef: block.id, status: 'mapped', candidateId: primaryCandidateId });
     }
   }
 
