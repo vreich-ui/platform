@@ -1,48 +1,117 @@
 {
   "__generated": {
-    "at": "2026-08-15T11:18:31.573Z",
+    "at": "2026-08-23T16:56:44.882Z",
     "from": "objects/page/by-id/page_partners.json",
-    "record_version": 5
+    "record_version": 34
   },
-  "pageType": "standard",
+  "pageType": "clone",
   "route": "/partners",
   "sections": [
     {
       "data": {
         "actions": [],
-        "body": "<p>The Zilberman Foundation is excited to be supporting Young Vic Theatre in the heart of Lambeth and Southwark, and in particular the work Young Vic is doing in young community engagement and young talent development.</p>",
-        "heading": "Our Partners"
+        "heading": "OUR PARTNERS"
       },
-      "id": "s_partnerslede",
+      "id": "s_b58bb35d3b",
       "type": "lede"
     },
     {
       "data": {
-        "body": "<h2>Young Vic — Taking Part</h2><p>The Young Vic's local communities in Southwark and Lambeth are our greatest stakeholders. They are the people we invite to see our work; they are our source of inspiration and the people who give us our unique identity. Taking Part's activity engages 15,000 participants annually and we give out over 5,000 free tickets to young people and people in our communities who may not usually attend. Taking Part includes three programme strands:</p><h3>01 — Learning</h3><p>Schools, university and college-based projects. Each year, we work with 15 local schools to deliver various creative projects and workshops with young people aged 11-25. We are also at the tail end of our two year flagship schools project INNOVATE, aiming to create a model that brings cultural learning into the wider curriculum with Royal Holloway.</p><h3>02 — Participation</h3><p>Workshops, productions and programming for young people aged 14-25 years. This includes our Young Associates programme offering 4 aspiring theatre-makers (aged 16-25) a 9-month placement at the YV.</p><h3>03 — Neighbourhood Theatre</h3><p>Writing, movement and acting programming for 25+ years. Includes our Neighbourhood Theatre Company, consisting of people from our local community who stage one key production a year at YV, and Neighbourhood Play performance programme for those aged 55+.</p>"
+        "actions": [],
+        "body": "<p>The Zilberman Foundation is excited to be supporting Young Vic Theatre in the heart of Lambeth and Southwark, and in particular the work Young Vic is doing in young community engagement and young talent development. The Young Vic’s local communities in Southwark and Lambeth are our greatest stakeholders. They are the people we invite to see our work; they are our source of inspiration and the people who give us our unique identity. Taking Part’s activity engages 15,000 participants annually and we give out over 5,000 free tickets to young people and people in our communities who may not usually attend. Taking Part includes three programme strands:0102LearningParticipationSchools, university and college-based projects. Each year, we work with 15 local schools to deliver various creative projects and workshops with young people aged 11-25. We are also at the tail end of our two year flagship schools project INNOVATE, aiming to create a model that brings cultural learning into the wider curriculum with Royal Holloway.Workshops, productions and programming for young people aged 14-25 years. This includes our Young Associates programme offering 4 aspiring theatre-makers (aged 16 -25) a 9-month placement at the YV. 03Neighbourhood TheatreWriting, movement and acting programming for 25+ years. Includes our Neighbourhood Theatre Company, consisting of people from our local community who stage one key production a year at YV, and Neighbourhood Play performance programme for those aged 55+.</p>",
+        "heading": "Learning",
+        "images": [
+          {
+            "alt": "Audience In Theater",
+            "src": "/img/req_capture_zilberman_20260823_03/c4bb924a319a75064c8af12fd97e51401f2a02bd81028accc1405908b5e7b1d6.jpg"
+          },
+          {
+            "alt": "Young Vic logo",
+            "src": "/img/req_capture_zilberman_20260823_03/d60a243b27614aae425b290a312a315c056fb58bd987683af98279055c4fc699.png"
+          }
+        ]
       },
-      "id": "s_youngvic",
-      "type": "prose"
+      "id": "s_d4aa65c59e",
+      "type": "content_split"
     },
     {
       "data": {
-        "body": "<h2>Prince William BAFTA Bursary Fund</h2><p>Support to junior film makers — the Prince William BAFTA Bursary Fund. The Fund supports career starters in film, games and television who are facing significant barriers to pursuing their career due to their financial situation.</p><p><a href=\"https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx\">Download Press Release</a></p>"
+        "blocks": [
+          {
+            "body": "<p>Support to junior film makers - the Prince William BAFTA Bursary Fund. The Fund supports career starters in film, games and television who are facing significant barriers to pursuing their career due to their financial situation.</p>",
+            "kind": "text"
+          },
+          {
+            "imageIndex": 0,
+            "kind": "image"
+          },
+          {
+            "actions": [
+              {
+                "label": "Download Press Release",
+                "style": "primary",
+                "target": {
+                  "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx",
+                  "kind": "route"
+                }
+              }
+            ],
+            "kind": "actions"
+          }
+        ],
+        "images": [
+          {
+            "alt": "Bafta_edited_edited.jpg",
+            "src": "/img/req_capture_zilberman_20260823_03/85d45f96e2fb7ec2c5a70a65279707aead069f088d7146f3895b62ae404139f5.jpg"
+          }
+        ]
       },
-      "id": "s_bafta",
-      "type": "prose"
+      "id": "s_d1299808a0",
+      "type": "composition"
     },
     {
       "data": {
-        "body": "<h2>Donmar Warehouse</h2><p>Donmar Warehouse is a 251-seat theatre in the heart of Covent Garden. The theatre produces a rich variety of theatre from classics to new plays that feel relevant to the world today, engaging audiences of the future and inspiring young people through education work.</p><p>The Zilberman Foundation is proud to support the Donmar's participation programme, Donmar LOCAL. The programme engages over 5,500 young people each year, offering them opportunities for creative discovery, bringing them together to celebrate stories and new voices through theatre experiences. The programme aims to develop the audiences, theatre-makers, and workforce of the future through partnerships with school and community groups across Camden and Westminster.</p>"
+        "blocks": [
+          {
+            "body": "<p>Donmar Warehouse is a 251-seat theatre in the heart of Covent Garden. The theatre produces a rich variety of theatre from classics to new plays that feel relevant to the world today, engaging audiences of the future and inspiring young people through education work. ​ The Zilberman Foundation is proud to support the Donmar&#39;s participation programme, Donmar LOCAL. The programme engages over 5,500 young people each year, offering them opportunities for creative discovery, bringing them together to celebrate stories and new voices through theatre experiences. The programme aims to develop the audiences, theatre-makers, and workforce of the future through partnerships with school and community groups across Camden and Westminster</p>",
+            "kind": "text"
+          },
+          {
+            "imageIndex": 0,
+            "kind": "image"
+          }
+        ],
+        "images": [
+          {
+            "alt": "donmar logo",
+            "src": "/img/req_capture_zilberman_20260823_03/be5c2ef3fcf9b7484301f0b2f7a4dcc6daf44ad29777f381ce732ab913675593.png"
+          }
+        ]
       },
-      "id": "s_donmar",
-      "type": "prose"
+      "id": "s_507276e77f",
+      "type": "composition"
     },
     {
       "data": {
-        "body": "<h2>Les 7 Parnassiens</h2><p>Sept Parnassiens is an independent art house cinema located in Paris' Montparnasse district, in the 14th arrondissement of Paris. The cinema program is dedicated to films in the original language, as well as to numerous international festivals during the year. Les 7 Parnassiens are part of the Multiciné group family business, alongside Le Lincoln and les Cinq Caumartin.</p><p>Les 7 Parnassiens was founded in 1978 by French cinema operator and film producer Boris Gourevitch. Today, his great-grand-sons Louis and Sammy, carry the torch. Boris Gourevitch was born in St Petersburg in 1897. In 1917, the family moved to Italy, and later to France.</p><p>Boris Gourevitch first started operating cinemas in Paris in the 1930's. Boris moved his family to the United States during World War II, to return after the liberation of Paris. His main contributions to cinema occurred in the 1960's and 70's. First, he invented \"multi-plex\", or multi-screen cinemas. His multi-plex brought auteur cinema and repertoire films to Paris' Latin Quarter. Second, as a man of many cultures and a flair for good cinema, Boris Gourevitch introduced the French public to many forms of international cinema. He was the first to release in France Italian directors Dino Risi and Pasolini. He also introduced the French public to Russian films, at a time when the West did not know Tarkovski, Konchalovskii, or Georgian cinema. The last film Boris Gourevitch produced, Romy Schneider's \"The Lady Banker\", was released shortly after his death in 1980.</p>"
+        "blocks": [
+          {
+            "body": "<p>Sept Parnassiens is an independent art house cinema located in Paris&#39; Montparnasse district, in the 14th arrondissement of Paris. The cinema program is dedicated to films in the original language, as well as to numerous international festivals during the year. Les 7 Parnassiens are part of the Multiciné group family business, alongside Le Lincoln and les Cinq Caumartin. Les 7 Parnassiens was founded in 1978 by French cinema operator and film producer Boris Gourevitch. Today, his great-grand-sons Louis and Sammy, carry the torch. Boris Gourevitch was born in St Petersburg in 1897. In 1917, the family moved to Italy, and later to France. Boris Gourevitch first started operating cinemas in Paris in the 1930’s. Boris moved his family to the United States during World War II, to return after the liberation of Paris. His main contributions to cinema occurred in the 1960’s and 70’s. First, he invented “multi-plex”, or multi-screen cinemas. His multi-plex brought auteur cinema and repertoire films to Paris’ Latin Quarter. Second, as a man of many cultures and a flair for good cinema, Boris Gourevitch introduced the French public to many forms of international cinema. He was the first to release in France Italian directors Dino Risi and Pasolini. He also introduced the French public to Russian films, at a time when the West did not know Tarkovski, Konchalovskii, or Georgian cinema. The last film Boris Gourevitch produced, Romy Schneider’s “The Lady Banker”, was released shortly after his death in 1980.</p>",
+            "kind": "text"
+          },
+          {
+            "imageIndex": 0,
+            "kind": "image"
+          }
+        ],
+        "images": [
+          {
+            "alt": "7 Parnassiens",
+            "src": "/img/req_capture_zilberman_20260823_03/5cc5ac9a98d1b47a6ec037a7af5628377447f29379c622e6a541fe7ba9434066.jpg"
+          }
+        ]
       },
-      "id": "s_parnassiens",
-      "type": "prose"
+      "id": "s_7e41481581",
+      "type": "composition"
     }
   ],
   "seo": {
@@ -52,5 +121,5 @@
       "index": true
     }
   },
-  "title": "Our Partners"
+  "title": "OUR PARTNERS"
 }
