@@ -29,17 +29,29 @@
         "sections": [
           {
             "id": "s_31b26f5390",
-            "type": "cta_banner",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:163 chars]</p>",
-              "actions": [
+              "blocks": [
                 {
-                  "label": "[redacted:8 chars]",
-                  "target": {
-                    "kind": "route",
-                    "href": "/s-projects-side-by-side"
-                  },
-                  "style": "primary"
+                  "kind": "text",
+                  "body": "<p>[redacted:163 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:8 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/s-projects-side-by-side"
+                      },
+                      "style": "primary"
+                    }
+                  ]
                 }
               ]
             }
@@ -53,17 +65,29 @@
           },
           {
             "id": "s_1c4da9d983",
-            "type": "cta_banner",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:577 chars]</p>",
-              "actions": [
+              "blocks": [
                 {
-                  "label": "[redacted:11 chars]",
-                  "target": {
-                    "kind": "route",
-                    "href": "/filmography"
-                  },
-                  "style": "primary"
+                  "kind": "text",
+                  "body": "<p>[redacted:577 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:11 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/filmography"
+                      },
+                      "style": "primary"
+                    }
+                  ]
                 }
               ]
             }
@@ -77,61 +101,188 @@
           },
           {
             "id": "s_e15bfa9414",
-            "type": "prose",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:615 chars]</p>"
+              "blocks": [
+                {
+                  "kind": "text",
+                  "body": "<p>[redacted:615 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                }
+              ]
             }
           },
           {
             "id": "s_244ef90d50",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "grid"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 2
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 3
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:10 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/partners"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           },
           {
             "id": "s_8c8b1b8196",
-            "type": "brand_row",
-            "data": {}
+            "type": "composition",
+            "data": {
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 2
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 3
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 4
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 5
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 6
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 7
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:8 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/s-projects-side-by-side"
+                      },
+                      "style": "primary"
+                    },
+                    {
+                      "label": "[redacted:11 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/filmography"
+                      },
+                      "style": "link"
+                    },
+                    {
+                      "label": "[redacted:10 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/partners"
+                      },
+                      "style": "link"
+                    }
+                  ]
+                }
+              ]
+            }
           }
         ]
       },
       "candidates": [
         {
-          "candidateId": "candidate_ee73efbf964d",
-          "sectionType": "cta_banner",
+          "candidateId": "candidate_9c7ee98273bb",
+          "sectionType": "composition",
           "data": {
-            "body": "<p>[redacted:163 chars]</p>",
-            "actions": [
+            "blocks": [
               {
-                "label": "[redacted:8 chars]",
-                "target": {
-                  "kind": "route",
-                  "href": "/s-projects-side-by-side"
-                },
-                "style": "primary"
+                "kind": "text",
+                "body": "<p>[redacted:163 chars]</p>"
+              },
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:8 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/s-projects-side-by-side"
+                    },
+                    "style": "primary"
+                  }
+                ]
               }
             ]
           },
           "section": {
             "id": "s_31b26f5390",
-            "type": "cta_banner",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:163 chars]</p>",
-              "actions": [
+              "blocks": [
                 {
-                  "label": "[redacted:8 chars]",
-                  "target": {
-                    "kind": "route",
-                    "href": "/s-projects-side-by-side"
-                  },
-                  "style": "primary"
+                  "kind": "text",
+                  "body": "<p>[redacted:163 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:8 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/s-projects-side-by-side"
+                      },
+                      "style": "primary"
+                    }
+                  ]
                 }
               ]
             }
           },
           "confidence": 0.77,
-          "mappingReason": "compact call-to-action block",
+          "mappingReason": "compact call-to-action block; re-typed from cta_banner to a composition so its copy and image evidence both survive",
           "sourceBlockIds": [
             "page_9563b8e16278_block_001"
           ],
@@ -148,21 +299,42 @@
               "status": "pending_artifact_materialization"
             }
           ],
+          "assetPlan": {
+            "target": "composition",
+            "entries": [
+              {
+                "manifestRef": "asset_04df533f8dea",
+                "alt": "[redacted:9 chars]"
+              }
+            ],
+            "sectionType": "composition"
+          },
+          "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.body",
+                "path": "data.blocks.0.body",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_001"
                 ]
               },
               {
-                "path": "data.actions.0.label",
+                "path": "data.blocks.2.actions.0.label",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_001"
                 ]
+              }
+            ],
+            "assetFields": [
+              {
+                "path": "data.composition.0.alt",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_9563b8e16278_block_001"
+                ],
+                "manifestRef": "asset_04df533f8dea"
               }
             ]
           }
@@ -203,40 +375,64 @@
           }
         },
         {
-          "candidateId": "candidate_615369ab8083",
-          "sectionType": "cta_banner",
+          "candidateId": "candidate_6c26dcc93fc6",
+          "sectionType": "composition",
           "data": {
-            "body": "<p>[redacted:577 chars]</p>",
-            "actions": [
+            "blocks": [
               {
-                "label": "[redacted:11 chars]",
-                "target": {
-                  "kind": "route",
-                  "href": "/filmography"
-                },
-                "style": "primary"
+                "kind": "text",
+                "body": "<p>[redacted:577 chars]</p>"
+              },
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:11 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/filmography"
+                    },
+                    "style": "primary"
+                  }
+                ]
               }
             ]
           },
           "section": {
             "id": "s_1c4da9d983",
-            "type": "cta_banner",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:577 chars]</p>",
-              "actions": [
+              "blocks": [
                 {
-                  "label": "[redacted:11 chars]",
-                  "target": {
-                    "kind": "route",
-                    "href": "/filmography"
-                  },
-                  "style": "primary"
+                  "kind": "text",
+                  "body": "<p>[redacted:577 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:11 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/filmography"
+                      },
+                      "style": "primary"
+                    }
+                  ]
                 }
               ]
             }
           },
           "confidence": 0.77,
-          "mappingReason": "compact call-to-action block",
+          "mappingReason": "compact call-to-action block; re-typed from cta_banner to a composition so its copy and image evidence both survive",
           "sourceBlockIds": [
             "page_9563b8e16278_block_007"
           ],
@@ -253,21 +449,42 @@
               "status": "pending_artifact_materialization"
             }
           ],
+          "assetPlan": {
+            "target": "composition",
+            "entries": [
+              {
+                "manifestRef": "asset_031339564037",
+                "alt": "[redacted:15 chars]"
+              }
+            ],
+            "sectionType": "composition"
+          },
+          "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.body",
+                "path": "data.blocks.0.body",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_007"
                 ]
               },
               {
-                "path": "data.actions.0.label",
+                "path": "data.blocks.2.actions.0.label",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_007"
                 ]
+              }
+            ],
+            "assetFields": [
+              {
+                "path": "data.composition.0.alt",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_9563b8e16278_block_007"
+                ],
+                "manifestRef": "asset_031339564037"
               }
             ]
           }
@@ -356,20 +573,38 @@
           }
         },
         {
-          "candidateId": "candidate_2e5f0926e1d8",
-          "sectionType": "prose",
+          "candidateId": "candidate_65005d188682",
+          "sectionType": "composition",
           "data": {
-            "body": "<p>[redacted:615 chars]</p>"
+            "blocks": [
+              {
+                "kind": "text",
+                "body": "<p>[redacted:615 chars]</p>"
+              },
+              {
+                "kind": "image",
+                "imageIndex": 0
+              }
+            ]
           },
           "section": {
             "id": "s_e15bfa9414",
-            "type": "prose",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:615 chars]</p>"
+              "blocks": [
+                {
+                  "kind": "text",
+                  "body": "<p>[redacted:615 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                }
+              ]
             }
           },
           "confidence": 0.76,
-          "mappingReason": "explanatory text fallback",
+          "mappingReason": "explanatory text fallback; re-typed from prose to a composition so its copy and image evidence both survive",
           "sourceBlockIds": [
             "page_9563b8e16278_block_011"
           ],
@@ -386,33 +621,114 @@
               "status": "pending_artifact_materialization"
             }
           ],
+          "assetPlan": {
+            "target": "composition",
+            "entries": [
+              {
+                "manifestRef": "asset_a355b5687800",
+                "alt": "[redacted:5 chars]"
+              }
+            ],
+            "sectionType": "composition"
+          },
+          "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.body",
+                "path": "data.blocks.0.body",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_011"
                 ]
               }
+            ],
+            "assetFields": [
+              {
+                "path": "data.composition.0.alt",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_9563b8e16278_block_011"
+                ],
+                "manifestRef": "asset_a355b5687800"
+              }
             ]
           }
         },
         {
-          "candidateId": "candidate_6fc1eb5b5da8",
-          "sectionType": "media",
+          "candidateId": "candidate_63761491ff23",
+          "sectionType": "composition",
           "data": {
-            "layout": "grid"
+            "blocks": [
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "image",
+                "imageIndex": 1
+              },
+              {
+                "kind": "image",
+                "imageIndex": 2
+              },
+              {
+                "kind": "image",
+                "imageIndex": 3
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:10 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/partners"
+                    },
+                    "style": "primary"
+                  }
+                ]
+              }
+            ]
           },
           "section": {
             "id": "s_244ef90d50",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "grid"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 2
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 3
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:10 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/partners"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           },
-          "confidence": 0.86,
-          "mappingReason": "image evidence bound as a gallery",
+          "confidence": 0.79,
+          "mappingReason": "imagery with links — the gallery types carry no actions",
           "sourceBlockIds": [
             "page_9563b8e16278_block_012"
           ],
@@ -451,7 +767,7 @@
             }
           ],
           "assetPlan": {
-            "target": "items",
+            "target": "composition",
             "entries": [
               {
                 "manifestRef": "asset_ae2faed89ba0",
@@ -470,13 +786,13 @@
                 "alt": "[redacted:9 chars]"
               }
             ],
-            "sectionType": "media"
+            "sectionType": "composition"
           },
           "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.layout",
+                "path": "data.blocks.4.actions.0.label",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_012"
@@ -485,7 +801,7 @@
             ],
             "assetFields": [
               {
-                "path": "data.items.0.alt",
+                "path": "data.composition.0.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_012"
@@ -493,7 +809,7 @@
                 "manifestRef": "asset_ae2faed89ba0"
               },
               {
-                "path": "data.items.1.alt",
+                "path": "data.composition.1.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_012"
@@ -501,7 +817,7 @@
                 "manifestRef": "asset_a9ef9c615a73"
               },
               {
-                "path": "data.items.2.alt",
+                "path": "data.composition.2.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_012"
@@ -509,7 +825,7 @@
                 "manifestRef": "asset_8b800f3ec795"
               },
               {
-                "path": "data.items.3.alt",
+                "path": "data.composition.3.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_012"
@@ -520,16 +836,144 @@
           }
         },
         {
-          "candidateId": "candidate_3c3c0a4e81cb",
-          "sectionType": "brand_row",
-          "data": {},
+          "candidateId": "candidate_e98fe2a332cd",
+          "sectionType": "composition",
+          "data": {
+            "blocks": [
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "image",
+                "imageIndex": 1
+              },
+              {
+                "kind": "image",
+                "imageIndex": 2
+              },
+              {
+                "kind": "image",
+                "imageIndex": 3
+              },
+              {
+                "kind": "image",
+                "imageIndex": 4
+              },
+              {
+                "kind": "image",
+                "imageIndex": 5
+              },
+              {
+                "kind": "image",
+                "imageIndex": 6
+              },
+              {
+                "kind": "image",
+                "imageIndex": 7
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:8 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/s-projects-side-by-side"
+                    },
+                    "style": "primary"
+                  },
+                  {
+                    "label": "[redacted:11 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/filmography"
+                    },
+                    "style": "link"
+                  },
+                  {
+                    "label": "[redacted:10 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/partners"
+                    },
+                    "style": "link"
+                  }
+                ]
+              }
+            ]
+          },
           "section": {
             "id": "s_8c8b1b8196",
-            "type": "brand_row",
-            "data": {}
+            "type": "composition",
+            "data": {
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 2
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 3
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 4
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 5
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 6
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 7
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:8 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/s-projects-side-by-side"
+                      },
+                      "style": "primary"
+                    },
+                    {
+                      "label": "[redacted:11 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/filmography"
+                      },
+                      "style": "link"
+                    },
+                    {
+                      "label": "[redacted:10 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/partners"
+                      },
+                      "style": "link"
+                    }
+                  ]
+                }
+              ]
+            }
           },
-          "confidence": 0.84,
-          "mappingReason": "linked logo or partner strip",
+          "confidence": 0.79,
+          "mappingReason": "imagery with links — the gallery types carry no actions",
           "sourceBlockIds": [
             "page_9563b8e16278_block_017"
           ],
@@ -596,7 +1040,7 @@
             }
           ],
           "assetPlan": {
-            "target": "logos",
+            "target": "composition",
             "entries": [
               {
                 "manifestRef": "asset_04df533f8dea",
@@ -631,14 +1075,36 @@
                 "alt": "[redacted:9 chars]"
               }
             ],
-            "sectionType": "brand_row"
+            "sectionType": "composition"
           },
           "assetBindingStatus": "pending",
           "provenance": {
-            "textFields": [],
+            "textFields": [
+              {
+                "path": "data.blocks.8.actions.0.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_9563b8e16278_block_017"
+                ]
+              },
+              {
+                "path": "data.blocks.8.actions.1.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_9563b8e16278_block_017"
+                ]
+              },
+              {
+                "path": "data.blocks.8.actions.2.label",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_9563b8e16278_block_017"
+                ]
+              }
+            ],
             "assetFields": [
               {
-                "path": "data.logos.0.alt",
+                "path": "data.composition.0.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -646,7 +1112,7 @@
                 "manifestRef": "asset_04df533f8dea"
               },
               {
-                "path": "data.logos.1.alt",
+                "path": "data.composition.1.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -654,7 +1120,7 @@
                 "manifestRef": "asset_031339564037"
               },
               {
-                "path": "data.logos.2.alt",
+                "path": "data.composition.2.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -662,7 +1128,7 @@
                 "manifestRef": "asset_b5ee50b9ae36"
               },
               {
-                "path": "data.logos.3.alt",
+                "path": "data.composition.3.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -670,7 +1136,7 @@
                 "manifestRef": "asset_a355b5687800"
               },
               {
-                "path": "data.logos.4.alt",
+                "path": "data.composition.4.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -678,7 +1144,7 @@
                 "manifestRef": "asset_ae2faed89ba0"
               },
               {
-                "path": "data.logos.5.alt",
+                "path": "data.composition.5.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -686,7 +1152,7 @@
                 "manifestRef": "asset_a9ef9c615a73"
               },
               {
-                "path": "data.logos.6.alt",
+                "path": "data.composition.6.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -694,7 +1160,7 @@
                 "manifestRef": "asset_8b800f3ec795"
               },
               {
-                "path": "data.logos.7.alt",
+                "path": "data.composition.7.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_9563b8e16278_block_017"
@@ -707,60 +1173,19 @@
       ],
       "gaps": [
         {
-          "gapId": "gap_f17327c62c93",
-          "blockRef": "page_9563b8e16278_block_001",
-          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
-          "why": "section_type_has_no_asset_field",
-          "nearestType": "media",
-          "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-        },
-        {
-          "gapId": "gap_5e8f8645fd8e",
-          "blockRef": "page_9563b8e16278_block_007",
-          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
-          "why": "section_type_has_no_asset_field",
-          "nearestType": "media",
-          "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-        },
-        {
-          "gapId": "gap_02825896f914",
-          "blockRef": "page_9563b8e16278_block_011",
-          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
-          "why": "section_type_has_no_asset_field",
-          "nearestType": "media",
-          "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-        },
-        {
-          "gapId": "gap_ced43a55bb41",
-          "blockRef": "page_9563b8e16278_block_012",
-          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
-          "why": "link_actions_not_carried_by_asset_section",
-          "nearestType": "media",
-          "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-        },
-        {
           "gapId": "gap_8515975a683d",
           "blockRef": "page_9563b8e16278_block_014",
           "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
           "why": "insufficient_structure",
           "nearestType": "prose",
           "missingCapability": "more semantic or textual evidence"
-        },
-        {
-          "gapId": "gap_7b5cc403e100",
-          "blockRef": "page_9563b8e16278_block_017",
-          "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
-          "why": "link_actions_not_carried_by_asset_section",
-          "nearestType": "brand_row",
-          "missingCapability": "a governed placement for evidence this brand_row cannot hold: 3 source link action(s) that brand_row has no field for"
         }
       ],
       "blockAccounting": [
         {
           "blockRef": "page_9563b8e16278_block_001",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_ee73efbf964d",
-          "gapId": "gap_f17327c62c93"
+          "status": "mapped",
+          "candidateId": "candidate_9c7ee98273bb"
         },
         {
           "blockRef": "page_9563b8e16278_block_002",
@@ -789,9 +1214,8 @@
         },
         {
           "blockRef": "page_9563b8e16278_block_007",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_615369ab8083",
-          "gapId": "gap_5e8f8645fd8e"
+          "status": "mapped",
+          "candidateId": "candidate_6c26dcc93fc6"
         },
         {
           "blockRef": "page_9563b8e16278_block_008",
@@ -810,15 +1234,13 @@
         },
         {
           "blockRef": "page_9563b8e16278_block_011",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_2e5f0926e1d8",
-          "gapId": "gap_02825896f914"
+          "status": "mapped",
+          "candidateId": "candidate_65005d188682"
         },
         {
           "blockRef": "page_9563b8e16278_block_012",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_6fc1eb5b5da8",
-          "gapId": "gap_ced43a55bb41"
+          "status": "mapped",
+          "candidateId": "candidate_63761491ff23"
         },
         {
           "blockRef": "page_9563b8e16278_block_013",
@@ -842,9 +1264,8 @@
         },
         {
           "blockRef": "page_9563b8e16278_block_017",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_3c3c0a4e81cb",
-          "gapId": "gap_7b5cc403e100"
+          "status": "mapped",
+          "candidateId": "candidate_e98fe2a332cd"
         }
       ]
     },
@@ -861,29 +1282,95 @@
         "sections": [
           {
             "id": "s_d92603a71c",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "strip"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:23 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           }
         ]
       },
       "candidates": [
         {
-          "candidateId": "candidate_6aeb52775ce1",
-          "sectionType": "media",
+          "candidateId": "candidate_23a788bf4401",
+          "sectionType": "composition",
           "data": {
-            "layout": "strip"
+            "blocks": [
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "image",
+                "imageIndex": 1
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:23 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/"
+                    },
+                    "style": "primary"
+                  }
+                ]
+              }
+            ]
           },
           "section": {
             "id": "s_d92603a71c",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "strip"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:23 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           },
-          "confidence": 0.86,
-          "mappingReason": "image evidence bound as a gallery",
+          "confidence": 0.79,
+          "mappingReason": "imagery with links — the gallery types carry no actions",
           "sourceBlockIds": [
             "page_593efe6a40c0_block_001"
           ],
@@ -908,7 +1395,7 @@
             }
           ],
           "assetPlan": {
-            "target": "items",
+            "target": "composition",
             "entries": [
               {
                 "manifestRef": "asset_912a9b4ec8c4",
@@ -919,13 +1406,13 @@
                 "alt": "[redacted:11 chars]"
               }
             ],
-            "sectionType": "media"
+            "sectionType": "composition"
           },
           "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.layout",
+                "path": "data.blocks.2.actions.0.label",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_593efe6a40c0_block_001"
@@ -934,7 +1421,7 @@
             ],
             "assetFields": [
               {
-                "path": "data.items.0.alt",
+                "path": "data.composition.0.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_593efe6a40c0_block_001"
@@ -942,7 +1429,7 @@
                 "manifestRef": "asset_912a9b4ec8c4"
               },
               {
-                "path": "data.items.1.alt",
+                "path": "data.composition.1.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_593efe6a40c0_block_001"
@@ -953,22 +1440,12 @@
           }
         }
       ],
-      "gaps": [
-        {
-          "gapId": "gap_c354f48f1e21",
-          "blockRef": "page_593efe6a40c0_block_001",
-          "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
-          "why": "link_actions_not_carried_by_asset_section",
-          "nearestType": "media",
-          "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-        }
-      ],
+      "gaps": [],
       "blockAccounting": [
         {
           "blockRef": "page_593efe6a40c0_block_001",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_6aeb52775ce1",
-          "gapId": "gap_c354f48f1e21"
+          "status": "mapped",
+          "candidateId": "candidate_23a788bf4401"
         },
         {
           "blockRef": "page_593efe6a40c0_block_002",
@@ -1610,16 +2087,43 @@
           },
           {
             "id": "s_c4231af4b6",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "single"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:22 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           },
           {
             "id": "s_8d1b67616f",
-            "type": "prose",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:735 chars]</p>"
+              "blocks": [
+                {
+                  "kind": "text",
+                  "body": "<p>[redacted:735 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                }
+              ]
             }
           },
           {
@@ -1631,9 +2135,43 @@
           },
           {
             "id": "s_c724cdb13b",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "grid"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 2
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 3
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 4
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:22 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           }
         ]
@@ -1760,20 +2298,56 @@
           }
         },
         {
-          "candidateId": "candidate_03be809a450e",
-          "sectionType": "media",
+          "candidateId": "candidate_9945eeeaf8d8",
+          "sectionType": "composition",
           "data": {
-            "layout": "single"
+            "blocks": [
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:22 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                    },
+                    "style": "primary"
+                  }
+                ]
+              }
+            ]
           },
           "section": {
             "id": "s_c4231af4b6",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "single"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:22 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           },
-          "confidence": 0.86,
-          "mappingReason": "image evidence bound as a single image",
+          "confidence": 0.79,
+          "mappingReason": "imagery with links — the gallery types carry no actions",
           "sourceBlockIds": [
             "page_79c515d4cebf_block_004"
           ],
@@ -1798,20 +2372,20 @@
             }
           ],
           "assetPlan": {
-            "target": "items",
+            "target": "composition",
             "entries": [
               {
                 "manifestRef": "asset_4a5948f739f1",
                 "alt": "[redacted:23 chars]"
               }
             ],
-            "sectionType": "media"
+            "sectionType": "composition"
           },
           "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.layout",
+                "path": "data.blocks.1.actions.0.label",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_004"
@@ -1820,7 +2394,7 @@
             ],
             "assetFields": [
               {
-                "path": "data.items.0.alt",
+                "path": "data.composition.0.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_004"
@@ -1831,20 +2405,38 @@
           }
         },
         {
-          "candidateId": "candidate_ed4f78af95c9",
-          "sectionType": "prose",
+          "candidateId": "candidate_9955ff556888",
+          "sectionType": "composition",
           "data": {
-            "body": "<p>[redacted:735 chars]</p>"
+            "blocks": [
+              {
+                "kind": "text",
+                "body": "<p>[redacted:735 chars]</p>"
+              },
+              {
+                "kind": "image",
+                "imageIndex": 0
+              }
+            ]
           },
           "section": {
             "id": "s_8d1b67616f",
-            "type": "prose",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:735 chars]</p>"
+              "blocks": [
+                {
+                  "kind": "text",
+                  "body": "<p>[redacted:735 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                }
+              ]
             }
           },
           "confidence": 0.76,
-          "mappingReason": "explanatory text fallback",
+          "mappingReason": "explanatory text fallback; re-typed from prose to a composition so its copy and image evidence both survive",
           "sourceBlockIds": [
             "page_79c515d4cebf_block_005"
           ],
@@ -1861,14 +2453,35 @@
               "status": "pending_artifact_materialization"
             }
           ],
+          "assetPlan": {
+            "target": "composition",
+            "entries": [
+              {
+                "manifestRef": "asset_2e28c6c60668",
+                "alt": "[redacted:11 chars]"
+              }
+            ],
+            "sectionType": "composition"
+          },
+          "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.body",
+                "path": "data.blocks.0.body",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_005"
                 ]
+              }
+            ],
+            "assetFields": [
+              {
+                "path": "data.composition.0.alt",
+                "source": "extracted",
+                "sourceBlockRefs": [
+                  "page_79c515d4cebf_block_005"
+                ],
+                "manifestRef": "asset_2e28c6c60668"
               }
             ]
           }
@@ -1945,20 +2558,88 @@
           }
         },
         {
-          "candidateId": "candidate_1661a065c310",
-          "sectionType": "media",
+          "candidateId": "candidate_6058d8e22f34",
+          "sectionType": "composition",
           "data": {
-            "layout": "grid"
+            "blocks": [
+              {
+                "kind": "image",
+                "imageIndex": 0
+              },
+              {
+                "kind": "image",
+                "imageIndex": 1
+              },
+              {
+                "kind": "image",
+                "imageIndex": 2
+              },
+              {
+                "kind": "image",
+                "imageIndex": 3
+              },
+              {
+                "kind": "image",
+                "imageIndex": 4
+              },
+              {
+                "kind": "actions",
+                "actions": [
+                  {
+                    "label": "[redacted:22 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                    },
+                    "style": "primary"
+                  }
+                ]
+              }
+            ]
           },
           "section": {
             "id": "s_c724cdb13b",
-            "type": "media",
+            "type": "composition",
             "data": {
-              "layout": "grid"
+              "blocks": [
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 1
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 2
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 3
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 4
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:22 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                      },
+                      "style": "primary"
+                    }
+                  ]
+                }
+              ]
             }
           },
-          "confidence": 0.86,
-          "mappingReason": "image evidence bound as a gallery",
+          "confidence": 0.79,
+          "mappingReason": "imagery with links — the gallery types carry no actions",
           "sourceBlockIds": [
             "page_79c515d4cebf_block_007"
           ],
@@ -2018,7 +2699,7 @@
             }
           ],
           "assetPlan": {
-            "target": "items",
+            "target": "composition",
             "entries": [
               {
                 "manifestRef": "asset_0f361ff0b0e9",
@@ -2041,13 +2722,13 @@
                 "alt": "[redacted:13 chars]"
               }
             ],
-            "sectionType": "media"
+            "sectionType": "composition"
           },
           "assetBindingStatus": "pending",
           "provenance": {
             "textFields": [
               {
-                "path": "data.layout",
+                "path": "data.blocks.5.actions.0.label",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_007"
@@ -2056,7 +2737,7 @@
             ],
             "assetFields": [
               {
-                "path": "data.items.0.alt",
+                "path": "data.composition.0.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_007"
@@ -2064,7 +2745,7 @@
                 "manifestRef": "asset_0f361ff0b0e9"
               },
               {
-                "path": "data.items.1.alt",
+                "path": "data.composition.1.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_007"
@@ -2072,7 +2753,7 @@
                 "manifestRef": "asset_ae6d46d5b577"
               },
               {
-                "path": "data.items.2.alt",
+                "path": "data.composition.2.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_007"
@@ -2080,7 +2761,7 @@
                 "manifestRef": "asset_4a5948f739f1"
               },
               {
-                "path": "data.items.3.alt",
+                "path": "data.composition.3.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_007"
@@ -2088,7 +2769,7 @@
                 "manifestRef": "asset_2e28c6c60668"
               },
               {
-                "path": "data.items.4.alt",
+                "path": "data.composition.4.alt",
                 "source": "extracted",
                 "sourceBlockRefs": [
                   "page_79c515d4cebf_block_007"
@@ -2100,22 +2781,6 @@
         }
       ],
       "gaps": [
-        {
-          "gapId": "gap_fa7b10668327",
-          "blockRef": "page_79c515d4cebf_block_004",
-          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
-          "why": "link_actions_not_carried_by_asset_section",
-          "nearestType": "media",
-          "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-        },
-        {
-          "gapId": "gap_a04da85fad4d",
-          "blockRef": "page_79c515d4cebf_block_005",
-          "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
-          "why": "section_type_has_no_asset_field",
-          "nearestType": "media",
-          "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-        },
         {
           "gapId": "gap_18aa3971f2f4",
           "blockRef": "page_79c515d4cebf_block_006",
@@ -2129,8 +2794,8 @@
           "blockRef": "page_79c515d4cebf_block_007",
           "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
           "why": "image_missing_item_level_text_association",
-          "nearestType": "media",
-          "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented; 1 source link action(s) that media has no field for"
+          "nearestType": "composition",
+          "missingCapability": "a governed placement for evidence this composition cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented"
         }
       ],
       "blockAccounting": [
@@ -2151,15 +2816,13 @@
         },
         {
           "blockRef": "page_79c515d4cebf_block_004",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_03be809a450e",
-          "gapId": "gap_fa7b10668327"
+          "status": "mapped",
+          "candidateId": "candidate_9945eeeaf8d8"
         },
         {
           "blockRef": "page_79c515d4cebf_block_005",
-          "status": "mapped_with_gap",
-          "candidateId": "candidate_ed4f78af95c9",
-          "gapId": "gap_a04da85fad4d"
+          "status": "mapped",
+          "candidateId": "candidate_9955ff556888"
         },
         {
           "blockRef": "page_79c515d4cebf_block_006",
@@ -2170,7 +2833,7 @@
         {
           "blockRef": "page_79c515d4cebf_block_007",
           "status": "mapped_with_gap",
-          "candidateId": "candidate_1661a065c310",
+          "candidateId": "candidate_6058d8e22f34",
           "gapId": "gap_2f5bd371ee0b"
         }
       ]
@@ -2331,8 +2994,8 @@
     "pages": 5,
     "sectionCandidates": 17,
     "navigationCandidates": 2,
-    "pendingAssetSections": 10,
-    "gaps": 12,
+    "pendingAssetSections": 14,
+    "gaps": 4,
     "sourceBlocks": 33,
     "accountedBlocks": 33
   }

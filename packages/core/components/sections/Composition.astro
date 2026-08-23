@@ -1,0 +1,79 @@
+---
+/**
+ * `composition` section component (T12.31) — the one composable section.
+ *
+ * Renders an ORDERED SEQUENCE of copy, imagery and calls-to-action, so a source
+ * block that holds more than any single named type can carry keeps its own
+ * order instead of losing whichever half its type could not express.
+ *
+ * Deliberately plain. Every other section owns a layout opinion; this one owns
+ * none, because it has no way to know what it is looking at. A single readable
+ * column, the site's own type and button styles, images at full width. If a
+ * composition ever wants a real layout, that is the signal it should have been
+ * a named type.
+ */
+import { splitRichTextParagraphs } from '@core/lib/richtext/paragraphs';
+import type { CompositionResolved, RenderCtx, SectionDataOf } from '@core/lib/registry/components/types';
+
+type Props = {
+  data: SectionDataOf<'composition'>;
+  resolved: CompositionResolved;
+  ctx: RenderCtx;
+};
+
+const { data, resolved } = Astro.props;
+const actionClass = (style?: 'primary' | 'secondary' | 'link') =>
+  style === 'secondary' ? 'btn-secondary' : style === 'link' ? 'btn-link' : 'btn-primary';
+
+// Action hrefs resolve centrally and are indexed by the ACTION BLOCK's position
+// among action blocks, not by its position in `blocks` — see CompositionResolved.
+let actionGroup = -1;
+const blocks = data.blocks.map((block) => ({
+  block,
+  actionGroup: block.kind === 'actions' ? (actionGroup += 1) : -1,
+}));
+---
+
+<section class="mx-auto max-w-3xl px-4 py-14 sm:px-6 sm:py-20" id={data.anchor}>
+  {data.kicker && <p class="text-sm font-semibold uppercase tracking-[0.18em] text-accent">{data.kicker}</p>}
+  {data.heading && <h2 class="mt-4 text-4xl font-bold sm:text-5xl">{data.heading}</h2>}
+
+  <div class:list={[data.heading || data.kicker ? 'mt-8' : '']}>
+    {
+      blocks.map(({ block, actionGroup: group }) => {
+        if (block.kind === 'text') {
+          return (
+            <div class="mt-6 text-lg text-muted first:mt-0">
+              {splitRichTextParagraphs(block.body).map((paragraph, index) => (
+                <p class:list={[index > 0 ? 'mt-4' : '']} set:html={paragraph} />
+              ))}
+            </div>
+          );
+        }
+        if (block.kind === 'actions') {
+          return (
+            <div class="mt-8 flex flex-col gap-3 first:mt-0 sm:flex-row">
+              {block.actions.map((action, index) => (
+                <a
+                  class:list={[actionClass(action.style)]}
+                  href={resolved.actionHrefs[group]?.[index]}
+                  set:text={action.label}
+                />
+              ))}
+            </div>
+          );
+        }
+        // `image` — the index is range-checked at validation, so a missing entry
+        // here would mean an object that should never have been created. Render
+        // nothing rather than an empty frame.
+        const image = data.images[block.imageIndex];
+        if (!image) return null;
+        return (
+          <figure class="mt-8 overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm first:mt-0 dark:border-slate-800 dark:bg-slate-900">
+            <img class="h-auto w-full" src={image.src} alt={image.alt} loading="lazy" decoding="async" />
+          </figure>
+        );
+      })
+    }
+  </div>
+</section>

@@ -140,27 +140,39 @@
       {
         "kind": "section_template",
         "objectType": "section_template",
-        "requestedId": "stpl_capture_b51f7eca672c808b1a",
-        "idempotencyKey": "t12.4:fixture-target:section-template:0bb0d0944e96fee7",
-        "reason": "shape repeated 2 times (threshold 2); fields actions[],body",
+        "requestedId": "stpl_capture_1c2164c6dea948c5f3",
+        "idempotencyKey": "t12.4:fixture-target:section-template:fd8d007e4e64c76e",
+        "reason": "shape repeated 9 times (threshold 2); fields blocks[]",
         "body": {
-          "name": "Captured cta banner recipe (actions[],body)",
-          "description": "Draft recipe extracted from 2 repeated cta_banner shapes carrying actions[],body.",
-          "whenToUse": "Use for the repeated cta_banner shape discovered in this capture, where the section carries actions[],body.",
+          "name": "Captured composition recipe (blocks[])",
+          "description": "Draft recipe extracted from 9 repeated composition shapes carrying blocks[].",
+          "whenToUse": "Use for the repeated composition shape discovered in this capture, where the section carries blocks[].",
           "scope": "one_off",
           "blueprint": {
             "id": "s_31b26f5390",
-            "type": "cta_banner",
+            "type": "composition",
             "data": {
-              "body": "<p>[redacted:163 chars]</p>",
-              "actions": [
+              "blocks": [
                 {
-                  "label": "[redacted:8 chars]",
-                  "target": {
-                    "kind": "route",
-                    "href": "/s-projects-side-by-side"
-                  },
-                  "style": "primary"
+                  "kind": "text",
+                  "body": "<p>[redacted:163 chars]</p>"
+                },
+                {
+                  "kind": "image",
+                  "imageIndex": 0
+                },
+                {
+                  "kind": "actions",
+                  "actions": [
+                    {
+                      "label": "[redacted:8 chars]",
+                      "target": {
+                        "kind": "route",
+                        "href": "/s-projects-side-by-side"
+                      },
+                      "style": "primary"
+                    }
+                  ]
                 }
               ]
             }
@@ -193,10 +205,10 @@
         "objectType": "section_template",
         "requestedId": "stpl_capture_7f623aa8eae4db2f53",
         "idempotencyKey": "t12.4:fixture-target:section-template:96392a317a2999db",
-        "reason": "shape repeated 9 times (threshold 2); fields layout",
+        "reason": "shape repeated 5 times (threshold 2); fields layout",
         "body": {
           "name": "Captured media recipe (layout)",
-          "description": "Draft recipe extracted from 9 repeated media shapes carrying layout.",
+          "description": "Draft recipe extracted from 5 repeated media shapes carrying layout.",
           "whenToUse": "Use for the repeated media shape discovered in this capture, where the section carries layout.",
           "scope": "one_off",
           "blueprint": {
@@ -204,26 +216,6 @@
             "type": "media",
             "data": {
               "layout": "strip"
-            }
-          }
-        }
-      },
-      {
-        "kind": "section_template",
-        "objectType": "section_template",
-        "requestedId": "stpl_capture_7396ac993926999e24",
-        "idempotencyKey": "t12.4:fixture-target:section-template:35440f06c5c2b585",
-        "reason": "shape repeated 3 times (threshold 2); fields body",
-        "body": {
-          "name": "Captured prose recipe (body)",
-          "description": "Draft recipe extracted from 3 repeated prose shapes carrying body.",
-          "whenToUse": "Use for the repeated prose shape discovered in this capture, where the section carries body.",
-          "scope": "one_off",
-          "blueprint": {
-            "id": "s_f49bf8bb02",
-            "type": "prose",
-            "data": {
-              "body": "<p>[redacted:581 chars]</p>"
             }
           }
         }
@@ -305,17 +297,29 @@
           "sections": [
             {
               "id": "s_31b26f5390",
-              "type": "cta_banner",
+              "type": "composition",
               "data": {
-                "body": "<p>[redacted:163 chars]</p>",
-                "actions": [
+                "blocks": [
                   {
-                    "label": "[redacted:8 chars]",
-                    "target": {
-                      "kind": "route",
-                      "href": "/s-projects-side-by-side"
-                    },
-                    "style": "primary"
+                    "kind": "text",
+                    "body": "<p>[redacted:163 chars]</p>"
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:8 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/s-projects-side-by-side"
+                        },
+                        "style": "primary"
+                      }
+                    ]
                   }
                 ]
               }
@@ -329,17 +333,29 @@
             },
             {
               "id": "s_1c4da9d983",
-              "type": "cta_banner",
+              "type": "composition",
               "data": {
-                "body": "<p>[redacted:577 chars]</p>",
-                "actions": [
+                "blocks": [
                   {
-                    "label": "[redacted:11 chars]",
-                    "target": {
-                      "kind": "route",
-                      "href": "/filmography"
-                    },
-                    "style": "primary"
+                    "kind": "text",
+                    "body": "<p>[redacted:577 chars]</p>"
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:11 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/filmography"
+                        },
+                        "style": "primary"
+                      }
+                    ]
                   }
                 ]
               }
@@ -353,22 +369,125 @@
             },
             {
               "id": "s_e15bfa9414",
-              "type": "prose",
+              "type": "composition",
               "data": {
-                "body": "<p>[redacted:615 chars]</p>"
+                "blocks": [
+                  {
+                    "kind": "text",
+                    "body": "<p>[redacted:615 chars]</p>"
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  }
+                ]
               }
             },
             {
               "id": "s_244ef90d50",
-              "type": "media",
+              "type": "composition",
               "data": {
-                "layout": "grid"
+                "blocks": [
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 1
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 2
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 3
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:10 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/partners"
+                        },
+                        "style": "primary"
+                      }
+                    ]
+                  }
+                ]
               }
             },
             {
               "id": "s_8c8b1b8196",
-              "type": "brand_row",
-              "data": {}
+              "type": "composition",
+              "data": {
+                "blocks": [
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 1
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 2
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 3
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 4
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 5
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 6
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 7
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:8 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/s-projects-side-by-side"
+                        },
+                        "style": "primary"
+                      },
+                      {
+                        "label": "[redacted:11 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/filmography"
+                        },
+                        "style": "link"
+                      },
+                      {
+                        "label": "[redacted:10 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/partners"
+                        },
+                        "style": "link"
+                      }
+                    ]
+                  }
+                ]
+              }
             }
           ]
         },
@@ -390,9 +509,31 @@
           "sections": [
             {
               "id": "s_d92603a71c",
-              "type": "media",
+              "type": "composition",
               "data": {
-                "layout": "strip"
+                "blocks": [
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 1
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:23 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/"
+                        },
+                        "style": "primary"
+                      }
+                    ]
+                  }
+                ]
               }
             }
           ]
@@ -466,16 +607,43 @@
             },
             {
               "id": "s_c4231af4b6",
-              "type": "media",
+              "type": "composition",
               "data": {
-                "layout": "single"
+                "blocks": [
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:22 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                        },
+                        "style": "primary"
+                      }
+                    ]
+                  }
+                ]
               }
             },
             {
               "id": "s_8d1b67616f",
-              "type": "prose",
+              "type": "composition",
               "data": {
-                "body": "<p>[redacted:735 chars]</p>"
+                "blocks": [
+                  {
+                    "kind": "text",
+                    "body": "<p>[redacted:735 chars]</p>"
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  }
+                ]
               }
             },
             {
@@ -487,9 +655,43 @@
             },
             {
               "id": "s_c724cdb13b",
-              "type": "media",
+              "type": "composition",
               "data": {
-                "layout": "grid"
+                "blocks": [
+                  {
+                    "kind": "image",
+                    "imageIndex": 0
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 1
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 2
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 3
+                  },
+                  {
+                    "kind": "image",
+                    "imageIndex": 4
+                  },
+                  {
+                    "kind": "actions",
+                    "actions": [
+                      {
+                        "label": "[redacted:22 chars]",
+                        "target": {
+                          "kind": "route",
+                          "href": "/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx"
+                        },
+                        "style": "primary"
+                      }
+                    ]
+                  }
+                ]
               }
             }
           ]
@@ -516,7 +718,7 @@
     "media": [
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_ee73efbf964d",
+        "candidateId": "candidate_9c7ee98273bb",
         "manifestRef": "asset_04df533f8dea",
         "sourceUrl": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
         "kind": "image",
@@ -525,7 +727,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_615369ab8083",
+        "candidateId": "candidate_6c26dcc93fc6",
         "manifestRef": "asset_031339564037",
         "sourceUrl": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
         "kind": "image",
@@ -552,7 +754,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_2e5f0926e1d8",
+        "candidateId": "candidate_65005d188682",
         "manifestRef": "asset_a355b5687800",
         "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
         "kind": "image",
@@ -561,7 +763,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_6fc1eb5b5da8",
+        "candidateId": "candidate_63761491ff23",
         "manifestRef": "asset_ae2faed89ba0",
         "sourceUrl": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
         "kind": "image",
@@ -570,7 +772,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_6fc1eb5b5da8",
+        "candidateId": "candidate_63761491ff23",
         "manifestRef": "asset_a9ef9c615a73",
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
         "kind": "image",
@@ -579,7 +781,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_6fc1eb5b5da8",
+        "candidateId": "candidate_63761491ff23",
         "manifestRef": "asset_8b800f3ec795",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
@@ -588,7 +790,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_6fc1eb5b5da8",
+        "candidateId": "candidate_63761491ff23",
         "manifestRef": "asset_042e06854691",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
@@ -597,7 +799,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_04df533f8dea",
         "sourceUrl": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
         "kind": "image",
@@ -606,7 +808,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_031339564037",
         "sourceUrl": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
         "kind": "image",
@@ -615,7 +817,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_b5ee50b9ae36",
         "sourceUrl": "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
         "kind": "image",
@@ -624,7 +826,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_a355b5687800",
         "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
         "kind": "image",
@@ -633,7 +835,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_ae2faed89ba0",
         "sourceUrl": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
         "kind": "image",
@@ -642,7 +844,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_a9ef9c615a73",
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
         "kind": "image",
@@ -651,7 +853,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_8b800f3ec795",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
@@ -660,7 +862,7 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "manifestRef": "asset_042e06854691",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
@@ -669,7 +871,7 @@
       },
       {
         "pageRef": "page_593efe6a40c0",
-        "candidateId": "candidate_6aeb52775ce1",
+        "candidateId": "candidate_23a788bf4401",
         "manifestRef": "asset_912a9b4ec8c4",
         "sourceUrl": "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_147,h_147,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
         "kind": "image",
@@ -678,7 +880,7 @@
       },
       {
         "pageRef": "page_593efe6a40c0",
-        "candidateId": "candidate_6aeb52775ce1",
+        "candidateId": "candidate_23a788bf4401",
         "manifestRef": "asset_5dd5661ead94",
         "sourceUrl": "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_979,h_552,fp_0.50_0.50,q_85,usm_0.66_1.00_0.01,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
         "kind": "image",
@@ -993,7 +1195,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_03be809a450e",
+        "candidateId": "candidate_9945eeeaf8d8",
         "manifestRef": "asset_4a5948f739f1",
         "sourceUrl": "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
         "kind": "image",
@@ -1002,7 +1204,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_03be809a450e",
+        "candidateId": "candidate_9945eeeaf8d8",
         "manifestRef": "asset_e690c43e6f07",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx",
         "kind": "document",
@@ -1011,7 +1213,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_ed4f78af95c9",
+        "candidateId": "candidate_9955ff556888",
         "manifestRef": "asset_2e28c6c60668",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
@@ -1038,7 +1240,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_0f361ff0b0e9",
         "sourceUrl": "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
         "kind": "image",
@@ -1047,7 +1249,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_ae6d46d5b577",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
@@ -1056,7 +1258,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_4a5948f739f1",
         "sourceUrl": "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
         "kind": "image",
@@ -1065,7 +1267,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_2e28c6c60668",
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
@@ -1074,7 +1276,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_36d728931de4",
         "sourceUrl": "https://static.wixstatic.com/media/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg/v1/fill/w_147,h_83,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_avif,quality_auto/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg",
         "kind": "image",
@@ -1083,7 +1285,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_931010472f88",
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg",
         "kind": "image",
@@ -1092,7 +1294,7 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "manifestRef": "asset_e690c43e6f07",
         "sourceUrl": "https://www.zilbermanfilmfoundation.com/_files/ugd/944663_dfff67d06bb84d2382af381412d2208a.docx?dn=Press%20Release%20-%20Scholarships-Bursaries.docx",
         "kind": "document",
@@ -1101,6 +1303,32 @@
       }
     ],
     "assetPlans": [
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_9c7ee98273bb",
+        "sectionId": "s_31b26f5390",
+        "sectionType": "composition",
+        "target": "composition",
+        "entries": [
+          {
+            "manifestRef": "asset_04df533f8dea",
+            "alt": "[redacted:9 chars]"
+          }
+        ]
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_6c26dcc93fc6",
+        "sectionId": "s_1c4da9d983",
+        "sectionType": "composition",
+        "target": "composition",
+        "entries": [
+          {
+            "manifestRef": "asset_031339564037",
+            "alt": "[redacted:15 chars]"
+          }
+        ]
+      },
       {
         "pageRef": "page_9563b8e16278",
         "candidateId": "candidate_c8936a1307fc",
@@ -1120,10 +1348,23 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_6fc1eb5b5da8",
+        "candidateId": "candidate_65005d188682",
+        "sectionId": "s_e15bfa9414",
+        "sectionType": "composition",
+        "target": "composition",
+        "entries": [
+          {
+            "manifestRef": "asset_a355b5687800",
+            "alt": "[redacted:5 chars]"
+          }
+        ]
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_63761491ff23",
         "sectionId": "s_244ef90d50",
-        "sectionType": "media",
-        "target": "items",
+        "sectionType": "composition",
+        "target": "composition",
         "entries": [
           {
             "manifestRef": "asset_ae2faed89ba0",
@@ -1145,10 +1386,10 @@
       },
       {
         "pageRef": "page_9563b8e16278",
-        "candidateId": "candidate_3c3c0a4e81cb",
+        "candidateId": "candidate_e98fe2a332cd",
         "sectionId": "s_8c8b1b8196",
-        "sectionType": "brand_row",
-        "target": "logos",
+        "sectionType": "composition",
+        "target": "composition",
         "entries": [
           {
             "manifestRef": "asset_04df533f8dea",
@@ -1186,10 +1427,10 @@
       },
       {
         "pageRef": "page_593efe6a40c0",
-        "candidateId": "candidate_6aeb52775ce1",
+        "candidateId": "candidate_23a788bf4401",
         "sectionId": "s_d92603a71c",
-        "sectionType": "media",
-        "target": "items",
+        "sectionType": "composition",
+        "target": "composition",
         "entries": [
           {
             "manifestRef": "asset_912a9b4ec8c4",
@@ -1302,14 +1543,27 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_03be809a450e",
+        "candidateId": "candidate_9945eeeaf8d8",
         "sectionId": "s_c4231af4b6",
-        "sectionType": "media",
-        "target": "items",
+        "sectionType": "composition",
+        "target": "composition",
         "entries": [
           {
             "manifestRef": "asset_4a5948f739f1",
             "alt": "[redacted:23 chars]"
+          }
+        ]
+      },
+      {
+        "pageRef": "page_79c515d4cebf",
+        "candidateId": "candidate_9955ff556888",
+        "sectionId": "s_8d1b67616f",
+        "sectionType": "composition",
+        "target": "composition",
+        "entries": [
+          {
+            "manifestRef": "asset_2e28c6c60668",
+            "alt": "[redacted:11 chars]"
           }
         ]
       },
@@ -1328,10 +1582,10 @@
       },
       {
         "pageRef": "page_79c515d4cebf",
-        "candidateId": "candidate_1661a065c310",
+        "candidateId": "candidate_6058d8e22f34",
         "sectionId": "s_c724cdb13b",
-        "sectionType": "media",
-        "target": "items",
+        "sectionType": "composition",
+        "target": "composition",
         "entries": [
           {
             "manifestRef": "asset_0f361ff0b0e9",
@@ -1358,76 +1612,12 @@
     ],
     "gaps": [
       {
-        "gapId": "gap_f17327c62c93",
-        "blockRef": "page_9563b8e16278_block_001",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
-        "why": "section_type_has_no_asset_field",
-        "nearestType": "media",
-        "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-      },
-      {
-        "gapId": "gap_5e8f8645fd8e",
-        "blockRef": "page_9563b8e16278_block_007",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
-        "why": "section_type_has_no_asset_field",
-        "nearestType": "media",
-        "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-      },
-      {
-        "gapId": "gap_02825896f914",
-        "blockRef": "page_9563b8e16278_block_011",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
-        "why": "section_type_has_no_asset_field",
-        "nearestType": "media",
-        "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
-      },
-      {
-        "gapId": "gap_ced43a55bb41",
-        "blockRef": "page_9563b8e16278_block_012",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
-        "why": "link_actions_not_carried_by_asset_section",
-        "nearestType": "media",
-        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-      },
-      {
         "gapId": "gap_8515975a683d",
         "blockRef": "page_9563b8e16278_block_014",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_014.png",
         "why": "insufficient_structure",
         "nearestType": "prose",
         "missingCapability": "more semantic or textual evidence"
-      },
-      {
-        "gapId": "gap_7b5cc403e100",
-        "blockRef": "page_9563b8e16278_block_017",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
-        "why": "link_actions_not_carried_by_asset_section",
-        "nearestType": "brand_row",
-        "missingCapability": "a governed placement for evidence this brand_row cannot hold: 3 source link action(s) that brand_row has no field for"
-      },
-      {
-        "gapId": "gap_c354f48f1e21",
-        "blockRef": "page_593efe6a40c0_block_001",
-        "screenshotRef": "pages/page_593efe6a40c0/mobile/blocks/page_593efe6a40c0_block_001.png",
-        "why": "link_actions_not_carried_by_asset_section",
-        "nearestType": "media",
-        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-      },
-      {
-        "gapId": "gap_fa7b10668327",
-        "blockRef": "page_79c515d4cebf_block_004",
-        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_004.png",
-        "why": "link_actions_not_carried_by_asset_section",
-        "nearestType": "media",
-        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
-      },
-      {
-        "gapId": "gap_a04da85fad4d",
-        "blockRef": "page_79c515d4cebf_block_005",
-        "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_005.png",
-        "why": "section_type_has_no_asset_field",
-        "nearestType": "media",
-        "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
       },
       {
         "gapId": "gap_18aa3971f2f4",
@@ -1442,8 +1632,8 @@
         "blockRef": "page_79c515d4cebf_block_007",
         "screenshotRef": "pages/page_79c515d4cebf/mobile/blocks/page_79c515d4cebf_block_007.png",
         "why": "image_missing_item_level_text_association",
-        "nearestType": "media",
-        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented; 1 source link action(s) that media has no field for"
+        "nearestType": "composition",
+        "missingCapability": "a governed placement for evidence this composition cannot hold: 1 source image(s) carry no alt text, and item-level text association may not be invented"
       },
       {
         "gapId": "gap_3ca2c570f6e6",

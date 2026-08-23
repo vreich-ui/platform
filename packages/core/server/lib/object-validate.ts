@@ -489,6 +489,27 @@ export const checkReferenceIntegrity = (
           );
         }
       }
+      // T12.31: a `composition` image block addresses `images` BY INDEX, which is what keeps an
+      // image out of the block union entirely — a block can never carry a URL. The cost of that
+      // choice is that the index has to be range-checked somewhere, and it cannot be done in the
+      // schema: a Zod `.superRefine` returns a ZodEffects, and a discriminatedUnion accepts only
+      // ZodObject members. So it lives here, with the other cross-field structural rules.
+      //
+      // Out of range is a hard problem, not a warning. The renderer would otherwise emit a section
+      // with a silently missing picture, which is precisely the class of half-rendered output the
+      // two-phase asset binding exists to prevent.
+      if (node.type === 'composition' && Array.isArray(data.blocks)) {
+        const imageCount = Array.isArray(data.images) ? data.images.length : 0;
+        for (const block of data.blocks) {
+          if (!isRecord(block) || block.kind !== 'image') continue;
+          const index = block.imageIndex;
+          if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= imageCount) {
+            problems.push(
+              `composition image block references images[${String(index)}], but the section carries ${imageCount} image(s).`
+            );
+          }
+        }
+      }
       if (node.type === 'content_embed' && typeof data.contentItem === 'string') {
         requireObject('content_item', data.contentItem, 'content_embed.contentItem');
       }
