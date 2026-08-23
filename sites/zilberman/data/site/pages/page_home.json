@@ -1,87 +1,153 @@
 {
   "__generated": {
-    "at": "2026-08-15T11:17:52.621Z",
+    "at": "2026-08-23T16:54:59.818Z",
     "from": "objects/page/by-id/page_home.json",
-    "record_version": 16
+    "record_version": 49
   },
   "navigationOverrides": {
     "footer": "nav_footer"
   },
-  "pageType": "standard",
+  "pageType": "clone",
   "route": "/",
   "sections": [
     {
       "data": {
-        "body": "<p>A UK Charitable Trust is set to support young filmmakers and provide a platform for creative talent in the international film industry.</p>"
-      },
-      "id": "s_welcome",
-      "type": "prose"
-    },
-    {
-      "data": {
-        "actions": [],
-        "body": "<p>The Zilberman Foundation was established in honour of the film producer Misha Zilberman, and is set to give spotlight to the next generation of filmmaking. It aims to encourage and showcase new work and to nurture and support the next generation of creative film talent.</p><p>We believe in creating opportunities to connect people who share passions for cinema, we believe in coming together to learn from the well known film talent, we believe in establishing partnerships that give stage for dialogues to encourage new ideas and preserve a long standing legacy of creative filmmaking.</p>",
-        "heading": "In honour of Misha Zilberman",
-        "kicker": "Zilberman Foundation"
-      },
-      "id": "s_intro",
-      "type": "lede"
-    },
-    {
-      "data": {
-        "body": "<h2>In Memory of Misha</h2><p>1952 - 2020</p><p>A chance encounter led to an opportunity and Misha Zilberman's lifetime love affair with cinema began. He started sweeping studio floors, in time his films swept awards in a career in which he produced more than forty feature films. Described as someone with “endless courage to speak the truth and make everyone feel loved” his life defined what makes great cinematic storytelling. Our foundation is inspired by Misha's story, we now wish to provide opportunities to young filmmakers to speak their truth and win hearts with new cinema.</p>"
-      },
-      "id": "s_memory",
-      "type": "prose"
-    },
-    {
-      "data": {
-        "body": "<p>Julia is the founder of the Zilberman Film Foundation, in honor of her father, Misha Zilberman, who taught her everything and with whom she has shared greatly her passion for culture and filmmaking.</p><p>Julia is a banking executive and is currently based in London. In parallel, she plays an active role in its arts and culture scene. Julia is a Trustee of the Philharmonia and a member of the Development Board at the Young Vic theatre. In the past, she has acted as a member of the Donmar Warehouse Theatre Development and Capital Campaign Committee, and as chair of the Philharmonia Development Board.</p>",
-        "heading": "Julia Zilberman",
-        "kicker": "Our Trustees",
-        "trustNotes": [
-          "Trustee of the Philharmonia",
-          "Member of the Development Board at the Young Vic theatre"
-        ]
-      },
-      "id": "s_trustee",
-      "type": "bio"
-    },
-    {
-      "data": {
         "actions": [
           {
-            "label": "Learn more",
+            "label": "Projects",
             "style": "primary",
             "target": {
-              "href": "/partners",
+              "href": "/s-projects-side-by-side",
               "kind": "route"
             }
           }
         ],
-        "body": "<p>The Foundation partners with leading cultural organisations to nurture new film and theatre talent.</p>",
-        "heading": "Our Partners"
+        "body": "<p>A UK Charitable Trust is set to support young filmmakers and provide a platform for creative talent in the international film industry.</p>",
+        "heading": "ZILBERMAN FOUNDATION",
+        "images": [
+          {
+            "alt": "Zilberman",
+            "src": "/img/req_capture_zilberman_20260823_01/6e38852fcf28ab665695862e8372906974133bce8fda6990d3cf7a2b4064ee7f.jpg"
+          }
+        ]
       },
-      "id": "s_partnersteaser",
-      "type": "cta_banner"
+      "id": "s_31b26f5390",
+      "type": "content_split"
     },
     {
       "data": {
-        "description": "Name, e-mail, topic and message.",
-        "formName": "contact",
-        "heading": "Contacts",
-        "subtitle": "Get in touch with the Zilberman Foundation."
+        "body": "<p>The Zilberman Foundation was established in honour of the film producer Misha Zilberman, and is set to give spotlight to the next generation of filmmaking. It aims to encourage and showcase new work and to nurture and support the next generation of creative film talent. We believe in creating opportunities to connect people who share passions for cinema, we believe in coming together to learn from the well known film talent, we believe in establishing partnerships that give stage for dialogues to encourage new ideas and preserve a long standing legacy of creative filmmaking.</p>"
       },
-      "id": "s_contact",
+      "id": "s_f49bf8bb02",
+      "type": "prose"
+    },
+    {
+      "data": {
+        "blocks": [
+          {
+            "body": "<p>1952 - 2020In Memory of MishaA chance encounter led to an opportunity and Misha Zilberman’s lifetime love affair with cinema began. He started sweeping studio floors, in time his films swept awards in a career in which he produced more than forty feature films. Described as someone with “endless courage to speak the truth and make everyone feel loved” his life defined what makes great cinematic storytelling. Our foundation is inspired by Misha’s story, we now wish to provide opportunities to young filmmakers to speak their truth and win hearts with new cinema.Filmography</p>",
+            "kind": "text"
+          },
+          {
+            "imageIndex": 0,
+            "kind": "image"
+          }
+        ],
+        "images": [
+          {
+            "alt": "Misha Zilberman",
+            "src": "/img/req_capture_zilberman_20260823_01/72da8ee81b614b18c1569522782bdb4586e9057bc608d1a7efc4f9226ffcaf7e.jpg"
+          }
+        ]
+      },
+      "id": "s_1c4da9d983",
+      "type": "composition"
+    },
+    {
+      "data": {
+        "body": "<p>Julia ZilbermanJulia is the founder of the Zilberman Film Foundation, in honor of her father, Misha Zilberman, who taught her everything and with whom she has shared greatly her passion for culture and filmmaking. Julia is a banking executive and is currently based in London. In parallel, she plays an active role in its arts and culture scene. Julia is a Trustee of the Philharmonia and a member of the Development Board at the Young Vic theatre. In the past, she has acted as a member of the Donmar Warehouse Theatre Development and Capital Campaign Committee, and as chair of the Philharmonia Development Board.</p>",
+        "heading": "Our Trustees",
+        "portrait": {
+          "alt": "Lights_Background.jpg",
+          "src": "/img/req_capture_zilberman_20260823_01/9b2e7a045e0381494f2edcc4e29900eb849d320505b765e673da3fc0aaa35263.jpg"
+        },
+        "portraitAssetRef": "image/req_capture_zilberman_20260823_01/9b2e7a045e0381494f2edcc4e29900eb849d320505b765e673da3fc0aaa35263.jpg",
+        "trustNotes": []
+      },
+      "id": "s_4025a57d3e",
+      "type": "bio"
+    },
+    {
+      "data": {
+        "blocks": [
+          {
+            "imageIndex": 0,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 1,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 2,
+            "kind": "image"
+          },
+          {
+            "imageIndex": 3,
+            "kind": "image"
+          },
+          {
+            "actions": [
+              {
+                "label": "Learn more",
+                "style": "primary",
+                "target": {
+                  "href": "/partners",
+                  "kind": "route"
+                }
+              }
+            ],
+            "kind": "actions"
+          }
+        ],
+        "heading": "Our Partners",
+        "images": [
+          {
+            "alt": "bafta logo",
+            "src": "/img/req_capture_zilberman_20260823_01/ffe82e7783d4cd244d18de7d3d5cecb849496775f1cd0e8d4358d90a9c2ffa4c.jpg"
+          },
+          {
+            "alt": "7 parnasiens logo",
+            "src": "/img/req_capture_zilberman_20260823_01/205d8bb6d03f681780ad57dbe84ac40b09d6debaec318c693da9a6158e7534b0.jpg"
+          },
+          {
+            "alt": "logo",
+            "src": "/img/req_capture_zilberman_20260823_01/af1d913bdae17b48329b8843132d2637738c42e04685673dc34c9b5b17ed95db.png"
+          },
+          {
+            "alt": "Young Vic",
+            "src": "/img/req_capture_zilberman_20260823_01/97b8c7ac15174f6574b6030d61e7c32bdb7e6ae7d5df28325c6732a0f64644e4.png"
+          }
+        ]
+      },
+      "id": "s_244ef90d50",
+      "type": "composition"
+    },
+    {
+      "data": {
+        "formName": "contact-8a5edab2",
+        "heading": "Contacts"
+      },
+      "id": "s_8515975a68",
       "type": "contact_form"
     }
   ],
   "seo": {
-    "description": "The Zilberman Foundation — a UK Charitable Trust supporting young filmmakers and creative talent in the international film industry.",
+    "description": "ZILBERMAN FOUNDATION.\nA UK Charitable Trust is set to support young filmmakers and provide a platform for creative talent in the international film industry.",
     "robots": {
       "follow": true,
       "index": true
     }
   },
-  "title": "Zilberman Foundation"
+  "title": "ZILBERMAN FOUNDATION"
 }
