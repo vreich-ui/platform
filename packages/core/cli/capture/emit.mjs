@@ -613,6 +613,138 @@ async function pageRouteRows(transport, inventory, trace) {
   return resolved;
 }
 
+
+// ─── T12.28 REUSE-FIRST EMISSION ────────────────────────────────────────────────────────────────
+//
+// THE DEFECT. This emitter could only ever CREATE. Every route it wanted already existed on the
+// tenant — the hand-built seed pages and both navigations — so on 2026-08-21 a live run produced
+// `createdObjects: 0`, five `route_collision`s, two `requested_id_unavailable`s, and bound 0 of 132
+// planned media. Nothing rendered, and nothing could: media binds INTO a page section, so a page
+// that is never written is a page whose imagery has nowhere to go.
+//
+// A cloner that cannot write into a route it has already written is broken by construction. Wolf's
+// requirement from 2026-08-19 was explicit: "clones need to be able to rerun, be edited or wiped."
+// Re-running was the half that did not work.
+//
+// WHAT THIS DOES. When the route (or a navigation role) already exists, the plan's body is applied
+// to the EXISTING object through the governed patch path — checkout, typed ops, checkin — instead
+// of being quarantined. Every guarantee of the create path is kept:
+//
+//   * PageType law, the leaf rule and reference integrity still gate every op, because
+//     `object_patch` runs them; nothing here bypasses validation.
+//   * The asset fields are bound BEFORE the patch and re-asserted first-party, exactly as on create.
+//   * Publishing stays unreachable: a patched object is a draft with unpublished changes. Nothing
+//     in this path can publish, release or build.
+//   * The lease is released in a `finally`, so a failed patch cannot strand a lock on a live page —
+//     a stranded lock would block the tenant's own admin chat from editing that page at all.
+//
+// WHAT IT DELIBERATELY DOES NOT DO. It does not merge. A captured page REPLACES the section list of
+// the page at that route, because a capture is a statement about what the source page contains, and
+// interleaving it with whatever was there before produces a page that matches neither. The old
+// sections are removed in the same patch, so the result is one atomic revision the tenant can roll
+// back — pages are versioned (`page_home` was at v18 when this landed).
+const REUSE_LOCK_RELEASE_FAILED = 'reuse_lock_release_failed';
+
+const navRoleOf = (row) => row?.role ?? row?.body?.role ?? null;
+
+const lockTokenOf = (record) => record?.lockToken ?? record?.lock_token ?? record?.lock?.token ?? null;
+const recordVersionOf = (record) =>
+  record?.record_version ?? record?.recordVersion ?? record?.version ?? null;
+
+/** The section ids currently on a record, so a patch can clear them before writing the new list. */
+const sectionIdsOf = (record) =>
+  (record?.body?.sections ?? record?.sections ?? [])
+    .map((section) => section?.id)
+    .filter((id) => typeof id === 'string' && id);
+
+const navGroupIdsOf = (record) =>
+  (record?.body?.groups ?? record?.groups ?? [])
+    .map((group) => group?.id)
+    .filter((id) => typeof id === 'string' && id);
+
+/**
+ * Build the typed ops that turn the existing record into the captured body.
+ *
+ * Order matters: removals first, then upserts in capture order, so the resulting section list is
+ * the captured one and its ordering is the source's ordering rather than an interleaving.
+ */
+function reuseOpsForPage(existingRecord, body) {
+  // REFUSE TO EMPTY A LIVE PAGE. A captured page with no sections is not an instruction to delete
+  // the page's content — it is a capture that failed to map anything, and the fixture proves the
+  // case is real: the redacted Zilberman `/` maps to zero sections while the live page at that
+  // route carries the hand-built homepage. Removing its sections and writing nothing back would
+  // have blanked a published page on the first reuse run. An empty capture yields no ops, and the
+  // caller quarantines instead.
+  const captured = body.sections ?? [];
+  if (captured.length === 0) return [];
+  const ops = sectionIdsOf(existingRecord).map((sectionId) => ({ op: 'remove_section', section_id: sectionId }));
+  captured.forEach((section, index) => {
+    ops.push({ op: 'upsert_section', section, position: index });
+  });
+  // `sections` is refused inside set_page_meta by schema — the section ops above are its only writer.
+  const fields = {};
+  if (typeof body.title === 'string') fields.title = body.title;
+  if (body.seo && typeof body.seo === 'object') fields.seo = body.seo;
+  if (Object.keys(fields).length > 0) ops.unshift({ op: 'set_page_meta', fields });
+  return ops;
+}
+
+function reuseOpsForNavigation(existingRecord, body) {
+  const ops = navGroupIdsOf(existingRecord).map((groupId) => ({ op: 'remove_group', group_id: groupId }));
+  (body.groups ?? []).forEach((group, index) => {
+    ops.push({ op: 'upsert_group', group, position: index });
+  });
+  const fields = {};
+  if (typeof body.footNote === 'string') fields.footNote = body.footNote;
+  if (typeof body.brand === 'string') fields.brand = body.brand;
+  if (Object.keys(fields).length > 0) ops.unshift({ op: 'set_nav_meta', fields });
+  return ops;
+}
+
+/**
+ * Apply `body` to an object that already exists, through checkout → patch → checkin.
+ * Returns { ok: true } or { ok: false, reason } — it never throws past the lease release.
+ */
+async function patchExistingObject({ transport, objectType, objectId, body, trace }) {
+  const detail = await transport.call('object_get', { object_type: objectType, object_id: objectId });
+  trace.push({ verb: 'object_get', objectType, objectId, purpose: 'reuse_existing' });
+  const existingRecord = recordFrom(detail);
+
+  const ops = objectType === 'page' ? reuseOpsForPage(existingRecord, body) : reuseOpsForNavigation(existingRecord, body);
+  if (ops.length === 0)
+    return { ok: false, reason: objectType === 'page' ? 'reuse_would_empty_page' : 'reuse_produced_no_ops' };
+
+  const checkout = await transport.call('object_checkout', { object_type: objectType, object_id: objectId });
+  trace.push({ verb: 'object_checkout', objectType, objectId });
+  const lease = recordFrom(checkout);
+  const lockToken = lockTokenOf(lease);
+  const expectedRecordVersion = recordVersionOf(lease);
+  if (!lockToken) return { ok: false, reason: 'reuse_checkout_returned_no_lock' };
+
+  try {
+    await transport.call('object_patch', {
+      object_type: objectType,
+      object_id: objectId,
+      lock_token: lockToken,
+      ...(expectedRecordVersion === null ? {} : { expected_record_version: expectedRecordVersion }),
+      ops,
+    });
+    trace.push({ verb: 'object_patch', objectType, objectId, opCount: ops.length });
+    return { ok: true, opCount: ops.length };
+  } catch (error) {
+    return { ok: false, reason: errorCode(error) ?? 'reuse_patch_failed' };
+  } finally {
+    // ALWAYS. A stranded lease on a live page blocks the tenant's own admin chat from editing it,
+    // which is a worse outcome than the failed patch that caused it.
+    try {
+      await transport.call('object_checkin', { object_type: objectType, object_id: objectId, lock_token: lockToken });
+      trace.push({ verb: 'object_checkin', objectType, objectId });
+    } catch {
+      trace.push({ verb: 'object_checkin', objectType, objectId, failed: true, note: REUSE_LOCK_RELEASE_FAILED });
+    }
+  }
+}
+
 /**
  * Execute a plan through an injected MCP transport.  Used by the CLI and by
  * the integration tests; it never imports core store modules.
@@ -635,7 +767,7 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
   const siteId = sites[0].object_id;
   const contracts = await ensureContracts(transport, trace);
   const inventories = {};
-  for (const type of ['theme', 'section_template', 'page']) {
+  for (const type of ['theme', 'section_template', 'page', 'navigation']) {
     inventories[type] = await transport.call('object_inventory', { object_type: type });
     trace.push({ verb: 'object_inventory', objectType: type });
   }
@@ -689,10 +821,19 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
       });
       continue;
     }
-    if (operation.objectType === 'page' && existingPages.some((row) => routeOf(row) === operation.body.route)) {
-      report.quarantines.push({ requestedId: operation.requestedId, reason: 'route_collision', route: operation.body.route });
-      continue;
-    }
+    // T12.28: a route that already exists is a REUSE, not a refusal. The existing object is resolved
+    // here and patched further down — after asset binding, so the imagery lands in the same write.
+    const collidingPage =
+      operation.objectType === 'page'
+        ? existingPages.find((row) => routeOf(row) === operation.body.route) ?? null
+        : null;
+    // Navigation has no route; its identity is its ROLE. Two navs (header, footer) is the whole
+    // space, and `requested_id_unavailable` was this emitter discovering that the hand-built ones
+    // already occupy it.
+    const collidingNav =
+      operation.objectType === 'navigation'
+        ? inventoryRows(inventories.navigation).find((row) => navRoleOf(row) === operation.body.role) ?? null
+        : null;
     let body = clone(operation.body);
     // Bind materialized artifacts into this body's asset fields. A page binds its
     // own page's plans; a section_template's blueprint is a single section, so it
@@ -740,6 +881,66 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
     if (copyPolicy.mode === 'regenerate' && operation.objectType !== 'theme') {
       body = await modelAdapter.regenerateBody({ body, objectType: operation.objectType, target: plan.target, source: plan.source });
       if (!body || typeof body !== 'object') throw new EmissionError('Model adapter returned no replacement body.');
+    }
+    const reuseTarget = collidingPage ?? collidingNav;
+    if (reuseTarget && typeof reuseTarget.object_id === 'string') {
+      // The same first-party assertion the create path makes. A reused object is not a softer
+      // target: nothing may reach the wire carrying a remote URL, on either path.
+      try {
+        assertAssetFieldsFirstParty(body, `${operation.requestedId}.body`);
+      } catch (error) {
+        report.quarantines.push({
+          requestedId: operation.requestedId,
+          objectType: operation.objectType,
+          reason: 'validation_or_create_failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+      const patched = await patchExistingObject({
+        transport,
+        objectType: operation.objectType,
+        objectId: reuseTarget.object_id,
+        body,
+        trace,
+      });
+      if (!patched.ok) {
+        report.quarantines.push({
+          objectId: reuseTarget.object_id,
+          objectType: operation.objectType,
+          reason: patched.reason,
+          ...(operation.body.route ? { route: operation.body.route } : {}),
+        });
+        continue;
+      }
+      const validation = await transport.call('object_validate', {
+        object_type: operation.objectType,
+        object_id: reuseTarget.object_id,
+      });
+      trace.push({ verb: 'object_validate', phase: 'postpatch', objectId: reuseTarget.object_id });
+      const decision = validationDecision(validation);
+      report.validationStates.push({
+        phase: 'postpatch',
+        objectId: reuseTarget.object_id,
+        valid: decision.valid,
+        reason: decision.reason,
+      });
+      report.reusedObjects.push({
+        objectType: operation.objectType,
+        objectId: reuseTarget.object_id,
+        reason: collidingPage ? 'route_already_present' : 'navigation_role_already_present',
+        mode: 'patched',
+        opCount: patched.opCount,
+        ...(operation.body.route ? { route: operation.body.route } : {}),
+      });
+      if (!decision.valid) {
+        report.quarantines.push({
+          objectId: reuseTarget.object_id,
+          objectType: operation.objectType,
+          reason: 'postpatch_validation_failed',
+        });
+      }
+      continue;
     }
     const candidate = { object_type: operation.objectType, body, requested_id: operation.requestedId };
     let createdObjectId = null;
