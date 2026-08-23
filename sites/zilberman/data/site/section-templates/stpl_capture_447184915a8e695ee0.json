@@ -1,0 +1,18 @@
+{
+  "__generated": {
+    "at": "2026-08-23T13:54:07.305Z",
+    "from": "objects/section_template/by-id/stpl_capture_447184915a8e695ee0.json",
+    "record_version": 2
+  },
+  "blueprint": {
+    "data": {
+      "body": "<p>Donmar Warehouse is a 251-seat theatre in the heart of Covent Garden. The theatre produces a rich variety of theatre from classics to new plays that feel relevant to the world today, engaging audiences of the future and inspiring young people through education work. ​ The Zilberman Foundation is proud to support the Donmar&#39;s participation programme, Donmar LOCAL. The programme engages over 5,500 young people each year, offering them opportunities for creative discovery, bringing them together to celebrate stories and new voices through theatre experiences. The programme aims to develop the audiences, theatre-makers, and workforce of the future through partnerships with school and community groups across Camden and Westminster</p>"
+    },
+    "id": "s_8d1b67616f",
+    "type": "prose"
+  },
+  "description": "Draft recipe extracted from 4 repeated prose shapes carrying body.",
+  "name": "Captured prose recipe (body)",
+  "scope": "one_off",
+  "whenToUse": "Use for the repeated prose shape discovered in this capture, where the section carries body."
+}
