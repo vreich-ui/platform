@@ -193,7 +193,10 @@ test('run_workspace_workflow start mode sends projectId + input + a minted reque
 
 test('run_workspace_workflow advance mode calls workflow_run_all WITHOUT approved — the CMS-Agent publish gate stays armed', async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const ctx = bridgeCtx(() => ({ runId: 'run_1', status: 'running', driverNote: 'stopped before publish-risk' }), calls);
+  const ctx = bridgeCtx(
+    () => ({ runId: 'run_1', status: 'running', driverNote: 'stopped before publish-risk' }),
+    calls
+  );
   const tool = chatToolByName('run_workspace_workflow')!;
   const result = await tool.execute(ctx, { run_id: 'run_1' });
   assert.equal(result.is_error, false);
@@ -226,7 +229,8 @@ test('all three tools answer with a clear error when the bridge is not configure
   const ctx = noBridgeCtx();
   for (const name of ['list_workspace_nodes', 'run_workspace_workflow', 'get_workspace_run']) {
     const tool = chatToolByName(name)!;
-    const args = name === 'get_workspace_run' ? { run_id: 'r' } : name === 'run_workspace_workflow' ? { run_id: 'r' } : {};
+    const args =
+      name === 'get_workspace_run' ? { run_id: 'r' } : name === 'run_workspace_workflow' ? { run_id: 'r' } : {};
     const result = await tool.execute(ctx, args);
     assert.equal(result.is_error, true, name);
     assert.match(result.content, /not configured/i);

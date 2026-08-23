@@ -22,6 +22,7 @@ import {
   type DerivedRequestState,
   type RunSnapshot,
 } from './derive-status.js';
+import { ackMailed, alreadyMailed, emailModeFor, isMuted, loadNotifyState, shouldMailNow } from './notify-state.js';
 import {
   NON_TERMINAL_REQUEST_STATUSES,
   TERMINAL_REQUEST_STATUSES,
@@ -68,8 +69,20 @@ export interface SweepChatSink {
   chatStatus(chatId: string): Promise<string | undefined>;
 }
 
+/** T19.7: the mail channel, injected so the sweep logic stays testable and provider-free. */
+export interface SweepMailer {
+  notify(input: {
+    to: string;
+    requestId: string;
+    title: string;
+    status: string;
+    statusReason?: string;
+  }): Promise<{ ok: boolean; code?: string }>;
+}
+
 export interface SweepDeps {
   store: EditorialRequestStore;
+  mailer?: SweepMailer;
   bridge?: SweepBridge;
   chats?: SweepChatSink;
   now?: () => number;
@@ -171,6 +184,40 @@ const articleBodyCompleted = (run: RunSnapshot | undefined): boolean => {
       ((node as { nodeId?: string }).nodeId === 'article_body' || (node as { id?: string }).id === 'article_body') &&
       (node as { status?: string }).status === 'completed'
   );
+};
+
+/** The transitions that earn an interruption (plan §6). Everything else is visible on the surface. */
+export const NOTIFYING_STATUSES: readonly RequestStatus[] = ['needs_you', 'stalled', 'failed', 'done'];
+
+/**
+ * One mail, to the person who asked for the job, if their preference says so
+ * and they have not muted it and they have not already been told.
+ */
+const notifyByMail = async (deps: SweepDeps, doc: EditorialRequest, status: RequestStatus): Promise<void> => {
+  if (!deps.mailer) return;
+  const recipient = doc.created_by?.trim();
+  if (!recipient || !recipient.includes('@')) return;
+
+  const state = await loadNotifyState(deps.store, recipient).catch(() => undefined);
+  if (isMuted(state, doc.request_id)) return;
+  if (alreadyMailed(state, doc.request_id, status)) return;
+  if (!shouldMailNow(emailModeFor(state), status)) return;
+
+  const result = await deps.mailer.notify({
+    to: recipient,
+    requestId: doc.request_id,
+    title: doc.title,
+    status,
+    ...(doc.status_reason ? { statusReason: doc.status_reason } : {}),
+  });
+
+  if (result.ok) {
+    // The MAIL ledger only. The browser has its own, so an e-mail never
+    // silences the toast the editor would otherwise have seen.
+    await ackMailed(deps.store, recipient, { [doc.request_id]: status }).catch(() => undefined);
+  } else {
+    console.warn('editorial request mail not sent', { request_id: doc.request_id, code: result.code });
+  }
 };
 
 const isTerminal = (status: RequestStatus): boolean =>
@@ -310,6 +357,14 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
 
   if (changed && lastChat && deps.chats && updated) {
     await deps.chats.appendProgress(lastChat.chat_id, progressDetail(updated, derived)).catch(() => undefined);
+  }
+
+  // T19.7: mail, on the four transitions that earn it and nowhere else. Every
+  // failure mode here is swallowed and recorded — a provider outage must never
+  // stall a sweep, because the record is worth more than the notification, and
+  // the in-app channel already delivered it.
+  if (changed && updated && deps.mailer && NOTIFYING_STATUSES.includes(to)) {
+    await notifyByMail(deps, updated, to).catch(() => undefined);
   }
 
   // Rule 3: nudge only a genuinely dead driver, at most MAX_NUDGES times.

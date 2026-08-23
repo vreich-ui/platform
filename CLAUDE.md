@@ -118,7 +118,10 @@ pure function (plan §5.1); no surface, tool or chat path may set `running`,
 `stalled`, `failed` or `done` by hand. **A run that ends must say so** — the
 `run_finished → null` render (`admin/chat.tsx`) was F1 and is not to be
 reintroduced; a `caps` ending in particular must tell the editor the job is
-still alive. Fleet law holds: the sweep is a scheduled function, so its
+still alive. **Red means a step DIED** (Wolf, 2026-08-22) — severity comes from
+`lib/admin/activity-severity.ts` and nowhere else: a held gate (readiness
+`no_go`, an approval, a policy refusal) is amber, a handled warning is muted,
+and `is_error` alone is never a reason to paint something red. Fleet law holds: the sweep is a scheduled function, so its
 schedule block belongs in every `sites/<client>/netlify.toml`, and the W19 mail
 env carries the full P2 obligation. Execution: the W19 rows in queue.tsv.
 

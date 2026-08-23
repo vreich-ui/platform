@@ -326,6 +326,36 @@ export const ENV_CHECKLIST = [
       },
     ],
   },
+  {
+    group: 'Notifications (W19)',
+    rows: [
+      {
+        name: 'MAIL_PROVIDER',
+        cls: 'per-site',
+        note:
+          "'resend' to send editorial-request notification e-mail from this tenant; 'none' (or unset) opts out. " +
+          'Opting out is a supported state, not a gap: the in-app and browser channels are unaffected and the ' +
+          'capability probe reports mail as unconfigured rather than failing.',
+      },
+      {
+        name: 'MAIL_API_KEY',
+        cls: 'fleet-shared',
+        note: 'Provider API key. Reuse the fleet value — do not mint one per tenant.',
+      },
+      {
+        name: 'MAIL_FROM',
+        cls: 'per-site',
+        note:
+          "Verified sender for THIS tenant's domain (e.g. editorial@<client-domain>). The domain must be verified " +
+          'with the provider first — that is a human console step, see the provisioning runbook.',
+      },
+      {
+        name: 'MAIL_REPLY_TO',
+        cls: 'per-site',
+        note: 'Optional; defaults to MAIL_FROM.',
+      },
+    ],
+  },
 ];
 
 // Transitional escape-hatch env overrides (src/lib/site-identity.ts) —

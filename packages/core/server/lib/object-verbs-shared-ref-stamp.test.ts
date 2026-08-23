@@ -281,10 +281,7 @@ describe('D3-sharedref write path — stampSharedRefSectionNames (via handleObje
 
     assert.strictEqual(result.status, 422, JSON.stringify(result.body));
     // Refused before persisting — the store still holds only the original page.
-    assert.strictEqual(
-      JSON.parse(store.blobs.get(objectRecordKey('page', page.object_id))!).version,
-      page.version
-    );
+    assert.strictEqual(JSON.parse(store.blobs.get(objectRecordKey('page', page.object_id))!).version, page.version);
   });
 
   it('leaves sectionName unset rather than throwing when no validationContext is wired at all (e.g. a bare test harness)', async () => {

@@ -267,7 +267,9 @@ export const saveChatDoc = async (store: AgentChatStore, doc: ChatDoc): Promise<
 
 /** List every chat doc (corpus is small; the hub sorts by updated_at). Corrupt docs are skipped. */
 export const listChatDocs = async (store: AgentChatStore): Promise<ChatDoc[]> => {
-  const items = await collectBlobListItems(await store.list({ prefix: KEY_PREFIX, directories: false, paginate: true }));
+  const items = await collectBlobListItems(
+    await store.list({ prefix: KEY_PREFIX, directories: false, paginate: true })
+  );
   const docs: ChatDoc[] = [];
   for (const blob of items) {
     const raw = await store.get(blob.key);

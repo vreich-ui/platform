@@ -52,7 +52,8 @@ export const netlifyDeployLookupMissingEnvVars = (envNames: SiteBindingEnvNames 
 
 export const isNetlifyDeployLookupConfigured = () => netlifyDeployLookupMissingEnvVars().length === 0;
 
-const getNetlifyBuildHookUrl = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) => readBoundEnv(envNames.buildHookUrl) ?? '';
+const getNetlifyBuildHookUrl = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) =>
+  readBoundEnv(envNames.buildHookUrl) ?? '';
 
 /**
  * T16.5: the single predicate for "is the build hook configured" — both the

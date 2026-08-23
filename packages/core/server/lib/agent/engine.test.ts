@@ -13,11 +13,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { ChatDoc, ChatMsg, ChatRun } from './chat-store.js';
-import type {
-  CmsAgentConverseRequest,
-  CmsAgentConverseResponse,
-  CmsAgentResult,
-} from './cms-agent-client.js';
+import type { CmsAgentConverseRequest, CmsAgentConverseResponse, CmsAgentResult } from './cms-agent-client.js';
 import {
   buildChatEngine,
   cmsAgentEngine,

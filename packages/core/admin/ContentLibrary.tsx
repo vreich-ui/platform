@@ -301,10 +301,16 @@ export default function ContentLibrary({ identity }: ContentLibraryProps) {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a href={agentStarterHref('article')} className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]">
+            <a
+              href={agentStarterHref('article')}
+              className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]"
+            >
               <IconSparkles size={16} /> New article
             </a>
-            <a href={agentStarterHref('page')} className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)]">
+            <a
+              href={agentStarterHref('page')}
+              className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)]"
+            >
               New page
             </a>
           </div>

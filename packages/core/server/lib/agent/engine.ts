@@ -174,11 +174,51 @@ const conversationContext = (doc: ChatDoc, run: ChatRun, siteId: string): CmsAge
  * be written.
  */
 /** Trim the membership family (only) when the wire list exceeds the CMS-Agent bound. Pure. */
-export const fitToolsToCmsAgentBound = (tools: WireTool[], maxTools = CMS_AGENT_BOUNDS.maxTools): WireTool[] => {
-  if (tools.length <= maxTools) return tools;
-  const trimmed = tools.filter((tool) => !isMembershipTool(tool.name));
-  return trimmed.length <= maxTools ? trimmed : trimmed.slice(0, maxTools);
+/**
+ * W19 T19.8: families are dropped WHOLE, in a documented order, and a
+ * positional slice is the last resort.
+ *
+ * Slicing by array position drops whatever happens to sit at the end, which
+ * after this wave was three of the four editorial-request tools — leaving the
+ * agent a `list_requests` it could call and a `get_request` it could not. If
+ * the wire must lose a capability it should lose all of it and know which:
+ * membership first (reachable from the admin UI and OAuth /mcp), then the
+ * request tools (the whole registry is on the Requests page anyway). Object
+ * verbs are never in this list; without them the chat cannot work at all.
+ */
+const TRIMMABLE_FAMILIES: ReadonlyArray<{ name: string; matches: (toolName: string) => boolean }> = [
+  { name: 'membership', matches: isMembershipTool },
+  { name: 'editorial_requests', matches: (name) => REQUEST_TOOL_NAMES.has(name) },
+];
+
+const REQUEST_TOOL_NAMES = new Set(['list_requests', 'get_request', 'retry_request', 'archive_request']);
+
+export interface ToolTrimResult {
+  tools: WireTool[];
+  /** Which whole families were dropped, in the order they were dropped. */
+  dropped: string[];
+  /** True when dropping families was not enough and a positional slice ran. */
+  sliced: boolean;
+}
+
+export const trimToolsToCmsAgentBound = (
+  tools: WireTool[],
+  maxTools: number = CMS_AGENT_BOUNDS.maxTools
+): ToolTrimResult => {
+  if (tools.length <= maxTools) return { tools, dropped: [], sliced: false };
+  let trimmed = tools;
+  const dropped: string[] = [];
+  for (const family of TRIMMABLE_FAMILIES) {
+    const next = trimmed.filter((tool) => !family.matches(tool.name));
+    if (next.length !== trimmed.length) dropped.push(family.name);
+    trimmed = next;
+    if (trimmed.length <= maxTools) return { tools: trimmed, dropped, sliced: false };
+  }
+  return { tools: trimmed.slice(0, maxTools), dropped, sliced: true };
 };
+
+export const fitToolsToCmsAgentBound = (tools: WireTool[], maxTools: number = CMS_AGENT_BOUNDS.maxTools): WireTool[] =>
+  trimToolsToCmsAgentBound(tools, maxTools).tools;
 
 export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
   const { client, projectId, siteId } = options;
@@ -204,7 +244,8 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
     // wire list would exceed the bound, that family is trimmed here — logged,
     // never a hard failure — and membership stays reachable from the admin UI,
     // /mcp (OAuth) and the provider engine. Raise the bound to lift this.
-    const wireTools = fitToolsToCmsAgentBound(tools);
+    const trim = trimToolsToCmsAgentBound(tools);
+    let wireTools = trim.tools;
     if (wireTools.length !== tools.length) {
       console.warn(
         JSON.stringify({
@@ -212,7 +253,11 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
           run_id: run.run_id,
           dropped: tools.length - wireTools.length,
           bound: CMS_AGENT_BOUNDS.maxTools,
-          family: 'membership',
+          // The families that ACTUALLY went, not a hardcoded guess — an
+          // operator asking "why can't the agent see get_request" needs this
+          // line to answer them.
+          families: trim.dropped,
+          ...(trim.sliced ? { sliced: true } : {}),
         })
       );
     }
@@ -220,6 +265,7 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
     let turnId = baseTurnId;
     let refreshedRef = false;
     let retriedSession = false;
+    let retriedToolBound = false;
 
     for (;;) {
       const result = await client.converse({
@@ -245,6 +291,37 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
           toolCalls: result.data.tool_calls ?? [],
           outputTokens: result.data.usage?.output_tokens ?? 0,
         };
+      }
+      /**
+       * W19 T19.8: the two repos raised `maxTools` together (64 → 96), and
+       * this makes their merge ORDER irrelevant. If the far side is still on
+       * the old ceiling it answers `invalid_turn_request`; we trim to 64 once,
+       * with a fresh turn id, and carry on. The trigger is deliberately NOT a
+       * match on the rejection's wording — that prose belongs to the other
+       * repo and can be reworded at any time, which would silently strand
+       * every chat. Any validation rejection of a wire that is over the old
+       * ceiling earns exactly one retry under it; if the real cause was
+       * something else, the retry fails the same way and the error surfaces.
+       */
+      if (
+        result.code === 'invalid_turn_request' &&
+        !retriedToolBound &&
+        wireTools.length > CMS_AGENT_BOUNDS.legacyMaxTools
+      ) {
+        retriedToolBound = true;
+        const legacy = trimToolsToCmsAgentBound(tools, CMS_AGENT_BOUNDS.legacyMaxTools);
+        wireTools = legacy.tools;
+        turnId = `${baseTurnId}_b64`;
+        console.warn(
+          JSON.stringify({
+            event: 'cms_agent_tool_bound_fallback',
+            run_id: run.run_id,
+            bound: CMS_AGENT_BOUNDS.legacyMaxTools,
+            families: legacy.dropped,
+            ...(legacy.sliced ? { sliced: true } : {}),
+          })
+        );
+        continue;
       }
       if (result.code === 'agent_unresolved' && !refreshedRef) {
         // Constraint 10: stale/pinned rev — drop the cache, re-resolve once,

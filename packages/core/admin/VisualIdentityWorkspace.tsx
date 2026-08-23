@@ -30,14 +30,30 @@ async function fetchSite(siteId: string): Promise<StudioRecord> {
 }
 
 function Swatches({ colors }: { colors: VisualIdentityViewModel['colors'] }) {
-  if (!colors.length) return <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">No active color tokens are available yet.</p>;
+  if (!colors.length)
+    return (
+      <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+        No active color tokens are available yet.
+      </p>
+    );
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {colors.map((color) => (
-        <div key={color.name} className="min-w-0 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] p-2">
-          <span className="mb-2 block h-12 rounded-[var(--adm-radius-sm)] border border-black/10" style={{ backgroundColor: color.value }} aria-hidden="true" />
-          <span className="block truncate text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">{color.name}</span>
-          <span className="block truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{color.value}</span>
+        <div
+          key={color.name}
+          className="min-w-0 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] p-2"
+        >
+          <span
+            className="mb-2 block h-12 rounded-[var(--adm-radius-sm)] border border-black/10"
+            style={{ backgroundColor: color.value }}
+            aria-hidden="true"
+          />
+          <span className="block truncate text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">
+            {color.name}
+          </span>
+          <span className="block truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            {color.value}
+          </span>
         </div>
       ))}
     </div>
@@ -45,13 +61,26 @@ function Swatches({ colors }: { colors: VisualIdentityViewModel['colors'] }) {
 }
 
 function Typography({ rows }: { rows: VisualIdentityViewModel['typography'] }) {
-  if (!rows.length) return <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">No publication typography tokens are available yet.</p>;
+  if (!rows.length)
+    return (
+      <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+        No publication typography tokens are available yet.
+      </p>
+    );
   return (
     <div className="flex flex-col gap-3">
       {rows.map((row) => (
-        <div key={row.name} className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2">
-          <p className="text-[length:var(--adm-text-xs)] font-medium uppercase tracking-wide text-[var(--adm-text-muted)]">{row.name}</p>
-          <p className="mt-1 text-[length:var(--adm-text-lg)] text-[var(--adm-text-heading)]" style={{ fontFamily: row.value }}>
+        <div
+          key={row.name}
+          className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2"
+        >
+          <p className="text-[length:var(--adm-text-xs)] font-medium uppercase tracking-wide text-[var(--adm-text-muted)]">
+            {row.name}
+          </p>
+          <p
+            className="mt-1 text-[length:var(--adm-text-lg)] text-[var(--adm-text-heading)]"
+            style={{ fontFamily: row.value }}
+          >
             Evidence-led publishing for real readers.
           </p>
           <p className="truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{row.value}</p>
@@ -66,8 +95,12 @@ function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; id
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">Publication identity</p>
-          <h1 className="mt-1 text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Visual identity</h1>
+          <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
+            Publication identity
+          </p>
+          <h1 className="mt-1 text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">
+            Visual identity
+          </h1>
           <p className="mt-1 max-w-2xl text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
             The active visual system drawn from this publication’s site and theme objects.
           </p>
@@ -84,7 +117,9 @@ function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; id
         <Card kicker="Mark" title={model.logoText}>
           <div className="flex flex-col gap-3">
             <div className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] p-5">
-              <p className="text-[length:var(--adm-text-xl)] font-semibold tracking-[0.16em] text-[var(--adm-text-heading)]">{model.logoText}</p>
+              <p className="text-[length:var(--adm-text-xl)] font-semibold tracking-[0.16em] text-[var(--adm-text-heading)]">
+                {model.logoText}
+              </p>
             </div>
             <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
               {model.logoImageConfigured
@@ -112,18 +147,29 @@ function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; id
                 src={model.previewUrl}
                 className="h-[22rem] w-full rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-white"
               />
-              <a href={model.previewUrl} target="_blank" rel="noreferrer" className="adm-focusable inline-flex items-center gap-1 self-start text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent)] hover:underline">
+              <a
+                href={model.previewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="adm-focusable inline-flex items-center gap-1 self-start text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent)] hover:underline"
+              >
                 Open publication <IconExternalLink size={14} />
               </a>
             </div>
           ) : (
-            <EmptyState title="Preview address unavailable" message="Add a valid publication base address to the site object to show a representative live preview." />
+            <EmptyState
+              title="Preview address unavailable"
+              message="Add a valid publication base address to the site object to show a representative live preview."
+            />
           )}
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card kicker="Active palette" title={model.activeThemeLabel ? `Applied from ${model.activeThemeLabel}` : 'Publication color tokens'}>
+        <Card
+          kicker="Active palette"
+          title={model.activeThemeLabel ? `Applied from ${model.activeThemeLabel}` : 'Publication color tokens'}
+        >
           <Swatches colors={model.colors} />
         </Card>
         <Card kicker="Typography" title="Publication type system">
@@ -147,7 +193,8 @@ function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; id
           </div>
         ) : (
           <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-            No named theme objects are available. The active tokens above still come directly from the publication object.
+            No named theme objects are available. The active tokens above still come directly from the publication
+            object.
           </p>
         )}
       </Card>
@@ -170,8 +217,19 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
       const isOwner = me.roles.includes('owner');
       setOwner(isOwner);
       if (!isOwner) return;
-      const [site, studio, assets] = await Promise.all([fetchSite(identity.siteId), fetchStudioData(getToken), fetchEditorialAssets(getToken)]);
-      setModel(buildVisualIdentityViewModel({ site, themes: studio.themes, artifacts: assets.artifacts, fallbackName: identity.brandName }));
+      const [site, studio, assets] = await Promise.all([
+        fetchSite(identity.siteId),
+        fetchStudioData(getToken),
+        fetchEditorialAssets(getToken),
+      ]);
+      setModel(
+        buildVisualIdentityViewModel({
+          site,
+          themes: studio.themes,
+          artifacts: assets.artifacts,
+          fallbackName: identity.brandName,
+        })
+      );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Visual identity could not be loaded.');
     } finally {
@@ -186,13 +244,20 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
   if (loading || owner === null) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
-        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">Loading the publication’s visual system…</p>
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          Loading the publication’s visual system…
+        </p>
         <Skeleton variant="rect" height={420} />
       </div>
     );
   }
   if (!owner) {
-    return <EmptyState title="Visual identity is Owner-only" message="Ask a publication Owner to review or change this visual system." />;
+    return (
+      <EmptyState
+        title="Visual identity is Owner-only"
+        message="Ask a publication Owner to review or change this visual system."
+      />
+    );
   }
   if (error || !model) {
     return (
@@ -200,7 +265,11 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
         icon={<IconAlertTriangle size={26} />}
         title="Visual identity unavailable"
         message={error ?? 'The visual identity records could not be loaded.'}
-        action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
+        action={
+          <Button variant="secondary" onClick={() => void load()}>
+            Try again
+          </Button>
+        }
       />
     );
   }

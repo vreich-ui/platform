@@ -222,7 +222,9 @@ export default function TemplatesWorkspace({ identity }: { identity: SiteIdentit
       <div className="flex flex-col gap-5">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">Templates</h1>
+            <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">
+              Templates
+            </h1>
             <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
               Reusable standards, organized by what they create.
             </p>
@@ -231,12 +233,16 @@ export default function TemplatesWorkspace({ identity }: { identity: SiteIdentit
             href={creationStarter ? agentStarterHref(creationStarter) : '/admin/agents'}
             className="adm-focusable inline-flex h-10 items-center rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]"
           >
-            {creationStarter ? `Create ${FAMILIES.find((item) => item.id === family)?.label.toLowerCase()} with agent` : 'Ask CMS Agent'}
+            {creationStarter
+              ? `Create ${FAMILIES.find((item) => item.id === family)?.label.toLowerCase()} with agent`
+              : 'Ask CMS Agent'}
           </a>
         </header>
         {loading ? (
           <div className="flex flex-col gap-3" role="status" aria-live="polite">
-            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">Loading reusable templates and PDF samples…</p>
+            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              Loading reusable templates and PDF samples…
+            </p>
             <Skeleton variant="rect" height={360} />
           </div>
         ) : error ? (
@@ -244,7 +250,11 @@ export default function TemplatesWorkspace({ identity }: { identity: SiteIdentit
             icon={<IconAlertTriangle size={26} />}
             title="Templates unavailable"
             message={`${error} No template has been changed.`}
-            action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
+            action={
+              <Button variant="secondary" onClick={() => void load()}>
+                Try again
+              </Button>
+            }
           />
         ) : (
           <>

@@ -269,3 +269,21 @@ Once scaffolded, `npm test` type-checks everything under `sites/**/*.ts`
 client's seed bodies parse against the same `packages/core/schema/bodies/*`
 zod schemas Dr-Lurie's do — `tests/scripts/create-site.test.mjs` checks both
 for every scaffold this CLI can produce.
+
+## Mail (W19 T19.7) — optional, one human step
+
+Editorial-request notifications can reach an editor by e-mail. This is the one
+step in the wave that needs a console and cannot be automated: the sending
+DOMAIN must be verified with the provider before anything sends.
+
+1. Verify the tenant's sending domain with the mail provider (Resend today).
+2. Set `MAIL_PROVIDER=resend`, `MAIL_FROM=<verified sender on that domain>`,
+   and the fleet-shared `MAIL_API_KEY` on the tenant site. `MAIL_REPLY_TO` is
+   optional and defaults to `MAIL_FROM`.
+3. `node scripts/fleet-capability-probe.mjs --site sites/<client>` — the `mail`
+   family should read configured.
+
+**Skipping this is a supported outcome.** A tenant with no mail provider
+behaves exactly as it did before W19: the in-app toasts, the tab-title count
+and the browser notification all work, and the capability probe reports `mail`
+as unconfigured rather than failing.

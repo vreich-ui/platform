@@ -18,6 +18,7 @@ import {
   type RunProfile,
   type ToolAutonomy,
 } from './chat-store.js';
+import { CMS_AGENT_BOUNDS } from './cms-agent-client.js';
 import { fitToolsToCmsAgentBound, providerEngine } from './engine.js';
 import { approvePendingTool, runAgentLoop, startRun, type ProtocolDeps } from './loop.js';
 import { autonomyForCall } from './registry.js';
@@ -171,12 +172,15 @@ describe('generated registry — wiring', () => {
       started.resume!.triggerToken
     );
     const names = receivedTools.map((tool) => tool.name);
-    // D2a (2026-08-17) added three workspace verbs; the wire is now bounded
-    // by the CMS-Agent engine's membership trim (W18 T18.6b), which is what
-    // actually applies at send time. Non-membership + present_candidates must
-    // still fit 64 on their own.
+    // D2a (2026-08-17) added three workspace verbs; W19 T19.8 added four
+    // editorial-request tools and raised the contract bound to 96, because the
+    // registry had reached the old 64 with zero headroom. The wire is bounded
+    // by the engine's family trim, which is what actually applies at send time.
     const bounded = fitToolsToCmsAgentBound(receivedTools).map((tool) => tool.name);
-    assert.ok(bounded.length <= 64, `expected <= 64 wire tools after the CMS-Agent bound, got ${bounded.length}`);
+    assert.ok(
+      bounded.length <= CMS_AGENT_BOUNDS.maxTools,
+      `expected the wire to fit the CMS-Agent bound, got ${bounded.length}`
+    );
     assert.ok(names.includes('present_candidates'));
     assert.ok(names.includes('object_get'));
     assert.ok(!names.includes('set_image_search_policy'), 'off-defaulted tools must not be wired by default');
@@ -186,7 +190,7 @@ describe('generated registry — wiring', () => {
 // ─── legacy registry: unchanged wire list ───────────────────────────────────────
 
 describe('legacy registry — wiring', () => {
-  it('chat_registry legacy wires the 24 legacy tools (+ present_candidates in learning mode)', async () => {
+  it('chat_registry legacy wires the 28 legacy tools (+ present_candidates in learning mode)', async () => {
     const chatStore = memoryStore();
     await saveChatDoc(chatStore, idleDoc());
     const protocol: ProtocolDeps = { chatStore, toolContext: toolContext(), nowIso: () => T0 };
@@ -213,7 +217,10 @@ describe('legacy registry — wiring', () => {
       started.resume!.triggerToken
     );
     const names = receivedTools.map((tool) => tool.name);
-    assert.equal(names.filter((name) => name !== 'present_candidates').length, 24);
+    // W19 T19.8 added the four editorial-request tools to CHAT_TOOLS, so the
+    // legacy registry carries them too — they ride the request store, not the
+    // object verbs, and are registry-agnostic.
+    assert.equal(names.filter((name) => name !== 'present_candidates').length, 28);
     assert.ok(names.includes('present_candidates'));
     assert.ok(names.includes('patch'));
     assert.ok(!names.includes('object_patch'), 'the legacy registry must never wire a canonical generated name');
@@ -339,9 +346,7 @@ describe('error split', () => {
       started.resume!.triggerToken
     );
     const doc = await loadChatDoc(chatStore, CHAT_ID);
-    const unknownMsg = doc!.run!.transcript.find(
-      (message) => message.role === 'tool' && message.tool_call_id === 'c1'
-    );
+    const unknownMsg = doc!.run!.transcript.find((message) => message.role === 'tool' && message.tool_call_id === 'c1');
     const offMsg = doc!.run!.transcript.find((message) => message.role === 'tool' && message.tool_call_id === 'c2');
     assert.match((unknownMsg as { content: string }).content, /is not a capability of this workspace/);
     assert.match((offMsg as { content: string }).content, /is disabled by policy for this chat/);

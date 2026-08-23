@@ -23,7 +23,17 @@ import { callerPrincipalFromChatRun } from '../membership/caller-principal.js';
 import type { MembershipStore } from '../membership/store.js';
 import type { OAuthBlobStore } from '../oauth-store.js';
 import type { ObjectLockSweepStore } from '../membership/offboarding.js';
-import { attachChat, createRequest, type EditorialRequestStore } from '../requests/store.js';
+import {
+  archiveRequest,
+  attachChat,
+  createRequest,
+  loadIndex,
+  loadRequest,
+  rebuildIndex,
+  requeueRequest,
+  type EditorialRequestStore,
+} from '../requests/store.js';
+import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../../lib/admin/request-logic.js';
 import { buildObjectContract } from '../../../lib/registry/object-contract.js';
 import { mintId, MintIdError } from '../../../lib/object-ids-mint.js';
 import { validateObjectIdForType } from '../../../lib/object-ids.js';
@@ -404,6 +414,52 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
     ...(deps.requestStore
       ? {
           requests: {
+            /**
+             * T19.8: the same index the surface reads, through the same pure
+             * filter/sort — so "what's running?" in chat and the Requests page
+             * can never disagree about what is running or in what order.
+             */
+            list: async (filters) => {
+              const store = deps.requestStore!;
+              const index = (await loadIndex(store)) ?? (await rebuildIndex(store));
+              const rows = sortRequestRows(
+                filterRequestRows(index.rows, {
+                  ...(filters.kind ? { kind: filters.kind } : {}),
+                  ...(filters.mine !== undefined ? { mine: filters.mine } : {}),
+                  ...(filters.archived !== undefined ? { archived: filters.archived } : {}),
+                  ...(filters.q ? { q: filters.q } : {}),
+                  // The tool's schema already enums the statuses; the cast is
+                  // the seam between an untyped wire arg and the pure filter.
+                  ...(filters.status ? { status: filters.status as RequestListFilters['status'] } : {}),
+                  ...(deps.principal.kind === 'human' ? { callerEmail: deps.principal.email } : {}),
+                })
+              );
+              return { requests: rows.slice(0, 50), total: rows.length };
+            },
+            get: async (requestId) => loadRequest(deps.requestStore!, requestId),
+            /**
+             * A nudge, not a restart: it clears the bounded auto-advance
+             * counter so the sweeper's next pass will push the run again. The
+             * sweeper stays the only writer of a running request's status.
+             */
+            retry: async (requestId) => {
+              const result = await requeueRequest(deps.requestStore!, requestId);
+              if (!result.ok) {
+                return { refused: true, reason: result.reason, ...(result.status ? { status: result.status } : {}) };
+              }
+              return {
+                retried: true,
+                request_id: requestId,
+                status: result.doc.status,
+                note: 'The next sweep will push this run again; everything already completed is kept.',
+              };
+            },
+            archive: async (requestId) =>
+              archiveRequest(
+                deps.requestStore!,
+                requestId,
+                deps.principal.kind === 'human' ? deps.principal.email : 'agent'
+              ),
             /**
              * Failure-swallowing by design (T19.1 scope item 5): a registry
              * write that throws is logged, never propagated — losing the

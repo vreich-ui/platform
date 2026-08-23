@@ -374,3 +374,47 @@ Taken by default under R8, overridable by a queue comment:
 **Not hard, despite appearances:** resumability. Nothing needs to be made durable — it already is. The window closing was never what stopped the work; the absence of anyone watching was.
 
 **Risk to watch:** F7's O(N) listing gets worse before it gets better if the index lands late. T19.2 must ship the index-backed list in the same change that adds a second poller, or the 15-second shell poll doubles.
+
+---
+
+## 12. What shipped
+
+| Finding | Closed by |
+|---|---|
+| F1 — a finished run said nothing | ✅ `RunFinishedLine` (activity wave); the `caps` ending says the job continues |
+| F2 — the caps path was invisible | ✅ same |
+| F3 — nothing watched the job | ✅ T19.3 sweeper (away path) + `admin-request-activity` (watch path) |
+| F4 — no registry tied the pieces together | ✅ T19.1 `editorial-request.v1` + the index |
+| F5 — the list was a chat list, in one page | ✅ T19.4 `/admin/requests`, attention-first, filtered, deep-linkable |
+| F6 — requests were private to their creator | ✅ T19.2, team-wide read (plan §8) |
+| F7 — listing was O(N) blob reads, polled | ✅ T19.2, one index GET; a test pins it |
+| F8 — no notification on any channel | ✅ T19.6 in-app + browser · T19.7 e-mail behind a seam |
+| F9 — no archive, no end state | ✅ T19.1 `archived` + the archive filter |
+| F10 — the agent had no idea which request | ✅ T19.5 `focus` injection · T19.8 `list_requests` / `get_request` |
+
+### Decisions recorded along the way (R8)
+
+- **D7, partly deferred.** Only `run_workspace_workflow` registers a request.
+  It is the one chat tool that starts work an editor then waits on; template
+  instantiation, retheme and media jobs complete inline and have no `req_…`
+  id of their own yet. They register when that minting is designed.
+- **The e-mail preference lives on the W19 `NotifyState` doc**, not the W18
+  `Person` record as §6.3 said. Same per-person key, already exists, already
+  holds the mute list — every notification setting in one place, and no
+  membership-schema migration.
+- **The MCP mirror of the request tools is deferred** to its own row (T19.8b).
+  The chat surface answers the stated need ("inquire on all running requests");
+  the MCP mirror serves external agents, is purely additive, and did not
+  justify growing an already large change.
+- **The conversation tool bound moved 64 → 96**, on both sides. Platform's
+  registry had reached exactly 63 + the learning-mode tool: the old ceiling
+  with no headroom, so the next capability added would have been silently
+  sliced off the wire. Platform falls back to 64 once, automatically, if it
+  meets a server still on the old bound.
+
+### Still open
+
+T19.9's remaining scope is absorbed (shims, schedule blocks, scaffold, probe
+family and env all landed with the rows that needed them). T19.11 — the
+credentialed end-to-end run, including the per-tenant mail domain verification
+— is Wolf's, and is the wave's last step.

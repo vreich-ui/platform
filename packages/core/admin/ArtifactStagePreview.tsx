@@ -42,7 +42,11 @@ export function ArtifactStagePreview({ artifact }: { artifact: EditorialArtifact
         icon={<IconAlertTriangle size={24} />}
         title="Preview unavailable"
         message="The artifact is still indexed, but its preview bytes could not be loaded. Try again without changing the asset."
-        action={<Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>Try preview again</Button>}
+        action={
+          <Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
+            Try preview again
+          </Button>
+        }
       />
     );
   }

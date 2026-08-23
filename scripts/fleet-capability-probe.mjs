@@ -85,6 +85,8 @@ export const CAPABILITY_FAMILIES = [
   'blob_credentials',
   'mcp_auth',
   'artifact_upload',
+  // W19 T19.7 — the request-notification mail channel.
+  'mail',
 ];
 
 // ── T11.7 env-table coverage (P2: "every var maps to a family or is listed
@@ -170,6 +172,13 @@ export const T11_7_ENV_COVERAGE = {
   },
   STRIPE_SECRET_KEY: { family: 'commerce' },
   STRIPE_SECRET_KEY_TEST: { family: 'commerce' },
+  MAIL_PROVIDER: { family: 'mail' },
+  MAIL_API_KEY: { family: 'mail' },
+  MAIL_FROM: { family: 'mail' },
+  MAIL_REPLY_TO: {
+    family: null,
+    reason: 'optional reply-to header on an already-probed mail family; its absence changes nothing a probe can see.',
+  },
   STRIPE_WEBHOOK_SECRET: {
     family: null,
     reason:

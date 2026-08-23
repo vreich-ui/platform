@@ -7686,3 +7686,49 @@ Branch: `claude/phase-2-nav-footers-fdwfpt`, restarted from `main`@`e09e608`
 - The Astro content store bleeds across worktrees via symlinked
   node_modules — `scripts/build-diff.mjs` purges it per build; do the same
   in any new harness.
+
+## 2026-08-23 — W19 editorial requests: the record, the surface, the watch, the notifications
+
+Shipped across four PRs (#595 plan, #596 T19.1–T19.4, #598 activity view, and
+this one). An editorial job is now a first-class record in the per-site
+`editorial-requests` store, keyed by the `req_…` id Platform already minted and
+threw away; `/admin/requests` lists every job attention-first; a scheduled
+sweeper keeps every status true against CMS-Agent's run state while nobody is
+watching, and `admin-request-activity` shows nodes moving while somebody is.
+
+What this wave changed about the product, in one line each:
+
+- **You no longer ask the agent what it is doing.** The chat carries a live
+  line — step, `11 / 23`, an ETA measured from this workflow's own p50 history,
+  and the running cost — expanding to the full node timeline with tools,
+  warnings, and what each step produced and cost.
+- **Red means a step died.** Wolf's ruling of 2026-08-22, from a screenshot of
+  a red ✗ on a publish that was correctly refused. `lib/admin/activity-severity.ts`
+  is the shared classifier; a held gate is amber, a handled warning is muted,
+  and the `voice_prefetch_fallback` family that fires on every production run
+  is finally visible without shouting.
+- **Closing the window costs nothing.** The sweeper is the away path; the
+  activity endpoint is the watch path.
+- **Notifications** in-app and in the browser, with e-mail behind a provider
+  seam and the full P2 env obligation landed (`mail` capability family, env
+  table, `ENV_CHECKLIST`, probe map, runbook step).
+
+Two adversarial review passes ran over the finished branches and found
+nineteen defects between them, including three that would have shipped the
+feature broken: the severity classifier had nothing to classify because error
+tool results never carried their body; the activity view never appeared in the
+flow it was built for, because the chat resolved its request only on the first
+poll while the job registers mid-run; and gate matching on prose could label a
+dead step "waiting for approval". Every one is fixed with a regression test
+that fails without the fix.
+
+Also found and fixed en route: Platform's chat registry had reached the
+64-tool conversation bound with **zero** headroom, so the next tool added to
+it would have been silently truncated off the wire. Raised to 96 on both
+sides, with an automatic one-shot fallback so the two repos can land in either
+order.
+
+Records: `19-editorial-requests-plan.md` §12 maps F1–F10 to what closed them
+and carries the four R8 decisions taken along the way. Remaining: T19.8b (the
+MCP mirror of the request tools) and T19.11 (the credentialed run, Wolf's,
+including per-tenant mail domain verification).

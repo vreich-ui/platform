@@ -81,7 +81,10 @@ export default function MediaWorkspace({ identity }: { identity: SiteIdentity })
               Approved images and documents available to this publication.
             </p>
           </div>
-          <a href={agentStarterHref('media')} className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]">
+          <a
+            href={agentStarterHref('media')}
+            className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-transparent bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-on-accent)] hover:bg-[var(--adm-accent-hover)]"
+          >
             <IconSparkles size={16} /> Plan media with agent
           </a>
         </header>
@@ -95,14 +98,25 @@ export default function MediaWorkspace({ identity }: { identity: SiteIdentity })
             icon={<IconAlertTriangle size={26} />}
             title="Media unavailable"
             message={`${error} Your existing media has not been changed.`}
-            action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
+            action={
+              <Button variant="secondary" onClick={() => void load()}>
+                Try again
+              </Button>
+            }
           />
         ) : !artifacts.length ? (
           <EmptyState
             icon={<IconLibrary size={26} />}
             title="No media yet"
             message="Ask the CMS Agent to plan an approved image or document. It will show the governed proposal before it creates anything."
-            action={<a href={agentStarterHref('media')} className="adm-focusable text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent)] hover:underline">Plan media with agent</a>}
+            action={
+              <a
+                href={agentStarterHref('media')}
+                className="adm-focusable text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent)] hover:underline"
+              >
+                Plan media with agent
+              </a>
+            }
           />
         ) : (
           <>

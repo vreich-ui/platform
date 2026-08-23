@@ -21,22 +21,37 @@ import {
   getCapabilityStatus,
   type CapabilityFamily,
 } from '../../packages/core/server/lib/capability-status.js';
-import { pdfToolBridgeMissingEnvVars, isPdfToolBridgeConfigured } from '../../packages/core/server/lib/pdf-tool-client.js';
+import {
+  pdfToolBridgeMissingEnvVars,
+  isPdfToolBridgeConfigured,
+} from '../../packages/core/server/lib/pdf-tool-client.js';
 import {
   pdfToolStorageGrantMissingEnvVars,
   isPdfToolStorageGrantConfigured,
 } from '../../packages/core/server/lib/pdf-tool-storage-grant.js';
 import { commerceMissingEnvVars, isCommerceConfigured } from '../../packages/core/server/lib/stripe-env.js';
-import { purchaseTokenMissingEnvVars, isPurchaseTokenConfigured } from '../../packages/core/server/lib/purchase-tokens.js';
+import {
+  purchaseTokenMissingEnvVars,
+  isPurchaseTokenConfigured,
+} from '../../packages/core/server/lib/purchase-tokens.js';
 import {
   netlifyBuildHookMissingEnvVars,
   netlifyDeployLookupMissingEnvVars,
   isNetlifyBuildHookConfigured,
   isNetlifyDeployLookupConfigured,
 } from '../../packages/core/server/lib/netlify-deploys.js';
-import { gitCommitterMissingEnvVars, isGitCommitterConfigured } from '../../packages/core/server/lib/object-git-committer.js';
-import { blobCredentialsMissingEnvVars, isBlobCredentialsConfigured } from '../../packages/core/server/lib/blob-store.js';
-import { artifactUploadMissingEnvVars, isArtifactUploadConfigured } from '../../packages/core/server/lib/artifact-upload.js';
+import {
+  gitCommitterMissingEnvVars,
+  isGitCommitterConfigured,
+} from '../../packages/core/server/lib/object-git-committer.js';
+import {
+  blobCredentialsMissingEnvVars,
+  isBlobCredentialsConfigured,
+} from '../../packages/core/server/lib/blob-store.js';
+import {
+  artifactUploadMissingEnvVars,
+  isArtifactUploadConfigured,
+} from '../../packages/core/server/lib/artifact-upload.js';
 
 /** Every env var any predicate below reads — snapshotted/restored per test so tests never leak state to each other or the rest of the suite. */
 const ALL_TOUCHED_ENV_VARS = [
@@ -45,6 +60,11 @@ const ALL_TOUCHED_ENV_VARS = [
   'PDF_TOOL_STORAGE_TOKEN',
   'PDF_TOOL_STORAGE_SITE_ID',
   'STRIPE_MODE',
+  // W19 T19.7 — the opt-in mail family.
+  'MAIL_PROVIDER',
+  'MAIL_API_KEY',
+  'MAIL_FROM',
+  'MAIL_REPLY_TO',
   'STRIPE_SECRET_KEY',
   'STRIPE_SECRET_KEY_TEST',
   'PURCHASE_TOKEN_SECRET',
@@ -58,7 +78,10 @@ const ALL_TOUCHED_ENV_VARS = [
   'ARTIFACT_UPLOAD_TOKEN_SECRET',
 ] as const;
 
-const withEnv = async (values: Partial<Record<(typeof ALL_TOUCHED_ENV_VARS)[number], string>>, fn: () => Promise<void> | void) => {
+const withEnv = async (
+  values: Partial<Record<(typeof ALL_TOUCHED_ENV_VARS)[number], string>>,
+  fn: () => Promise<void> | void
+) => {
   const previous = Object.fromEntries(ALL_TOUCHED_ENV_VARS.map((name) => [name, process.env[name]]));
   for (const name of ALL_TOUCHED_ENV_VARS) delete process.env[name];
   for (const [name, value] of Object.entries(values)) process.env[name] = value;
@@ -94,7 +117,10 @@ test('pdf_bridge predicate: configured only with both PDF_TOOL_BASE_URL and PDF_
 test('pdf_storage_grant predicate: configured only with both PDF_TOOL_STORAGE_TOKEN and PDF_TOOL_STORAGE_SITE_ID', async () => {
   await withEnv({}, () => {
     assert.equal(isPdfToolStorageGrantConfigured(), false);
-    assert.deepEqual(pdfToolStorageGrantMissingEnvVars().sort(), ['PDF_TOOL_STORAGE_SITE_ID', 'PDF_TOOL_STORAGE_TOKEN']);
+    assert.deepEqual(pdfToolStorageGrantMissingEnvVars().sort(), [
+      'PDF_TOOL_STORAGE_SITE_ID',
+      'PDF_TOOL_STORAGE_TOKEN',
+    ]);
   });
   await withEnv({ PDF_TOOL_STORAGE_TOKEN: 'tok' }, () => {
     assert.deepEqual(pdfToolStorageGrantMissingEnvVars(), ['PDF_TOOL_STORAGE_SITE_ID']);
@@ -209,7 +235,7 @@ test('artifact_upload predicate: configured only with ARTIFACT_UPLOAD_TOKEN_SECR
 
 // ── getCapabilityStatus(): the composed report ──────────────────────────────
 
-test('getCapabilityStatus reports all ten families, none configured, with every var missing', async () => {
+test('getCapabilityStatus reports every family, none configured, with every var missing (except the two that cannot be)', async () => {
   await withEnv({}, () => {
     const report = getCapabilityStatus();
     assert.equal(typeof report.site_id, 'string');
@@ -218,6 +244,14 @@ test('getCapabilityStatus reports all ten families, none configured, with every 
 
     for (const family of CAPABILITY_FAMILIES as readonly CapabilityFamily[]) {
       const entry = report.families[family];
+      if (family === 'mail') {
+        // W19 T19.7: mail is OPT-IN. An empty env means the tenant did not ask
+        // for it — not configured, and nothing missing, because nothing was
+        // required. Missing vars appear only once MAIL_PROVIDER names one.
+        assert.equal(entry.configured, false);
+        assert.deepEqual(entry.missing, [], 'an opted-out tenant has no gap to report');
+        continue;
+      }
       if (family === 'mcp_auth') {
         // trivially true: capability_status itself already cleared the MCP auth gate
         assert.equal(entry.configured, true);
@@ -233,6 +267,9 @@ test('getCapabilityStatus reports all ten families, none configured, with every 
 test('getCapabilityStatus reports every family configured when every required var is set', async () => {
   await withEnv(
     {
+      MAIL_PROVIDER: 'resend',
+      MAIL_API_KEY: 'mail_key',
+      MAIL_FROM: 'editorial@example.com',
       PDF_TOOL_BASE_URL: 'https://pdf-tool.example',
       PDF_TOOL_AGENT_RUN_TOKEN: 'tok',
       PDF_TOOL_STORAGE_TOKEN: 'tok',
@@ -337,4 +374,33 @@ test('capability_status never returns anything secret-shaped, even with real-loo
       }
     }
   );
+});
+
+test('the mail family tells OFF apart from BROKEN (W19 T19.7)', async () => {
+  await withEnv({}, () => {
+    // Opted out: not usable, but nothing is wrong.
+    assert.deepEqual(getCapabilityStatus().families.mail, { configured: false, missing: [] });
+  });
+  await withEnv({ MAIL_PROVIDER: 'none' }, () => {
+    assert.deepEqual(getCapabilityStatus().families.mail, { configured: false, missing: [] });
+  });
+  await withEnv({ MAIL_PROVIDER: 'resend' }, () => {
+    // Opted IN with the wiring incomplete: a real gap, named.
+    assert.deepEqual(getCapabilityStatus().families.mail, {
+      configured: false,
+      missing: ['MAIL_API_KEY', 'MAIL_FROM'],
+    });
+  });
+  await withEnv({ MAIL_PROVIDER: 'resend', MAIL_API_KEY: 'k', MAIL_FROM: 'a@b.com' }, () => {
+    assert.deepEqual(getCapabilityStatus().families.mail, { configured: true, missing: [] });
+  });
+  await withEnv({ MAIL_PROVIDER: 'postmark', MAIL_API_KEY: 'k', MAIL_FROM: 'a@b.com' }, () => {
+    // A provider this build has NO adapter for. Every other var is present, so
+    // a naive probe would call this green — and every notification would then
+    // vanish into the null sender with the dashboard insisting mail works.
+    assert.deepEqual(getCapabilityStatus().families.mail, {
+      configured: false,
+      missing: ['MAIL_PROVIDER'],
+    });
+  });
 });

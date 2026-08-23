@@ -355,4 +355,12 @@ T19.7	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.7-mail-se
 T19.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T19.8-request-tools-agent-and-mcp.md
 T19.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T19.9-fleet-parity-and-probe.md
 T19.10	auto	claude-sonnet-5	low	docs/cms-architecture/cms-pipeline/T19.10-backfill-and-records.md
+# W19 status (2026-08-23): T19.1-T19.8 and T19.10 SHIPPED across PRs #596/#598
+# and the notifications wave; T19.9's scope was absorbed into the rows that
+# needed it (shims, schedule blocks, scaffold, probe family, env). Two rows
+# remain, both recorded in 19-editorial-requests-plan.md §12:
+#   T19.8b - mirror the four request tools onto the MCP surface (deferred so an
+#            already-large change stayed reviewable; purely additive).
+#   T19.11 - the credentialed end-to-end run, Wolf's hands, including the
+#            per-tenant mail sending-domain verification.
 T19.11	notify	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T19.11-e2e-and-credentialed-run.md

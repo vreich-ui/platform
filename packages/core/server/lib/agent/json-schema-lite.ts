@@ -86,7 +86,9 @@ const compileNode = (schema: unknown, where: string): Checker => {
 
   for (const key of Object.keys(schema)) {
     if (!SUPPORTED_KEYWORDS.has(key)) {
-      throw new Error(`json-schema-lite: unsupported keyword "${key}" at ${where} — extend the supported set deliberately, do not silently ignore it.`);
+      throw new Error(
+        `json-schema-lite: unsupported keyword "${key}" at ${where} — extend the supported set deliberately, do not silently ignore it.`
+      );
     }
   }
 
@@ -111,7 +113,9 @@ const compileNode = (schema: unknown, where: string): Checker => {
       propertyCheckers.set(key, compileNode(subschema, `${where}.properties.${key}`));
     }
   }
-  const required = Array.isArray(schema.required) ? (schema.required as unknown[]).filter((v) => typeof v === 'string') : undefined;
+  const required = Array.isArray(schema.required)
+    ? (schema.required as unknown[]).filter((v) => typeof v === 'string')
+    : undefined;
 
   const itemsChecker = schema.items !== undefined ? compileNode(schema.items, `${where}.items`) : undefined;
 

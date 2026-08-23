@@ -624,6 +624,46 @@ export const unarchiveRequest = async (
 };
 
 /**
+ * Re-open a stopped request so the sweeper will look at it again.
+ *
+ * WRITER: the human retry path (`retry_request`, and the surface's Retry
+ * button). It exists because `failed` is deliberately NOT in the sweeper's
+ * selection — a dead run is not polled forever — so clearing the nudge counter
+ * alone was a no-op that reported success. Moving the row back to `queued` is
+ * what actually puts it in front of the sweeper again.
+ *
+ * Refuses anything a retry cannot help: a terminal request, and a request
+ * waiting on a human (a gate is not a stall; pushing it will not open it).
+ */
+export const requeueRequest = async (
+  store: EditorialRequestStore,
+  requestId: string,
+  at: string = nowIso()
+): Promise<{ ok: true; doc: EditorialRequest } | { ok: false; reason: string; status?: RequestStatus }> => {
+  const doc = await loadRequest(store, requestId);
+  if (!doc) return { ok: false, reason: `No request ${requestId}.` };
+  if ((TERMINAL_REQUEST_STATUSES as readonly RequestStatus[]).includes(doc.status)) {
+    return { ok: false, reason: `This request is ${doc.status}; there is nothing left to retry.`, status: doc.status };
+  }
+  if (doc.status === 'needs_you') {
+    return {
+      ok: false,
+      reason: 'This request is waiting for a human decision, not stalled — retrying would not open the gate.',
+      status: doc.status,
+    };
+  }
+  if (!doc.workflow?.run_id) {
+    return { ok: false, reason: 'This request has no workflow run behind it to retry.', status: doc.status };
+  }
+  doc.status = 'queued';
+  doc.status_reason = 'Retried — waiting for the next sweep to push the run.';
+  doc.workflow = { ...doc.workflow, nudges: 0, stalled: false };
+  doc.updated_at = at;
+  appendHistory(doc, at, 'queued', 'retried by a human');
+  return { ok: true, doc: await commitRequest(store, doc, at) };
+};
+
+/**
  * Cancel. WRITER: the cancel path only — the request's creator or an Owner
  * (chat cancel, or an explicit request cancel; plan §8). A terminal doc
  * (done/cancelled/archived) is a no-op returning the current doc: there is

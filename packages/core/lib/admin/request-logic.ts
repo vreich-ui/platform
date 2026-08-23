@@ -167,3 +167,112 @@ export const relativeAge = (iso: string, nowMs: number): string => {
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
 };
+
+// ─── W19 T19.6: which transitions are worth telling a person about ───────────
+
+/**
+ * The ONLY four transitions that notify (plan §6). Everything else — a node
+ * completing, a progress tick, a request starting — is visible on the surface
+ * and is not worth interrupting anyone for. Keeping this list short is what
+ * makes a notification mean something.
+ */
+export const NOTIFYING_STATUSES: readonly RequestStatusName[] = ['needs_you', 'stalled', 'failed', 'done'];
+
+export interface PendingNotification {
+  request_id: string;
+  title: string;
+  status: RequestStatusName;
+  status_reason?: string;
+}
+
+/**
+ * Compare the current index against what this person was last told, and
+ * return only what is genuinely new to them.
+ *
+ * `lastNotified` is stored SERVER-side per person, so the dedup holds across
+ * tabs, across devices and across a reload — a second tab opening must not
+ * re-announce an approval the editor already saw, and neither must a refresh.
+ * Muted requests are dropped here rather than at the surface, so muting one
+ * silences every channel at once.
+ */
+export interface NotificationScan {
+  /** What to show the person now. */
+  notify: PendingNotification[];
+  /**
+   * Every row whose status differs from the stored one — INCLUDING the
+   * non-notifying ones. Acking these is what lets a request that returns to a
+   * notifying status be announced again.
+   */
+  ack: Record<string, string>;
+}
+
+/**
+ * Compare the current index against what this person was last shown.
+ *
+ * The map tracks the CURRENT status, notifying or not. Tracking only the
+ * notifying ones silently swallowed the most valuable event in the system: a
+ * request that hits `needs_you`, is approved, runs, and hits a SECOND approval
+ * gate would find `needs_you` already recorded and say nothing — the same for a
+ * job that stalls, is revived, and stalls again. Acking the intermediate
+ * `running` is what closes that hole.
+ *
+ * Muted requests are dropped here rather than at the surface, so muting one
+ * silences every channel at once.
+ */
+export const scanNotifications = (
+  rows: readonly (RequestRowLike & { status_reason?: string })[],
+  lastNotified: Readonly<Record<string, string>>,
+  muted: readonly string[] = []
+): NotificationScan => {
+  const silenced = new Set(muted);
+  const notify: PendingNotification[] = [];
+  const ack: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.archived || silenced.has(row.request_id)) continue;
+    if (lastNotified[row.request_id] === row.status) continue;
+    ack[row.request_id] = row.status;
+    if (!NOTIFYING_STATUSES.includes(row.status)) continue;
+    notify.push({
+      request_id: row.request_id,
+      title: row.title,
+      status: row.status,
+      ...(row.status_reason ? { status_reason: row.status_reason } : {}),
+    });
+  }
+  return { notify, ack };
+};
+
+/** Convenience for callers that only want what to show. */
+export const pendingNotifications = (
+  rows: readonly (RequestRowLike & { status_reason?: string })[],
+  lastNotified: Readonly<Record<string, string>>,
+  muted: readonly string[] = []
+): PendingNotification[] => scanNotifications(rows, lastNotified, muted).notify;
+
+/** One sentence per transition — the toast body, the browser notification body, and the e-mail subject all use it. */
+export const notificationSentence = (notification: PendingNotification): string => {
+  switch (notification.status) {
+    case 'needs_you':
+      return notification.status_reason || 'Needs a decision from you.';
+    case 'stalled':
+      return notification.status_reason || 'Stopped moving — nothing has happened for a while.';
+    case 'failed':
+      return notification.status_reason || 'A step failed and the job stopped.';
+    default:
+      return 'Finished.';
+  }
+};
+
+export const notificationHeadline = (notification: PendingNotification): string =>
+  `${notification.title} — ${
+    notification.status === 'needs_you'
+      ? 'needs you'
+      : notification.status === 'stalled'
+        ? 'stalled'
+        : notification.status === 'failed'
+          ? 'failed'
+          : 'done'
+  }`;
+
+/** `(3) ` for the tab title, and nothing at all at zero — a bare title must stay bare. */
+export const titlePrefix = (count: number): string => (count > 0 ? `(${count}) ` : '');

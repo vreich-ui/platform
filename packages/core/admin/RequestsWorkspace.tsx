@@ -12,6 +12,7 @@ import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Badge, Button, Card, EmptyState, Skeleton, StatusPill } from './primitives';
 import { RequestActivity } from './RequestActivity';
+import { browserPermission, requestBrowserPermission, type BrowserPermission } from './useRequestNotifications';
 import { Input, Select } from './forms';
 import { useToast } from './overlays';
 import { IconAlertTriangle, IconExternalLink, IconSparkles } from './icons';
@@ -179,6 +180,41 @@ function RequestRow({
   );
 }
 
+/**
+ * W19 T19.6 — the browser-notification opt-in.
+ *
+ * The permission is requested ONCE, and only from this button (plan §6.2):
+ * asking on page load is how a browser prompt gets dismissed forever. The
+ * honest limit is stated next to it — this only fires while an admin tab is
+ * open somewhere; closed-browser push needs a service worker and VAPID keys
+ * and is deliberately not built (plan D5).
+ */
+function BrowserNotifyControl() {
+  const [permission, setPermission] = useState<BrowserPermission>('unsupported');
+  useEffect(() => setPermission(browserPermission()), []);
+
+  if (permission === 'unsupported') return null;
+  if (permission === 'granted') {
+    return (
+      <span className="pb-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+        Desktop alerts on — while an admin tab is open.
+      </span>
+    );
+  }
+  if (permission === 'denied') {
+    return (
+      <span className="pb-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+        Desktop alerts are blocked in your browser settings.
+      </span>
+    );
+  }
+  return (
+    <Button size="sm" variant="secondary" onClick={() => void requestBrowserPermission().then(setPermission)}>
+      Notify me on the desktop
+    </Button>
+  );
+}
+
 const readParams = () =>
   typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
 
@@ -343,6 +379,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
               onChange={(event) => setQuery(event.target.value)}
             />
             <div className="flex items-end gap-3 pb-1">
+              <BrowserNotifyControl />
               <label className="flex items-center gap-1.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
                 <input type="checkbox" checked={mine} onChange={(event) => setMine(event.target.checked)} /> Mine
               </label>

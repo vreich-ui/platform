@@ -20,7 +20,7 @@ import type { ReactNode } from 'react';
 import { cn } from './utils';
 import { Avatar, Badge, IconButton } from './primitives';
 import { CommandPalette, DropdownMenu, type CommandItem } from './menus';
-import { ToastProvider } from './overlays';
+import { ToastProvider, useToast } from './overlays';
 import { Drawer } from './overlays';
 import { AdminErrorBoundary } from './ErrorBoundary';
 import {
@@ -46,6 +46,7 @@ import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { welcomeGateDecision } from './logic';
 import { listRequests } from '@core/lib/admin/requests-client';
 import { summarizeRequestRows } from '@core/lib/admin/request-logic';
+import { useRequestNotifications } from './useRequestNotifications';
 import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
 import { settingsNavigationLabel } from '@core/lib/admin/admin-navigation';
 
@@ -172,6 +173,59 @@ function NavList({
   );
 }
 
+/**
+ * W19: the one poll behind the shell's pills, the toasts, the browser
+ * notification and the tab-title count.
+ *
+ * It is a CHILD of `ToastProvider` rather than part of `AdminShell`'s body
+ * because the shell renders that provider and cannot consume its own context.
+ * Rendering nothing is the point: it exists to own the interval exactly once
+ * per page, so no two surfaces can announce the same transition.
+ */
+function RequestPulse({
+  onCounts,
+  onUnread,
+}: {
+  onCounts: (counts: { working: number; needsYou: number; stalled: number }) => void;
+  onUnread: (unread: number) => void;
+}) {
+  const { toast } = useToast();
+  const { ingest, unread, clearUnread } = useRequestNotifications(shellToken, toast);
+
+  useEffect(() => {
+    onUnread(unread);
+  }, [unread, onUnread]);
+
+  // Visiting the requests surface IS reading them.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/requests')) clearUnread();
+  }, [clearUnread]);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        // W19 T19.2: ONE blob GET (the request index), not the O(N) chat scan
+        // this used to run every 15 s per signed-in admin (plan F7).
+        const result = await listRequests(shellToken, { limit: 100 });
+        if (!alive) return;
+        onCounts(summarizeRequestRows(result.requests));
+        ingest(result.requests, result.last_notified ?? {}, result.muted ?? []);
+      } catch {
+        // Global utilities are progressive enhancement; page work remains usable.
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 15_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [ingest, onCounts]);
+
+  return null;
+}
+
 export interface AdminShellProps {
   currentPath: string;
   title?: string;
@@ -189,6 +243,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [objectRows, setObjectRows] = useState<LibraryRow[]>([]);
   const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0, stalled: 0 });
+  const [, setUnread] = useState(0);
   const objectsAttempted = useRef(false);
 
   // W18 T18.5: the welcome gate. A member whose Person.onboarding is not
@@ -253,27 +308,6 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     };
   }, [paletteOpen]);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        // W19 T19.2: ONE blob GET (the request index), not the O(N) chat scan
-        // this used to run every 15 s per signed-in admin (plan F7).
-        const { requests } = await listRequests(shellToken, { limit: 100 });
-        const summary = summarizeRequestRows(requests);
-        if (alive) setWorkCounts(summary);
-      } catch {
-        // Global utilities are progressive enhancement; page work remains usable.
-      }
-    };
-    void load();
-    const timer = window.setInterval(load, 15_000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, []);
-
   const onLogout = () => {
     import('@core/lib/admin/goTrueClient')
       .then((m) => m.logout())
@@ -316,6 +350,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
 
   return (
     <ToastProvider>
+      <RequestPulse onCounts={setWorkCounts} onUnread={setUnread} />
       <div className="adm-root flex min-h-screen bg-[var(--adm-surface-page)] text-[var(--adm-text)]">
         {/* Sidebar (desktop) */}
         <aside

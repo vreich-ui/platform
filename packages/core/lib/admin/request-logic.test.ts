@@ -3,6 +3,11 @@ import { describe, it } from 'node:test';
 
 import {
   filterRequestRows,
+  notificationHeadline,
+  notificationSentence,
+  pendingNotifications,
+  scanNotifications,
+  titlePrefix,
   nodeLabel,
   progressPhrase,
   relativeAge,
@@ -159,5 +164,101 @@ describe('editor vocabulary', () => {
     assert.equal(relativeAge('2026-08-22T09:00:00.000Z', now), '3h');
     assert.equal(relativeAge('2026-08-20T12:00:00.000Z', now), '2d');
     assert.equal(relativeAge('not a date', now), '');
+  });
+});
+
+// ─── W19 T19.6: what notifies, and what stays quiet ──────────────────────────
+
+describe('notification transitions', () => {
+  const notifyRow = (
+    request_id: string,
+    status: RequestStatusName,
+    overrides: Partial<RequestRowLike & { status_reason?: string }> = {}
+  ) => ({ ...row(request_id, status), ...overrides });
+
+  it('announces only the four transitions that earn an interruption', () => {
+    const rows = [
+      notifyRow('req_a_x_20260822_01', 'needs_you'),
+      notifyRow('req_b_x_20260822_01', 'stalled'),
+      notifyRow('req_c_x_20260822_01', 'failed'),
+      notifyRow('req_d_x_20260822_01', 'done'),
+      // These are visible on the surface and interrupt nobody.
+      notifyRow('req_e_x_20260822_01', 'running'),
+      notifyRow('req_f_x_20260822_01', 'queued'),
+      notifyRow('req_g_x_20260822_01', 'cancelled'),
+    ];
+    assert.deepEqual(
+      pendingNotifications(rows, {}).map((item) => item.status),
+      ['needs_you', 'stalled', 'failed', 'done']
+    );
+  });
+
+  it('says nothing twice — the dedup is what makes a second tab bearable', () => {
+    const rows = [notifyRow('req_a_x_20260822_01', 'needs_you')];
+    assert.equal(pendingNotifications(rows, { req_a_x_20260822_01: 'needs_you' }).length, 0);
+    // …but a NEW transition on the same request is still news.
+    assert.equal(pendingNotifications(rows, { req_a_x_20260822_01: 'running' }).length, 1);
+  });
+
+  it('acks the QUIET statuses too, so a second visit to the same gate is news again', () => {
+    // The bug this pins: dedup keyed on the status VALUE alone. A request that
+    // hits `needs_you`, is approved, runs, and hits a second approval gate has
+    // the same status string as the first time — if the intermediate `running`
+    // was never recorded, the second gate is silently swallowed and the editor
+    // waits forever on a job that is waiting for them.
+    const running = scanNotifications([notifyRow('req_a_x_20260822_01', 'running')], {
+      req_a_x_20260822_01: 'needs_you',
+    });
+    assert.deepEqual(running.notify, [], 'running is not worth interrupting anyone for');
+    assert.deepEqual(
+      running.ack,
+      { req_a_x_20260822_01: 'running' },
+      'but it MUST be recorded, or the next needs_you looks like the last one'
+    );
+    // …and with that recorded, the second gate announces.
+    assert.equal(pendingNotifications([notifyRow('req_a_x_20260822_01', 'needs_you')], running.ack).length, 1);
+  });
+
+  it('acks nothing for a row it has already announced', () => {
+    const scan = scanNotifications([notifyRow('req_a_x_20260822_01', 'failed')], {
+      req_a_x_20260822_01: 'failed',
+    });
+    assert.deepEqual(scan.notify, []);
+    assert.deepEqual(scan.ack, {}, 'an unchanged row is not a write');
+  });
+
+  it('honours a mute across every channel at once', () => {
+    const rows = [notifyRow('req_a_x_20260822_01', 'failed')];
+    assert.equal(pendingNotifications(rows, {}, ['req_a_x_20260822_01']).length, 0);
+  });
+
+  it('never announces an archived request', () => {
+    const rows = [notifyRow('req_a_x_20260822_01', 'done', { archived: true })];
+    assert.equal(pendingNotifications(rows, {}).length, 0);
+  });
+
+  it('uses the status reason verbatim where there is one, and a plain sentence where there is not', () => {
+    assert.equal(
+      notificationSentence({
+        request_id: 'r',
+        title: 't',
+        status: 'needs_you',
+        status_reason: 'Publish-risk node requires explicit approval.',
+      }),
+      'Publish-risk node requires explicit approval.'
+    );
+    assert.equal(
+      notificationSentence({ request_id: 'r', title: 't', status: 'stalled' }),
+      'Stopped moving — nothing has happened for a while.'
+    );
+    assert.equal(
+      notificationHeadline({ request_id: 'r', title: 'Retinol after 40', status: 'failed' }),
+      'Retinol after 40 — failed'
+    );
+  });
+
+  it('leaves a bare tab title bare', () => {
+    assert.equal(titlePrefix(0), '');
+    assert.equal(titlePrefix(3), '(3) ');
   });
 });
