@@ -219,6 +219,36 @@ export interface NotificationScan {
  * Muted requests are dropped here rather than at the surface, so muting one
  * silences every channel at once.
  */
+/**
+ * Combine the SERVER's ledger of what this person has been told with a tab's
+ * own record of what it just showed, and prune what has gone stale.
+ *
+ * The local record exists only to cover the round-trip between showing
+ * something and the ack landing — but an entry left in it after the row moved
+ * on is worse than useless. A pinned tab that showed `needs_you`, watched the
+ * job be approved and go `running`, and later saw it reach a SECOND gate would
+ * find its stale `needs_you` entry matching the row again and suppress the
+ * toast, the desktop notification AND the ack — permanently, for exactly the
+ * event this engine exists to deliver.
+ *
+ * Returns the merged view to scan against, and the pruned local record to keep.
+ */
+export const mergeSeen = (
+  rows: readonly RequestRowLike[],
+  lastNotified: Readonly<Record<string, string>>,
+  localSeen: Readonly<Record<string, string>>
+): { seen: Record<string, string>; local: Record<string, string> } => {
+  const seen: Record<string, string> = { ...lastNotified };
+  const local: Record<string, string> = {};
+  for (const [requestId, status] of Object.entries(localSeen)) {
+    const row = rows.find((candidate) => candidate.request_id === requestId);
+    if (!row || row.status !== status) continue;
+    seen[requestId] = status;
+    local[requestId] = status;
+  }
+  return { seen, local };
+};
+
 export const scanNotifications = (
   rows: readonly (RequestRowLike & { status_reason?: string })[],
   lastNotified: Readonly<Record<string, string>>,

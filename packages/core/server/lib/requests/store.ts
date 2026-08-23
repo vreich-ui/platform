@@ -217,8 +217,27 @@ export const requestDocKey = (requestId: string) => `${KEY_PREFIX}${requestId.re
 
 export const REQUEST_INDEX_KEY = 'requests/index.json';
 
-/** Per-person delivery + mute state (plan §6). Key reserved here; the NotifyState schema and writers land in T19.6. */
-export const notifyStateKey = (personId: string) => `requests/notify/${personId.replaceAll(':', '__')}.json`;
+/**
+ * Per-person notification state (plan §6), split across THREE keys by writer.
+ *
+ * Blob storage has no compare-and-swap, so the fleet's answer to concurrency
+ * is that each document has exactly one writing component. These three had one
+ * document and three writers — the person's own settings (mute, mail mode),
+ * every open tab's delivery ack, and the sweeper's mail ledger — which is a
+ * read-modify-write race between components, not within one. A person clicking
+ * Mute while their other tab acked a transition could have the mute silently
+ * reverted; the sweeper's mail ledger could be clobbered by a tab mid-send and
+ * the same e-mail sent twice.
+ *
+ * One key per writer, and the race is gone:
+ *   notify/       — the PERSON's settings. Written only by an explicit click.
+ *   notify-seen/  — what the browser has shown. Written only by the ack path.
+ *   notify-mailed/— what the mailer has sent. Written only by the sweeper.
+ */
+const personSlug = (personId: string) => personId.replaceAll(':', '__');
+export const notifyStateKey = (personId: string) => `requests/notify/${personSlug(personId)}.json`;
+export const notifySeenKey = (personId: string) => `requests/notify-seen/${personSlug(personId)}.json`;
+export const notifyMailedKey = (personId: string) => `requests/notify-mailed/${personSlug(personId)}.json`;
 
 // ─── reads ───────────────────────────────────────────────────────────────────
 
@@ -649,6 +668,18 @@ export const requeueRequest = async (
     return {
       ok: false,
       reason: 'This request is waiting for a human decision, not stalled — retrying would not open the gate.',
+      status: doc.status,
+    };
+  }
+  // `stalled` and `failed` ONLY. A `running` or `queued` request is the
+  // sweeper's to write (§3.4 writer assignment); rewriting its status from the
+  // human path can land inside a sweep's load→commit window and lose one of
+  // the two writes. There is also nothing to retry — a job that is still
+  // moving has not stopped.
+  if (doc.status !== 'stalled' && doc.status !== 'failed') {
+    return {
+      ok: false,
+      reason: `This request is ${doc.status} — it has not stopped, so there is nothing to retry yet.`,
       status: doc.status,
     };
   }

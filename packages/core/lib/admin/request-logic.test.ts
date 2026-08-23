@@ -5,6 +5,7 @@ import {
   filterRequestRows,
   notificationHeadline,
   notificationSentence,
+  mergeSeen,
   pendingNotifications,
   scanNotifications,
   titlePrefix,
@@ -198,6 +199,39 @@ describe('notification transitions', () => {
     assert.equal(pendingNotifications(rows, { req_a_x_20260822_01: 'needs_you' }).length, 0);
     // …but a NEW transition on the same request is still news.
     assert.equal(pendingNotifications(rows, { req_a_x_20260822_01: 'running' }).length, 1);
+  });
+
+  it('prunes a local record the row has moved past — the pinned-tab bug', () => {
+    // One tab, open for a day. It showed `needs_you` and remembers that
+    // locally. The job is approved and runs; the server ledger now says
+    // `running`. Later the job reaches a SECOND gate.
+    const atSecondGate = [notifyRow('req_a_x_20260822_01', 'needs_you')];
+    const stale = { req_a_x_20260822_01: 'needs_you' };
+
+    // Between the two gates the local entry must be dropped…
+    const between = mergeSeen([notifyRow('req_a_x_20260822_01', 'running')], {}, stale);
+    assert.deepEqual(between.local, {}, 'an entry its row has moved past is not a suppressor any more');
+
+    // …because if it survives, it matches the second gate and silences it forever.
+    const merged = mergeSeen(atSecondGate, { req_a_x_20260822_01: 'running' }, between.local);
+    assert.equal(pendingNotifications(atSecondGate, merged.seen).length, 1);
+    assert.equal(
+      pendingNotifications(atSecondGate, mergeSeen(atSecondGate, { req_a_x_20260822_01: 'running' }, stale).seen)
+        .length,
+      0,
+      'this is what the unpruned record did'
+    );
+  });
+
+  it('keeps a local record that still matches, so the ack round-trip does not double-announce', () => {
+    const rows = [notifyRow('req_a_x_20260822_01', 'failed')];
+    const { seen, local } = mergeSeen(rows, {}, { req_a_x_20260822_01: 'failed' });
+    assert.deepEqual(local, { req_a_x_20260822_01: 'failed' });
+    assert.equal(pendingNotifications(rows, seen).length, 0);
+  });
+
+  it('forgets a request that has left the list entirely', () => {
+    assert.deepEqual(mergeSeen([], {}, { req_gone_x_20260822_01: 'done' }).local, {});
   });
 
   it('acks the QUIET statuses too, so a second visit to the same gate is news again', () => {

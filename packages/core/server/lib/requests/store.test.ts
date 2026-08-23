@@ -707,6 +707,17 @@ describe('requeueRequest — what "Retry" actually does', () => {
     assert.equal((await loadRequest(store, ID))?.status, 'needs_you');
   });
 
+  it('refuses a request that is still MOVING — the sweeper owns that row', async () => {
+    const store = new FakeStore();
+    await seedWorkflowRequest(store);
+    await setStatus(store, ID, { status: 'running' }, iso(1));
+
+    const result = await requeueRequest(store, ID, iso(2));
+    assert.equal(result.ok, false);
+    assert.match(result.ok === false ? result.reason : '', /has not stopped/i);
+    assert.equal((await loadRequest(store, ID))?.status, 'running', 'a human write here can lose the sweeper\u2019s');
+  });
+
   it('refuses when there is no run behind the row at all', async () => {
     const store = new FakeStore();
     await createRequest(
@@ -714,7 +725,8 @@ describe('requeueRequest — what "Retry" actually does', () => {
       { request_id: ID_B, kind: 'article', title: 'No run', created_by: 'editor@example.com' },
       iso(0)
     );
-    const result = await requeueRequest(store, ID_B, iso(1));
+    await setStatus(store, ID_B, { status: 'failed', status_reason: 'nothing ever dispatched' }, iso(1));
+    const result = await requeueRequest(store, ID_B, iso(2));
     assert.equal(result.ok, false);
     assert.match(result.ok === false ? result.reason : '', /no workflow run/i);
   });

@@ -122,9 +122,21 @@ const main = async () => {
 
   if (!APPLY) {
     for (const job of toRegister.slice(0, 20)) {
-      console.info(`  would register ${job.requestId} (run ${job.runId ?? 'unknown'})${isOld(job) ? ' [archived]' : ' [live]'}`);
+      console.info(
+        `  would register ${job.requestId} (run ${job.runId ?? 'unknown'})${isOld(job) ? ' [archived]' : ' [live]'}`
+      );
     }
     if (toRegister.length > 20) console.info(`  … and ${toRegister.length - 20} more`);
+    // Named, not counted. Archiving is the one write here that HIDES
+    // something, and an operator cannot check `to_archive=7` against their own
+    // knowledge of the desk.
+    const alreadyOnDisk = toArchive.filter((job) => rowsById.has(job.requestId));
+    for (const job of alreadyOnDisk.slice(0, 20)) {
+      console.info(
+        `  would archive ALREADY-REGISTERED ${job.requestId} (queued since ${rowsById.get(job.requestId).updated_at})`
+      );
+    }
+    if (alreadyOnDisk.length > 20) console.info(`  … and ${alreadyOnDisk.length - 20} more`);
     console.info('[backfill] dry run — nothing written. Re-run with --apply.');
     return;
   }
@@ -142,9 +154,7 @@ const main = async () => {
         title: job.title || job.requestId,
         created_by: job.createdBy,
         chat: { chat_id: job.chatId, kind: job.chatKind },
-        ...(job.runId
-          ? { workflow: { run_id: job.runId, workflow_id: 'publishing_conductor', project_id: '' } }
-          : {}),
+        ...(job.runId ? { workflow: { run_id: job.runId, workflow_id: 'publishing_conductor', project_id: '' } } : {}),
       },
       job.at
     );
@@ -161,7 +171,7 @@ const main = async () => {
   }
   await store.rebuildIndex(requestStore);
   console.info(
-    `[backfill] registered=${registered} archived=${archived} left_live=${registered - toArchive.filter((job) => toRegister.includes(job)).length}; index rebuilt.`
+    `[backfill] registered=${registered} archived=${archived} left_live=${registered - archived}; index rebuilt.`
   );
 };
 

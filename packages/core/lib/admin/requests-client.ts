@@ -85,6 +85,8 @@ export interface RequestListView {
   muted: string[];
   /** T19.6: request_id → the status this person was last told about, server-side so the dedup crosses tabs and devices. */
   last_notified: Record<string, string>;
+  /** This person has never been told anything: the first ingest acks in silence rather than announcing the whole backlog. */
+  notify_first_contact?: boolean;
   email_mode: EmailMode;
 }
 

@@ -22,7 +22,15 @@ import {
   type DerivedRequestState,
   type RunSnapshot,
 } from './derive-status.js';
-import { ackMailed, alreadyMailed, emailModeFor, isMuted, loadNotifyState, shouldMailNow } from './notify-state.js';
+import {
+  ackMailed,
+  alreadyMailed,
+  emailModeFor,
+  isMuted,
+  loadMailedLedger,
+  loadNotifyState,
+  shouldMailNow,
+} from './notify-state.js';
 import {
   NON_TERMINAL_REQUEST_STATUSES,
   TERMINAL_REQUEST_STATUSES,
@@ -200,8 +208,12 @@ const notifyByMail = async (deps: SweepDeps, doc: EditorialRequest, status: Requ
 
   const state = await loadNotifyState(deps.store, recipient).catch(() => undefined);
   if (isMuted(state, doc.request_id)) return;
-  if (alreadyMailed(state, doc.request_id, status)) return;
   if (!shouldMailNow(emailModeFor(state), status)) return;
+  // The mail ledger is its own document, written only here — read it last, so
+  // the window between "have I already sent this" and sending is as small as
+  // this function can make it.
+  const mailed = await loadMailedLedger(deps.store, recipient, state).catch(() => ({}));
+  if (alreadyMailed(mailed, doc.request_id, status)) return;
 
   const result = await deps.mailer.notify({
     to: recipient,

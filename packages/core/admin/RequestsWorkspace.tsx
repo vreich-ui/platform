@@ -20,9 +20,13 @@ import {
   archiveRequest,
   cancelRequest,
   listRequests,
+  muteRequest,
   requestPollIntervalFor,
   requestStatusLabel,
+  setEmailMode,
   unarchiveRequest,
+  unmuteRequest,
+  type EmailMode,
   type RequestKind,
   type RequestRowView,
   type RequestStatus,
@@ -94,16 +98,20 @@ function RequestRow({
   nowMs,
   canArchive,
   busy,
+  muted,
   onArchive,
   onCancel,
+  onMute,
   selected,
 }: {
   row: RequestRowView;
   nowMs: number;
   canArchive: boolean;
   busy: boolean;
+  muted: boolean;
   onArchive: (row: RequestRowView) => void;
   onCancel: (row: RequestRowView) => void;
+  onMute: (row: RequestRowView, muted: boolean) => void;
   selected: boolean;
 }) {
   const phrase = progressPhrase(row.progress, row.current_node);
@@ -164,6 +172,20 @@ function RequestRow({
               Article
             </Button>
           ) : null}
+          {/* W19 T19.6: muting is personal and silences ALL THREE channels —
+              the toast, the desktop alert and the e-mail. Every notification
+              e-mail points back here, so the control has to exist here. */}
+          {!row.archived ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => onMute(row, muted)}
+              title={muted ? 'You are not being told about this one' : 'Stop telling me about this one'}
+            >
+              {muted ? 'Unmute' : 'Mute'}
+            </Button>
+          ) : null}
           {row.status !== 'done' && row.status !== 'cancelled' && !row.archived ? (
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => onCancel(row)}>
               Cancel
@@ -215,6 +237,30 @@ function BrowserNotifyControl() {
   );
 }
 
+/**
+ * W19 T19.7 — how much mail this person wants.
+ *
+ * Every notification e-mail ends by telling the reader they can change or stop
+ * these e-mails on this page, so this control is what makes that sentence
+ * true. Two options only: `daily` is still accepted by the API and by older
+ * stored settings, but no digest pass exists yet, so offering it would be
+ * offering silence under another name. (R8: recorded, and T19.11 owns the
+ * digest.)
+ */
+function EmailModeControl({ mode, onChange }: { mode: EmailMode; onChange: (next: EmailMode) => void }) {
+  return (
+    <Select
+      label="E-mail me"
+      value={mode === 'daily' ? 'off' : mode}
+      onChange={(event) => onChange(event.target.value as EmailMode)}
+      options={[
+        { value: 'immediate', label: 'When a job needs me or stops' },
+        { value: 'off', label: 'Never' },
+      ]}
+    />
+  );
+}
+
 const readParams = () =>
   typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
 
@@ -231,6 +277,8 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   const [mine, setMine] = useState(() => readParams().get('mine') === '1');
   const [archived, setArchived] = useState(() => readParams().get('archived') === '1');
   const [query, setQuery] = useState(() => readParams().get('q') ?? '');
+  const [muted, setMuted] = useState<readonly string[]>([]);
+  const [emailMode, setEmailModeState] = useState<EmailMode>('immediate');
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   /**
    * A GENERATION counter, not a shared `live` flag. A filter change (every
@@ -272,6 +320,8 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
         if (!current()) return;
         setRows(result.requests);
         setTotal(result.total);
+        setMuted(result.muted ?? []);
+        setEmailModeState(result.email_mode ?? 'immediate');
         setNowMs(Date.now());
         setError(undefined);
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -378,6 +428,13 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
               placeholder="Title or request id"
               onChange={(event) => setQuery(event.target.value)}
             />
+            <EmailModeControl
+              mode={emailMode}
+              onChange={(next) => {
+                setEmailModeState(next);
+                void act('Saved', () => setEmailMode(getToken, next));
+              }}
+            />
             <div className="flex items-end gap-3 pb-1">
               <BrowserNotifyControl />
               <label className="flex items-center gap-1.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
@@ -425,6 +482,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                 nowMs={nowMs}
                 canArchive={canArchive}
                 busy={busy}
+                muted={muted.includes(row.request_id)}
                 selected={row.request_id === selectedId}
                 onArchive={(target) =>
                   void act(target.archived ? 'Restored' : 'Archived', () =>
@@ -434,6 +492,11 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                   )
                 }
                 onCancel={(target) => void act('Cancelled', () => cancelRequest(getToken, target.request_id))}
+                onMute={(target, isMuted) =>
+                  void act(isMuted ? 'Unmuted' : 'Muted', () =>
+                    isMuted ? unmuteRequest(getToken, target.request_id) : muteRequest(getToken, target.request_id)
+                  )
+                }
               />
             ))}
           </ul>

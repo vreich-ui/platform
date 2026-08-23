@@ -406,6 +406,41 @@ Taken by default under R8, overridable by a queue comment:
   The chat surface answers the stated need ("inquire on all running requests");
   the MCP mirror serves external agents, is purely additive, and did not
   justify growing an already large change.
+- **The per-person notification doc is split three ways, by writer.** One
+  document had three writing components — the person's own settings, every
+  open tab's delivery ack, and the sweeper's mail ledger. On a store with no
+  compare-and-swap that is a read-modify-write race *between* components, not
+  within one: a mute could be silently reverted by the person's other tab, and
+  the mail ledger clobbered mid-send so the same e-mail went twice. Now
+  `notify/` holds settings, `notify-seen/` the browser ledger, `notify-mailed/`
+  the mail ledger, and each has exactly one writer. A pre-split doc is still
+  read as the fallback for both ledgers, so nobody is re-notified about
+  something they were already told.
+- **`daily` is accepted but not offered.** The mail-mode API and the stored
+  schema still take it, so an older setting keeps parsing, but no digest pass
+  exists yet and `shouldMailNow` therefore treats it as silence. Offering it in
+  the UI would be offering silence under another name, so `/admin/requests`
+  offers two options — when a job needs me or stops, and never. The digest is
+  T19.11's.
+- **`retry_request` is `stalled` and `failed` only.** It refuses a `running` or
+  `queued` request: there is nothing to retry on a job that has not stopped,
+  and rewriting a live row's status from the human path can land inside a
+  sweep's load→commit window and lose one of the two writes. §3.4's writer
+  assignment is what makes the whole registry safe without CAS; a retry button
+  is not worth an exception to it.
+- **The backfill archives only rows it owns.** Every W19 request leaves the
+  same `run_workspace_workflow` result in its chat — that is how one starts —
+  so age alone would have buried live requests that had been sitting at an
+  approval gate longer than the cutoff, permanently, since the sweeper skips
+  archived rows. A row qualifies only if this run created it or a previous
+  interrupted run left it untouched at `queued`, and the dry run now names
+  every already-registered row it would file away rather than counting them.
+- **First contact acks in silence.** An empty ledger and a never-written one
+  look identical on the wire, and the browser treats every difference as news —
+  so the day this ships, and every new team member's first visit, would have
+  stacked a toast and a desktop notification for every finished, failed and
+  waiting job on the site. The list response flags first contact and the first
+  ingest records without announcing.
 - **The conversation tool bound moved 64 → 96**, on both sides. Platform's
   registry had reached exactly 63 + the learning-mode tool: the old ceiling
   with no headroom, so the next capability added would have been silently

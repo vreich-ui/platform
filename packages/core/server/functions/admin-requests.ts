@@ -40,6 +40,7 @@ import {
   emailModeFor,
   emailModeSchema,
   loadNotifyState,
+  loadSeenLedger,
   muteRequest,
   setEmailMode,
   unmuteRequest,
@@ -168,6 +169,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         const page = matched.slice(start, start + limit);
         const nextCursor = start + limit < matched.length ? String(start + limit) : undefined;
         const notify = await loadNotifyState(store, callerEmail);
+        const seen = await loadSeenLedger(store, callerEmail, notify);
         return jsonResponse(200, {
           requests: page,
           total: matched.length,
@@ -175,7 +177,16 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
           ...(nextCursor ? { next_cursor: nextCursor } : {}),
           ...(rebuilt ? { rebuilt: true } : {}),
           muted: notify?.muted ?? [],
-          last_notified: notify?.last_notified ?? {},
+          last_notified: seen,
+          /**
+           * First contact. An empty ledger and a NEVER-WRITTEN ledger look
+           * identical on the wire, and the browser treats every difference as
+           * news — so on the day this ships, and on every new team member's
+           * first visit, each of them would get a toast and a desktop
+           * notification for every finished, failed and waiting job on the
+           * site at once. The flag lets the first ingest ack silently.
+           */
+          ...(Object.keys(seen).length === 0 ? { notify_first_contact: true } : {}),
           email_mode: emailModeFor(notify),
         });
       }
@@ -230,8 +241,8 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
       }
 
       case 'notify_ack': {
-        const state = await ackNotifications(store, callerEmail, request.data.acked);
-        return jsonResponse(200, { last_notified: state.last_notified ?? {} });
+        const entries = await ackNotifications(store, callerEmail, request.data.acked);
+        return jsonResponse(200, { last_notified: entries });
       }
 
       case 'mute':

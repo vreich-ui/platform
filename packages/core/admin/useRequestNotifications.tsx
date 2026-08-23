@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ToastOptions } from './overlays';
 import { ackNotifications, type RequestRowView } from '@core/lib/admin/requests-client';
 import {
+  mergeSeen,
   notificationHeadline,
   notificationSentence,
   scanNotifications,
@@ -63,9 +64,23 @@ const fireBrowserNotification = (notification: PendingNotification) => {
   }
 };
 
+export interface IngestOptions {
+  /**
+   * This person has no ledger yet. Everything currently unhappy would read as
+   * "new", so the first ingest records it silently instead of stacking a toast
+   * and a desktop notification per row.
+   */
+  firstContact?: boolean;
+}
+
 export interface UseRequestNotifications {
   /** Feed each poll's rows in; everything else is handled here. */
-  ingest: (rows: readonly RequestRowView[], lastNotified: Record<string, string>, muted: readonly string[]) => void;
+  ingest: (
+    rows: readonly RequestRowView[],
+    lastNotified: Record<string, string>,
+    muted: readonly string[],
+    options?: IngestOptions
+  ) => void;
   /** Unread count, cleared when the person visits the requests surface. */
   unread: number;
   clearUnread: () => void;
@@ -82,21 +97,26 @@ export function useRequestNotifications(
   const baseTitleRef = useRef<string | undefined>(undefined);
 
   const ingest = useCallback(
-    (rows: readonly RequestRowView[], lastNotified: Record<string, string>, muted: readonly string[]) => {
-      // A row counts as seen if EITHER ledger matches. The local ref is only a
-      // suppressor for the round-trip window between showing something and the
-      // ack landing — letting it WIN over the server made a second tab
-      // re-announce a transition the first tab had already acked past.
-      const seen: Record<string, string> = { ...lastNotified };
-      for (const [requestId, status] of Object.entries(seenRef.current)) {
-        const row = rows.find((candidate) => candidate.request_id === requestId);
-        if (row && row.status === status) seen[requestId] = status;
-      }
+    (
+      rows: readonly RequestRowView[],
+      lastNotified: Record<string, string>,
+      muted: readonly string[],
+      options: IngestOptions = {}
+    ) => {
+      // A row counts as seen if EITHER ledger matches; the merge (and the
+      // pruning of what has gone stale) is pure and lives in request-logic.
+      const { seen, local } = mergeSeen(rows, lastNotified, seenRef.current);
+      seenRef.current = local;
       const { notify: fresh, ack } = scanNotifications(rows, seen, muted);
       // Non-notifying moves are acked too — that is what lets a request return
       // to `needs_you` later and be announced again.
       if (Object.keys(ack).length > 0) void ackNotifications(getToken, ack).catch(() => undefined);
       if (fresh.length === 0) return;
+      if (options.firstContact) {
+        // Recorded, not announced. From the next poll on, only real changes are news.
+        for (const notification of fresh) seenRef.current[notification.request_id] = notification.status;
+        return;
+      }
 
       for (const notification of fresh) {
         seenRef.current[notification.request_id] = notification.status;

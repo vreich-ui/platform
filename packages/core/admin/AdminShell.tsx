@@ -184,22 +184,11 @@ function NavList({
  */
 function RequestPulse({
   onCounts,
-  onUnread,
 }: {
   onCounts: (counts: { working: number; needsYou: number; stalled: number }) => void;
-  onUnread: (unread: number) => void;
 }) {
   const { toast } = useToast();
-  const { ingest, unread, clearUnread } = useRequestNotifications(shellToken, toast);
-
-  useEffect(() => {
-    onUnread(unread);
-  }, [unread, onUnread]);
-
-  // Visiting the requests surface IS reading them.
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/requests')) clearUnread();
-  }, [clearUnread]);
+  const { ingest, clearUnread } = useRequestNotifications(shellToken, toast);
 
   useEffect(() => {
     let alive = true;
@@ -210,7 +199,14 @@ function RequestPulse({
         const result = await listRequests(shellToken, { limit: 100 });
         if (!alive) return;
         onCounts(summarizeRequestRows(result.requests));
-        ingest(result.requests, result.last_notified ?? {}, result.muted ?? []);
+        ingest(result.requests, result.last_notified ?? {}, result.muted ?? [], {
+          ...(result.notify_first_contact ? { firstContact: true } : {}),
+        });
+        // Being ON the requests surface IS reading them — and it has to be
+        // re-checked on every poll, not once at mount: a person who leaves the
+        // page open watches each transition arrive in the list in front of
+        // them, and a tab title counting them as unread never clears.
+        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/requests')) clearUnread();
       } catch {
         // Global utilities are progressive enhancement; page work remains usable.
       }
@@ -221,7 +217,7 @@ function RequestPulse({
       alive = false;
       window.clearInterval(timer);
     };
-  }, [ingest, onCounts]);
+  }, [ingest, onCounts, clearUnread]);
 
   return null;
 }
@@ -243,7 +239,6 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [objectRows, setObjectRows] = useState<LibraryRow[]>([]);
   const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0, stalled: 0 });
-  const [, setUnread] = useState(0);
   const objectsAttempted = useRef(false);
 
   // W18 T18.5: the welcome gate. A member whose Person.onboarding is not
@@ -350,7 +345,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
 
   return (
     <ToastProvider>
-      <RequestPulse onCounts={setWorkCounts} onUnread={setUnread} />
+      <RequestPulse onCounts={setWorkCounts} />
       <div className="adm-root flex min-h-screen bg-[var(--adm-surface-page)] text-[var(--adm-text)]">
         {/* Sidebar (desktop) */}
         <aside

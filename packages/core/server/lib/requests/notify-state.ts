@@ -1,15 +1,24 @@
 /**
- * W19 T19.2 — per-person notification state, at the key T19.1 reserved
- * (`requests/notify/<person>.json`).
+ * W19 T19.2 — per-person notification state, split across three keys BY WRITER
+ * (see `notifyStateKey` and its siblings in store.ts for why).
  *
- * This row owns only MUTE (personal, always — muting affects your
- * notifications and nobody's list, plan §8). The `last_notified` map that
- * dedupes delivery across tabs and reloads is T19.6's; the schema carries it
- * as an optional field from day one so T19.6 is additive, not a migration.
+ *   notify/<person>.json        the person's own settings: mute and mail mode.
+ *                               Written only when they click something.
+ *   notify-seen/<person>.json   what the browser has already shown them.
+ *                               Written only by the ack path.
+ *   notify-mailed/<person>.json what the mailer has already sent them.
+ *                               Written only by the sweeper.
+ *
+ * They were one document with three writers, which on a store with no
+ * compare-and-swap means a person's mute could be silently reverted by their
+ * other tab's ack, and the sweeper's mail ledger clobbered mid-send so the
+ * same e-mail went twice. The settings doc still CARRIES the two legacy maps
+ * so a doc written before the split keeps deduping — they are read as a
+ * fallback and never written again.
  */
 import { z } from 'zod';
 
-import { notifyStateKey, type EditorialRequestStore } from './store.js';
+import { notifyMailedKey, notifySeenKey, notifyStateKey, type EditorialRequestStore } from './store.js';
 
 export const NOTIFY_STATE_SCHEMA_VERSION = 'editorial-request-notify.v1';
 
@@ -65,6 +74,17 @@ export const notifyStateSchema = z.object({
   last_mailed: z.record(z.string(), z.string()).optional(),
 });
 export type NotifyState = z.infer<typeof notifyStateSchema>;
+
+export const NOTIFY_LEDGER_SCHEMA_VERSION = 'editorial-request-notify-ledger.v1';
+
+/** One channel's "already told them this" map, in its own document. */
+export const notifyLedgerSchema = z.object({
+  schema_version: z.literal(NOTIFY_LEDGER_SCHEMA_VERSION),
+  person: z.string(),
+  updated_at: z.string(),
+  entries: z.record(z.string(), z.string()),
+});
+export type NotifyLedger = z.infer<typeof notifyLedgerSchema>;
 
 const personKey = (email: string) => email.trim().toLowerCase();
 
@@ -139,30 +159,90 @@ const mergeBounded = (
   return Object.fromEntries(entries.slice(Math.max(0, entries.length - LAST_NOTIFIED_MAX)));
 };
 
+const loadLedger = async (
+  store: EditorialRequestStore,
+  key: string,
+  legacy: Readonly<Record<string, string>> | undefined
+): Promise<Record<string, string>> => {
+  const raw = await store.get(key);
+  if (!raw) return { ...(legacy ?? {}) };
+  const parsed = notifyLedgerSchema.safeParse(JSON.parse(raw));
+  // An unparseable ledger is treated as EMPTY, not as fatal: the cost is one
+  // repeated notification, and refusing to load it would stop the sweep.
+  return parsed.success ? parsed.data.entries : { ...(legacy ?? {}) };
+};
+
+const saveLedger = async (
+  store: EditorialRequestStore,
+  key: string,
+  person: string,
+  entries: Record<string, string>,
+  at: string
+): Promise<Record<string, string>> => {
+  await store.setJSON(
+    key,
+    notifyLedgerSchema.parse({
+      schema_version: NOTIFY_LEDGER_SCHEMA_VERSION,
+      person,
+      updated_at: at,
+      entries,
+    })
+  );
+  return entries;
+};
+
+/** What the BROWSER has already shown this person. Falls back to a pre-split doc. */
+export const loadSeenLedger = async (
+  store: EditorialRequestStore,
+  email: string,
+  state?: NotifyState
+): Promise<Record<string, string>> =>
+  loadLedger(store, notifySeenKey(personKey(email)), (state ?? (await loadNotifyState(store, email)))?.last_notified);
+
+/** What the MAILER has already sent this person. Falls back to a pre-split doc. */
+export const loadMailedLedger = async (
+  store: EditorialRequestStore,
+  email: string,
+  state?: NotifyState
+): Promise<Record<string, string>> =>
+  loadLedger(store, notifyMailedKey(personKey(email)), (state ?? (await loadNotifyState(store, email)))?.last_mailed);
+
+/**
+ * Record what this person has now been told, so a second tab, another device,
+ * or a reload does not announce it again. Acked server-side rather than in
+ * browser storage precisely so the dedup survives all three. Written to the
+ * ack path's OWN document — a settings write must never be able to revert it,
+ * and it must never be able to revert a mute.
+ */
 export const ackNotifications = async (
   store: EditorialRequestStore,
   email: string,
   acked: Readonly<Record<string, string>>,
   at: string = new Date().toISOString()
-): Promise<NotifyState> => {
-  const current = (await loadNotifyState(store, email)) ?? blank(email, at);
-  return save(store, { ...current, last_notified: mergeBounded(current.last_notified, acked), updated_at: at });
+): Promise<Record<string, string>> => {
+  const person = personKey(email);
+  const current = await loadSeenLedger(store, email);
+  return saveLedger(store, notifySeenKey(person), person, mergeBounded(current, acked), at);
 };
 
-/** The mail channel's own ledger — see `last_mailed` on the schema for why it is separate. */
+/** The mail channel's own ledger, in the sweeper's own document. */
 export const ackMailed = async (
   store: EditorialRequestStore,
   email: string,
   acked: Readonly<Record<string, string>>,
   at: string = new Date().toISOString()
-): Promise<NotifyState> => {
-  const current = (await loadNotifyState(store, email)) ?? blank(email, at);
-  return save(store, { ...current, last_mailed: mergeBounded(current.last_mailed, acked), updated_at: at });
+): Promise<Record<string, string>> => {
+  const person = personKey(email);
+  const current = await loadMailedLedger(store, email);
+  return saveLedger(store, notifyMailedKey(person), person, mergeBounded(current, acked), at);
 };
 
 /** Has the MAIL channel already covered this exact transition? */
-export const alreadyMailed = (state: NotifyState | undefined, requestId: string, status: string): boolean =>
-  state?.last_mailed?.[requestId] === status;
+export const alreadyMailed = (
+  mailed: Readonly<Record<string, string>> | undefined,
+  requestId: string,
+  status: string
+): boolean => mailed?.[requestId] === status;
 
 /** Muting is personal and silences EVERY channel — in-app, browser and e-mail. */
 export const isMuted = (state: NotifyState | undefined, requestId: string): boolean =>
