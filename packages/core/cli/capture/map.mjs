@@ -39,6 +39,11 @@ export const SUPPORTED_SECTION_TYPES = new Set([
 export const CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS = {
   home: new Set(['hero', 'checklist', 'content_grid', 'bio', 'newsletter_signup', 'shared_ref']),
   standard: 'any',
+  // T12.29: captured pages declare pageType 'clone', which permits any registered section. `home`
+  // stays exactly as narrow as it is — it is a product decision (C§1.1), not an obstacle to route
+  // around — and is kept here only because the focused mapper test pins it against the governed
+  // registry so capture can never quietly widen a page type to flatter a clone.
+  clone: 'any',
 };
 
 // ─── T12.14 asset-aware mapping ──────────────────────────────────────────────
@@ -933,7 +938,11 @@ function screenshotRef(block) {
 
 function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed) {
   const origin = snapshot.capture.origin;
-  const pageType = page.path === '/' ? 'home' : 'standard';
+  // T12.29: every captured page is a CLONE, including the one at '/'. Typing it 'home' put it under
+  // the DTC homepage family, which allows neither `media` nor `content_split` — so a cloned
+  // homepage lost its imagery to a section_not_allowed_for_page_type gap while the mapper had
+  // mapped it perfectly well. The page says what it is and is governed accordingly.
+  const pageType = 'clone';
   const allowedSections = CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS[pageType];
   const reconciled = reconcileBlocks(page);
   const candidates = [];

@@ -82,6 +82,18 @@ export const pageTypeDefinitions: Partial<Record<PageTypeId, PageTypeDefinition>
     requiredSections: ['hero'],
     reviewPolicy: PAGE_REVIEW_POLICY,
   },
+  clone: {
+    id: 'clone',
+    // Descriptive only — routePattern is metadata and is not enforced anywhere, so a clone may sit
+    // at '/' alongside the home type without contradiction.
+    routePattern: '/[...captured]',
+    // A capture reproduces what a source page contains; it does not get to choose from a curated
+    // family. Any registered section may appear.
+    allowedSections: 'any',
+    // Deliberately NO requiredSections. `home` requires a hero; a captured page may legitimately
+    // have none, and failing the whole page for that would discard content the capture did map.
+    reviewPolicy: PAGE_REVIEW_POLICY,
+  },
   standard: {
     id: 'standard',
     routePattern: '/[slug]',

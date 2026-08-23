@@ -140,6 +140,36 @@
       {
         "kind": "section_template",
         "objectType": "section_template",
+        "requestedId": "stpl_capture_b51f7eca672c808b1a",
+        "idempotencyKey": "t12.4:fixture-target:section-template:0bb0d0944e96fee7",
+        "reason": "shape repeated 2 times (threshold 2); fields actions[],body",
+        "body": {
+          "name": "Captured cta banner recipe (actions[],body)",
+          "description": "Draft recipe extracted from 2 repeated cta_banner shapes carrying actions[],body.",
+          "whenToUse": "Use for the repeated cta_banner shape discovered in this capture, where the section carries actions[],body.",
+          "scope": "one_off",
+          "blueprint": {
+            "id": "s_31b26f5390",
+            "type": "cta_banner",
+            "data": {
+              "body": "<p>[redacted:163 chars]</p>",
+              "actions": [
+                {
+                  "label": "[redacted:8 chars]",
+                  "target": {
+                    "kind": "route",
+                    "href": "/s-projects-side-by-side"
+                  },
+                  "style": "primary"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "kind": "section_template",
+        "objectType": "section_template",
         "requestedId": "stpl_capture_e134fa9d31a8eb58f9",
         "idempotencyKey": "t12.4:fixture-target:section-template:e9313bae236f67e0",
         "reason": "shape repeated 2 times (threshold 2); fields heading",
@@ -163,17 +193,37 @@
         "objectType": "section_template",
         "requestedId": "stpl_capture_7f623aa8eae4db2f53",
         "idempotencyKey": "t12.4:fixture-target:section-template:96392a317a2999db",
-        "reason": "shape repeated 7 times (threshold 2); fields layout",
+        "reason": "shape repeated 9 times (threshold 2); fields layout",
         "body": {
           "name": "Captured media recipe (layout)",
-          "description": "Draft recipe extracted from 7 repeated media shapes carrying layout.",
+          "description": "Draft recipe extracted from 9 repeated media shapes carrying layout.",
           "whenToUse": "Use for the repeated media shape discovered in this capture, where the section carries layout.",
           "scope": "one_off",
           "blueprint": {
-            "id": "s_d92603a71c",
+            "id": "s_4025a57d3e",
             "type": "media",
             "data": {
               "layout": "strip"
+            }
+          }
+        }
+      },
+      {
+        "kind": "section_template",
+        "objectType": "section_template",
+        "requestedId": "stpl_capture_7396ac993926999e24",
+        "idempotencyKey": "t12.4:fixture-target:section-template:35440f06c5c2b585",
+        "reason": "shape repeated 3 times (threshold 2); fields body",
+        "body": {
+          "name": "Captured prose recipe (body)",
+          "description": "Draft recipe extracted from 3 repeated prose shapes carrying body.",
+          "whenToUse": "Use for the repeated prose shape discovered in this capture, where the section carries body.",
+          "scope": "one_off",
+          "blueprint": {
+            "id": "s_f49bf8bb02",
+            "type": "prose",
+            "data": {
+              "body": "<p>[redacted:581 chars]</p>"
             }
           }
         }
@@ -247,12 +297,80 @@
         "idempotencyKey": "t12.4:fixture-target:page:19c2f2fbce7026f2",
         "body": {
           "route": "/",
-          "pageType": "home",
+          "pageType": "clone",
           "title": "[redacted:20 chars]",
           "seo": {
             "description": "[redacted:157 chars]"
           },
-          "sections": []
+          "sections": [
+            {
+              "id": "s_31b26f5390",
+              "type": "cta_banner",
+              "data": {
+                "body": "<p>[redacted:163 chars]</p>",
+                "actions": [
+                  {
+                    "label": "[redacted:8 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/s-projects-side-by-side"
+                    },
+                    "style": "primary"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "s_f49bf8bb02",
+              "type": "prose",
+              "data": {
+                "body": "<p>[redacted:581 chars]</p>"
+              }
+            },
+            {
+              "id": "s_1c4da9d983",
+              "type": "cta_banner",
+              "data": {
+                "body": "<p>[redacted:577 chars]</p>",
+                "actions": [
+                  {
+                    "label": "[redacted:11 chars]",
+                    "target": {
+                      "kind": "route",
+                      "href": "/filmography"
+                    },
+                    "style": "primary"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "s_4025a57d3e",
+              "type": "media",
+              "data": {
+                "layout": "strip"
+              }
+            },
+            {
+              "id": "s_e15bfa9414",
+              "type": "prose",
+              "data": {
+                "body": "<p>[redacted:615 chars]</p>"
+              }
+            },
+            {
+              "id": "s_244ef90d50",
+              "type": "media",
+              "data": {
+                "layout": "grid"
+              }
+            },
+            {
+              "id": "s_8c8b1b8196",
+              "type": "brand_row",
+              "data": {}
+            }
+          ]
         },
         "reason": "Mapped page https://www.zilbermanfilmfoundation.com/; route availability is probed before creation.",
         "pageRef": "page_9563b8e16278"
@@ -264,7 +382,7 @@
         "idempotencyKey": "t12.4:fixture-target:page:98369e48724fc750",
         "body": {
           "route": "/blank-1/moye-sobytiye",
-          "pageType": "standard",
+          "pageType": "clone",
           "title": "[redacted:11 chars]",
           "seo": {
             "description": "[redacted:13 chars]"
@@ -289,7 +407,7 @@
         "idempotencyKey": "t12.4:fixture-target:page:86acf93a599fe147",
         "body": {
           "route": "/filmography",
-          "pageType": "standard",
+          "pageType": "clone",
           "title": "[redacted:19 chars]",
           "seo": {},
           "sections": [
@@ -327,7 +445,7 @@
         "idempotencyKey": "t12.4:fixture-target:page:8a8d283de8990937",
         "body": {
           "route": "/partners",
-          "pageType": "standard",
+          "pageType": "clone",
           "title": "[redacted:12 chars]",
           "seo": {},
           "sections": [
@@ -386,7 +504,7 @@
         "idempotencyKey": "t12.4:fixture-target:page:79d63878e18fe9b8",
         "body": {
           "route": "/book-online",
-          "pageType": "standard",
+          "pageType": "clone",
           "title": "[redacted:36 chars]",
           "seo": {},
           "sections": []
@@ -396,6 +514,159 @@
       }
     ],
     "media": [
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_ee73efbf964d",
+        "manifestRef": "asset_04df533f8dea",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:9 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_615369ab8083",
+        "manifestRef": "asset_031339564037",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
+        "kind": "image",
+        "alt": "[redacted:15 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_c8936a1307fc",
+        "manifestRef": "asset_b5ee50b9ae36",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:21 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_c8936a1307fc",
+        "manifestRef": "asset_a355b5687800",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
+        "kind": "image",
+        "alt": "[redacted:5 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_2e5f0926e1d8",
+        "manifestRef": "asset_a355b5687800",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
+        "kind": "image",
+        "alt": "[redacted:5 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_6fc1eb5b5da8",
+        "manifestRef": "asset_ae2faed89ba0",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:10 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_6fc1eb5b5da8",
+        "manifestRef": "asset_a9ef9c615a73",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:17 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_6fc1eb5b5da8",
+        "manifestRef": "asset_8b800f3ec795",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+        "kind": "image",
+        "alt": "[redacted:4 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_6fc1eb5b5da8",
+        "manifestRef": "asset_042e06854691",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
+        "kind": "image",
+        "alt": "[redacted:9 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_04df533f8dea",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:9 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_031339564037",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
+        "kind": "image",
+        "alt": "[redacted:15 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_b5ee50b9ae36",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:21 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_a355b5687800",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
+        "kind": "image",
+        "alt": "[redacted:5 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_ae2faed89ba0",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:10 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_a9ef9c615a73",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
+        "kind": "image",
+        "alt": "[redacted:17 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_8b800f3ec795",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
+        "kind": "image",
+        "alt": "[redacted:4 chars]",
+        "status": "pending_artifact_materialization"
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "manifestRef": "asset_042e06854691",
+        "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
+        "kind": "image",
+        "alt": "[redacted:9 chars]",
+        "status": "pending_artifact_materialization"
+      },
       {
         "pageRef": "page_593efe6a40c0",
         "candidateId": "candidate_6aeb52775ce1",
@@ -831,6 +1102,89 @@
     ],
     "assetPlans": [
       {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_c8936a1307fc",
+        "sectionId": "s_4025a57d3e",
+        "sectionType": "media",
+        "target": "items",
+        "entries": [
+          {
+            "manifestRef": "asset_b5ee50b9ae36",
+            "alt": "[redacted:21 chars]"
+          },
+          {
+            "manifestRef": "asset_a355b5687800",
+            "alt": "[redacted:5 chars]"
+          }
+        ]
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_6fc1eb5b5da8",
+        "sectionId": "s_244ef90d50",
+        "sectionType": "media",
+        "target": "items",
+        "entries": [
+          {
+            "manifestRef": "asset_ae2faed89ba0",
+            "alt": "[redacted:10 chars]"
+          },
+          {
+            "manifestRef": "asset_a9ef9c615a73",
+            "alt": "[redacted:17 chars]"
+          },
+          {
+            "manifestRef": "asset_8b800f3ec795",
+            "alt": "[redacted:4 chars]"
+          },
+          {
+            "manifestRef": "asset_042e06854691",
+            "alt": "[redacted:9 chars]"
+          }
+        ]
+      },
+      {
+        "pageRef": "page_9563b8e16278",
+        "candidateId": "candidate_3c3c0a4e81cb",
+        "sectionId": "s_8c8b1b8196",
+        "sectionType": "brand_row",
+        "target": "logos",
+        "entries": [
+          {
+            "manifestRef": "asset_04df533f8dea",
+            "alt": "[redacted:9 chars]"
+          },
+          {
+            "manifestRef": "asset_031339564037",
+            "alt": "[redacted:15 chars]"
+          },
+          {
+            "manifestRef": "asset_b5ee50b9ae36",
+            "alt": "[redacted:21 chars]"
+          },
+          {
+            "manifestRef": "asset_a355b5687800",
+            "alt": "[redacted:5 chars]"
+          },
+          {
+            "manifestRef": "asset_ae2faed89ba0",
+            "alt": "[redacted:10 chars]"
+          },
+          {
+            "manifestRef": "asset_a9ef9c615a73",
+            "alt": "[redacted:17 chars]"
+          },
+          {
+            "manifestRef": "asset_8b800f3ec795",
+            "alt": "[redacted:4 chars]"
+          },
+          {
+            "manifestRef": "asset_042e06854691",
+            "alt": "[redacted:9 chars]"
+          }
+        ]
+      },
+      {
         "pageRef": "page_593efe6a40c0",
         "candidateId": "candidate_6aeb52775ce1",
         "sectionId": "s_d92603a71c",
@@ -1004,52 +1358,36 @@
     ],
     "gaps": [
       {
-        "gapId": "gap_615362d9f5bd",
+        "gapId": "gap_f17327c62c93",
         "blockRef": "page_9563b8e16278_block_001",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_001.png",
-        "why": "section_not_allowed_for_page_type",
-        "nearestType": "cta_banner",
-        "missingCapability": "home PageType does not allow cta_banner; preserve source evidence as a gap rather than coercing it"
+        "why": "section_type_has_no_asset_field",
+        "nearestType": "media",
+        "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
       },
       {
-        "gapId": "gap_07ad96fe838f",
-        "blockRef": "page_9563b8e16278_block_006",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_006.png",
-        "why": "section_not_allowed_for_page_type",
-        "nearestType": "prose",
-        "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
-      },
-      {
-        "gapId": "gap_4fb4d4158abe",
+        "gapId": "gap_5e8f8645fd8e",
         "blockRef": "page_9563b8e16278_block_007",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_007.png",
-        "why": "section_not_allowed_for_page_type",
-        "nearestType": "cta_banner",
-        "missingCapability": "home PageType does not allow cta_banner; preserve source evidence as a gap rather than coercing it"
-      },
-      {
-        "gapId": "gap_f762dbd916dc",
-        "blockRef": "page_9563b8e16278_block_010",
-        "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_010.png",
-        "why": "section_not_allowed_for_page_type",
+        "why": "section_type_has_no_asset_field",
         "nearestType": "media",
-        "missingCapability": "home PageType does not allow media; preserve source evidence as a gap rather than coercing it"
+        "missingCapability": "cta_banner has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
       },
       {
-        "gapId": "gap_1d376811a72e",
+        "gapId": "gap_02825896f914",
         "blockRef": "page_9563b8e16278_block_011",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_011.png",
-        "why": "section_not_allowed_for_page_type",
-        "nearestType": "prose",
-        "missingCapability": "home PageType does not allow prose; preserve source evidence as a gap rather than coercing it"
+        "why": "section_type_has_no_asset_field",
+        "nearestType": "media",
+        "missingCapability": "prose has no asset field, and re-typing it to media would drop extracted copy or be refused by this PageType; a legal placement for the image evidence in this block"
       },
       {
-        "gapId": "gap_67c3d9961821",
+        "gapId": "gap_ced43a55bb41",
         "blockRef": "page_9563b8e16278_block_012",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_012.png",
-        "why": "section_not_allowed_for_page_type",
+        "why": "link_actions_not_carried_by_asset_section",
         "nearestType": "media",
-        "missingCapability": "home PageType does not allow media; preserve source evidence as a gap rather than coercing it"
+        "missingCapability": "a governed placement for evidence this media cannot hold: 1 source link action(s) that media has no field for"
       },
       {
         "gapId": "gap_8515975a683d",
@@ -1060,12 +1398,12 @@
         "missingCapability": "more semantic or textual evidence"
       },
       {
-        "gapId": "gap_45cd24af6219",
+        "gapId": "gap_7b5cc403e100",
         "blockRef": "page_9563b8e16278_block_017",
         "screenshotRef": "pages/page_9563b8e16278/mobile/blocks/page_9563b8e16278_block_017.png",
-        "why": "section_not_allowed_for_page_type",
+        "why": "link_actions_not_carried_by_asset_section",
         "nearestType": "brand_row",
-        "missingCapability": "home PageType does not allow brand_row; preserve source evidence as a gap rather than coercing it"
+        "missingCapability": "a governed placement for evidence this brand_row cannot hold: 3 source link action(s) that brand_row has no field for"
       },
       {
         "gapId": "gap_c354f48f1e21",

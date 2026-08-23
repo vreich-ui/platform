@@ -4,7 +4,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SUPPORTED_SECTION_TYPES, STRUCTURED_BUILDERS, mapSnapshot } from './map.mjs';
+import {
+  CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS,
+  STRUCTURED_BUILDERS,
+  SUPPORTED_SECTION_TYPES,
+  mapSnapshot
+} from './map.mjs';
 
 const ORIGIN = 'https://example.test';
 
@@ -225,11 +230,12 @@ test('a snapshot with NO structure key maps exactly as it did before T12.23', ()
   assert.equal(candidate.sectionType, 'prose');
 });
 
-test('the home PageType now reaches checklist — a type it always allowed and capture could never build', () => {
-  // Before T12.23 the mapper could produce exactly two of the six section types `home` permits
-  // (hero and bio), so a homepage clone was structurally capped no matter what the source looked
-  // like. `checklist` was allowed the whole time; nothing could build one.
-  const { candidate, page } = candidateFor(
+test('a captured page declares pageType clone, so the homepage is no longer capped', () => {
+  // Before T12.29 a captured '/' was typed 'home', whose family (C§1.1) permits neither `media` nor
+  // `content_split`. The mapper produced them and the page type threw them away — imagery lost to a
+  // section_not_allowed_for_page_type gap. A clone declares what it is and any registered section
+  // may appear.
+  const { page, candidate } = candidateFor(
     snapshotWith(
       {
         text: flat('Open access Peer reviewed Free to submit'),
@@ -239,16 +245,14 @@ test('the home PageType now reaches checklist — a type it always allowed and c
     ),
     'block_under_test'
   );
-  assert.equal(page.pageBody.pageType, 'home');
+  assert.equal(page.pageBody.pageType, 'clone');
   assert.equal(candidate.sectionType, 'checklist');
 });
 
-test('a structured type the PageType forbids is skipped, never emitted as a disallowed section', () => {
-  // `home` allows hero/checklist/content_grid/bio/newsletter_signup/shared_ref — deliberately, per
-  // the platform PageType registry. A testimonial must not be produced for the homepage at all;
-  // whether the block then maps or gaps is the text path's business, but it must never come out
-  // typed as something the page type refuses.
-  const { candidate } = candidateFor(
+test('a structured type the OLD home family forbade now survives on a cloned homepage', () => {
+  // `testimonial` is not in the home family. On a clone it is simply allowed — this is the whole
+  // point of T12.29, and the assertion that would have failed before it.
+  const { page, candidate } = candidateFor(
     snapshotWith(
       {
         text: flat('They changed how we work, and we would not go back to the old way of doing any of it.'),
@@ -258,5 +262,18 @@ test('a structured type the PageType forbids is skipped, never emitted as a disa
     ),
     'block_under_test'
   );
-  assert.notEqual(candidate?.sectionType, 'testimonial');
+  assert.equal(page.pageBody.pageType, 'clone');
+  assert.equal(candidate.sectionType, 'testimonial');
+  assert.equal((page.gaps ?? []).some((gap) => gap.why === 'section_not_allowed_for_page_type'), false);
+});
+
+test('the capture-side home family is untouched — capture must never widen a page type', () => {
+  // The gate that skips a disallowed structured type is still live code and still correct; what
+  // changed is which page type captured pages declare. `home` remains exactly as narrow as the
+  // governed registry says (asserted against the real definition in map.test.ts).
+  const home = CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS.home;
+  assert.ok(home instanceof Set);
+  assert.equal(home.has('testimonial'), false);
+  assert.equal(home.has('media'), false);
+  assert.equal(CAPTURE_PAGE_TYPE_ALLOWED_SECTIONS.clone, 'any');
 });
