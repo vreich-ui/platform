@@ -53,7 +53,23 @@ const bodySchema = z.object({
 const bridge = (): SweepBridge | undefined =>
   isCmsAgentConfigured()
     ? {
-        getRun: (runId) => cmsAgentClient.callTool<Record<string, unknown>>('workflow_get_run', { runId }),
+        // `workflow_get_run` answers `ok({ run, mode, stall })`; the client unwraps
+        // only the `{ok,data}` envelope, so the row must be lifted out here. It is
+        // NOT cosmetic: handing derive-status the envelope meant `runId`, `status`
+        // and `nodes` were all undefined, so a request with a live run derived a
+        // shape-unreadable `running` for ever and could never reach done/failed.
+        // `stall` is a SIBLING of `run` on the wire but derive-status reads it off
+        // the snapshot (§5.2's dispatch heartbeat), so it is folded back in.
+        getRun: async (runId) => {
+          const result = await cmsAgentClient.callTool<Record<string, unknown>>('workflow_get_run', { runId });
+          if (!result.ok) return result;
+          const payload = result.data;
+          const row =
+            typeof payload.run === 'object' && payload.run !== null && !Array.isArray(payload.run)
+              ? (payload.run as Record<string, unknown>)
+              : payload;
+          return { ok: true, data: { ...row, ...(payload.stall !== undefined ? { stall: payload.stall } : {}) } };
+        },
         advance: (runId, budgetMs) =>
           cmsAgentClient.callTool<Record<string, unknown>>('workflow_run_all', { runId, budgetMs }),
       }

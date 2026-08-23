@@ -654,12 +654,39 @@ const projectWorkspaceNode = (node: Record<string, unknown>): Record<string, unk
   ...(Array.isArray(node.dependsOn) && node.dependsOn.length > 0 ? { depends_on: node.dependsOn } : {}),
 });
 
+/**
+ * CMS-Agent answers EVERY workflow tool with `ok({ run: … })` — the run row is
+ * nested under `run`, beside its siblings (`mode`, `stall`, `driverNote`,
+ * `continued`). `CmsAgentClient.callTool` unwraps only the OUTER `{ok,data}`
+ * envelope, so `data` is that object and never the run row itself.
+ *
+ * Reading `data.runId` therefore yielded `undefined` at every seam that touches
+ * a run, and the consequence was not a cosmetic one: `run_workspace_workflow`
+ * registered its request with NO workflow block (the guard below deliberately
+ * omits one rather than store `run_id: ''`), so the sweeper had no run to poll,
+ * `deriveRequestStatus` returned `queued` for ever, `retry_request` refused for
+ * want of a run id, and the run's real failure was invisible to the desk. Every
+ * unit test passed throughout, because the fakes returned the FLAT shape this
+ * code expected instead of the shape the wire actually carries.
+ *
+ * Tolerant on purpose: a payload that IS already a run row passes through
+ * unchanged, so a caller that has unwrapped is not broken by this.
+ */
+const runRowFrom = (payload: Record<string, unknown>): Record<string, unknown> => {
+  const nested = payload.run;
+  return typeof nested === 'object' && nested !== null && !Array.isArray(nested)
+    ? (nested as Record<string, unknown>)
+    : payload;
+};
+
 /** Bounded run projection — the full run record can approach ~500KB; this
  *  keeps status, per-node states and driver notes and nothing else. The
  *  `mode` block is reduced to a live/mock boolean: its raw form names the
  *  provider (executionMode: 'openai'), which editor-facing output must
  *  never carry. `stall` reduces to a boolean for the same reason. */
-const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unknown> => {
+const projectWorkspaceRun = (payload: Record<string, unknown>): Record<string, unknown> => {
+  // The run row, unwrapped from CMS-Agent's `{ run, … }` envelope (runRowFrom).
+  const run = runRowFrom(payload);
   // T19.8c: id + status alone was not enough to say anything an editor could
   // use — "node_7 is running" is not an answer. The LABEL and the timing cost
   // a few bytes each and turn the same call into a sentence. Anything richer
@@ -681,8 +708,12 @@ const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unkno
   // `mode` is nullable on the wire, not merely absent: a compact run view omits it
   // and some records carry an explicit null. `!== undefined` admits null and then
   // dereferences it, so this reads truthiness instead.
-  const mode = run.mode as { live?: boolean; executionMode?: string } | null | undefined;
-  const stall = run.stall as { stalled?: boolean } | boolean | undefined;
+  // `mode`, `stall` and `driverNote` are SIBLINGS of `run` on the wire, so they
+  // are read from the envelope and only then from the row (a caller that already
+  // unwrapped still works).
+  const mode = (payload.mode ?? run.mode) as { live?: boolean; executionMode?: string } | null | undefined;
+  const stall = (payload.stall ?? run.stall) as { stalled?: boolean } | boolean | undefined;
+  const driverNote = payload.driverNote ?? run.driverNote;
   return {
     run_id: run.runId ?? run.id,
     status: run.status,
@@ -690,7 +721,7 @@ const projectWorkspaceRun = (run: Record<string, unknown>): Record<string, unkno
     ...(stall !== undefined
       ? { stalled: stall === true || (typeof stall === 'object' && stall?.stalled === true) }
       : {}),
-    ...(typeof run.driverNote === 'string' ? { driver_note: truncate(run.driverNote, 500) } : {}),
+    ...(typeof driverNote === 'string' ? { driver_note: truncate(driverNote, 500) } : {}),
     ...(nodes ? { nodes } : {}),
   };
 };

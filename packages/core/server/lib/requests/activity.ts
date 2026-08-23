@@ -167,8 +167,15 @@ export const estimateRemaining = (
 };
 
 /** `run` is workflow_get_run's data; `cost` is workflow_get_run_cost's (optional — the view degrades without it). */
-export const projectActivity = (run: unknown, cost: unknown, nowMs: number = Date.now()): ActivityView | undefined => {
-  if (!isRecord(run)) return undefined;
+export const projectActivity = (payload: unknown, cost: unknown, nowMs: number = Date.now()): ActivityView | undefined => {
+  if (!isRecord(payload)) return undefined;
+  // CMS-Agent answers `workflow_get_run` with `ok({ run, mode, stall })`, and the
+  // client unwraps only the `{ok,data}` envelope — so what arrives here is that
+  // object, not the run row. Reading `runId` off it yielded undefined and this
+  // whole projection returned `undefined`, which is why both activity surfaces
+  // (the chat tool and /admin/requests) could only ever answer "run_not_readable".
+  // Tolerant: an already-unwrapped row passes through.
+  const run = isRecord(payload.run) ? payload.run : payload;
   const runId = str(run.runId) ?? str(run.id);
   if (!runId) return undefined;
 
