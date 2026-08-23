@@ -402,6 +402,18 @@ Taken by default under R8, overridable by a queue comment:
   `Person` record as §6.3 said. Same per-person key, already exists, already
   holds the mute list — every notification setting in one place, and no
   membership-schema migration.
+- **T19.8c: `get_request_activity`.** Found in use, not in review. Asked "where
+  is it up to?", the client manager could only say "still running, no errors
+  reported" — because `get_workspace_run` handed it node ids and states and
+  nothing else, and the request status says `running` without saying which of
+  twenty-three steps. The activity projection the Requests page already draws
+  its timeline from is now behind a chat tool, narrowed for a persisted tool
+  result: every step in order, in editor words, with what it produced, how long
+  it took against how long it usually takes, its warnings and its errors. The
+  result carries a `how_to_answer` line — a tool description is read once at
+  wire time against eighty others; a line inside the result is read at the
+  moment it matters. `get_workspace_run`'s node projection gained the step
+  label and timestamps for the same reason.
 - **The MCP mirror of the request tools is deferred** to its own row (T19.8b).
   The chat surface answers the stated need ("inquire on all running requests");
   the MCP mirror serves external agents, is purely additive, and did not

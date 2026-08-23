@@ -190,7 +190,7 @@ describe('generated registry — wiring', () => {
 // ─── legacy registry: unchanged wire list ───────────────────────────────────────
 
 describe('legacy registry — wiring', () => {
-  it('chat_registry legacy wires the 28 legacy tools (+ present_candidates in learning mode)', async () => {
+  it('chat_registry legacy wires the 29 legacy tools (+ present_candidates in learning mode)', async () => {
     const chatStore = memoryStore();
     await saveChatDoc(chatStore, idleDoc());
     const protocol: ProtocolDeps = { chatStore, toolContext: toolContext(), nowIso: () => T0 };
@@ -220,7 +220,7 @@ describe('legacy registry — wiring', () => {
     // W19 T19.8 added the four editorial-request tools to CHAT_TOOLS, so the
     // legacy registry carries them too — they ride the request store, not the
     // object verbs, and are registry-agnostic.
-    assert.equal(names.filter((name) => name !== 'present_candidates').length, 28);
+    assert.equal(names.filter((name) => name !== 'present_candidates').length, 29);
     assert.ok(names.includes('present_candidates'));
     assert.ok(names.includes('patch'));
     assert.ok(!names.includes('object_patch'), 'the legacy registry must never wire a canonical generated name');

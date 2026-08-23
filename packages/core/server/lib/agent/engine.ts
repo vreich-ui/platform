@@ -191,7 +191,13 @@ const TRIMMABLE_FAMILIES: ReadonlyArray<{ name: string; matches: (toolName: stri
   { name: 'editorial_requests', matches: (name) => REQUEST_TOOL_NAMES.has(name) },
 ];
 
-const REQUEST_TOOL_NAMES = new Set(['list_requests', 'get_request', 'retry_request', 'archive_request']);
+const REQUEST_TOOL_NAMES = new Set([
+  'list_requests',
+  'get_request',
+  'get_request_activity',
+  'retry_request',
+  'archive_request',
+]);
 
 export interface ToolTrimResult {
   tools: WireTool[];
