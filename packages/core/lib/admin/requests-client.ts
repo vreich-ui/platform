@@ -223,6 +223,14 @@ export interface ActivityResponse {
    * that is about to start or one that will never have one. Absent means "stop".
    */
   retry_ms?: number;
+  /**
+   * Whether THIS caller may act on an approval the run is waiting on. Decided
+   * server-side from the caller's resolved roles, so a surface never offers a
+   * button the server would refuse.
+   */
+  can_approve?: boolean;
+  /** Set when an approve/withhold could not be carried out; the reason code is in `reason`. */
+  error?: string;
 }
 
 export const getRequestActivity = async (
@@ -251,6 +259,33 @@ export const getRequestActivity = async (
  * article, and "no run yet" must not freeze one that is about to start — the
  * server says which via `retry_ms`.
  */
+/**
+ * Act on the approval a run is waiting on, from the surface that shows it.
+ *
+ * `approve` records the operator's durable publish decision AND advances the
+ * run through the publish-risk nodes — both, because either alone leaves the
+ * run stopped with nothing new for the editor to press. `withhold` records the
+ * veto instead, which is what keeps the decision reversible.
+ *
+ * Returns the refreshed activity, so the caller renders the run's state AFTER
+ * the decision rather than waiting for the next poll.
+ */
+export const decideRunPublish = async (
+  getToken: GetToken,
+  target: { request_id?: string; run_id?: string },
+  action: 'approve' | 'withhold'
+): Promise<ActivityResponse> => {
+  const token = await getToken();
+  const res = await fetch(ACTIVITY_ENDPOINT, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...target, action }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  return json as unknown as ActivityResponse;
+};
+
 export const activityPollIntervalFor = (response: ActivityResponse | null): number | undefined => {
   if (!response) return undefined;
   if (!response.activity) return response.retry_ms;

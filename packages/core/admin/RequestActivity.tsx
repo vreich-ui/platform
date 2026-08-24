@@ -19,6 +19,7 @@ import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconIn
 import { cn } from './utils';
 import {
   activityPollIntervalFor,
+  decideRunPublish,
   formatDuration,
   formatEta,
   formatShortDuration,
@@ -368,6 +369,10 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
   const [activity, setActivity] = useState<ActivityView | null>(null);
   const [reason, setReason] = useState<string | undefined>(undefined);
+  /** Server-decided: this caller's roles allow acting on an approval. */
+  const [canApprove, setCanApprove] = useState(false);
+  const [deciding, setDeciding] = useState<'approve' | 'withhold' | undefined>(undefined);
+  const [decideError, setDecideError] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -402,6 +407,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
         if (!current()) return;
         setActivity(result.activity);
         setReason(result.reason);
+        setCanApprove(result.can_approve === true);
         setNowMs(Date.now());
         setError(undefined);
         setLoaded(true);
@@ -439,6 +445,50 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
       }
     },
     [requestId, runId]
+  );
+
+  /**
+   * Act on the approval this run is waiting on.
+   *
+   * The response carries the run's state AFTER the decision, so the card moves
+   * on the click rather than on the next poll. Polling is then re-armed by
+   * bumping the generation: an approved run has just started executing again,
+   * and the chain that was watching it had almost certainly stopped (a blocked
+   * run is not something `activityPollIntervalFor` keeps asking about).
+   */
+  const decide = useCallback(
+    async (action: 'approve' | 'withhold') => {
+      if (deciding) return;
+      setDeciding(action);
+      setDecideError(undefined);
+      try {
+        const result = await decideRunPublish(
+          getToken,
+          { ...(requestId ? { request_id: requestId } : {}), ...(runId ? { run_id: runId } : {}) },
+          action
+        );
+        setActivity(result.activity);
+        setReason(result.reason);
+        setCanApprove(result.can_approve === true);
+        setNowMs(Date.now());
+        setLoaded(true);
+        // The server reports a decision it could not carry out in `error` with
+        // a code in `reason` — surfaced verbatim rather than flattened into a
+        // generic failure, because "which half did not happen" is the whole
+        // question when a publish stalls.
+        if (result.error) setDecideError(result.error);
+        generationRef.current += 1;
+        stoppedRef.current = false;
+        settledRef.current = false;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        void load(generationRef.current);
+      } catch (actionError) {
+        setDecideError(actionError instanceof Error ? actionError.message : 'The decision could not be recorded.');
+      } finally {
+        setDeciding(undefined);
+      }
+    },
+    [deciding, load, requestId, runId]
   );
 
   useEffect(() => {
@@ -607,6 +657,25 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
               );
             })}
           </ul>
+          {canApprove ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={() => void decide('approve')} disabled={deciding !== undefined}>
+                {deciding === 'approve' ? 'Approving…' : 'Approve and publish'}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void decide('withhold')}
+                disabled={deciding !== undefined}
+                title="Record the operator veto instead. Blocks every publish-risk node on this run until you replace the decision."
+              >
+                {deciding === 'withhold' ? 'Holding…' : 'Hold'}
+              </Button>
+            </div>
+          ) : null}
+          {decideError ? (
+            <p className="mt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{decideError}</p>
+          ) : null}
         </section>
       ) : null}
 
