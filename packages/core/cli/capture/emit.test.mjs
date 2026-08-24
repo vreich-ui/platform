@@ -11,8 +11,10 @@ import {
   buildDryRunReport,
   buildEmissionPlan,
   captureRequestId,
+  createAssetProbe,
   createMcpTransport,
   executeEmission,
+  imageDimensions,
   shapeFingerprint,
 } from './emit.mjs';
 
@@ -889,4 +891,136 @@ test('a shape that appears once is still not worth a recipe', () => {
   assert.equal(shapeFingerprint({ type: 'hero', data: { heading: 'x', actions: [] } }), 'hero:heading');
   // An empty array is not a populated field — otherwise `actions: []` would split every hero in two.
   assert.equal(shapeFingerprint({ type: 'hero', data: { heading: 'x' } }), 'hero:heading');
+});
+
+// ─── T14.2: the probe VERIFIES the canonicalizer's proposal, or falls back ────
+//
+// `canonicalizeAssetUrl` only proposes. FAULT 1 was materialising a 146×194 thumbnail as if it
+// were the original; the fix is worthless if it trusts a URL, so every one of these drives the
+// probe with a CDN that misbehaves in a different way and asserts the captured URL is what ships.
+
+/** A minimal PNG: 8-byte signature plus the IHDR whose fixed offsets carry the dimensions. */
+function pngBytes(width, height) {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  new DataView(bytes.buffer).setUint32(16, width);
+  new DataView(bytes.buffer).setUint32(20, height);
+  return bytes;
+}
+
+const okResponse = (url, contentType, bytes) => ({
+  ok: true,
+  status: 200,
+  url,
+  headers: { get: () => contentType },
+  arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+});
+
+const THUMBNAIL = 'https://static.wixstatic.com/media/944663_abc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif/poster.jpg';
+const ORIGINAL = 'https://static.wixstatic.com/media/944663_abc~mv2.jpg';
+
+/** Drives the probe with a canned answer per URL, and records what was actually requested. */
+function probeWith(answers) {
+  const requested = [];
+  const probe = createAssetProbe({
+    fetchImpl: async (url) => {
+      requested.push(url);
+      const answer = answers[url];
+      if (typeof answer === 'function') return answer(url);
+      if (!answer) throw new Error(`unexpected fetch: ${url}`);
+      return answer;
+    },
+  });
+  return { probe, requested };
+}
+
+test('T14.2: a verified larger original supersedes the captured thumbnail', async () => {
+  const { probe, requested } = probeWith({
+    [ORIGINAL]: okResponse(ORIGINAL, 'image/png', pngBytes(2000, 2600)),
+  });
+  const resolved = await probe(THUMBNAIL);
+  assert.equal(resolved.sourceUrl, ORIGINAL);
+  assert.equal(resolved.upgradedFrom, THUMBNAIL);
+  assert.deepEqual(resolved.intrinsic, { width: 2000, height: 2600 });
+  // One request: the thumbnail's size was already stated by its own URL transform.
+  assert.deepEqual(requested, [ORIGINAL]);
+});
+
+test('T14.2: a canonical URL that 404s falls back to the captured transform URL', async () => {
+  const { probe, requested } = probeWith({
+    [ORIGINAL]: {
+      ok: false,
+      status: 404,
+      url: ORIGINAL,
+      headers: { get: () => 'text/html' },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    },
+    [THUMBNAIL]: okResponse(THUMBNAIL, 'image/png', pngBytes(146, 194)),
+  });
+  const resolved = await probe(THUMBNAIL);
+  assert.equal(resolved.sourceUrl, THUMBNAIL);
+  assert.equal(resolved.upgradedFrom, undefined);
+  assert.deepEqual(requested, [ORIGINAL, THUMBNAIL]);
+});
+
+test('T14.2: a canonical URL that answers 200 with something that is not an image falls back', async () => {
+  // The failure mode a status check alone misses: a CDN serving its own error page with HTTP 200.
+  const html = new TextEncoder().encode('<!doctype html><title>Not found</title>');
+  const { probe } = probeWith({
+    [ORIGINAL]: okResponse(ORIGINAL, 'text/html', html),
+    [THUMBNAIL]: okResponse(THUMBNAIL, 'image/png', pngBytes(146, 194)),
+  });
+  assert.equal((await probe(THUMBNAIL)).sourceUrl, THUMBNAIL);
+});
+
+test('T14.2: a canonical URL that is an image but NOT larger falls back', async () => {
+  // Some hosts answer an un-transformed path with the same derivative, or with a placeholder.
+  // "Larger" is decided on the decoded pixels, which is the only witness that settles it.
+  const { probe } = probeWith({
+    [ORIGINAL]: okResponse(ORIGINAL, 'image/png', pngBytes(146, 194)),
+    [THUMBNAIL]: okResponse(THUMBNAIL, 'image/png', pngBytes(146, 194)),
+  });
+  const resolved = await probe(THUMBNAIL);
+  assert.equal(resolved.sourceUrl, THUMBNAIL);
+  assert.equal(resolved.expectedSizeBytes, 24);
+});
+
+test('T14.2: a canonical URL whose format this cannot measure falls back rather than guessing', async () => {
+  const unreadable = new Uint8Array([
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+  ]);
+  const { probe } = probeWith({
+    [ORIGINAL]: okResponse(ORIGINAL, 'image/jxl', unreadable),
+    [THUMBNAIL]: okResponse(THUMBNAIL, 'image/png', pngBytes(146, 194)),
+  });
+  assert.equal((await probe(THUMBNAIL)).sourceUrl, THUMBNAIL);
+});
+
+test('T14.2: a canonical URL that throws mid-fetch falls back instead of failing the asset', async () => {
+  const { probe } = probeWith({
+    [ORIGINAL]: () => {
+      throw new Error('ECONNRESET');
+    },
+    [THUMBNAIL]: okResponse(THUMBNAIL, 'image/png', pngBytes(146, 194)),
+  });
+  assert.equal((await probe(THUMBNAIL)).sourceUrl, THUMBNAIL);
+});
+
+test('T14.2: an asset on an unrecognised host is fetched exactly as captured', async () => {
+  const url = 'https://cdn.acme.example/poster.jpg';
+  const { probe, requested } = probeWith({ [url]: okResponse(url, 'image/png', pngBytes(800, 600)) });
+  const resolved = await probe(url);
+  assert.equal(resolved.sourceUrl, url);
+  assert.deepEqual(requested, [url], 'no speculative second request is made for a host we do not know');
+});
+
+test('T14.2: image dimensions are read from the bytes for the formats a CDN actually serves', () => {
+  assert.deepEqual(imageDimensions(pngBytes(1200, 900)), { width: 1200, height: 900 });
+  // JPEG: SOI, a skipped APP0 segment, then the SOF0 frame header carrying height then width.
+  const jpeg = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x03, 0x20, 0x03, 0x01,
+    0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+  ]);
+  assert.deepEqual(imageDimensions(jpeg), { width: 800, height: 600 });
+  assert.equal(imageDimensions(new Uint8Array([1, 2, 3])), null);
 });

@@ -723,6 +723,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:9 chars]",
+        "intrinsic": {
+          "width": 980,
+          "height": 844,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -732,6 +737,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
         "kind": "image",
         "alt": "[redacted:15 chars]",
+        "intrinsic": {
+          "width": 460,
+          "height": 501,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -741,6 +751,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:21 chars]",
+        "intrinsic": {
+          "width": 980,
+          "height": 844,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -750,6 +765,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
         "kind": "image",
         "alt": "[redacted:5 chars]",
+        "intrinsic": {
+          "width": 261,
+          "height": 261,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -759,6 +779,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
         "kind": "image",
         "alt": "[redacted:5 chars]",
+        "intrinsic": {
+          "width": 261,
+          "height": 261,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -768,6 +793,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:10 chars]",
+        "intrinsic": {
+          "width": 231,
+          "height": 205,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -777,6 +807,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:17 chars]",
+        "intrinsic": {
+          "width": 101,
+          "height": 101,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -786,6 +821,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
         "alt": "[redacted:4 chars]",
+        "intrinsic": {
+          "width": 183,
+          "height": 43,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -795,6 +835,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
         "alt": "[redacted:9 chars]",
+        "intrinsic": {
+          "width": 188,
+          "height": 45,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -804,6 +849,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_7479990b824c4732934e7c0fa8a50ef8~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:9 chars]",
+        "intrinsic": {
+          "width": 980,
+          "height": 844,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -813,6 +863,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_f7ac872408b748a38e7c4f4c66762182~mv2.jpg/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,al_c,lg_1,q_80,enc_avif,quality_auto/Misha.jpg",
         "kind": "image",
         "alt": "[redacted:15 chars]",
+        "intrinsic": {
+          "width": 460,
+          "height": 501,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -822,6 +877,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg/v1/fill/w_980,h_844,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_710d0df6c69b4e8292db5a7c7fc296d7~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:21 chars]",
+        "intrinsic": {
+          "width": 980,
+          "height": 844,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -831,6 +891,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_0c9e4dfa630e4bb2a908864ae79b56bf~mv2.jpg/v1/crop/x_0,y_1,w_199,h_199/fill/w_261,h_261,al_c,lg_1,q_80,enc_avif,quality_auto/Julia_N.jpg",
         "kind": "image",
         "alt": "[redacted:5 chars]",
+        "intrinsic": {
+          "width": 261,
+          "height": 261,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -840,6 +905,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg/v1/fill/w_231,h_205,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_2c120a1efae4421e915d49b75214f96f~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:10 chars]",
+        "intrinsic": {
+          "width": 231,
+          "height": 205,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -849,6 +919,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/fill/w_101,h_101,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:17 chars]",
+        "intrinsic": {
+          "width": 101,
+          "height": 101,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -858,6 +933,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_183,h_43,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
         "alt": "[redacted:4 chars]",
+        "intrinsic": {
+          "width": 183,
+          "height": 43,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -867,6 +947,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_188,h_45,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
         "alt": "[redacted:9 chars]",
+        "intrinsic": {
+          "width": 188,
+          "height": 45,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -876,6 +961,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_147,h_147,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 147,
+          "height": 147,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -885,6 +975,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg/v1/fill/w_979,h_552,fp_0.50_0.50,q_85,usm_0.66_1.00_0.01,enc_auto/f109e7_b1bfb62334d1489e8a4b777c126baa06~mv2_d_2767_2767_s_4_2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 979,
+          "height": 552,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -894,6 +989,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -903,6 +1003,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -912,6 +1017,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -921,6 +1031,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -930,6 +1045,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -939,6 +1059,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -948,6 +1073,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -957,6 +1087,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1038,6 +1173,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_fdac4c14e2bd4534b634d7d1532b7ddf~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1047,6 +1187,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_6918579dace845b4be6e63345952a289~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_6918579dace845b4be6e63345952a289~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1056,6 +1201,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_2ea1b03f6d824cba9d322aae14faa4fc~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1065,6 +1215,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_14a4caa2554248c99528d7495d060083~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_14a4caa2554248c99528d7495d060083~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1074,6 +1229,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3708d57b27864aeca2474821e151f3cb~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1083,6 +1243,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_88f1922125ac49f598a9a4bd62baa48c~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1092,6 +1257,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg/v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/944663_3db1a505b1114ef2a31822885b94c562~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 146,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1101,6 +1271,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg/v1/fill/w_145,h_194,q_75,enc_avif,quality_auto/944663_d86652b84fd6407bb01432dfb7447908~mv2.jpg",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 145,
+          "height": 194,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1182,6 +1357,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
         "kind": "image",
         "alt": "[redacted:19 chars]",
+        "intrinsic": {
+          "width": 980,
+          "height": 994,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1191,6 +1371,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
         "alt": "[redacted:14 chars]",
+        "intrinsic": {
+          "width": 253,
+          "height": 80,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1200,6 +1385,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
         "kind": "image",
         "alt": "[redacted:23 chars]",
+        "intrinsic": {
+          "width": 398,
+          "height": 144,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1218,6 +1408,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 290,
+          "height": 68,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1227,6 +1422,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg/v1/fill/w_147,h_83,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_avif,quality_auto/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg",
         "kind": "image",
         "alt": null,
+        "intrinsic": {
+          "width": 147,
+          "height": 83,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1236,6 +1436,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg",
         "kind": "image",
         "alt": "[redacted:13 chars]",
+        "intrinsic": {
+          "width": 194,
+          "height": 191,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1245,6 +1450,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg/v1/fill/w_980,h_994,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/7d5b9d67451d4e19bd9f0a6d38ad208d.jpg",
         "kind": "image",
         "alt": "[redacted:19 chars]",
+        "intrinsic": {
+          "width": 980,
+          "height": 994,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1254,6 +1464,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3f5ab9c4a1fa449ebe4a939edde3bdcc~mv2.png/v1/fill/w_253,h_80,al_c,q_85,enc_avif,quality_auto/Young%20Vic_.png",
         "kind": "image",
         "alt": "[redacted:14 chars]",
+        "intrinsic": {
+          "width": 253,
+          "height": 80,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1263,6 +1478,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/30be91_4b6aaa9e92e6497081cd9584d7b963ec~mv2.jpg/v1/crop/x_0,y_49,w_607,h_220/fill/w_398,h_144,al_c,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/Bafta_edited_edited.jpg",
         "kind": "image",
         "alt": "[redacted:23 chars]",
+        "intrinsic": {
+          "width": 398,
+          "height": 144,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1272,6 +1492,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png/v1/fill/w_290,h_68,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/944663_3a191d51f8904230aa568d22d11fb6cf~mv2.png",
         "kind": "image",
         "alt": "[redacted:11 chars]",
+        "intrinsic": {
+          "width": 290,
+          "height": 68,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1281,6 +1506,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg/v1/fill/w_147,h_83,al_c,q_80,usm_0.66_1.00_0.01,blur_2,enc_avif,quality_auto/944663_85e1f1a6899a41ea81ff2395beea49c3~mv2.jpg",
         "kind": "image",
         "alt": null,
+        "intrinsic": {
+          "width": 147,
+          "height": 83,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {
@@ -1290,6 +1520,11 @@
         "sourceUrl": "https://static.wixstatic.com/media/944663_567ba0748edc4d67803cbf66d5e26393~mv2.jpg/v1/crop/x_0,y_15,w_1000,h_985/fill/w_194,h_191,fp_0.50_0.50,q_80,usm_0.66_1.00_0.01,enc_avif,quality_auto/7_Parnassiens.jpg",
         "kind": "image",
         "alt": "[redacted:13 chars]",
+        "intrinsic": {
+          "width": 194,
+          "height": 191,
+          "source": "transform"
+        },
         "status": "pending_artifact_materialization"
       },
       {

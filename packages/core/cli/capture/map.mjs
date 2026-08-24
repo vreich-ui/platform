@@ -76,6 +76,372 @@ export const MEDIA_RETENTION_RIGHT = 'retain_referenced_allowed_origin_media';
 /** A body shorter than this is a label, not copy a section has to preserve. */
 export const SUBSTANTIVE_BODY_MIN_CHARS = 40;
 
+// ─── T14.2 image fidelity ────────────────────────────────────────────────────
+//
+// A live capture of the Zilberman filmography produced blurry stretched posters, and the crawl
+// data named three separate faults. The first two are answered here.
+//
+// FAULT 1 — THUMBNAILS MATERIALISED AS IF THEY WERE ORIGINALS. Every asset URL on that page bakes
+// the DISPLAY size into the path (`fill/w_146,h_194,q_75,enc_avif,…` ×54). The engine downloaded
+// exactly that and the section rendered it 980–1440px wide. `canonicalizeAssetUrl` proposes the
+// URL of the untransformed original instead.
+//
+// FAULT 2 — NOTHING PREVENTED UPSCALING. A 146px asset went into a 1440px slot unremarked.
+// `assetFidelity` names the ratio, and the mapper acts on it rather than stretching.
+//
+// Both are DETERMINISTIC and OFFLINE: one proposes a URL, the other compares two numbers. Neither
+// asserts anything about what a CDN will actually return — that is the caller's job, and the
+// contract for it is on `canonicalizeAssetUrl` below.
+
+/**
+ * The transform-in-path (and transform-in-query) CDN families this recognises. Each entry is
+ * matched on HOST, never on a URL shape alone: `/upload/w_400/` in a path proves nothing about a
+ * host that is not Cloudinary, and guessing there would rewrite a URL that was already the
+ * original. An unrecognised host is returned untouched.
+ *
+ * DELIBERATELY NOT HANDLED: Shopify's other sizing idiom, the `_400x300` suffix inside the
+ * FILENAME (`poster_400x300.jpg` → `poster.jpg`). It was considered and declined, because it is the
+ * one case the verify-and-fallback contract below cannot make safe. Everything this function does
+ * strip — a `/v1/fill/w_146,h_194/` segment, a `?width=200` — belongs to a documented transform
+ * grammar and cannot be part of the asset's identity. A filename IS the identity: `poster.jpg` and
+ * `poster_400x300.jpg` can be two unrelated uploads on the same store, and a chart legitimately
+ * named `sales_100x100.png` is simply itself. Verification compares SIZE, not identity, so a wrong
+ * guess here would resolve to a real, larger, entirely different picture and pass every check on
+ * the way to the page. A hallucinated URL that 404s is cheap; one that succeeds and ships the wrong
+ * image is the failure this whole task exists to stop. Shopify's `?width=` query form is handled
+ * below and covers the transform case without touching identity.
+ */
+export const CDN_TRANSFORM_FAMILIES = Object.freeze(['wix', 'cloudinary', 'imgix', 'shopify', 'squarespace']);
+
+/** `/media/<id>/v1/<transform>/<filename>` — everything from `/v1/` on is the derivative. */
+const WIX_TRANSFORM_RE = /^\/media\/([^/]+)\/v1\/(.+)$/;
+/** A Cloudinary transform segment: comma-separated `key_value` pairs (`w_400,h_300,c_fill`). */
+const CLOUDINARY_TRANSFORM_SEGMENT_RE = /^[a-z]{1,3}_[^,/]+(?:,[a-z]{1,3}_[^,/]+)*$/i;
+/** Cloudinary's asset version marker, which is part of the canonical URL and is NOT stripped. */
+const CLOUDINARY_VERSION_RE = /^v\d+$/;
+/** Sizing query parameters. Fidelity-relevant only; `auto=format`, `v=`, `fm=` etc. are kept. */
+const QUERY_SIZE_PARAMS = Object.freeze(['w', 'h', 'width', 'height', 'max-w', 'max-h']);
+/** Squarespace states the width in `format`: `?format=750w`. */
+const SQUARESPACE_FORMAT_RE = /^(\d+)w$/;
+
+const positiveInt = (value) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+/** The LAST `w_`/`h_` pair in a transform chain is the size actually delivered. */
+function dimensionsFromTransformSegments(segments) {
+  const text = segments.join('/');
+  const width = positiveInt([...text.matchAll(/(?:^|[/,])w_(\d+)/g)].at(-1)?.[1]);
+  const height = positiveInt([...text.matchAll(/(?:^|[/,])h_(\d+)/g)].at(-1)?.[1]);
+  return { ...(width ? { width } : {}), ...(height ? { height } : {}) };
+}
+
+const hostIn = (hostname, ...suffixes) =>
+  suffixes.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`));
+
+/**
+ * Propose the best-fidelity URL for an asset whose CDN bakes its DISPLAY size into the URL.
+ *
+ * Returns `{ canonical, original, transform }`:
+ *   - `original`   the URL exactly as captured — the transform derivative, and the FALLBACK;
+ *   - `canonical`  the proposal: the same asset with its size transform removed. Equal to
+ *                  `original` when the host is not a recognised family;
+ *   - `transform`  what was stripped — `{ family, kind, removed, width?, height? }` — or null.
+ *                  `width`/`height` are the derivative's own delivered pixels, which is a real
+ *                  intrinsic measurement when the DOM exposes none.
+ *
+ * ═══ THIS FUNCTION ONLY PROPOSES. THE CALLER MUST VERIFY. ═══
+ *
+ * A URL is not an image. Before ANY use of `canonical`, the caller must fetch it and confirm all
+ * three of: the response is OK (not a 404 — several CDNs answer an un-transformed path with one),
+ * it is an image (`content-type: image/*`), and it is ACTUALLY LARGER than what `original`
+ * returns. If any of those fails — for any reason, including reasons no one anticipated — the
+ * caller MUST fall back to `original` and materialise that instead. Correctness may not depend on
+ * any assumption about how a given CDN behaves, because every such assumption is a guess about
+ * somebody else's server that will eventually be wrong. The fallback is not an error path; it is
+ * the ordinary outcome whenever the proposal does not pay off.
+ *
+ * `packages/core/cli/capture/emit.mjs` (`createAssetProbe`) is the verifying caller today.
+ */
+export function canonicalizeAssetUrl(url) {
+  const unchanged = { canonical: url, original: url, transform: null };
+  if (typeof url !== 'string' || !url) return unchanged;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return unchanged;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return unchanged;
+  const hostname = parsed.hostname.toLowerCase();
+
+  // ── Wix: https://static.wixstatic.com/media/<ID>/v1/<transform>/<filename> ──
+  // The original is `/media/<ID>`. One captured URL PROVES a bigger original exists behind a
+  // thumbnail on this host — `/v1/crop/x_0,y_2,w_450,h_490/fill/w_460,h_501,…/Misha.jpg` is a crop
+  // of w_450,h_490 taken from something larger — but that is evidence, not a guarantee, and the
+  // verify-and-fallback contract above is what makes it safe to act on.
+  if (hostIn(hostname, 'wixstatic.com')) {
+    const match = WIX_TRANSFORM_RE.exec(parsed.pathname);
+    if (!match) return unchanged;
+    const segments = match[2].split('/');
+    const canonical = new URL(parsed.href);
+    canonical.pathname = `/media/${match[1]}`;
+    canonical.search = '';
+    return {
+      canonical: canonical.href,
+      original: url,
+      transform: {
+        family: 'wix',
+        kind: 'path',
+        removed: `v1/${match[2]}`,
+        // The filename is the last segment and is not a transform; excluding it keeps a `w_`
+        // inside somebody's filename from being read as a delivered width.
+        ...dimensionsFromTransformSegments(segments.slice(0, -1)),
+      },
+    };
+  }
+
+  // ── Cloudinary: /<cloud>/image/upload/<transform>/[v123/]<public id> ────────
+  // Transforms chain across several segments; the version and the public id do not, and both are
+  // part of the canonical URL.
+  if (hostIn(hostname, 'cloudinary.com')) {
+    const segments = parsed.pathname.split('/');
+    const uploadAt = segments.findIndex((segment) => segment === 'upload');
+    if (uploadAt < 0) return unchanged;
+    let end = uploadAt + 1;
+    while (
+      end < segments.length - 1 &&
+      !CLOUDINARY_VERSION_RE.test(segments[end]) &&
+      CLOUDINARY_TRANSFORM_SEGMENT_RE.test(segments[end])
+    )
+      end += 1;
+    if (end === uploadAt + 1) return unchanged;
+    const removed = segments.slice(uploadAt + 1, end);
+    const canonical = new URL(parsed.href);
+    canonical.pathname = [...segments.slice(0, uploadAt + 1), ...segments.slice(end)].join('/');
+    return {
+      canonical: canonical.href,
+      original: url,
+      transform: {
+        family: 'cloudinary',
+        kind: 'path',
+        removed: removed.join('/'),
+        ...dimensionsFromTransformSegments(removed),
+      },
+    };
+  }
+
+  // ── imgix / Shopify / Squarespace: the size is in the QUERY ────────────────
+  // Only the sizing parameters are removed. Everything else (`auto=format`, Shopify's cache-buster
+  // `v=`, an imgix crop) describes the asset rather than shrinking it, and dropping it would
+  // change what comes back for reasons that have nothing to do with fidelity.
+  const family = hostIn(hostname, 'imgix.net')
+    ? 'imgix'
+    : hostIn(hostname, 'cdn.shopify.com', 'myshopify.com')
+      ? 'shopify'
+      : hostIn(hostname, 'squarespace-cdn.com', 'squarespace.com')
+        ? 'squarespace'
+        : null;
+  if (!family) return unchanged;
+  const canonical = new URL(parsed.href);
+  const removed = [];
+  let width = null;
+  let height = null;
+  for (const name of QUERY_SIZE_PARAMS) {
+    const value = canonical.searchParams.get(name);
+    if (value === null) continue;
+    removed.push(`${name}=${value}`);
+    if (name === 'w' || name === 'width' || name === 'max-w') width ??= positiveInt(value);
+    if (name === 'h' || name === 'height' || name === 'max-h') height ??= positiveInt(value);
+    canonical.searchParams.delete(name);
+  }
+  if (family === 'squarespace') {
+    const format = canonical.searchParams.get('format');
+    const sized = format ? SQUARESPACE_FORMAT_RE.exec(format) : null;
+    if (sized) {
+      removed.push(`format=${format}`);
+      width ??= positiveInt(sized[1]);
+      canonical.searchParams.delete('format');
+    }
+  }
+  if (removed.length === 0) return unchanged;
+  return {
+    canonical: canonical.href,
+    original: url,
+    transform: {
+      family,
+      kind: 'query',
+      removed: removed.join('&'),
+      ...(width ? { width } : {}),
+      ...(height ? { height } : {}),
+    },
+  };
+}
+
+/**
+ * The no-upscale thresholds, as RATIOS of rendered slot width to the asset's own pixel width.
+ *
+ * 1.15 (`ok`) — a browser resamples by fractional amounts constantly: a fixed-width asset dropped
+ * into a fluid grid column almost never lands at exactly 1.0, and the two captured viewports
+ * measure the same slot at two different widths. Below ~15% the resampling is not distinguishable
+ * from the rounding, so calling it a defect would flag healthy pages and train everyone to ignore
+ * the signal.
+ *
+ * 1.5 (`upscale_material`) — at 1.5× a one-pixel source detail is smeared across more than one and
+ * a half rendered pixels, which is the point at which edges and small type go visibly soft on an
+ * ordinary display. It is also comfortably below the ratio that produced this defect (146px into a
+ * 980px slot is 6.7×), so the rule catches the real fault with room to spare rather than being
+ * tuned to it. Between the two the upscale is real but recoverable-looking: `upscale_minor`, which
+ * proceeds and is reported.
+ *
+ * These are CSS-pixel ratios. Device pixel ratio is deliberately excluded: the capture measures
+ * layout at deviceScaleFactor 1, and a 2× display would make every asset on the web "material",
+ * which is a rendering-quality argument, not a fidelity defect in what was captured.
+ */
+export const UPSCALE_OK_MAX_RATIO = 1.15;
+export const UPSCALE_MATERIAL_MIN_RATIO = 1.5;
+
+/**
+ * Compare an asset's own pixels to the slot it is headed for.
+ *
+ * `intrinsic` is `{width, height}` (as recorded by the crawl, or read off the URL's own transform);
+ * `slot` is `{width, height}` in CSS pixels. Returns `'ok' | 'upscale_minor' | 'upscale_material'`.
+ *
+ * UNKNOWN IS `ok`, ON PURPOSE. With no intrinsic or no measured slot there is no evidence of an
+ * upscale, and inventing one would gap perfectly good blocks — including every pre-T14.2 snapshot,
+ * which records no intrinsic at all. The rule reports what it can see and nothing else.
+ */
+export function assetFidelity(intrinsic, slot) {
+  const ratios = [
+    [positiveInt(slot?.width), positiveInt(intrinsic?.width)],
+    [positiveInt(slot?.height), positiveInt(intrinsic?.height)],
+  ]
+    .filter(([slotSize, assetSize]) => slotSize && assetSize)
+    .map(([slotSize, assetSize]) => slotSize / assetSize);
+  if (ratios.length === 0) return 'ok';
+  const ratio = Math.max(...ratios);
+  if (ratio <= UPSCALE_OK_MAX_RATIO) return 'ok';
+  return ratio < UPSCALE_MATERIAL_MIN_RATIO ? 'upscale_minor' : 'upscale_material';
+}
+
+/**
+ * The slot ONE image actually gets, per asset field — READ OFF THE RENDERERS, not assumed.
+ * `widthFraction` is a fraction of the section's own width; `heightPx` is an absolute cap.
+ *
+ *   items:single     Media.astro `space-y-8`            — one figure per row, full width.
+ *   items:grid       Media.astro `sm:grid-cols-2`       — two per row.
+ *   items:strip      Media.astro `flex` + `w-72`        — a horizontal scroller of FIXED 288px
+ *                                                         figures. A third of a measured block is
+ *                                                         a deliberate over-estimate of that (at
+ *                                                         any block ≥ 864px it is wider than 288),
+ *                                                         so the rule errs toward flagging rather
+ *                                                         than depending on the section's own
+ *                                                         max-width, which is a theme's business.
+ *   images           ContentSplit.astro                 — the image column is `minmax(420px,1fr)`
+ *                                                         of `[0.92fr_1fr]` (~half the section)
+ *                                                         and subdivides `sm:grid-cols-2` again.
+ *   portrait         Bio.astro `md:grid-cols-[0.9fr_1.1fr]` — the narrower of the two columns.
+ *   composition      Composition.astro `w-full`         — the image block spans the section.
+ *   logos            BrandRow.astro `h-8 w-auto`        — a logo strip is HEIGHT-constrained, so
+ *                                                         its slot is 32px tall and as wide as the
+ *                                                         mark happens to be. Almost nothing is
+ *                                                         upscaled into it, which is a fact about
+ *                                                         that renderer, not an exemption.
+ *
+ * These mirror components rather than importing from them (there is no exported layout metric to
+ * import). The focused test pins the two load-bearing classes so a component change fails loudly
+ * instead of drifting these numbers into fiction.
+ */
+export const ASSET_SLOT = Object.freeze({
+  'items:single': { widthFraction: 1 },
+  'items:grid': { widthFraction: 1 / 2 },
+  'items:strip': { widthFraction: 1 / 3 },
+  images: { widthFraction: 1 / 4 },
+  portrait: { widthFraction: 0.45 },
+  composition: { widthFraction: 1 },
+  logos: { heightPx: 32 },
+});
+
+/**
+ * `media` layouts ordered by the slot they give one image, widest first. The step-down walks this,
+ * so "choose a section whose slot the asset can fill" is a lookup rather than a judgement call.
+ */
+export const MEDIA_LAYOUTS_BY_SLOT = Object.freeze(['single', 'grid', 'strip']);
+
+/** Turn a slot key plus a measured block width into the `{width, height}` `assetFidelity` reads. */
+function slotFor(key, blockWidth) {
+  const slot = ASSET_SLOT[key];
+  if (!slot) return null;
+  if (slot.heightPx) return { height: slot.heightPx };
+  return blockWidth ? { width: Math.round(blockWidth * slot.widthFraction) } : null;
+}
+
+/**
+ * The widest width a block was measured at — the viewport that actually exposes the stretch.
+ *
+ * This is the SOURCE block's box, not the emitted section's. The emitted renderers cap themselves
+ * (Media.astro is `max-w-5xl`), so measuring the source over-estimates the slot wherever the source
+ * ran wider — which flags more, never less. It is also the honest reading of a clone's job: the
+ * fidelity question is whether the picture holds up where the source put it, and a theme's own
+ * max-width is a decision the target project gets to make later.
+ */
+function blockSlotWidth(block) {
+  const widths = Object.values(block?.boundingBoxes ?? {})
+    .map((box) => Number(box?.width))
+    .filter((width) => Number.isFinite(width) && width > 0);
+  return widths.length > 0 ? Math.max(...widths) : null;
+}
+
+/**
+ * The fidelity verdict for a PLANNED asset, which is not quite the measured one.
+ *
+ * When `canonicalizeAssetUrl` has proposed a larger original, the intrinsic recorded here is the
+ * THUMBNAIL's — it is evidence about the derivative, not about what will be materialised. Judging
+ * the plan on it would gap every image on a transform-in-path CDN (i.e. every image on the page
+ * this task exists for) while the fix for exactly that case is one fetch away. So the verdict is
+ * deferred to emission, which is where the bytes are and where the fallback lives.
+ */
+function plannedFidelity(image, slot) {
+  if (image?.canonicalUpgradeAvailable) return 'pending_source_upgrade';
+  return assetFidelity(image?.intrinsic, slot);
+}
+
+/**
+ * Record images a placement refused for resolution, once each.
+ *
+ * Three call sites can refuse the same picture — the planner, the bio-portrait upgrade and the
+ * composition upgrade all run against the same block — and a ledger that counted one refusal three
+ * times would overstate the defect it exists to report.
+ */
+function recordRefusals(context, entries, slotWidth) {
+  for (const entry of entries) {
+    if (context.fidelityRefusals.some((seen) => seen.manifestRef === entry.manifestRef)) continue;
+    context.fidelityRefusals.push({ ...entry, slotWidth });
+  }
+  return null;
+}
+
+/**
+ * One entry of an asset plan — the ONLY channel between the mapper and the emitter, and still
+ * carrying no source URL (T12.14). T14.2 adds three extracted or measured facts to it:
+ *   - `caption`   the item-level text the crawl found INSIDE this image's own subtree;
+ *   - `intrinsic` this asset's own pixels, so the fidelity claim can be re-checked downstream;
+ *   - `fidelity`  the verdict against the slot this plan renders it into. 'ok' is the silent
+ *                 default; 'pending_source_upgrade' means the intrinsic describes a thumbnail
+ *                 whose original emission must fetch and VERIFY (see `canonicalizeAssetUrl`).
+ */
+function planEntry(asset, slot) {
+  const fidelity = plannedFidelity(asset, slot);
+  return {
+    manifestRef: asset.manifestRef,
+    alt: asset.alt,
+    ...(asset.caption ? { caption: asset.caption } : {}),
+    ...(asset.intrinsic ? { intrinsic: asset.intrinsic } : {}),
+    ...(fidelity === 'ok' ? {} : { fidelity }),
+  };
+}
+
 /**
  * A Major Key artifact reference, mirrored EXACTLY from the engine's
  * `MAJOR_KEY_ARTIFACT_REF_RE` (packages/core/server/lib/artifact-trust.ts) so
@@ -142,7 +508,7 @@ export function bindSectionAssets(section, assetPlan, resolveArtifactRef) {
       unresolved.push({ manifestRef: entry.manifestRef, reason: src ? 'missing_alt_text' : 'artifact_not_materialized' });
       continue;
     }
-    resolved.push({ manifestRef: entry.manifestRef, artifactRef, src, alt });
+    resolved.push({ manifestRef: entry.manifestRef, artifactRef, src, alt, caption: clean(entry.caption) });
   }
   if (resolved.length < bounds.min) {
     return {
@@ -158,7 +524,13 @@ export function bindSectionAssets(section, assetPlan, resolveArtifactRef) {
   const used = resolved.slice(0, bounds.max);
   const data = { ...section.data };
   if (assetPlan.target === 'items') {
-    data.items = used.map(({ src, alt }) => ({ kind: 'image', src, alt }));
+    // T14.2 FAULT 3: `mediaImageItemSchema.caption` already existed — what was missing was a
+    // caption to put in it. It is emitted ONLY when the crawl found one inside that image's own
+    // subtree, so an item with no recovered caption stays a picture with no caption rather than
+    // borrowing its neighbour's. `media` is the only asset field in the schema that has a caption;
+    // content_split images, brand_row logos and composition images have none, so a caption
+    // travelling with one of those is carried in the plan's provenance and rendered nowhere.
+    data.items = used.map(({ src, alt, caption }) => ({ kind: 'image', src, alt, ...(caption ? { caption } : {}) }));
   } else if (assetPlan.target === 'images') {
     data.images = used.map(({ src, alt }) => ({ src, alt }));
   } else if (assetPlan.target === 'logos') {
@@ -378,15 +750,39 @@ function linkActions(block, origin) {
 
 function assetBindings(page, block) {
   const urls = new Set(block.assetUrls ?? []);
+  // T14.2 FAULT 3: the block's recovered gallery items are joined to the assets BY SOURCE URL.
+  // That is the crawl's containment pairing carried across intact — a caption reaches the picture
+  // it was found inside of, and no other. Nothing here pairs by array position, so a block with 40
+  // asset URLs and 20 titles yields 20 captioned items and 20 uncaptioned ones, never 40 guesses.
+  const galleryItems = (block.structure?.gallery?.items ?? []).filter((item) => item?.src);
+  const captionBySource = new Map(
+    galleryItems.filter((item) => clean(item.caption)).map((item) => [item.src, clean(item.caption)])
+  );
+  const intrinsicBySource = new Map(
+    galleryItems.filter((item) => item.intrinsic).map((item) => [item.src, item.intrinsic])
+  );
   return (page.assets ?? [])
     .filter((asset) => urls.has(asset.url))
-    .map((asset) => ({
-      manifestRef: `asset_${hash(asset.url)}`,
-      sourceUrl: asset.url,
-      kind: asset.kind,
-      alt: clean(asset.alt) || clean(asset.label) || null,
-      status: 'pending_artifact_materialization',
-    }));
+    .map((asset) => {
+      // The URL's own transform is a real measurement of the delivered bytes, and it is the ONLY
+      // intrinsic available for a snapshot captured before the crawl recorded one.
+      const { transform } = canonicalizeAssetUrl(asset.url);
+      const fromTransform =
+        transform?.width && transform?.height
+          ? { width: transform.width, height: transform.height, source: 'transform' }
+          : null;
+      const intrinsic = asset.intrinsic ?? intrinsicBySource.get(asset.url) ?? fromTransform;
+      const caption = captionBySource.get(asset.url);
+      return {
+        manifestRef: `asset_${hash(asset.url)}`,
+        sourceUrl: asset.url,
+        kind: asset.kind,
+        alt: clean(asset.alt) || clean(asset.label) || null,
+        ...(caption ? { caption } : {}),
+        ...(intrinsic ? { intrinsic } : {}),
+        status: 'pending_artifact_materialization',
+      };
+    });
 }
 
 /**
@@ -403,11 +799,19 @@ function assetBindings(page, block) {
  */
 function bindableImages(bindings) {
   const seen = new Set();
-  return bindings.filter((asset) => {
-    if (asset.kind !== 'image' || !asset.alt || seen.has(asset.manifestRef)) return false;
-    seen.add(asset.manifestRef);
-    return true;
-  });
+  return bindings
+    .filter((asset) => {
+      if (asset.kind !== 'image' || !asset.alt || seen.has(asset.manifestRef)) return false;
+      seen.add(asset.manifestRef);
+      return true;
+    })
+    // `canonicalUpgradeAvailable` is DERIVED, not extracted, so it rides on this working copy and
+    // never reaches the emitted artifact: it says only that a better-fidelity URL can be PROPOSED
+    // for this asset, which is what defers its fidelity verdict to the emitter that can verify one.
+    .map((asset) => ({
+      ...asset,
+      canonicalUpgradeAvailable: canonicalizeAssetUrl(asset.sourceUrl).transform !== null,
+    }));
 }
 
 function sourceProvenance(data, sourceBlockRefs) {
@@ -690,6 +1094,12 @@ function buildForType(type, context) {
 
 const BIO_SIGNAL_RE = /in memory of|our trustees|founder|biograph|trustee/i;
 
+/** A page builder's injected CSS custom properties — a property of the block's text, never copy. */
+const isStyleNoise = (text) => {
+  const lowercase = clean(text).toLowerCase();
+  return lowercase.includes('--wix-color-') || lowercase.includes('{ --');
+};
+
 /**
  * Choose the asset-bearing section type a block's shape warrants, and build its
  * data MINUS the asset field (emission binds that — see `bindSectionAssets`).
@@ -710,25 +1120,54 @@ function assetSectionPlan(context, images) {
   // block's real evidence is the gallery; the payload reaches no field at all.
   const body = styleNoise ? '' : stripHeadingAndLinks(text, headings, actions);
   const substantive = body.length >= SUBSTANTIVE_BODY_MIN_CHARS;
-  const plan = (target, entries) => ({
-    target,
-    entries: entries.map((asset) => ({ manifestRef: asset.manifestRef, alt: asset.alt })),
-  });
+  // ── T14.2 FAULT 2: every placement is judged against the slot it actually gives an image ──
+  //
+  // `usableIn` splits a candidate placement's images into the ones its slot can hold and the ones
+  // it would have to stretch. A branch that would stretch is either NOT TAKEN (so the mapper picks
+  // a type whose slot the asset can fill) or takes only the images that fit and refuses the rest
+  // onto the gap ledger. Nothing is stretched, and nothing leaves silently.
+  const usableIn = (key, entries = images) => {
+    const slot = slotFor(key, context.slotWidth);
+    const undersized = entries.filter((image) => plannedFidelity(image, slot) === 'upscale_material');
+    return {
+      slot,
+      undersized,
+      usable: entries.filter((image) => !undersized.includes(image)),
+    };
+  };
+  const refuse = (entries, key) => recordRefusals(context, entries, slotFor(key, context.slotWidth)?.width ?? null);
+  const plan = (target, entries, key) => {
+    const slot = slotFor(key, context.slotWidth);
+    return {
+      target,
+      ...(slot?.width ? { slotWidth: slot.width } : {}),
+      entries: entries.map((asset) => planEntry(asset, slot)),
+    };
+  };
 
-  if (substantive && heading && BIO_SIGNAL_RE.test(text.toLowerCase())) {
+  if (
+    substantive &&
+    heading &&
+    BIO_SIGNAL_RE.test(text.toLowerCase()) &&
+    usableIn('portrait', images.slice(0, 1)).usable.length === 1
+  ) {
     return {
       type: 'bio',
       data: { heading, body: richText(body), trustNotes: [] },
-      assetPlan: plan('portrait', images.slice(0, 1)),
+      assetPlan: plan('portrait', images.slice(0, 1), 'portrait'),
       confidence: 0.87,
       reason: 'person-focused biography signals with a portrait asset',
     };
   }
-  if (substantive && heading && images.length <= CONTENT_SPLIT_MAX_IMAGES) {
+  const splitImages = usableIn('images');
+  if (substantive && heading && images.length <= CONTENT_SPLIT_MAX_IMAGES && splitImages.usable.length > 0) {
+    // An image the copy column would stretch is left out and recorded; the ones that fit still
+    // render beside the copy, which is more of the source preserved than refusing the whole shape.
+    if (splitImages.undersized.length > 0) refuse(splitImages.undersized, 'images');
     return {
       type: 'content_split',
       data: { heading, body: richText(body), actions },
-      assetPlan: plan('images', images),
+      assetPlan: plan('images', splitImages.usable, 'images'),
       confidence: 0.85,
       reason: 'heading plus body copy beside one or two source images',
     };
@@ -751,43 +1190,68 @@ function assetSectionPlan(context, images) {
   const compositionImages = images.slice(0, COMPOSITION_MAX_IMAGES);
   if (substantive || (images.length > 0 && actions.length > 0)) {
     if (compositionImages.length === 0) return null;
-    const blocks = [
-      ...(substantive ? [{ kind: 'text', body: richText(body) }] : []),
-      ...compositionImages.map((_, index) => ({ kind: 'image', imageIndex: index })),
-      ...(actions.length > 0 ? [{ kind: 'actions', actions }] : []),
-    ];
-    return {
-      type: 'composition',
-      data: { ...(heading ? { heading } : {}), blocks },
-      assetPlan: plan('composition', compositionImages),
-      // Below the named types on purpose: a composition is the honest fallback, not a better answer.
-      confidence: 0.79,
-      reason:
-        substantive && actions.length > 0
-          ? 'copy, imagery and links together — no single named section carries all three'
-          : substantive
-            ? `copy beside ${compositionImages.length} images — beyond content_split's capacity`
-            : 'imagery with links — the gallery types carry no actions',
-    };
+    // T14.2: a composition's image block spans the section, so it is the WIDEST slot on offer. If
+    // these images cannot fill it, the only narrower types left (`media`, `brand_row`) carry no
+    // body copy — and re-typing a block into a shape that discards its own words is the one thing
+    // this planner may never do. A block with copy therefore refuses the asset field here; a block
+    // without copy has nothing to lose and falls through to the gallery types below.
+    const composition = usableIn('composition', compositionImages);
+    if (composition.usable.length === 0 && substantive) return refuse(compositionImages, 'composition');
+    if (composition.usable.length > 0) {
+      if (composition.undersized.length > 0) refuse(composition.undersized, 'composition');
+      const blocks = [
+        ...(substantive ? [{ kind: 'text', body: richText(body) }] : []),
+        ...composition.usable.map((_, index) => ({ kind: 'image', imageIndex: index })),
+        ...(actions.length > 0 ? [{ kind: 'actions', actions }] : []),
+      ];
+      return {
+        type: 'composition',
+        data: { ...(heading ? { heading } : {}), blocks },
+        assetPlan: plan('composition', composition.usable, 'composition'),
+        // Below the named types on purpose: a composition is the honest fallback, not a better answer.
+        confidence: 0.79,
+        reason:
+          substantive && actions.length > 0
+            ? 'copy, imagery and links together — no single named section carries all three'
+            : substantive
+              ? `copy beside ${composition.usable.length} images — beyond content_split's capacity`
+              : 'imagery with links — the gallery types carry no actions',
+      };
+    }
   }
-  if (images.length >= BRAND_ROW_MIN_LOGOS && actions.length >= 2) {
+  const logos = usableIn('logos');
+  if (logos.usable.length >= BRAND_ROW_MIN_LOGOS && actions.length >= 2) {
+    if (logos.undersized.length > 0) refuse(logos.undersized, 'logos');
     return {
       type: 'brand_row',
       data: { ...(heading ? { heading } : {}) },
-      assetPlan: plan('logos', images),
+      assetPlan: plan('logos', logos.usable, 'logos'),
       confidence: 0.84,
       reason: 'linked logo or partner strip',
     };
   }
+  // T14.2 FAULT 2 — THE LAYOUT IS THE LEVER. `media`'s three layouts are three different slots for
+  // the same pictures (Media.astro: a full-width `single`, a two-up `grid`, a fixed-width `strip`).
+  // So the count PROPOSES a layout and the images' own resolution DISPOSES: a picture that would be
+  // stretched across a `single` can fill a strip figure honestly. Only layouts at or below the
+  // proposed width are considered — stepping UP would widen the slot to fix a stretch, which is
+  // the opposite of the point.
+  const naturalLayout = images.length === 1 ? 'single' : images.length === 2 ? 'strip' : 'grid';
+  const considered = MEDIA_LAYOUTS_BY_SLOT.slice(MEDIA_LAYOUTS_BY_SLOT.indexOf(naturalLayout));
+  const layout = considered.find((option) => usableIn(`items:${option}`).undersized.length === 0) ?? considered.at(-1);
+  const items = usableIn(`items:${layout}`);
+  // Not one layout can hold ANY of them: there is no honest gallery here, only a refusal.
+  if (items.usable.length === 0) return refuse(images, `items:${layout}`);
+  if (items.undersized.length > 0) refuse(items.undersized, `items:${layout}`);
   return {
     type: 'media',
-    data: {
-      ...(heading ? { heading } : {}),
-      layout: images.length === 1 ? 'single' : images.length === 2 ? 'strip' : 'grid',
-    },
-    assetPlan: plan('items', images),
+    data: { ...(heading ? { heading } : {}), layout },
+    assetPlan: plan('items', items.usable, `items:${layout}`),
     confidence: 0.86,
-    reason: `image evidence bound as a ${images.length === 1 ? 'single image' : 'gallery'}`,
+    reason:
+      layout === naturalLayout
+        ? `image evidence bound as a ${items.usable.length === 1 ? 'single image' : 'gallery'}`
+        : `image evidence bound as a ${layout} — a ${naturalLayout} slot is wider than these source images can fill`,
   };
 }
 
@@ -858,7 +1322,7 @@ function classifyBlock(context, forcedType) {
   const text = clean(block.text?.value);
   const assets = block.assetUrls?.length ?? 0;
   const lowercase = text.toLowerCase();
-  const styleNoise = lowercase.includes('--wix-color-') || lowercase.includes('{ --');
+  const styleNoise = isStyleNoise(text);
 
   if (forcedType && SUPPORTED_SECTION_TYPES.has(forcedType)) {
     const data = buildForType(forcedType, context);
@@ -910,6 +1374,23 @@ function classifyBlock(context, forcedType) {
     }
     const plan = assetSectionPlan({ ...context, styleNoise }, images);
     if (plan) return plan;
+    // T14.2: no placement would hold these images without stretching them. A refusal declines the
+    // whole block ONLY when it leaves nothing else to map — the block's words are still its words,
+    // so where there is mappable text the classifier falls through to it and `assetResidueGap`
+    // records the refused pictures against whatever the text becomes. An image refused for
+    // RESOLUTION is also not an unlabelled or non-image asset, and saying so would send whoever
+    // reads this ledger looking for alt text that is already there.
+    if (context.fidelityRefusals.length > 0 && (styleNoise || text.length < 20)) {
+      return {
+        gap: [
+          'asset_resolution_below_section_slot',
+          'media',
+          `a source image large enough for the narrowest slot any section offers: ${undersizedDetail(
+            context.fidelityRefusals
+          )}. No larger original is addressable from these URLs, and stretching is not a fidelity outcome`,
+        ],
+      };
+    }
   }
   if (styleNoise) {
     return { gap: ['embedded_builder_style_payload', 'media', 'clean semantic gallery data without injected CSS'] };
@@ -964,9 +1445,18 @@ function classifyBlock(context, forcedType) {
 function assetUpgrade(result, context, images, allowedSections) {
   const permitted = (type) => allowedSections === 'any' || allowedSections.has(type);
   if (result.type === 'bio') {
+    const portraitSlot = slotFor('portrait', context.slotWidth);
+    // T14.2: additive or not, a portrait too small for its own frame is still a stretched picture.
+    if (plannedFidelity(images[0], portraitSlot) === 'upscale_material') {
+      return recordRefusals(context, images.slice(0, 1), portraitSlot?.width ?? null);
+    }
     return {
       ...result,
-      assetPlan: { target: 'portrait', entries: [{ manifestRef: images[0].manifestRef, alt: images[0].alt }] },
+      assetPlan: {
+        target: 'portrait',
+        ...(portraitSlot?.width ? { slotWidth: portraitSlot.width } : {}),
+        entries: [planEntry(images[0], portraitSlot)],
+      },
       reason: `${result.reason}; portrait asset bound`,
     };
   }
@@ -1002,13 +1492,22 @@ function assetUpgrade(result, context, images, allowedSections) {
   // A composition of images alone is just a `media` section; if the text type carried no copy and
   // no actions there is nothing this re-type preserves that media would not.
   if (!body && actions.length === 0) return null;
+  // T14.2: this upgrade puts each image in a section-wide block — the widest slot there is. An
+  // image that cannot fill it is refused rather than stretched, and the text candidate stands with
+  // the images recorded as a gap.
+  const compositionSlot = slotFor('composition', context.slotWidth);
+  const undersized = compositionImages.filter(
+    (image) => plannedFidelity(image, compositionSlot) === 'upscale_material'
+  );
+  if (undersized.length > 0) return recordRefusals(context, undersized, compositionSlot?.width ?? null);
   return {
     ...result,
     type: 'composition',
     data: { ...(heading ? { heading } : {}), blocks },
     assetPlan: {
       target: 'composition',
-      entries: compositionImages.map((asset) => ({ manifestRef: asset.manifestRef, alt: asset.alt })),
+      ...(compositionSlot?.width ? { slotWidth: compositionSlot.width } : {}),
+      entries: compositionImages.map((asset) => planEntry(asset, compositionSlot)),
     },
     confidence: Math.min(result.confidence, 0.79),
     reason: `${result.reason}; re-typed from ${result.type} to a composition so its copy and image evidence both survive`,
@@ -1022,7 +1521,53 @@ function assetUpgrade(result, context, images, allowedSections) {
  */
 const SECTION_TYPES_WITHOUT_ACTIONS = new Set(['media', 'brand_row', 'bio']);
 
-function assetResidueGap(result, bindings, images, actions) {
+/** "146×194 into a 327px slot (2.24× upscale)" — the numbers, so nobody has to take it on trust. */
+function undersizedDetail(refusals) {
+  const sample = refusals
+    .slice(0, 3)
+    .map((image) => {
+      const { width, height } = image.intrinsic ?? {};
+      const ratio = width && image.slotWidth ? (image.slotWidth / width).toFixed(2) : null;
+      return [
+        width && height ? `${width}×${height}` : 'an unrecorded size',
+        image.slotWidth ? ` into a ${image.slotWidth}px slot` : '',
+        ratio ? ` (${ratio}× upscale)` : '',
+      ].join('');
+    })
+    .join('; ');
+  return (
+    `${refusals.length} source image(s) at or above the ${UPSCALE_MATERIAL_MIN_RATIO}× material-upscale ` +
+    `threshold — ${sample}${refusals.length > 3 ? '; …' : ''}`
+  );
+}
+
+/**
+ * T14.2 FAULT 3 residue: the block HAS text and HAS repeated imagery, but nothing in the DOM says
+ * which words belong to which picture. The captured evidence is exactly the defect's shape — 40
+ * asset URLs against one blob reading "The LIttle PrincessHouse with the ghostsMio mein Mio…" —
+ * and the correct output is no captions at all plus this entry on the ledger. Pairing them by
+ * position would look right on the page that produced this snapshot and mislabel films on the next.
+ */
+function captionAssociationResidue(block, images, headings, actions) {
+  if (images.length < 2) return null;
+  const gallery = block.structure?.gallery;
+  if (gallery?.captions === 'per_item') return null;
+  const text = clean(block.text?.value);
+  // An injected builder style payload is not copy, so it is not unpaired captions either — the
+  // same judgement `assetSectionPlan` makes about it, made in the same terms.
+  if (isStyleNoise(text)) return null;
+  const leftover = stripHeadingAndLinks(text, headings, actions);
+  if (leftover.length < SUBSTANTIVE_BODY_MIN_CHARS) return null;
+  const reason = gallery?.reason ?? (gallery ? 'captions_partially_recovered' : 'no_gallery_structure_captured');
+  return {
+    code: 'gallery_item_captions_not_associable',
+    detail:
+      `${images.length} gallery image(s) beside ${leftover.length} characters of block text that no per-item ` +
+      `DOM structure associates (${reason}); captions are omitted rather than paired by position`,
+  };
+}
+
+function assetResidueGap(result, bindings, images, actions, refusals = [], captionResidue = null) {
   const unlabelledImages = bindings.filter((asset) => asset.kind === 'image' && !asset.alt);
   if (result.assetPlan) {
     const bounds = ASSET_FIELD_BOUNDS[result.assetPlan.target];
@@ -1057,6 +1602,13 @@ function assetResidueGap(result, bindings, images, actions) {
             },
           ]
         : []),
+      // T14.2 residues are APPENDED: `why` is residues[0].code, and the codes above are what the
+      // recorded ledger already reasons about. A block whose only residue is one of these two says
+      // so directly.
+      ...(refusals.length > 0
+        ? [{ code: 'asset_resolution_below_section_slot', detail: undersizedDetail(refusals) }]
+        : []),
+      ...(captionResidue ? [captionResidue] : []),
     ];
     if (residues.length === 0) return null;
     return {
@@ -1069,6 +1621,19 @@ function assetResidueGap(result, bindings, images, actions) {
   }
   if (bindings.length === 0) return null;
   if (result.type === 'contact_form' || result.type === 'link_list') return null;
+  // T14.2: when a planner REFUSED a placement for resolution, that refusal is why this candidate
+  // has no asset field at all — it outranks the generic "this type has no asset field" below,
+  // which would report the symptom and hide the cause.
+  if (refusals.length > 0) {
+    return {
+      code: 'asset_resolution_below_section_slot',
+      nearestType: images.length >= 2 ? 'media' : 'content_split',
+      missingCapability:
+        `a source image large enough for the slot a section would render it into: ${undersizedDetail(refusals)}. ` +
+        'Every placement that carries this block’s copy is wider than these images can fill, and stretching ' +
+        'them is not a fidelity outcome',
+    };
+  }
   if (images.length === 0) {
     return {
       code: 'media_evidence_not_bindable',
@@ -1107,6 +1672,12 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
     const headings = blockHeadings(page, block);
     const actions = linkActions(block, origin);
     const bindings = assetBindings(page, block);
+    // T14.2 FAULT 2: the slot an image ends up in is a fraction of the block's own measured width,
+    // and the WIDEST viewport is the one that exposes the stretch — the defect block measured 1440
+    // desktop / 980 mobile and took a 146px asset into it unremarked. The planner judges each
+    // placement against that; nothing is pre-filtered here, because which slot an image has to fill
+    // is not knowable until a placement is chosen.
+    const slotWidth = blockSlotWidth(block);
     const images = mediaRetentionAllowed ? bindableImages(bindings) : [];
     const context = {
       page,
@@ -1118,6 +1689,10 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
       images,
       mediaRetentionAllowed,
       allowedSections,
+      slotWidth,
+      // Mutable BY DESIGN and the only such field: a placement refused for resolution is decided
+      // deep inside the planner, and the gap it owes has to reach the ledger out here.
+      fidelityRefusals: [],
     };
     let result = classifyBlock(context, assistanceByBlock.get(block.id)?.sectionType);
     if (!result.gap && result.data && !result.assetPlan && images.length > 0) {
@@ -1190,12 +1765,18 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
         // the gap report asked for, recorded per planned asset.
         ...(result.assetPlan
           ? {
-              assetFields: result.assetPlan.entries.map((entry, position) => ({
-                path: `data.${result.assetPlan.target}${result.assetPlan.target === 'portrait' ? '' : `.${position}`}.alt`,
-                source: 'extracted',
-                sourceBlockRefs: [block.id],
-                manifestRef: entry.manifestRef,
-              })),
+              assetFields: result.assetPlan.entries.flatMap((entry, position) => {
+                const base = `data.${result.assetPlan.target}${result.assetPlan.target === 'portrait' ? '' : `.${position}`}`;
+                const field = (path) => ({
+                  path,
+                  source: 'extracted',
+                  sourceBlockRefs: [block.id],
+                  manifestRef: entry.manifestRef,
+                });
+                // T14.2: a caption is extracted copy exactly as alt text is, and is recorded per
+                // asset for the same reason — so the ledger can say which source item it came from.
+                return [field(`${base}.alt`), ...(entry.caption ? [field(`${base}.caption`)] : [])];
+              }),
             }
           : {}),
       },
@@ -1207,7 +1788,14 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
     // every part is inside its field's capacity, so there is no overflow left to report. The other
     // residues this checks — unlabelled images, actions a type cannot carry — are properties of the
     // block and are unchanged by the division.
-    const secondaryGap = assetResidueGap(parts[0], bindings, images, actions);
+    const secondaryGap = assetResidueGap(
+      parts[0],
+      bindings,
+      images,
+      actions,
+      context.fidelityRefusals,
+      captionAssociationResidue(block, images, headings, actions)
+    );
     if (secondaryGap) {
       const gap = {
         gapId: `gap_${hash(`${block.id}:${secondaryGap.code}`)}`,
