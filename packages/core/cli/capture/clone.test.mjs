@@ -355,9 +355,12 @@ test('buildCloneIntake emits a bounded briefing and never mutates its arguments'
 
   // Defect A: the site's own palette slots reach the envelope, from the object_get BODY. The site's
   // layout/shape tokens do not — no stage downstream may propose them.
+  // T13.3: `palette`, not `brandTokens`/`tokens` — the executor's per-node prompt redactor treats
+  // any key matching `/token/i` as a credential and replaces it with "[REDACTED]" before the model
+  // ever sees it, so the old field names silently blanked this whole briefing section.
   assert.deepEqual(intake.site, {
     objectId: 'site_0',
-    brandTokens: {
+    palette: {
       colors: { primary: 'rgb(46 111 149)', secondary: 'rgb(37 90 120)', accent: '#5e8c8a' },
       fonts: { sans: "'Inter Variable', system-ui", serif: 'Georgia, serif', heading: 'Playfair Display, serif' },
     },
@@ -365,7 +368,7 @@ test('buildCloneIntake emits a bounded briefing and never mutates its arguments'
   assert.deepEqual(intake.theme, {
     objectId: 'thm_captured',
     name: 'Captured theme',
-    tokens: { colors: {}, fonts: {} },
+    palette: { colors: {}, fonts: {} },
   });
 
   // Defect B, the heart of it: FIELD NAMES, never the JSON Schema those names came from.
@@ -403,8 +406,8 @@ test('buildCloneIntake emits a bounded briefing and never mutates its arguments'
 
   // Deep clone, not a reference: mutating the returned intake must not reach back into the caller's
   // own objects, and the arguments themselves must read exactly as they did going in.
-  intake.site.brandTokens.colors.primary = 'MUTATED';
-  intake.theme.tokens.colors.invented = '#000000';
+  intake.site.palette.colors.primary = 'MUTATED';
+  intake.theme.palette.colors.invented = '#000000';
   assert.deepEqual(args.siteBody, pristineSiteBody);
   assert.deepEqual(args.inventory, pristineInventory);
 });
@@ -421,9 +424,9 @@ test('buildCloneIntake keeps a realistic capture briefing under the 12,000-char 
   // Bounded, not gutted: every page, every registry entry, the whole palette and the whole captured
   // theme are still there.
   assert.equal(intake.pages.length, 10);
-  assert.deepEqual(intake.theme.tokens, realisticThemeTokens());
+  assert.deepEqual(intake.theme.palette, realisticThemeTokens());
   assert.equal(Object.keys(intake.registry.sectionTypes).length, 24);
-  assert.equal(Object.keys(intake.site.brandTokens.colors).length, 3);
+  assert.equal(Object.keys(intake.site.palette.colors).length, 3);
   assert.ok(intake.pages.some((page) => page.gaps.length > 0));
 });
 
@@ -466,8 +469,8 @@ test('buildCloneIntake degrades in the documented order and records every drop i
   assert.equal(typeof contract.fieldCount, 'number');
 
   // NEVER dropped, at any size.
-  assert.equal(Object.keys(intake.site.brandTokens.colors).length, 3);
-  assert.deepEqual(intake.theme.tokens, { colors: { primary: '#204060' }, fonts: {} });
+  assert.equal(Object.keys(intake.site.palette.colors).length, 3);
+  assert.deepEqual(intake.theme.palette, { colors: { primary: '#204060' }, fonts: {} });
   assert.equal(Object.keys(intake.registry.pageTypes).length, 2);
 });
 
@@ -672,6 +675,60 @@ test('buildCloneIntake throws CloneError when handed an inventory ROW instead of
   );
 });
 
+// ─── T13.3 guard: no briefing key collides with the credential redactor ───────────────────────────
+
+// Copied from `src/agent/execution/runners/OpenAINodeRunner.ts` line 16 (and the identical line in
+// `AnthropicNodeRunner.ts`) in the cms-agent repo — the executor's per-node prompt redactor. It is
+// a GLOBAL security control run over every node's input in every workflow: any key at any depth
+// whose NAME matches this pattern has its VALUE silently replaced with the literal string
+// "[REDACTED]" before the model ever sees it — the model gets no signal that a substitution
+// happened at all. `buildCloneIntake`'s old `site.brandTokens` and `theme.tokens` fields both
+// matched `/token/i`, so `theme_reconciler` received a briefing whose whole palette read
+// "[REDACTED]" and correctly, but uselessly, refused it. This module must never re-introduce a
+// briefing key that collides with this pattern, for this field or any other — that is exactly what
+// this test exists to catch before it ships again.
+const REDACTOR_KEY_RE = /api[_-]?key|authorization|bearer|jwt|cookie|token|secret|blob.*credential/i;
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Every `{key, path}` pair at every depth of `value`, arrays walked but not treated as keyed. */
+function collectKeyPaths(value, path, out) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectKeyPaths(item, `${path}[${index}]`, out));
+    return;
+  }
+  if (!isRecord(value)) return;
+  for (const [key, item] of Object.entries(value)) {
+    out.push({ key, path: `${path}.${key}` });
+    collectKeyPaths(item, `${path}.${key}`, out);
+  }
+}
+
+test('buildCloneIntake GUARD: no key at any depth of the briefing collides with the credential redactor', () => {
+  // Two shapes: a normal realistic briefing, and the deliberately oversized one that exercises every
+  // documented degradation step (fieldCount instead of fields, budget.truncated entries, etc) — a
+  // colliding key introduced only by a degraded shape would otherwise slip past this guard.
+  const briefings = [buildCloneIntake(realisticIntakeArgs()), buildCloneIntake(oversizedIntakeArgs())];
+
+  const offenders = [];
+  for (const briefing of briefings) {
+    const keyPaths = [];
+    collectKeyPaths(briefing, '$', keyPaths);
+    for (const { key, path } of keyPaths) {
+      if (REDACTOR_KEY_RE.test(key)) offenders.push(path);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    'briefing key(s) collide with the executor credential redactor (/token/i et al.) and will reach ' +
+      `the model as the literal string "[REDACTED]": ${offenders.join(', ')}`
+  );
+});
+
 // ─── 2. validateSectionTemplateDesign / validateTemplateDesign ───────────────────────────────────
 
 function intakeFixture(overrides = {}) {
@@ -761,6 +818,61 @@ test('validateTemplateDesign accepts a legal design covering a required section'
   const result = validateTemplateDesign(design, intake);
   assert.equal(result.ok, true);
   assert.equal(result.normalized.slots[0].slotId, 'hero_slot');
+});
+
+// T13.3 TOLERANT READER: run_1787567551705_e1qp0l's `recipe_designer` emitted `applies_to`
+// (snake_case, per its own outputSchema at the time) into a validator that only ever read
+// `appliesTo` (camelCase) — a good design was rejected `malformed_design` for a mismatch that had
+// nothing to do with the design's actual content. Fixed by accepting either spelling on INPUT
+// while keeping `appliesTo` the one CANONICAL name emitted/normalized — that is what the
+// platform's own template body carries (`row?.body?.appliesTo`), so nothing here ever writes
+// `applies_to` anywhere downstream.
+test('validateTemplateDesign accepts appliesTo (camelCase)', () => {
+  const intake = intakeFixture();
+  const design = {
+    name: 'Home template',
+    appliesTo: ['home'],
+    slots: [{ slotId: 'hero_slot', sectionType: 'hero', required: true }],
+  };
+  const result = validateTemplateDesign(design, intake);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.normalized.appliesTo, ['home']);
+  assert.equal(result.normalized.applies_to, undefined);
+});
+
+test('validateTemplateDesign accepts applies_to (snake_case) identically to appliesTo', () => {
+  const intake = intakeFixture();
+  const design = {
+    name: 'Home template',
+    applies_to: ['home'],
+    slots: [{ slotId: 'hero_slot', sectionType: 'hero', required: true }],
+  };
+  const result = validateTemplateDesign(design, intake);
+  assert.equal(result.ok, true);
+  // Normalizes to the SAME canonical shape appliesTo would have produced.
+  assert.deepEqual(result.normalized.appliesTo, ['home']);
+  assert.equal(result.normalized.applies_to, undefined);
+});
+
+test('validateTemplateDesign REJECTS with neither appliesTo nor applies_to, exact existing message', () => {
+  const intake = intakeFixture();
+  const design = { name: 'Homeless template', slots: [{ slotId: 'hero_slot', sectionType: 'hero' }] };
+  assert.throws(() => validateTemplateDesign(design, intake), {
+    message: 'A template design requires at least one appliesTo page type.',
+  });
+});
+
+test('validateTemplateDesign PREFERS appliesTo when both appliesTo and applies_to are present and non-empty', () => {
+  const intake = intakeFixture();
+  const design = {
+    name: 'Home template',
+    appliesTo: ['home'],
+    applies_to: ['clone'], // deliberately different, to prove which one wins
+    slots: [{ slotId: 'hero_slot', sectionType: 'hero', required: true }],
+  };
+  const result = validateTemplateDesign(design, intake);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.normalized.appliesTo, ['home']);
 });
 
 test('validateTemplateDesign REJECTS unknown_section_type on a slot', () => {
