@@ -121,6 +121,13 @@ const requestSchema = z.discriminatedUnion('action', [
     chat_id: z.string().min(1),
     text: z.string().min(1).max(20_000),
     focus: z.string().min(1).max(500).optional(),
+    /**
+     * Owner-only test mode (Wolf, 2026-08-24). The browser ASKS; this function
+     * decides. It is ANDed with the roles resolved below from the caller's own
+     * authenticated principal, so a forged flag from a non-owner session buys
+     * nothing. Never trust this value on its own.
+     */
+    test_mode: z.boolean().optional(),
   }),
   z.object({
     action: z.literal('approve_tool'),
@@ -482,6 +489,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
         });
         const cmsAgent = cmsAgentToolBridge();
+        // Decided ONCE, here, from roles this function resolved itself. Both the
+        // tool context and the run doc read this same value, so the turn cannot
+        // execute with a different authority than it was stamped with.
+        const testMode = request.data.test_mode === true && roles.includes('owner');
         const toolContext = buildToolContext({
           objectStore,
           // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
@@ -493,6 +504,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             | undefined,
           principal,
           roles,
+          ...(testMode ? { testMode: true } : {}),
           exportRoot: binding.dataRoot,
         });
         const result = await startRun(
@@ -518,7 +530,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           // least useful part first to stay inside the wire's 500-char bound.
           requestFocus ?? request.data.focus,
           roles.includes('owner'),
-          registryKind
+          registryKind,
+          testMode
         );
         if (result.resume) await triggerBackground(request.data.chat_id, result.resume.triggerToken);
         return jsonResponse(result.status, result.body);
@@ -550,6 +563,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             | undefined,
           principal: runPrincipal,
           roles,
+          // The value frozen on the run at send time, NOT a fresh read of a
+          // browser flag — an approval executes with the authority the turn was
+          // stamped with. Re-ANDed with the roles resolved just above, so an
+          // owner demoted mid-run cannot approve a test-mode call afterwards.
+          ...(doc.run.test_mode === true && roles.includes('owner') ? { testMode: true } : {}),
           exportRoot: binding.dataRoot,
           // Task 3 §5: so an approved/executed generated-registry tool that
           // rides the operational bridge (deploy_status, pdf-tool/image

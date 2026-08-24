@@ -171,6 +171,13 @@ export const chatRunSchema = z.object({
    *  frozen for the run, exactly like profile/autonomy. Absent on runs
    *  in-flight from before this deploy; treated as 'legacy' (see RegistryKind). */
   registry: registryKindSchema.optional(),
+  /** Owner-only test mode, stamped at send time and frozen for the run exactly
+   *  like autonomy/profile/registry. Already ANDed with the caller's resolved
+   *  roles by the `send` handler, so anything reading it downstream is reading
+   *  a decision, not a claim. Schema-additive and OPTIONAL — like `registry`
+   *  above — so pre-existing run docs parse unchanged and an ordinary run
+   *  carries no key at all. Every read site tests `=== true`. */
+  test_mode: z.boolean().optional(),
   trigger_token: z.string().optional(),
   transcript: z.array(chatMsgSchema),
   call_queue: z.array(chatToolCallSchema),

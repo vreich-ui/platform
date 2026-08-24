@@ -726,7 +726,15 @@ export const startRun = async (
    *  `chat_registry` ?? 'generated'); frozen into the run, exactly like
    *  profile/autonomy. Defaults to 'generated' to match the documented
    *  effective default for callers (and existing tests) that don't pass it. */
-  registry: RegistryKind = 'generated'
+  registry: RegistryKind = 'generated',
+  /**
+   * Owner-only test mode, ALREADY ANDed with the caller's resolved roles by the
+   * `send` handler — this parameter is a decision, never a claim, and nothing
+   * downstream re-checks identity. Frozen into the run like autonomy/profile so
+   * every later hop reads the value the turn was authorised with, not whatever
+   * the browser is sending now. Defaults false for existing callers and tests.
+   */
+  testMode = false
 ): Promise<ProtocolResult> => {
   const at = () => (deps.nowIso ?? (() => new Date().toISOString()))();
   const nowMs = (deps.nowMs ?? Date.now)();
@@ -766,6 +774,8 @@ export const startRun = async (
     autonomy,
     registry,
     learning_mode: learningMode,
+    // Written only when true: an ordinary run's doc is byte-identical to before.
+    ...(testMode ? { test_mode: true } : {}),
     ...(focus ? { focus } : {}),
     diagnostics_requested: editorIsOwner && asksForDiagnostics(text),
     engine: 'provider',

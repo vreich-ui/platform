@@ -15,7 +15,7 @@ import { Input, Select, Textarea } from './forms';
 import { Dialog, useToast } from './overlays';
 import { AgentChip, ChatComposer, ChatThread, useChat } from './chat';
 import { RequestActivity } from './RequestActivity';
-import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
+import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
 import {
@@ -357,6 +357,10 @@ function HubBody() {
 
   const active = chats?.find((item) => item.chat_id === activeId);
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope: activeId });
+  // `owner` is the same fetchMe roles check the rest of this surface uses. It
+  // decides only whether the switch is OFFERED — the server re-derives roles on
+  // every turn before honouring the flag.
+  const [testMode, setTestMode] = useTestMode({ preferenceScope: activeId, allowed: owner });
   // Highlight-to-reference: a quoted selection from the transcript, relayed into the composer.
   const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
 
@@ -517,7 +521,7 @@ function HubBody() {
               onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
               onDeny={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
               onQuote={(text) => setQuote({ token: Date.now(), text })}
-              onSendControls={(text) => void chat.send(text)}
+              onSendControls={(text) => void chat.send(text, undefined, testMode)}
               pendingConsumed={chat.pendingConsumed}
             />
             {chat.error ? (
@@ -525,12 +529,18 @@ function HubBody() {
             ) : null}
             <div className="mt-3 border-t border-[var(--adm-border)] pt-3">
               <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
-                <RunApprovalControls mode={approvalMode} onChange={setApprovalMode} />
+                <RunApprovalControls
+                  mode={approvalMode}
+                  onChange={setApprovalMode}
+                  testMode={testMode}
+                  onTestModeChange={setTestMode}
+                  canUseTestMode={owner}
+                />
               </div>
               <ChatComposer
                 status={chat.status}
                 busy={chat.busy}
-                onSend={(text) => void chat.send(text)}
+                onSend={(text) => void chat.send(text, undefined, testMode)}
                 onCancel={() => void chat.cancel()}
                 quote={quote}
               />

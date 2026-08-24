@@ -53,6 +53,14 @@ export interface ToolContext {
   agentAuthoredOps(objectType: ObjectType): Set<string>;
   roles: readonly Role[];
   /**
+   * Owner-only TEST MODE for this run (Wolf, 2026-08-24). Stamped at send time
+   * by `admin-agent-chat.ts`, which has ALREADY ANDed the browser's request
+   * with the roles it resolved from the authenticated principal — so a tool
+   * reading this is reading a decision, never a claim, and must not re-derive
+   * identity from it. Absent/false on every ordinary run.
+   */
+  testMode?: boolean;
+  /**
    * PF4: the CMS-Agent bridge for the workspace orchestration tools. Absent
    * when the site has no bridge configured — those tools then answer with a
    * clear error instead of crashing. `callTool` is the PF1 client's; the
@@ -779,6 +787,17 @@ const runWorkspaceWorkflow: ChatTool = {
         type: 'string',
         description: 'Topic slug used to mint the request id (defaults to a slugified input.title / input.topic).',
       },
+      entrypoint: {
+        type: 'string',
+        enum: ['article_body'],
+        description:
+          'TEST MODE ONLY. Enter the run at article_body with a supplied body: the ideation, research and drafting nodes are seeded complete and never dispatched, so the run costs no model spend and finishes in seconds. Requires article_body. Refused unless this run is in test mode.',
+      },
+      article_body: {
+        type: 'object',
+        description:
+          "TEST MODE ONLY. The client_object.v1 to seed as article_body's result. Validated against that node's own output schema before the run is created; a malformed body is refused with the failing fields named.",
+      },
     },
     additionalProperties: false,
   },
@@ -795,6 +814,14 @@ const runWorkspaceWorkflow: ChatTool = {
           .regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>')
           .optional(),
         slug: z.string().min(1).optional(),
+        entrypoint: z.literal('article_body').optional(),
+        article_body: z.record(z.string(), z.unknown()).optional(),
+      })
+      .refine((value) => !value.entrypoint || Boolean(value.article_body), {
+        message: 'entrypoint requires article_body — the seeded output the run enters with.',
+      })
+      .refine((value) => !value.article_body || Boolean(value.entrypoint), {
+        message: 'article_body is only meaningful with entrypoint: "article_body".',
       })
       .refine((value) => Boolean(value.run_id) !== Boolean(value.input), {
         message: 'Provide exactly one of: input (start a new run) or run_id (advance an existing run).',
@@ -819,6 +846,22 @@ const runWorkspaceWorkflow: ChatTool = {
     // D2a: CMS-Agent's workflow_start_dry_run REQUIRES a caller request id
     // for openai runs — mint one here (req_agent_<slug>_<yyyymmdd>_<nn>,
     // bumping nn past any existing content_item) unless the caller passed one.
+    // The late-stage entrypoint skips every ideation/research/draft node, so it
+    // is the one way to produce a publishable run without model spend — and for
+    // exactly that reason it must never be reachable on an ordinary editorial
+    // turn, where the skipped nodes ARE the product (the sourcing, claim and
+    // compliance record ART-2 requires, and the aggression-ceiling clamp).
+    // `ctx.testMode` was decided at send time against the caller's real roles.
+    if (args.entrypoint && ctx.testMode !== true) {
+      return {
+        content: json({
+          error:
+            'entrypoint is available only in test mode. Turn on Test mode in the chat controls (owner only) and send again; an ordinary article run must go through the full workflow, which is what builds its sourcing, claim and compliance record.',
+          code: 'test_mode_required',
+        }),
+        is_error: true,
+      };
+    }
     const requestId = (args.request_id as string | undefined) ?? (await mintWorkspaceRequestId(ctx, args));
     const started = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_start_dry_run', {
       projectId: ctx.cmsAgent.projectId,
@@ -827,6 +870,7 @@ const runWorkspaceWorkflow: ChatTool = {
       ...(args.workflow_id ? { workflowId: args.workflow_id } : {}),
       ...(args.budget_usd !== undefined ? { budgetUsd: args.budget_usd } : {}),
       ...(args.execution_mode ? { executionMode: args.execution_mode } : {}),
+      ...(args.entrypoint ? { entrypoint: args.entrypoint, articleBody: args.article_body } : {}),
     });
     if (!started.ok) return { content: json({ error: started.message, code: started.code }), is_error: true };
     // W19 T19.1: register the job the instant it starts, so the record exists
@@ -878,6 +922,7 @@ const runWorkspaceWorkflow: ChatTool = {
     ...(args.budget_usd !== undefined ? { budget_usd: args.budget_usd } : {}),
     ...(args.request_id ? { request_id: args.request_id } : {}),
     ...(args.slug ? { slug: args.slug } : {}),
+    ...(args.entrypoint ? { entrypoint: args.entrypoint, seeded_article_body: true } : {}),
     execution_mode: args.execution_mode ?? 'openai',
     note: 'A dry-run workflow has no publishing side effects; publishing remains a separate human decision (publish_workspace_run, ask-gated).',
   }),

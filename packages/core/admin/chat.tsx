@@ -50,7 +50,7 @@ export interface UseChatState {
   request: ChatRequestBindingView | undefined;
   error: string | undefined;
   busy: boolean;
-  send: (text: string, focus?: string) => Promise<void>;
+  send: (text: string, focus?: string, testMode?: boolean) => Promise<void>;
   preview: (candidateId: string | undefined) => void;
   chooseCandidate: (candidateId: string) => Promise<void>;
   rejectCandidates: (reason: string) => Promise<void>;
@@ -236,7 +236,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     busy,
     writeStamp,
     pendingConsumed: pending !== undefined && claimRef.current.has(pending.call_id),
-    send: (text, focus) => wrap(() => sendChatMessage(getToken, chatId!, text, focus)),
+    send: (text, focus, testMode) => wrap(() => sendChatMessage(getToken, chatId!, text, focus, testMode)),
     preview: setPreviewCandidateId,
     chooseCandidate: (candidateId) => {
       const callId = candidateSet?.call_id;

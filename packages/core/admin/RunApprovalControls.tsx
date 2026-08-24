@@ -3,17 +3,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UseChatState } from './chat';
 import {
   readPersistedRunApprovalMode,
+  readPersistedTestMode,
   shouldAutoApproveRunTool,
   writePersistedRunApprovalMode,
+  writePersistedTestMode,
   type RunApprovalMode,
 } from '@core/lib/admin/approval-mode';
 
 export function RunApprovalControls({
   mode,
   onChange,
+  testMode = false,
+  onTestModeChange,
+  canUseTestMode = false,
 }: {
   mode: RunApprovalMode;
   onChange: (mode: RunApprovalMode) => void;
+  /** Orthogonal to `mode` — a run can be asking OR continuing while in test mode. */
+  testMode?: boolean;
+  onTestModeChange?: (on: boolean) => void;
+  /** Owner-only. Absent or false renders the row exactly as it was before test mode existed. */
+  canUseTestMode?: boolean;
 }) {
   return (
     <div
@@ -38,8 +48,55 @@ export function RunApprovalControls({
       >
         Approve safe actions
       </button>
+      {canUseTestMode && onTestModeChange ? (
+        <>
+          <span aria-hidden="true" className="mx-0.5 h-3.5 w-px bg-[var(--adm-border)]" />
+          <button
+            type="button"
+            aria-pressed={testMode}
+            onClick={() => onTestModeChange(!testMode)}
+            title="Exercise publishing mechanics with the committed test fixture instead of writing client copy. Owner only; the server re-checks your roles before honouring it."
+            className={`adm-focusable rounded-[var(--adm-radius-pill)] px-2.5 py-1 font-medium ${testMode ? 'bg-[var(--adm-accent-soft)] text-[var(--adm-accent)]' : 'text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]'}`}
+          >
+            Test mode
+          </button>
+        </>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * The test-mode switch, persisted per chat exactly like `useRunApprovalMode`.
+ *
+ * `allowed` is the caller's own owner check (the admin surfaces already hold
+ * `me.roles`). When it is false the hook reports `false` and its setter is a
+ * no-op, so a stale persisted `on` from a previous session can never re-arm the
+ * switch for someone who is no longer an owner. The server re-derives roles per
+ * turn regardless — this is convenience, not the gate.
+ */
+export function useTestMode(
+  { preferenceScope, allowed }: { preferenceScope?: string; allowed: boolean }
+): [boolean, (on: boolean) => void] {
+  const [on, setOnState] = useState<boolean>(() => (allowed ? readPersistedTestMode(preferenceScope) : false));
+  const scopeRef = useRef(preferenceScope);
+  scopeRef.current = preferenceScope;
+
+  const setOn = useCallback(
+    (next: boolean) => {
+      if (!allowed) return;
+      writePersistedTestMode(scopeRef.current, next);
+      setOnState(next);
+    },
+    [allowed]
+  );
+
+  // A scope change (switching chats) loads THAT chat's own stored value.
+  useEffect(() => {
+    setOnState(allowed ? readPersistedTestMode(preferenceScope) : false);
+  }, [allowed, preferenceScope]);
+
+  return [on, setOn];
 }
 
 /**

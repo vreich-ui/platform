@@ -94,6 +94,8 @@ export interface ToolContextDeps {
   artifactIndexStore?: ArtifactIndexStore;
   principal: Principal;
   roles: readonly Role[];
+  /** Owner-only test mode for this run, already ANDed with `roles` by the caller. */
+  testMode?: boolean;
   nowMs?: () => number;
   /**
    * The site's committed-export root (SiteBinding.dataRoot, W11 T11.6) —
@@ -286,6 +288,7 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
   const membershipStore = deps.membershipStore;
   return {
     roles: deps.roles,
+    ...(deps.testMode ? { testMode: true } : {}),
     ...(deps.cmsAgent ? { cmsAgent: deps.cmsAgent } : {}),
     // D2a: the human approver for chat-side publish; and the stored
     // idempotency ledger (only when an operational event is available).

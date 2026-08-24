@@ -260,6 +260,53 @@ test('run_workspace_workflow advance mode calls workflow_run_all WITHOUT approve
   assert.deepEqual(calls[0]!.args, { runId: 'run_1', budgetMs: 45_000 });
 });
 
+test('run_workspace_workflow REFUSES the late-stage entrypoint outside test mode — the skipped nodes ARE the product', async () => {
+  // The entrypoint seeds article_body and marks every ideation/research/draft
+  // node complete without dispatching it. On an ordinary editorial turn those
+  // nodes are exactly what ART-2 requires (sourcing, claim and compliance
+  // record) plus the aggression-ceiling clamp, so reaching this without test
+  // mode would publish an article that never earned its record.
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = bridgeCtx(() => ({ run: { runId: 'run_x', status: 'created' } }), calls);
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    input: { topic: 'anything' },
+    entrypoint: 'article_body',
+    article_body: { artifact: 'client_object.v1', body: { slug: 'zz-test' } },
+  });
+  assert.equal(result.is_error, true);
+  assert.equal((JSON.parse(result.content) as { code: string }).code, 'test_mode_required');
+  assert.equal(calls.length, 0, 'a refused entrypoint must reach CMS-Agent not at all');
+});
+
+test('run_workspace_workflow forwards entrypoint + articleBody to CMS-Agent when the RUN is in test mode', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = bridgeCtx(() => ({ run: { runId: 'run_seeded', status: 'created' } }), calls);
+  // Stamped at send time by admin-agent-chat after ANDing the browser's request
+  // with the caller's resolved roles — a tool never derives this itself.
+  (ctx as { testMode?: boolean }).testMode = true;
+  (ctx as { verb?: unknown }).verb = async () => ({ status: 404, body: { not_found: true } });
+  const body = { artifact: 'client_object.v1', body: { slug: 'zz-test-article-a' } };
+
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    input: { topic: 'fixture' },
+    entrypoint: 'article_body',
+    article_body: body,
+  });
+  assert.equal(result.is_error, false);
+  assert.equal(calls[0]!.name, 'workflow_start_dry_run');
+  assert.equal(calls[0]!.args.entrypoint, 'article_body');
+  assert.deepEqual(calls[0]!.args.articleBody, body);
+  assert.equal('approved' in calls[0]!.args, false, 'test mode never implies publish approval');
+});
+
+test('run_workspace_workflow parse pairs entrypoint and article_body in both directions', () => {
+  const tool = chatToolByName('run_workspace_workflow')!;
+  const ctx = noBridgeCtx();
+  assert.equal(tool.parse({ input: { topic: 'x' }, entrypoint: 'article_body' }, ctx).ok, false);
+  assert.equal(tool.parse({ input: { topic: 'x' }, article_body: { a: 1 } }, ctx).ok, false);
+  assert.equal(tool.parse({ input: { topic: 'x' }, entrypoint: 'article_body', article_body: { a: 1 } }, ctx).ok, true);
+});
+
 test('run_workspace_workflow parse requires exactly one of input / run_id', () => {
   const tool = chatToolByName('run_workspace_workflow')!;
   const ctx = noBridgeCtx();
