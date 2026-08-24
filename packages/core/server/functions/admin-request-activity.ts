@@ -44,6 +44,19 @@ const cmsAgentClient = new CmsAgentClient();
 export const requestSchema = z.object({
   request_id: z.string().min(1).optional(),
   run_id: z.string().min(1).optional(),
+  /**
+   * W19: the approval a run is waiting on, taken from the surface that shows
+   * it. Absent = the read this function has always been.
+   *
+   * `approve` is TWO facts, not one, because a run stopped at
+   * publication_controller needs both and giving only the first leaves the
+   * editor stuck one step later with no new button to press: the durable
+   * operator decision (`workflow.set_operator_publish_decision`), then the
+   * advance that lets the publish-risk nodes execute
+   * (`workflow.run_all` with `approved`). `withhold` records the operator VETO,
+   * which is what makes this decision reversible rather than a one-way door.
+   */
+  action: z.enum(['approve', 'withhold']).optional(),
 });
 
 const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
@@ -105,6 +118,51 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
       });
     }
 
+    // The decision, before the read — so the activity returned below is the
+    // state AFTER the approval, and the editor sees the run move rather than
+    // the same "waiting for you" card until the next poll.
+    if (request.data.action) {
+      if (!runId) return jsonResponse(400, { error: 'That request has no run to act on yet.' });
+      const decision = request.data.action === 'approve' ? 'approved' : 'withheld';
+      const decided = await cmsAgentClient.callTool<Record<string, unknown>>(
+        'workflow_set_operator_publish_decision',
+        { runId, decision }
+      );
+      if (!decided.ok) {
+        return jsonResponse(200, {
+          activity: null,
+          ...(requestTitle ? { title: requestTitle } : {}),
+          reason: decided.code || 'decision_failed',
+          error: decided.message,
+        });
+      }
+      if (request.data.action === 'approve') {
+        // Bounded on purpose: this is an interactive request, and the run
+        // continues on the scheduled tick if the driver runs out of budget.
+        // A failure here is reported but does NOT undo the decision above —
+        // the operator's approval is durable and the next advance picks it up.
+        const advanced = await cmsAgentClient.callTool<Record<string, unknown>>('workflow_run_all', {
+          runId,
+          budgetMs: 20_000,
+          approved: true,
+        });
+        if (!advanced.ok) {
+          return jsonResponse(200, {
+            activity: null,
+            ...(requestTitle ? { title: requestTitle } : {}),
+            reason: advanced.code || 'advance_failed',
+            error: advanced.message,
+            retry_ms: 10_000,
+          });
+        }
+      }
+      console.info('Admin_Request_Activity publish decision', {
+        runId,
+        decision,
+        by: callerPrincipal.email,
+      });
+    }
+
     const [run, cost] = await Promise.all([
       cmsAgentClient.callTool<Record<string, unknown>>('workflow_get_run', { runId }),
       // The cost ledger carries the timing history the ETA is built from. It is
@@ -126,7 +184,14 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
     }
 
     const activity = projectActivity(run.data, cost.ok ? cost.data : undefined);
-    return jsonResponse(200, { activity: activity ?? null, ...(requestTitle ? { title: requestTitle } : {}) });
+    return jsonResponse(200, {
+      activity: activity ?? null,
+      ...(requestTitle ? { title: requestTitle } : {}),
+      // The browser offers the button exactly when this function would accept
+      // it — one source of truth for the permission, so a surface can never
+      // show an approve control that the server then refuses.
+      can_approve: callerRoles.includes('admin'),
+    });
   } catch (error) {
     console.error('Admin_Request_Activity request failed.', error);
     return jsonResponse(500, { error: 'Activity could not be read.' });
