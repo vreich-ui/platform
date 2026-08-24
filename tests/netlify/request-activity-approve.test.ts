@@ -23,6 +23,8 @@ process.env.CMS_AGENT_MCP_TOKEN = 'test-token';
  * below; a stub installed inside a test would be captured by nothing.
  */
 let dispatch: (name: string, args: Record<string, unknown>) => unknown = () => ({ ok: true, data: {} });
+/** Set to 401/403 to exercise the door refusal a scoped token gets for an off-allowlist tool. */
+let httpStatus = 200;
 let calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
 const jsonRes = (body: unknown, headers: Record<string, string> = {}) =>
@@ -43,6 +45,12 @@ globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
   const name = payload.params?.name ?? '';
   const args = payload.params?.arguments ?? {};
   calls.push({ name, args });
+  if (httpStatus !== 200) {
+    return new Response('{"error":"unauthorized"}', {
+      status: httpStatus,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
   return jsonRes({ jsonrpc: '2.0', id: 2, result: dispatch(name, args) });
 }) as typeof fetch;
 
@@ -56,6 +64,7 @@ const RUN_ID = 'run_test_approve_1';
 /** Reset the recorder and answer every workflow tool the handler may reach. */
 const stubBridge = () => {
   calls = [];
+  httpStatus = 200;
   dispatch = (name) =>
     name === 'workflow_get_run'
       ? {
@@ -109,6 +118,21 @@ test('withhold records the veto and does NOT advance the run', async () => {
       'a veto must never drive the run forward'
     );
   } finally {
+    restore();
+  }
+});
+
+test('an auth refusal names the tools it attempted — a scope denial and a bad token look identical on the wire', async () => {
+  const restore = stubBridge();
+  try {
+    httpStatus = 401;
+    const res = await call({ run_id: RUN_ID, action: 'approve' }, OWNER_CTX);
+    assert.equal(res.statusCode, 200, res.body);
+    const body = parse(res);
+    assert.match(String(body.error ?? ''), /workflow_set_operator_publish_decision/);
+    assert.match(String(body.error ?? ''), /allowlist/);
+  } finally {
+    httpStatus = 200;
     restore();
   }
 });

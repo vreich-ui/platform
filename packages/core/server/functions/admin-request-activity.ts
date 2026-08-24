@@ -59,6 +59,26 @@ export const requestSchema = z.object({
   action: z.enum(['approve', 'withhold']).optional(),
 });
 
+/**
+ * CMS-Agent answers a scoped site token the SAME 401 whether the token is wrong
+ * or whether the token is fine and the tool is simply not on its allowlist
+ * (`MCP_SCOPED_TOKENS_JSON` → `toolAllowlist`, enforced by the endpoint's
+ * `isScopedMessageAllowed` before dispatch). That sameness is deliberate on
+ * their side — it stops a caller enumerating which tools a stolen token can
+ * reach — so this side must not try to tell the two apart.
+ *
+ * What this side CAN do is say what it just asked for. Hit for real on the
+ * first press of the approve button: reads through the site token worked, the
+ * write came back "CMS-Agent rejected the credential", and the operator went
+ * hunting a credential that was never broken — the actual cause was one tool
+ * name missing from an allowlist. On an auth failure the message now names the
+ * tools the request attempted; on anything else the bridge's copy stands.
+ */
+const scopeAwareMessage = (code: string | undefined, message: string, attempted: readonly string[]): string =>
+  code === 'cms_agent_auth_failed'
+    ? `${message} Also check that this site's CMS-Agent token allows ${attempted.join(', ')} — a tool missing from the token's allowlist is refused with this same response.`
+    : message;
+
 const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
@@ -133,7 +153,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
           activity: null,
           ...(requestTitle ? { title: requestTitle } : {}),
           reason: decided.code || 'decision_failed',
-          error: decided.message,
+          error: scopeAwareMessage(decided.code, decided.message, ['workflow_set_operator_publish_decision']),
         });
       }
       if (request.data.action === 'approve') {
@@ -151,7 +171,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
             activity: null,
             ...(requestTitle ? { title: requestTitle } : {}),
             reason: advanced.code || 'advance_failed',
-            error: advanced.message,
+            error: scopeAwareMessage(advanced.code, advanced.message, ['workflow_run_all']),
             retry_ms: 10_000,
           });
         }
