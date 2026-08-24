@@ -274,7 +274,14 @@ function brandTokensFromSiteBody(siteBody) {
 }
 
 /** The captured theme, unwrapped the same way, with its objectId taken from the record when the
- *  caller `object_get`'s one and from inventory when there is exactly one theme to mean. */
+ *  caller `object_get`'s one and from inventory when there is exactly one theme to mean.
+ *
+ *  T13.3 (credential-redactor collision): the briefing field is `palette`, not `tokens` — the
+ *  executor's per-node prompt redactor (`OpenAINodeRunner.ts` / `AnthropicNodeRunner.ts`,
+ *  `/token/i`) replaces any key matching it with "[REDACTED]" before the model ever sees it, and
+ *  `tokens`/`brandTokens` both matched, silently blanking `theme_reconciler`'s whole palette. The
+ *  real platform field this reads FROM (`body.tokens`, written by `set_theme_fields`) is
+ *  unchanged — only the outgoing briefing key is renamed. */
 function themeBriefing(theme, themeRows) {
   const outer = isPlainObject(theme) ? theme : {};
   const body = isPlainObject(outer.tokens) ? outer : isPlainObject(outer.body) ? outer.body : outer;
@@ -284,7 +291,7 @@ function themeBriefing(theme, themeRows) {
     name: typeof body.name === 'string' ? body.name : null,
     // Whole, never degraded: it is ~900 chars, and it is the one thing `theme_reconciler` exists to
     // read. The 637KB envelope carried it faithfully and starved the node of everything around it.
-    tokens: clone(isPlainObject(body.tokens) ? body.tokens : { colors: {}, fonts: {} }),
+    palette: clone(isPlainObject(body.tokens) ? body.tokens : { colors: {}, fonts: {} }),
   };
 }
 
@@ -308,7 +315,7 @@ function settleBudgetChars(envelope) {
 
 // The FIXED degradation order (CLONE-INTAKE-FIX.md). Each step records what it removed in
 // `budget.truncated` before the next is even considered, and the envelope is re-measured between
-// steps so nothing is dropped that did not have to be. `site.brandTokens`, `theme.tokens` and
+// steps so nothing is dropped that did not have to be. `site.palette`, `theme.palette` and
 // `registry.pageTypes` appear in no step: they are never dropped, at any size.
 const DEGRADATION_STEPS = [
   function dropGapsBeyondFivePerPage(envelope) {
@@ -440,11 +447,11 @@ export function buildCloneIntake({
     );
   }
 
-  const brandTokens = brandTokensFromSiteBody(siteBody);
+  const palette = brandTokensFromSiteBody(siteBody);
   // Fail closed, same posture as the empty registry above: without the site's own palette slots there
   // is nothing for a theme proposal to be TOTAL against, and `theme_not_total` becomes a refusal about
   // a missing fetch rather than about a missing color. That mistake has already been made once.
-  if (!brandTokens) {
+  if (!palette) {
     throw new CloneError(
       'Clone intake requires the site BODY (object_get) carrying brandTokens; an object_inventory row has none.'
     );
@@ -458,7 +465,9 @@ export function buildCloneIntake({
       'themselves. budget.truncated names everything this briefing had to leave out.',
     captureRunId,
     target,
-    site: { objectId: activeSites[0].object_id ?? activeSites[0].objectId ?? null, brandTokens },
+    // T13.3: `palette`, not `brandTokens` — see the comment on `themeBriefing` above. The real
+    // platform field this was read FROM (siteBody.brandTokens) is unchanged.
+    site: { objectId: activeSites[0].object_id ?? activeSites[0].objectId ?? null, palette },
     theme: themeBriefing(theme, Array.isArray(inventory?.theme) ? inventory.theme : []),
     registry: { sectionTypes, pageTypes },
     pages: briefingPages(mapping, emissionReport),
@@ -576,7 +585,15 @@ export function validateTemplateDesign(design, intake) {
   if (!isPlainObject(design) || typeof design.name !== 'string' || !design.name.trim()) {
     throw new CloneError('A template design requires at least a name.');
   }
-  const appliesTo = Array.isArray(design.appliesTo) ? design.appliesTo : [];
+  // TOLERANT READER (input only): a designer node may emit either `appliesTo` (canonical) or
+  // `applies_to` (snake_case) — this is a normalization boundary, not a security boundary, so
+  // accepting both protects any future caller. `appliesTo` wins when both are present and
+  // non-empty. The CANONICAL name stays `appliesTo` everywhere downstream of this point (see
+  // `normalized.appliesTo` below and `recipeBody`) — that is what the platform's own template
+  // body carries (`row?.body?.appliesTo`), and nothing here writes `applies_to` to the platform.
+  const camelAppliesTo = Array.isArray(design.appliesTo) ? design.appliesTo : [];
+  const snakeAppliesTo = Array.isArray(design.applies_to) ? design.applies_to : [];
+  const appliesTo = camelAppliesTo.length > 0 ? camelAppliesTo : snakeAppliesTo;
   if (appliesTo.length === 0) throw new CloneError('A template design requires at least one appliesTo page type.');
   const slots = Array.isArray(design.slots) ? design.slots : [];
 
@@ -633,6 +650,11 @@ export function validateTemplateDesign(design, intake) {
 
   const normalized = clone(design);
   normalized.scope = normalized.scope || 'one_off';
+  // Emit only the canonical name — a design that arrived as `applies_to` (or as both) normalizes
+  // to `appliesTo` alone, so nothing downstream (recipeBody, the platform write) ever sees the
+  // snake_case spelling.
+  normalized.appliesTo = appliesTo;
+  delete normalized.applies_to;
   normalized.slots = slots.map((slot, index) => ({ ...clone(slot), slotId: slot.slotId || `slot_${index}` }));
   return { ok: true, normalized };
 }
@@ -973,7 +995,7 @@ function hasFontFallbackStack(value) {
 
 /**
  * Re-validate a proposed theme token set against the site's OWN declared slots (CLONE-ENGINE-API.md
- * §4). `intake.site.brandTokens` is the authority on which slots exist — the proposal supplies values,
+ * §4). `intake.site.palette` is the authority on which slots exist — the proposal supplies values,
  * never new slot names, because inventing a slot the renderer's CustomStyles.astro never emits a CSS
  * variable for would be a token nothing on the site ever reads.
  *
@@ -982,20 +1004,24 @@ function hasFontFallbackStack(value) {
  * `object_inventory` ROW instead — which carries no `brandTokens` at all — and the totality check
  * refused a palette it could not see. Reconciled by making the BRIEFING the single authority: intake
  * fetches the site body once, refuses outright if it has no palette, and publishes it as
- * `intake.site.brandTokens`; this function reads it from there. There is now exactly one place a site
+ * `intake.site.palette`; this function reads it from there. There is now exactly one place a site
  * palette can enter a clone run, and it is the same place `buildCloneRunReport` reads the site's id
  * from — so a caller cannot validate a proposal against one site and report against another.
+ *
+ * FIELD NAME (T13.3): `palette`, not `brandTokens`/`tokens` — see the comment on `themeBriefing`
+ * above. The executor's per-node prompt redactor treats any key matching `/token/i` as a credential
+ * and replaces it with "[REDACTED]" before the model sees it; `intake.site.brandTokens` collided.
  */
 export function validateThemeProposal({ proposal, intake }) {
   if (!isPlainObject(proposal)) throw new CloneError('A theme proposal is required.');
-  if (!isPlainObject(intake?.site?.brandTokens)) {
-    throw new CloneError('A clone intake carrying site.brandTokens is required to validate a theme proposal against.');
+  if (!isPlainObject(intake?.site?.palette)) {
+    throw new CloneError('A clone intake carrying site.palette is required to validate a theme proposal against.');
   }
 
   const applied = { colors: {}, fonts: {} };
   const dropped = [];
-  const existingColorSlots = intake.site.brandTokens.colors ?? {};
-  const existingFontSlots = intake.site.brandTokens.fonts ?? {};
+  const existingColorSlots = intake.site.palette.colors ?? {};
+  const existingFontSlots = intake.site.palette.fonts ?? {};
 
   for (const [slot, value] of Object.entries(proposal.colors ?? {})) {
     if (!(slot in existingColorSlots)) {
