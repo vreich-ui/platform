@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-23T13:52:31.629Z",
+    "at": "2026-08-24T15:34:16.698Z",
     "from": "objects/theme/by-id/thm_capture_2da15087afc79cd29a.json",
-    "record_version": 2
+    "record_version": 13
   },
   "description": "Bounded theme draft extracted from captured computed styles.",
   "name": "Captured site theme",
@@ -16,14 +16,14 @@
       "gold": "rgb(194 168 120)",
       "primary": "rgb(46 111 149)",
       "secondary": "rgb(37 90 120)",
-      "text-default": "rgb(0  0  0)",
+      "text-default": "rgb(0 0 0)",
       "text-heading": "rgb(22 26 29)",
       "text-muted": "rgb(58 65 73 / 76%)"
     },
     "fonts": {
-      "heading": "'Playfair Display', 'Times New Roman', serif",
+      "heading": "Georgia, 'Times New Roman', serif",
       "sans": "Arial, Helvetica, sans-serif",
-      "serif": "'Source Serif 4', Georgia, serif"
+      "serif": "Georgia, 'Times New Roman', serif"
     },
     "layout": {
       "containerWidth": "wide",
