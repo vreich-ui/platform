@@ -43,6 +43,40 @@
 export const STAGES = ['scaffold', 'genesis', 'onboarding', 'content'];
 
 /**
+ * CANONICAL PACKS (T14.1) — a shared library of brand-neutral recipe BODIES
+ * (`portability: 'canonical'`, packages/core/schema/bodies/
+ * recipe-metadata-v1.ts), imported by ONE seed module in SEED_MODULES below
+ * rather than restated per-site the way the pre-T14.1 fleet restated its
+ * "same" five section-template recipes three times over.
+ *
+ * A pack is NOT itself a seed FILE — no `sites/<client>/seeds/` entry exists
+ * for it, it never appears in SEED_MODULES, and it carries no stage or
+ * driveOrder of its own; it rides whichever seed module's `file` names it in
+ * `consumedBy`. It is listed here, separately, purely so the drift test can
+ * assert BOTH directions the manifest promises elsewhere: every canonical id
+ * actually reaches every site (nothing quietly missing one), and no site
+ * restates a canonical body as its own local literal instead of importing it
+ * — the exact failure `packages/core/cli/canonical-seed-data.mjs` exists to
+ * end. `idsExport` names the export on `module` that lists membership (an
+ * array of object ids) — the smallest hook a generic accessor needs.
+ * `entriesExport` names the export carrying the actual `{ objectId, body }`
+ * pairs, which the drift test needs to prove a site's CONVERSION_SEEDS entry
+ * for a canonical id is the SAME object the pack exports (imported), not a
+ * separate literal that merely looks the same (restated).
+ *
+ * A second pack (templates, themes, …) gets its own row here, not a widened
+ * one — `consumedBy` names exactly one SEED_MODULES `file`.
+ */
+export const CANONICAL_PACKS = [
+  {
+    module: 'packages/core/cli/canonical-seed-data.mjs',
+    idsExport: 'CANONICAL_SECTION_TEMPLATE_IDS',
+    entriesExport: 'CANONICAL_SECTION_TEMPLATES',
+    consumedBy: 'section-templates-seed-data.mjs',
+  },
+];
+
+/**
  * The seed pack. Listed in SCAFFOLD order (the order `create-site` writes the
  * files, which the committed dry-run fixture pins); `driveOrder` gives the
  * GENESIS order, which is different and is law:
@@ -176,6 +210,9 @@ export const genesisSeedFiles = () =>
 
 /** Export-tree subdirs every scaffolded site carries. */
 export const dataSiteSubdirs = () => DATA_SITE_SUBDIRS.filter((entry) => !entry.todo).map((entry) => entry.name);
+
+/** The CANONICAL_PACKS row a given seed-module file consumes, if any. */
+export const canonicalPackFor = (seedFile) => CANONICAL_PACKS.find((pack) => pack.consumedBy === seedFile);
 
 /** Every entry that records a known gap, with the task that closes it. */
 export const pendingEntries = () =>

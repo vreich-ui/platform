@@ -35,10 +35,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { buildPlan } from '../../packages/core/cli/create-site.mjs';
 import {
+  CANONICAL_PACKS,
   DATA_SITE_SUBDIRS,
   SCAFFOLD_GROUPS,
   SEED_MODULES,
@@ -153,6 +154,60 @@ test('every existing site carries every data/site export subdir the manifest lis
     }
   }
 });
+
+// ─── 1b. canonical packs (T14.1) ────────────────────────────────────────────
+//
+// Two directions, mirroring the fleet checks above: every site RECEIVES every
+// canonical id (nothing quietly missing one), and no site RESTATES a
+// canonical body as its own local literal — the exact failure the pack
+// exists to end. The restatement check is a referential-identity check, not
+// a content diff: a site that imports the canonical export gets the SAME
+// object; a site that pastes an identical-looking literal instead gets a
+// different one, so `===` catches restatement even when the copy is
+// byte-perfect today. A site's OWN recipes (no `portability: 'canonical'`
+// stamp — absent means 'client', recipe-metadata-v1.ts) are never examined
+// here; only entries actually claiming to be canonical are held to it.
+
+for (const pack of CANONICAL_PACKS) {
+  test(`canonical pack ${pack.module}: every site receives it, and no site restates a body it imports`, async () => {
+    const packMod = await import(pathToFileURL(path.join(repoRoot, pack.module)).href);
+    const ids = packMod[pack.idsExport];
+    const entries = packMod[pack.entriesExport];
+    assert.ok(Array.isArray(ids) && ids.length > 0, `${pack.module} exports no ${pack.idsExport}`);
+    assert.ok(Array.isArray(entries) && entries.length > 0, `${pack.module} exports no ${pack.entriesExport}`);
+    assert.deepEqual(
+      entries.map((e) => e.objectId).sort(),
+      [...ids].sort(),
+      `${pack.idsExport} and ${pack.entriesExport} disagree on membership`
+    );
+    const bodyById = new Map(entries.map((e) => [e.objectId, e.body]));
+
+    for (const site of SITES) {
+      const consumerFile = path.join(sitesDir, site, 'seeds', pack.consumedBy);
+      if (!fs.existsSync(consumerFile)) continue; // covered by the seed-present check above
+      const consumerMod = await import(pathToFileURL(consumerFile).href);
+      const seeds = consumerMod.CONVERSION_SEEDS ?? [];
+      const seedById = new Map(seeds.map((s) => [s.objectId, s.body]));
+
+      for (const id of ids) {
+        expectTarget(
+          `canonical-received:${site}:${id}`,
+          seedById.has(id),
+          `sites/${site}/seeds/${pack.consumedBy} does not carry canonical recipe '${id}' — every site must receive the canonical pack`
+        );
+      }
+
+      for (const [id, body] of seedById) {
+        if (body?.portability !== 'canonical') continue; // a site-specific override under the same id — not this check's business
+        assert.equal(
+          body,
+          bodyById.get(id),
+          `sites/${site}/seeds/${pack.consumedBy}'s '${id}' is stamped portability: 'canonical' but is not the SAME object ${pack.module} exports — it restates the canonical body locally instead of importing it`
+        );
+      }
+    }
+  });
+}
 
 // ─── 2. manifest → consumers ────────────────────────────────────────────────
 

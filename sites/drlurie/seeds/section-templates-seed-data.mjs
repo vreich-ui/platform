@@ -14,6 +14,17 @@
  *   stpl_newsletter_cta    newsletter_signup  the sec_newsletter_signup shape
  *   stpl_cta_banner        cta_banner         the W1/about closing-CTA shape
  *
+ * T14.1: these five stay LOCAL, deliberately. Their content diverged from
+ * the platform/fernwell/zilberman "canonical five" long ago (different
+ * whenToUse copy, different blueprint ids, `stpl_related_articles` even
+ * carries a different `data` shape) — they are drlurie's own tuned
+ * overrides of the same recipe IDS, not restatements of the canonical
+ * bodies. Importing the canonical pack for these five would change what
+ * this site is born with, which T14.1 is explicitly not allowed to do.
+ * They therefore carry no `portability` stamp (absent = 'client', per
+ * packages/core/schema/bodies/recipe-metadata-v1.ts) rather than a false
+ * 'canonical' one.
+ *
  * Recipes are DATA: agents evolve them freely with the section_template patch
  * ops, and every blueprint here is self-contained (no shared_refs, no content
  * refs, no asset refs) so a stamped section validates with zero external
@@ -26,10 +37,16 @@
  * which drills every section_template patch op (set_section_template_meta,
  * replace_blueprint, update_blueprint_data) ending byte-identical to the seed.
  */
+import {
+  sectionTemplateComparisonBody,
+  sectionTemplateExpectationsTimelineBody,
+  sectionTemplateMediaGalleryBody,
+  sectionTemplateStatsBandBody,
+} from '../../../packages/core/cli/canonical-seed-data.mjs';
 
 export const SEED_SITE = 'site_drlurie';
 
-// ─── the five recipes ────────────────────────────────────────────────────────
+// ─── the five recipes (site-specific — see the T14.1 note above) ────────────
 
 export const sectionTemplateHeroLandingBody = {
   name: 'Landing hero',
@@ -126,86 +143,20 @@ export const sectionTemplateCtaBannerBody = {
 // `brand_row` (logo strips are inherently site-specific assets — a starter
 // would stamp placeholder marks that read as broken; agents compose it
 // directly) and `comparison_table`'s pricing cousin (pricing_table stays
-// product-bound). Every blueprint below is self-contained: plain site-asset
-// placeholder paths only, no *AssetRef, no object/taxonomy refs.
+// product-bound).
+//
+// T14.1: these four were promoted to the CANONICAL pack
+// (packages/core/cli/canonical-seed-data.mjs) — they were always
+// brand-neutral (verified by reading each body: no Dr-Lurie copy, no
+// *AssetRef, no object/taxonomy refs), so every site draws from them now
+// instead of only this one. Re-exported here under their original names so
+// nothing that imported them FROM drlurie's seed file breaks.
 
-export const sectionTemplateStatsBandBody = {
-  name: 'Stats band',
-  description: 'A row of headline numbers (value + label + optional sublabel) — the trust/metrics band.',
-  whenToUse:
-    'Stamp between content sections to anchor credibility with 2–6 numbers ("10k readers · 97% satisfaction"). Replace the starter figures before publishing — never ship placeholder metrics.',
-  scope: 'evergreen',
-  blueprint: {
-    id: 's_stplstats',
-    type: 'stats',
-    data: {
-      kicker: 'By the numbers',
-      items: [
-        { value: '10k+', label: 'Readers' },
-        { value: '97%', label: 'Satisfaction' },
-        { value: '5★', label: 'Average rating' },
-      ],
-    },
-  },
-};
-
-export const sectionTemplateExpectationsTimelineBody = {
-  name: 'Expectations timeline',
-  description: 'An ordered "what to expect" milestone rail over time (label + period + short description).',
-  whenToUse:
-    'Any change-over-time narrative — a routine\u2019s first 12 weeks, an onboarding arc. Use the steps recipe for a procedure the reader performs; this one is time, not tasks.',
-  scope: 'evergreen',
-  blueprint: {
-    id: 's_stpltimeline',
-    type: 'timeline',
-    data: {
-      kicker: 'What to expect',
-      milestones: [
-        { label: 'Adjustment', period: 'Weeks 1\u20132', description: 'Starter copy: what happens first.' },
-        { label: 'Early change', period: 'Weeks 3\u20136', description: 'Starter copy: the first visible shift.' },
-        { label: 'Steady state', period: 'Week 12', description: 'Starter copy: where this settles.' },
-      ],
-    },
-  },
-};
-
-export const sectionTemplateComparisonBody = {
-  name: 'Comparison matrix',
-  description: 'A bounded us-vs-them feature matrix (2\u20134 columns, yes/no or short-text cells).',
-  whenToUse:
-    'Positioning pages comparing approaches or offerings feature-by-feature. Use pricing_table when the columns are purchasable products \u2014 money truth stays object-bound.',
-  scope: 'evergreen',
-  blueprint: {
-    id: 's_stplcomparison',
-    type: 'comparison_table',
-    data: {
-      heading: 'How this compares',
-      columns: [{ label: 'This approach', highlighted: true }, { label: 'The usual way' }],
-      rows: [
-        { label: 'Evidence-based', cells: [true, false] },
-        { label: 'Starter row \u2014 replace', cells: ['Yes', 'Sometimes'] },
-      ],
-    },
-  },
-};
-
-export const sectionTemplateMediaGalleryBody = {
-  name: 'Media gallery',
-  description: 'A standalone image gallery block (grid layout starter; swap items for single figures or video).',
-  whenToUse:
-    'Visual evidence between prose \u2014 result galleries, product-in-use shots, a video feature (switch an item to kind:\u2019video\u2019 with a provider + video ID). Replace the placeholder images before publishing.',
-  scope: 'evergreen',
-  blueprint: {
-    id: 's_stplmedia',
-    type: 'media',
-    data: {
-      layout: 'grid',
-      items: [
-        { kind: 'image', src: '/images/default.png', alt: 'Placeholder \u2014 replace', caption: 'Starter caption' },
-        { kind: 'image', src: '/images/default.png', alt: 'Placeholder \u2014 replace' },
-      ],
-    },
-  },
+export {
+  sectionTemplateStatsBandBody,
+  sectionTemplateExpectationsTimelineBody,
+  sectionTemplateComparisonBody,
+  sectionTemplateMediaGalleryBody,
 };
 
 // ─── driver contract ─────────────────────────────────────────────────────────
@@ -216,7 +167,7 @@ export const CONVERSION_SEEDS = [
   { objectType: 'section_template', objectId: 'stpl_related_articles', body: sectionTemplateRelatedArticlesBody },
   { objectType: 'section_template', objectId: 'stpl_newsletter_cta', body: sectionTemplateNewsletterCtaBody },
   { objectType: 'section_template', objectId: 'stpl_cta_banner', body: sectionTemplateCtaBannerBody },
-  // W10 T10.8 — starters for the ratified mints.
+  // W10 T10.8 — starters for the ratified mints. Bodies now canonical (T14.1).
   { objectType: 'section_template', objectId: 'stpl_stats_band', body: sectionTemplateStatsBandBody },
   {
     objectType: 'section_template',
