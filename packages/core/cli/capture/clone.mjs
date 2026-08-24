@@ -486,6 +486,198 @@ export function buildCloneIntake({
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 /**
+ * T13.4 PART B — SUBSTITUTION AS A NORMAL OUTCOME, NOT A FAILURE.
+ *
+ * Wolf: "make any object that just doesn't fit select another existing or available style, this an
+ * agentic judgement likely every time." `theme_reconciler` (an AI node this module never runs) already
+ * does the right thing for fonts — it declines a webfont a theme token cannot load and picks an
+ * existing, already-legal font stack instead, recording why. That behaviour generalises: a validator
+ * in THIS module never chooses a substitute — choosing is the model's job (PART C, wired separately)
+ * — it only ever says "this cannot be used, and here is what the live registry offers instead."
+ *
+ * THE LEDGER VOCABULARY. Every substitution outcome this module reports, from any validator, is the
+ * same shape:
+ *
+ *   { kind: 'section_type' | 'font' | 'recipe' | 'page_type',
+ *     wanted, chosen,            // chosen === null means declined, not substituted — ALWAYS null here
+ *     reason,                    // why the wanted thing could not be used (an existing reason string)
+ *     basis,                     // why these candidates (or why none fit)
+ *     fidelityCost: 'none' | 'minor' | 'material',
+ *     substitutable,             // true iff candidates.length > 0
+ *     candidates }                // the registered alternatives that COULD stand in — never a choice
+ *
+ * `chosen` stays `null` everywhere in this file: nothing here is authorized to pick one of
+ * `candidates` and call it the answer. `fidelityCost` is likewise a property of the SITUATION, not of
+ * a chosen candidate this module never picks — 'minor' when at least one same-capability candidate
+ * exists, 'material' when none does (the wanted thing is simply lost unless a human or a later model
+ * step supplies one). `substitutionEntry` below is the one and only place a ledger entry is built, so
+ * every caller produces the identical shape.
+ */
+function substitutionBasis({ kind, substitutable, candidateCount, wanted }) {
+  if (!substitutable) {
+    switch (kind) {
+      case 'section_type':
+        return `no live, allowed section type shares ${JSON.stringify(wanted)}'s compatibility class`;
+      case 'page_type':
+        return 'no other page type is registered on this site';
+      case 'recipe':
+        return 'no existing recipe of this kind is registered to reuse';
+      case 'font':
+        return "no other font value on this site's palette has a usable fallback stack to offer instead";
+      default:
+        return 'no compatible alternative is registered';
+    }
+  }
+  switch (kind) {
+    case 'section_type':
+      return `${candidateCount} live, allowed section type(s) share ${JSON.stringify(wanted)}'s compatibility class`;
+    case 'page_type':
+      return `${candidateCount} other page type(s) are registered on this site`;
+    case 'recipe':
+      return `${candidateCount} existing recipe(s) of this kind are already registered and could be reused`;
+    case 'font':
+      return `${candidateCount} font value(s) already active on this site's palette have a usable fallback stack`;
+    default:
+      return `${candidateCount} registered alternative(s) are available`;
+  }
+}
+
+/** The ONE constructor for a substitution ledger entry (see the vocabulary comment above). Every
+ *  `substitutions[]` array in this module — `validateThemeProposal`'s, `buildRecipeMintPlan`'s,
+ *  `buildCloneRunReport`'s — is built exclusively from entries this function returns, so the shape
+ *  can never drift between kinds or between call sites. */
+function substitutionEntry({ kind, wanted, reason, candidates }) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  const substitutable = list.length > 0;
+  return {
+    kind,
+    wanted,
+    chosen: null,
+    reason,
+    basis: substitutionBasis({ kind, substitutable, candidateCount: list.length, wanted }),
+    fidelityCost: substitutable ? 'minor' : 'material',
+    substitutable,
+    candidates: list,
+  };
+}
+
+/**
+ * SECTION-TYPE COMPATIBILITY CLASSES — the hard boundary a substitution may never cross (PART B item
+ * 3). A capability class groups section types that perform the SAME function for a visitor; two types
+ * in different classes are not stylistic variants of one another, they are different capabilities, and
+ * swapping one for the other is not a substitution, it is a silent deletion of whatever the original
+ * did. The textbook case, named directly in the spec: `contact_form` collects a visitor's message
+ * through a live FORM object; `prose` displays static text. A clone that "substitutes" prose for a
+ * missing contact_form has not adapted the page — it has removed the page's only way to hear from a
+ * visitor, and nothing downstream would ever be told that happened. That must be a DECLINE
+ * (`chosen: null`, `fidelityCost: 'material'`), never a substitution.
+ *
+ * This table is deliberately CONSERVATIVE: most section types are their own one-member class, because
+ * most of them do something no sibling in the registry also does (site search is not a FAQ list is not
+ * a live product feed). A class only groups two or more types when the schema itself already documents
+ * them as interchangeable presentations of the same capability — see the comment on each class.
+ *
+ * `classOfSectionType` and `substitutionCandidatesForSectionType` are the ONLY two ways this table is
+ * ever read, and neither one — nor anything that calls them — may build a candidate list by any other
+ * means (string similarity, fuzzy matching, a hand-picked override). That is what makes a cross-class
+ * substitution IMPOSSIBLE rather than merely discouraged: the only door out of a class is membership in
+ * that same class, and this table is the only place membership is declared. `assertSameCompatibilityClass`
+ * below is the runtime guard a later, choosing caller (PART C) can — and must — run any (wanted, chosen)
+ * pair through before treating a swap as legitimate.
+ */
+const SECTION_TYPE_COMPATIBILITY_CLASSES = {
+  // Page/section openers: heading + supporting copy + optional actions. section-v1.ts documents `lede`
+  // as literally "the same field shape as hero but a distinct, lighter presentation" — the one pair in
+  // the registry the schema itself calls a presentation choice, not a capability difference.
+  intro_banner: ['hero', 'lede'],
+  // Pure reading content: conveys information as text, collects nothing, embeds nothing, links to
+  // nothing external. Swapping among these changes HOW text is laid out, never what the page can do.
+  narrative_text: ['prose', 'checklist', 'bio'],
+  // Hand-authored internal navigation aids: a curated set of links/cards the visitor can browse.
+  curated_links: ['content_grid', 'link_list'],
+  // An ORDERED sequence shown to the visitor — order IS the content (a numbered process or a
+  // chronology), unlike the unordered curated_links set above.
+  ordered_sequence: ['steps', 'timeline'],
+  // Structured/quantitative summary content presented as a table or figure set.
+  structured_comparison: ['comparison_table', 'stats'],
+  // Display-only social proof / brand association — no data collection, no live query.
+  social_proof: ['testimonial', 'brand_row'],
+  // Visitor-submitted data capture through a live FORM object. THE example this whole boundary exists
+  // for: swapping either of these for anything outside this class deletes the page's ability to
+  // receive visitor input — a function loss, not a style change.
+  lead_capture: ['contact_form', 'newsletter_signup'],
+  // Everything below performs a capability nothing else in the registry also performs, so each is its
+  // own singleton class: one focused call-to-action moment, a specific question set, live commerce
+  // data, plan/price data, bound first-party media, live site search, third-party embedded content
+  // (its own risk surface), a post-submission acknowledgment tied to one specific form flow, a
+  // free-form block-tree container, and a fixed text+media layout with no sibling in the registry.
+  cta_moment: ['cta_banner'],
+  reference_qa: ['faq'],
+  commerce_feed: ['product_preview'],
+  pricing_data: ['pricing_table'],
+  bound_media: ['media'],
+  site_search: ['search'],
+  external_embed: ['content_embed'],
+  form_result: ['form_confirmation'],
+  free_composition: ['composition'],
+  text_media_split: ['content_split'],
+};
+
+const SECTION_TYPE_CLASS_BY_TYPE = new Map(
+  Object.entries(SECTION_TYPE_COMPATIBILITY_CLASSES).flatMap(([className, types]) =>
+    types.map((type) => [type, className])
+  )
+);
+
+/** The compatibility class a KNOWN section type belongs to, or `null` for a type this table has never
+ *  heard of — which includes every type invented by a design that failed `unknown_section_type` for a
+ *  name the live registry never registered either. A `null` class means "no basis to say what would
+ *  stand in for it exists," not "anything will do." Exported so PART C (and this module's own tests)
+ *  can introspect class membership without reaching into the table directly. */
+export function classOfSectionType(type) {
+  return SECTION_TYPE_CLASS_BY_TYPE.get(type) ?? null;
+}
+
+/**
+ * The section types that COULD stand in for `wanted`, and nothing else: same compatibility class,
+ * present in the LIVE registry (`registrySectionTypes`, i.e. `intake.registry.sectionTypes` — the
+ * live registry is the only thing allowed to say a type exists, same discipline as everywhere else in
+ * this module), and — when the caller is substituting into a page-type slot — present in that page
+ * type's `allowed` list (`allowedTypes`; omit it, or pass `undefined`, when there is no slot to be
+ * allowed into, e.g. a standalone section_template design). This function does not choose; it
+ * enumerates. Choosing which candidate to use, if any, is the model's job (PART C) — this function's
+ * only contract is that its output can never cross a class boundary, which is what makes the boundary
+ * a hard one rather than a convention.
+ */
+export function substitutionCandidatesForSectionType(wanted, { registrySectionTypes, allowedTypes } = {}) {
+  const className = classOfSectionType(wanted);
+  if (!className) return [];
+  const registryKeys = new Set(Object.keys(registrySectionTypes ?? {}));
+  const allowedSet = Array.isArray(allowedTypes) ? new Set(allowedTypes) : null;
+  return SECTION_TYPE_COMPATIBILITY_CLASSES[className].filter(
+    (type) => type !== wanted && registryKeys.has(type) && (!allowedSet || allowedSet.has(type))
+  );
+}
+
+/** The runtime guard behind "cross-class substitution impossible rather than merely discouraged": a
+ *  caller that DOES choose a substitute (PART C, never this module) must run the (wanted, chosen) pair
+ *  through this before treating the swap as legitimate. Throws — it does not return a boolean — because
+ *  a cross-class swap is not a validation failure to report, it is a bug in the caller that must not be
+ *  allowed to proceed. Two section types with the same, non-null class pass; anything else throws,
+ *  INCLUDING wanted === chosen (a "substitution" that changes nothing is not one) and either side
+ *  having no known class at all (nothing to prove the swap is safe). */
+export function assertSameCompatibilityClass(wanted, chosen) {
+  const wantedClass = classOfSectionType(wanted);
+  const chosenClass = classOfSectionType(chosen);
+  if (!wantedClass || !chosenClass || wantedClass !== chosenClass || wanted === chosen) {
+    throw new CloneError(
+      `assertSameCompatibilityClass: "${wanted}" and "${chosen}" are not a legal substitution — ` +
+        'cross-class (or non-)substitution is not allowed.'
+    );
+  }
+}
+
+/**
  * Structural re-validation of a blueprint's `data` against one live section type's FIELD CONTRACT —
  * the `{fields, required}` pair `intake.registry.sectionTypes` now carries (CLONE-INTAKE-FIX.md
  * Defect B), not a JSON Schema.
@@ -551,25 +743,67 @@ export function validateSectionTemplateDesign(design, intake) {
 
   // Reuse-first, same discipline as emit.mjs T12.28: a name collision is resolved by referencing the
   // object that already carries it, never by re-validating (and possibly rejecting) a design whose
-  // shape the platform already has an answer for.
+  // shape the platform already has an answer for. Not itself a "substitution" in the ledger sense —
+  // the design was never going to be minted new — so it carries no candidates.
   if (existingRecipeObjectId(intake.recipes?.section_template, design.name)) {
-    return { ok: false, reason: 'name_collision', detail: `a section_template named "${design.name}" already exists` };
+    return {
+      ok: false,
+      reason: 'name_collision',
+      detail: `a section_template named "${design.name}" already exists`,
+      substitutable: false,
+      candidates: [],
+    };
   }
 
   const contract = intake.registry.sectionTypes[blueprint.type];
   if (contract === undefined) {
+    // PART B item 2: this cannot be used — here is what the live registry offers instead, if
+    // anything, from `blueprint.type`'s OWN compatibility class (item 3's hard boundary). This
+    // function never chooses among `candidates`; see substitutionCandidatesForSectionType's doc.
+    const candidates = substitutionCandidatesForSectionType(blueprint.type, {
+      registrySectionTypes: intake.registry.sectionTypes,
+    });
     return {
       ok: false,
       reason: 'unknown_section_type',
       detail: `"${blueprint.type}" is not in the live component registry`,
+      wanted: blueprint.type,
+      substitutable: candidates.length > 0,
+      candidates,
     };
   }
   const errors = fieldContractErrors(blueprint.data ?? {}, contract);
-  if (errors.length > 0) return { ok: false, reason: 'blueprint_schema_mismatch', detail: errors };
+  if (errors.length > 0) {
+    // The TYPE is fine; the DATA is wrong. No compatibility-class candidate answers a field-shape
+    // mismatch, so this stays a pure decline — see buildRecipeMintPlan's 'recipe'-kind substitution
+    // for the higher-level "reuse an existing recipe instead" answer to a design that doesn't fit.
+    return { ok: false, reason: 'blueprint_schema_mismatch', detail: errors, substitutable: false, candidates: [] };
+  }
+
+  // T13.4 PART B item 6: tolerant reader for the designer's `when_to_use` (its own outputSchema uses
+  // snake_case), same discipline as `appliesTo`/`applies_to` in validateTemplateDesign below. An empty
+  // result is refused OUTRIGHT rather than minted with `whenToUse: ''` — an empty whenToUse is a
+  // warning that blocks PUBLISHING the recipe later (CLONE-ENGINE-API.md's own downstream gate), so a
+  // recipe that cannot explain itself must not be minted in the first place.
+  const camelWhenToUse = typeof design.whenToUse === 'string' ? design.whenToUse.trim() : '';
+  const snakeWhenToUse = typeof design.when_to_use === 'string' ? design.when_to_use.trim() : '';
+  const whenToUse = camelWhenToUse || snakeWhenToUse;
+  if (!whenToUse) {
+    return {
+      ok: false,
+      reason: 'recipe_metadata_incomplete',
+      detail: 'a section_template design requires whenToUse (or when_to_use) explaining when to use it',
+      substitutable: false,
+      candidates: [],
+    };
+  }
 
   const normalized = clone(design);
   normalized.blueprint.id = normalized.blueprint.id || mintPlaceholderSectionId(design.name, blueprint.type);
   normalized.scope = normalized.scope || 'one_off';
+  // Emit only the canonical name, same discipline as appliesTo/applies_to below.
+  normalized.whenToUse = whenToUse;
+  delete normalized.when_to_use;
   return { ok: true, normalized };
 }
 
@@ -598,39 +832,87 @@ export function validateTemplateDesign(design, intake) {
   const slots = Array.isArray(design.slots) ? design.slots : [];
 
   if (existingRecipeObjectId(intake.recipes?.template, design.name)) {
-    return { ok: false, reason: 'name_collision', detail: `a template named "${design.name}" already exists` };
+    return {
+      ok: false,
+      reason: 'name_collision',
+      detail: `a template named "${design.name}" already exists`,
+      substitutable: false,
+      candidates: [],
+    };
   }
 
   for (const pageType of appliesTo) {
     if (!(pageType in intake.registry.pageTypes)) {
+      // The wanted PAGE TYPE doesn't exist; the "registered alternatives" are simply the other page
+      // types the live registry does carry — page types have no sub-classification (item 3's hard
+      // boundary is about section-type CAPABILITY classes; a page type is just a route pattern +
+      // section policy), so every other registered id is offered and the model judges fit.
+      const candidates = Object.keys(intake.registry.pageTypes).sort();
       return {
         ok: false,
         reason: 'applies_to_page_type_missing',
         detail: `page type "${pageType}" is not in the live page-type registry`,
+        wanted: pageType,
+        substitutable: candidates.length > 0,
+        candidates,
       };
     }
   }
 
+  // A section-type candidate for one SLOT must be legal for EVERY page type this template applies
+  // to, or it would just fail slot_section_type_not_allowed against a different appliesTo entry next.
+  // `null` means "no restriction from any appliesTo page type" (every one allows 'any'); a Set means
+  // the intersection of what every restricting page type allows.
+  let allowedAcrossAppliesTo = null;
+  for (const pageType of appliesTo) {
+    const allowed = intake.registry.pageTypes[pageType].allowed;
+    if (allowed === 'any') continue;
+    const set = new Set(allowed);
+    allowedAcrossAppliesTo = allowedAcrossAppliesTo
+      ? new Set([...allowedAcrossAppliesTo].filter((type) => set.has(type)))
+      : set;
+  }
+  const allowedTypesForCandidates = allowedAcrossAppliesTo ? [...allowedAcrossAppliesTo] : undefined;
+
   for (const slot of slots) {
     const contract = intake.registry.sectionTypes[slot.sectionType];
     if (contract === undefined) {
+      const candidates = substitutionCandidatesForSectionType(slot.sectionType, {
+        registrySectionTypes: intake.registry.sectionTypes,
+        allowedTypes: allowedTypesForCandidates,
+      });
       return {
         ok: false,
         reason: 'unknown_section_type',
         detail: `slot "${slot.slotId ?? '(unnamed)'}" names "${slot.sectionType}", which is not in the live component registry`,
+        wanted: slot.sectionType,
+        substitutable: candidates.length > 0,
+        candidates,
       };
     }
     if (slot.blueprint) {
       const errors = fieldContractErrors(slot.blueprint.data ?? {}, contract);
-      if (errors.length > 0) return { ok: false, reason: 'blueprint_schema_mismatch', detail: errors };
+      if (errors.length > 0) {
+        return { ok: false, reason: 'blueprint_schema_mismatch', detail: errors, substitutable: false, candidates: [] };
+      }
     }
     for (const pageType of appliesTo) {
       const allowed = intake.registry.pageTypes[pageType].allowed;
       if (allowed !== 'any' && !allowed.includes(slot.sectionType)) {
+        // The type IS real — it is simply not allowed in THIS page type's slot. This is exactly the
+        // "existing object that just doesn't fit" case: offer same-class, live, allowed alternatives;
+        // never a cross-class one (item 3 — a contact_form can never candidate-in for a prose slot).
+        const candidates = substitutionCandidatesForSectionType(slot.sectionType, {
+          registrySectionTypes: intake.registry.sectionTypes,
+          allowedTypes: allowedTypesForCandidates,
+        });
         return {
           ok: false,
           reason: 'slot_section_type_not_allowed',
           detail: `slot "${slot.slotId ?? '(unnamed)'}" places "${slot.sectionType}", which page type "${pageType}" does not allow`,
+          wanted: slot.sectionType,
+          substitutable: candidates.length > 0,
+          candidates,
         };
       }
     }
@@ -640,12 +922,32 @@ export function validateTemplateDesign(design, intake) {
   for (const pageType of appliesTo) {
     const missing = intake.registry.pageTypes[pageType].required.filter((type) => !slottedTypes.has(type));
     if (missing.length > 0) {
+      // A gap, not a bad fit: nothing was proposed for the missing slot, so there is no "wanted" value
+      // whose compatibility class could be searched. buildRecipeMintPlan's 'recipe'-kind substitution
+      // still offers whole EXISTING templates as a higher-level alternative to designing a new one.
       return {
         ok: false,
         reason: 'required_section_not_covered',
         detail: `page type "${pageType}" requires ${missing.join(', ')}, which no slot in this template provides`,
+        substitutable: false,
+        candidates: [],
       };
     }
+  }
+
+  // T13.4 PART B item 6, same discipline as validateSectionTemplateDesign above and the same
+  // appliesTo/applies_to tolerant-read pattern this function already uses.
+  const camelWhenToUse = typeof design.whenToUse === 'string' ? design.whenToUse.trim() : '';
+  const snakeWhenToUse = typeof design.when_to_use === 'string' ? design.when_to_use.trim() : '';
+  const whenToUse = camelWhenToUse || snakeWhenToUse;
+  if (!whenToUse) {
+    return {
+      ok: false,
+      reason: 'recipe_metadata_incomplete',
+      detail: 'a template design requires whenToUse (or when_to_use) explaining when to use it',
+      substitutable: false,
+      candidates: [],
+    };
   }
 
   const normalized = clone(design);
@@ -656,6 +958,8 @@ export function validateTemplateDesign(design, intake) {
   normalized.appliesTo = appliesTo;
   delete normalized.applies_to;
   normalized.slots = slots.map((slot, index) => ({ ...clone(slot), slotId: slot.slotId || `slot_${index}` }));
+  normalized.whenToUse = whenToUse;
+  delete normalized.when_to_use;
   return { ok: true, normalized };
 }
 
@@ -702,6 +1006,13 @@ export function buildRecipeMintPlan({ intake, design }) {
   if (!isPlainObject(intake) || typeof intake.target !== 'string') {
     throw new CloneError('A recipe mint plan requires an intake with a target.');
   }
+  // T13.4 PART B item 5: `object_create`'s schema REQUIRES `site` — omitting it is exactly the live
+  // defect (a body the platform itself validated `eligible: true, blockers: []` was still rejected
+  // `400: Invalid request fields` for lacking it). Guard here, belt and braces alongside PART A's
+  // adapter (which throws at the wire boundary if `site` is absent from the engine object).
+  if (!isPlainObject(intake.site) || typeof intake.site.objectId !== 'string' || !intake.site.objectId) {
+    throw new CloneError('A recipe mint plan requires an intake carrying site.objectId.');
+  }
   const target = intake.target;
   const batches = [
     [
@@ -744,6 +1055,10 @@ export function buildRecipeMintPlan({ intake, design }) {
           name: name ?? null,
           reason: 'malformed_design',
           detail: error instanceof Error ? error.message : String(error),
+          // Shape parity with every other rejected entry (see below) — an authoring bug, not a "does
+          // not fit" outcome, so always non-substitutable; never carried into `substitutions[]`.
+          substitutable: false,
+          candidates: [],
           ...(sourceCandidateIds ? { sourceCandidateIds } : {}),
         });
         continue;
@@ -758,6 +1073,11 @@ export function buildRecipeMintPlan({ intake, design }) {
             name,
             reason: outcome.reason,
             detail: outcome.detail,
+            // PART B item 2: passed straight through from the validator — this function never adds to
+            // or edits what a validator already determined about substitutability.
+            ...(outcome.wanted !== undefined ? { wanted: outcome.wanted } : {}),
+            substitutable: Boolean(outcome.substitutable),
+            candidates: Array.isArray(outcome.candidates) ? outcome.candidates : [],
             ...(sourceCandidateIds ? { sourceCandidateIds } : {}),
           });
         }
@@ -769,6 +1089,11 @@ export function buildRecipeMintPlan({ intake, design }) {
         verb: 'object_create',
         objectType,
         requestedId,
+        // T13.4 PART B item 5: `site` travels on every create from here on — `object_create`'s schema
+        // requires it, and `intake.site.objectId` is the one place a clone run's site id can come
+        // from (buildCloneIntake's own single-authority guarantee — see the comment on `themeBriefing`
+        // and `validateThemeProposal`).
+        site: intake.site.objectId,
         body: recipeBody(objectType, outcome.normalized),
         rationale: entryDesign.rationale ?? `designed to satisfy a capability gap found while cloning ${target}`,
         ...(sourceCandidateIds ? { sourceCandidateIds } : {}),
@@ -784,12 +1109,54 @@ export function buildRecipeMintPlan({ intake, design }) {
       throw new CloneError(`Recipe mint plan attempted a forbidden verb: ${item.verb}`);
   }
 
+  // PART B items 1/2/3: the ledger. `malformed_design` (an authoring bug the validator never even
+  // reached) and `recipe_metadata_incomplete` (item 6 — a completeness gate, not a fit problem) are
+  // deliberately excluded: neither is "an object that doesn't fit", so neither belongs in a report of
+  // compromises the run made. `blueprint_schema_mismatch` and `required_section_not_covered` have no
+  // section-type-level candidate (the type was fine; the design around it wasn't), so they surface at
+  // the RECIPE level instead — Wolf's "select another existing or available style", applied to whole
+  // recipes: the candidates are existing recipes of the SAME objectType already registered on the
+  // site. That objectType filter is itself a compatibility-class boundary — a section_template can
+  // never candidate-in for a rejected template design, or vice versa.
+  const substitutions = [];
+  for (const entry of rejected) {
+    if (entry.reason === 'malformed_design' || entry.reason === 'recipe_metadata_incomplete') continue;
+    if (entry.reason === 'unknown_section_type' || entry.reason === 'slot_section_type_not_allowed') {
+      substitutions.push(
+        substitutionEntry({
+          kind: 'section_type',
+          wanted: entry.wanted,
+          reason: entry.reason,
+          candidates: entry.candidates,
+        })
+      );
+    } else if (entry.reason === 'applies_to_page_type_missing') {
+      substitutions.push(
+        substitutionEntry({
+          kind: 'page_type',
+          wanted: entry.wanted,
+          reason: entry.reason,
+          candidates: entry.candidates,
+        })
+      );
+    } else if (entry.reason === 'blueprint_schema_mismatch' || entry.reason === 'required_section_not_covered') {
+      const existingRecipes = (intake.recipes?.[entry.kind] ?? []).map((row) => ({
+        objectId: row.objectId,
+        name: row.name,
+      }));
+      substitutions.push(
+        substitutionEntry({ kind: 'recipe', wanted: entry.name, reason: entry.reason, candidates: existingRecipes })
+      );
+    }
+  }
+
   return {
     schemaVersion: 'clone-mint-plan.v1',
     target,
     creates,
     rejected,
     reused,
+    substitutions,
     forbiddenVerbs: [...FORBIDDEN_VERBS].sort(),
   };
 }
@@ -993,6 +1360,23 @@ function hasFontFallbackStack(value) {
   return false;
 }
 
+/** The site's OWN already-declared font values that could stand in for a `wanted` value this stage
+ *  just dropped — "an existing or available style" (Wolf), read from `intake.site.palette.fonts`
+ *  itself rather than invented. Deduplicated, excludes `wanted`, and re-checked against
+ *  `hasFontFallbackStack` defensively: a captured site's raw computed style can still carry a bare
+ *  single family in another slot (the same shape this function's caller just dropped), and offering
+ *  an equally-broken candidate back would defeat the point. */
+function existingFontCandidates(existingFontSlots, wanted) {
+  const seen = new Set();
+  const candidates = [];
+  for (const value of Object.values(existingFontSlots ?? {})) {
+    if (typeof value !== 'string' || value === wanted || seen.has(value) || !hasFontFallbackStack(value)) continue;
+    seen.add(value);
+    candidates.push(value);
+  }
+  return candidates;
+}
+
 /**
  * Re-validate a proposed theme token set against the site's OWN declared slots (CLONE-ENGINE-API.md
  * §4). `intake.site.palette` is the authority on which slots exist — the proposal supplies values,
@@ -1034,13 +1418,37 @@ export function validateThemeProposal({ proposal, intake }) {
       applied.colors[slot] = value;
     }
   }
+  // PART B item 1/2/3, generalising the fix already proven for fonts (Wolf's own example: a webfont a
+  // theme token cannot load is DECLINED and an existing, already-legal font stack is offered instead
+  // — never chosen here; see substitutionEntry's doc comment). `unknown_slot` gets no candidates: the
+  // proposal named a slot the site does not have at all, so there is no live thing to substitute INTO.
+  // The other two font drop reasons name a REAL slot with a value that doesn't fit it, so the site's
+  // own OTHER already-declared font values — "an existing or available style" — are exactly what a
+  // caller (or PART C) should be told exists.
+  const fontSubstitutions = [];
   for (const [slot, value] of Object.entries(proposal.fonts ?? {})) {
     if (!(slot in existingFontSlots)) {
       dropped.push({ slot, value, reason: 'unknown_slot' });
     } else if (typeof value === 'string' && CSS_URL_OR_IMPORT_RE.test(value)) {
       dropped.push({ slot, value, reason: 'external_reference_forbidden' });
+      fontSubstitutions.push(
+        substitutionEntry({
+          kind: 'font',
+          wanted: value,
+          reason: 'external_reference_forbidden',
+          candidates: existingFontCandidates(existingFontSlots, value),
+        })
+      );
     } else if (!hasFontFallbackStack(value)) {
       dropped.push({ slot, value, reason: 'no_fallback_stack' });
+      fontSubstitutions.push(
+        substitutionEntry({
+          kind: 'font',
+          wanted: value,
+          reason: 'no_fallback_stack',
+          candidates: existingFontCandidates(existingFontSlots, value),
+        })
+      );
     } else {
       applied.fonts[slot] = value;
     }
@@ -1074,7 +1482,9 @@ export function validateThemeProposal({ proposal, intake }) {
     .filter((slot) => !(slot in applied.colors))
     .sort();
 
-  return { applied, dropped, missingKeys };
+  // PART B item 4: the ledger, as its own first-class field — `dropped[]` is left byte-for-byte as it
+  // was (every existing caller/test that reads it is unaffected); `substitutions[]` is additive.
+  return { applied, dropped, missingKeys, substitutions: fontSubstitutions };
 }
 
 // Runtime-resolved placeholders. `buildThemeApplyPlan` is a PURE PLAN builder — it has no transport,
@@ -1209,6 +1619,74 @@ function assertNoRemoteAssetValues(value, path) {
   }
 }
 
+/** A ledger-shaped rejection for an adjudicated `chosen` this engine will never apply — same shape
+ *  every other substitution entry uses, `chosen: null` (it was NOT applied), with the model's
+ *  rejected proposal named in `basis` so an operator sees exactly what was refused and why, never
+ *  buried. `reason` is new (T13.4 PART C's closing instruction): the wanted thing still could not be
+ *  used, and now neither could the model's proposed fix. */
+function illegalSubstitutionRejection({ wanted, proposedChosen, candidates }) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  const candidateList = list.length > 0 ? list.map((candidate) => JSON.stringify(candidate)).join(', ') : 'none';
+  return {
+    kind: 'section_type',
+    wanted,
+    chosen: null,
+    reason: 'substitution_not_in_candidates',
+    basis:
+      `the model proposed ${JSON.stringify(proposedChosen)} for ${JSON.stringify(wanted)}, which is not ` +
+      `one of this engine's own candidates (${candidateList}) — never applied`,
+    fidelityCost: 'material',
+    substitutable: list.length > 0,
+    candidates: list,
+  };
+}
+
+/**
+ * T13.4 PART C: `fit_adjudicator` (an AI node this module never runs) reads this module's OWN
+ * `substitutions[]` ledger and CHOOSES — that is its whole job, per the vocabulary's `chosen` field.
+ * This function is the one place its choices are RE-VALIDATED before anything is applied, the same
+ * advisory/re-validate posture this module already takes toward every other AI-node output
+ * (CLONE-ENGINE-API.md's whole design). A `choices` entry of `kind: 'section_type'` is applied ONLY
+ * when BOTH hold, checked in this order:
+ *   1. `assertSameCompatibilityClass(wanted, chosen)` does not throw — the item-3 hard boundary,
+ *      enforced again here rather than trusted from the model's own `kind` label;
+ *   2. `chosen` is LITERALLY a member of the `candidates` THIS ENGINE computed for that `wanted` at
+ *      mint time (`mintReport.substitutions`) — never a value the model invented, however plausible
+ *      it looks. This is why the engine builds the candidate list in the first place.
+ * Anything failing either check is REJECTED — `substitution_not_in_candidates` — and never applied;
+ * the page section it would have touched keeps its original, uncoerced type. `declined` entries and
+ * choices of any other kind are untouched here; they carry no restamp-time apply step.
+ */
+function resolveSectionTypeSubstitutions(mintReport, adjudication) {
+  const applied = new Map(); // wanted -> chosen, validated
+  const rejected = [];
+  if (!isPlainObject(adjudication)) return { applied, rejected };
+
+  const candidatesByWanted = new Map(
+    (mintReport?.substitutions ?? [])
+      .filter((entry) => isPlainObject(entry) && entry.kind === 'section_type')
+      .map((entry) => [entry.wanted, Array.isArray(entry.candidates) ? entry.candidates : []])
+  );
+
+  for (const choice of adjudication.choices ?? []) {
+    if (!isPlainObject(choice) || choice.kind !== 'section_type') continue;
+    const { wanted, chosen } = choice;
+    const candidates = candidatesByWanted.get(wanted) ?? [];
+    let sameClass = true;
+    try {
+      assertSameCompatibilityClass(wanted, chosen);
+    } catch {
+      sameClass = false;
+    }
+    if (sameClass && candidates.includes(chosen)) {
+      applied.set(wanted, chosen);
+    } else {
+      rejected.push(illegalSubstitutionRejection({ wanted, proposedChosen: chosen, candidates }));
+    }
+  }
+  return { applied, rejected };
+}
+
 /**
  * Build the ops that restamp the site's already-emitted pages once mint has run (CLONE-ENGINE-API.md
  * §5). A page's final section list — already carrying whatever first-party asset paths emission bound
@@ -1239,8 +1717,18 @@ function assertNoRemoteAssetValues(value, path) {
  *     restamping the rest of the page while quietly leaving out the piece that depended on the failed
  *     recipe is exactly the "half-restamped" outcome the contract forbids, so the whole page is left
  *     untouched instead.
+ *
+ * `adjudication` (T13.4 PART C, OPTIONAL — every existing caller and test that omits it sees BYTE-
+ * IDENTICAL output to before this argument existed): `fit_adjudicator`'s `clone_fit_adjudication.v1`
+ * output, `{ choices: [{kind, wanted, chosen, basis, fidelityCost}], declined: [...] }`. Every
+ * `choices` entry of `kind: 'section_type'` is RE-VALIDATED (see `resolveSectionTypeSubstitutions`)
+ * before it is applied — a section whose captured type equals a validated choice's `wanted` is
+ * stamped with `chosen` instead of its original type; a choice that fails re-validation is rejected
+ * (`substitution_not_in_candidates`, returned in `substitutionRejections` for the report to surface)
+ * and the section it would have touched keeps its original, uncoerced type. This module never trusts
+ * the model's own claim of what is safe — it re-derives safety from its own candidate list every time.
  */
-export function buildRestampOps({ intake, mintReport, pageBodies }) {
+export function buildRestampOps({ intake, mintReport, pageBodies, adjudication }) {
   if (!isPlainObject(intake) || !Array.isArray(intake.pages)) {
     throw new CloneError('Restamp requires a clone intake carrying its briefed pages.');
   }
@@ -1253,6 +1741,10 @@ export function buildRestampOps({ intake, mintReport, pageBodies }) {
     })
   );
   const blockedCandidateIds = new Set((mintReport.rejected ?? []).flatMap((entry) => entry.sourceCandidateIds ?? []));
+  const { applied: sectionTypeChoices, rejected: substitutionRejections } = resolveSectionTypeSubstitutions(
+    mintReport,
+    adjudication
+  );
 
   const restamp = [];
   const skipped = [];
@@ -1272,12 +1764,25 @@ export function buildRestampOps({ intake, mintReport, pageBodies }) {
       continue;
     }
 
-    const ops = sections.map((section, index) => ({ op: 'upsert_section', section: clone(section), position: index }));
+    const ops = sections.map((section, index) => {
+      const stamped = clone(section);
+      // The ONLY effect a validated adjudication has on restamp: a captured section's TYPE, and
+      // nothing else about it, is swapped for the engine-validated `chosen` when its original type
+      // was the `wanted` of a substitution this run's own ledger recorded.
+      if (sectionTypeChoices.has(stamped.type)) stamped.type = sectionTypeChoices.get(stamped.type);
+      return { op: 'upsert_section', section: stamped, position: index };
+    });
     ops.forEach((op) => assertNoRemoteAssetValues(op.section, `${page.objectId}.sections.${op.position}`));
     restamp.push({ objectId: page.objectId, ops });
   }
 
-  return { restamp, skipped };
+  // Ground truth for buildCloneRunReport: exactly which (wanted -> chosen) swaps this run VALIDATED
+  // (not merely what the model proposed — see resolveSectionTypeSubstitutions), and every choice that
+  // failed re-validation. Reported regardless of whether the wanted type actually turned up on a
+  // restamped page — the ledger is about what the RUN resolved, not only what got physically applied.
+  const appliedSubstitutions = [...sectionTypeChoices.entries()].map(([wanted, chosen]) => ({ wanted, chosen }));
+
+  return { restamp, skipped, appliedSubstitutions, substitutionRejections };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1301,8 +1806,16 @@ function groupUnmetNeedsBySectionType(unmetNeeds) {
  * SUMMARIZE prior stages' already-computed outcomes — it creates, changes, and publishes nothing;
  * `humanGate.publishedByThisRun` is unconditionally `false` because nothing upstream of this file can
  * publish (`FORBIDDEN_VERBS` refuses `object_publish` before a create is even attempted).
+ *
+ * `adjudication` (T13.4 PART C, OPTIONAL — omitted, the ledger is exactly what mint/theme produced,
+ * byte-identical to before this argument existed): `fit_adjudicator`'s `clone_fit_adjudication.v1`
+ * output. This function never RE-validates a `choices` entry itself — `buildRestampOps` already did
+ * that, and its result (`restampReport.appliedSubstitutions` / `.substitutionRejections`) is the
+ * ground truth of what this run actually resolved, summarized here rather than re-derived. For kinds
+ * this module never applies (font/recipe/page_type — no engine code writes any of those yet), the
+ * adjudicator's own `chosen`/`basis`/`fidelityCost` are relayed as reported, informationally.
  */
-export function buildCloneRunReport({ intake, mintReport, themeReport, restampReport, design }) {
+export function buildCloneRunReport({ intake, mintReport, themeReport, restampReport, design, adjudication }) {
   if (!isPlainObject(intake)) throw new CloneError('A clone run report requires the intake it was built from.');
   if (!isPlainObject(mintReport)) throw new CloneError('A clone run report requires an executed mint report.');
   if (!isPlainObject(themeReport)) throw new CloneError('A clone run report requires a theme bind report.');
@@ -1328,11 +1841,78 @@ export function buildCloneRunReport({ intake, mintReport, themeReport, restampRe
     })),
   ];
 
+  // PART B item 4: every compromise the run made, in one place, with its fidelity cost — never buried
+  // in `mint.rejected`/`theme.dropped` where a human reviewer would have to go hunting for it. Sourced
+  // from the two stages that can produce one (mint's section_type/page_type/recipe substitutions,
+  // theme's font substitutions); restamp itself is purely mechanical and never substitutes anything —
+  // it only APPLIES a section_type substitution mint already recorded.
+  const baseSubstitutions = [...(mintReport.substitutions ?? []), ...(themeReport.substitutions ?? [])];
+
+  // PART C: fold the adjudicator's resolution into that same ledger, so a human sees ONE list of
+  // every compromise, each with what stood in for it (or what was given up). `chosen` for a
+  // `section_type` entry comes from `restampReport.appliedSubstitutions` — what this run actually
+  // validated and applied, never from trusting `adjudication` directly a second time. Every other
+  // kind (font/recipe/page_type) has no apply step in this module yet, so its `chosen` is the
+  // adjudicator's own value, relayed informationally.
+  const appliedChosenByWanted = new Map(
+    (restampReport.appliedSubstitutions ?? []).map((entry) => [entry.wanted, entry.chosen])
+  );
+  const choiceByKey = new Map(
+    (isPlainObject(adjudication) && Array.isArray(adjudication.choices) ? adjudication.choices : [])
+      .filter(isPlainObject)
+      .map((choice) => [`${choice.kind}:${choice.wanted}`, choice])
+  );
+  const declinedByKey = new Map(
+    (isPlainObject(adjudication) && Array.isArray(adjudication.declined) ? adjudication.declined : [])
+      .filter(isPlainObject)
+      .map((decline) => [`${decline.kind}:${decline.wanted}`, decline])
+  );
+
+  const adjudicatedSubstitutions = baseSubstitutions.map((entry) => {
+    const key = `${entry.kind}:${entry.wanted}`;
+    if (entry.kind === 'section_type' && appliedChosenByWanted.has(entry.wanted)) {
+      const choice = choiceByKey.get(key);
+      return {
+        ...entry,
+        chosen: appliedChosenByWanted.get(entry.wanted),
+        basis: choice?.basis ?? entry.basis,
+        fidelityCost: choice?.fidelityCost ?? entry.fidelityCost,
+      };
+    }
+    if (entry.kind !== 'section_type') {
+      const choice = choiceByKey.get(key);
+      if (choice) {
+        return {
+          ...entry,
+          chosen: typeof choice.chosen === 'string' && choice.chosen ? choice.chosen : entry.chosen,
+          basis: choice.basis ?? entry.basis,
+          fidelityCost: choice.fidelityCost ?? entry.fidelityCost,
+        };
+      }
+    }
+    const declined = declinedByKey.get(key);
+    if (declined) {
+      return {
+        ...entry,
+        chosen: null,
+        basis: declined.basis ?? entry.basis,
+        fidelityCost: declined.fidelityCost ?? entry.fidelityCost,
+      };
+    }
+    return entry;
+  });
+
+  // A model proposing an illegal swap is something the operator should see, not something to bury —
+  // surfaced as its own entries (`reason: 'substitution_not_in_candidates'`), alongside, never instead
+  // of, the original "this didn't fit" entry above.
+  const substitutions = clone([...adjudicatedSubstitutions, ...(restampReport.substitutionRejections ?? [])]);
+
   return {
     schemaVersion: 'clone-run-report.v1',
     mint: clone(mintReport),
     theme: clone(themeReport),
     restamp: clone(restampReport),
+    substitutions,
     capabilityBacklog: groupUnmetNeedsBySectionType(design?.unmetNeeds),
     reviewQueue,
     humanGate: {
