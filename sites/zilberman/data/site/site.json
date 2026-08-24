@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-14T07:56:39.249Z",
+    "at": "2026-08-24T15:30:08.533Z",
     "from": "objects/site/by-id/site_zilberman.json",
-    "record_version": 8
+    "record_version": 19
   },
   "blog": {
     "categoryBase": "category",
@@ -12,21 +12,34 @@
   },
   "brandTokens": {
     "colors": {
-      "accent": "rgb(0 150 136)",
-      "bg-page": "rgb(255 255 255)",
-      "bg-page-dark": "rgb(10 12 20)",
-      "bg-surface": "rgb(245 246 248)",
-      "gold": "rgb(191 155 48)",
-      "primary": "rgb(51 102 204)",
-      "secondary": "rgb(38 77 153)",
-      "text-default": "rgb(38 43 48)",
-      "text-heading": "rgb(20 24 28)",
-      "text-muted": "rgb(60 67 75 / 76%)"
+      "accent": "rgb(94 140 138)",
+      "bg-page": "rgb(252 251 248)",
+      "bg-page-dark": "rgb(3 6 32)",
+      "bg-surface": "rgb(247 245 240)",
+      "gold": "rgb(194 168 120)",
+      "primary": "rgb(46 111 149)",
+      "secondary": "rgb(37 90 120)",
+      "text-default": "rgb(0 0 0)",
+      "text-heading": "rgb(22 26 29)",
+      "text-muted": "rgb(58 65 73 / 76%)"
     },
     "fonts": {
-      "heading": "Georgia, serif",
-      "sans": "system-ui, sans-serif",
-      "serif": "Georgia, serif"
+      "heading": "Georgia, 'Times New Roman', serif",
+      "sans": "Arial, Helvetica, sans-serif",
+      "serif": "Georgia, 'Times New Roman', serif"
+    },
+    "layout": {
+      "containerWidth": "wide",
+      "sectionRhythm": "compact"
+    },
+    "shape": {
+      "buttonShape": "rect",
+      "radius": "sharp",
+      "shadow": "soft"
+    },
+    "type": {
+      "headingWeight": "regular",
+      "scale": "compact"
     }
   },
   "chrome": {
