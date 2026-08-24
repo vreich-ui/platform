@@ -6,8 +6,10 @@ import {
   clearPersistedRunApprovalMode,
   isRunSafeApproval,
   readPersistedRunApprovalMode,
+  readPersistedTestMode,
   shouldAutoApproveRunTool,
   writePersistedRunApprovalMode,
+  writePersistedTestMode,
 } from './approval-mode.js';
 
 /** Minimal in-memory Storage stand-in — Node has no global sessionStorage. Same pattern as library-client.test.ts. */
@@ -198,5 +200,42 @@ describe('run-approval-mode persistence', () => {
     assert.equal(readPersistedRunApprovalMode('chat-1'), 'ask');
     assert.equal(readPersistedRunApprovalMode('chat-2'), 'ask');
     assert.equal(readPersistedRunApprovalMode(undefined), 'ask');
+  });
+});
+
+describe('test mode persistence (Wolf, 2026-08-24)', () => {
+  it('defaults to off, round-trips per scope, and never bleeds between chats', () => {
+    assert.equal(readPersistedTestMode('chat_a'), false);
+    writePersistedTestMode('chat_a', true);
+    assert.equal(readPersistedTestMode('chat_a'), true);
+    // Orthogonal to the approval mode — turning one on says nothing about the other.
+    assert.equal(readPersistedRunApprovalMode('chat_a'), 'ask');
+    assert.equal(readPersistedTestMode('chat_b'), false, 'another chat is not in test mode');
+    writePersistedTestMode('chat_a', false);
+    assert.equal(readPersistedTestMode('chat_a'), false);
+  });
+
+  it('is dropped by the logout sweep — a shared machine never inherits it', () => {
+    writePersistedTestMode('chat_a', true);
+    writePersistedRunApprovalMode('chat_a', 'safe-run');
+    clearAllPersistedRunApprovalModes();
+    assert.equal(readPersistedTestMode('chat_a'), false);
+    assert.equal(readPersistedRunApprovalMode('chat_a'), 'ask');
+  });
+
+  it('never throws when storage is unavailable', () => {
+    const saved = (globalThis as { sessionStorage?: unknown }).sessionStorage;
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new Error('disabled');
+      },
+    });
+    try {
+      assert.equal(readPersistedTestMode('chat_a'), false);
+      assert.doesNotThrow(() => writePersistedTestMode('chat_a', true));
+    } finally {
+      Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, writable: true, value: saved });
+    }
   });
 });

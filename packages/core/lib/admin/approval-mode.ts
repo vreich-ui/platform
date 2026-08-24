@@ -72,6 +72,46 @@ export function writePersistedRunApprovalMode(scope: string | undefined, mode: R
   }
 }
 
+/**
+ * TEST MODE (Wolf, 2026-08-24) — the operator's "I am exercising mechanics, not
+ * producing editorial copy" switch, persisted exactly like the approval mode
+ * above and scoped per chat.
+ *
+ * DELIBERATELY NOT a third `RunApprovalMode`. Those two are a mutually
+ * exclusive pair — a run is either asking or continuing — whereas test mode is
+ * ORTHOGONAL: you still want ask-vs-continue while testing. Folding it into
+ * that union would have forced a false choice between them.
+ *
+ * This flag is a REQUEST, never a grant. It is sent with the turn and the
+ * server independently re-derives the caller's roles before honouring it
+ * (`admin-agent-chat.ts`, the `send` case). A browser that sets this without
+ * the matching identity changes nothing — which is the whole reason the switch
+ * lives here and the authority does not.
+ */
+const TEST_MODE_KEY_PREFIX = 'run-test-mode:v1:';
+
+const testModeKeyForScope = (scope: string | undefined): string =>
+  `${TEST_MODE_KEY_PREFIX}${scope || DEFAULT_PREFERENCE_SCOPE}`;
+
+/** Reads the persisted test-mode flag for a scope. Never throws; defaults to `false`. */
+export function readPersistedTestMode(scope: string | undefined): boolean {
+  try {
+    return sessionStorage.getItem(testModeKeyForScope(scope)) === 'on';
+  } catch {
+    return false;
+  }
+}
+
+/** Persists the test-mode flag for a scope. Never throws — a write failure just means the choice isn't sticky. */
+export function writePersistedTestMode(scope: string | undefined, on: boolean): void {
+  try {
+    if (on) sessionStorage.setItem(testModeKeyForScope(scope), 'on');
+    else sessionStorage.removeItem(testModeKeyForScope(scope));
+  } catch {
+    // ignored — private browsing / disabled storage
+  }
+}
+
 /** Drops the persisted mode for one scope (used when a scope is torn down, e.g. a chat is deleted). */
 export function clearPersistedRunApprovalMode(scope: string | undefined): void {
   try {
@@ -92,7 +132,7 @@ export function clearAllPersistedRunApprovalModes(): void {
     const keys: string[] = [];
     for (let i = 0; i < sessionStorage.length; i += 1) {
       const key = sessionStorage.key(i);
-      if (key?.startsWith(STORAGE_KEY_PREFIX)) keys.push(key);
+      if (key?.startsWith(STORAGE_KEY_PREFIX) || key?.startsWith(TEST_MODE_KEY_PREFIX)) keys.push(key);
     }
     keys.forEach((key) => sessionStorage.removeItem(key));
   } catch {

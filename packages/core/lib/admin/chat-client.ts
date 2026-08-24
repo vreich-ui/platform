@@ -136,12 +136,20 @@ export const getChat = (getToken: GetToken, chatId: string, sinceSeq?: number, w
     ...(wantRequest ? { want_request: true } : {}),
   });
 
-export const sendChatMessage = (getToken: GetToken, chatId: string, text: string, focus?: string) =>
+export const sendChatMessage = (
+  getToken: GetToken,
+  chatId: string,
+  text: string,
+  focus?: string,
+  /** Owner-only test mode. A REQUEST: the server re-derives roles and ignores it for anyone else. */
+  testMode = false
+) =>
   post<{ chat_id: string; run_id: string }>(getToken, {
     action: 'send',
     chat_id: chatId,
     text,
     ...(focus ? { focus } : {}),
+    ...(testMode ? { test_mode: true } : {}),
   });
 
 export const chooseCandidate = (getToken: GetToken, chatId: string, callId: string, candidateId: string) =>

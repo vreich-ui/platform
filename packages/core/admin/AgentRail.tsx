@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { EmptyState } from './primitives';
 import { ChatComposer, ChatThread, type UseChatState } from './chat';
 import { RequestActivity } from './RequestActivity';
-import { RunApprovalControls, useRunApprovalMode } from './RunApprovalControls';
+import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 
 export function AgentRail({
   chat,
@@ -15,6 +15,7 @@ export function AgentRail({
   contextActions,
   draftSeed,
   approvalInStage = false,
+  canUseTestMode = false,
 }: {
   chat: UseChatState;
   focus: string;
@@ -25,8 +26,15 @@ export function AgentRail({
   contextActions?: Array<{ id: string; label: string; text: string }>;
   draftSeed?: { key: string; text: string };
   approvalInStage?: boolean;
+  /**
+   * Owner-only test mode. The rail does not resolve roles itself — the surface
+   * that already holds them passes this in. Default false, so every existing
+   * caller renders exactly as it did before test mode existed.
+   */
+  canUseTestMode?: boolean;
 }) {
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope, approvalInStage });
+  const [testMode, setTestMode] = useTestMode({ preferenceScope, allowed: canUseTestMode });
   // Highlight-to-reference: a quoted selection from the transcript, relayed into the composer.
   const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
 
@@ -63,7 +71,7 @@ export function AgentRail({
         onChooseCandidate={(candidateId) => void chat.chooseCandidate(candidateId)}
         onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
         onQuote={(text) => setQuote({ token: Date.now(), text })}
-        onSendControls={(text) => void chat.send(text)}
+        onSendControls={(text) => void chat.send(text, undefined, testMode)}
         preferenceScope={preferenceScope}
         approvalInStage={approvalInStage}
         pendingConsumed={chat.pendingConsumed}
@@ -79,12 +87,18 @@ export function AgentRail({
       ) : null}
       <div className="shrink-0 border-t border-[var(--adm-border)] pt-3">
         <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
-          <RunApprovalControls mode={approvalMode} onChange={setApprovalMode} />
+          <RunApprovalControls
+            mode={approvalMode}
+            onChange={setApprovalMode}
+            testMode={testMode}
+            onTestModeChange={setTestMode}
+            canUseTestMode={canUseTestMode}
+          />
         </div>
         <ChatComposer
           status={chat.status}
           busy={chat.busy}
-          onSend={(text) => void chat.send(text, agentFocus ?? focus)}
+          onSend={(text) => void chat.send(text, agentFocus ?? focus, testMode)}
           onCancel={() => void chat.cancel()}
           suggestions={suggestions}
           contextActions={contextActions}
