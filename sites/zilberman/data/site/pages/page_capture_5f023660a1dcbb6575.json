@@ -1,0 +1,20 @@
+{
+  "__generated": {
+    "at": "2026-08-25T12:34:58.572Z",
+    "from": "objects/page/by-id/page_capture_5f023660a1dcbb6575.json",
+    "record_version": 30
+  },
+  "pageType": "clone",
+  "route": "/book-online",
+  "sections": [
+    {
+      "data": {
+        "body": "<p>Nothing to book right now. Check back soon.</p>"
+      },
+      "id": "s_3ca2c570f6",
+      "type": "prose"
+    }
+  ],
+  "seo": {},
+  "title": "Онлайн-запись | Zilberman Foundation"
+}
