@@ -355,6 +355,96 @@ test('an operational tool answers with a clear error when no operational bridge 
   assert.match(result.content, /operational tool bridge is not configured/);
 });
 
+// ─── T7 (2026-08-25): object_review_decide on a still-running workspace run ────
+
+test('object_review_decide on a missing object routes to the run gate instead of surfacing the raw 404, when a workflow-backed request with that same id exists and has not produced an object yet', async () => {
+  const tool = generatedChatToolByName('object_review_decide')!;
+  const ctx = stubCtx({
+    verb: async () => ({ status: 404, body: { error: 'Object record not found', not_found: true } }),
+    requests: {
+      register: async () => {},
+      get: async (requestId) => {
+        assert.equal(requestId, 'req_agent_retinol_basics_20260825_01');
+        return {
+          request_id: requestId,
+          kind: 'article',
+          status: 'running',
+          workflow: { run_id: 'run_abc123', workflow_id: 'publishing_conductor', project_id: 'platform' },
+          // no `object` yet — the workflow has not produced the content_item.
+        };
+      },
+    },
+  });
+  const result = await tool.execute(ctx, {
+    object_type: 'content_item',
+    object_id: 'req_agent_retinol_basics_20260825_01',
+    decision: 'approve',
+  });
+  assert.equal(result.is_error, true);
+  assert.doesNotMatch(result.content, /Object record not found/);
+  const body = JSON.parse(result.content) as { error: string; code: string; run_id: string; request_id: string };
+  assert.equal(body.code, 'still_in_workspace_run');
+  assert.equal(body.run_id, 'run_abc123');
+  assert.match(body.error, /check_workspace_run_readiness/);
+  assert.match(body.error, /publish_workspace_run/);
+});
+
+test('object_review_decide on a missing object with NO matching request surfaces the raw verb 404 unchanged (no misrouting a real deletion)', async () => {
+  const tool = generatedChatToolByName('object_review_decide')!;
+  const ctx = stubCtx({
+    verb: async () => ({ status: 404, body: { error: 'Object record not found', not_found: true } }),
+    requests: { register: async () => {}, get: async () => undefined },
+  });
+  const result = await tool.execute(ctx, {
+    object_type: 'content_item',
+    object_id: 'content_item_orphaned',
+    decision: 'approve',
+  });
+  assert.equal(result.is_error, true);
+  assert.match(result.content, /Object record not found/);
+});
+
+test('object_review_decide does not misroute a request whose object has ALREADY been produced (a real 404 means something else)', async () => {
+  const tool = generatedChatToolByName('object_review_decide')!;
+  const ctx = stubCtx({
+    verb: async () => ({ status: 404, body: { error: 'Object record not found', not_found: true } }),
+    requests: {
+      register: async () => {},
+      get: async () => ({
+        request_id: 'req_agent_retinol_basics_20260825_01',
+        workflow: { run_id: 'run_abc123', workflow_id: 'publishing_conductor', project_id: 'platform' },
+        object: { object_type: 'content_item', object_id: 'req_agent_retinol_basics_20260825_01' },
+      }),
+    },
+  });
+  const result = await tool.execute(ctx, {
+    object_type: 'content_item',
+    object_id: 'req_agent_retinol_basics_20260825_01',
+    decision: 'approve',
+  });
+  assert.match(result.content, /Object record not found/);
+});
+
+test('object_review_decide on a real 200 result is unaffected by the routing guard', async () => {
+  const tool = generatedChatToolByName('object_review_decide')!;
+  const calls: Record<string, unknown>[] = [];
+  const ctx = stubCtx({
+    verb: async (request) => {
+      calls.push(request);
+      return { status: 200, body: { review_state: 'approved' } };
+    },
+    requests: { register: async () => {}, get: async () => undefined },
+  });
+  const result = await tool.execute(ctx, {
+    object_type: 'content_item',
+    object_id: 'content_item_x',
+    decision: 'approve',
+  });
+  assert.equal(result.is_error, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.action, 'review_decide');
+});
+
 // ─── json-schema-lite ─────────────────────────────────────────────────────────
 
 test('compileSchema throws at compile time on an unsupported keyword', () => {

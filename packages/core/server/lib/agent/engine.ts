@@ -141,9 +141,34 @@ export type CmsAgentEngineOptions = {
   siteId: string;
 };
 
-/** Mirrors the plan §5.1 example; CA6 owns the full governance prompt. ≤1000 chars (contract bound). */
+/**
+ * Mirrors the plan §5.1 example; CA6 owns the full governance prompt. ≤1000
+ * chars (contract bound, `checkConverseBounds`'s `context.approval_note` row
+ * in cms-agent-client.ts).
+ *
+ * T8 (2026-08-25) — the DEFECT this note exists to close: an editor said
+ * "publish it" / "approved, ship it" about a workspace run, and Client
+ * Manager answered as though the approval had already gone through — no
+ * `publish_workspace_run` call, so no approval card ever rendered, and
+ * nothing actually happened. Client Manager owns its own prompt (engine.ts's
+ * header comment, CA6) so Platform cannot edit that prompt directly; this
+ * `approval_note` is the one per-turn channel Platform DOES control on every
+ * `client_manager.turn.v1` request (`conversationContext` below), so the two
+ * added sentences ride here rather than needing a CMS-Agent-side change.
+ * `publish_workspace_run` already carries `autonomyFloor: 'ask'` (tools.ts) —
+ * PROPOSING that call is what turns into the approval card the editor clicks,
+ * so telling the model to propose it is telling it to render the button.
+ * Second sentence closes a related failure: a `no_go` readiness got
+ * paraphrased into a vague "a few things need fixing" instead of the actual
+ * checklist entries, leaving the editor unable to act on it.
+ */
 const APPROVAL_NOTE =
-  'Some tools require human approval; propose one coherent change at a time, and never re-submit a call a human declined.';
+  'Some tools require human approval; propose one coherent change at a time, and never re-submit a call a human ' +
+  'declined. Never say an approval, publish, or other privileged action is "registered", "recorded", or "done" ' +
+  'unless you propose the matching privileged tool call in the SAME turn — proposing the call is what renders the ' +
+  'approval card; nothing happens without it. When an editor approves, confirms, or asks to publish, ship, or take ' +
+  'live a workspace run, propose publish_workspace_run — never claim it happened without proposing it. When ' +
+  'check_workspace_run_readiness reports no_go, show its checklist and blockers to the editor VERBATIM, not paraphrased.';
 
 const conversationContext = (doc: ChatDoc, run: ChatRun, siteId: string): CmsAgentContext => ({
   site_id: siteId,

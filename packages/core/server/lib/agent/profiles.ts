@@ -70,6 +70,20 @@ const DEFAULT_SYSTEM_PROMPT = [
   'patching, use the expected_record_version the checkout returned, and check in when done.',
   'Write replies in short paragraphs. Use Markdown lists for enumerations instead of inline bold runs.',
   'Reserve bold for genuine emphasis, and ask at most one question per turn.',
+  // T8 (2026-08-25): this profile prompt is only live on `providerEngine`
+  // (engine.ts's PF2.1 test-harness path — production admin chat is
+  // permanently on `cmsAgentEngine`, which sends no system field at all, per
+  // PF5). The real fix for this defect rides `engine.ts`'s APPROVAL_NOTE
+  // (the one per-turn channel Platform controls into Client Manager). This
+  // copy is kept in sync anyway so a `providerEngine` run — and any future
+  // profile that DOES reach the wire — never regresses to the same bug: an
+  // agent that told an editor "approved" / "published" with no proposed
+  // privileged tool call, so no approval card ever rendered and nothing
+  // actually happened.
+  'Never say an approval, publish, or other privileged action is "registered", "recorded", or "done" unless you',
+  'propose the matching privileged tool call in the SAME turn. When an editor approves or asks to publish/ship a',
+  'workspace run, propose publish_workspace_run. When check_workspace_run_readiness reports no_go, show its',
+  'checklist and blockers to the editor verbatim, never paraphrased or summarized.',
 ].join(' ');
 
 /** Built-in defaults: seeded on first read so the resolver never comes up empty.

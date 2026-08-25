@@ -13,7 +13,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { ChatDoc, ChatMsg, ChatRun } from './chat-store.js';
-import type { CmsAgentConverseRequest, CmsAgentConverseResponse, CmsAgentResult } from './cms-agent-client.js';
+import {
+  checkConverseBounds,
+  type CmsAgentConverseRequest,
+  type CmsAgentConverseResponse,
+  type CmsAgentResult,
+} from './cms-agent-client.js';
 import {
   buildChatEngine,
   cmsAgentEngine,
@@ -149,6 +154,19 @@ test('cmsAgentEngine builds the strict request: {kind,id} actor (no email), expl
   assert.equal(request.project_id, 'platform');
   assert.equal(request.conversation_id, 'obj:page_home');
   assert.equal(request.turn_id, 't_run_pf2_1');
+});
+
+// ─── T8 (2026-08-25): approval_note carries the anti-hollow-approval rule ──
+
+test("every turn's approval_note tells Client Manager to propose the privileged call, not just claim it, and to relay a no_go readiness verbatim", async () => {
+  const { engine, converseCalls } = engineWith([okTurn()]);
+  await engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS });
+  const note = converseCalls[0]!.context.approval_note!;
+  assert.match(note, /never (say|claim)[^.]*"registered"/i);
+  assert.match(note, /publish_workspace_run/);
+  assert.match(note, /VERBATIM|verbatim/);
+  assert.ok(note.length <= 1000, `approval_note must stay within the 1000-char contract bound, got ${note.length}`);
+  assert.ok(checkConverseBounds(converseCalls[0]!) === undefined, 'the note must pass the pre-flight bound check');
 });
 
 test('a free chat sends neither object_type nor object_id; diagnostics_requested rides only when set', async () => {
