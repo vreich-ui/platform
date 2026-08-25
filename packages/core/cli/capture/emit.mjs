@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   bindSectionAssets,
+  canonicalizeAssetUrl,
   FIRST_PARTY_ASSET_PATH_RE,
   MAJOR_KEY_ARTIFACT_REF_RE,
 } from './map.mjs';
@@ -409,22 +410,126 @@ export function createMcpTransport({ endpoint, fetchImpl = fetch, token } = {}) 
   };
 }
 
-/** Bounded HTTPS probe for artifact metadata the target MCP requires. */
+const beUint32 = (bytes, at) => (bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3];
+const beUint16 = (bytes, at) => (bytes[at] << 8) | bytes[at + 1];
+const leUint16 = (bytes, at) => bytes[at] | (bytes[at + 1] << 8);
+const ascii = (bytes, at, length) => String.fromCharCode(...bytes.slice(at, at + length));
+
+/**
+ * An image's own pixel dimensions, read from its bytes. Returns `{width, height}` or null.
+ *
+ * T14.2: this is how "the canonical URL really is bigger" stops being an assumption. Bytes are the
+ * only witness that settles it — a URL, a content-type and a byte count can all be larger while the
+ * picture is not. Formats it cannot read return null, which the caller treats as UNVERIFIED and
+ * therefore as a fallback, never as a pass.
+ */
+export function imageDimensions(bytes) {
+  if (!bytes || bytes.byteLength < 16) return null;
+  // PNG: IHDR is always the first chunk, at a fixed offset.
+  if (ascii(bytes, 1, 3) === 'PNG') return { width: beUint32(bytes, 16), height: beUint32(bytes, 20) };
+  // GIF: logical screen descriptor, little-endian.
+  if (ascii(bytes, 0, 3) === 'GIF') return { width: leUint16(bytes, 6), height: leUint16(bytes, 8) };
+  if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WEBP') {
+    const chunk = ascii(bytes, 12, 4);
+    // VP8X carries 24-bit little-endian minus-one canvas dimensions; VP8 (lossy) a 14-bit pair.
+    if (chunk === 'VP8X')
+      return {
+        width: 1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)),
+        height: 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)),
+      };
+    if (chunk === 'VP8 ') return { width: leUint16(bytes, 26) & 0x3fff, height: leUint16(bytes, 28) & 0x3fff };
+  }
+  // JPEG: walk the marker segments to the frame header, which is the only place the size lives.
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    for (let at = 2; at + 9 < bytes.byteLength; ) {
+      if (bytes[at] !== 0xff) {
+        at += 1;
+        continue;
+      }
+      const marker = bytes[at + 1];
+      const isFrameHeader = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
+      if (isFrameHeader) return { width: beUint16(bytes, at + 7), height: beUint16(bytes, at + 5) };
+      if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd9)) {
+        at += 2;
+        continue;
+      }
+      at += 2 + beUint16(bytes, at + 2);
+    }
+    return null;
+  }
+  // AVIF/HEIF (an `enc_avif` transform's own format): the `ispe` property box states the size.
+  // Scanned rather than walked — the box tree is deep and this only has to find one 12-byte record.
+  if (ascii(bytes, 4, 4) === 'ftyp') {
+    for (let at = 8; at + 16 < Math.min(bytes.byteLength, 65_536); at += 1) {
+      if (ascii(bytes, at, 4) === 'ispe') return { width: beUint32(bytes, at + 8), height: beUint32(bytes, at + 12) };
+    }
+  }
+  return null;
+}
+
+/** A fetched candidate: its final URL, media type, bytes and (where readable) its own pixels. */
+async function fetchAssetBytes(url, { fetchImpl, maxBytes }) {
+  const source = new URL(url);
+  if (source.protocol !== 'https:') throw new EmissionError('Artifact source must be HTTPS.');
+  const response = await fetchImpl(url, { redirect: 'follow' });
+  if (!response.ok) throw new EmissionError(`Asset probe HTTP ${response.status}.`);
+  const finalUrl = new URL(response.url || url);
+  // The capture manifest already authorizes this asset host. A redirect may
+  // not silently switch origin while calculating the trusted hash/size.
+  if (finalUrl.hostname !== source.hostname) throw new EmissionError('Asset probe redirected outside the source asset host.');
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > maxBytes) throw new EmissionError('Asset exceeds the bounded probe limit.');
+  const contentType = response.headers.get('content-type')?.split(';')[0].toLowerCase() ?? '';
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return {
+    sourceUrl: finalUrl.href,
+    contentType,
+    expectedSizeBytes: bytes.byteLength,
+    expectedSha256: Buffer.from(digest).toString('hex'),
+    intrinsic: imageDimensions(bytes),
+  };
+}
+
+/**
+ * Bounded HTTPS probe for artifact metadata the target MCP requires — and (T14.2) the VERIFYING
+ * caller of `canonicalizeAssetUrl`.
+ *
+ * FAULT 1 was that a thumbnail was materialised as if it were the original: every URL on the
+ * source page baked `w_146,h_194` into its path and the engine downloaded exactly that. The
+ * mapper's canonicalizer proposes the untransformed original; nothing about that proposal is
+ * trusted here. The upgrade is taken ONLY when the fetched canonical bytes are an image whose own
+ * decoded pixels are strictly wider AND taller than the derivative's. Every other outcome — a 404,
+ * a redirect to a placeholder, an HTML error page served with 200, a format whose dimensions this
+ * cannot read, an oversized body, a network failure, or bytes that are simply not bigger — falls
+ * back to the captured transform URL and materialises that. The fallback is the ordinary path, not
+ * an error path: correctness never depends on a CDN behaving the way we expect.
+ *
+ * The canonical is fetched FIRST because the derivative's dimensions are already known from its own
+ * URL transform, so the common case costs one request, not two.
+ */
 export function createAssetProbe({ fetchImpl = fetch, maxBytes = 5_000_000 } = {}) {
   return async (sourceUrl) => {
-    const source = new URL(sourceUrl);
-    if (source.protocol !== 'https:') throw new EmissionError('Artifact source must be HTTPS.');
-    const response = await fetchImpl(sourceUrl, { redirect: 'follow' });
-    if (!response.ok) throw new EmissionError(`Asset probe HTTP ${response.status}.`);
-    const finalUrl = new URL(response.url || sourceUrl);
-    // The capture manifest already authorizes this asset host. A redirect may
-    // not silently switch origin while calculating the trusted hash/size.
-    if (finalUrl.hostname !== source.hostname) throw new EmissionError('Asset probe redirected outside the source asset host.');
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw new EmissionError('Asset exceeds the bounded probe limit.');
-    const contentType = response.headers.get('content-type')?.split(';')[0].toLowerCase() ?? '';
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return { sourceUrl: finalUrl.href, contentType, expectedSizeBytes: bytes.byteLength, expectedSha256: Buffer.from(digest).toString('hex') };
+    const { canonical, transform } = canonicalizeAssetUrl(sourceUrl);
+    const upgradeProposed = transform !== null && canonical !== sourceUrl;
+    if (upgradeProposed) {
+      try {
+        const upgrade = await fetchAssetBytes(canonical, { fetchImpl, maxBytes });
+        // The derivative's size comes from its own transform when the CDN stated it there;
+        // otherwise there is nothing to compare against and the proposal cannot be verified.
+        const before = transform.width && transform.height ? transform : null;
+        const bigger =
+          upgrade.contentType.startsWith('image/') &&
+          before &&
+          upgrade.intrinsic &&
+          upgrade.intrinsic.width > before.width &&
+          upgrade.intrinsic.height > before.height;
+        if (bigger) return { ...upgrade, upgradedFrom: sourceUrl, supersededTransform: transform };
+      } catch {
+        // Fall through to the captured URL. A canonical that 404s, redirects away, or exceeds the
+        // bounded body limit tells us only that the proposal did not pay off.
+      }
+    }
+    return fetchAssetBytes(sourceUrl, { fetchImpl, maxBytes });
   };
 }
 
@@ -1033,6 +1138,8 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
   }
   const probe = assetProbe ?? createAssetProbe();
   const seen = new Set();
+  /** T14.2: assets whose captured URL was a thumbnail and whose verified original shipped instead. */
+  const fidelityUpgrades = [];
   let lastAssetStartedAt = 0;
   const assetDelayMs = Number.isInteger(capturePolicy.delayMs) && capturePolicy.delayMs >= 0 ? capturePolicy.delayMs : 0;
   for (const asset of plan.media) {
@@ -1053,6 +1160,18 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
       // failures that invalidate the PLAN itself, not one row of it.
       try {
         resolved = { ...asset, ...(await probe(asset.sourceUrl)) };
+        // T14.2: the probe may have materialised a DIFFERENT URL than the plan named — the
+        // untransformed original, verified larger than the captured thumbnail. That substitution
+        // is a fact about what shipped, so it is recorded rather than inferred from the URL later.
+        if (resolved.upgradedFrom) {
+          fidelityUpgrades.push({
+            asset: asset.manifestRef,
+            from: resolved.upgradedFrom,
+            to: resolved.sourceUrl,
+            fromIntrinsic: resolved.supersededTransform,
+            toIntrinsic: resolved.intrinsic,
+          });
+        }
       } catch (error) {
         report.quarantines.push({
           asset: asset.manifestRef,
@@ -1117,6 +1236,7 @@ async function materializeMedia({ plan, transport, capturePolicy, assetProbe, re
     mediaRetention: 'retain_referenced_allowed_origin_media',
     materialized: artifactRefs.size,
     declined: seen.size - artifactRefs.size,
+    ...(fidelityUpgrades.length > 0 ? { fidelityUpgrades } : {}),
   };
   return artifactRefs;
 }

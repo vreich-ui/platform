@@ -27,6 +27,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright-core';
 
+import { GALLERY_MAX_ITEMS, GALLERY_MAX_TEXT_LENGTH, GALLERY_MIN_ITEMS, groupGalleryItems } from './gallery-items.mjs';
+
 /**
  * The capture viewports. Source and preview MUST be screenshotted at exactly
  * these sizes or a per-block diff is comparing two different layouts and the
@@ -143,8 +145,14 @@ export async function gotoSettled(page, url) {
   return status;
 }
 
+// T14.2 FAULT 3 — the repeated-figure rule lives in `./gallery-items.mjs`, which imports NOTHING,
+// so its judgement is testable in a tree with no node_modules (this file's first import is
+// playwright). The DOM-walking shell stays here; every decision about what the walk finds is made
+// there. Re-exported so `browser.mjs` remains the one name a caller needs to know for capture.
+export { GALLERY_MAX_ITEMS, GALLERY_MAX_TEXT_LENGTH, GALLERY_MIN_ITEMS, groupGalleryItems };
+
 export async function extractPageModel(page) {
-  return page.evaluate(() => {
+  const model = await page.evaluate(() => {
     const clean = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
     const absolute = (value) => {
       if (!value) return null;
@@ -245,7 +253,32 @@ export async function extractPageModel(page) {
     const S_MAX_ITEMS = 24;
     const S_MAX_GROUPS = 6;
     const S_MAX_LEN = 400;
+    /** Transport bound on the raw descriptors, above the item cap so the true count stays visible. */
+    const S_MAX_GALLERY_NODES = 120;
     const sClip = (value) => clean(value).slice(0, S_MAX_LEN);
+
+    /**
+     * T14.2 FAULT 1/2 — an image's own pixel dimensions, where the DOM exposes them.
+     *
+     * `naturalWidth`/`naturalHeight` are the dimensions of the bytes the browser ACTUALLY decoded
+     * (i.e. of `currentSrc`), which on a transform-in-path CDN is the thumbnail, not the original
+     * — that is precisely the fact the mapper needs to notice a 146px asset heading for a 1440px
+     * slot. `width`/`height` attributes are the author's declaration and are used only when the
+     * image has not decoded. Absent both, null: an unknown intrinsic is reported as unknown rather
+     * than assumed adequate, and no dimension is ever inferred from the layout box (that measures
+     * the SLOT, which would make every stretched image look correct by construction).
+     */
+    const intrinsicOf = (image) => {
+      const naturalWidth = Number(image.naturalWidth) || 0;
+      const naturalHeight = Number(image.naturalHeight) || 0;
+      if (naturalWidth > 0 && naturalHeight > 0)
+        return { width: naturalWidth, height: naturalHeight, source: 'natural' };
+      const attributeWidth = Number.parseInt(image.getAttribute('width') ?? '', 10);
+      const attributeHeight = Number.parseInt(image.getAttribute('height') ?? '', 10);
+      if (attributeWidth > 0 && attributeHeight > 0)
+        return { width: attributeWidth, height: attributeHeight, source: 'attribute' };
+      return null;
+    };
     // Only the nearest enclosing block owns a node — otherwise a <section> wrapping an <article>
     // reports the same list twice and the mapper sees two candidates for one piece of content.
     const ownsNode = (element, node) => node.closest('section, article, [role="region"], main > *, body > header, body > nav, body > footer') === element;
@@ -318,6 +351,49 @@ export async function extractPageModel(page) {
       }
       if (qa.length) structure.qa = qa.slice(0, S_MAX_ITEMS);
 
+      // ── T14.2 FAULT 3: the gallery WALK ──────────────────────────────────────
+      //
+      // Deliberately thin. This finds each image's item container and reports a plain descriptor;
+      // it decides nothing. `groupGalleryItems` (./gallery-items.mjs, which imports nothing) makes
+      // every judgement about those descriptors, out of the page and under test — see it for why.
+      const galleryImages = [...element.querySelectorAll('img')].filter((image) => ownsNode(element, image));
+      // More than one image is simply what "repeated" means; the authoritative threshold is
+      // `groupGalleryItems`' own `minItems`, which re-checks it. This only keeps the walk from
+      // shipping descriptors for a lone picture on every page that has one.
+      if (galleryImages.length > 1) {
+        // The item container is the LARGEST subtree around an image that still holds only that one
+        // image — for `<figure><img><figcaption>` it is the figure; for a builder's nested card
+        // divs it is the outermost of them. Growing stops at the element that would swallow a
+        // sibling's picture, which is the gallery container itself.
+        const itemContainerOf = (image) => {
+          let node = image;
+          while (node.parentElement && node.parentElement !== element) {
+            if (node.parentElement.querySelectorAll('img').length > 1) break;
+            node = node.parentElement;
+          }
+          return node;
+        };
+        // A transport bound on the descriptors themselves, above the item cap so the true count is
+        // still observable. Both keys are consumed and removed the moment the page hands them back.
+        structure.galleryNodes = galleryImages.slice(0, S_MAX_GALLERY_NODES).map((image) => {
+          const container = itemContainerOf(image);
+          const figcaption = container.querySelector('figcaption');
+          const anchor = container.matches('a[href]') ? container : container.querySelector('a[href]');
+          const intrinsic = intrinsicOf(image);
+          return {
+            src: absolute(image.currentSrc || image.getAttribute('src')),
+            alt: clean(image.getAttribute('alt')) || null,
+            text: sClip(container.textContent),
+            figcaption: figcaption ? sClip(figcaption.textContent) : null,
+            href: anchor ? absolute(anchor.getAttribute('href')) : null,
+            intrinsic,
+            containerPath: selectorFor(container),
+            parentPath: container.parentElement ? selectorFor(container.parentElement) : null,
+          };
+        });
+        structure.gallerySourceCount = galleryImages.length;
+      }
+
       return Object.keys(structure).length > 0 ? structure : undefined;
     };
 
@@ -362,7 +438,13 @@ export async function extractPageModel(page) {
         });
     };
     for (const image of document.querySelectorAll('img')) {
-      addAsset(image.currentSrc || image.getAttribute('src'), 'image', image, { srcset: image.getAttribute('srcset') });
+      const intrinsic = intrinsicOf(image);
+      addAsset(image.currentSrc || image.getAttribute('src'), 'image', image, {
+        srcset: image.getAttribute('srcset'),
+        // T14.2: carried on the ASSET, so the mapper can compare it to the slot the section will
+        // render it into without re-deriving anything from the DOM it no longer has.
+        ...(intrinsic ? { intrinsic } : {}),
+      });
     }
     // T12.17: a srcset candidate URL may itself contain commas — every Wix transform URL does
     // (`.../v1/fill/w_146,h_194,q_75,enc_avif,quality_auto/file.jpg 1x, ...`). Splitting the
@@ -449,6 +531,19 @@ export async function extractPageModel(page) {
       discoveredLinks: [...new Set(allLinks)],
     };
   });
+  // T14.2: the page hands back per-image descriptors; the grouping decision is made HERE, by a pure
+  // function that never saw a DOM. The transient keys are consumed and removed, so what a snapshot
+  // stores is the recovered gallery (or nothing) and never the raw walk.
+  for (const block of model.blocks) {
+    if (!block.structure?.galleryNodes) continue;
+    const { galleryNodes, gallerySourceCount } = block.structure;
+    delete block.structure.galleryNodes;
+    delete block.structure.gallerySourceCount;
+    const gallery = groupGalleryItems(galleryNodes, { sourceCount: gallerySourceCount });
+    if (gallery) block.structure.gallery = gallery;
+    if (Object.keys(block.structure).length === 0) delete block.structure;
+  }
+  return model;
 }
 
 export async function measureBlocks(page, blocks, viewportId) {

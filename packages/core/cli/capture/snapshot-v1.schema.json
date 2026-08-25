@@ -136,6 +136,40 @@
                       "a": { "type": "string" }
                     }
                   }
+                },
+                "gallery": {
+                  "type": "object",
+                  "description": "T14.2: a repeated figure recovered as ORDERED DISCRETE ITEMS, so a caption stays attached to the picture it describes instead of melting into the block's flat text. Pairing is by CONTAINMENT (an item's caption is text inside that item's own subtree), never by array position. `captions: 'unavailable'` plus a `reason` is emitted when the DOM does not associate them — downstream must then emit no captions rather than guess.",
+                  "required": ["sourceCount", "items", "captions"],
+                  "properties": {
+                    "sourceCount": { "type": "integer", "minimum": 0 },
+                    "truncated": { "type": "boolean" },
+                    "captions": { "enum": ["per_item", "partial", "unavailable"] },
+                    "reason": { "type": "string" },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["src"],
+                        "properties": {
+                          "src": { "type": "string", "format": "uri" },
+                          "alt": { "type": ["string", "null"] },
+                          "caption": { "type": "string" },
+                          "captionSource": { "enum": ["figcaption", "item_text"] },
+                          "href": { "type": ["string", "null"] },
+                          "intrinsic": {
+                            "type": "object",
+                            "required": ["width", "height"],
+                            "properties": {
+                              "width": { "type": "integer", "minimum": 1 },
+                              "height": { "type": "integer", "minimum": 1 },
+                              "source": { "enum": ["natural", "attribute", "transform"] }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             },
