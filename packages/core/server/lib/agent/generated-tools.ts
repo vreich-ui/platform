@@ -34,7 +34,7 @@ import {
 } from '../mcp-tool-definitions-membership.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import { compileSchema, type CompiledSchema } from './json-schema-lite.js';
-import { chatToolByName, type ChatTool, type ToolContext, type ToolAutonomy } from './tools.js';
+import { chatToolByName, type ChatTool, type ToolContext, type ToolAutonomy, type ToolResult } from './tools.js';
 import type { ObjectType } from '../../../schema/object-record-v1.js';
 
 const json = (body: unknown) => JSON.stringify(body);
@@ -355,6 +355,58 @@ const buildParse = (name: string, validator: CompiledSchema): ChatTool['parse'] 
   };
 };
 
+/**
+ * T7 (2026-08-25) — `object_review_decide` on an object still mid-workspace-
+ * run must not surface object-verbs.ts's raw `Object record not found`.
+ *
+ * DEFECT this guards against: an editor says "approve it" / "publish it" for
+ * an article a `run_workspace_workflow` job is still producing. ART-1 means
+ * that article has NO `content_item` record yet — the workflow hasn't
+ * published it — so `object_review_decide` 404s. Read literally by an editor,
+ * "Object record not found" sounds like the work was lost, and it points the
+ * chat agent at nothing: there is no retry, no next step named. The actual
+ * fix is always the same (poll `check_workspace_run_readiness`, then
+ * `publish_workspace_run`), so refusing with that route beats a bare 404.
+ *
+ * Detecting "this 404 is really a still-running workspace run" reuses W19's
+ * existing plumbing rather than inventing conversation-scanning: per
+ * `mintWorkspaceRequestId` (tools.ts) and 19-editorial-requests-plan.md §item
+ * 60, a workflow-started article's `content_item` id and its editorial
+ * request id are the SAME string — `req_agent_<slug>_<yyyymmdd>_<nn>` is
+ * minted by probing `object_type: 'content_item'` for that exact id. So a
+ * 404'd `object_id` that matches a LIVE (workflow-backed, not yet producing
+ * an object) request record in `ctx.requests` is not a missing object, it's
+ * an unfinished run — `ctx.requests` is already the correlation key W19 built
+ * for exactly this ("a job is a record, not a chat"), so this reads it rather
+ * than adding a second one. `request.object` is stamped only once the
+ * workflow actually produces the record (requests/store.ts's
+ * `recordProducedObject`) — if it's already set, the 404 means something else
+ * (e.g. a real deletion after publish) and this must NOT misroute that case.
+ */
+const routeReviewDecideNotFound = async (
+  ctx: ToolContext,
+  objectId: string | undefined
+): Promise<ToolResult | undefined> => {
+  if (!objectId || !ctx.requests?.get) return undefined;
+  const request = await ctx.requests.get(objectId);
+  if (!request) return undefined;
+  const workflow = (request as { workflow?: { run_id?: string } }).workflow;
+  const produced = (request as { object?: unknown }).object;
+  if (!workflow?.run_id || produced) return undefined;
+  return {
+    content: json({
+      error:
+        `${objectId} has no object record yet — it is still being produced by workspace run ${workflow.run_id}. ` +
+        'There is nothing to review or decide on until that run publishes. Check readiness with ' +
+        'check_workspace_run_readiness, then call publish_workspace_run (never object_review_decide) to take it live.',
+      code: 'still_in_workspace_run',
+      run_id: workflow.run_id,
+      request_id: objectId,
+    }),
+    is_error: true,
+  };
+};
+
 // ─── execute(): per §3's binding map ────────────────────────────────────────────────────
 
 const buildExecute = (name: string, verbPayload: VerbPayloadBuilder | undefined): ChatTool['execute'] => {
@@ -381,6 +433,16 @@ const buildExecute = (name: string, verbPayload: VerbPayloadBuilder | undefined)
         // config, mirroring tools.ts's applyTheme.
         if (!ctx.roles.includes('owner')) return ownerRequired(name);
         return verbResult(ctx, verbPayload(args));
+      };
+    }
+    if (name === 'object_review_decide') {
+      return async (ctx, args) => {
+        const result = await ctx.verb(verbPayload(args));
+        if (result.status === 404 && result.body?.not_found === true) {
+          const routed = await routeReviewDecideNotFound(ctx, args.object_id as string | undefined);
+          if (routed) return routed;
+        }
+        return { content: json(result.body), is_error: result.status !== 200 };
       };
     }
     return async (ctx, args) => verbResult(ctx, verbPayload(args));
