@@ -96,6 +96,7 @@ import {
   pageTypeDefinitionJsonSchema,
   unimplementedPageTypeIds,
 } from '../../lib/registry/page-types.js';
+import { activeApprovalPolicy } from '../../lib/approval-policy.js';
 import { listSectionTypeContracts } from '../../lib/registry/object-contract.js';
 import {
   getHeader,
@@ -2032,11 +2033,14 @@ export const callOrderReissue = async (event: LambdaEvent, input: Record<string,
 export const callRegistryGet = async (_event: LambdaEvent, input: Record<string, unknown>) => {
   const registry = toNonEmptyString(input.registry) ?? null;
   if (registry === 'page_type') {
+    // T15.8: reviewPolicy.required is derived live from approval-policy.ts
+    // (the deciding layer for publish-gate.ts) rather than a static,
+    // independently-drifting copy — see resolvePageTypeReviewPolicy.
     return toolResult({
       registry,
       status: 'ok',
       available: true,
-      definitions: listPageTypeDefinitions(),
+      definitions: listPageTypeDefinitions(activeApprovalPolicy()),
       not_yet_implemented: unimplementedPageTypeIds(),
       definition_schema: pageTypeDefinitionJsonSchema(),
     });

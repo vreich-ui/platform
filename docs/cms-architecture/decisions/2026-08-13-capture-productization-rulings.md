@@ -129,3 +129,62 @@ skipped.
   bounds are ceilings enforced on BOTH sides (caller and worker).
 - T12.6 is a `human_gate`: agents prepare, **Wolf dispositions**. The
   2026-08-13 agent-authored disposition was withdrawn and stays withdrawn.
+
+## 2026-08-25 Addendum — T15.3 autonomy directive (SUPERSEDES v2 standing constraints R-C5.1 & R-C5.2)
+
+**Status: RATIFIED by T15 convergence.** This addendum, dated 2026-08-25, supersedes
+the standing constraints stated above (lines 125–126 and 130–131 in v2) in light of
+the T15 autonomy directive: **"assume the human is not involved unless the policy says
+otherwise."** The capture workflow's publish authority is no longer a hard-blocked path
+per-workflow; instead, it is now governed by a **project policy knob**,
+`publishingPolicy.autonomyMode` (enum: `autonomous` | `operator-gated`), read from
+the project policy at invocation time.
+
+### R-C5.1 (amended 2026-08-25) — Publish is ONE shared tail, gated by policy
+
+**Superseded ruling:** "Everything capture writes lands as never-released drafts;
+publish/release/build/deploy stay hard-blocked at the emission transport layer."
+
+**Amended ruling:** Capture workflow outputs are delivered to the one shared publishing
+tail (a single decision reader, not a per-workflow path). The tail's decision is:
+- **If `publishingPolicy.autonomyMode === autonomous`:** an absent operator decision
+  is read as approved; capture publishes drafts automatically.
+- **If `publishingPolicy.autonomyMode === operator-gated`:** an explicit operator
+  decision (approval or withheld) is required; absent decisions halt the tail.
+- **Withheld decisions always halt**, in every autonomy mode.
+
+This rules out the T14.5 dual-path architecture (fail-open publish in `CMS-Agent`
+src/agent/capture/engine/publish.mjs), which is being deleted in T15.7. The convergent
+design uses one tail, one decision reader, one policy knob.
+
+### R-C5.2 (amended 2026-08-25) — Release is a governed step, not a verb
+
+**Superseded ruling:** "T12.6 is a `human_gate`: agents prepare, Wolf dispositions."
+
+**Amended ruling:** T12.6 remains a decision gate (agents prepare reports + drafts),
+but the operator decision now flows into the one shared publishing tail, where release
+is a **governed tail step** (`release_executor`) that fires automatically once the
+publish stage completes and the deploy is verified. Release is no longer a blocked verb
+or a separate human gate; it is a deterministic tail action keyed to policy autonomy.
+The operator's role shifts from disposition to approval/withhold on the decision reader.
+
+### Stale assertions now in flight — awaiting corrective cross-notes
+
+The following brief documents contain now-stale assertions recorded during W12 before
+T15 autonomy policy was formalized. They will be updated in their respective T15
+follow-ups:
+
+- **T12.6 brief** (cms-pipeline/T12.6-capture-acceptance-run.md, line 19): states
+  publish/release are optional and human-gated. _Stale as of 2026-08-25._
+- **T12.9 brief** (cms-pipeline/T12.9-capture-conductor-workflow.md, lines 51–52):
+  states "Human gate preserved" and "publish/release are not reachable from any capture
+  node." _Stale as of 2026-08-25._ The workflow still ends with a report + drafts; the
+  operator decision now flows onward into the shared tail.
+- **T12.11 brief** (cms-pipeline/T12.11-one-call-site-duplication.md, line 59):
+  states "No publish/release from any path in this tool." _Stale as of 2026-08-25._
+  Publish is reachable via the shared tail, gated by policy autonomy.
+
+These assertions were correct under the W12 framing and serve as the historical record
+of intent. T15 convergence replaces the per-path autonomy model with a single policy
+knob and one tail. The briefs' evidence (reports, drafts, status, gating surfaces) remains
+valid; only the path topology and autonomy lever point have changed.

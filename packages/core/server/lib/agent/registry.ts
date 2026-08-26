@@ -10,6 +10,7 @@ import { CHAT_TOOL_ALIASES } from '../mcp-tool-definitions.js';
 import { chatToolByName, CHAT_TOOLS, type ChatTool, type ToolAutonomy } from './tools.js';
 import { GENERATED_CHAT_TOOLS, generatedChatToolByName } from './generated-tools.js';
 import type { ChatRun, RegistryKind } from './chat-store.js';
+import { activeAutonomyMode } from '../../../lib/publishing-policy.js';
 
 export type { RegistryKind };
 
@@ -47,6 +48,38 @@ const defaultAutonomyByClass = (tool: ChatTool): ToolAutonomy => (tool.toolClass
  * time, so a frozen legacy autonomy map can never let a floored write run
  * un-asked under the generated registry. Returns undefined only when `kind`
  * has no tool by that name at all.
+ *
+ * T15.8 ("one approval truth on the platform", ADR structure-studio §4.2):
+ * the floor's own gate-evaluation-time reconciliation happens here, in this
+ * one function, matching the "one function, one place" discipline of
+ * `resolvePublishAuthority` on the CMS-Agent side. `tool.autonomyFloor`
+ * ITSELF never changes (the floor's classification is fixed —
+ * `mcp-tool-definitions.test.ts:62`'s list is untouched); what changes is
+ * whether it is SATISFIED without a human:
+ *
+ *   - an EXPLICIT `'off'` in the frozen map is the operator's withheld
+ *     decision on this specific tool — it always wins, in every autonomy
+ *     mode, exactly like ADR publish-autonomy rule 1 ("withheld halts,
+ *     never overridden, never defaulted away").
+ *   - an EXPLICIT `'ask'` is a deliberate human choice to keep asking on
+ *     this tool even under an autonomous project — also respected; policy
+ *     autonomy only ever fills an ABSENT decision, never overrides a
+ *     present one (mirrors rule 4/5's ordering: an explicit operator record
+ *     is checked before the policy default).
+ *   - otherwise (no explicit override, or a stale/owner-set `'auto'`), the
+ *     floor is satisfied — resolves `'auto'` — exactly when this project's
+ *     `publishingPolicy.autonomyMode` (`../../../lib/publishing-policy.js`)
+ *     is `'autonomous'`. Every other case — absent, unconfigured, a
+ *     malformed provider, or `'operator-gated'` — keeps the floor at `'ask'`.
+ *     `activeAutonomyMode()` defaults closed and never throws, so this can
+ *     never accidentally promote an unconfigured project.
+ *
+ * This is independent of, and does not relax, the object-store's own
+ * per-type gates (`publish-gate.ts`'s `approval-policy.ts` resolution): a
+ * call that clears this chat floor autonomously can still be denied at the
+ * write itself for a type pinned `require-approval` — the two checks stay
+ * separate, exactly as ADR publish-autonomy §3 keeps the tail's machine
+ * self-check and its authority check independent.
  */
 export const autonomyForCall = (
   kind: RegistryKind,
@@ -62,10 +95,13 @@ export const autonomyForCall = (
   // name. The raw call name and the reverse-alias legacy name remain as
   // fallbacks for legacy-keyed maps.
   const legacyName = REVERSE_ALIASES[tool.name];
-  const resolved =
+  const explicit =
     run.autonomy[tool.name] ??
     run.autonomy[name] ??
-    (legacyName !== undefined ? run.autonomy[legacyName] : undefined) ??
-    defaultAutonomyByClass(tool);
-  return tool.autonomyFloor === 'ask' && resolved === 'auto' ? 'ask' : resolved;
+    (legacyName !== undefined ? run.autonomy[legacyName] : undefined);
+  const resolved = explicit ?? defaultAutonomyByClass(tool);
+  if (tool.autonomyFloor !== 'ask') return resolved;
+  if (explicit === 'off') return 'off'; // withheld — always halts (rule 1)
+  if (explicit === 'ask') return 'ask'; // explicit human ask — respected, never promoted by policy
+  return activeAutonomyMode() === 'autonomous' ? 'auto' : 'ask';
 };
