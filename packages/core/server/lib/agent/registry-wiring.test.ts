@@ -7,7 +7,12 @@
 import '../../../../../sites/drlurie/config/policy-bindings.js'; // registers site providers — tools.ts resolves site identity at import
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
+
+import {
+  clearActivePublishingPolicyProviderForTests,
+  setActivePublishingPolicyProvider,
+} from '../../../lib/publishing-policy.js';
 
 import {
   loadChatDoc,
@@ -402,6 +407,64 @@ describe('migrateAutonomyKeys', () => {
     // This is exactly why admin-agent-chat.ts / admin-governance.ts gate the
     // call behind `chat_tools_migrated` / `keys_migrated`: once stamped, the
     // stored map is used as-is, never re-migrated.
+  });
+});
+
+// ─── T15.8: the ask floor consults publishingPolicy.autonomyMode ───────────
+
+describe('T15.8 — one approval truth: autonomyForCall consults publishingPolicy.autonomyMode', () => {
+  afterEach(() => {
+    clearActivePublishingPolicyProviderForTests();
+  });
+
+  it('an autonomous project satisfies the floor with no human: no explicit override needed', () => {
+    setActivePublishingPolicyProvider(() => ({ autonomyMode: 'autonomous' }));
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: {} };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'auto');
+    assert.equal(autonomyForCall('generated', run, 'object_publish'), 'auto');
+    assert.equal(autonomyForCall('generated', run, 'object_create'), 'auto');
+  });
+
+  it('an unconfigured project (no provider registered) still asks, even for the same floored tool', () => {
+    // No setActivePublishingPolicyProvider call — this is every fleet site's
+    // default state today.
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: {} };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'ask');
+  });
+
+  it('a project explicitly configured operator-gated still asks', () => {
+    setActivePublishingPolicyProvider(() => ({ autonomyMode: 'operator-gated' }));
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: {} };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'ask');
+  });
+
+  it('a withheld decision (explicit "off") halts an otherwise-autonomous project', () => {
+    setActivePublishingPolicyProvider(() => ({ autonomyMode: 'autonomous' }));
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: { object_retire: 'off' as ToolAutonomy } };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'off');
+  });
+
+  it('an explicit "ask" override is respected even under an autonomous project (never silently promoted)', () => {
+    setActivePublishingPolicyProvider(() => ({ autonomyMode: 'autonomous' }));
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: { object_retire: 'ask' as ToolAutonomy } };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'ask');
+  });
+
+  it('a stale governance "auto" is honored once the project is genuinely autonomous (it was only ever re-clamped for lack of policy evidence)', () => {
+    setActivePublishingPolicyProvider(() => ({ autonomyMode: 'autonomous' }));
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: { object_retire: 'auto' as ToolAutonomy } };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'auto');
+  });
+
+  it('a bare governance "auto" override still cannot bypass the floor on an unconfigured/operator-gated project', () => {
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: { object_retire: 'auto' as ToolAutonomy } };
+    assert.equal(autonomyForCall('generated', run, 'object_retire'), 'ask');
+  });
+
+  it('a non-floored (read) tool is unaffected by publishingPolicy.autonomyMode either way', () => {
+    setActivePublishingPolicyProvider(() => ({ autonomyMode: 'autonomous' }));
+    const run: Pick<ChatRun, 'autonomy'> = { autonomy: {} };
+    assert.equal(autonomyForCall('generated', run, 'object_get'), 'auto');
   });
 });
 

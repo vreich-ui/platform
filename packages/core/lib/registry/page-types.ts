@@ -23,6 +23,7 @@ import { z } from 'zod';
 
 import { pageTypeIdSchema, type PageTypeId } from '../../schema/bodies/page-v1.js';
 import { contentQuerySchema, sectionTypeSchema, type SectionInstance } from '../../schema/bodies/section-v1.js';
+import { publishRequiresApproval, type ApprovalPolicy } from '../approval-policy.js';
 
 type SectionType = SectionInstance['type'];
 
@@ -143,19 +144,56 @@ export const pageTypeDefinitions: Partial<Record<PageTypeId, PageTypeDefinition>
   },
 };
 
+/**
+ * T15.8 ("one approval truth on the platform"): every PageTypeDefinition
+ * above hardcodes the SAME `PAGE_REVIEW_POLICY` constant — there has never
+ * been genuine per-PageType granularity here, because `publish-gate.ts`
+ * gates by governed OBJECT TYPE (`'page'`, one bucket covering every
+ * PageTypeId), never by PageType. That made the static constant a second,
+ * independent copy of a fact `approval-policy.ts` already decides — and on
+ * every fleet site, which sets `master: 'all-autonomous'`, the two already
+ * disagreed: this registry told an MCP caller `required: true` for the
+ * `clone` page type while `publish-gate.ts` allowed a direct, unapproved
+ * publish for the same object.
+ *
+ * `resolvePageTypeReviewPolicy` closes that gap by DERIVING `required` from
+ * the live approval policy for the one governed type every PageType maps to
+ * (`'page'`) — `approval-policy.ts` stays the sole deciding layer;
+ * `minApprovals`/`publishRoles` are unaffected (they only matter once
+ * `required` is true). `PAGE_REVIEW_POLICY` remains the fail-closed default
+ * used when no policy is supplied — a client-safe caller (no server context,
+ * e.g. a build-time or admin-UI read with no policy provider handy) still
+ * sees the conservative `required: true`, never a silent "ask" → "auto" flip
+ * for want of a policy argument.
+ */
+export const resolvePageTypeReviewPolicy = (policy: ApprovalPolicy): ReviewPolicy => ({
+  ...PAGE_REVIEW_POLICY,
+  required: publishRequiresApproval('page', policy),
+});
+
+const withResolvedReviewPolicy = (definition: PageTypeDefinition, policy?: ApprovalPolicy): PageTypeDefinition =>
+  policy === undefined ? definition : { ...definition, reviewPolicy: resolvePageTypeReviewPolicy(policy) };
+
 export type PageTypeLookup =
   | { ok: true; definition: PageTypeDefinition }
   | { ok: false; reason: 'unknown_page_type' | 'not_yet_implemented' };
 
-export const getPageTypeDefinition = (id: string): PageTypeLookup => {
+/** `policy`, when supplied, derives `reviewPolicy.required` live from
+ *  `approval-policy.ts` (see `resolvePageTypeReviewPolicy`) instead of the
+ *  static default — pass the site's `activeApprovalPolicy()` from any
+ *  server-side caller (e.g. `registry_get`) so the two layers cannot
+ *  contradict each other. */
+export const getPageTypeDefinition = (id: string, policy?: ApprovalPolicy): PageTypeLookup => {
   const parsed = pageTypeIdSchema.safeParse(id);
   if (!parsed.success) return { ok: false, reason: 'unknown_page_type' };
   const definition = pageTypeDefinitions[parsed.data];
-  return definition ? { ok: true, definition } : { ok: false, reason: 'not_yet_implemented' };
+  return definition ? { ok: true, definition: withResolvedReviewPolicy(definition, policy) } : { ok: false, reason: 'not_yet_implemented' };
 };
 
-export const listPageTypeDefinitions = (): PageTypeDefinition[] =>
-  Object.values(pageTypeDefinitions).filter((definition): definition is PageTypeDefinition => Boolean(definition));
+export const listPageTypeDefinitions = (policy?: ApprovalPolicy): PageTypeDefinition[] =>
+  Object.values(pageTypeDefinitions)
+    .filter((definition): definition is PageTypeDefinition => Boolean(definition))
+    .map((definition) => withResolvedReviewPolicy(definition, policy));
 
 /** Ids typed in the enum but not yet defined here — empty since W6; surfaced by registry_get. */
 export const unimplementedPageTypeIds = (): PageTypeId[] =>

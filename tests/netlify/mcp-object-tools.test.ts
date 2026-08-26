@@ -181,7 +181,11 @@ test("registry_get('page_type') serves the T3.1 definitions with the JSON-schema
     // page-types.ts, where it sits ahead of 'standard'.
     ['home', 'clone', 'standard', 'system', 'listing', 'content_detail']
   );
-  assert.ok(definitions.every((definition) => definition.reviewPolicy.required === true));
+  // T15.8 ("one approval truth"): reviewPolicy.required is now DERIVED from
+  // this site's approval-policy.ts (master: 'all-autonomous', no override for
+  // 'page') rather than a static independent copy — it can no longer
+  // contradict publish-gate.ts's own resolution for the same governed type.
+  assert.ok(definitions.every((definition) => definition.reviewPolicy.required === false));
   assert.deepEqual(res.structuredContent?.not_yet_implemented, []);
   const schema = res.structuredContent?.definition_schema as { type?: string };
   assert.equal(schema.type, 'object');
