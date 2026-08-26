@@ -27,14 +27,20 @@ export function renderWordDiff(oldText: string, newText: string): HTMLElement {
   for (const change of changes) {
     if (change.added) {
       const ins = document.createElement('ins');
+      // B9 (T0.3): "added" is diff semantics, not a D4 severity — normalized
+      // to the `--adm-success-*` tokens (not a literal Tailwind color) so the
+      // dark-mode swap comes from admin-tokens.css, not a hand-written
+      // `dark:` pair, matching every other status color in the admin kit.
       ins.className =
-        'dl-diff-ins bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 rounded px-0.5 no-underline';
+        'dl-diff-ins bg-[var(--adm-success-soft)] text-[var(--adm-success-text)] rounded px-0.5 no-underline';
       ins.textContent = change.value;
       container.append(ins);
     } else if (change.removed) {
       const del = document.createElement('del');
+      // B9 (T0.3): "removed" is diff semantics, not a D4 severity — same
+      // token normalization as the `ins` branch above, using `--adm-danger-*`.
       del.className =
-        'dl-diff-del bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 rounded px-0.5 line-through';
+        'dl-diff-del bg-[var(--adm-danger-soft)] text-[var(--adm-danger-text)] rounded px-0.5 line-through';
       del.textContent = change.value;
       container.append(del);
     } else {
@@ -54,10 +60,10 @@ export function renderFieldDiff(
   newValue: string | undefined
 ): HTMLElement {
   const row = document.createElement('div');
-  row.className = 'dl-diff-field flex flex-col gap-1 py-2 border-b border-gray-100 dark:border-slate-700 last:border-0';
+  row.className = 'dl-diff-field flex flex-col gap-1 py-2 border-b border-[var(--adm-border)] last:border-0';
 
   const label = document.createElement('span');
-  label.className = 'text-xs font-bold uppercase tracking-wide text-muted';
+  label.className = 'text-xs font-bold uppercase tracking-wide text-[var(--adm-text-muted)]';
   label.textContent = fieldName;
   row.append(label);
 
@@ -69,13 +75,13 @@ export function renderFieldDiff(
 
     if (oldValue !== undefined && oldValue !== '') {
       const oldEl = document.createElement('div');
-      oldEl.className = 'flex-1 rounded p-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 line-through';
+      oldEl.className = 'flex-1 rounded p-2 bg-[var(--adm-danger-soft)] text-[var(--adm-danger-text)] line-through';
       oldEl.textContent = oldValue;
       pair.append(oldEl);
     }
 
     const newEl = document.createElement('div');
-    newEl.className = 'flex-1 rounded p-2 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300';
+    newEl.className = 'flex-1 rounded p-2 bg-[var(--adm-success-soft)] text-[var(--adm-success-text)]';
     newEl.textContent = newValue ?? '';
     pair.append(newEl);
 

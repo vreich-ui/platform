@@ -12,7 +12,6 @@ import type { SiteIdentity } from '@core/lib/site-identity';
 import { Avatar, Badge, Button, Card, EmptyState, Skeleton, StatusPill } from './primitives';
 import { Input, Select, Switch } from './forms';
 import { useToast } from './overlays';
-import { IconAlertTriangle } from './icons';
 import { updateMe, avatarSrc } from '@core/lib/admin/users-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 
@@ -62,7 +61,7 @@ function ProfileBody() {
   if (error || !user) {
     return (
       <Card>
-        <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't load your profile" message={error} />
+        <EmptyState severity="error" title="Couldn't load your profile" message={error} />
       </Card>
     );
   }

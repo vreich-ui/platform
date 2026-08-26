@@ -1,4 +1,15 @@
-export type BlobListItem = { key: string };
+/**
+ * `key` is all `@netlify/blobs` used to be modelled as returning here, but its
+ * real `ListResultBlob` is `{ key, etag }` — the etag comes back with the
+ * listing at NO extra cost, and T5.1 R3 uses it to decide, per key, whether a
+ * cached projection of that blob is still valid without reading the blob.
+ *
+ * Optional on purpose. The local file-backed store (`local-blobs.ts`) reports
+ * `etag: ''`, and a caller must treat an empty or absent etag as
+ * "unverifiable" — NEVER as "two blobs with no etag match" — so those paths
+ * degrade to reading the record, which is exactly the old behaviour.
+ */
+export type BlobListItem = { key: string; etag?: string };
 
 export type BlobListResult = {
   blobs?: BlobListItem[];

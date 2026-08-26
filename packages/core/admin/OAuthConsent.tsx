@@ -18,7 +18,6 @@ import { useEffect, useState } from 'react';
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Button, Card, EmptyState } from './primitives';
-import { IconAlertTriangle } from './icons';
 
 const CONSENT_ENDPOINT = '/oauth/consent';
 
@@ -97,7 +96,7 @@ function OAuthConsentBody() {
   };
 
   if (error) {
-    return <EmptyState icon={<IconAlertTriangle />} title="Connection request unavailable" message={error} />;
+    return <EmptyState severity="error" title="Connection request unavailable" message={error} />;
   }
 
   if (!info) {

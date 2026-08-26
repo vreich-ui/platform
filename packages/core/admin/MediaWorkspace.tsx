@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminShell } from './AdminShell';
 import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, EmptyState, Skeleton } from './primitives';
-import { IconAlertTriangle, IconLibrary, IconSparkles } from './icons';
+import { IconLibrary, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { artifactsByFamily, type EditorialArtifact, type MediaFamily } from '@core/lib/admin/editorial-assets';
@@ -95,7 +95,7 @@ export default function MediaWorkspace({ identity }: { identity: SiteIdentity })
           </div>
         ) : error ? (
           <EmptyState
-            icon={<IconAlertTriangle size={26} />}
+            severity="error"
             title="Media unavailable"
             message={`${error} Your existing media has not been changed.`}
             action={

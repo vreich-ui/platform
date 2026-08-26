@@ -22,9 +22,12 @@ describe('rowStatus', () => {
       label: 'Changes requested',
       tone: 'warning',
     });
+    // T0.3 Table C / T6.1: matches EDITORIAL_STATE_PRESENTATION.published
+    // (info/blue) — the published/live color race fix. rowStatus() now
+    // derives this from that same table rather than a second literal.
     assert.deepStrictEqual(rowStatus(row({ published_time: '2026-07-01T00:00:00.000Z', unpublished_changes: false })), {
       label: 'Published',
-      tone: 'success',
+      tone: 'info',
     });
     assert.deepStrictEqual(rowStatus(row()), { label: 'Draft', tone: 'neutral' });
     assert.deepStrictEqual(rowStatus(row({ status: 'archived' })), { label: 'Archived', tone: 'neutral' });

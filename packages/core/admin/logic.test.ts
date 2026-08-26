@@ -16,6 +16,12 @@ describe('statusTone', () => {
     assert.strictEqual(statusTone('failed'), 'danger');
     assert.strictEqual(statusTone('whatever'), 'neutral');
   });
+  // T0.3 Table C / T6.1: `archived` is a settled fact, not a decision — must
+  // agree with `library-logic.ts`'s `rowStatus()`, which already returns
+  // 'neutral' for the same word (see `library-logic.test.ts`).
+  it('maps archived to neutral, matching library-logic.ts rowStatus', () => {
+    assert.strictEqual(statusTone('archived'), 'neutral');
+  });
 });
 
 describe('sortRows', () => {
@@ -175,18 +181,18 @@ describe('grantableTiers / roleOptionsFor (policy × actor role × target role)'
 
 describe('memberActionsFor', () => {
   const me = 'boss@x.com';
-  it('owner acting: env rows → promote + audit; self → audit; removed → audit; active → change_role/suspend/remove; suspended → reinstate', () => {
+  it('owner acting: env rows → promote + audit + export; self → audit + export; removed → audit + export; active → change_role/suspend/remove; suspended → reinstate', () => {
     assert.deepEqual(
       memberActionsFor({
         row: { email: 'env@x.com', role: 'owner', status: 'active', source: 'environment' },
         actorEmail: me,
         actorRoles: ['owner'],
       }),
-      ['promote_bootstrap', 'view_audit']
+      ['promote_bootstrap', 'view_audit', 'export']
     );
     assert.deepEqual(
       memberActionsFor({ row: { email: me, role: 'owner', status: 'active' }, actorEmail: me, actorRoles: ['owner'] }),
-      ['view_audit']
+      ['view_audit', 'export']
     );
     assert.deepEqual(
       memberActionsFor({
@@ -194,7 +200,7 @@ describe('memberActionsFor', () => {
         actorEmail: me,
         actorRoles: ['owner'],
       }),
-      ['view_audit']
+      ['view_audit', 'export']
     );
     assert.deepEqual(
       memberActionsFor({
@@ -202,7 +208,7 @@ describe('memberActionsFor', () => {
         actorEmail: me,
         actorRoles: ['owner'],
       }),
-      ['change_role', 'view_audit', 'suspend', 'remove']
+      ['change_role', 'view_audit', 'export', 'suspend', 'remove']
     );
     assert.deepEqual(
       memberActionsFor({
@@ -210,7 +216,7 @@ describe('memberActionsFor', () => {
         actorEmail: me,
         actorRoles: ['owner'],
       }),
-      ['change_role', 'view_audit', 'reinstate', 'remove']
+      ['change_role', 'view_audit', 'export', 'reinstate', 'remove']
     );
     // v1 view without membership_status: disabled ⇒ suspended
     assert.deepEqual(
@@ -219,7 +225,7 @@ describe('memberActionsFor', () => {
         actorEmail: me,
         actorRoles: ['owner'],
       }),
-      ['change_role', 'view_audit', 'reinstate', 'remove']
+      ['change_role', 'view_audit', 'export', 'reinstate', 'remove']
     );
   });
   it('a non-owner gets no row actions (read-only list; the audit stream is Owner-only)', () => {

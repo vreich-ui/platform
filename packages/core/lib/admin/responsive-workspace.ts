@@ -5,6 +5,14 @@
  * for all three working surfaces. Below `xl`, the Object Stage remains the
  * page's only persistent surface; publication navigation and the agent open
  * as modal drawers from compact controls.
+ *
+ * T2.2 note: the object DETAIL view is now two columns (content + agent
+ * dock) — the library column moved out to the objects plane (`/admin/objects`,
+ * T2.1) — so it consumes `WORKSPACE_EXPANDED_MIN_WIDTH` only. The three
+ * `WORKSPACE_*_CLASS` constants below currently have no component consumer;
+ * they are left in place (with their tests) rather than deleted, because
+ * deciding whether the three-column contract is dead belongs with the
+ * remaining workspace surfaces, not with this one rebuild.
  */
 export const ADMIN_EXPANDED_NAV_BREAKPOINT = 'xl';
 export const WORKSPACE_EXPANDED_BREAKPOINT = 'xl';

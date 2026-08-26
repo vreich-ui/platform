@@ -28,7 +28,6 @@ import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 
 import { Button, Card, EmptyState } from './primitives';
-import { IconAlertTriangle } from './icons';
 
 export interface AdminErrorBoundaryProps {
   /** Human label for the guarded surface (e.g. "Maintenance") — shown in the fallback so an operator knows what broke. */
@@ -59,7 +58,7 @@ export class AdminErrorBoundary extends Component<AdminErrorBoundaryProps, Admin
     return (
       <Card>
         <EmptyState
-          icon={<IconAlertTriangle size={26} />}
+          severity="error"
           title={`"${this.props.surface}" hit an error`}
           message={error.message || 'Something went wrong rendering this page.'}
           action={

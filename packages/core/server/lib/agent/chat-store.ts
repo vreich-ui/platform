@@ -22,7 +22,12 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { getNetlifyBlobStore } from '../blob-store.js';
-import { collectBlobListItems, type BlobListResponse } from '../blob-list.js';
+import {
+  collectBlobListItems,
+  mapWithConcurrency,
+  STORE_READ_CONCURRENCY,
+  type BlobListResponse,
+} from '../blob-list.js';
 
 export const AGENT_CHAT_SCHEMA_VERSION = 'agent-chat.v1';
 
@@ -272,14 +277,30 @@ export const saveChatDoc = async (store: AgentChatStore, doc: ChatDoc): Promise<
   await store.setJSON(chatDocKey(doc.chat_id), chatDocSchema.parse(doc));
 };
 
-/** List every chat doc (corpus is small; the hub sorts by updated_at). Corrupt docs are skipped. */
+/**
+ * List every chat doc (the hub sorts by updated_at). Corrupt docs are skipped.
+ *
+ * T5.1 R9 (F4): the `store.get()`s used to run one-at-a-time in a serial
+ * `for` loop, so a `list_chats` call cost C SEQUENTIAL blob reads — each
+ * pulling a whole transcript (up to `EVENTS_MAX` events) to produce an
+ * eight-field summary. `mapWithConcurrency` at `STORE_READ_CONCURRENCY` is
+ * the same bound `object-verbs.ts`'s inventory sweep already uses, and turns
+ * C serial reads into ceil(C/8) parallel batches. It does NOT reduce the
+ * NUMBER of reads — the proper fix is a `chats/index.json` summary doc (the
+ * `requests/index.json` pattern); this is the one-line first aid T0.2 called
+ * for, and the aggregate `admin-editorial-view` avoids the sweep entirely on
+ * the surface that paid for it worst.
+ *
+ * Failure semantics are unchanged: a read or `JSON.parse` that throws still
+ * rejects the whole listing, exactly as the serial loop did.
+ */
 export const listChatDocs = async (store: AgentChatStore): Promise<ChatDoc[]> => {
   const items = await collectBlobListItems(
     await store.list({ prefix: KEY_PREFIX, directories: false, paginate: true })
   );
+  const raws = await mapWithConcurrency(items, STORE_READ_CONCURRENCY, (blob) => store.get(blob.key));
   const docs: ChatDoc[] = [];
-  for (const blob of items) {
-    const raw = await store.get(blob.key);
+  for (const raw of raws) {
     if (!raw) continue;
     const parsed = chatDocSchema.safeParse(JSON.parse(raw));
     if (parsed.success) docs.push(parsed.data);

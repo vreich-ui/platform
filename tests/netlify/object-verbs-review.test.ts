@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
-import { handleObjectVerb, type ObjectVerbRequest, type ObjectVerbStore } from '../../packages/core/server/lib/object-verbs.js';
+import {
+  handleObjectVerb,
+  type ObjectVerbRequest,
+  type ObjectVerbStore,
+} from '../../packages/core/server/lib/object-verbs.js';
 import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import type { ApprovalPolicy } from '../../packages/core/lib/approval-policy.js';
 import type { ObjectRecord, Principal } from '../../packages/core/schema/object-record-v1.js';
@@ -218,6 +222,54 @@ test('review_decide(approve) by a human pins content_revision + publish_action a
   });
 });
 
+// T6.2: the Reject path through the FULL endpoint wiring — `review-state.test.ts`
+// already exercises `decideReview`'s `note` field as a pure function; nothing
+// exercised it through `handleObjectVerb` (auth, lock checks, persistence)
+// before this, and it is exactly the call the client-side façade's Reject
+// button makes (`decisions.ts`: `decision === 'approve' ? 'approve' : 'request_changes'`,
+// with the reviewer's typed reason forwarded as `note`).
+test('review_decide(request_changes) by a human carries the typed reason through as note, end to end', async () => {
+  await withRoleEnv(async () => {
+    const store = createMemoryStore();
+    const objectId = await seedNav(store);
+    const lockToken = await checkoutAs(store, 'navigation', objectId, AGENT);
+    await call(store, {
+      action: 'submit_review',
+      object_type: 'navigation',
+      object_id: objectId,
+      lock_token: lockToken,
+    });
+    await call(
+      store,
+      { action: 'checkin', object_type: 'navigation', object_id: objectId, lock_token: lockToken },
+      AGENT
+    );
+
+    const result = await call(
+      store,
+      {
+        action: 'review_decide',
+        object_type: 'navigation',
+        object_id: objectId,
+        decision: 'request_changes',
+        note: 'needs a source for the privacy claim',
+      },
+      HUMAN_ADMIN
+    );
+
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.review_state, 'changes_requested');
+    const record = stored(store, 'navigation', objectId);
+    const decision = record.review?.decisions[record.review.decisions.length - 1];
+    assert.equal(decision?.decision, 'request_changes');
+    assert.equal(decision?.note, 'needs a source for the privacy claim');
+    // request_changes never pins a publish action — there is nothing to
+    // execute yet, so nothing here is "ignored-by-gate" the way the same
+    // field on an approve is.
+    assert.equal(decision?.publish_action, undefined);
+  });
+});
+
 // ─── discard ──────────────────────────────────────────────────────────────────
 
 test('discard reverts a rejected patch under the reviewer lock and bumps content_revision', async () => {
@@ -388,7 +440,10 @@ test('publish_by_time: with navigation overridden to require-approval, an unappr
       store,
       { action: 'publish_by_time', object_type: 'navigation', object_id: objectId, lock_token: lockToken },
       AGENT,
-      { publishDeps: { fetchImpl: github.fetchImpl, sleep: async () => {}, exportRoot: 'sites/drlurie/data/site' }, approvalPolicy: GATE_NAVIGATION }
+      {
+        publishDeps: { fetchImpl: github.fetchImpl, sleep: async () => {}, exportRoot: 'sites/drlurie/data/site' },
+        approvalPolicy: GATE_NAVIGATION,
+      }
     );
 
     assert.equal(result.status, 403);
@@ -434,7 +489,10 @@ test('publish_by_time: with navigation overridden to require-approval, an APPROV
       store,
       { action: 'publish_by_time', object_type: 'navigation', object_id: objectId, lock_token: relock },
       AGENT,
-      { publishDeps: { fetchImpl: github.fetchImpl, sleep: async () => {}, exportRoot: 'sites/drlurie/data/site' }, approvalPolicy: GATE_NAVIGATION }
+      {
+        publishDeps: { fetchImpl: github.fetchImpl, sleep: async () => {}, exportRoot: 'sites/drlurie/data/site' },
+        approvalPolicy: GATE_NAVIGATION,
+      }
     );
 
     assert.equal(result.status, 200, JSON.stringify(result.body));
@@ -473,7 +531,10 @@ test('publish_by_time: with navigation overridden to require-approval, a human a
         store,
         { action: 'publish_by_time', object_type: 'navigation', object_id: objectId, lock_token: relock },
         HUMAN_ADMIN,
-        { publishDeps: { fetchImpl: github.fetchImpl, sleep: async () => {}, exportRoot: 'sites/drlurie/data/site' }, approvalPolicy: GATE_NAVIGATION }
+        {
+          publishDeps: { fetchImpl: github.fetchImpl, sleep: async () => {}, exportRoot: 'sites/drlurie/data/site' },
+          approvalPolicy: GATE_NAVIGATION,
+        }
       );
 
       assert.equal(result.status, 200, JSON.stringify(result.body));

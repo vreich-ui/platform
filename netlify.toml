@@ -169,6 +169,40 @@
   to = "/admin/requests/__request"
   status = 200
 
+# T2.1 D1(a): the objects plane is now canonical — Templates/Media/Content
+# collapse into one library at /admin/objects. force=true because each of
+# these still has a real built page (the S1 rewrite above intentionally
+# leaves /admin/content unforced so single-segment ids can still reach the
+# workspace; these are exact-path rules so that pattern doesn't apply here).
+[[redirects]]
+  from = "/admin/content"
+  to = "/admin/objects"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/admin/templates"
+  to = "/admin/objects?type=template,section_template"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/admin/studio"
+  to = "/admin/objects?type=template,section_template"
+  status = 301
+  force = true
+
+# No governed object type is "media" (objectTypes has no such value — see
+# schema/object-record-v1.ts and lib/admin/media-counts.ts's own comment).
+# The old Media workspace showed ungoverned editorial assets, not object
+# records; the closest honest destination is the objects plane's grid view,
+# not a fabricated type facet that would silently match nothing.
+[[redirects]]
+  from = "/admin/media"
+  to = "/admin/objects?view=grid"
+  status = 301
+  force = true
+
 
 [[redirects]]
   from = "/blog"

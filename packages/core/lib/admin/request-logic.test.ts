@@ -2,12 +2,19 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  DEFAULT_REQUEST_QUICK_FILTER,
   filterRequestRows,
+  matchesQuickFilter,
   notificationHeadline,
   notificationSentence,
   mergeSeen,
   pendingNotifications,
+  QUICK_FILTERS,
+  quickFilterToStatuses,
+  requestSeverityLevel,
+  requestStatusLabel,
   scanNotifications,
+  STALLED_VS_FAILED_SPLIT,
   titlePrefix,
   nodeLabel,
   progressPhrase,
@@ -118,7 +125,7 @@ describe('request list ordering', () => {
 });
 
 describe('shell pill counts', () => {
-  it('counts working, needs-you and stalled, and never counts archived rows', () => {
+  it('counts working, needs-you and blocked, and never counts archived rows', () => {
     const counts = summarizeRequestRows([
       row('req_a_x_20260822_01', 'running'),
       row('req_b_x_20260822_01', 'queued'),
@@ -130,7 +137,121 @@ describe('shell pill counts', () => {
       // An archived row whose stored status still reads unhappy must not count.
       row('req_h_x_20260822_01', 'needs_you', { archived: true }),
     ]);
-    assert.deepEqual(counts, { working: 2, needsYou: 1, stalled: 2 });
+    // STALLED_VS_FAILED_SPLIT (default true): `stalled` joins `needsYou`
+    // (amber, D4) rather than `blocked` (red) — see the flag's own comment
+    // in request-logic.ts for the open question this encodes.
+    assert.equal(
+      STALLED_VS_FAILED_SPLIT,
+      true,
+      'this assertion is written for the split default — update it if the flag flips'
+    );
+    assert.deepEqual(counts, { working: 2, needsYou: 2, blocked: 1 });
+  });
+});
+
+describe('STALLED_VS_FAILED_SPLIT (T2.3, open question — see request-logic.ts)', () => {
+  it('gives stalled its own amber needs_you level, and failed alone is blocked/red', () => {
+    assert.equal(requestSeverityLevel('stalled'), 'needs_you');
+    assert.equal(requestSeverityLevel('failed'), 'blocked');
+    assert.equal(requestSeverityLevel('needs_you'), 'needs_you');
+  });
+
+  it('carries the split into the status tone — never red for stalled', () => {
+    assert.equal(requestStatusTone('stalled'), 'warning');
+    assert.equal(requestStatusTone('failed'), 'danger');
+  });
+
+  it('gives stalled its own label, distinct from the bare status word', () => {
+    assert.equal(requestStatusLabel('stalled'), 'Taking longer than expected');
+    assert.equal(requestStatusLabel('failed'), 'Failed');
+    assert.equal(requestStatusLabel('needs_you'), 'Needs you');
+  });
+});
+
+describe('D1(b) quick filters', () => {
+  const rows: RequestRowLike[] = [
+    row('req_ny_x_20260822_01', 'needs_you'),
+    row('req_st_x_20260822_01', 'stalled'),
+    row('req_fa_x_20260822_01', 'failed'),
+    row('req_ru_x_20260822_01', 'running'),
+    row('req_qu_x_20260822_01', 'queued'),
+    row('req_do_x_20260822_01', 'done'),
+    row('req_ca_x_20260822_01', 'cancelled'),
+    row('req_ar_x_20260822_01', 'archived'),
+  ];
+  const muted = ['req_ru_x_20260822_01'];
+
+  it('defaults the inbox to "Needs you" — what is waiting for the operator', () => {
+    assert.equal(DEFAULT_REQUEST_QUICK_FILTER, 'needsYou');
+  });
+
+  it('lists every tab the brief names, in order, "Needs you" first', () => {
+    assert.deepEqual(
+      QUICK_FILTERS.map((tab) => tab.key),
+      ['needsYou', 'all', 'running', 'blocked', 'done', 'muted', 'archived']
+    );
+  });
+
+  it('"Needs you" includes stalled (the split) and excludes archived', () => {
+    const matched = rows.filter((r) => matchesQuickFilter(r, 'needsYou', muted)).map((r) => r.request_id);
+    assert.deepEqual(matched, ['req_ny_x_20260822_01', 'req_st_x_20260822_01']);
+  });
+
+  it('"Blocked" is failed alone (the split) — stalled moved to "Needs you"', () => {
+    const matched = rows.filter((r) => matchesQuickFilter(r, 'blocked', muted)).map((r) => r.request_id);
+    assert.deepEqual(matched, ['req_fa_x_20260822_01']);
+  });
+
+  it('"All" is every active (non-archived) row', () => {
+    const matched = rows.filter((r) => matchesQuickFilter(r, 'all', muted));
+    assert.equal(matched.length, rows.length - 1);
+    assert.ok(!matched.some((r) => r.archived));
+  });
+
+  it('"Running" is running or queued', () => {
+    assert.deepEqual(
+      rows.filter((r) => matchesQuickFilter(r, 'running', muted)).map((r) => r.request_id),
+      ['req_ru_x_20260822_01', 'req_qu_x_20260822_01']
+    );
+  });
+
+  it('"Done" is done or cancelled', () => {
+    assert.deepEqual(
+      rows.filter((r) => matchesQuickFilter(r, 'done', muted)).map((r) => r.request_id),
+      ['req_do_x_20260822_01', 'req_ca_x_20260822_01']
+    );
+  });
+
+  it('"Muted" is exactly the muted set, minus archived', () => {
+    assert.deepEqual(
+      rows.filter((r) => matchesQuickFilter(r, 'muted', muted)).map((r) => r.request_id),
+      ['req_ru_x_20260822_01']
+    );
+  });
+
+  it('"Archived" is archived rows only, regardless of their stored status', () => {
+    assert.deepEqual(
+      rows.filter((r) => matchesQuickFilter(r, 'archived', muted)).map((r) => r.request_id),
+      ['req_ar_x_20260822_01']
+    );
+  });
+});
+
+describe('quickFilterToStatuses (the server-query equivalent of a quick-filter tab)', () => {
+  it("matches matchesQuickFilter's split for needsYou and blocked", () => {
+    assert.deepEqual(quickFilterToStatuses('needsYou'), ['needs_you', 'stalled']);
+    assert.deepEqual(quickFilterToStatuses('blocked'), ['failed']);
+  });
+
+  it('has no status constraint for all, muted or archived — those narrow a different way', () => {
+    assert.equal(quickFilterToStatuses('all'), undefined);
+    assert.equal(quickFilterToStatuses('muted'), undefined);
+    assert.equal(quickFilterToStatuses('archived'), undefined);
+  });
+
+  it('maps running and done to their two-status pairs', () => {
+    assert.deepEqual(quickFilterToStatuses('running'), ['running', 'queued']);
+    assert.deepEqual(quickFilterToStatuses('done'), ['done', 'cancelled']);
   });
 });
 
@@ -149,8 +270,8 @@ describe('editor vocabulary', () => {
     assert.equal(progressPhrase({ done: 0, total: 0 }, undefined), undefined);
   });
 
-  it('gives stalled and failed the danger tone — to an editor they are one sentence', () => {
-    assert.equal(requestStatusTone('stalled'), 'danger');
+  it("tones each status per D4 — stalled reads amber now, not merged into failed's red (see STALLED_VS_FAILED_SPLIT)", () => {
+    assert.equal(requestStatusTone('stalled'), 'warning');
     assert.equal(requestStatusTone('failed'), 'danger');
     assert.equal(requestStatusTone('needs_you'), 'warning');
     assert.equal(requestStatusTone('running'), 'info');

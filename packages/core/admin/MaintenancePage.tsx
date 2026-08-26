@@ -22,7 +22,7 @@ import { Input, Select, Textarea } from './forms';
 import { ConfirmDialog, Drawer, useToast } from './overlays';
 import { DataTable, type Column } from './data';
 import { DropdownMenu, Tabs } from './menus';
-import { IconAlertTriangle, IconDots, IconPlus, IconTrash, IconUser, IconWrench } from './icons';
+import { IconDots, IconPlus, IconTrash, IconUser, IconWrench } from './icons';
 import { fetchMe } from '@core/lib/admin/users-client';
 import {
   deleteBlob,
@@ -484,7 +484,7 @@ function MaintenanceBody() {
   if (ownerCheckError) {
     return (
       <Card>
-        <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't verify access" message={ownerCheckError} />
+        <EmptyState severity="error" title="Couldn't verify access" message={ownerCheckError} />
       </Card>
     );
   }

@@ -5,7 +5,7 @@ import { AgentRail } from './AgentRail';
 import { ArtifactPreviewPlaceholder, ArtifactStagePreview } from './ArtifactStagePreview';
 import { useChat } from './chat';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
-import { IconAlertTriangle, IconLibrary, IconSparkles } from './icons';
+import { IconLibrary, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { createFreeChat } from '@core/lib/admin/chat-client';
 import { fetchStudioData, type StudioRecord } from '@core/lib/admin/studio-client';
@@ -247,7 +247,7 @@ export default function TemplatesWorkspace({ identity }: { identity: SiteIdentit
           </div>
         ) : error ? (
           <EmptyState
-            icon={<IconAlertTriangle size={26} />}
+            severity="error"
             title="Templates unavailable"
             message={`${error} No template has been changed.`}
             action={

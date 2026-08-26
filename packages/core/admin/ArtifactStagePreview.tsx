@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { Button, EmptyState, Skeleton } from './primitives';
-import { IconAlertTriangle, IconLibrary } from './icons';
+import { IconLibrary } from './icons';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
 
 async function getToken(): Promise<string> {
@@ -39,7 +39,7 @@ export function ArtifactStagePreview({ artifact }: { artifact: EditorialArtifact
   if (error) {
     return (
       <EmptyState
-        icon={<IconAlertTriangle size={24} />}
+        severity="error"
         title="Preview unavailable"
         message="The artifact is still indexed, but its preview bytes could not be loaded. Try again without changing the asset."
         action={

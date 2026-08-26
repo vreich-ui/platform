@@ -30,7 +30,8 @@ import {
 import { acceptInvite as storeAcceptInvite, fetchMe, invitePreview } from '@core/lib/admin/users-client';
 import { Button, Card } from './primitives';
 import { Input } from './forms';
-import { IconAlertTriangle, IconCheck } from './icons';
+import { IconCheck } from './icons';
+import { SeverityIcon } from './severity';
 
 const MIN_PASSWORD_DEFAULT = 8;
 const WORKSPACE_PATH = '/admin';
@@ -115,11 +116,17 @@ function PasswordFields({
 
 function ErrorLine({ message }: { message: string }) {
   return (
+    // D4/D9 (T6.1): was a hardcoded `#c0392b` var() fallback and the
+    // Needs-you triangle glyph on what is always a failed/blocked operation
+    // (an expired link, a rejected password) — `--adm-danger*` tokens only,
+    // and the level's real Error glyph. `role="alert"` already makes this an
+    // assertive live region, so a screen-reader user hears it without a
+    // separate aria-live wrapper.
     <p
       role="alert"
-      className="flex items-start gap-2 rounded-md border border-[var(--adm-danger,#c0392b)] px-3 py-2 text-[length:var(--adm-text-sm)] text-[var(--adm-danger,#c0392b)]"
+      className="flex items-start gap-2 rounded-md border border-[var(--adm-danger)] bg-[var(--adm-danger-soft)] px-3 py-2 text-[length:var(--adm-text-sm)] text-[var(--adm-danger-text)]"
     >
-      <IconAlertTriangle size={16} />
+      <SeverityIcon level="error" size={16} title="" />
       <span>{message}</span>
     </p>
   );

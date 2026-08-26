@@ -143,6 +143,34 @@ export const resolveBranchHeadCommit = async (fetchImpl: typeof fetch = fetch): 
  * configured or the compare call fails, so a caller degrades exactly like
  * the existing "lookup unavailable" paths already do.
  */
+/**
+ * T5.1 R2 (T0.2 F3): a PERMANENT per-instance memo of the ancestry answer.
+ *
+ * `admin-release-state` asks this question once per distinct
+ * `publish_commit` across the whole object store, on EVERY request, and
+ * every miss is a GitHub `/compare` REST call — so a page view cost K
+ * outbound calls and K × ~150-300 ms, growing monotonically with publish
+ * history, and burned GitHub API quota per admin page view.
+ *
+ * The memo never expires and never needs invalidating, because what it
+ * caches is IMMUTABLE: whether commit A is an ancestor of commit B is a fact
+ * about two fixed points in the commit graph. A rewritten history would
+ * produce different SHAs, hence different keys. Only definite answers are
+ * memoized — `undefined` means "could not verify" (GitHub unconfigured, a
+ * non-2xx, a network error), which is a transient condition and must stay
+ * retryable.
+ *
+ * Scope is the warm function instance, matching `content-item-index.ts`'s
+ * in-repo precedent. `fetchImpl` is part of the key's contract only in the
+ * sense that tests inject their own: `resetCommitAncestryMemoForTesting`
+ * clears it between cases.
+ */
+const commitAncestryMemo = new Map<string, boolean>();
+
+export const resetCommitAncestryMemoForTesting = (): void => {
+  commitAncestryMemo.clear();
+};
+
 export const isCommitAncestorOrEqual = async (
   targetCommit: string,
   publishedCommit: string,
@@ -150,6 +178,10 @@ export const isCommitAncestorOrEqual = async (
 ): Promise<boolean | undefined> => {
   if (!targetCommit || !publishedCommit) return undefined;
   if (targetCommit === publishedCommit) return true;
+
+  const memoKey = `${targetCommit}...${publishedCommit}`;
+  const memoized = commitAncestryMemo.get(memoKey);
+  if (memoized !== undefined) return memoized;
 
   const { token, repo } = resolveGitHubConfig();
   if (!token || !repo) return undefined;
@@ -171,7 +203,9 @@ export const isCommitAncestorOrEqual = async (
     // 'ahead': publishedCommit is a descendant of targetCommit (targetCommit's
     // changes are included). 'identical': same commit (already handled above,
     // but GitHub can also report it this way for annotated/merge edge cases).
-    return body.status === 'ahead' || body.status === 'identical';
+    const answer = body.status === 'ahead' || body.status === 'identical';
+    commitAncestryMemo.set(memoKey, answer);
+    return answer;
   } catch {
     return undefined;
   }

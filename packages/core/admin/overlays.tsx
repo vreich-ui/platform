@@ -7,7 +7,7 @@
  * backdrop-click-to-close on top. All effects are client-only, so the
  * components server-render inertly and wire up on hydration.
  */
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { cn } from './utils';
@@ -308,8 +308,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [remove]
   );
 
+  /**
+   * T5.1 R12 (F16): `value={{ toast }}` allocated a NEW context object on
+   * every `ToastProvider` render, and `items` changes on every toast show
+   * and every toast expiry — so showing one toast re-rendered every
+   * `useToast()` consumer in the tree (on the object workspace, the whole
+   * page). `toast` itself is already stable, so memoising the wrapper is
+   * enough to make a toast a local update again.
+   */
+  const value = useMemo(() => ({ toast }), [toast]);
+
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div
         className="adm-root pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"

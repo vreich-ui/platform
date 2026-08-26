@@ -176,6 +176,43 @@ export const promoteBootstrapOwner = (getToken: GetToken, email: string) =>
   post<{ user: UserView }>(getToken, { verb: 'promote_bootstrap', email });
 
 /**
+ * T4.3: the subset of `MembershipPolicy` (plan §2.1) the client renders —
+ * fetched with `policy_get` (Owner+Admin tier) so the role picker/invite
+ * gate reflect this SITE's committed override instead of the compiled-in
+ * default. Superset of `MembershipPolicyView` (`admin/logic.ts`); callers
+ * take only the fields that logic needs.
+ */
+export interface MembershipPolicyServer {
+  invite_ttl_hours: number;
+  max_resends: number;
+  allowed_email_domains?: string[];
+  default_role: UserRole;
+  min_owners: number;
+  require_display_name: boolean;
+  purge_grace_days: number;
+  who_can_invite: 'owner' | 'owner_admin';
+  roles_admin_may_grant: Array<'admin' | 'publisher' | 'editor' | 'viewer'>;
+  default_role_for_external: 'viewer' | 'editor';
+  delete_identity_on_remove: boolean;
+}
+
+export const getMembershipPolicy = (getToken: GetToken) =>
+  post<{ policy: MembershipPolicyServer }>(getToken, { verb: 'policy_get' });
+
+/** T4.3: the GDPR-style export bundle (verb `export`, alias `export_person`; Owner-only) — Person + Memberships + audit + authored-history ids. */
+export interface PersonExportBundle {
+  exported_at: string;
+  person: Record<string, unknown>;
+  memberships: Array<Record<string, unknown>>;
+  invitations: Array<Record<string, unknown>>;
+  audit: Array<Record<string, unknown>>;
+  authored_history: Array<{ object_type: string; object_id: string; at: string; action: string }>;
+}
+
+export const exportMember = (getToken: GetToken, email: string) =>
+  post<{ export: PersonExportBundle }>(getToken, { verb: 'export', email });
+
+/**
  * T18.0b — the accept page's verbs (server contract: T18.0a).
  * `acceptInvite` runs on the fresh session GoTrue's /verify returned: flips the
  * caller's invited record to active with the typed name; `needs_grant:true`

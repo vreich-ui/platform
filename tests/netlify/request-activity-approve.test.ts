@@ -163,3 +163,80 @@ test('a plain read reports whether THIS caller may approve, so no surface offers
     restore();
   }
 });
+
+// ─── T6.2 — the server-side half of the façade's `partly_applied` mapping ──
+//
+// No test in this repo exercised the branch where the durable decision
+// succeeds but the advance does not, before this one. `decisions.ts` (T3.2)
+// depends on this endpoint returning 200 with `error` set — rather than
+// undoing the recorded decision or answering a non-2xx status — and maps
+// exactly that shape onto `code: 'partly_applied'`
+// (`packages/core/lib/admin/decisions.test.ts`'s recorder-based test pins
+// the client side of this; this pins the server side it depends on).
+
+test('approve records the durable decision even when the advance fails — the decision is not undone, and 200+error is exactly what the client-side partly_applied mapping depends on', async () => {
+  const restore = stubBridge();
+  try {
+    dispatch = (name) =>
+      name === 'workflow_run_all'
+        ? { ok: false } // CMS-Agent's own envelope failure shape — see cms-agent-client.ts's `envelope.ok !== true` branch.
+        : { ok: true, data: { run: { runId: RUN_ID } } };
+
+    const res = await call({ run_id: RUN_ID, action: 'approve' }, OWNER_CTX);
+    assert.equal(res.statusCode, 200, res.body); // NOT a 4xx/5xx — the durable half stands.
+
+    const body = parse(res);
+    assert.equal(body.activity, null);
+    assert.equal(body.reason, 'cms_agent_protocol_error');
+    assert.match(String(body.error ?? ''), /CMS-Agent returned no/);
+
+    const names = calls.map((entry) => entry.name);
+    assert.deepEqual(
+      names,
+      ['workflow_set_operator_publish_decision', 'workflow_run_all'],
+      'the durable decision must have gone out BEFORE the advance that then failed — and the function must not attempt a read after failing to advance'
+    );
+    assert.equal(calls[0]!.args.decision, 'approved', 'the operator decision itself was never rolled back');
+  } finally {
+    restore();
+  }
+});
+
+// ─── T6.2 — the endpoint's contract matches the façade's honest table ─────
+//
+// `decisionAvailability` (packages/core/lib/admin/decisions.ts) tells the UI
+// this endpoint's whole request schema is `{request_id|run_id, action}` —
+// Modify does not exist here, and a typed reason never reaches it. These pin
+// that claim from the SERVER side: the endpoint really does reject an action
+// this façade already refuses to send, and really does silently drop a
+// reason it was never asked to accept (zod strips unknown keys rather than
+// erroring, so a stray `reason` must not change the outcome at all).
+
+test("rejects action:'modify' at the schema — the façade already refuses to send it, and the server agrees there is no such verb here", async () => {
+  const restore = stubBridge();
+  try {
+    const res = await call({ run_id: RUN_ID, action: 'modify' }, OWNER_CTX);
+    assert.equal(res.statusCode, 400, res.body);
+    assert.equal(calls.length, 0, 'a request the schema itself refuses must never reach CMS-Agent');
+  } finally {
+    restore();
+  }
+});
+
+test('a reason field the façade never sends is silently dropped, not rejected and not forwarded to CMS-Agent', async () => {
+  const restore = stubBridge();
+  try {
+    const res = await call({ run_id: RUN_ID, action: 'approve', reason: 'why I approved it' }, OWNER_CTX);
+    assert.equal(res.statusCode, 200, res.body);
+    // Same call shape as the plain-reason-free approve above — the field
+    // reached zod and was stripped, not threaded through to the bridge.
+    for (const entry of calls) {
+      assert.ok(
+        !('reason' in entry.args),
+        `${entry.name} must never receive a reason this endpoint's schema has no field for`
+      );
+    }
+  } finally {
+    restore();
+  }
+});

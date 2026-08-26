@@ -15,6 +15,7 @@
 // from this client:load island; that would silently drop any env override.
 import type { SiteIdentity } from '../lib/site-identity.js';
 import { useEffect, useRef, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 import type { ReactNode } from 'react';
 
 import { cn } from './utils';
@@ -25,6 +26,7 @@ import { Drawer } from './overlays';
 import { AdminErrorBoundary } from './ErrorBoundary';
 import {
   IconHome,
+  IconLayoutGrid,
   IconLibrary,
   IconSparkles,
   IconPalette,
@@ -37,6 +39,8 @@ import {
   IconRocket,
   IconClock,
   IconExternalLink,
+  IconChartBar,
+  IconMail,
   type IconProps,
 } from './icons';
 import { objectTypeLabel } from '@core/lib/admin/display-name';
@@ -44,11 +48,13 @@ import type { LibraryRow } from '@core/lib/admin/library-logic';
 import { avatarSrc } from '@core/lib/admin/users-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { welcomeGateDecision } from './logic';
-import { listRequests } from '@core/lib/admin/requests-client';
+import { useRequestsIndex } from '@core/lib/admin/requests-store';
 import { summarizeRequestRows } from '@core/lib/admin/request-logic';
 import { useRequestNotifications } from './useRequestNotifications';
+import { SeverityCountPill } from './severity';
+import { NeedsYouMenu } from './NeedsYouMenu';
 import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
-import { settingsNavigationLabel } from '@core/lib/admin/admin-navigation';
+import { settingsNavigationLabel, visibleNavGroups } from '@core/lib/admin/admin-navigation';
 
 async function shellToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -60,11 +66,18 @@ interface NavItem {
   href: string;
   icon: (p: IconProps) => ReactNode;
   soon?: boolean;
+  /**
+   * T4.3 nav fix: per-ITEM now, not just per-group (see
+   * `lib/admin/admin-navigation.ts`'s `visibleNavGroups` doc comment for
+   * why) — a group can mix owner-only and admin-visible items.
+   */
+  ownerOnly?: boolean;
 }
 
 interface NavGroup {
   label?: string;
   items: NavItem[];
+  /** Hides the WHOLE group for a non-owner regardless of its items' own flags — use this only when nothing in the group should ever show to a non-owner. */
   ownerOnly?: boolean;
 }
 
@@ -75,23 +88,39 @@ export const NAV: NavGroup[] = [
     items: [
       { label: 'Editorial', href: '/admin', icon: IconHome },
       { label: 'Requests', href: '/admin/requests', icon: IconClock },
-      { label: 'Templates', href: '/admin/templates', icon: IconPalette },
-      { label: 'Media', href: '/admin/media', icon: IconLibrary },
-      { label: 'Content', href: '/admin/content', icon: IconLibrary },
+      // T2.1 D1(a): Templates/Media/Content collapsed into the one objects
+      // plane — the old three routes still exist (netlify.toml redirects
+      // them here) but are no longer separate nav entries.
+      { label: 'Objects', href: '/admin/objects', icon: IconLibrary },
+      // T4.4: article variant families + winner selection. Deliberately NOT
+      // labelled "A/B tests" — nothing serves a traffic split today, so the
+      // route never uses that phrase (see docs 12-object-tracking §15.4).
+      { label: 'Variants', href: '/admin/variants', icon: IconLayoutGrid },
+      { label: 'Traffic', href: '/admin/traffic', icon: IconChartBar },
       { label: 'Release', href: '/admin/release', icon: IconRocket },
     ],
   },
   {
     label: 'Settings',
-    ownerOnly: true,
     items: [
-      { label: 'Visual identity', href: '/admin/settings/visual-identity', icon: IconPalette },
-      { label: 'Guardrails', href: '/admin/settings/guardrails', icon: IconSettings },
+      { label: 'Visual identity', href: '/admin/settings/visual-identity', icon: IconPalette, ownerOnly: true },
+      { label: 'Guardrails', href: '/admin/settings/guardrails', icon: IconSettings, ownerOnly: true },
+      // T4.3: was inside the (then wholly owner-only) Settings group, so a
+      // non-owner Admin — whom `AdminUsers.tsx` explicitly supports as a
+      // read-only viewer (`list` is admin-tier, not owner-tier) — had no nav
+      // link to this page at all, only a typed-URL path to it. The server
+      // wall (`admin-users.ts`) is and remains the real boundary; this only
+      // changes whether the link is shown.
       { label: 'Admins', href: '/admin/settings/admins', icon: IconUser },
-      { label: 'Profile', href: '/admin/profile', icon: IconUser },
-      { label: 'Maintenance', href: '/admin/maintenance', icon: IconWrench },
-      { label: 'Component kit', href: '/admin/kit', icon: IconLibrary },
-      { label: 'Agents', href: '/admin/agents', icon: IconSparkles },
+      { label: 'Profile', href: '/admin/profile', icon: IconUser, ownerOnly: true },
+      { label: 'Maintenance', href: '/admin/maintenance', icon: IconWrench, ownerOnly: true },
+      { label: 'Component kit', href: '/admin/kit', icon: IconLibrary, ownerOnly: true },
+      { label: 'Agents', href: '/admin/agents', icon: IconSparkles, ownerOnly: true },
+      // G2 (email list administration, deferred): the nav entry exists so the
+      // destination is discoverable, but it is deliberately inert — no
+      // route, no page, no email API client. Visible to any admin (not
+      // ownerOnly) since it does nothing yet regardless of role.
+      { label: 'Email', href: '/admin/settings/email', icon: IconMail, soon: true },
     ],
   },
 ];
@@ -112,7 +141,7 @@ function NavList({
   settingsLabel: string;
   onNavigate?: () => void;
 }) {
-  const groups = NAV.filter((group) => !group.ownerOnly || owner);
+  const groups = visibleNavGroups(NAV, owner);
   return (
     <nav className="flex flex-col gap-5" aria-label="Admin sections">
       {groups.map((group, gi) => (
@@ -174,50 +203,40 @@ function NavList({
 }
 
 /**
- * W19: the one poll behind the shell's pills, the toasts, the browser
- * notification and the tab-title count.
+ * T2.3: the shell's pills, the toasts, the browser notification and the
+ * tab-title count now all read `useRequestsIndex` (`lib/admin/requests-store`)
+ * — the ONE shared poll chain, not an interval this component owns itself.
+ * T0.2 (plan F7) found this component running its own fixed-15s chain
+ * against the same `admin-requests {action:'list'}` endpoint
+ * `RequestsWorkspace.tsx` polled independently at 5-30s; the shared store
+ * collapses both into one, with the interval backing off to nothing while
+ * the tab is hidden (`requests-store.ts`'s own comment has the rest).
  *
  * It is a CHILD of `ToastProvider` rather than part of `AdminShell`'s body
  * because the shell renders that provider and cannot consume its own context.
- * Rendering nothing is the point: it exists to own the interval exactly once
- * per page, so no two surfaces can announce the same transition.
+ * Rendering nothing is the point: it exists to own the notification pipeline
+ * exactly once per page, so no two surfaces can announce the same transition.
  */
 function RequestPulse({
   onCounts,
 }: {
-  onCounts: (counts: { working: number; needsYou: number; stalled: number }) => void;
+  onCounts: (counts: { working: number; needsYou: number; blocked: number }) => void;
 }) {
   const { toast } = useToast();
   const { ingest, clearUnread } = useRequestNotifications(shellToken, toast);
+  const index = useRequestsIndex(shellToken);
+  const { rows, lastNotified, muted, notifyFirstContact } = index;
 
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        // W19 T19.2: ONE blob GET (the request index), not the O(N) chat scan
-        // this used to run every 15 s per signed-in admin (plan F7).
-        const result = await listRequests(shellToken, { limit: 100 });
-        if (!alive) return;
-        onCounts(summarizeRequestRows(result.requests));
-        ingest(result.requests, result.last_notified ?? {}, result.muted ?? [], {
-          ...(result.notify_first_contact ? { firstContact: true } : {}),
-        });
-        // Being ON the requests surface IS reading them — and it has to be
-        // re-checked on every poll, not once at mount: a person who leaves the
-        // page open watches each transition arrive in the list in front of
-        // them, and a tab title counting them as unread never clears.
-        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/requests')) clearUnread();
-      } catch {
-        // Global utilities are progressive enhancement; page work remains usable.
-      }
-    };
-    void load();
-    const timer = window.setInterval(load, 15_000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [ingest, onCounts, clearUnread]);
+    if (!rows) return;
+    onCounts(summarizeRequestRows(rows));
+    ingest(rows, lastNotified, muted, notifyFirstContact ? { firstContact: true } : {});
+    // Being ON the requests surface IS reading them — and it has to be
+    // re-checked on every tick, not once at mount: a person who leaves the
+    // page open watches each transition arrive in the list in front of
+    // them, and a tab title counting them as unread never clears.
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/requests')) clearUnread();
+  }, [rows, lastNotified, muted, notifyFirstContact, onCounts, ingest, clearUnread]);
 
   return null;
 }
@@ -238,7 +257,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const [mobileNav, setMobileNav] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [objectRows, setObjectRows] = useState<LibraryRow[]>([]);
-  const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0, stalled: 0 });
+  const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0, blocked: 0 });
   const objectsAttempted = useRef(false);
 
   // W18 T18.5: the welcome gate. A member whose Person.onboarding is not
@@ -269,6 +288,9 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
       completed: Boolean(currentUser.onboarding?.completed_at),
       requireDisplayName: currentUser.requireDisplayName ?? true,
     });
+    // T5.1 R4 exception #2 — `replace`, not `navigate()`: the welcome gate
+    // must not leave a back-navigable entry, and the caller's onboarding
+    // record changes underneath it, so the module caches must go too.
     if (decision === 'redirect') window.location.replace('/admin/welcome');
   }, [currentUser.loading, currentUser.onboarding, currentUser.roles, currentUser.requireDisplayName]);
 
@@ -303,6 +325,16 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     };
   }, [paletteOpen]);
 
+  /**
+   * T5.1 R4 (F14) exception #1 — this one stays a HARD document load on
+   * purpose. Every other in-app jump in this file is now `navigate()` (an
+   * Astro `ClientRouter` swap, which preserves the ES module registry and
+   * with it `library-client`'s inventory cache, `use-current-user`'s
+   * snapshot and `requests-store`'s index). Signing out is the one
+   * transition that must DESTROY all of that: a swap would leave the
+   * previous person's cached inventory, roles and request rows in module
+   * scope for whoever logs in next.
+   */
   const onLogout = () => {
     import('@core/lib/admin/goTrueClient')
       .then((m) => m.logout())
@@ -311,14 +343,14 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
       .finally(() => window.location.assign('/admin'));
   };
 
-  const navCommands: CommandItem[] = NAV.filter((group) => !group.ownerOnly || owner).flatMap((group) =>
+  const navCommands: CommandItem[] = visibleNavGroups(NAV, owner).flatMap((group) =>
     group.items
       .filter((item) => !item.soon)
       .map((item) => ({
         id: item.href,
         label: item.label,
         group: group.label ?? 'Go to',
-        onSelect: () => window.location.assign(item.href),
+        onSelect: () => void navigate(item.href),
       }))
   );
 
@@ -328,7 +360,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
       label: 'Release to production',
       group: 'Actions',
       icon: <IconRocket size={16} />,
-      onSelect: () => window.location.assign('/admin/release'),
+      onSelect: () => void navigate('/admin/release'),
     },
   ];
 
@@ -337,8 +369,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     label: row.display_name,
     group: objectTypeLabel(row.object_type),
     keywords: [row.object_id, row.object_type],
-    onSelect: () =>
-      window.location.assign(`/admin/content/${encodeURIComponent(row.object_id)}?type=${row.object_type}`),
+    onSelect: () => void navigate(`/admin/content/${encodeURIComponent(row.object_id)}?type=${row.object_type}`),
   }));
 
   const commands: CommandItem[] = [...actionCommands, ...navCommands, ...objectCommands];
@@ -390,33 +421,36 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             <h1 className="flex-1 truncate text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]">
               {title ?? 'Workspace'}
             </h1>
-            {/* W19: the three pills deep-link to the matching /admin/requests
-                filter — they used to point at /admin/release, which is not a
-                request list. */}
-            {workCounts.working > 0 ? (
-              <a
-                href="/admin/requests?status=running%2Cqueued"
-                className="adm-focusable hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-info-soft)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-info-text)] sm:inline-flex"
-              >
-                Working · {workCounts.working}
-              </a>
-            ) : null}
-            {workCounts.needsYou > 0 ? (
-              <a
-                href="/admin/requests?status=needs_you"
-                className="adm-focusable hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-warning-soft)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-warning-text)] sm:inline-flex"
-              >
-                Needs you · {workCounts.needsYou}
-              </a>
-            ) : null}
-            {workCounts.stalled > 0 ? (
-              <a
-                href="/admin/requests?status=stalled%2Cfailed"
-                className="adm-focusable hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-danger-soft)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-danger-text)] sm:inline-flex"
-              >
-                Stalled · {workCounts.stalled}
-              </a>
-            ) : null}
+            {/* T2.3 / T0.3 B5-B6: the three pills deep-link to the matching
+                /admin/requests quick filter, and now route through
+                SeverityCountPill (D4/T1.1) instead of three hand-written
+                tone classes — `blocked` (red) is `failed` alone under
+                STALLED_VS_FAILED_SPLIT; `stalled` moved into `needsYou`
+                (amber). Zero red for a non-blocked state, per the flag in
+                `request-logic.ts`. */}
+            <span className="hidden items-center gap-2 sm:flex">
+              {workCounts.working > 0 ? (
+                <SeverityCountPill
+                  level="info"
+                  count={workCounts.working}
+                  label="Working"
+                  href="/admin/requests?filter=running"
+                />
+              ) : null}
+              {/* T3.2 / T0.3 A5: the one pill that is NOT a link. D3 requires
+                  decision buttons to render WITH every needs-decision state,
+                  and names the header badge dropdown by name — so this pill
+                  opens the same Approve/Reject controls the inbox row has,
+                  over the same rows, through the same façade and the same
+                  shared store. `Working` and `Blocked` stay links: neither is
+                  a question anyone is being asked. */}
+              {workCounts.needsYou > 0 ? (
+                <NeedsYouMenu getToken={shellToken} count={workCounts.needsYou} roles={currentUser.roles} />
+              ) : null}
+              {workCounts.blocked > 0 ? (
+                <SeverityCountPill level="blocked" count={workCounts.blocked} href="/admin/requests?filter=blocked" />
+              ) : null}
+            </span>
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
@@ -466,7 +500,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
                     id: 'profile',
                     label: 'Profile',
                     icon: <IconUser size={16} />,
-                    onSelect: () => window.location.assign('/admin/profile'),
+                    onSelect: () => void navigate('/admin/profile'),
                   },
                   ...(owner
                     ? [
@@ -474,7 +508,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
                           id: 'settings',
                           label: 'Settings',
                           icon: <IconSettings size={16} />,
-                          onSelect: () => window.location.assign('/admin/settings/admins'),
+                          onSelect: () => void navigate('/admin/settings/admins'),
                         },
                       ]
                     : []),

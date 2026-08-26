@@ -31,7 +31,11 @@ export function statusTone(status: CriterionStatus | string): Tone {
     case 'open':
     case 'in_progress':
       return 'info';
+    // T0.3 Table C: `archived` is a settled fact, not a decision the viewer
+    // is being asked to make — neutral, matching `library-logic.ts`'s
+    // `rowStatus()` (the two disagreed: this generic mapper said amber).
     case 'archived':
+      return 'neutral';
     case 'changes_requested':
       return 'warning';
     case 'failed':
@@ -209,12 +213,22 @@ export interface MemberRowInput {
   membership_source?: string;
 }
 
-export type MemberAction = 'change_role' | 'suspend' | 'reinstate' | 'remove' | 'promote_bootstrap' | 'view_audit';
+export type MemberAction =
+  | 'change_role'
+  | 'suspend'
+  | 'reinstate'
+  | 'remove'
+  | 'promote_bootstrap'
+  | 'view_audit'
+  | 'export';
 
 /**
  * Which row actions are available for a member, given who is acting. Env
- * (break-glass) rows: only Promote + audit. Self: audit only. Removed: audit
- * only. Non-owners: audit only (the page is read-only for them).
+ * (break-glass) rows: only Promote + audit + export. Self: audit + export
+ * only. Removed: audit + export only (the GDPR bundle is retained through the
+ * purge grace period, so export must survive removal). Non-owners: nothing
+ * (the page is read-only for them — `export`/`member_audit` are Owner-tier
+ * verbs server-side, T4.3/plan §7).
  */
 export function memberActionsFor(input: {
   row: MemberRowInput;
@@ -223,7 +237,7 @@ export function memberActionsFor(input: {
 }): MemberAction[] {
   // T18.6a: an Admin sees the list read-only (the audit stream is Owner-only) — no row actions at all.
   if (!input.actorRoles.includes('owner')) return [];
-  const actions: MemberAction[] = ['view_audit'];
+  const actions: MemberAction[] = ['view_audit', 'export'];
   const isSelf = input.row.email === input.actorEmail;
   if (isSelf) return actions;
   if (input.row.source === 'environment') return ['promote_bootstrap', ...actions];

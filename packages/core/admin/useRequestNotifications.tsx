@@ -12,6 +12,7 @@
  * every channel at once.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 
 import type { ToastOptions } from './overlays';
 import { ackNotifications, type RequestRowView } from '@core/lib/admin/requests-client';
@@ -57,7 +58,9 @@ const fireBrowserNotification = (notification: PendingNotification) => {
     });
     shown.onclick = () => {
       window.focus();
-      window.location.assign(deepLink(notification.request_id));
+      // T5.1 R4: a ClientRouter swap, not a document load — the tray click
+      // lands on an already-warm tab whose module caches are worth keeping.
+      void navigate(deepLink(notification.request_id));
     };
   } catch {
     // A browser that refuses to construct one is not worth breaking the page over.

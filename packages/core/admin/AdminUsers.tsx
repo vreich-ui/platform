@@ -20,6 +20,17 @@
  * T18.4 capability). The invite dialog gains an optional message and an
  * inline domain-not-allowed error; a fresh invitation shows its shareable
  * link exactly once (we store only the token's hash).
+ *
+ * T4.3 adds: a search box + Role/Status filters over the members table
+ * (`filterMembers`, `lib/admin/admin-user-presentation.ts`, pure + tested);
+ * a per-member **Export data** row action (the existing `export`/
+ * `export_person` verb — a GDPR-style Person+Membership+audit bundle
+ * downloaded as JSON, never sent anywhere); the real per-site policy
+ * (`policy_get`) instead of the compiled-in default, so the role picker's
+ * disabled options reflect this site's committed override; and the
+ * `suspended` status pill is `neutral`, not amber — suspension is a settled
+ * fact about someone else's account, not something the viewer must act on
+ * (W19 severity rule, `lib/admin/severity.ts`).
  */
 import { useEffect, useMemo, useState } from 'react';
 
@@ -45,8 +56,13 @@ import {
   type MembershipPolicyView,
   type MembershipTier,
 } from './logic';
-import { canonicalMemberDisplayName, presentLastSeen } from '@core/lib/admin/admin-user-presentation';
-import { IconDots, IconPlus, IconAlertTriangle, IconUser, IconCheck } from './icons';
+import {
+  canonicalMemberDisplayName,
+  filterMembers,
+  presentLastSeen,
+  resolveMembershipStatus,
+} from '@core/lib/admin/admin-user-presentation';
+import { IconDots, IconPlus, IconUser, IconCheck, IconSearch } from './icons';
 import {
   fetchMe,
   listUsers,
@@ -63,8 +79,11 @@ import {
   listUnmanagedIdentities,
   grantRole,
   avatarSrc,
+  getMembershipPolicy,
+  exportMember,
   type UserView,
   type UserRole,
+  type MembershipStatus,
   type AuditEventView,
   type InvitationView,
   type UnmanagedIdentityView,
@@ -108,13 +127,20 @@ const friendlyError = (err: unknown): string => {
   return msg;
 };
 
-const membershipStatus = (u: UserView): 'invited' | 'active' | 'suspended' | 'removed' =>
-  u.membership_status ?? (u.status === 'disabled' ? 'suspended' : u.status);
+/** Shared with the toolbar's status filter — resolves the v1 VIEW's `disabled` to the real v2 status. */
+const membershipStatus = resolveMembershipStatus;
 
 const statusLabelFor = (u: UserView) => {
   const s = membershipStatus(u);
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
+/**
+ * T4.3 fix (T0.3 Table C): `suspended` was `warning` (amber) — amber means
+ * "waiting for a human to act" (W19, `lib/admin/severity.ts`), and suspension
+ * is the opposite: a settled administrative fact about someone else's
+ * account that the viewer already decided. `active`/`invited` are unaffected;
+ * `removed` stays the `neutral` default.
+ */
 const statusToneFor = (u: UserView) => {
   switch (membershipStatus(u)) {
     case 'active':
@@ -122,7 +148,7 @@ const statusToneFor = (u: UserView) => {
     case 'invited':
       return 'info' as const;
     case 'suspended':
-      return 'warning' as const;
+      return 'neutral' as const;
     default:
       return 'neutral' as const;
   }
@@ -182,7 +208,11 @@ export function AdminUsersBody() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  const policy: MembershipPolicyView = DEFAULT_POLICY_VIEW;
+  // T4.3: the compiled-in default until `policy_get` answers (Owner+Admin
+  // tier — fetched right after `me`); keeps the role picker's "who may I
+  // grant this to" gate accurate on a site whose committed policy override
+  // (`config/membership-policy.ts`) differs from the fleet default.
+  const [policy, setPolicy] = useState<MembershipPolicyView>(DEFAULT_POLICY_VIEW);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -193,6 +223,14 @@ export function AdminUsersBody() {
   const [createdLink, setCreatedLink] = useState<{ email: string; token: string } | null>(null);
   const [tab, setTab] = useState<'members' | 'invitations' | 'identities'>('members');
   const [invitationsVersion, setInvitationsVersion] = useState(0);
+
+  // T4.3: members-table search + role/status filters (pure predicate in
+  // `lib/admin/admin-user-presentation.ts`, applied client-side over the
+  // already-fetched list — no new list endpoint).
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<MembershipStatus | 'all'>('all');
+  const [exportingEmail, setExportingEmail] = useState<string | null>(null);
 
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [roleDialog, setRoleDialog] = useState<{ user: UserView; role: UserRole } | null>(null);
@@ -218,7 +256,17 @@ export function AdminUsersBody() {
         setMe(res.user);
         setRoles(res.roles);
         // T18.6a: `list` is admin-tier (read-only for Admins); Owners get the actions.
-        if (res.roles.includes('admin')) await refresh(false);
+        if (res.roles.includes('admin')) {
+          await refresh(false);
+          // T4.3: best-effort — `policy_get` is admin-tier too, but a site
+          // that cannot answer it (or an older deploy without the verb) just
+          // keeps DEFAULT_POLICY_VIEW; never blocks the page on this.
+          getMembershipPolicy(getToken)
+            .then((policyRes) => {
+              if (alive) setPolicy(policyRes.policy);
+            })
+            .catch(() => undefined);
+        }
         if (alive) setLoading(false);
       } catch (err) {
         if (alive) {
@@ -334,16 +382,51 @@ export function AdminUsersBody() {
     }
   };
 
+  /** T4.3: the `export`/`export_person` verb — a GDPR-style bundle, downloaded as JSON. Nothing is sent anywhere. */
+  const doExportMember = async (u: UserView) => {
+    setExportingEmail(u.email);
+    try {
+      const { export: bundle } = await exportMember(getToken, u.email);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${u.email.replace(/[^a-z0-9.@-]/gi, '_')}-export.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: `Exported ${u.display_name}`,
+        description: 'Person, membership, invitations and audit as JSON.',
+        tone: 'success',
+      });
+    } catch (err) {
+      toast({ title: 'Export failed', description: friendlyError(err), tone: 'danger' });
+    } finally {
+      setExportingEmail(null);
+    }
+  };
+
   const visibleUsers = useMemo(
     () => (showRemoved ? users : users.filter((u) => membershipStatus(u) !== 'removed')),
     [users, showRemoved]
+  );
+
+  const hasActiveFilters = search.trim() !== '' || roleFilter !== 'all' || statusFilter !== 'all';
+  const clearFilters = () => {
+    setSearch('');
+    setRoleFilter('all');
+    setStatusFilter('all');
+  };
+  const filteredUsers = useMemo(
+    () => filterMembers(visibleUsers, { query: search, role: roleFilter, status: statusFilter }),
+    [visibleUsers, search, roleFilter, statusFilter]
   );
 
   if (loading) return <Skeleton variant="rect" height={280} />;
   if (error) {
     return (
       <Card>
-        <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't load members" message={error} />
+        <EmptyState severity="error" title="Couldn't load members" message={error} />
       </Card>
     );
   }
@@ -452,6 +535,15 @@ export function AdminUsersBody() {
               }
             : null,
           { id: 'audit', label: 'View audit trail', onSelect: () => setAuditUser(u) },
+          actions.includes('export')
+            ? {
+                id: 'export',
+                label: exportingEmail === u.email ? 'Exporting…' : 'Export data…',
+                title: 'Download a JSON bundle: person, membership, invitations and audit for this member.',
+                disabled: exportingEmail === u.email,
+                onSelect: () => void doExportMember(u),
+              }
+            : null,
           actions.includes('suspend')
             ? {
                 id: 'suspend',
@@ -504,7 +596,8 @@ export function AdminUsersBody() {
     <div className="flex flex-col gap-4 pt-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-          {visibleUsers.length} {visibleUsers.length === 1 ? 'member' : 'members'}
+          {hasActiveFilters ? `${filteredUsers.length} of ${visibleUsers.length}` : visibleUsers.length}{' '}
+          {visibleUsers.length === 1 && !hasActiveFilters ? 'member' : 'members'}
           {removedCount ? ` · ${removedCount} removed` : ''}
         </p>
         <div className="flex items-center gap-3">
@@ -530,16 +623,76 @@ export function AdminUsersBody() {
         </div>
       </div>
 
+      {visibleUsers.length > 0 ? (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-full max-w-sm">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              aria-label="Search members"
+            />
+          </div>
+          <div className="w-40">
+            <Select
+              aria-label="Filter by role"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value as UserRole | 'all')}
+              options={[
+                { value: 'all', label: 'All roles' },
+                ...MEMBERSHIP_TIERS.map((t) => ({ value: t.value, label: t.label })),
+              ]}
+            />
+          </div>
+          <div className="w-40">
+            <Select
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(e) => {
+                const next = e.target.value as MembershipStatus | 'all';
+                setStatusFilter(next);
+                // `removed` rows are excluded from `visibleUsers` unless the
+                // "Show removed" switch also fetched them — picking the
+                // status makes the fetch happen too, so the filter isn't
+                // silently empty.
+                if (next === 'removed' && !showRemoved) {
+                  setShowRemoved(true);
+                  void refresh(true);
+                }
+              }}
+              options={[
+                { value: 'all', label: 'All statuses' },
+                { value: 'invited', label: 'Invited' },
+                { value: 'active', label: 'Active' },
+                { value: 'suspended', label: 'Suspended' },
+                { value: 'removed', label: 'Removed' },
+              ]}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {visibleUsers.length === 0 ? (
         <EmptyState
           icon={<IconUser size={26} />}
           title="No members yet"
           message="Invite your first member to start managing this publication."
         />
+      ) : filteredUsers.length === 0 ? (
+        <EmptyState
+          icon={<IconSearch size={26} />}
+          title="No members match"
+          message="Try a different name, e-mail, role or status."
+          action={
+            <Button variant="secondary" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          }
+        />
       ) : (
         <DataTable
           columns={columns}
-          rows={visibleUsers}
+          rows={filteredUsers}
           getRowKey={(u) => u.email}
           initialSort={{ key: 'display_name', dir: 'asc' }}
         />
@@ -997,7 +1150,7 @@ function InvitationsPanel({
   if (error) {
     return (
       <Card className="mt-3">
-        <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't load invitations" message={error} />
+        <EmptyState severity="error" title="Couldn't load invitations" message={error} />
       </Card>
     );
   }
@@ -1207,7 +1360,7 @@ function IdentitiesPanel({
       {state.error_code === 'identity_admin_unavailable' ? (
         <Card>
           <EmptyState
-            icon={<IconAlertTriangle size={26} />}
+            severity="error"
             title="Identity list unavailable"
             message="The Identity admin token was not available for this request (Identity disabled on the site, or a local run). Enable Netlify Identity on the site and reload."
           />

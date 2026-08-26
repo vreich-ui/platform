@@ -139,11 +139,7 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
   if (error || !gov || !draft) {
     return (
       <Card>
-        <EmptyState
-          icon={<IconAlertTriangle size={26} />}
-          title="Couldn't load guardrails"
-          message={error ?? undefined}
-        />
+        <EmptyState severity="error" title="Couldn't load guardrails" message={error ?? undefined} />
       </Card>
     );
   }

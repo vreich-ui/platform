@@ -206,3 +206,32 @@
   to = "/admin/requests/__request"
   status = 200
 
+# T2.1 D1(a): the objects plane is now canonical -- Templates/Media/Content
+# collapse into one library at /admin/objects. force=true because each of
+# these still has a real built page.
+[[redirects]]
+  from = "/admin/content"
+  to = "/admin/objects"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/admin/templates"
+  to = "/admin/objects?type=template,section_template"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/admin/studio"
+  to = "/admin/objects?type=template,section_template"
+  status = 301
+  force = true
+
+# No governed object type is "media" -- the closest honest destination is
+# the objects plane's grid view, not a fabricated type facet.
+[[redirects]]
+  from = "/admin/media"
+  to = "/admin/objects?view=grid"
+  status = 301
+  force = true
+

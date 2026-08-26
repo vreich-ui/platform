@@ -50,6 +50,11 @@ export const IconChevronDown = (p: IconProps) => (
     <path d="M6 9l6 6 6-6" />
   </IconBase>
 );
+export const IconChevronLeft = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M15 6l-6 6 6 6" />
+  </IconBase>
+);
 export const IconChevronRight = (p: IconProps) => (
   <IconBase {...p}>
     <path d="M9 6l6 6-6 6" />
@@ -109,6 +114,22 @@ export const IconInfo = (p: IconProps) => (
   <IconBase {...p}>
     <circle cx="12" cy="12" r="9" />
     <path d="M12 11v5M12 8h.01" />
+  </IconBase>
+);
+/** D4 "Error" glyph (T1.1) — a circle-!, deliberately distinct from `IconInfo`'s
+ * circle-i (stroke above the dot here, not below) and from `IconAlertTriangle`. */
+export const IconAlertCircle = (p: IconProps) => (
+  <IconBase {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v6M12 17h.01" />
+  </IconBase>
+);
+/** D4 "Blocked" glyph (T1.1) — an octagon with a hard stop mark inside, distinct
+ * from the bare cross `IconX` and reserved for the true dead-end level. */
+export const IconOctagon = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z" />
+    <path d="M8.5 8.5l7 7M15.5 8.5l-7 7" />
   </IconBase>
 );
 export const IconDots = (p: IconProps) => (
@@ -202,5 +223,51 @@ export const IconSend = (p: IconProps) => (
   <IconBase {...p}>
     <path d="M4.5 12L20 5l-3 14-5.5-4.5z" />
     <path d="M11.5 14.5L20 5" />
+  </IconBase>
+);
+export const IconMic = (p: IconProps) => (
+  <IconBase {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3M9 21h6" />
+  </IconBase>
+);
+export const IconLayoutList = (p: IconProps) => (
+  <IconBase {...p}>
+    <rect x="4" y="5" width="16" height="4" rx="1" />
+    <rect x="4" y="11" width="16" height="4" rx="1" />
+    <rect x="4" y="17" width="16" height="2.5" rx="1" />
+  </IconBase>
+);
+export const IconLayoutGrid = (p: IconProps) => (
+  <IconBase {...p}>
+    <rect x="4" y="4" width="7" height="7" rx="1" />
+    <rect x="13" y="4" width="7" height="7" rx="1" />
+    <rect x="4" y="13" width="7" height="7" rx="1" />
+    <rect x="13" y="13" width="7" height="7" rx="1" />
+  </IconBase>
+);
+export const IconArchive = (p: IconProps) => (
+  <IconBase {...p}>
+    <rect x="3" y="4" width="18" height="4" rx="1" />
+    <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+    <path d="M10 13h4" />
+  </IconBase>
+);
+export const IconTag = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M12.5 4H6a2 2 0 0 0-2 2v6.5a1 1 0 0 0 .3.7l9 9a1 1 0 0 0 1.4 0l6.5-6.5a1 1 0 0 0 0-1.4l-9-9a1 1 0 0 0-.7-.3z" />
+    <circle cx="8.5" cy="8.5" r="1.25" />
+  </IconBase>
+);
+export const IconChartBar = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M4 20V10M10 20V4M16 20v-7M4 20h16" />
+  </IconBase>
+);
+export const IconMail = (p: IconProps) => (
+  <IconBase {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M3.5 6.5l8 6.2a1 1 0 0 0 1 0l8-6.2" />
   </IconBase>
 );

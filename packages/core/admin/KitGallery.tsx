@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 
 import { AdminShell } from './AdminShell';
 import { Markdown } from './Markdown';
+import { MicButton } from './MicButton';
 import {
   Button,
   IconButton,
@@ -37,6 +38,8 @@ import {
   DiffView,
   ReadinessList,
   LockBanner,
+  ApprovalCard,
+  RunProgress,
   HistoryTimeline,
   Tree,
   IconPlus,
@@ -45,13 +48,62 @@ import {
   IconDots,
   IconExternalLink,
   IconChevronDown,
+  SeverityIcon,
+  StatusBadge,
+  SeverityCountPill,
   type Column,
 } from './index';
+import { SEVERITY, severityCopy, type AdminSeverity } from '@core/lib/admin/severity';
 import type { ReadinessGroup } from '@core/lib/admin/readiness-criteria';
 import type { HistoryEntry, ObjectType } from '@core/schema/object-record-v1';
 import { objectDisplayName, objectTypeLabel, idTooltip } from '@core/lib/admin/display-name';
 
 const FIXED_NOW = Date.parse('2026-07-17T12:00:00.000Z');
+
+/** D4 demo fixture (T1.1) — one copy-tone example per level, using the templates
+ * `severityCopy` implements. Order matches `SEVERITY`'s worst-first ranking. */
+const SEVERITY_DEMO: ReadonlyArray<{ level: AdminSeverity; copy: string }> = [
+  {
+    level: 'blocked',
+    copy: severityCopy('blocked', {
+      cause: 'the object has no signed-in approver and none is configured',
+      escape: 'ask an admin to grant approval rights for this object',
+    }),
+  },
+  {
+    level: 'error',
+    copy: severityCopy('error', { subject: 'Publishing', escape: 'retry the step' }),
+  },
+  {
+    level: 'needs_you',
+    copy: severityCopy('needs_you', { action: 'approve the pending release before it ships' }),
+  },
+  {
+    level: 'info',
+    copy: severityCopy('info', { subject: 'The draft', action: 'was saved automatically' }),
+  },
+  {
+    level: 'success',
+    copy: severityCopy('success', { subject: 'The article', action: 'was published' }),
+  },
+];
+
+/** T1.2 `ActionRow` demo fixture — a plain endpoint-agnostic async callback,
+ * exactly the shape T3.2 will point at whichever of the three decision
+ * mechanisms (`review_decide` / `approve_tool`/`deny_tool` / `decideRunPublish`)
+ * applies. Resolves after a short delay and surfaces the result via the same
+ * shared toast the rest of the kit gallery uses. */
+async function demoDecision(toast: ReturnType<typeof useToast>['toast'], verb: string, reason?: string): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  toast({ title: verb, description: reason, tone: verb === 'Rejected' ? 'warning' : 'success' });
+}
+
+/** Deliberately rejects, to demonstrate `ActionRow` returning to rest and
+ * surfacing the failure as a toast rather than leaving the button spinning. */
+async function demoDecisionFailure(verb: string): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  throw new Error(`${verb} failed — the publish service is still down (demo).`);
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -196,6 +248,7 @@ function GalleryBody({ identity }: { identity: SiteIdentity }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [switchOn, setSwitchOn] = useState(true);
   const [terms, setTerms] = useState<string[]>(['t_barrier']);
+  const [micListening, setMicListening] = useState(false);
 
   return (
     <div className="flex flex-col gap-8">
@@ -241,6 +294,104 @@ function GalleryBody({ identity }: { identity: SiteIdentity }) {
         </Row>
       </Section>
 
+      <Section title="Severity (D4) — one source of truth">
+        <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          All five levels, in worst-first order. Colors and glyphs come only from <code>SEVERITY</code> — Error and
+          Blocked deliberately share red, distinguished by icon alone (circle-! vs. octagon), never by a second red.
+        </p>
+        <Row>
+          {SEVERITY_DEMO.map(({ level }) => (
+            <SeverityIcon key={level} level={level} title={SEVERITY[level].label} />
+          ))}
+        </Row>
+        <Row>
+          {SEVERITY_DEMO.map(({ level }) => (
+            <StatusBadge key={level} level={level} />
+          ))}
+        </Row>
+        <Row>
+          {SEVERITY_DEMO.map(({ level }, index) => (
+            <SeverityCountPill key={level} level={level} count={index + 1} />
+          ))}
+        </Row>
+        <div className="flex flex-col gap-1.5">
+          {SEVERITY_DEMO.map(({ level, copy }) => (
+            <p key={level} className="flex items-start gap-2 text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+              <SeverityIcon level={level} size={16} className="mt-0.5 shrink-0" title="" />
+              <span>
+                <span className="font-medium text-[var(--adm-text-heading)]">{SEVERITY[level].label}:</span> {copy}
+              </span>
+            </p>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Approval card & action row (D9/D3, T1.2)">
+        <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          One bordered block, at most two background colours (the card surface plus the icon chip's soft tint), no
+          nested cards, no accordion — the Approve/Reject/Modify row is always visible. Click Reject or Modify below to
+          see the row swap in-place to the reason textarea; the Error card&apos;s Retry deliberately fails, to show a
+          rejected decision promise returning the row to rest and surfacing the error as a toast instead of leaving a
+          button stuck spinning.
+        </p>
+        <div className="flex max-w-lg flex-col gap-3">
+          <ApprovalCard
+            severity="needs_you"
+            title="Publish &ldquo;The Barrier Repair Guide&rdquo;"
+            cause={severityCopy('needs_you', { action: 'approve the pending release before it ships' })}
+            meta={{ requester: 'wolf@kugelbrands.com', age: 'held for 12m', cost: '$0.42' }}
+            actions={{
+              onApprove: () => demoDecision(toast, 'Approved'),
+              onReject: (reason) => demoDecision(toast, 'Rejected', reason),
+              onModify: (reason) => demoDecision(toast, 'Sent back for changes', reason),
+            }}
+          />
+          <ApprovalCard
+            severity="error"
+            title="Publishing the release failed"
+            cause={severityCopy('error', { subject: 'Publishing', escape: 'retry the step' })}
+            actions={{
+              approveLabel: 'Retry',
+              onApprove: () => demoDecisionFailure('Retry'),
+            }}
+          />
+          <ApprovalCard
+            severity="blocked"
+            title="No signed-in approver"
+            cause={severityCopy('blocked', {
+              cause: 'the article has no signed-in approver',
+              escape: 'ask an admin to grant approval rights',
+            })}
+            actions={{
+              onApprove: () => demoDecision(toast, 'Approved'),
+              onReject: (reason) => demoDecision(toast, 'Rejected', reason),
+            }}
+            disabledReason="You do not have review or publish authority for this object. Ask an admin to grant approval rights."
+          />
+        </div>
+      </Section>
+
+      <Section title="Run progress (D5 ambient tier, T1.2 — consumed by T3.1)">
+        <div className="flex max-w-lg flex-col gap-4">
+          <RunProgress
+            step={3}
+            totalSteps={7}
+            label="Drafting the outline"
+            elapsedMs={82_000}
+            costUsd={0.18}
+            severity="needs_you"
+          />
+          <RunProgress
+            step={7}
+            totalSteps={7}
+            label="Published"
+            elapsedMs={244_000}
+            costUsd={0.42}
+            severity="success"
+          />
+        </div>
+      </Section>
+
       <Section title="Cards & stats">
         <div className="grid gap-3 sm:grid-cols-3">
           <StatCard label="Published" value="42" hint="+3 this week" tone="success" />
@@ -276,6 +427,19 @@ function GalleryBody({ identity }: { identity: SiteIdentity }) {
         </div>
         <Textarea label="Excerpt" placeholder="One or two sentences…" rows={3} />
         <TaxonomyPicker label="Taxonomy" kinds={TAXONOMY_KINDS} value={terms} onChange={setTerms} />
+      </Section>
+
+      <Section title="Voice dictation (T3.4)">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          Sits beside every chat composer's Send button. Renders nothing at all in a browser without the Web Speech API
+          — this is a fixed idle/recording toggle for the gallery, not the live hook.
+        </p>
+        <Row>
+          <MicButton listening={micListening} onToggle={() => setMicListening((on) => !on)} />
+          <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            {micListening ? 'Recording — click to stop' : 'Idle — click to dictate'}
+          </span>
+        </Row>
       </Section>
 
       <Section title="Avatars, skeletons, empty state">

@@ -143,6 +143,13 @@ export const logout = async (): Promise<void> => {
   try {
     const { invalidateInventoryCache } = await import('./library-client.js');
     invalidateInventoryCache();
+    // T5.1 R2: the release overview is a module-scope cache too, and it
+    // carries per-object approval affordances — it must not outlive a
+    // sign-out any more than the inventory does.
+    const { invalidateReleaseOverview } = await import('./release-client.js');
+    invalidateReleaseOverview();
+    const { invalidateEditorialView } = await import('./editorial-view-client.js');
+    invalidateEditorialView();
   } catch {
     // ignored — nothing to invalidate if the module can't load
   }

@@ -81,6 +81,11 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     // static content library (the splat form swallowed the library index).
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
     { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
+    // T2.1 D1(a): Templates/Media/Content collapse into /admin/objects.
+    { from: '/admin/content', to: '/admin/objects', status: 301 },
+    { from: '/admin/templates', to: '/admin/objects?type=template,section_template', status: 301 },
+    { from: '/admin/studio', to: '/admin/objects?type=template,section_template', status: 301 },
+    { from: '/admin/media', to: '/admin/objects?view=grid', status: 301 },
     { from: '/blog', to: '/learn/library', status: 301 },
     { from: '/topics', to: '/learn/topics', status: 301 },
     { from: '/topics/*', to: '/learn/topics/:splat', status: 301 },

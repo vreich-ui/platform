@@ -145,13 +145,31 @@ const publishedContentRevision = (record: ObjectRecord): number | null => {
   return typeof revision === 'number' ? revision : null;
 };
 
+/**
+ * The lock half of a row, split out for T5.1 R3: it is the ONE field of an
+ * `InventoryRow` that depends on the current time rather than on the record
+ * alone (a lease expires without anything being written), so
+ * `objects/index-store.ts` caches the raw lease and re-derives this per read
+ * instead of caching a `held` boolean that would silently go wrong.
+ */
+export const inventoryLockState = (lock: ObjectRecord['lock'], atMs: number): InventoryLockState => {
+  const sanitized = isObjectLockActive(lock, atMs) ? sanitizeObjectLock(lock) : undefined;
+  return sanitized
+    ? {
+        held: true,
+        owner_id: sanitized.owner_id,
+        owner_label: sanitized.owner_label,
+        acquired_at: sanitized.acquired_at,
+        expires_at: sanitized.expires_at,
+      }
+    : { held: false };
+};
+
 export const inventoryRowFromRecord = (
   record: ObjectRecord,
   atMs: number,
   policy: ApprovalPolicy = activeApprovalPolicy()
 ): InventoryRow => {
-  const lockActive = isObjectLockActive(record.lock, atMs);
-  const sanitized = lockActive ? sanitizeObjectLock(record.lock) : undefined;
   const publishedTime = record.publication.published_time;
   const receiptRevision = publishedContentRevision(record);
   const recipe = recipeSummaryFromBody(record.object_type, record.body);
@@ -168,15 +186,7 @@ export const inventoryRowFromRecord = (
     content_revision: record.content_revision,
     review_state: record.review?.state ?? 'none',
     approval_state: effectiveApproval(record).state,
-    lock: sanitized
-      ? {
-          held: true,
-          owner_id: sanitized.owner_id,
-          owner_label: sanitized.owner_label,
-          acquired_at: sanitized.acquired_at,
-          expires_at: sanitized.expires_at,
-        }
-      : { held: false },
+    lock: inventoryLockState(record.lock, atMs),
     published_time: publishedTime,
     published_content_revision: receiptRevision,
     publish_commit: record.publication.publish_receipt?.commit_sha ?? null,
