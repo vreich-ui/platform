@@ -222,10 +222,38 @@ test('a token that is genuinely absent is still refused after the retries', asyn
   assert.deepEqual(resolved, { ok: false, reason: 'no_record' });
 });
 
-test('a store that throws on every read authorizes nobody', async () => {
-  const store = {
+/** A store that is reachable enough to be opened but fails every read. */
+const unreadableStore = (): OAuthBlobStore =>
+  ({
     async get() {
       throw new Error('blob store unreachable');
+    },
+    async setJSON() {},
+  }) as unknown as OAuthBlobStore;
+
+test('a store that throws on every read is store_error, NOT no_record', async () => {
+  // The distinction is the whole point: reporting an outage as "that token
+  // does not exist" is what makes a Blobs failure look like a bad credential.
+  const resolved = await describeOAuthPrincipal(unreadableStore(), {
+    token: 'anything',
+    site: SITE,
+    resourceUris: [`https://${HOST}/mcp`],
+    nowMs: Date.now(),
+  });
+
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.ok === false && resolved.reason, 'store_error');
+});
+
+test('a read that throws once and then answers empty is absence, not an outage', async () => {
+  // The store got its word in: two clean empty reads mean the record really is
+  // not there, whatever happened on the first attempt.
+  let call = 0;
+  const store = {
+    async get() {
+      call += 1;
+      if (call === 1) throw new Error('transient');
+      return null;
     },
     async setJSON() {},
   } as unknown as OAuthBlobStore;
@@ -237,7 +265,53 @@ test('a store that throws on every read authorizes nobody', async () => {
     nowMs: Date.now(),
   });
 
-  assert.equal(resolved.ok, false);
+  assert.deepEqual(resolved, { ok: false, reason: 'no_record' });
+});
+
+test('an unreadable store 401s /mcp — never 500s it — and says store_error', async () => {
+  // A governance-store outage must not become an outage for shared-key callers
+  // who need no OAuth at all, so the resource server still answers 401.
+  process.env.NETLIFY = 'true';
+  delete process.env.NETLIFY_SITE_ID;
+  setNetlifyBlobsModuleForTesting({ connectLambda() {}, getStore: () => unreadableStore() as never });
+
+  try {
+    const refused = await callMcp({ host: HOST, authorization: 'Bearer some-token' }, toolsList);
+
+    assert.equal(refused.statusCode, 401, refused.body);
+    const body = JSON.parse(refused.body) as { error?: { data?: { oauth_failure?: string } } };
+    assert.equal(body.error?.data?.oauth_failure, 'store_error');
+  } finally {
+    setNetlifyBlobsModuleForTesting(undefined);
+  }
+});
+
+test('an unreadable store makes /oauth/token answer server_error, not invalid_grant', async () => {
+  // Answering `invalid_grant` here would tell a client its authorization code
+  // was bad when the truth is that we could not look it up at all.
+  process.env.NETLIFY = 'true';
+  delete process.env.NETLIFY_SITE_ID;
+  setNetlifyBlobsModuleForTesting({ connectLambda() {}, getStore: () => unreadableStore() as never });
+
+  try {
+    const response = await (oauthHandler as unknown as LambdaLikeHandler)({
+      httpMethod: 'POST',
+      path: '/oauth/token',
+      headers: { host: HOST, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: 'some-code',
+        redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+        code_verifier: 'v'.repeat(43),
+        client_id: 'some-client',
+      }).toString(),
+    });
+
+    assert.equal(response.statusCode, 500, response.body);
+    assert.equal((JSON.parse(response.body) as { error?: string }).error, 'server_error');
+  } finally {
+    setNetlifyBlobsModuleForTesting(undefined);
+  }
 });
 
 test('a record written for another site never resolves, however many times it is read', async () => {

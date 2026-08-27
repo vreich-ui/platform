@@ -171,7 +171,13 @@ For everything NOT auto-generated in step 2:
   - **`token_store_reachable: false`.** The governance blob store is down or
     unconfigured, so no OAuth token can resolve. This is an outage, not a
     credential problem; the 401 body says `oauth_failure: "store_error"` and
-    the log carries `mcp_oauth_store_error` with the underlying message.
+    the log carries `mcp_oauth_store_error` with the underlying message. This
+    covers a store that cannot be OPENED and one that opens but fails every
+    read — both classify as `store_error`, never as `no_record`. On the
+    `/oauth/*` endpoints the same outage answers `500 server_error` rather than
+    a credential-shaped `invalid_grant`, so a client is never told its
+    authorization code was bad when the truth is that it could not be looked
+    up.
 
   If both look right, the function logs for that site carry one
   `mcp_auth_rejected` line per refusal with a `reason` and (whenever a bearer

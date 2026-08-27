@@ -249,6 +249,35 @@ const READ_RETRY_DELAYS_MS = [50, 150] as const;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * The store could not be READ — as distinct from "the record is not there".
+ *
+ * These two must never collapse into each other. An absent record is an
+ * answer: this token does not authorize you, this code was already redeemed.
+ * A store that throws is not an answer at all, and reporting it as absence is
+ * what makes a Blobs outage look, to everyone downstream, exactly like a bad
+ * credential — the confusion the whole diagnostic effort here exists to end.
+ *
+ * Carrying it as a throw rather than a null is deliberate. Every caller of a
+ * record getter treats null as a decision it is entitled to act on, and there
+ * are too many of them to make each one re-check an out-of-band flag; a throw
+ * cannot be ignored by accident. The two places that must not propagate it
+ * handle it explicitly: `describeOAuthPrincipal` maps it to a `store_error`
+ * resolution (the MCP endpoint answers 401, never 500, so a governance-store
+ * outage never becomes an outage for shared-key callers who need no OAuth),
+ * and every `/oauth/*` endpoint lets it reach the function's own guard, which
+ * answers RFC 6749 `server_error`.
+ */
+export class OAuthStoreReadError extends Error {
+  constructor(area: string, cause: unknown) {
+    super(`The OAuth store could not be read (${area}) after ${READ_RETRY_DELAYS_MS.length + 1} attempts.`, { cause });
+    this.name = 'OAuthStoreReadError';
+  }
+}
+
+/** The key's category, for a log line — never the key itself, which carries a token digest. */
+const keyArea = (key: string) => key.split('/').slice(0, 2).join('/');
+
+/**
  * Read + validate one record. Missing OR corrupt OR wrong-site → null. A
  * malformed blob must never authenticate anyone, and must never throw a 500
  * into a protocol response either: absent is the safe reading of both.
@@ -266,6 +295,14 @@ const readRecord = async <T extends z.ZodTypeAny>(
   options: { retryOnMiss?: boolean } = {}
 ): Promise<z.infer<T> | null> => {
   const attempts = options.retryOnMiss === false ? 1 : READ_RETRY_DELAYS_MS.length + 1;
+  /**
+   * The last read FAILURE, kept so an exhausted retry loop can still say which
+   * of its two exhaustions it was. Cleared by any attempt the store answers —
+   * a throw followed by two clean empty reads means the record is genuinely
+   * absent, and only a loop whose last word was an error is unable to
+   * conclude absence at all.
+   */
+  let lastReadError: unknown;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await sleep(READ_RETRY_DELAYS_MS[attempt - 1]);
@@ -273,9 +310,11 @@ const readRecord = async <T extends z.ZodTypeAny>(
     let raw: string | null = null;
     try {
       raw = await store.get(key);
-    } catch {
-      continue; // a store hiccup is a transient, not an answer
+    } catch (error) {
+      lastReadError = error; // a store hiccup is a transient, not an answer
+      continue;
     }
+    lastReadError = undefined;
     if (!raw) continue;
 
     try {
@@ -285,6 +324,10 @@ const readRecord = async <T extends z.ZodTypeAny>(
       return null; // corrupt: a decision, not a transient
     }
   }
+
+  // Exhausted while the store was still failing: we never learned whether the
+  // record exists, so we must not report that it does not.
+  if (lastReadError !== undefined) throw new OAuthStoreReadError(keyArea(key), lastReadError);
 
   return null;
 };
