@@ -88,7 +88,7 @@ test('BEFORE/AFTER: the lock projection reads exactly one blob — the same one 
   assert.equal(counts.set, 0, 'a status read must never write');
 });
 
-// ═══ 2. the wire shape — this is where F9's actual win is ═════════════
+// ═══ 2. the wire shape — this is where F9's actual win is ═════════════════
 
 test('the lock projection carries none of the full envelope — no body, no history', async () => {
   const { store, blobs } = countingStore();
