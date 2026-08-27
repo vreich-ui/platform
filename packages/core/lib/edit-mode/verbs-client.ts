@@ -61,6 +61,49 @@ export const getObjectRecord = async (
   return { status: result.status, record: result.body.record as Record<string, unknown> | undefined };
 };
 
+/**
+ * T3.2 — `object_review_decide` for callers that do not own an `EditSession`.
+ *
+ * The verb needs no lock and no record version (review bookkeeping never
+ * moves `content_revision`, D§3.1), so a surface that only knows an object's
+ * type and id — the Release workspace's "Pending approvals" card, the
+ * decision façade — can decide without checking the object out. `note` is the
+ * reviewer's reason and is stored on the decision either way; it is trimmed
+ * and omitted when blank, so a reviewer who tabbed through the textarea does
+ * not pin an empty string onto the permanent decision record.
+ */
+export const decideObjectReview = (
+  getToken: GetToken,
+  objectType: string,
+  objectId: string,
+  decision: 'approve' | 'request_changes',
+  note?: string,
+  publishedTime = 'immediate'
+): Promise<VerbResult> => {
+  const reason = note?.trim();
+  return callObjectVerb(getToken, {
+    action: 'review_decide',
+    object_type: objectType,
+    object_id: objectId,
+    decision,
+    ...(reason ? { note: reason } : {}),
+    // M-6: an approval pins the publish action it authorises. `decideReview`
+    // stores whatever `publish_action` it is handed on the decision itself,
+    // and nothing reads one recorded against a request_changes — so it is
+    // only ever sent with an approve.
+    ...(decision === 'approve' ? { publish_action: { published_time: publishedTime } } : {}),
+  });
+};
+
+/**
+ * T3.2 (T0.3 row A8) — owner-only lock takeover for a surface with no
+ * `EditSession`. The endpoint is idempotent: with no lock held it answers
+ * `{ released: false, idempotent: true, message: 'No lock was held' }`, which
+ * is why a surface may offer this control without first fetching lock state.
+ */
+export const forceReleaseObjectLock = (getToken: GetToken, objectType: string, objectId: string): Promise<VerbResult> =>
+  callObjectVerb(getToken, { action: 'checkin', object_type: objectType, object_id: objectId, force: true });
+
 export type PendingObjectRow = {
   object_id: string;
   object_type: string;
@@ -230,9 +273,13 @@ export class EditSession {
     this.lockManager = new LockManager(objectId, getToken, {
       endpoint: OBJECT_ENDPOINT,
       buildRequestBody: (action, id, fields) => ({
-        action: action === 'refresh' ? 'refresh_lock' : action,
+        // `force_release` is the LockManager's name for it; the object
+        // endpoint's name is `checkin` with `force:true` (owner-only,
+        // object-verbs.ts:1546). Same class of remap as `refresh`.
+        action: action === 'refresh' ? 'refresh_lock' : action === 'force_release' ? 'checkin' : action,
         object_type: objectType,
         object_id: id,
+        ...(action === 'force_release' ? { force: true } : {}),
         ...(fields.lockToken !== undefined ? { lock_token: fields.lockToken } : {}),
         ...(fields.leaseSeconds !== undefined ? { lease_seconds: fields.leaseSeconds } : {}),
       }),
@@ -329,15 +376,56 @@ export class EditSession {
     });
   }
 
-  /** Approve the open review through the existing human decision verb. */
-  async approveReview(): Promise<VerbResult> {
-    return callObjectVerb(this.getToken, {
-      action: 'review_decide',
-      object_type: this.objectType,
-      object_id: this.objectId,
-      decision: 'approve',
-      publish_action: { published_time: 'immediate' },
-    });
+  /**
+   * Approve the open review through the existing human decision verb.
+   *
+   * ADMIN SURFACES SHOULD NOT CALL THIS (nor `requestChanges`) DIRECTLY —
+   * they go through `decide()` (`lib/admin/decisions.ts`), which reaches this
+   * same verb AND drives the optimistic overlay + the one shared-store
+   * invalidation that keeps the other surfaces current without a reload. This
+   * pair stays for the edit-mode canvas, which owns a session already and has
+   * no request index to invalidate.
+   */
+  async approveReview(publishedTime = 'immediate'): Promise<VerbResult> {
+    return decideObjectReview(this.getToken, this.objectType, this.objectId, 'approve', undefined, publishedTime);
+  }
+
+  /**
+   * The other half of the SAME decision verb — the half missing since the
+   * verb existed. T0.1 §7 recorded `object_review_decide`'s only client call
+   * site as `approveReview()` ("approve only, no request-changes UI"), while
+   * `object-review-ui.ts`'s `canRequestChanges` (T1.5) had been computed for
+   * a button nothing could call (T0.3 rows A1/A2).
+   *
+   * Deliberately NOT a new endpoint and deliberately not a second wire shape:
+   * `review_decide` has accepted `decision:'request_changes'`
+   * (`object-verbs.ts`'s `z.enum(['approve','request_changes'])`) since
+   * `review-state.ts`'s `decideReview` was written, and that function already
+   * writes `review.state = 'changes_requested'` plus the decision and history
+   * entry. This delegates to `decideObjectReview` above so the M-6 rule —
+   * pin the publish action on an approve, never on a rejection, where
+   * `decideReview` would otherwise record a `publish_action` on the decision
+   * that nothing ever reads — lives in exactly one place.
+   *
+   * Like `approveReview`, this needs no lock: `review_decide` records a
+   * decision about the record, it does not write the body.
+   */
+  async requestChanges(note?: string): Promise<VerbResult> {
+    return decideObjectReview(this.getToken, this.objectType, this.objectId, 'request_changes', note);
+  }
+
+  /**
+   * Owner-only lock takeover (T0.3 row A8). `LockManager.forceRelease()` has
+   * existed and been demoed in the kit gallery, but the body it posts
+   * (`action:'force_release'`) is not a member of `ObjectVerbRequest` — the
+   * object endpoint spells this `checkin` with `force:true`
+   * (`object-verbs.ts:1546-1556`), so every call it could have made would
+   * have been refused as an unknown action. The remap lives in this session's
+   * `buildRequestBody` above, next to the `refresh`→`refresh_lock` remap it
+   * already carried.
+   */
+  async forceReleaseLock(): Promise<void> {
+    await this.lockManager.forceRelease();
   }
 
   async checkin(): Promise<void> {

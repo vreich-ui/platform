@@ -70,6 +70,15 @@ export default function Welcome({ identity }: WelcomeProps) {
       });
       setDone(true);
       await refresh().catch(() => undefined);
+      /**
+       * T5.1 R4 (F14) exception #3 — deliberately a HARD document load.
+       * `AdminShell`'s welcome gate re-decides from `use-current-user`'s
+       * module snapshot; `refresh()` above is best-effort (`.catch`), so on
+       * a failed refresh a `ClientRouter` swap would land on /admin with a
+       * snapshot still saying "onboarding incomplete" and be bounced
+       * straight back here — a redirect loop. A document load re-reads `me`
+       * from the server, which already has the update.
+       */
       window.location.assign('/admin');
     } catch (err) {
       setFailure(err instanceof Error ? err.message : 'Could not save. Please try again.');
@@ -88,7 +97,7 @@ export default function Welcome({ identity }: WelcomeProps) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <Card>
-          <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't load your profile" message={error} />
+          <EmptyState severity="error" title="Couldn't load your profile" message={error} />
         </Card>
       </div>
     );

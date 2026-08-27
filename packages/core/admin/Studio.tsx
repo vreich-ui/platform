@@ -8,12 +8,13 @@
  * governed verbs either way). REUSE-FIRST made visual.
  */
 import { useEffect, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { Input } from './forms';
 import { Dialog, ConfirmDialog, useToast } from './overlays';
-import { IconAlertTriangle, IconPalette, IconSparkles } from './icons';
+import { IconPalette, IconSparkles } from './icons';
 import type { ObjectRecord } from '@core/schema/object-record-v1';
 // D2: identity is resolved server-side by the /admin/studio.astro route
 // (where process.env is real) and threaded down as a prop, all the way to
@@ -37,12 +38,23 @@ async function getToken(): Promise<string> {
 // Cmd-K palette, nor Studio's own galleries show a stale view after one of
 // these succeeds.
 async function invalidateLibraryCache(): Promise<void> {
-  const [{ invalidateInventoryCache }, { invalidateStudioCache }] = await Promise.all([
+  const [
+    { invalidateInventoryCache },
+    { invalidateStudioCache },
+    { invalidateReleaseOverview },
+    { invalidateEditorialView },
+  ] = await Promise.all([
     import('@core/lib/admin/library-client'),
     import('@core/lib/admin/studio-client'),
+    import('@core/lib/admin/release-client'),
+    import('@core/lib/admin/editorial-view-client'),
   ]);
   invalidateInventoryCache();
   invalidateStudioCache();
+  // T5.1 R2/Phase 2 — a minted object is a new release row and a new count on
+  // the publication map.
+  invalidateReleaseOverview();
+  invalidateEditorialView();
 }
 
 type Rec = ObjectRecord<Record<string, unknown>>;
@@ -154,7 +166,7 @@ function TemplateGallery({ templates, onCreated }: { templates: Rec[]; onCreated
       }
     } finally {
       // Fixed defect: clearing `busy` unconditionally here re-enabled
-      // "Create page" while `onCreated`'s `location.assign` navigation was
+      // "Create page" while `onCreated`'s navigation was
       // still pending, so a double-click minted a duplicate page. Stay
       // busy/disabled through a successful mint — this view is about to be
       // replaced anyway — and only clear it to let the human retry a failure.
@@ -375,7 +387,7 @@ function ThemeGallery({ themes, owner, identity }: { themes: Rec[]; owner: boole
           description: 'The site palette changed in the working copy. Publish + release when ready.',
           tone: 'success',
         });
-        window.location.assign(`/admin/content/${encodeURIComponent(SITE_ID)}?type=site`);
+        void navigate(`/admin/content/${encodeURIComponent(SITE_ID)}?type=site`);
       } else {
         toast({ title: 'Apply refused', description: String(res.body.error ?? ''), tone: 'danger' });
       }
@@ -577,10 +589,10 @@ function StudioBody({ identity }: { identity: SiteIdentity }) {
   }, []);
 
   if (error) {
-    return <EmptyState icon={<IconAlertTriangle size={26} />} title="Studio unavailable" message={error} />;
+    return <EmptyState severity="error" title="Studio unavailable" message={error} />;
   }
 
-  const navigate = (path: string) => window.location.assign(path);
+  const go = (path: string) => void navigate(path);
 
   return (
     <div className="flex flex-col gap-6">
@@ -606,7 +618,7 @@ function StudioBody({ identity }: { identity: SiteIdentity }) {
             message="There's no in-app form for minting one — page templates are created conversationally through the CMS Agents, or by an agent calling object_create with object_type: 'template' (include description, whenToUse, and scope so it can publish)."
           />
         ) : (
-          <TemplateGallery templates={templates} onCreated={navigate} />
+          <TemplateGallery templates={templates} onCreated={go} />
         )}
       </section>
       <section>
@@ -622,7 +634,7 @@ function StudioBody({ identity }: { identity: SiteIdentity }) {
             message="There's no in-app form for minting one — section templates are created conversationally through the CMS Agents, or by an agent calling object_create with object_type: 'section_template' (include description, whenToUse, and scope so it can publish)."
           />
         ) : (
-          <SectionTemplateGallery sections={sections} onCreated={navigate} />
+          <SectionTemplateGallery sections={sections} onCreated={go} />
         )}
       </section>
       <section>

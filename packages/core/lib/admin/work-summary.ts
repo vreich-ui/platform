@@ -25,7 +25,8 @@ export function getWorkSummary(rows: readonly LibraryRow[], chats: readonly Chat
   };
 }
 
-export const chatWorkLabel = (chat: ChatSummaryView): string => {
+/** Reads only `status`, so any live-run summary can label itself — including the trimmed one `admin-editorial-view` returns (T5.1). */
+export const chatWorkLabel = (chat: Pick<ChatSummaryView, 'status'>): string => {
   if (chat.status === 'awaiting_candidate') return 'Ready to review';
   if (chat.status === 'awaiting_approval') return 'Waiting for you';
   if (chat.status === 'error') return 'Failed';

@@ -107,6 +107,45 @@ async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promi
 export const listRequests = (getToken: GetToken, filters: RequestListFiltersInput = {}) =>
   post<RequestListView>(getToken, { action: 'list', ...filters });
 
+/**
+ * The conditional form of `listRequests` (T5.1 R8, T0.2 F12).
+ *
+ * `list` is the busiest endpoint in the admin — T0.2 measured ~16 requests a
+ * minute per open tab, every one re-serialising and re-transferring
+ * byte-identical JSON. `admin-requests.ts` now emits an `ETag` over the list
+ * body; pass the one from the previous response and an unchanged view comes
+ * back as a bodyless `304`.
+ *
+ * This is an explicit protocol between this client and that handler, NOT
+ * browser HTTP caching — the action is a POST, which no cache revalidates.
+ * A caller with no etag, or a server that emits none, simply gets the full
+ * response, so the path degrades to exactly what it did before.
+ *
+ * Saves bytes and serialisation, never blob reads: the handler still reads the
+ * index, the notify state and the seen ledger before it can hash.
+ */
+export async function listRequestsIfChanged(
+  getToken: GetToken,
+  filters: RequestListFiltersInput,
+  etag: string | undefined
+): Promise<{ unchanged: true; etag: string | undefined } | { unchanged: false; view: RequestListView; etag?: string }> {
+  const token = await getToken();
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(etag ? { 'If-None-Match': etag } : {}),
+    },
+    body: JSON.stringify({ action: 'list', ...filters }),
+  });
+  if (res.status === 304) return { unchanged: true, etag: res.headers.get('etag') ?? etag };
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  const nextEtag = res.headers.get('etag');
+  return { unchanged: false, view: json as unknown as RequestListView, ...(nextEtag ? { etag: nextEtag } : {}) };
+}
+
 export const getRequest = (getToken: GetToken, requestId: string) =>
   post<{ request: RequestDetailView }>(getToken, { action: 'get', request_id: requestId });
 
@@ -136,6 +175,19 @@ export const muteRequest = (getToken: GetToken, requestId: string) =>
 export const unmuteRequest = (getToken: GetToken, requestId: string) =>
   post<{ muted: string[] }>(getToken, { action: 'unmute', request_id: requestId });
 
+/**
+ * T2.3 — visibility backoff for a poll chain. Nobody is reading a hidden tab
+ * and the sweeper (W19) keeps every record true regardless, so the strongest
+ * available form of "back off" is to schedule nothing at all while hidden —
+ * `undefined` means "do not arm a timer." The caller's `visibilitychange`
+ * handler is expected to re-fetch immediately on return rather than waiting
+ * out a stale interval; see `requests-store.ts` and `RequestActivity.tsx`,
+ * which already did this by hand before this helper existed to name it and
+ * make it independently testable.
+ */
+export const pollIntervalWithBackoff = (baseMs: number, hiddenNow: boolean): number | undefined =>
+  hiddenNow ? undefined : baseMs;
+
 /** A request whose state can still change on its own. */
 export const isLiveRequestStatus = (status: RequestStatus): boolean =>
   status === 'queued' || status === 'running' || status === 'needs_you' || status === 'stalled';
@@ -151,18 +203,14 @@ export const requestPollIntervalFor = (rows: readonly { status: RequestStatus }[
   return 30_000;
 };
 
-/** Editor-facing label for a status — the one vocabulary the list, the pills and the chat card all use. */
-export const requestStatusLabel = (status: RequestStatus): string =>
-  ({
-    queued: 'Starting',
-    running: 'Working',
-    needs_you: 'Needs you',
-    stalled: 'Stalled',
-    failed: 'Failed',
-    done: 'Done',
-    cancelled: 'Cancelled',
-    archived: 'Archived',
-  })[status];
+/**
+ * Editor-facing label for a status — moved to `request-logic.ts` (T2.3) as
+ * `requestStatusLabel`, alongside the `STALLED_VS_FAILED_SPLIT` flag it now
+ * reads for `stalled`'s copy ("Taking longer than expected" when split).
+ * Re-exported here so the one existing import site does not need two module
+ * specifiers for two closely related things.
+ */
+export { requestStatusLabel } from './request-logic.js';
 
 // ─── W19: the live watch path (admin-request-activity) ───────────────────────
 

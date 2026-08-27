@@ -12,12 +12,13 @@ import { Markdown } from './Markdown';
 import { Textarea } from './forms';
 import { useToast } from './overlays';
 import { ControlsCard } from './ControlsCard';
-import { IconAlertTriangle, IconCheck, IconInfo, IconRobot, IconSend, IconX } from './icons';
+import { MicButton } from './MicButton';
+import { RunProgress } from './approval';
+import { SeverityIcon } from './severity';
+import { IconAlertTriangle, IconRobot, IconSend } from './icons';
 import {
-  approveTool,
   cancelChatRun,
   chooseCandidate as chooseCandidateRequest,
-  denyTool,
   getChat,
   pollIntervalFor,
   rejectCandidates as rejectCandidatesRequest,
@@ -28,14 +29,29 @@ import {
   type ChatRequestBindingView,
   type ChatView,
   type PendingView,
+  type RunSummaryView,
 } from '@core/lib/admin/chat-client';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
-import { groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
+import { createdObjectsFromEvents, groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
 import { DENIED_SEVERITY, classifyToolResult, type Severity } from '@core/lib/admin/activity-severity';
+import { severityFromActivity } from '@core/lib/admin/severity';
+import {
+  deriveLivenessChip,
+  elapsedMsForChip,
+  elapsedMsSince,
+  isStreamingNow,
+  lastUndoableWriteTool,
+  terminalReceiptInfo,
+  undoPrompt,
+} from '@core/lib/admin/chat-liveness';
+import { formatDuration } from '@core/lib/admin/requests-client';
 import { createApprovalClaim } from '@core/lib/admin/object-context-actions';
+import { assertDecided, decide } from '@core/lib/admin/decisions';
+import { DECISION_LABEL } from '@core/lib/admin/approval-actions';
 import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/chat-quote';
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
+import { useDictation } from '@core/lib/admin/use-dictation';
 
 // ─── useChat: since_seq polling over get_chat ───────────────────────
 
@@ -48,6 +64,17 @@ export interface UseChatState {
   agent: AgentView | undefined;
   /** W19 T19.5: the editorial request this conversation is about, once the server has resolved it. */
   request: ChatRequestBindingView | undefined;
+  /** T3.1 (D5): the most recent run's summary — carried on every `get_chat`
+   *  response (`ChatSummaryView.last_outcome`) already, so the receipt tier
+   *  and the ambient chip's `idle` reading need no new fetch. `null` means
+   *  the chat has loaded and genuinely never run; `undefined` means it
+   *  hasn't loaded yet. */
+  lastOutcome: RunSummaryView | null | undefined;
+  /** T3.1 (D5): a CLIENT clock reading of the moment the last poll ingested
+   *  new events — the one honest signal available for "tokens are actively
+   *  arriving" given this transport has no per-token stream. See
+   *  `isStreamingNow` (`chat-liveness.ts`). */
+  lastEventAtMs: number | undefined;
   error: string | undefined;
   busy: boolean;
   send: (text: string, focus?: string, testMode?: boolean) => Promise<void>;
@@ -95,6 +122,8 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const [previewCandidateId, setPreviewCandidateId] = useState<string | undefined>(undefined);
   const [agent, setAgent] = useState<AgentView | undefined>(undefined);
   const [request, setRequest] = useState<ChatRequestBindingView | undefined>(undefined);
+  const [lastOutcome, setLastOutcome] = useState<RunSummaryView | null | undefined>(undefined);
+  const [lastEventAtMs, setLastEventAtMs] = useState<number | undefined>(undefined);
   /** Read inside `poll`'s closure, which must not re-create on every binding change. */
   const requestRef = useRef<ChatRequestBindingView | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -109,9 +138,12 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   // the in-flight `pending.call_id`. A claimed call_id stays claimed until
   // the next poll confirms the server has moved past it (see `ingest`).
   const claimRef = useRef(createApprovalClaim());
+  /** The pending call, mirrored in a ref so a decision callback can name the tool in its receipt without re-creating itself on every poll. */
+  const pendingRef = useRef<PendingView | undefined>(undefined);
 
   const ingest = useCallback((view: ChatView) => {
     setStatus(view.status);
+    pendingRef.current = view.pending;
     setPending(view.pending);
     setCandidateSet(view.candidate_set);
     setPreviewCandidateId((current) =>
@@ -125,9 +157,14 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
       requestRef.current = view.request;
       setRequest(view.request);
     }
+    setLastOutcome(view.last_outcome);
     if (view.events.length > 0) {
       seqRef.current = Math.max(seqRef.current, ...view.events.map((event) => event.seq));
       setEvents((prior) => [...prior, ...view.events.filter((event) => !prior.some((p) => p.seq === event.seq))]);
+      // T3.1 (D5): the one client-side signal "tokens are actively arriving"
+      // can honestly be built from, given this transport polls rather than
+      // streams — see `isStreamingNow`.
+      setLastEventAtMs(Date.now());
       if (
         view.events.some(
           (event) =>
@@ -162,10 +199,13 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     setEvents([]);
     setStatus(undefined);
     setPending(undefined);
+    pendingRef.current = undefined;
     setCandidateSet(undefined);
     setPreviewCandidateId(undefined);
     setRequest(undefined);
     requestRef.current = undefined;
+    setLastOutcome(undefined);
+    setLastEventAtMs(undefined);
     claimRef.current = createApprovalClaim();
     if (chatId) void poll();
     return () => {
@@ -203,15 +243,39 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
       if (!claimRef.current.claim(callId)) return { approved: false };
       setBusy(true);
       try {
-        const result = await approveTool(getToken, chatId, callId, editedArgs);
-        setError(undefined);
+        // T3.2: through the ONE decision façade, not `approveTool` directly.
+        // The wire call is identical (`approve_tool`, with `edited_args` when
+        // the human edited the arguments — the only real Modify of the three
+        // mechanisms); what the façade adds is the shared optimistic marker
+        // and the one invalidation path, so a chat approval moves the header
+        // pill and the runs inbox without a reload.
+        const result = await decide(
+          getToken,
+          {
+            mechanism: 'chat_tool',
+            chatId,
+            callId,
+            tool: pendingRef.current?.tool,
+            // W19 T19.5's binding — "chats attach to a request rather than
+            // owning it" — read from the ref the poll already keeps for this
+            // session. It gives the optimistic entry the request keying the
+            // inbox row and the header pill actually look up, so approving a
+            // tool call HERE stops them counting the row in the same tick
+            // instead of when the sweeper next runs. A free chat that never
+            // registered a job has no binding and behaves exactly as before.
+            ...(requestRef.current ? { requestId: requestRef.current.request_id } : {}),
+          },
+          editedArgs ? 'modify' : 'approve',
+          editedArgs ? { editedArgs } : {}
+        );
+        setError(result.ok ? undefined : result.error);
         // The server didn't consume it (e.g. already-decided elsewhere) — free
         // it up so a genuine retry isn't permanently blocked.
-        if (!result.approved) claimRef.current.release(callId);
+        if (!result.ok) claimRef.current.release(callId);
         // Execution is async now (Task 5): the card clears on approval; the
         // tool's success/failure arrives as a normal `tool_result` event via
         // the poll, not here.
-        return { approved: result.approved };
+        return { approved: result.ok };
       } catch (actionError) {
         claimRef.current.release(callId);
         setError(actionError instanceof Error ? actionError.message : 'Action failed.');
@@ -232,6 +296,8 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     previewCandidate: candidateSet?.candidates.find((candidate) => candidate.candidate_id === previewCandidateId),
     agent,
     request,
+    lastOutcome,
+    lastEventAtMs,
     error,
     busy,
     writeStamp,
@@ -268,7 +334,23 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
       if (!claimRef.current.claim(callId)) return Promise.resolve();
       return wrap(async () => {
         try {
-          await denyTool(getToken, chatId!, callId, reason);
+          // T3.2: same façade, same shared invalidation — `deny_tool` is the
+          // one call of the three mechanisms that carries the typed reason.
+          const result = await decide(
+            getToken,
+            {
+              mechanism: 'chat_tool',
+              chatId: chatId!,
+              callId,
+              tool: pendingRef.current?.tool,
+              // Same binding as Approve above — a rejection has to clear the
+              // row from the other two surfaces just as promptly.
+              ...(requestRef.current ? { requestId: requestRef.current.request_id } : {}),
+            },
+            'reject',
+            reason ? { reason } : {}
+          );
+          assertDecided(result);
         } catch (actionError) {
           claimRef.current.release(callId);
           throw actionError;
@@ -507,6 +589,137 @@ function RunFinishedLine({ event }: { event: ChatEventView }) {
   return <p className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{text}</p>;
 }
 
+// ─── RunReceipt (D5 tier 4) ───────────────────────────────
+
+/**
+ * D5 tier 4 — the receipt. Renders in place of the plain `RunFinishedLine` /
+ * `run_error` / `run_cancelled` text ONLY for the chat's most recent run
+ * (`lastOutcome` — `ChatSummaryView.last_outcome`, matched by `run_id`);
+ * older runs further up the transcript keep the plain line, since only the
+ * latest run's `chips`/timing are available client-side.
+ *
+ * What changed: `outcome.chips` — already computed server-side (`runChips`,
+ * `agent/loop.ts`) from exactly the same events this component could
+ * re-derive, so it is read, not recomputed (W19's "one classifier" discipline
+ * applies to this shape too). Where: the created-object links, when this run
+ * created anything. Cost: omitted — no cost figure exists anywhere in the
+ * chat/agent-loop protocol (see this task's final report). Undo: only when
+ * the run's last successful write has a known exact inverse
+ * (`lastUndoableWriteTool`/`undoPrompt`) — clicking it sends the ask back
+ * into THIS chat, so the same agent that holds (or can reacquire) the
+ * checkout/lock context performs it, through the same governed, interrupt-
+ * capable path (tier 3) as any other write. No inverse, no button — never a
+ * dead link.
+ */
+function RunReceipt({
+  outcome,
+  message,
+  events,
+  onUndo,
+  busy,
+}: {
+  outcome: RunSummaryView;
+  /** The `run_error` event's human message, when this receipt is for a failed run. */
+  message?: string;
+  events: ChatEventView[];
+  onUndo?: (prompt: string) => void;
+  busy?: boolean;
+}) {
+  const info = terminalReceiptInfo(outcome.outcome);
+  const elapsed = elapsedMsSince(outcome.started_at, Date.parse(outcome.finished_at));
+  const undoTool = lastUndoableWriteTool(events, outcome.run_id);
+  const prompt = undoTool ? undoPrompt(undoTool) : undefined;
+  const created = createdObjectsFromEvents(events, outcome.run_id);
+  return (
+    <div className="mx-auto flex w-full max-w-[85%] flex-col gap-1.5 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2 text-[length:var(--adm-text-xs)]">
+      <div className="flex flex-wrap items-center gap-2">
+        <SeverityIcon level={info.severity} size={13} title="" />
+        <span className="font-medium text-[var(--adm-text)]">{info.label}</span>
+        {elapsed !== undefined ? (
+          <span className="tabular-nums text-[var(--adm-text-muted)]">{formatDuration(elapsed)}</span>
+        ) : null}
+      </div>
+      {message ? <p className="text-[var(--adm-text-muted)]">{message}</p> : null}
+      {outcome.chips.length > 0 ? <p className="text-[var(--adm-text-muted)]">{outcome.chips.join(' · ')}</p> : null}
+      {created.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {created.map((object) => (
+            <a
+              key={object.id}
+              href={`/admin/content/${encodeURIComponent(object.id)}${object.type ? `?type=${encodeURIComponent(object.type)}` : ''}`}
+              className="adm-focusable rounded-full border border-[var(--adm-border)] px-2 py-0.5 text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+            >
+              Open {object.id}
+            </a>
+          ))}
+        </div>
+      ) : null}
+      {prompt && onUndo ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onUndo(prompt)}
+          className="adm-focusable w-fit rounded text-[var(--adm-accent)] hover:underline disabled:opacity-50"
+        >
+          Undo
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── ChatStateChip (D5 tier 1) ───────────────────────────────
+
+/**
+ * D5 tier 1 — the ambient header state chip: `working` / `waiting` /
+ * `blocked` / `done`, elapsed time, and — while streaming — a distinct
+ * "Writing…" reading instead of the generic `working` label. Always visible
+ * while `deriveLivenessChip` has something to say (an active run, or a
+ * recently-finished one); renders nothing for a chat that has never run.
+ *
+ * Colour is D4's, via `SeverityIcon` — `working` has none (D5: "working is
+ * not a severity"), rendered as a plain pulsing accent dot instead.
+ */
+export function ChatStateChip({
+  status,
+  lastOutcome,
+  events,
+  lastEventAtMs,
+}: {
+  status: ChatStatus | undefined;
+  lastOutcome: RunSummaryView | null | undefined;
+  events: ChatEventView[];
+  lastEventAtMs: number | undefined;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const chip = deriveLivenessChip(status, lastOutcome);
+  const ticking = chip?.tier === 'working' || chip?.tier === 'waiting';
+  useEffect(() => {
+    if (!ticking) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [ticking]);
+  if (!chip) return null;
+  const elapsed = elapsedMsForChip(chip.tier, events, lastOutcome, nowMs);
+  const streaming = isStreamingNow(status, lastEventAtMs, nowMs);
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-[var(--adm-radius-pill)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">
+      {chip.severity ? (
+        <SeverityIcon level={chip.severity} size={12} title="" />
+      ) : (
+        <span
+          className={`inline-block h-1.5 w-1.5 rounded-full bg-[var(--adm-accent)] ${streaming ? 'animate-bounce' : 'animate-pulse'}`}
+          aria-hidden="true"
+        />
+      )}
+      <span>{streaming ? 'Writing…' : chip.label}</span>
+      {elapsed !== undefined ? (
+        <span className="tabular-nums text-[var(--adm-text-muted)]">{formatDuration(elapsed)}</span>
+      ) : null}
+    </span>
+  );
+}
+
 /**
  * W19 (Wolf, 2026-08-22): red is for a step that actually died.
  *
@@ -535,25 +748,13 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
   // Declining a proposed write is a normal outcome of the approval protocol,
   // not an error — it has always rendered as a red ✗ too.
   const severity: Severity = classified?.severity ?? (denied ? DENIED_SEVERITY : 'ok');
-
-  const icon =
-    severity === 'failure' ? (
-      <IconX size={14} />
-    ) : severity === 'attention' ? (
-      <IconAlertTriangle size={14} />
-    ) : severity === 'notice' ? (
-      <IconInfo size={14} />
-    ) : (
-      <IconCheck size={14} />
-    );
-  const tone =
-    severity === 'failure'
-      ? 'text-[var(--adm-danger)]'
-      : severity === 'attention'
-        ? 'text-[var(--adm-warning-text)]'
-        : severity === 'notice'
-          ? 'text-[var(--adm-text-muted)]'
-          : 'text-[var(--adm-success)]';
+  // B2 (T0.3 Table B): this was its own severity→icon/colour switch, hand-
+  // copied from `RequestActivity.tsx`'s (B1) — the two drifted apart once
+  // already. Both now render through T1.1's `<SeverityIcon>`. No retry
+  // affordance exists on THIS card (a chat transcript row never offers one —
+  // recovery lives in `RequestActivity`, a separate component), so a
+  // `failure` here is always `blocked`, never `error`.
+  const adminSeverity = severityFromActivity(severity, { canRetry: false });
   const label =
     event.type === 'tool_call'
       ? summary
@@ -579,7 +780,7 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
   return (
     <div className="flex flex-col gap-1 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
       <div className="flex items-center gap-2">
-        <span className={tone}>{icon}</span>
+        <SeverityIcon level={adminSeverity} size={14} title="" />
         <span className="truncate">{label}</span>
       </div>
       {classified?.detail ? (
@@ -590,7 +791,34 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
   );
 }
 
-function ActivityLine({ events, preferenceScope = 'default' }: { events: ChatEventView[]; preferenceScope?: string }) {
+/**
+ * D5 tier 2 — progress. Collapsed by default (the `/admin/publish` dock
+ * convention — sections default collapsed, `ControlsCard.tsx`), expanding to
+ * the run's steps: unchanged behaviour for a HISTORICAL activity group.
+ *
+ * `live` is true only for the trailing group of the currently-running turn —
+ * there, the trigger row swaps its plain "N steps" text for T1.2's
+ * `<RunProgress>` (step count + elapsed), so the collapsed dock itself reads
+ * as active rather than as a static label. `totalSteps` is deliberately set
+ * equal to `step`: the agent loop decides its own tool calls turn by turn, so
+ * there is no fixed target to show a fraction of — this reports "N steps so
+ * far", not a guessed percentage toward an unknown total. Cost is left
+ * unset: no cost figure exists anywhere in the chat/agent-loop protocol (see
+ * `chat-liveness.ts`'s module comment and this task's final report) — only a
+ * request-bound run's SEPARATE `RequestActivity` poll knows a cost, and this
+ * component does not duplicate that poll.
+ */
+function ActivityLine({
+  events,
+  preferenceScope = 'default',
+  live = false,
+  elapsedMs,
+}: {
+  events: ChatEventView[];
+  preferenceScope?: string;
+  live?: boolean;
+  elapsedMs?: number;
+}) {
   const storageKey = `platform:admin:activity:${preferenceScope}`;
   const [expanded, setExpanded] = useState(() => {
     try {
@@ -615,13 +843,25 @@ function ActivityLine({ events, preferenceScope = 'default' }: { events: ChatEve
       <button
         type="button"
         onClick={toggle}
-        className="adm-focusable flex w-full items-center justify-between gap-3 text-left text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
+        className="adm-focusable flex w-full items-center gap-3 text-left text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
         aria-expanded={expanded}
       >
-        <span className="truncate">
-          Activity · {steps} step{steps === 1 ? '' : 's'} · {toolLabel(latest)}
+        {live ? (
+          <RunProgress
+            step={steps}
+            totalSteps={steps}
+            label={toolLabel(latest)}
+            elapsedMs={elapsedMs}
+            className="min-w-0 flex-1"
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate">
+            Activity · {steps} step{steps === 1 ? '' : 's'} · {toolLabel(latest)}
+          </span>
+        )}
+        <span aria-hidden="true" className="shrink-0">
+          {expanded ? '−' : '+'}
         </span>
-        <span aria-hidden="true">{expanded ? '−' : '+'}</span>
       </button>
       {expanded ? (
         <div className="mt-2 flex flex-col gap-1">
@@ -747,7 +987,7 @@ export function ApprovalCard({
             />
             <div className="flex gap-2">
               <Button size="sm" onClick={approveEdited} loading={busy}>
-                Approve edited
+                {`Confirm ${DECISION_LABEL.modify.toLowerCase()}`}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
                 Back
@@ -761,11 +1001,11 @@ export function ApprovalCard({
               onChange={(event) => setReason(event.target.value)}
               rows={2}
               placeholder="Why not? (optional — the agent sees this)"
-              aria-label="Denial reason"
+              aria-label={`${DECISION_LABEL.reject} reason`}
             />
             <div className="flex gap-2">
               <Button size="sm" variant="danger" onClick={() => onDeny(reason || undefined)} loading={busy}>
-                Deny
+                {`Confirm ${DECISION_LABEL.reject.toLowerCase()}`}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setDenying(false)} disabled={busy}>
                 Back
@@ -774,11 +1014,16 @@ export function ApprovalCard({
           </div>
         ) : (
           <div className="flex items-center gap-2">
+            {/* T3.2 vocabulary ruling (ux-inventory.md Table C): the same
+                two non-approve actions were called "Decline"/"Deny"/"Edit
+                request" here, "Hold" on the request activity card and "Ask for
+                changes" on the object workspace. One word each, everywhere —
+                Approve / Reject / Modify, from the shared DECISION_LABEL. */}
             <Button size="sm" onClick={() => onApprove()} loading={busy}>
-              Approve
+              {DECISION_LABEL.approve}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setDenying(true)} disabled={busy}>
-              Decline
+              {DECISION_LABEL.reject}
             </Button>
             <button
               type="button"
@@ -786,7 +1031,7 @@ export function ApprovalCard({
               disabled={busy}
               className="adm-focusable ml-auto rounded px-1.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:text-[var(--adm-text)] disabled:opacity-50"
             >
-              Edit request
+              {DECISION_LABEL.modify}
             </button>
           </div>
         )}
@@ -823,6 +1068,9 @@ export function ChatThread({
   preferenceScope,
   approvalInStage = false,
   pendingConsumed = false,
+  lastOutcome,
+  lastEventAtMs,
+  onUndo,
 }: {
   events: ChatEventView[];
   status: ChatStatus | undefined;
@@ -844,6 +1092,12 @@ export function ChatThread({
   approvalInStage?: boolean;
   /** From `chat.pendingConsumed` — `pending`'s call_id was already submitted. */
   pendingConsumed?: boolean;
+  /** T3.1 (D5): `chat.lastOutcome` — powers the tier-4 receipt for the latest run. */
+  lastOutcome?: RunSummaryView | null;
+  /** T3.1 (D5): `chat.lastEventAtMs` — powers the streaming-vs-silent indicator. */
+  lastEventAtMs?: number;
+  /** T3.1 (D5): the receipt's Undo button sends this prompt back into the chat. */
+  onUndo?: (prompt: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -855,6 +1109,17 @@ export function ChatThread({
   const settledAtBottom = useRef(false);
   const [showLatest, setShowLatest] = useState(false);
   const [quoteSelection, setQuoteSelection] = useState<QuoteSelectionState | undefined>(undefined);
+  // T3.1 (D5): a local clock for the live activity group's elapsed time and
+  // the streaming-vs-silent read below — ticking only while there is
+  // something worth ticking for, same pattern as `RequestActivity`'s own
+  // node clock.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const running = status === 'running';
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
   useEffect(() => {
     if (atBottom.current) {
       bottomRef.current?.scrollIntoView({ behavior: settledAtBottom.current ? 'smooth' : 'auto', block: 'end' });
@@ -922,6 +1187,11 @@ export function ChatThread({
   const userMessages = events.filter((event) => event.type === 'user_message');
   const laterUserTextsAfter = (seq: number): string[] =>
     userMessages.filter((event) => event.seq > seq).map((event) => String(event.detail?.text ?? ''));
+  // T3.1 (D5 tier 2): only the trailing activity group of an actually-running
+  // turn gets the live `<RunProgress>` treatment — a historical group (from a
+  // finished run, further up the transcript) keeps the plain static summary.
+  const liveActivityElapsedMs = running ? elapsedMsForChip('working', events, lastOutcome, nowMs) : undefined;
+  const streaming = isStreamingNow(status, lastEventAtMs, nowMs);
 
   return (
     <div
@@ -950,13 +1220,16 @@ export function ChatThread({
         </button>
       ) : null}
       {events.length === 0 && status === undefined ? emptyHint : null}
-      {timeline.map((item) => {
+      {timeline.map((item, index) => {
+        const isLast = index === timeline.length - 1;
         if (item.kind === 'activity')
           return (
             <ActivityLine
               key={`activity-${item.events[0]?.seq}`}
               events={item.events}
               preferenceScope={preferenceScope}
+              live={isLast && running}
+              elapsedMs={isLast && running ? liveActivityElapsedMs : undefined}
             />
           );
         const event = item.event;
@@ -971,15 +1244,41 @@ export function ChatThread({
             />
           );
         }
-        if (event.type === 'run_finished') return <RunFinishedLine key={event.seq} event={event} />;
+        // T3.1 (D5 tier 4): the LATEST run's terminal event gets the full
+        // receipt (chips, cost-if-any, undo) — `lastOutcome` only carries
+        // the most recent run's summary, so an older run further up the
+        // transcript falls through to the plain line it always rendered.
+        const isLatestRun = lastOutcome != null && event.detail?.run_id === lastOutcome.run_id;
+        if (event.type === 'run_finished') {
+          if (isLatestRun) {
+            return <RunReceipt key={event.seq} outcome={lastOutcome} events={events} onUndo={onUndo} busy={busy} />;
+          }
+          return <RunFinishedLine key={event.seq} event={event} />;
+        }
         if (event.type === 'run_error') {
+          const message = String(event.detail?.message ?? 'unknown error');
+          if (isLatestRun) {
+            return (
+              <RunReceipt
+                key={event.seq}
+                outcome={lastOutcome}
+                message={message}
+                events={events}
+                onUndo={onUndo}
+                busy={busy}
+              />
+            );
+          }
           return (
             <p key={event.seq} className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">
-              The run hit a problem: {String(event.detail?.message ?? 'unknown error')}
+              The run hit a problem: {message}
             </p>
           );
         }
         if (event.type === 'run_cancelled') {
+          if (isLatestRun) {
+            return <RunReceipt key={event.seq} outcome={lastOutcome} events={events} onUndo={onUndo} busy={busy} />;
+          }
           return (
             <p key={event.seq} className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
               Run cancelled.
@@ -1026,8 +1325,8 @@ export function ChatThread({
       ) : null}
       {status === 'queued' || status === 'running' ? (
         <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-          <span className="mr-1 inline-block animate-pulse">●</span>
-          {status === 'queued' ? 'Waking the agent…' : 'Working…'}
+          <span className={`mr-1 inline-block ${streaming ? 'animate-bounce' : 'animate-pulse'}`}>●</span>
+          {status === 'queued' ? 'Waking the agent…' : streaming ? 'Writing…' : 'Working…'}
         </p>
       ) : null}
       {showLatest ? (
@@ -1076,6 +1375,18 @@ export function ChatComposer({
 }) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { toast } = useToast();
+  const dictation = useDictation({
+    value: text,
+    onChange: setText,
+    onError: (error) => {
+      toast({
+        title: error === 'not-allowed' ? 'Microphone access was denied' : 'Dictation stopped',
+        description: error === 'not-allowed' ? 'Allow microphone access to dictate, or type your message.' : undefined,
+        tone: 'warning',
+      });
+    },
+  });
   const live =
     status === 'queued' || status === 'running' || status === 'awaiting_approval' || status === 'awaiting_candidate';
   useEffect(() => {
@@ -1098,6 +1409,7 @@ export function ChatComposer({
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed || live || busy) return;
+    dictation.stop();
     onSend(trimmed);
     setText('');
   };
@@ -1143,6 +1455,11 @@ export function ChatComposer({
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === 'Escape' && dictation.listening) {
+              event.preventDefault();
+              dictation.stop();
+              return;
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
               submit();
@@ -1160,6 +1477,9 @@ export function ChatComposer({
           disabled={busy && !live}
           className="flex-1"
         />
+        {dictation.supported ? (
+          <MicButton listening={dictation.listening} onToggle={dictation.toggle} disabled={busy && !live} />
+        ) : null}
         {live && onCancel ? (
           <Button variant="secondary" onClick={onCancel} disabled={busy}>
             Stop

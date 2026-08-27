@@ -1,0 +1,17 @@
+---
+// Traffic dashboard (T4.1) — visits/sources/top content from Netlify
+// Analytics, on AdminShell.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import TrafficWorkspace from '~/admin/TrafficWorkspace';
+
+// D2: resolve identity once, server-side, where process.env is real, and
+// pass it down explicitly — the island must not call getSiteIdentity()
+// itself (the browser has no process.env, so env overrides never reached it).
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Traffic">
+  <TrafficWorkspace client:load identity={identity} />
+</AdminLayout>

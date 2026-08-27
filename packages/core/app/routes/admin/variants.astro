@@ -1,0 +1,16 @@
+---
+// Article variants (T4.4) — variant families, their judged evidence, and
+// winner selection. Deliberately not called an A/B monitor: no traffic split
+// exists to make one (OQ-W7-2), and the screen says so rather than implying
+// otherwise.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import VariantsWorkspace from '~/admin/VariantsWorkspace';
+
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Variants">
+  <VariantsWorkspace client:load identity={identity} />
+</AdminLayout>

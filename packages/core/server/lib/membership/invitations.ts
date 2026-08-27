@@ -652,17 +652,34 @@ const closeInvitationAsAccepted = async (
 };
 
 /**
+ * How stale `last_seen_at` may be before a self-read refreshes it.
+ *
+ * T5.1 R10 (F11): `{verb:'me'}` is a READ that every admin page load
+ * performs, and it used to `saveMember` unconditionally just to stamp
+ * `last_seen_at` — putting a blob WRITE (the slowest Blobs operation) on the
+ * critical path to rendering the topbar user chip, on all four surfaces, on
+ * every navigation. The field feeds presence display ("when was this person
+ * last here"), never authorization, so hour granularity keeps the semantics
+ * and removes the write from essentially every page load.
+ */
+export const LAST_SEEN_REFRESH_MS = 60 * 60_000;
+
+/**
  * First-login activation (T9.5): flip an `invited` membership to `active` and
  * stamp the GoTrue user_id + last_seen (closing a pending invitation the same
  * way `accept` does). Active/suspended memberships only get last_seen; no
  * member → null (bootstrap owners have no stored record).
+ *
+ * `wrote` reports whether this call actually persisted anything, so the
+ * caller can keep its audit append in step with the write rather than
+ * appending a `person.login` entry on every page load (T5.1 R10).
  */
-export const activateOnLogin = async (
+export const activateOnLoginDetailed = async (
   store: MembershipStore,
   email: string,
   userId: string | undefined,
   at: string
-): Promise<UserRecord | null> => {
+): Promise<{ record: UserRecord; wrote: boolean } | null> => {
   const normalized = normalizeEmail(email);
   const member = await getMembershipByEmail(store, normalized);
   if (!member) return null;
@@ -687,14 +704,30 @@ export const activateOnLogin = async (
       },
     });
     if (invitation) await closeInvitationAsAccepted(store, invitation, saved.person.person_id, at);
-    return memberToUserRecord(saved);
+    return { record: memberToUserRecord(saved), wrote: true };
+  }
+  // T5.1 R10: skip the write when `last_seen_at` is already fresh. The
+  // returned record still reports the CURRENT time, so nothing the caller
+  // renders changes — only the blob write is elided.
+  const previous = Date.parse(member.person.last_seen_at ?? '');
+  const nowMs = Date.parse(at);
+  if (Number.isFinite(previous) && Number.isFinite(nowMs) && nowMs - previous < LAST_SEEN_REFRESH_MS) {
+    return { record: memberToUserRecord({ ...member, person: { ...member.person, last_seen_at: at } }), wrote: false };
   }
   const saved = await saveMember(store, {
     person: { ...member.person, last_seen_at: at },
     membership: member.membership,
   });
-  return memberToUserRecord(saved);
+  return { record: memberToUserRecord(saved), wrote: true };
 };
+
+/** The record-only form (the original T9.5 signature); callers that need to know whether a write happened use `activateOnLoginDetailed`. */
+export const activateOnLogin = async (
+  store: MembershipStore,
+  email: string,
+  userId: string | undefined,
+  at: string
+): Promise<UserRecord | null> => (await activateOnLoginDetailed(store, email, userId, at))?.record ?? null;
 
 /**
  * Unassigned-login default (Wolf, 2026-08-18, admin gate follow-up): a

@@ -7,19 +7,31 @@
  * always true, a node timeline behind a disclosure, and a per-node detail for
  * the editor who wants to know which tool took the time.
  *
- * Colour comes from the server's `severity` and from nothing else. Per Wolf's
- * ruling (see `lib/admin/activity-severity.ts`), `notice` is muted grey rather
- * than yellow — an editor's eye must pass over the handled things so that a
- * real red still means something. This component never re-classifies.
+ * Colour comes from the server's `severity`, run through D4
+ * (`@core/lib/admin/severity`'s `severityFromActivity`, T2.3) — `attention`
+ * is D4 `needs_you` (amber), a `failure` next to a retry affordance is
+ * `error` and one without is `blocked` (both red; the split is the icon
+ * shape, not the colour — see `SeverityGlyph`'s own comment).
+ *
+ * ONE deliberate exception, kept rather than silently upgraded: per Wolf's
+ * ruling, `notice` stays the muted grey it always was, not D4's brighter
+ * `info` blue — an editor's eye must pass over the handled things so that a
+ * real red still means something. `severity.ts`'s own adapter docstring
+ * flags "should notice become info" as a UI-layer/prominence question that
+ * task deliberately left open; this component's answer is no, for exactly
+ * the reason the original comment (below, kept) gives. This component never
+ * re-classifies beyond that one named exception.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { Button, Skeleton } from './primitives';
-import { IconAlertTriangle, IconCheck, IconChevronDown, IconChevronRight, IconInfo, IconX } from './icons';
+import { ActionRow } from './approval';
+import { decide, type DecisionAction } from '@core/lib/admin/decisions';
+import { SeverityIcon } from './severity';
+import { IconChevronDown, IconChevronRight, IconInfo } from './icons';
 import { cn } from './utils';
 import {
   activityPollIntervalFor,
-  decideRunPublish,
   formatDuration,
   formatEta,
   formatShortDuration,
@@ -29,7 +41,7 @@ import {
   type ActivitySeverity,
   type ActivityView,
 } from '@core/lib/admin/requests-client';
-import { severityTone } from '@core/lib/admin/activity-severity';
+import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
 import { relativeAge } from '@core/lib/admin/request-logic';
 
 async function getToken(): Promise<string> {
@@ -48,22 +60,26 @@ const hidden = (): boolean => typeof document !== 'undefined' && document.visibi
 
 const UNREACHABLE_POLL_MS = 20_000;
 
-type SeverityToneName = ReturnType<typeof severityTone>;
-
-/** The only place a severity becomes a colour. `neutral` is the muted grey `notice` rides on. */
-const GLYPH_TINT: Record<SeverityToneName, string> = {
-  danger: 'text-[var(--adm-danger)]',
-  warning: 'text-[var(--adm-warning-text)]',
-  neutral: 'text-[var(--adm-text-muted)]',
-  success: 'text-[var(--adm-success)]',
-};
-
-const PROGRESS_FILL: Record<SeverityToneName, string> = {
-  danger: 'bg-[var(--adm-danger)]',
-  warning: 'bg-[var(--adm-warning)]',
-  // A run carrying a `notice` is just a run working; it gets the ordinary bar.
-  neutral: 'bg-[var(--adm-accent)]',
+/**
+ * T2.3/T3.1 (T0.3 Table B rows B1/B2/B10) — colour and glyph now come from D4
+ * (`@core/lib/admin/severity`, `./severity.tsx`) via `severityFromActivity`,
+ * not from a private tint table keyed on `activity-severity.ts`'s four-level
+ * `severityTone`. This used to be its own severity→icon switch, hand-copied
+ * from the one in `chat.tsx`'s `ToolCallCard` (B2) — the two would drift the
+ * next time either changed; both now render through T1.1's `<SeverityIcon>`.
+ * The split this closes: `failure` used to render the same bare ✕ whether or
+ * not a "Retry this step" button sat right next to it on the same card — now
+ * a `failure` with a retry available (`canRetry`, below) is D4 `error`
+ * (circle-!), and one without is `blocked` (octagon). Both remain red — D4
+ * says colour, not shape, is what "died" means, and this split is about
+ * telling the two dead-ends apart, not about un-reddening either of them.
+ */
+const BAR_FILL: Record<AdminSeverity, string> = {
+  info: 'bg-[var(--adm-info)]',
   success: 'bg-[var(--adm-success)]',
+  needs_you: 'bg-[var(--adm-warning)]',
+  error: 'bg-[var(--adm-danger)]',
+  blocked: 'bg-[var(--adm-danger)]',
 };
 
 // ─── pure helpers (exported so they can be tested outside this folder) ───────
@@ -190,12 +206,38 @@ function Dot({ className }: { className?: string }) {
   return <span className={cn('inline-block h-1.5 w-1.5 rounded-full', className)} aria-hidden="true" />;
 }
 
-function SeverityGlyph({ severity, size = 14 }: { severity: ActivitySeverity; size?: number }) {
-  const tint = GLYPH_TINT[severityTone(severity)];
-  if (severity === 'failure') return <IconX size={size} className={tint} title="Failed" />;
-  if (severity === 'attention') return <IconAlertTriangle size={size} className={tint} title="Waiting for you" />;
-  if (severity === 'notice') return <IconInfo size={size} className={tint} title="Handled — the run carried on" />;
-  return <IconCheck size={size} className={tint} title="Done" />;
+const GLYPH_TITLE: Record<AdminSeverity, string> = {
+  info: 'Handled — the run carried on',
+  success: 'Done',
+  needs_you: 'Waiting for you',
+  error: 'Failed — a retry is available',
+  blocked: 'Failed',
+};
+
+/**
+ * `canRetry` is the B1/B2 split criterion — pass whether THIS signal is the
+ * one a retry affordance targets. Defaults to false, the safer read of an
+ * unknown recovery state (see `severityFromActivity`'s own doc). Threaded
+ * per node/warning/tool-call (via `retryNodeId` below), not as one card-wide
+ * flag — a card can fail in several places at once and only the one
+ * `recovery` actually names should read as the softer `error`.
+ */
+function SeverityGlyph({
+  severity,
+  size = 14,
+  canRetry = false,
+}: {
+  severity: ActivitySeverity;
+  size?: number;
+  canRetry?: boolean;
+}) {
+  // The one named exception (see file header): `notice` keeps its original
+  // muted-grey `IconInfo`, never D4's brighter `info` blue.
+  if (severity === 'notice') {
+    return <IconInfo size={size} className="text-[var(--adm-text-muted)]" title={GLYPH_TITLE.info} />;
+  }
+  const level = severityFromActivity(severity, { canRetry });
+  return <SeverityIcon level={level} size={size} title={GLYPH_TITLE[level]} />;
 }
 
 /**
@@ -203,16 +245,17 @@ function SeverityGlyph({ severity, size = 14 }: { severity: ActivitySeverity; si
  * and a step that was skipped by design must not wear the same tick as one
  * that actually finished. Severity remains the only thing choosing a hue.
  */
-function NodeGlyph({ node }: { node: ActivityNodeView }) {
+function NodeGlyph({ node, retryNodeId }: { node: ActivityNodeView; retryNodeId?: string }) {
   if (node.status === 'running') return <Spinner size={14} className="text-[var(--adm-info-text)]" />;
   if (node.severity === 'ok' && node.status === 'skipped') return <Dot className="bg-[var(--adm-text-muted)]" />;
   if (node.severity === 'ok' && !node.started_at) return <Dot className="border border-[var(--adm-border-strong)]" />;
-  return <SeverityGlyph severity={node.severity} />;
+  return <SeverityGlyph severity={node.severity} canRetry={node.id === retryNodeId} />;
 }
 
 // ─── level 3: one node's detail ──────────────────────────────────────────────
 
-function NodeDetail({ node }: { node: ActivityNodeView }) {
+function NodeDetail({ node, retryNodeId }: { node: ActivityNodeView; retryNodeId?: string }) {
+  const canRetry = node.id === retryNodeId;
   return (
     <div className="flex flex-col gap-2 pb-2 text-[length:var(--adm-text-xs)]">
       {node.errors.length > 0 ? (
@@ -230,7 +273,7 @@ function NodeDetail({ node }: { node: ActivityNodeView }) {
           {node.warnings.map((warning, index) => (
             <p key={index} className="flex items-start gap-1.5 text-[var(--adm-text-muted)]">
               <span className="mt-px flex w-3.5 shrink-0 items-center justify-center">
-                <SeverityGlyph severity={warning.severity} size={13} />
+                <SeverityGlyph severity={warning.severity} size={13} canRetry={canRetry} />
               </span>
               <span className={warning.severity === 'attention' ? 'text-[var(--adm-warning-text)]' : undefined}>
                 {warning.label}
@@ -258,7 +301,7 @@ function NodeDetail({ node }: { node: ActivityNodeView }) {
             const took = tool.duration_ms === undefined ? '' : formatShortDuration(tool.duration_ms);
             return (
               <li key={`${tool.id}-${toolIndex}`} className="inline-flex items-center gap-1.5">
-                <SeverityGlyph severity={tool.severity} size={12} />
+                <SeverityGlyph severity={tool.severity} size={12} canRetry={canRetry} />
                 <span className="text-[var(--adm-text)]">{tool.id}</span>
                 {took ? <span>· {took}</span> : null}
                 {tool.severity !== 'ok' && tool.error_code ? <span>· {tool.error_code}</span> : null}
@@ -285,7 +328,7 @@ function NodeDetail({ node }: { node: ActivityNodeView }) {
 
 // ─── level 2: one node row ───────────────────────────────────────────────────
 
-function NodeRow({ node, nowMs }: { node: ActivityNodeView; nowMs: number }) {
+function NodeRow({ node, nowMs, retryNodeId }: { node: ActivityNodeView; nowMs: number; retryNodeId?: string }) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
   const expandable = nodeHasDetail(node);
@@ -297,7 +340,7 @@ function NodeRow({ node, nowMs }: { node: ActivityNodeView; nowMs: number }) {
   const line = (
     <>
       <span className="flex w-3.5 shrink-0 items-center justify-center">
-        <NodeGlyph node={node} />
+        <NodeGlyph node={node} retryNodeId={retryNodeId} />
       </span>
       <span
         className={cn(
@@ -344,7 +387,7 @@ function NodeRow({ node, nowMs }: { node: ActivityNodeView; nowMs: number }) {
         </p>
       ) : null}
       <div id={detailId} hidden={!expandable || !open} className="pl-7 pr-1.5">
-        {expandable && open ? <NodeDetail node={node} /> : null}
+        {expandable && open ? <NodeDetail node={node} retryNodeId={retryNodeId} /> : null}
       </div>
     </li>
   );
@@ -371,7 +414,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   const [reason, setReason] = useState<string | undefined>(undefined);
   /** Server-decided: this caller's roles allow acting on an approval. */
   const [canApprove, setCanApprove] = useState(false);
-  const [deciding, setDeciding] = useState<'approve' | 'withhold' | undefined>(undefined);
+  const [deciding, setDeciding] = useState<DecisionAction | undefined>(undefined);
   const [decideError, setDecideError] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
@@ -456,27 +499,38 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
    * and the chain that was watching it had almost certainly stopped (a blocked
    * run is not something `activityPollIntervalFor` keeps asking about).
    */
-  const decide = useCallback(
-    async (action: 'approve' | 'withhold') => {
+  const runDecision = useCallback(
+    async (action: DecisionAction) => {
       if (deciding) return;
       setDeciding(action);
       setDecideError(undefined);
       try {
-        const result = await decideRunPublish(
+        // T3.2: through the one decision façade rather than `decideRunPublish`
+        // directly. Same wire call; what the façade adds is the shared
+        // optimistic marker and the one invalidation path, so deciding HERE
+        // moves the header pill and the runs inbox with no reload.
+        const result = await decide(
           getToken,
-          { ...(requestId ? { request_id: requestId } : {}), ...(runId ? { run_id: runId } : {}) },
+          {
+            mechanism: 'workflow_gate',
+            ...(requestId ? { requestId } : {}),
+            ...(runId ? { runId } : {}),
+            canApprove,
+          },
           action
         );
-        setActivity(result.activity);
-        setReason(result.reason);
-        setCanApprove(result.can_approve === true);
-        setNowMs(Date.now());
-        setLoaded(true);
+        if (result.activity) {
+          setActivity(result.activity.activity);
+          setReason(result.activity.reason);
+          setCanApprove(result.activity.can_approve === true);
+          setNowMs(Date.now());
+          setLoaded(true);
+        }
         // The server reports a decision it could not carry out in `error` with
         // a code in `reason` — surfaced verbatim rather than flattened into a
         // generic failure, because "which half did not happen" is the whole
         // question when a publish stalls.
-        if (result.error) setDecideError(result.error);
+        if (!result.ok) setDecideError(result.error);
         generationRef.current += 1;
         stoppedRef.current = false;
         settledRef.current = false;
@@ -488,7 +542,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
         setDeciding(undefined);
       }
     },
-    [deciding, load, requestId, runId]
+    [canApprove, deciding, load, requestId, runId]
   );
 
   useEffect(() => {
@@ -559,11 +613,32 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   }
 
   const { done, total } = activity.progress;
-  const tone = severityTone(activity.severity);
   const eta = formatEta(activity.eta);
   const live = activity.status === 'running' || activity.status === 'queued';
   const recovery = activity.recovery;
   const retryNodeId = recovery?.node_id;
+  /**
+   * B1 (T0.3): a `failure` reads as D4 `error` (retry affordance exists)
+   * rather than `blocked` (none) only where BOTH halves of that affordance
+   * are actually present on this card — the node `recovery` names, AND a
+   * host that passed `onRetry` at all (an embed that never wires `onRetry`
+   * offers no "Retry this step" button no matter what `recovery` says, so
+   * every failure on it must read as the harder `blocked`). Gated once here,
+   * then threaded down as `retryNodeId` — per node, not as one card-wide
+   * boolean — so only the node the affordance actually targets gets the
+   * softer `error` icon; every other failed node on the same card, and every
+   * warning/tool-call under it, stays `blocked`.
+   */
+  const effectiveRetryNodeId = onRetry ? retryNodeId : undefined;
+  // D4/T2.3: the whole-run level of the same B1/B2 split — a retry exists
+  // SOMEWHERE on this run iff `effectiveRetryNodeId` names a node for it.
+  // `notice` keeps its pre-existing neutral/accent bar rather than D4's
+  // `info` blue — the same named exception `SeverityGlyph` makes, kept in
+  // sync here so the header glyph and the bar underneath it never disagree.
+  const progressFill =
+    activity.severity === 'notice'
+      ? 'bg-[var(--adm-accent)]'
+      : BAR_FILL[severityFromActivity(activity.severity, { canRetry: Boolean(effectiveRetryNodeId) })];
   const labelFor = (nodeId: string) => activity.nodes.find((node) => node.id === nodeId)?.label;
   const spend = activity.cost;
   const spendLabel = spend?.most_expensive_node ? labelFor(spend.most_expensive_node) : undefined;
@@ -584,7 +659,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
             {live ? (
               <Spinner size={14} className="text-[var(--adm-info-text)]" />
             ) : (
-              <SeverityGlyph severity={activity.severity} />
+              <SeverityGlyph severity={activity.severity} canRetry={Boolean(effectiveRetryNodeId)} />
             )}
           </span>
           <span className="min-w-0 flex-1 truncate font-medium text-[var(--adm-text)]">{activity.headline}</span>
@@ -611,7 +686,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
           aria-valuetext={`${done} of ${total} steps done`}
         >
           <span
-            className={cn('block h-full rounded-[var(--adm-radius-pill)]', PROGRESS_FILL[tone])}
+            className={cn('block h-full rounded-[var(--adm-radius-pill)]', progressFill)}
             style={{ width: `${progressPercent(done, total)}%` }}
           />
         </span>
@@ -634,7 +709,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
           className="mx-3 mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-warning)] bg-[var(--adm-warning-soft)] px-3 py-2"
         >
           <p className="flex items-center gap-1.5 text-[length:var(--adm-text-xs)] font-semibold text-[var(--adm-warning-text)]">
-            <IconAlertTriangle size={14} /> Waiting for you
+            <SeverityIcon level="needs_you" size={14} title="" /> Waiting for you
           </p>
           <ul className="mt-1 flex flex-col gap-1.5">
             {activity.approvals.map((approval, index) => {
@@ -657,22 +732,30 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
               );
             })}
           </ul>
-          {canApprove ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => void decide('approve')} disabled={deciding !== undefined}>
-                {deciding === 'approve' ? 'Approving…' : 'Approve and publish'}
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => void decide('withhold')}
-                disabled={deciding !== undefined}
-                title="Record the operator veto instead. Blocks every publish-risk node on this run until you replace the decision."
-              >
-                {deciding === 'withhold' ? 'Holding…' : 'Hold'}
-              </Button>
-            </div>
-          ) : null}
+          {/* T1.2/D3: ActionRow always renders — disabled with a tooltip when
+              the server says this viewer cannot decide (T0.3 row A4's own
+              gap: the old card showed zero buttons AND zero explanation when
+              `canApprove` was false). Reject maps to the existing `withhold`
+              mechanism (§6.3) — the vocabulary ruling (T1.2 brief,
+              ux-inventory.md Table C) is Approve/Reject/Modify everywhere;
+              "Hold" was one of four different words the codebase used for
+              this same action. */}
+          <ActionRow
+            className="mt-2"
+            onApprove={() => runDecision('approve')}
+            onReject={() => runDecision('reject')}
+            approveLabel="Approve and publish"
+            /* T3.2: this endpoint's request body is `{request_id|run_id,
+               action}` and nothing else, so there is nowhere to put a typed
+               reason — `decisions.ts`'s `reasonDroppedNote`. Reject decides on
+               the click rather than prompting for words it would discard. */
+            rejectReason="none"
+            disabledReason={canApprove ? undefined : 'You do not have publish-decision authority for this run.'}
+          />
+          <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            Rejecting records the operator veto and blocks every publish-risk node on this run until the decision is
+            replaced.
+          </p>
           {decideError ? (
             <p className="mt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{decideError}</p>
           ) : null}
@@ -710,7 +793,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
             ) : null}
             <ol className="flex flex-col">
               {activity.nodes.map((node, nodeIndex) => (
-                <NodeRow key={`${node.id}-${nodeIndex}`} node={node} nowMs={nowMs} />
+                <NodeRow key={`${node.id}-${nodeIndex}`} node={node} nowMs={nowMs} retryNodeId={effectiveRetryNodeId} />
               ))}
             </ol>
             {spend ? (

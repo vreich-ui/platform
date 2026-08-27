@@ -16,7 +16,7 @@ import { Badge, StatusPill, Skeleton, EmptyState, Card } from './primitives';
 import { Input } from './forms';
 import { DataTable, type Column } from './data';
 import { relativeTimeFromNow } from './logic';
-import { IconLibrary, IconAlertTriangle, IconSparkles } from './icons';
+import { IconLibrary, IconSparkles } from './icons';
 import {
   filterRows,
   rowStatus,
@@ -218,7 +218,7 @@ function ContentLibraryBody() {
   if (error) {
     return (
       <Card>
-        <EmptyState icon={<IconAlertTriangle size={26} />} title="Couldn't load the library" message={error} />
+        <EmptyState severity="error" title="Couldn't load the library" message={error} />
       </Card>
     );
   }

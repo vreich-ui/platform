@@ -8,13 +8,22 @@
  * ring.
  */
 import { forwardRef } from 'react';
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ComponentType, HTMLAttributes, ReactNode } from 'react';
 
 import { cn } from './utils';
 import type { Tone } from './logic';
 import { statusTone } from './logic';
-import { IconChevronRight } from './icons';
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconCheck,
+  IconChevronRight,
+  IconInfo,
+  IconOctagon,
+  type IconProps,
+} from './icons';
 import { statusLabel } from '@core/lib/admin/display-name';
+import { SEVERITY, type AdminSeverity, type SeverityIconKey, type SeverityTokenFamily } from '@core/lib/admin/severity';
 
 // ─── tone maps (shared by Badge / StatusPill) ─────────────────────────────────
 
@@ -326,14 +335,51 @@ export function Skeleton({ variant = 'text', width, height, className, style, ..
 
 // ─── EmptyState ───────────────────────────────────────────────────────────────
 
+/** D4/B4: `EmptyState`'s own icon+color lookup, sourced from `SEVERITY`
+ * (`@core/lib/admin/severity`) — not imported from `./severity.tsx`, which
+ * itself imports `Badge` from this file; duplicating the tiny level→glyph map
+ * here (same shape as `severity.tsx`'s own `ICON_COMPONENT`/`ICON_TONE`)
+ * avoids a circular import between the two. Literal Tailwind color classes
+ * for the same content-scanner reason `severity.tsx`'s header documents. */
+const EMPTY_STATE_ICON_COMPONENT: Record<SeverityIconKey, ComponentType<IconProps>> = {
+  info: IconInfo,
+  check: IconCheck,
+  'alert-triangle': IconAlertTriangle,
+  'alert-circle': IconAlertCircle,
+  octagon: IconOctagon,
+};
+
+const EMPTY_STATE_ICON_TONE: Record<SeverityTokenFamily, string> = {
+  info: 'text-[var(--adm-info)]',
+  success: 'text-[var(--adm-success)]',
+  warning: 'text-[var(--adm-warning-text)]',
+  danger: 'text-[var(--adm-danger)]',
+};
+
 export interface EmptyStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
+  /** Custom icon override. Ignored in favor of the level's own D4 glyph when `severity` is set. */
   icon?: ReactNode;
+  /**
+   * D4 (T1.1) / B4 fix: a genuine load/fetch failure must not render
+   * identically to an ordinary empty list — both used to share the same flat
+   * neutral-gray triangle regardless of which one actually happened. Set
+   * `severity="error"` (or another D4 level) to render that level's real
+   * glyph (red circle-! for `error`, not the neutral triangle) in its color;
+   * omit entirely for a genuinely empty list — nothing broke, nothing to
+   * decide, so it stays neutral/decorative exactly as before this prop
+   * existed (e.g. `GovernancePage.tsx`'s "No chat tools").
+   */
+  severity?: AdminSeverity;
   title: ReactNode;
   message?: ReactNode;
   action?: ReactNode;
 }
 
-export function EmptyState({ icon, title, message, action, className, ...rest }: EmptyStateProps) {
+export function EmptyState({ icon, severity, title, message, action, className, ...rest }: EmptyStateProps) {
+  const def = severity ? SEVERITY[severity] : undefined;
+  const Glyph = def ? EMPTY_STATE_ICON_COMPONENT[def.icon] : undefined;
+  const resolvedIcon = icon ?? (Glyph ? <Glyph size={28} title="" /> : undefined);
+  const iconClass = def ? EMPTY_STATE_ICON_TONE[def.tokens.family] : 'text-[var(--adm-text-muted)]';
   return (
     <div
       className={cn(
@@ -342,7 +388,7 @@ export function EmptyState({ icon, title, message, action, className, ...rest }:
       )}
       {...rest}
     >
-      {icon ? <div className="mb-3 text-[var(--adm-text-muted)]">{icon}</div> : null}
+      {resolvedIcon ? <div className={cn('mb-3', iconClass)}>{resolvedIcon}</div> : null}
       <p className="text-[length:var(--adm-text-base)] font-semibold text-[var(--adm-text-heading)]">{title}</p>
       {message ? (
         <p className="mt-1 max-w-sm text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">{message}</p>

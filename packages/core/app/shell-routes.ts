@@ -51,6 +51,11 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   // an authenticated admin, and that login already lives here.
   { pattern: '/admin/authorize', entry: 'admin/authorize.astro' },
   { pattern: '/admin/content', entry: 'admin/content/index.astro' },
+  // T2.1 D1(a): the objects plane — canonical now; /admin/content,
+  // /admin/templates, /admin/studio and /admin/media redirect here
+  // (netlify.toml, force=true) but keep their own injected routes below so
+  // shell-routes/admin-parity's route inventory stays satisfied.
+  { pattern: '/admin/objects', entry: 'admin/objects/index.astro' },
   // W19 T19.4: the editorial request list, and its deep link. `[requestId]`
   // is the T9.9 placeholder pattern — the netlify.toml rewrite serves the
   // `__request` page for every /admin/requests/<id> and the island reads the
@@ -61,6 +66,9 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   // T18.5: one-time onboarding (name + "what your role can do") — the AdminShell gate sends new members here.
   { pattern: '/admin/welcome', entry: 'admin/welcome.astro' },
   { pattern: '/admin/templates', entry: 'admin/templates.astro' },
+  // T4.4: article variant families + winner selection. Not an A/B monitor —
+  // no traffic split exists (OQ-W7-2) and the page says so on its face.
+  { pattern: '/admin/variants', entry: 'admin/variants.astro' },
   { pattern: '/admin/media', entry: 'admin/media.astro' },
   { pattern: '/admin/release', entry: 'admin/release.astro' },
   { pattern: '/admin/kit', entry: 'admin/kit.astro' },

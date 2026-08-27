@@ -14,6 +14,8 @@
  * "fix" the read rule back to creator-scoped — a stalled article belonging to
  * a colleague is the desk's problem, which is the whole point of the surface.
  */
+import { createHash } from 'node:crypto';
+
 import { z } from 'zod';
 
 import type { SiteBinding } from '../lib/site-binding.js';
@@ -54,11 +56,31 @@ type LambdaEvent = {
 };
 
 const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
-const jsonResponse = (status: number, body: Record<string, unknown>) => ({
+const jsonResponse = (status: number, body: Record<string, unknown>, extraHeaders: Record<string, string> = {}) => ({
   statusCode: status,
-  headers: jsonHeaders,
+  headers: { ...jsonHeaders, ...extraHeaders },
   body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
 });
+
+/**
+ * T5.1 R8 (T0.2 F12): the `list` action is the busiest endpoint in the admin —
+ * T0.2 measured ~16 requests/minute per open tab against it, every one
+ * re-serialising and re-transferring byte-identical JSON, because there was no
+ * `ETag` anywhere in `server/functions/` and `no-store` forbade even
+ * conditional revalidation.
+ *
+ * This is an EXPLICIT conditional-request protocol between this handler and
+ * `requests-client.ts`, not browser HTTP caching: the action is a POST, so no
+ * cache would honour it. The client keeps the last `ETag` and sends it as
+ * `If-None-Match`; an unchanged view comes back `304` with an empty body and
+ * the client keeps the snapshot it already has.
+ *
+ * It saves BYTES and serialisation, never blob reads — the handler still reads
+ * the index, the notify state and the seen ledger before it can hash. Pairs
+ * with the index read those three already collapsed to.
+ */
+const LIST_CACHE_CONTROL = 'private, no-cache';
+const etagFor = (body: unknown): string => `"${createHash('sha1').update(JSON.stringify(body)).digest('hex')}"`;
 
 /** Page size for `list`. The index is bounded already; this bounds the wire. */
 export const REQUEST_PAGE_SIZE = 100;
@@ -170,7 +192,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         const nextCursor = start + limit < matched.length ? String(start + limit) : undefined;
         const notify = await loadNotifyState(store, callerEmail);
         const seen = await loadSeenLedger(store, callerEmail, notify);
-        return jsonResponse(200, {
+        const listBody: Record<string, unknown> = {
           requests: page,
           total: matched.length,
           seq,
@@ -188,7 +210,13 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
            */
           ...(Object.keys(seen).length === 0 ? { notify_first_contact: true } : {}),
           email_mode: emailModeFor(notify),
-        });
+        };
+        const etag = etagFor(listBody);
+        const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+        if (ifNoneMatch && ifNoneMatch === etag) {
+          return { statusCode: 304, headers: { 'Cache-Control': LIST_CACHE_CONTROL, ETag: etag }, body: '' };
+        }
+        return jsonResponse(200, listBody, { 'Cache-Control': LIST_CACHE_CONTROL, ETag: etag });
       }
 
       case 'get': {

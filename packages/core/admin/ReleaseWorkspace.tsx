@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { Switch } from './forms';
-import { useToast } from './overlays';
-import { IconAlertTriangle, IconExternalLink, IconRocket } from './icons';
+import { ConfirmDialog, useToast } from './overlays';
+import { ActionRow } from './approval';
+import { IconCheck, IconExternalLink, IconRocket } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { fetchInventoryRows } from '@core/lib/admin/library-client';
 import { listChats, type ChatSummaryView } from '@core/lib/admin/chat-client';
@@ -25,6 +27,9 @@ import {
   shortDiagnosticCommit,
   type ReleaseReviewGroup,
 } from '@core/lib/admin/release-presentation';
+import { assertDecided, decide, decisionAvailability, type DecisionAction } from '@core/lib/admin/decisions';
+import { forceReleaseObjectLock } from '@core/lib/edit-mode/verbs-client';
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -119,8 +124,138 @@ function WorkList({ chats, empty }: { chats: ChatSummaryView[]; empty: string })
   );
 }
 
-function ReleaseReviewGroupCard({ group }: { group: ReleaseReviewGroup<ReleaseObjectView> }) {
+/**
+ * T3.2 (T0.3 row A6) — the "Pending approvals" row, with the decision on it.
+ *
+ * These are objects with an OPEN review: the object-review mechanism (T0.1
+ * §6.1), which is a different mechanism from the run gate the inbox decides
+ * and from the chat tool card — the façade dispatches on the variant so this
+ * surface does not have to know that. `review_decide` needs no lock and no
+ * record version, which is why a row here can decide without checking the
+ * object out.
+ *
+ * Reject is `request_changes`, the half of the verb that had no client method
+ * at all before this task (T0.1 §7: "approve only, no request-changes UI").
+ * There is no Modify: the object store records exactly two review decisions,
+ * and `decisionAvailability` says so rather than rendering a third button.
+ */
+function ApprovalDecisionRow({
+  item,
+  canForceRelease,
+  onDecide,
+  onForceRelease,
+}: {
+  item: ReleaseObjectView;
+  canForceRelease: boolean;
+  onDecide: (item: ReleaseObjectView, decision: DecisionAction, reason?: string) => Promise<void>;
+  onForceRelease: (item: ReleaseObjectView) => void;
+}) {
+  const availability = decisionAvailability({
+    mechanism: 'object_review',
+    objectType: item.object_type,
+    objectId: item.object_id,
+  });
+  return (
+    <li className="flex flex-col gap-2 border-b border-[var(--adm-border)] py-3 last:border-0">
+      <div className="flex items-center justify-between gap-3">
+        <a
+          href={objectHref(item)}
+          className="adm-focusable min-w-0 truncate rounded font-medium hover:text-[var(--adm-accent)]"
+        >
+          {item.display_name}
+        </a>
+        <Badge tone={item.requires_approval ? 'warning' : 'neutral'}>
+          {item.requires_approval ? 'Approval required' : 'In review'}
+        </Badge>
+      </div>
+      <ActionRow
+        onApprove={() => onDecide(item, 'approve')}
+        onReject={(reason) => onDecide(item, 'reject', reason)}
+        approveLabel="Approve"
+        rejectLabel="Reject"
+        rejectReason={availability.reasonReaches.reject ? 'optional' : 'none'}
+        secondary={
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={<IconExternalLink size={14} />}
+              onClick={() => void navigate(objectHref(item))}
+            >
+              Open object
+            </Button>
+            {/* T0.3 row A8 — a LOCK action, deliberately not a decision and
+                deliberately not on the façade. The readiness checklist tells
+                editors to "wait or force-release" and nothing anywhere wired
+                the verb; this is the button that copy promised. Owner-only,
+                exactly as the endpoint enforces. */}
+            {canForceRelease ? (
+              <Button size="sm" variant="ghost" onClick={() => onForceRelease(item)}>
+                Force-release lock
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+    </li>
+  );
+}
+
+function ApprovalDecisionList({
+  items,
+  empty,
+  canForceRelease,
+  onDecide,
+  onForceRelease,
+}: {
+  items: ReleaseObjectView[];
+  empty?: string;
+  canForceRelease: boolean;
+  onDecide: (item: ReleaseObjectView, decision: DecisionAction, reason?: string) => Promise<void>;
+  onForceRelease: (item: ReleaseObjectView) => void;
+}) {
+  if (!items.length) {
+    return empty ? <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">{empty}</p> : null;
+  }
+  return (
+    <ul className="flex flex-col">
+      {items.map((item) => (
+        <ApprovalDecisionRow
+          key={item.object_id}
+          item={item}
+          canForceRelease={canForceRelease}
+          onDecide={onDecide}
+          onForceRelease={onForceRelease}
+        />
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * T3.2 (T0.3 row A7) — the two "Review:" groups get an acknowledge control.
+ *
+ * These are needs-you states by every definition in D4 (a human must look
+ * before releasing) that had no way at all to say "looked, proceed". There is
+ * no backend verb for this and this task does not invent one: the
+ * acknowledgement is LOCAL and per-batch, keyed to the same queue signature
+ * the "I reviewed this batch" switch already resets against, and the release
+ * button's own gate is unchanged. What it buys is that the reviewer can see
+ * which groups they have been through and the batch card can say how many are
+ * outstanding — which is the honest version of the missing affordance, not a
+ * button pretending to write a server record.
+ */
+function ReleaseReviewGroupCard({
+  group,
+  acknowledged,
+  onAcknowledge,
+}: {
+  group: ReleaseReviewGroup<ReleaseObjectView>;
+  acknowledged: boolean;
+  onAcknowledge: (category: string, next: boolean) => void;
+}) {
   const tone = group.category === 'ready' ? 'success' : 'warning';
+  const needsLook = group.category !== 'ready';
   return (
     <Card>
       <div className="mb-2 flex items-start justify-between gap-3">
@@ -128,9 +263,26 @@ function ReleaseReviewGroupCard({ group }: { group: ReleaseReviewGroup<ReleaseOb
           <h2 className="font-semibold text-[var(--adm-text-heading)]">{group.label}</h2>
           <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{group.description}</p>
         </div>
-        <Badge tone={tone}>{group.items.length}</Badge>
+        <Badge tone={acknowledged ? 'success' : tone}>{group.items.length}</Badge>
       </div>
       <ObjectList items={group.items} />
+      {needsLook ? (
+        <div className="mt-3 flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={acknowledged ? 'ghost' : 'secondary'}
+            leftIcon={acknowledged ? <IconCheck size={14} /> : undefined}
+            onClick={() => onAcknowledge(group.category, !acknowledged)}
+          >
+            {acknowledged ? 'Reviewed' : 'Mark reviewed'}
+          </Button>
+          <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            {acknowledged
+              ? 'Noted for this batch — it resets if the batch changes.'
+              : 'Says you have looked at these before releasing. Recorded on this screen only.'}
+          </span>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -144,11 +296,20 @@ function ReleaseWorkspaceContent() {
   const [error, setError] = useState<string>();
   const [lastResult, setLastResult] = useState<ReleaseResultView>();
   const [reviewedQueueSignature, setReviewedQueueSignature] = useState<string>();
+  // T3.2 (A7): per-group acknowledgement, local and per-batch — see
+  // `ReleaseReviewGroupCard`'s comment for why it is not a server record.
+  const [acknowledged, setAcknowledged] = useState<{ signature?: string; categories: string[] }>({ categories: [] });
+  const [forceTarget, setForceTarget] = useState<ReleaseObjectView | null>(null);
+  const currentUser = useCurrentUser();
+  const canForceRelease = currentUser.roles.includes('owner');
 
   const refresh = useCallback(async () => {
     try {
       const [nextOverview, rows, chatResult] = await Promise.all([
-        fetchReleaseOverview(getToken),
+        // T5.1 R2: this surface's explicit refresh must bypass the new
+        // module TTL for the same reason it already bypasses the inventory
+        // one — the human pressed Refresh, or just released.
+        fetchReleaseOverview(getToken, { force: true }),
         fetchInventoryRows(getToken, { force: true }),
         listChats(getToken).catch((): { chats: ChatSummaryView[] } => ({ chats: [] })),
       ]);
@@ -185,6 +346,69 @@ function ReleaseWorkspaceContent() {
   const queueSignature = useMemo(() => releaseQueueSignature(waiting), [waiting]);
   const reviewed = waiting.length > 0 && reviewedQueueSignature === queueSignature;
   const deploy = overview ? deployCopy[overview.deploy.state] : undefined;
+  // The acknowledgement set belongs to ONE batch — the moment the queue
+  // changes it is stale, exactly like the "I reviewed this batch" switch.
+  const acknowledgedCategories = acknowledged.signature === queueSignature ? acknowledged.categories : [];
+  const groupsNeedingLook = reviewGroups.filter((group) => group.category !== 'ready');
+  const outstandingGroups = groupsNeedingLook.filter(
+    (group) => !acknowledgedCategories.includes(group.category)
+  ).length;
+
+  const acknowledgeGroup = (category: string, next: boolean) => {
+    setAcknowledged((current) => {
+      const base = current.signature === queueSignature ? current.categories : [];
+      return {
+        signature: queueSignature,
+        categories: next ? [...new Set([...base, category])] : base.filter((entry) => entry !== category),
+      };
+    });
+  };
+
+  /**
+   * T3.2 (A6) — an object review decision, through the one façade. Different
+   * mechanism from the inbox's run gate, identical call shape here; the
+   * façade also invalidates the shared request index, so a request bound to
+   * this object stops showing as waiting on the other two surfaces.
+   */
+  const decideApproval = async (item: ReleaseObjectView, decision: DecisionAction, reason?: string) => {
+    const result = await decide(
+      getToken,
+      {
+        mechanism: 'object_review',
+        objectType: item.object_type,
+        objectId: item.object_id,
+        displayName: item.display_name,
+      },
+      decision,
+      reason ? { reason } : {}
+    );
+    assertDecided(result);
+    toast({ title: item.display_name, description: result.receipt, tone: 'success' });
+    setRows(await refresh());
+  };
+
+  const runForceRelease = async (item: ReleaseObjectView) => {
+    setForceTarget(null);
+    const result = await forceReleaseObjectLock(getToken, item.object_type, item.object_id);
+    if (result.status !== 200) {
+      toast({
+        title: 'Lock not released',
+        description: typeof result.body.error === 'string' ? result.body.error : undefined,
+        tone: 'danger',
+      });
+      return;
+    }
+    toast({
+      title: item.display_name,
+      // The verb is idempotent and says so; repeating the server's own word
+      // beats claiming a lock was broken that was never held.
+      description: result.body.released
+        ? 'The edit lock was force-released. Whoever held it will have to check out again.'
+        : 'No lock was held — nothing to release.',
+      tone: 'success',
+    });
+    setRows(await refresh());
+  };
 
   const release = async () => {
     if (!reviewed || waiting.length === 0) return;
@@ -231,7 +455,7 @@ function ReleaseWorkspaceContent() {
       {loading ? (
         <Skeleton variant="rect" height={420} />
       ) : error || !overview || !deploy ? (
-        <EmptyState icon={<IconAlertTriangle size={26} />} title="Release unavailable" message={error} />
+        <EmptyState severity="error" title="Release unavailable" message={error} />
       ) : (
         <>
           <Card className="flex flex-wrap items-center justify-between gap-4">
@@ -279,7 +503,11 @@ function ReleaseWorkspaceContent() {
                 onCheckedChange={(checked) => setReviewedQueueSignature(checked ? queueSignature : undefined)}
                 disabled={waiting.length === 0 || releasing}
                 label="I reviewed this batch and understand it starts one production build."
-                hint="This confirmation applies only to the current published batch and resets if that batch changes."
+                hint={
+                  outstandingGroups > 0
+                    ? `${outstandingGroups} review group${outstandingGroups === 1 ? '' : 's'} below is not marked reviewed yet. This confirmation applies only to the current published batch and resets if that batch changes.`
+                    : 'This confirmation applies only to the current published batch and resets if that batch changes.'
+                }
               />
               <details className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
                 <summary className="adm-focusable cursor-pointer rounded text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)]">
@@ -312,7 +540,14 @@ function ReleaseWorkspaceContent() {
 
           <section aria-label="Release review groups" className="grid gap-4 lg:grid-cols-2">
             {reviewGroups.length ? (
-              reviewGroups.map((group) => <ReleaseReviewGroupCard key={group.category} group={group} />)
+              reviewGroups.map((group) => (
+                <ReleaseReviewGroupCard
+                  key={group.category}
+                  group={group}
+                  acknowledged={acknowledgedCategories.includes(group.category)}
+                  onAcknowledge={acknowledgeGroup}
+                />
+              ))
             ) : (
               <Card>
                 <h2 className="font-semibold text-[var(--adm-text-heading)]">Published changes ready to release</h2>
@@ -329,7 +564,13 @@ function ReleaseWorkspaceContent() {
                 <h2 className="font-semibold text-[var(--adm-text-heading)]">Pending approvals</h2>
                 <Badge tone={approvals.length ? 'warning' : 'neutral'}>{approvals.length}</Badge>
               </div>
-              <ObjectList items={approvals} empty="No object is waiting for an approval decision." />
+              <ApprovalDecisionList
+                items={approvals}
+                empty="No object is waiting for an approval decision."
+                canForceRelease={canForceRelease}
+                onDecide={decideApproval}
+                onForceRelease={setForceTarget}
+              />
             </Card>
             <Card>
               <div className="mb-2 flex items-center justify-between gap-3">
@@ -337,10 +578,16 @@ function ReleaseWorkspaceContent() {
                 <Badge tone={work.needsYouCount ? 'warning' : 'neutral'}>{work.needsYouCount}</Badge>
               </div>
               <WorkList chats={work.needsYouChats} empty="No agent work needs a decision." />
-              <ObjectList
+              {/* D3: the same objects, so the same decision controls — a
+                  needs-you list that only links out is exactly the text-only
+                  approval this task exists to delete. */}
+              <ApprovalDecisionList
                 items={approvals.filter(
                   (approval) => !work.needsYouChats.some((chat) => chat.object_id === approval.object_id)
                 )}
+                canForceRelease={canForceRelease}
+                onDecide={decideApproval}
+                onForceRelease={setForceTarget}
               />
             </Card>
             <Card>
@@ -353,6 +600,23 @@ function ReleaseWorkspaceContent() {
           </div>
         </>
       )}
+
+      {/* T0.3 row A8 — breaking someone else's lock is destructive and
+          owner-only, so it confirms through the shared ConfirmDialog rather
+          than adding a second confirmation mechanism. */}
+      <ConfirmDialog
+        open={forceTarget !== null}
+        onClose={() => setForceTarget(null)}
+        onConfirm={() => forceTarget && void runForceRelease(forceTarget)}
+        title="Force-release this edit lock?"
+        message={
+          forceTarget
+            ? `Whoever holds the lock on "${forceTarget.display_name}" — an agent or another editor — loses it immediately and has to check the object out again. Unsaved work in their session is not recovered by this.`
+            : undefined
+        }
+        confirmLabel="Force-release"
+        tone="danger"
+      />
     </div>
   );
 }

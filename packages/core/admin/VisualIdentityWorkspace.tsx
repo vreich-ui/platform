@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AdminShell } from './AdminShell';
 import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
-import { IconAlertTriangle, IconExternalLink, IconPalette } from './icons';
+import { IconExternalLink, IconPalette } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { fetchStudioData } from '@core/lib/admin/studio-client';
@@ -262,7 +262,7 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
   if (error || !model) {
     return (
       <EmptyState
-        icon={<IconAlertTriangle size={26} />}
+        severity="error"
         title="Visual identity unavailable"
         message={error ?? 'The visual identity records could not be loaded.'}
         action={

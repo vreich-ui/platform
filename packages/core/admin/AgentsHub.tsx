@@ -7,17 +7,21 @@
  * new object's workspace.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
+
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Avatar, Badge, Button, Card, EmptyState, Skeleton, StatusPill } from './primitives';
 import { Input, Select, Textarea } from './forms';
 import { Dialog, useToast } from './overlays';
-import { AgentChip, ChatComposer, ChatThread, useChat } from './chat';
+import { AgentChip, ChatComposer, ChatStateChip, ChatThread, useChat } from './chat';
 import { RequestActivity } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
+import { createdObjectsFromEvents } from '@core/lib/admin/chat-logic';
 import {
   assignProfile,
   createFreeChat,
@@ -285,7 +289,16 @@ function HubBody() {
     if (typeof window === 'undefined') return undefined;
     return new URLSearchParams(window.location.search).get('chat') ?? undefined;
   });
-  const [owner, setOwner] = useState(false);
+  /**
+   * T5.1 R5 (F5+F6): `owner` comes from the SHARED `use-current-user` module
+   * store, which `AdminShell` — this component's own parent — has already
+   * populated. It used to be a private `fetchMe` here, which meant
+   * `admin-users {verb:'me'}` twice per mount, and `me` is a WRITE
+   * (`invitations.ts` stamps `last_seen_at`, `admin-users.ts` appends an
+   * audit entry), so that duplicate cost 2 blob reads AND 2 blob writes.
+   */
+  const currentUser = useCurrentUser();
+  const owner = currentUser.roles.includes('owner') || currentUser.user?.role === 'owner';
   const [pendingStarter, setPendingStarter] = useState<string | undefined>(undefined);
   const requestedStarterHandled = useRef(false);
   const chat = useChat(getToken, activeId);
@@ -299,20 +312,23 @@ function HubBody() {
     }
   };
 
+  /**
+   * T5.1 R5 (F5): ONE `list_chats` per mount, scoped correctly the first
+   * time. This effect used to fire `reloadList()` immediately, then await a
+   * private `fetchMe`, then — for an Owner, the common case on this surface
+   * — fire `reloadList(true)`, a strict SUPERSET of the first. Two full
+   * chat sweeps (each `1 list() + C get()`, every get pulling a whole
+   * transcript), the second serialised behind the `me` round trip, and the
+   * first's result thrown away with a visible list flash.
+   *
+   * Waiting for the resolved role costs nothing extra: `AdminShell` already
+   * has `me` in flight through the shared store, so this subscribes to a
+   * request that was going out anyway rather than issuing a second one.
+   */
   useEffect(() => {
-    void reloadList();
-    (async () => {
-      try {
-        const { fetchMe } = await import('@core/lib/admin/users-client');
-        const me = await fetchMe(getToken);
-        const isOwner = me.roles.includes('owner');
-        setOwner(isOwner);
-        if (isOwner) await reloadList(true);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, []);
+    if (currentUser.loading) return;
+    void reloadList(owner);
+  }, [currentUser.loading, owner]);
 
   // Keep the list fresh while a run is live (titles/outcomes update server-side).
   useEffect(() => {
@@ -344,16 +360,7 @@ function HubBody() {
   }, [owner]);
 
   /** Creation results carry object_id/object_type — route to the workspace. */
-  const createdObjects = useMemo(
-    () =>
-      chat.events
-        .filter((event) => event.type === 'tool_result' && !event.detail?.is_error && event.detail?.object_id)
-        .map((event) => ({
-          id: String(event.detail!.object_id),
-          type: event.detail!.object_type ? String(event.detail!.object_type) : undefined,
-        })),
-    [chat.events]
-  );
+  const createdObjects = useMemo(() => createdObjectsFromEvents(chat.events), [chat.events]);
 
   const active = chats?.find((item) => item.chat_id === activeId);
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope: activeId });
@@ -466,6 +473,14 @@ function HubBody() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--adm-border)] pb-3">
               <span className="flex min-w-0 flex-wrap items-center gap-2">
                 <AgentChip agent={chat.agent} />
+                {/* D5 tier 1: the ambient state chip — always visible while
+                    this chat has an active or recently-finished run. */}
+                <ChatStateChip
+                  status={chat.status}
+                  lastOutcome={chat.lastOutcome}
+                  events={chat.events}
+                  lastEventAtMs={chat.lastEventAtMs}
+                />
                 {chat.request ? (
                   <a
                     href={`/admin/requests/${encodeURIComponent(chat.request.request_id)}`}
@@ -502,7 +517,7 @@ function HubBody() {
                     variant="secondary"
                     leftIcon={<IconExternalLink size={14} />}
                     onClick={() =>
-                      window.location.assign(
+                      void navigate(
                         `/admin/content/${encodeURIComponent(created.id)}${created.type ? `?type=${encodeURIComponent(created.type)}` : ''}`
                       )
                     }
@@ -523,6 +538,9 @@ function HubBody() {
               onQuote={(text) => setQuote({ token: Date.now(), text })}
               onSendControls={(text) => void chat.send(text, undefined, testMode)}
               pendingConsumed={chat.pendingConsumed}
+              lastOutcome={chat.lastOutcome}
+              lastEventAtMs={chat.lastEventAtMs}
+              onUndo={(prompt) => void chat.send(prompt, undefined, testMode)}
             />
             {chat.error ? (
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>

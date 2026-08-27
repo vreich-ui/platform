@@ -49,6 +49,7 @@ import {
   objectStatusIndexPrefix,
   OBJECT_STORE_MARKER_VALUE,
 } from './object-store-keys.js';
+import { sweepInventoryRows } from './objects/index-store.js';
 import {
   summarizeValidation,
   validateCandidatePatch,
@@ -82,10 +83,8 @@ import {
 import {
   compareInventoryRows,
   inventoryDetailFromRecord,
-  inventoryRowFromRecord,
   matchesInventoryFilters,
   type InventoryFilters,
-  type InventoryRow,
 } from './object-inventory.js';
 import { publishObject, type PublishObjectDeps } from './object-publish.js';
 import { checkPublishGate } from './publish-gate.js';
@@ -879,40 +878,31 @@ export const handleObjectVerb = async (
         review_state: request.review_state,
         pending_changes: request.pending_changes,
       };
-      const types = request.object_type ? [request.object_type] : objectTypes;
-      // The per-type listings are independent — issue them together; final
-      // output order comes from the sort below regardless of load order. A
-      // transient failure listing one type degrades to "0 rows from that
-      // type this sweep" rather than failing the whole request — matches the
-      // per-record resilience below (2026-08-06 hotfix).
-      const perTypeItems = await Promise.all(
-        types.map(async (objectType) => {
-          // 2026-08-06 hotfix follow-up: see listAllObjectRecords above —
-          // chaining `.then()` off `store.list()`'s return value throws
-          // synchronously when that value isn't a real Promise, before
-          // `.catch()` can attach. Await it first instead.
-          try {
-            return await collectBlobListItems(
-              await store.list({ prefix: `objects/${objectType}/by-id/`, directories: false, paginate: true })
-            );
-          } catch (error) {
-            console.warn(`inventory: skipping unlistable object type "${objectType}".`, error);
-            return [];
-          }
-        })
-      );
-      const inventoryItems = perTypeItems.flat();
-      const loadedRecords = await mapWithConcurrency(inventoryItems, STORE_READ_CONCURRENCY, (item) =>
-        loadRecordForSweep(store, item.key)
-      );
-      const rows: InventoryRow[] = [];
-      for (const record of loadedRecords) {
-        if (!record) continue;
-        const row = inventoryRowFromRecord(record, ts, options.approvalPolicy);
-        if (matchesInventoryFilters(row, filters)) rows.push(row);
-      }
+      /**
+       * T5.1 R3 (T0.2 F10, §4 cause #3). This used to be `13 x store.list()`
+       * followed by `N x store.get()` of whole record envelopes — body trees
+       * and unbounded history — to derive fifteen scalars per row, on a path
+       * that runs two-to-four times per admin page load. The listings still
+       * happen (they are cheap, parallel, and name the live key set), but each
+       * key now serves its row from `objects/index.json` when the listing's
+       * etag proves the record has not changed since that row was projected.
+       * Only genuinely changed records are read. See `objects/index-store.ts`
+       * for why this is verified against the listing rather than maintained by
+       * writers.
+       *
+       * `sweep.stats` is reported on the response so drift is observable — a
+       * `read` that stays high call after call means etags are not reaching
+       * this code (an unusual store, or the local file-backed shim) and the
+       * cost has silently reverted to the old sweep.
+       */
+      const sweep = await sweepInventoryRows(store, {
+        nowMs: ts,
+        ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
+        ...(request.object_type ? { objectType: request.object_type } : {}),
+      });
+      const rows = sweep.rows.filter((row) => matchesInventoryFilters(row, filters));
       rows.sort(compareInventoryRows(objectTypes));
-      return ok({ objects: rows, generated_at: timestamp });
+      return ok({ objects: rows, generated_at: timestamp, index: sweep.stats });
     }
 
     case 'create': {

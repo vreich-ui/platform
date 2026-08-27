@@ -1,40 +1,53 @@
+/**
+ * admin-release-state — the publication-state overview: every governed
+ * object's editorial state plus the production deploy's identity.
+ *
+ * T5.1 R2 (T0.2 F2/F3). This was the most expensive read on the admin: an
+ * object-store inventory sweep, two Netlify deploys-API calls, and one GitHub
+ * `/compare` per distinct publish commit — on every request, uncached, from
+ * seven client call sites, two of them on the SAME page load. T0.2 timed it as
+ * the gate on `/admin`'s first paint.
+ *
+ * The work itself now lives in `server/lib/release-overview.ts`, behind a
+ * warm-instance memo shared with `admin-editorial-view`, so whichever endpoint
+ * runs first pays and the other is free. This file is the HTTP skin over it:
+ *
+ *  - `ETag` + `If-None-Match` -> `304`, following `admin-traffic.ts`'s
+ *    precedent (T0.2 found zero ETags anywhere in `server/functions/`);
+ *  - `Cache-Control: private, no-cache` — always revalidate, but ALLOW
+ *    revalidation, which the old blanket `no-store` forbade, so a poll
+ *    returning byte-identical JSON re-serialised and re-transferred all of it.
+ *
+ * The browser side pairs with `lib/admin/release-client.ts`, which dedupes
+ * concurrent callers and TTL-caches the result at module scope so it survives
+ * an Astro `ClientRouter` navigation.
+ */
+import { createHash } from 'node:crypto';
+
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
-import { getSiteObjectsBlobStore } from '../lib/blob-store.js';
-import { handleObjectVerb, type ObjectVerbStore } from '../lib/object-verbs.js';
-import type { InventoryRow } from '../lib/object-inventory.js';
-import {
-  fetchRecentDeploys,
-  getPublishedProductionDeploy,
-  isNetlifyDeployLookupConfigured,
-  type DeployReceipt,
-} from '../lib/netlify-deploys.js';
-import { isCommitAncestorOrEqual } from '../lib/production-release.js';
-import { getEditorialDeployStatus, getEditorialObjectState } from '../../lib/admin/editorial-state.js';
+import { loadReleaseOverview, ReleaseOverviewUnavailableError } from '../lib/release-overview.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
   httpMethod?: string;
 };
 
-const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
+const jsonResponse = (
+  statusCode: number,
+  body: Record<string, unknown>,
+  extraHeaders: Record<string, string> = {}
+) => ({
   statusCode,
-  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extraHeaders },
   body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
 });
 
-const safeDeploy = (receipt: DeployReceipt | undefined) =>
-  receipt
-    ? {
-        id: receipt.deployId,
-        commit: receipt.commit,
-        status: receipt.deployStatus,
-        started_at: receipt.startedAt,
-        finished_at: receipt.finishedAt,
-        production_url: receipt.productionUrl,
-      }
-    : undefined;
+/** R8: authenticated data that is polled — revalidate always, but ALLOW revalidation. */
+const CACHE_CONTROL = 'private, no-cache';
+
+const etagFor = (body: unknown): string => `"${createHash('sha1').update(JSON.stringify(body)).digest('hex')}"`;
 
 const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
@@ -43,65 +56,29 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 
   try {
-    const inventory = await handleObjectVerb(
-      (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore,
-      { action: 'inventory', status: 'active' },
-      { kind: 'human', id: access.userId ?? '', email: access.email },
-      { roles: access.roles }
-    );
-    if (inventory.status !== 200) return jsonResponse(500, { error: 'Publication state could not be loaded.' });
-    const rows = (inventory.body.objects ?? []) as InventoryRow[];
-
-    const lookupConfigured = isNetlifyDeployLookupConfigured();
-    const [publishedDeploy, recentDeploys] = lookupConfigured
-      ? await Promise.all([getPublishedProductionDeploy(), fetchRecentDeploys()])
-      : [undefined, [] as DeployReceipt[]];
-    const latestProduction = recentDeploys.find((deploy) => !deploy.context || deploy.context === 'production');
-    const publishedCommit = publishedDeploy?.commit || undefined;
-    const commits = Array.from(
-      new Set(rows.map((row) => row.publish_commit).filter((value): value is string => Boolean(value)))
-    );
-    const includedCommits = publishedCommit
-      ? (
-          await Promise.all(
-            commits.map(async (commit) =>
-              commit === publishedCommit || (await isCommitAncestorOrEqual(commit, publishedCommit))
-                ? commit
-                : undefined
-            )
-          )
-        ).filter((commit): commit is string => Boolean(commit))
-      : [];
-    const deployState = {
-      production_confirmed: Boolean(publishedCommit),
-      ...(publishedCommit ? { live_commit: publishedCommit } : {}),
-      included_commits: includedCommits,
-      status: lookupConfigured ? getEditorialDeployStatus(latestProduction, publishedCommit) : ('unavailable' as const),
-    };
-    const objects = rows.map((row) => ({
-      object_id: row.object_id,
-      object_type: row.object_type,
-      display_name: row.display_name,
-      review_state: row.review_state,
-      approval_state: row.approval_state,
-      requires_approval: row.requires_approval,
-      state: getEditorialObjectState(row, deployState),
-    }));
-
-    return jsonResponse(200, {
-      deploy: {
-        configured: lookupConfigured,
-        state: deployState.status,
-        production_confirmed: deployState.production_confirmed,
-        live_commit: publishedCommit ?? null,
-        latest: safeDeploy(latestProduction) ?? null,
-        published: safeDeploy(publishedDeploy) ?? null,
-      },
-      objects,
-      waiting_count: objects.filter((object) => object.state === 'published').length,
-      pending_approval_count: objects.filter((object) => object.review_state === 'open').length,
+    const overview = await loadReleaseOverview(event, {
+      userId: access.userId,
+      email: access.email,
+      roles: access.roles,
     });
+    // `rows` is the raw inventory the overview was derived from — internal to
+    // the shared builder, never part of this endpoint's wire contract.
+    const body: Record<string, unknown> = {
+      deploy: overview.deploy,
+      objects: overview.objects,
+      waiting_count: overview.waiting_count,
+      pending_approval_count: overview.pending_approval_count,
+    };
+    const etag = etagFor(body);
+    const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return { statusCode: 304, headers: { 'Cache-Control': CACHE_CONTROL, ETag: etag }, body: '' };
+    }
+    return jsonResponse(200, body, { 'Cache-Control': CACHE_CONTROL, ETag: etag });
   } catch (error) {
+    if (error instanceof ReleaseOverviewUnavailableError) {
+      return jsonResponse(500, { error: 'Publication state could not be loaded.' });
+    }
     console.error('Failed to load release state.', error);
     return jsonResponse(500, { error: 'Release state could not be loaded.' });
   }

@@ -1,47 +1,50 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { IconExternalLink, IconFilePlus, IconLibrary, IconPalette, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { createFreeChat, listChats, sendChatMessage, type ChatSummaryView } from '@core/lib/admin/chat-client';
-import { fetchInventoryRows } from '@core/lib/admin/library-client';
+import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
 import { rowStatus, type LibraryRow } from '@core/lib/admin/library-logic';
-import { fetchReleaseOverview } from '@core/lib/admin/release-client';
-import { EDITORIAL_STATE_PRESENTATION, type EditorialObjectState } from '@core/lib/admin/editorial-state';
+import { fetchEditorialView, type EditorialSlotView, type EditorialView } from '@core/lib/admin/editorial-view-client';
+import { EDITORIAL_STATE_PRESENTATION } from '@core/lib/admin/editorial-state';
 import { chatWorkLabel } from '@core/lib/admin/work-summary';
 import { agentStarterHref } from '@core/lib/admin/agent-starters';
 import { governedMediaCountLabel } from '@core/lib/admin/media-counts';
-import type { ObjectType } from '@core/schema/object-record-v1';
 
 async function token(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
   return (await auth.getAccessToken()) ?? '';
 }
 
-const href = (row: LibraryRow) => `/admin/content/${encodeURIComponent(row.object_id)}?type=${row.object_type}`;
+const href = (row: Pick<LibraryRow, 'object_id' | 'object_type'>) =>
+  `/admin/content/${encodeURIComponent(row.object_id)}?type=${row.object_type}`;
 
 function FoundationSlot({
   label,
   description,
-  rows,
+  slot,
   prompt,
-  lifecycle,
-  work,
 }: {
   label: string;
   description: string;
-  rows: LibraryRow[];
+  slot: EditorialSlotView;
   prompt: string;
-  lifecycle?: EditorialObjectState;
-  work?: ChatSummaryView;
 }) {
+  const rows = slot.rows;
+  const lifecycle = slot.state ?? undefined;
+  const work = slot.work ?? undefined;
   const primary = rows[0];
-  const status = primary ? (lifecycle ? EDITORIAL_STATE_PRESENTATION[lifecycle] : rowStatus(primary)) : undefined;
+  const status = primary
+    ? lifecycle
+      ? EDITORIAL_STATE_PRESENTATION[lifecycle]
+      : rowStatus(primary as LibraryRow)
+    : undefined;
   const create = async () => {
     const { chat } = await createFreeChat(token, `Create ${label}`);
     await sendChatMessage(token, chat.chat_id, prompt);
-    window.location.assign(`/admin/agents?chat=${encodeURIComponent(chat.chat_id)}`);
+    void navigate(`/admin/agents?chat=${encodeURIComponent(chat.chat_id)}`);
   };
   return (
     <div className="flex min-h-40 flex-col rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)] bg-[var(--adm-surface)] p-4">
@@ -70,9 +73,9 @@ function FoundationSlot({
             Create with agent
           </Button>
         )}
-        {rows.length > 1 ? (
+        {slot.count > 1 ? (
           <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-            {rows.length} connected objects
+            {slot.count} connected objects
           </p>
         ) : null}
       </div>
@@ -80,22 +83,24 @@ function FoundationSlot({
   );
 }
 
+/**
+ * T5.1 (T0.2 §6.3): `count` arrives as an integer. This used to receive the
+ * WHOLE inventory and a type list, and filter it in the browser — which is why
+ * the page downloaded N rows to render five numbers.
+ */
 function FamilySummary({
   label,
-  types,
-  rows,
+  count,
   href: destination,
   icon,
   countLabel,
 }: {
   label: string;
-  types: ObjectType[];
-  rows: LibraryRow[];
+  count: number;
   href: string;
   icon: React.ReactNode;
   countLabel?: (count: number) => string;
 }) {
-  const count = rows.filter((row) => types.includes(row.object_type)).length;
   return (
     <a
       href={destination}
@@ -120,32 +125,24 @@ export interface AdminHomeProps {
 }
 
 export default function AdminHome({ identity }: AdminHomeProps) {
-  const [rows, setRows] = useState<LibraryRow[]>([]);
+  const [view, setView] = useState<EditorialView>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [states, setStates] = useState<Record<string, EditorialObjectState>>({});
-  const [workByObject, setWorkByObject] = useState<Record<string, ChatSummaryView>>({});
+
+  /**
+   * T5.1 Phase 2 (T0.2 §6.3): ONE request.
+   *
+   * This mount used to `Promise.all` three — the whole object inventory, the
+   * whole release overview (a SECOND full store sweep, computed server-side),
+   * and the whole chat list — and block paint on all three, so the slowest of
+   * them gated the page. Everything below renders three object rows and eight
+   * integers, and that is now exactly what comes back.
+   */
   useEffect(() => {
     let live = true;
-    Promise.all([
-      fetchInventoryRows(token),
-      fetchReleaseOverview(token).catch(() => undefined),
-      listChats(token).catch((): { chats: ChatSummaryView[] } => ({ chats: [] })),
-    ])
-      .then(([next, overview, chatResult]) => {
-        if (!live) return;
-        setRows(next);
-        setStates(Object.fromEntries((overview?.objects ?? []).map((object) => [object.object_id, object.state])));
-        setWorkByObject(
-          Object.fromEntries(
-            chatResult.chats
-              .filter((chat) =>
-                ['queued', 'running', 'awaiting_approval', 'awaiting_candidate', 'error'].includes(chat.status)
-              )
-              .filter((chat): chat is ChatSummaryView & { object_id: string } => Boolean(chat.object_id))
-              .map((chat) => [chat.object_id, chat])
-          )
-        );
+    fetchEditorialView(token)
+      .then((next) => {
+        if (live) setView(next);
       })
       .catch((err) => {
         if (live) setError(err instanceof Error ? err.message : 'Could not load the publication map.');
@@ -157,8 +154,6 @@ export default function AdminHome({ identity }: AdminHomeProps) {
       live = false;
     };
   }, []);
-  const byType = useMemo(() => (type: ObjectType) => rows.filter((row) => row.object_type === type), [rows]);
-  const visualRows = [...byType('theme'), ...byType('site')];
 
   return (
     <AdminShell currentPath="/admin" title="Editorial" identity={identity}>
@@ -194,7 +189,15 @@ export default function AdminHome({ identity }: AdminHomeProps) {
           <Skeleton variant="rect" height={420} />
         ) : error ? (
           <Card>
-            <EmptyState title="Couldn’t load the publication map" message={error} />
+            <EmptyState severity="error" title="Couldn’t load the publication map" message={error} />
+          </Card>
+        ) : !view ? (
+          <Card>
+            <EmptyState
+              severity="error"
+              title="Couldn’t load the publication map"
+              message="The publication map came back empty. Refresh to try again."
+            />
           </Card>
         ) : (
           <>
@@ -206,25 +209,19 @@ export default function AdminHome({ identity }: AdminHomeProps) {
                 <FoundationSlot
                   label="Publication identity"
                   description="Name, public identity, defaults, and publication-level metadata."
-                  rows={byType('site')}
-                  lifecycle={byType('site')[0] ? states[byType('site')[0].object_id] : undefined}
-                  work={byType('site')[0] ? workByObject[byType('site')[0].object_id] : undefined}
+                  slot={view.foundation.site}
                   prompt={`Create the publication identity object for ${identity.brandName}. Inspect existing objects first and propose the smallest governed change.`}
                 />
                 <FoundationSlot
                   label="Brand Voice"
                   description="Audience, tone, cadence, vocabulary, claims, safety, and article frameworks."
-                  rows={byType('editorial_voice')}
-                  lifecycle={byType('editorial_voice')[0] ? states[byType('editorial_voice')[0].object_id] : undefined}
-                  work={byType('editorial_voice')[0] ? workByObject[byType('editorial_voice')[0].object_id] : undefined}
+                  slot={view.foundation.editorial_voice}
                   prompt={`Create the Brand Voice for ${identity.brandName}. Ask for any missing editorial decisions before proposing a governed object.`}
                 />
                 <FoundationSlot
                   label="Visual Identity"
-                  description={`Aggregate view of ${byType('theme').length} theme object${byType('theme').length === 1 ? '' : 's'}, brand tokens, and logo configuration.`}
-                  rows={visualRows}
-                  lifecycle={visualRows[0] ? states[visualRows[0].object_id] : undefined}
-                  work={visualRows[0] ? workByObject[visualRows[0].object_id] : undefined}
+                  description={`Aggregate view of ${view.foundation.visual_identity.theme_count} theme object${view.foundation.visual_identity.theme_count === 1 ? '' : 's'}, brand tokens, and logo configuration.`}
+                  slot={view.foundation.visual_identity}
                   prompt={`Create the visual identity foundation for ${identity.brandName}, reusing any existing theme and site brand tokens.`}
                 />
               </div>
@@ -236,16 +233,14 @@ export default function AdminHome({ identity }: AdminHomeProps) {
               <div className="grid gap-4 sm:grid-cols-2">
                 <FamilySummary
                   label="Pages"
-                  types={['page', 'section']}
-                  rows={rows}
-                  href="/admin/content"
+                  count={view.families.pages}
+                  href="/admin/objects?type=page,section"
                   icon={<IconFilePlus size={18} />}
                 />
                 <FamilySummary
                   label="Navigation"
-                  types={['navigation']}
-                  rows={rows}
-                  href="/admin/content"
+                  count={view.families.navigation}
+                  href="/admin/objects?type=navigation"
                   icon={<IconLibrary size={18} />}
                 />
               </div>
@@ -257,24 +252,24 @@ export default function AdminHome({ identity }: AdminHomeProps) {
               <div className="grid gap-4 sm:grid-cols-3">
                 <FamilySummary
                   label="Templates"
-                  types={['template', 'section_template']}
-                  rows={rows}
-                  href="/admin/templates"
+                  count={view.families.templates}
+                  href="/admin/objects?type=template,section_template"
                   icon={<IconPalette size={18} />}
                 />
                 <FamilySummary
                   label="Media"
-                  types={[]}
-                  rows={rows}
-                  href="/admin/media"
+                  count={view.families.media}
+                  // No governed object type is "media" (see media-counts.ts's
+                  // own comment) — the objects plane's grid view is the
+                  // closest honest destination, not a fabricated type facet.
+                  href="/admin/objects?view=grid"
                   icon={<IconLibrary size={18} />}
                   countLabel={governedMediaCountLabel}
                 />
                 <FamilySummary
                   label="Content"
-                  types={['content_item', 'product']}
-                  rows={rows}
-                  href="/admin/content"
+                  count={view.families.content}
+                  href="/admin/objects?type=content_item,product"
                   icon={<IconLibrary size={18} />}
                 />
               </div>

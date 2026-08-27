@@ -175,10 +175,10 @@ export function ObjectBrowser({
         )}
       </div>
       <a
-        href="/admin/content"
+        href="/admin/objects"
         className="adm-focusable mt-3 rounded px-2 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-accent)] hover:underline"
       >
-        Open full content library
+        Open full objects library
       </a>
     </aside>
   );

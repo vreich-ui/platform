@@ -104,7 +104,13 @@ export const EDITORIAL_STATE_PRESENTATION: Record<
 > = {
   draft: { label: 'Draft', tone: 'neutral' },
   approved: { label: 'Approved', tone: 'info' },
-  published: { label: 'Published', tone: 'warning' },
+  // T0.3 Table C / T6.1: "published, not yet live" is a fact being reported
+  // (a build is on its way), not a decision the reader is being asked to
+  // make — Info (blue), not Needs-you amber. Was `warning`; also fixes the
+  // published/live color-race with `library-logic.ts`'s `rowStatus()` below,
+  // which used to disagree (green) with this table (amber) purely by fetch
+  // timing for the identical object. Keep the two in agreement.
+  published: { label: 'Published', tone: 'info' },
   live: { label: 'Live', tone: 'success' },
 };
 

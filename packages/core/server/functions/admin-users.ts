@@ -31,7 +31,7 @@ import {
 import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
 import {
   acceptInvitation,
-  activateOnLogin,
+  activateOnLoginDetailed,
   previewInvitationByToken,
   type GoTrueIdentity,
 } from '../lib/membership/invitations.js';
@@ -277,8 +277,23 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         // and last_seen on every self-read. Materialize a missing bootstrap
         // Owner deliberately so the members list reflects their real access.
         const at = nowIso();
-        const activated = await activateOnLogin(store, email, adminState.userId, at);
-        if (activated) {
+        /**
+         * T5.1 R10 (F11): `me` is a READ that every admin page load makes,
+         * and it used to cost TWO blob writes — `saveMember` to stamp
+         * `last_seen_at`, and an audit append. `activateOnLoginDetailed`
+         * now reports whether it actually persisted anything (it throttles
+         * `last_seen_at` to `LAST_SEEN_REFRESH_MS`), and the audit entry
+         * rides that same decision so the two stay in step.
+         *
+         * BEHAVIOUR CHANGE, deliberate and disclosed: the `person.login`
+         * audit entry is appended at most once an hour per person instead
+         * of once per page load. `membership.activate` — the entry that
+         * records a real state transition — is unaffected, because a
+         * genuine activation always writes.
+         */
+        const activation = await activateOnLoginDetailed(store, email, adminState.userId, at);
+        const activated = activation?.record ?? null;
+        if (activated && activation?.wrote) {
           await appendAudit(store, {
             at,
             actor: auditActorFromPrincipal(principal),

@@ -43,10 +43,26 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/pdf/*', to: '/.netlify/functions/get-public-pdf?blobKey=pdf/:splat', status: 200 },
     { from: '/img/*', to: '/.netlify/functions/get-public-image?blobKey=image/:splat', status: 200 },
     { from: '/mcp', to: '/.netlify/functions/mcp', status: 200 },
-    { from: '/.well-known/oauth-protected-resource', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata', status: 200 },
-    { from: '/.well-known/oauth-protected-resource/*', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata', status: 200 },
-    { from: '/.well-known/oauth-authorization-server', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=authorization-server-metadata', status: 200 },
-    { from: '/.well-known/oauth-authorization-server/*', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=authorization-server-metadata', status: 200 },
+    {
+      from: '/.well-known/oauth-protected-resource',
+      to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata',
+      status: 200,
+    },
+    {
+      from: '/.well-known/oauth-protected-resource/*',
+      to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata',
+      status: 200,
+    },
+    {
+      from: '/.well-known/oauth-authorization-server',
+      to: '/.netlify/functions/mcp-oauth?oauth_endpoint=authorization-server-metadata',
+      status: 200,
+    },
+    {
+      from: '/.well-known/oauth-authorization-server/*',
+      to: '/.netlify/functions/mcp-oauth?oauth_endpoint=authorization-server-metadata',
+      status: 200,
+    },
     { from: '/oauth/register', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=register', status: 200 },
     { from: '/oauth/authorize', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=authorize', status: 200 },
     { from: '/oauth/consent', to: '/.netlify/functions/mcp-oauth?oauth_endpoint=consent', status: 200 },
@@ -57,6 +73,11 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     // static content library (the splat form swallowed the library index).
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
     { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
+    // T2.1 D1(a): Templates/Media/Content collapse into /admin/objects.
+    { from: '/admin/content', to: '/admin/objects', status: 301 },
+    { from: '/admin/templates', to: '/admin/objects?type=template,section_template', status: 301 },
+    { from: '/admin/studio', to: '/admin/objects?type=template,section_template', status: 301 },
+    { from: '/admin/media', to: '/admin/objects?view=grid', status: 301 },
   ],
 });
 

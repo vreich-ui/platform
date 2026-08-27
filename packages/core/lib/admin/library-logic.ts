@@ -7,6 +7,7 @@
  */
 import type { ObjectType } from '../../schema/object-record-v1.js';
 import { objectTypeLabel } from '../../lib/admin/display-name.js';
+import { EDITORIAL_STATE_PRESENTATION } from './editorial-state.js';
 
 /** The inventory-row fields the browse surface consumes (subset of InventoryRow). */
 export interface LibraryRow {
@@ -31,12 +32,20 @@ export interface LibraryStatus {
   tone: LibraryStatusTone;
 }
 
-/** The single most salient lifecycle status for the status pill. */
+/**
+ * The single most salient lifecycle status for the status pill — the
+ * fallback shown while `states[id]`'s real release-state fetch is still in
+ * flight (T0.3 Table C: the two used to disagree — this returned green,
+ * `EDITORIAL_STATE_PRESENTATION.published` amber — for the identical object,
+ * flipping on nothing but load order). The `published` branch now reads its
+ * label/tone straight from `EDITORIAL_STATE_PRESENTATION` instead of a second
+ * hand-written literal, so there is exactly one table to keep in sync, not two.
+ */
 export function rowStatus(row: LibraryRow): LibraryStatus {
   if (row.status === 'archived') return { label: 'Archived', tone: 'neutral' };
   if (row.review_state === 'open') return { label: 'In review', tone: 'info' };
   if (row.review_state === 'changes_requested') return { label: 'Changes requested', tone: 'warning' };
-  if (row.published_time) return { label: 'Published', tone: 'success' };
+  if (row.published_time) return { ...EDITORIAL_STATE_PRESENTATION.published };
   return { label: 'Draft', tone: 'neutral' };
 }
 

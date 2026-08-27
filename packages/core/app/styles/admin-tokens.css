@@ -39,7 +39,12 @@
   --adm-danger: #dc2626;
   --adm-danger-soft: #fee2e2;
   --adm-danger-text: #991b1b;
-  --adm-success: #16a34a;
+  /* T6.1 (a11y contrast pass): was #16a34a — only 3.30:1 on white and
+     ~3.00:1 on --adm-success-soft, right at (and in the chip case,
+     essentially riding) the WCAG AA 3:1 floor for a non-text/icon color.
+     Darkened one Tailwind green step for headroom: 5.02:1 on white,
+     4.57:1 on --adm-success-soft. See severity-contrast.test.ts. */
+  --adm-success: #15803d;
   --adm-success-soft: #dcfce7;
   --adm-success-text: #166534;
   --adm-warning: #d97706;
