@@ -691,29 +691,81 @@ export type ResolvedOAuthPrincipal = {
 };
 
 /**
+ * Why a bearer token did not authorize a request. The CALLER still answers
+ * 401 for every one of them — a resource server must not tell an unauthorized
+ * client which of its guesses was closest — but the reason belongs in the
+ * server's own log, because these four failures have four different fixes and
+ * are otherwise indistinguishable from the outside. Before this existed, every
+ * one of them surfaced to an operator as the same bare "Unauthorized", and
+ * `audience_mismatch` in particular (a permanent, silent 401 on a grant that
+ * was genuinely approved) could not be told apart from a bad token at all.
+ */
+export type OAuthPrincipalFailure = 'no_record' | 'expired' | 'audience_mismatch';
+
+export type OAuthPrincipalResolution =
+  | { ok: true; principal: ResolvedOAuthPrincipal }
+  | { ok: false; reason: OAuthPrincipalFailure };
+
+export type ResolveOAuthPrincipalInput = {
+  token: string;
+  site: string;
+  /**
+   * Every URI that names THIS deployment's MCP endpoint. More than one is
+   * normal and is not a widening of the audience check: a single Netlify site
+   * answers on its `*.netlify.app` name, on each custom domain (apex and
+   * `www.`), and on a deploy alias, and a token minted while the browser sat
+   * on one of them is presented against whichever one the connector was
+   * configured with. Comparing against only the CURRENT request's host made
+   * that ordinary difference a permanent 401 — the token was valid, the grant
+   * approved, and the client could do nothing but "reconnect" forever into the
+   * same mismatch.
+   *
+   * The MCP spec's MUST is that a token minted for SOMEONE ELSE'S resource is
+   * refused, and that still holds twice over: every entry here is an identity
+   * of this same deployment, and `site` is checked on the record besides.
+   */
+  resourceUris: readonly string[];
+  nowMs: number;
+};
+
+/**
  * The resource-server half: does this bearer token authorize THIS request?
  *
- * Three ways to fail, all of them silent to the caller (a 401 is a 401):
- * unknown token, expired token, or a token whose recorded audience is not this
- * deployment. The last one is the MCP spec's explicit MUST — a server that
- * skips it accepts tokens minted for someone else's resource.
+ * Three ways to fail, all of them a 401 to the caller: unknown token, expired
+ * token, or a token whose recorded audience is not this deployment. The last
+ * one is the MCP spec's explicit MUST — a server that skips it accepts tokens
+ * minted for someone else's resource.
  */
+export const describeOAuthPrincipal = async (
+  store: OAuthBlobStore,
+  input: ResolveOAuthPrincipalInput
+): Promise<OAuthPrincipalResolution> => {
+  const record: AccessTokenRecord | null = await getAccessTokenRecord(store, input.token, input.site);
+  if (!record) return { ok: false, reason: 'no_record' };
+  if (isExpired(record, input.nowMs)) return { ok: false, reason: 'expired' };
+  if (record.resource && !input.resourceUris.some((uri) => resourceMatches(record.resource as string, uri))) {
+    return { ok: false, reason: 'audience_mismatch' };
+  }
+
+  return {
+    ok: true,
+    principal: {
+      client_id: record.client_id,
+      client_name: record.client_name,
+      subject_email: record.subject_email,
+      subject_id: record.subject_id,
+      scope: record.scope,
+    },
+  };
+};
+
+/** The same resolution, reduced to the yes/no the gate needs. */
 export const resolveOAuthPrincipal = async (
   store: OAuthBlobStore,
   input: { token: string; site: string; resourceUri: string; nowMs: number }
 ): Promise<ResolvedOAuthPrincipal | null> => {
-  const record: AccessTokenRecord | null = await getAccessTokenRecord(store, input.token, input.site);
-  if (!record) return null;
-  if (isExpired(record, input.nowMs)) return null;
-  if (record.resource && !resourceMatches(record.resource, input.resourceUri)) return null;
-
-  return {
-    client_id: record.client_id,
-    client_name: record.client_name,
-    subject_email: record.subject_email,
-    subject_id: record.subject_id,
-    scope: record.scope,
-  };
+  const resolved = await describeOAuthPrincipal(store, { ...input, resourceUris: [input.resourceUri] });
+  return resolved.ok ? resolved.principal : null;
 };
 
 /**

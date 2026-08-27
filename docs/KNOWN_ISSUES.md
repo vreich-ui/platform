@@ -360,3 +360,38 @@ stored Owner per site — FLEET-STATUS "Membership footing per tenant", T18.9
 Part B. Known-and-accepted (not an issue): a suspended/removed member's JWT
 stays valid ≤ 1 h; every function re-resolves roles per call, so they cannot
 act — there is no server-side GoTrue logout.
+
+## 6. OAuth refresh-token rotation has no grace window — a retried refresh kills the grant
+
+**Status:** open, deliberately NOT fixed in the MCP-auth hardening change.
+
+`handleTokenRequest`'s `refresh_token` branch (`oauth-server.ts`) deletes the
+presented refresh token BEFORE it issues the replacement pair, and a second
+presentation of that same token is `invalid_grant` forever after. That is
+OAuth 2.1 §4.3.1 rotation done strictly, and `mcp-oauth.test.ts` pins it: *"a
+rotated refresh token must be dead"*.
+
+**The cost:** rotation with no grace period cannot tell a stolen token from a
+RETRIED one. A connector whose refresh POST times out, is retried by its own
+HTTP layer, or is issued twice concurrently (two tabs, two workers) presents
+the same refresh token twice — the second attempt is refused, the grant is
+destroyed, and the human is told to reconnect. Nothing distinguishes that from
+a genuine credential failure at the client, and the connector's message for it
+is the same "Authorization with the MCP server failed" that every other cause
+produces.
+
+**The usual fix** is a short reuse grace window: mark the record `rotated_at`
+instead of deleting it, honour a re-presentation within ~60s, and treat one
+after that as reuse — refusing it AND revoking the rest of the family (the
+reuse-detection half of the same spec section, which strict deletion does not
+implement either, since a deleted record cannot detect anything).
+
+**Why it was not done here:** it inverts a security property this repo
+deliberately pinned with a test. Widening it is a call about how much replay
+tolerance the fleet wants, not a bug fix, and it should be made explicitly
+rather than arrive inside a change about something else.
+
+**If it is taken:** the grace window goes in `handleTokenRequest`, the
+`rotated_at` field is schema-additive on `refreshTokenSchema`, and the pinned
+test changes from "the replay is dead" to "the replay inside the window
+succeeds, the one after it is dead AND revokes the family."

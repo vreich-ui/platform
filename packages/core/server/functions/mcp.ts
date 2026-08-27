@@ -130,8 +130,9 @@ import { getMembershipStatus } from '../lib/membership/status.js';
 import { getAgentKeysDoc, resolveVerifiedAgentName, type AgentKeysBlobStore } from '../lib/agent-keys.js';
 import {
   buildWwwAuthenticate,
-  resolveOAuthPrincipal,
+  describeOAuthPrincipal,
   resolveRequestOrigin,
+  type OAuthPrincipalFailure,
   type ResolvedOAuthPrincipal,
 } from '../lib/oauth-server.js';
 import type { OAuthBlobStore } from '../lib/oauth-store.js';
@@ -449,7 +450,12 @@ const parseBody = (event: LambdaEvent) => {
 
 type AuthResult =
   | { ok: true; verifiedAgentName?: string; oauthPrincipal?: ResolvedOAuthPrincipal }
-  | { ok: false; reason: 'missing_token' | 'missing_authorization' | 'invalid_authorization' };
+  | {
+      ok: false;
+      reason: 'missing_token' | 'missing_authorization' | 'invalid_authorization';
+      /** Set when a bearer WAS presented and the OAuth path was the one that refused it. */
+      oauthFailure?: OAuthPrincipalFailure | 'store_error';
+    };
 
 /** The audience this deployment issues and accepts tokens for (W14 F10). */
 const mcpRequestOrigin = (event: LambdaEvent): string =>
@@ -457,6 +463,32 @@ const mcpRequestOrigin = (event: LambdaEvent): string =>
     ...(event.headers ? { headers: event.headers } : {}),
     ...(process.env.URL ? { fallbackUrl: process.env.URL } : {}),
   });
+
+/**
+ * EVERY URI that names this deployment's MCP endpoint, not just the one the
+ * current request happened to arrive on.
+ *
+ * One Netlify site answers on several hosts at once — `<site>.netlify.app`,
+ * each custom domain and its `www.`/apex twin, and a deploy alias — and the
+ * OAuth flow and the MCP traffic do not have to arrive on the same one: the
+ * human approves consent in a browser (whatever host the connector sent them
+ * to, and Netlify's own domain canonicalization may move them), while the
+ * connector then calls `/mcp` on the URL it was configured with. Binding the
+ * token to only the consent-time host turned that ordinary difference into a
+ * PERMANENT 401 on a grant that was genuinely approved, with no diagnostic and
+ * no way out — reconnecting just reproduced it.
+ *
+ * `process.env.URL` (this site's primary URL) and `process.env.DEPLOY_URL`
+ * (this specific deploy) are set by the Netlify runtime itself, so no new
+ * configuration is involved and no other tenant's name can appear here.
+ */
+const mcpResourceAudiences = (event: LambdaEvent): string[] => {
+  const origins = [mcpRequestOrigin(event), process.env.URL, process.env.DEPLOY_URL]
+    .map((origin) => toNonEmptyString(origin)?.replace(/\/+$/, ''))
+    .filter((origin): origin is string => Boolean(origin));
+
+  return [...new Set(origins.map((origin) => `${origin}/mcp`))];
+};
 
 /**
  * perf/drop-verify-hop-cache-scope, Change 3: an uncached governance-blob read
@@ -530,19 +562,29 @@ const writeAuthMemo = <T>(memo: Map<string, AuthMemoEntry<T>>, key: string, valu
 const resolveOAuthPrincipalForRequest = async (
   event: LambdaEvent,
   token: string
-): Promise<ResolvedOAuthPrincipal | undefined> => {
+): Promise<{ principal?: ResolvedOAuthPrincipal; failure?: OAuthPrincipalFailure | 'store_error' }> => {
   try {
     const store = (await getGovernanceBlobStore(event)) as unknown as OAuthBlobStore;
-    return (
-      (await resolveOAuthPrincipal(store, {
-        token,
-        site: getSiteIdentity().siteId,
-        resourceUri: `${mcpRequestOrigin(event)}/mcp`,
-        nowMs: Date.now(),
-      })) ?? undefined
-    );
-  } catch {
-    return undefined;
+    const resolved = await describeOAuthPrincipal(store, {
+      token,
+      site: getSiteIdentity().siteId,
+      resourceUris: mcpResourceAudiences(event),
+      nowMs: Date.now(),
+    });
+    return resolved.ok ? { principal: resolved.principal } : { failure: resolved.reason };
+  } catch (error) {
+    // Still silent to the CALLER (this returns no principal, so the gate falls
+    // through to the shared-secret path and, absent that, to a 401) — but no
+    // longer silent to the operator. A governance-store outage used to be
+    // indistinguishable in the logs from a bad token, which is how an
+    // infrastructure failure got debugged as a credentials problem.
+    event.log?.({
+      event: 'mcp_oauth_store_error',
+      rpcMethod: null,
+      slug: null,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { failure: 'store_error' };
   }
 };
 
@@ -597,10 +639,18 @@ const getAuthResult = async (event: LambdaEvent): Promise<AuthResult> => {
 
   // Try OAuth only when the bearer is not simply the shared secret — the
   // common case must not pay a second blob read.
+  let oauthFailure: OAuthPrincipalFailure | 'store_error' | undefined;
   if (bearerToken && !(token && safeSecretsMatch(bearerToken, token))) {
-    const oauthPrincipal = await resolveOAuthPrincipalForRequest(event, bearerToken);
-    if (oauthPrincipal) return { ok: true, oauthPrincipal };
+    const resolved = await resolveOAuthPrincipalForRequest(event, bearerToken);
+    if (resolved.principal) return { ok: true, oauthPrincipal: resolved.principal };
+    oauthFailure = resolved.failure;
   }
+
+  const refuse = (reason: Exclude<AuthResult, { ok: true }>['reason']): AuthResult => ({
+    ok: false,
+    reason,
+    ...(oauthFailure ? { oauthFailure } : {}),
+  });
 
   if (!token) {
     // W14 F1: an UNSET shared token opens the gate ONLY in a non-lambda dev/test
@@ -614,7 +664,7 @@ const getAuthResult = async (event: LambdaEvent): Promise<AuthResult> => {
     if (process.env.MCP_HTTP_AUTH_TOKEN === undefined && !inLambdaRuntime) {
       return { ok: true };
     }
-    return { ok: false, reason: 'missing_token' };
+    return refuse('missing_token');
   }
 
   const dedicatedToken = toNonEmptyString(getHeader(event.headers, 'x-mcp-auth-token'));
@@ -624,11 +674,11 @@ const getAuthResult = async (event: LambdaEvent): Promise<AuthResult> => {
     Boolean(provided)
   );
 
-  if (providedTokens.length === 0) return { ok: false, reason: 'missing_authorization' };
+  if (providedTokens.length === 0) return refuse('missing_authorization');
 
   return providedTokens.some((provided) => safeSecretsMatch(provided, token))
     ? { ok: true }
-    : { ok: false, reason: 'invalid_authorization' };
+    : refuse('invalid_authorization');
 };
 
 const getAuthDiagnosticReason = (reason: Exclude<AuthResult, { ok: true }>['reason']) => `mcp_auth_${reason}`;
@@ -1309,12 +1359,43 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
   // GET /mcp?health=1 answers 200 with non-sensitive instance diagnostics.
   // Plain GET stays 405 below, as the Streamable HTTP spec requires for a
   // server that does not offer an SSE stream.
-  if (event.httpMethod === 'GET' && toNonEmptyString(event.queryStringParameters?.health)) {
+  const healthProbe = toNonEmptyString(event.queryStringParameters?.health);
+  if (event.httpMethod === 'GET' && healthProbe) {
+    /**
+     * `?health=auth` additionally answers the two questions an operator has
+     * when a connector reports an authorization failure and the logs are on
+     * the far side of a Netlify dashboard:
+     *
+     *   - WHICH audiences will this deploy accept a token for? A token minted
+     *     through a host that is not in this list is refused forever, and that
+     *     is invisible from the client side (see mcpResourceAudiences).
+     *   - Can this deploy READ its own token store at all? A governance-store
+     *     outage refuses every OAuth token while looking exactly like a bad
+     *     credential.
+     *
+     * Both answers are public facts — hostnames this site already serves, and
+     * a boolean. No token, no key, and not even whether a shared secret is
+     * configured, goes into this response.
+     */
+    const authDiagnostics =
+      healthProbe === 'auth'
+        ? {
+            oauth: {
+              realm: getSiteIdentity().siteSlug,
+              accepted_audiences: mcpResourceAudiences(event),
+              token_store_reachable: await getGovernanceBlobStore(event)
+                .then((store) => store.get('oauth/__health_probe__').then(() => true))
+                .catch(() => false),
+            },
+          }
+        : {};
+
     return response(200, {
       ok: true,
       server: SERVER_DIAGNOSTIC_NAME,
       instance_age_ms: Date.now() - INSTANCE_BOOTED_AT_MS,
       instance_invocations: instanceInvocationCount,
+      ...authDiagnostics,
     });
   }
 
@@ -1346,21 +1427,51 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
       // Presence only — the key itself never reaches a log line.
       hasUrlKey: Boolean(getUrlKeyToken(event)),
       reason: diagnosticReason,
+      // WHY the OAuth path refused, when a bearer was presented at all. This
+      // is the line that separates "the client sent a bad token" from "this
+      // deployment rejected a good one" — see mcpResourceAudiences.
+      ...(authResult.oauthFailure ? { oauthFailure: authResult.oauthFailure } : {}),
+      ...(authResult.oauthFailure === 'audience_mismatch' ? { audiences: mcpResourceAudiences(event) } : {}),
     });
 
     // W14 F10 / RFC 9728 §5.1: this challenge is how an OAuth-capable client
     // DISCOVERS the authorization server. Without it a connector has no way to
     // start a flow — it just reports "unauthorized" forever, which is exactly
     // the dead end F1's hardening left Wolf's connector in.
-    return response(401, rpcError(null, -32001, 'Unauthorized', { reason: diagnosticReason }), {
-      ...jsonHeaders,
-      'Access-Control-Expose-Headers': 'mcp-session-id, WWW-Authenticate',
-      'WWW-Authenticate': buildWwwAuthenticate({
-        origin: mcpRequestOrigin(event),
-        realm: getSiteIdentity().siteSlug,
-        ...(authResult.reason === 'invalid_authorization' ? { error: 'invalid_token' } : {}),
+    // `audience_mismatch` and `store_error` are OUR faults, not the caller's,
+    // and they are the two an operator cannot otherwise tell from a bad token
+    // — so they travel in the body where `curl -i` shows them. `no_record` and
+    // `expired` stay in the log only: naming them would make this endpoint a
+    // (weak, but free) oracle about which tokens exist.
+    const disclosableFailure =
+      authResult.oauthFailure === 'audience_mismatch' || authResult.oauthFailure === 'store_error'
+        ? authResult.oauthFailure
+        : undefined;
+
+    return response(
+      401,
+      rpcError(null, -32001, 'Unauthorized', {
+        reason: diagnosticReason,
+        ...(disclosableFailure ? { oauth_failure: disclosableFailure } : {}),
       }),
-    });
+      {
+        ...jsonHeaders,
+        'Access-Control-Expose-Headers': 'mcp-session-id, WWW-Authenticate',
+        'WWW-Authenticate': buildWwwAuthenticate({
+          origin: mcpRequestOrigin(event),
+          realm: getSiteIdentity().siteSlug,
+          // A bearer that WAS presented and refused is `invalid_token`,
+          // whichever of the three paths refused it. Saying so is what tells
+          // an OAuth client to discard the token and re-run the flow rather
+          // than retry the dead one forever; omitting it on an expired or
+          // unknown OAuth token (as this did) left the connector with no
+          // signal that reconnecting was the answer.
+          ...(authResult.reason === 'invalid_authorization' || authResult.oauthFailure
+            ? { error: 'invalid_token' }
+            : {}),
+        }),
+      }
+    );
   }
   // QA-W16-3: this request cleared the MCP gate above — every tool handler
   // reached via callTool for this request can treat the caller as
