@@ -220,6 +220,24 @@ export const getPlatformArtifactJobStatus = (
   options: PdfToolClientOptions = {}
 ) => postPdfTool('get-agent-artifact-job-status', projectPayload(grant, { jobId }), options);
 
+/**
+ * Resumes a job pdf-tool blocked awaiting operator approval
+ * (create_agent_artifact_job's requireApproval). pdf-tool's own
+ * resume_agent_artifact_job tool requires {projectId, jobId, resumeToken,
+ * approvalToken, storage} (confirmed against its live MCP tool schema, not
+ * guessed) -- resumeToken comes from the blocked job's status response
+ * (resume.input.resumeToken) and approvalToken is the operator's approval
+ * secret. On success the job returns to `pending`; the caller polls
+ * get_agent_artifact_job_status for the outcome same as any other job.
+ */
+export const resumePlatformArtifactJob = (
+  grant: PdfToolStorageGrant,
+  jobId: string,
+  resumeToken: string,
+  approvalToken: string,
+  options: PdfToolClientOptions = {}
+) => postPdfTool('resume-agent-artifact-job', projectPayload(grant, { jobId, resumeToken, approvalToken }), options);
+
 export const getPlatformArtifactBySlot = (
   grant: PdfToolStorageGrant,
   requestId: string,

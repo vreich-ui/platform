@@ -55,6 +55,7 @@ import {
   importPlatformImagesFromUrl,
   listPlatformPdfTemplates,
   publishPlatformPdfTemplate,
+  resumePlatformArtifactJob,
   searchPlatformImages,
   setPlatformImageModelPolicy,
   setPlatformImageSearchPolicy,
@@ -1235,6 +1236,81 @@ export const callGetAgentArtifactJobStatus = async (event: LambdaEvent, input: R
     artifactReference: canonical.artifactReference,
     public_path: canonical.publicPath,
     verified: true,
+  });
+};
+
+/**
+ * Resumes a job blocked awaiting operator approval (create_agent_artifact_job's
+ * requireApproval) through this Platform bridge. Same shape as
+ * callGetAgentArtifactJobStatus: cheap synchronous checks first, then the same
+ * site/request scoping (resolveArtifactBridgeScopeForJob, cached by jobId) and
+ * the same server-side project + storage-grant resolution (buildArtifactBridgeGrant)
+ * -- the grant is minted here and never returned to the caller (postPdfTool
+ * sanitizes it out of every response regardless).
+ *
+ * Unlike the status poll, this call has a side effect on pdf-tool's end (it
+ * unblocks the job), so scope is resolved BEFORE calling pdf-tool rather than
+ * in parallel with it -- no reason to risk sending an approval to pdf-tool for
+ * a job this caller cannot prove it owns.
+ *
+ * pdf-tool's resume_agent_artifact_job response shape is not documented
+ * anywhere in this repo (only its input contract is provable, from its own
+ * live MCP tool schema) -- do not assume it echoes projectId/requestId the
+ * way get-agent-artifact-job-status does. The scope-match guard below is
+ * therefore soft: it only rejects when pdf-tool's response actually includes
+ * those fields and they disagree, so an undocumented response shape can never
+ * cause a legitimate resume to be misreported as a scope mismatch.
+ */
+export const callResumeAgentArtifactJob = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const siteId = toNonEmptyString(input.site_id);
+  const requestId = toNonEmptyString(input.request_id);
+  const identity = getSiteIdentity();
+  if (!siteId || !requestId) {
+    return toolError('site_id and request_id are required.', { error_code: 'artifact_scope_required' });
+  }
+  if (siteId !== identity.siteId) {
+    return toolError(
+      `Artifact scope mismatch: this deployment owns ${identity.siteId}, not ${siteId}. Use the owning site's Platform connector.`,
+      { error_code: 'artifact_site_mismatch' }
+    );
+  }
+  const jobId = toNonEmptyString(input.job_id);
+  if (!jobId) return toolError('job_id is required.');
+  const resumeToken = toNonEmptyString(input.resume_token);
+  if (!resumeToken) return toolError('resume_token is required.');
+  const approvalToken = toNonEmptyString(input.approval_token);
+  if (!approvalToken) return toolError('approval_token is required.');
+
+  const scoped = await resolveArtifactBridgeScopeForJob(event, input, siteId, requestId, jobId);
+  if (!scoped.ok) return scoped.result;
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const resumed = await resumePlatformArtifactJob(built.grant, jobId, resumeToken, approvalToken);
+  if (!resumed.ok) return pdfToolBridgeError(resumed);
+
+  const returnedProjectId = typeof resumed.body.projectId === 'string' ? resumed.body.projectId : undefined;
+  const returnedRequestId = typeof resumed.body.requestId === 'string' ? resumed.body.requestId : undefined;
+  if (
+    (returnedProjectId && returnedProjectId !== built.grant.projectId) ||
+    (returnedRequestId && returnedRequestId !== scoped.scope.requestId)
+  ) {
+    return toolError('pdf-tool job scope does not match the requested site/content object.', {
+      error_code: 'artifact_job_scope_mismatch',
+    });
+  }
+
+  event.log?.({
+    event: 'artifact_bridge_job_resumed',
+    siteId: scoped.scope.siteId,
+    requestId: scoped.scope.requestId,
+    projectId: built.grant.projectId,
+    jobId,
+  });
+  return toolResult({
+    ...resumed.body,
+    siteId: scoped.scope.siteId,
+    polling: platformPolling(scoped.scope, jobId),
   });
 };
 

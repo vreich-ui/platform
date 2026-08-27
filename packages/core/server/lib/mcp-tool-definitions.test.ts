@@ -12,8 +12,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 87 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 87, `Expected 87 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 88 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 88, `Expected 88 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {

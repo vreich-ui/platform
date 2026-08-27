@@ -195,6 +195,7 @@ import {
   callGetPdfTemplateValidation,
   callPdfToolHealth,
   callPublishPdfTemplate,
+  callResumeAgentArtifactJob,
   callSearchImages,
   callSetImageModelPolicy,
   callSetImageSearchPolicy,
@@ -838,6 +839,8 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return withIdempotentToolCall(event, name, input.idempotency_key, () => callCreateAgentArtifactJob(event, input));
     case 'get_agent_artifact_job_status':
       return callGetAgentArtifactJobStatus(event, input);
+    case 'resume_agent_artifact_job':
+      return callResumeAgentArtifactJob(event, input);
     case 'get_agent_artifact_by_slot':
       return callGetAgentArtifactBySlot(event, input);
     case 'create_pdf_template':
