@@ -442,14 +442,34 @@ test('refresh tokens rotate: the presented one dies, a new pair is issued', asyn
   assert.notEqual(second.access_token, first.access_token);
   assert.notEqual(second.refresh_token, first.refresh_token);
 
-  const replay = await call(
+  /**
+   * KNOWN_ISSUES §6, now closed. Strict rotation made THIS the moment a grant
+   * died: a connector whose refresh POST was retried — by its own HTTP layer,
+   * by a second worker, by a lost response — presented the same token twice
+   * and lost the grant permanently. Inside the reuse grace window that replay
+   * is recognised as the retry it is and is answered with a fresh pair.
+   */
+  const replayWithinGrace = await call(
     postForm('/oauth/token', {
       grant_type: 'refresh_token',
       refresh_token: first.refresh_token,
       client_id: client.client_id,
     })
   );
-  assert.equal(replay.statusCode, 400, 'a rotated refresh token must be dead');
+  assert.equal(replayWithinGrace.statusCode, 200, 'a retried refresh inside the grace window must survive');
+  const third = jsonBody(replayWithinGrace);
+  assert.notEqual(third.refresh_token, first.refresh_token);
+  assert.notEqual(third.refresh_token, second.refresh_token);
+
+  // The successor issued by the FIRST exchange is untouched by the retry.
+  const successorStillLive = await call(
+    postForm('/oauth/token', {
+      grant_type: 'refresh_token',
+      refresh_token: second.refresh_token,
+      client_id: client.client_id,
+    })
+  );
+  assert.equal(successorStillLive.statusCode, 200, successorStillLive.body);
 });
 
 test('an unsupported grant type is refused', async () => {

@@ -31,7 +31,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 
-import type { BlobListResponse } from './blob-list.js';
+import { collectBlobListItems, type BlobListResponse } from './blob-list.js';
 
 /** Every key this module owns lives under one prefix, so an operator can see the whole surface in one `list`. */
 export const OAUTH_KEY_PREFIX = 'oauth/';
@@ -47,6 +47,26 @@ export const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
 export const AUTHORIZATION_CODE_TTL_MS = 60_000;
 export const ACCESS_TOKEN_TTL_MS = 60 * 60_000;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * REUSE GRACE for a rotated refresh token (KNOWN_ISSUES §6, now closed).
+ *
+ * Strict rotation — delete the presented token, issue a new pair — cannot tell
+ * a STOLEN refresh token from a RETRIED one, and a retry is the common case,
+ * not the rare one: the connector's own HTTP layer retries a POST whose
+ * response was lost, and two workers or two tabs can refresh the same grant
+ * concurrently. Under strict rotation the second presentation is
+ * `invalid_grant` FOREVER, the grant is destroyed, and the human is told to
+ * check credentials that were never wrong — the same sentence every other
+ * cause of failure produces.
+ *
+ * So a rotated record is MARKED (`rotated_at`) rather than deleted, and a
+ * re-presentation inside this window is honoured. Outside it, the
+ * re-presentation is genuine reuse: it is refused AND the whole token family
+ * is revoked, which is the OTHER half of OAuth 2.1 §4.3.1 that strict deletion
+ * never implemented — a deleted record cannot detect anything.
+ */
+export const REFRESH_REUSE_GRACE_MS = 90_000;
 
 /** Full access to this site's MCP surface. */
 export const MCP_SCOPE = 'mcp';
@@ -144,6 +164,19 @@ export const refreshTokenSchema = z.object({
   site: z.string().min(1),
   issued_at: z.string(),
   expires_at: z.string(),
+  /**
+   * The rotation chain this token belongs to. Every refresh issues a successor
+   * in the SAME family, so detected reuse can revoke the whole chain rather
+   * than just the one record presented. Optional: records minted before this
+   * field existed have no family and degrade to single-record revocation.
+   */
+  family_id: z.string().min(1).optional(),
+  /**
+   * Set when this token was exchanged for a successor. Present = rotated: a
+   * re-presentation inside REFRESH_REUSE_GRACE_MS is a retry and is honoured;
+   * after it, it is reuse and revokes the family.
+   */
+  rotated_at: z.string().optional(),
 });
 export type RefreshTokenRecord = z.infer<typeof refreshTokenSchema>;
 
@@ -192,6 +225,28 @@ const writeSubjectIndex = async (
     } satisfies SubjectIndexEntry);
   } catch {
     // the index is an offboarding aid; a failure here must never fail a token mint
+  }
+};
+
+/**
+ * The by-FAMILY index (reuse detection). A refresh token's successor is a new
+ * random value with a new key, so nothing could enumerate "every token in this
+ * rotation chain" — and without that, detected reuse could only kill the one
+ * record presented while its successor, the token the attacker or the client
+ * actually holds, kept working. Every refresh mint also writes
+ * `oauth/by-family/<family_id>/<hash>.json` → `{ key }`, and
+ * `revokeRefreshTokenFamily` lists that prefix and deletes both halves.
+ */
+export const familyIndexPrefix = (familyId: string) => `${OAUTH_KEY_PREFIX}by-family/${familyId}/`;
+export const familyIndexKey = (familyId: string, recordKey: string) =>
+  `${familyIndexPrefix(familyId)}${recordKey.split('/').pop()}`;
+export const familyIndexEntrySchema = z.object({ key: z.string().min(1) });
+
+const writeFamilyIndex = async (store: OAuthBlobStore, familyId: string, recordKey: string): Promise<void> => {
+  try {
+    await store.setJSON(familyIndexKey(familyId, recordKey), { key: recordKey });
+  } catch {
+    // the index only sharpens revocation; a failure here must never fail a mint
   }
 };
 
@@ -349,8 +404,12 @@ export const putPendingAuthorization = async (store: OAuthBlobStore, record: Pen
 export const deletePendingAuthorization = (store: OAuthBlobStore, requestId: string) =>
   deleteKey(store, pendingAuthorizationKey(requestId));
 
-export const getAuthorizationCode = (store: OAuthBlobStore, code: string, site: string) =>
-  readRecord(store, authorizationCodeKey(code), authorizationCodeSchema, site);
+export const getAuthorizationCode = (
+  store: OAuthBlobStore,
+  code: string,
+  site: string,
+  options: { retryOnMiss?: boolean } = {}
+) => readRecord(store, authorizationCodeKey(code), authorizationCodeSchema, site, options);
 
 export const putAuthorizationCode = async (
   store: OAuthBlobStore,
@@ -366,8 +425,12 @@ export const putAuthorizationCode = async (
 export const deleteAuthorizationCode = (store: OAuthBlobStore, code: string) =>
   deleteKey(store, authorizationCodeKey(code));
 
-export const getAccessTokenRecord = (store: OAuthBlobStore, token: string, site: string) =>
-  readRecord(store, accessTokenKey(token), accessTokenSchema, site);
+export const getAccessTokenRecord = (
+  store: OAuthBlobStore,
+  token: string,
+  site: string,
+  options: { retryOnMiss?: boolean } = {}
+) => readRecord(store, accessTokenKey(token), accessTokenSchema, site, options);
 
 export const putAccessTokenRecord = async (
   store: OAuthBlobStore,
@@ -382,8 +445,12 @@ export const putAccessTokenRecord = async (
 export const deleteAccessTokenRecord = (store: OAuthBlobStore, token: string) =>
   deleteKey(store, accessTokenKey(token));
 
-export const getRefreshTokenRecord = (store: OAuthBlobStore, token: string, site: string) =>
-  readRecord(store, refreshTokenKey(token), refreshTokenSchema, site);
+export const getRefreshTokenRecord = (
+  store: OAuthBlobStore,
+  token: string,
+  site: string,
+  options: { retryOnMiss?: boolean } = {}
+) => readRecord(store, refreshTokenKey(token), refreshTokenSchema, site, options);
 
 export const putRefreshTokenRecord = async (
   store: OAuthBlobStore,
@@ -393,10 +460,101 @@ export const putRefreshTokenRecord = async (
   const key = refreshTokenKey(token);
   await store.setJSON(key, refreshTokenSchema.parse(record));
   await writeSubjectIndex(store, record.subject_email, 'refresh', key);
+  if (record.family_id) await writeFamilyIndex(store, record.family_id, key);
 };
 
 export const deleteRefreshTokenRecord = (store: OAuthBlobStore, token: string) =>
   deleteKey(store, refreshTokenKey(token));
+
+/**
+ * Mark a refresh token as rotated INSTEAD of deleting it, so a retried refresh
+ * inside the grace window can still be recognised as a retry rather than read
+ * as an unknown token. The record stays until its own `expires_at`; what makes
+ * it unusable after the window is `rotated_at`, checked on every presentation.
+ */
+export const markRefreshTokenRotated = async (
+  store: OAuthBlobStore,
+  token: string,
+  record: RefreshTokenRecord,
+  rotatedAtIso: string
+): Promise<void> => {
+  await store.setJSON(
+    refreshTokenKey(token),
+    refreshTokenSchema.parse({ ...record, rotated_at: rotatedAtIso } satisfies RefreshTokenRecord)
+  );
+};
+
+/**
+ * Reuse detected: destroy the whole rotation chain, not just the token that
+ * was replayed. Best-effort by construction — a store that cannot list, or a
+ * record minted before the family index existed, degrades to revoking the one
+ * record the caller already holds, which is strictly what the old strict-
+ * rotation behaviour did.
+ */
+export const revokeRefreshTokenFamily = async (
+  store: OAuthBlobStore,
+  familyId: string | undefined
+): Promise<{ revoked: number }> => {
+  if (!familyId || typeof store.list !== 'function') return { revoked: 0 };
+  let items: { key: string }[];
+  try {
+    items = await collectBlobListItems(
+      await store.list({ prefix: familyIndexPrefix(familyId), directories: false, paginate: true })
+    );
+  } catch {
+    return { revoked: 0 };
+  }
+
+  let revoked = 0;
+  for (const item of items) {
+    try {
+      const raw = await store.get(item.key);
+      if (raw) {
+        const entry = familyIndexEntrySchema.safeParse(JSON.parse(raw));
+        if (entry.success) {
+          await deleteKey(store, entry.data.key);
+          revoked += 1;
+        }
+      }
+      await deleteKey(store, item.key);
+    } catch {
+      // one unreadable index entry must not stop the rest of the family dying
+    }
+  }
+  return { revoked };
+};
+
+/**
+ * WRITE-THEN-HAND-OUT is the other half of the read-after-write problem.
+ *
+ * The retry above rescues a read that arrives slightly before its write has
+ * propagated. It cannot rescue the case that actually breaks a connect: the
+ * authorization server writes a record and immediately hands the CLIENT the
+ * value that names it — a code in a browser redirect, an access token in a
+ * token response — and the client presents it against a replica that has not
+ * seen the write yet. The client is then told its brand-new credential is
+ * invalid, which is the one message that makes a human re-run the flow and get
+ * the same result.
+ *
+ * So a value is not handed out until the record behind it has been READ BACK.
+ * On the overwhelmingly common path the first read hits and this costs one
+ * extra store read. The budget is bounded; if it is exhausted the value is
+ * still returned (the write DID succeed, so it will become visible) and the
+ * caller logs it — a delayed success beats a guaranteed failure.
+ */
+export const WRITE_CONFIRM_DELAYS_MS = [50, 150, 350, 700, 1200] as const;
+
+export const confirmRecordVisible = async (read: () => Promise<unknown | null>): Promise<boolean> => {
+  for (let attempt = 0; attempt <= WRITE_CONFIRM_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) await sleep(WRITE_CONFIRM_DELAYS_MS[attempt - 1]);
+    try {
+      if (await read()) return true;
+    } catch {
+      // a store hiccup mid-confirmation is a transient; keep waiting
+    }
+  }
+  return false;
+};
 
 export const isExpired = (record: { expires_at: string }, nowMs: number): boolean => {
   const expiry = Date.parse(record.expires_at);
