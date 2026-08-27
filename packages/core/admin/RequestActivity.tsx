@@ -36,7 +36,7 @@ import {
   formatEta,
   formatShortDuration,
   formatUsd,
-  getRequestActivity,
+  getRequestActivityIfChanged,
   type ActivityNodeView,
   type ActivitySeverity,
   type ActivityView,
@@ -438,19 +438,71 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
 
   const hasTarget = Boolean(requestId || runId);
 
+  /**
+   * T5.1 (T0.2 F13): `admin-requests-view`'s two caching wins, held across
+   * ticks in refs so they survive re-renders without becoming poll deps.
+   * `resolvedRunId` starts at the `runId` prop when the caller already knows
+   * it, and is otherwise learned from the first response — a request's
+   * `run_id` never changes, so every later tick sends it back and the server
+   * skips re-reading the request doc entirely. `etag` lets an unmoved run
+   * come back a bodyless `304`. `nextCadence` remembers the last computed
+   * poll interval so a `304` tick can reschedule without needing to
+   * reconstruct a response `activityPollIntervalFor` has never seen.
+   */
+  const resolvedRunIdRef = useRef<string | undefined>(runId);
+  const etagRef = useRef<string | undefined>(undefined);
+  const nextCadenceRef = useRef<number | undefined>(undefined);
+
+  // A new target (a different request/run) must never see the OLD target's
+  // cached run_id or etag — reset in lockstep with the generation bump below,
+  // which already tears down and restarts the chain on this same dependency
+  // change.
+  useEffect(() => {
+    resolvedRunIdRef.current = runId;
+    etagRef.current = undefined;
+    nextCadenceRef.current = undefined;
+  }, [requestId, runId]);
+
   const load = useCallback(
     async (generation: number) => {
       // Only the current generation may write state or schedule the next poll.
       const current = () => generationRef.current === generation;
       try {
-        const result = await getRequestActivity(getToken, {
-          ...(requestId ? { request_id: requestId } : {}),
-          ...(runId ? { run_id: runId } : {}),
-        });
+        const result = await getRequestActivityIfChanged(
+          getToken,
+          {
+            ...(resolvedRunIdRef.current
+              ? { run_id: resolvedRunIdRef.current }
+              : requestId
+                ? { request_id: requestId }
+                : {}),
+          },
+          etagRef.current
+        );
         if (!current()) return;
-        setActivity(result.activity);
-        setReason(result.reason);
-        setCanApprove(result.can_approve === true);
+
+        if (result.unchanged) {
+          // Byte-identical to what is already on screen — R8's shape. Nothing
+          // to reconcile; just confirm freshness and reschedule at the SAME
+          // cadence the last real response computed.
+          etagRef.current = result.etag;
+          setNowMs(Date.now());
+          setError(undefined);
+          setLoaded(true);
+          if (timerRef.current) clearTimeout(timerRef.current);
+          const next = nextCadenceRef.current;
+          if (next !== undefined && !hidden()) {
+            timerRef.current = setTimeout(() => void load(generation), next);
+          }
+          return;
+        }
+
+        etagRef.current = result.etag;
+        const view = result.view;
+        if (view.run_id) resolvedRunIdRef.current = view.run_id;
+        setActivity(view.activity);
+        setReason(view.reason);
+        setCanApprove(view.can_approve === true);
         setNowMs(Date.now());
         setError(undefined);
         setLoaded(true);
@@ -459,7 +511,8 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
         // The whole response, not just the activity: only the server knows
         // whether a request with no run yet is one about to start or one that
         // will never have one, and it answers with `retry_ms`.
-        const next = activityPollIntervalFor(result);
+        const next = activityPollIntervalFor(view);
+        nextCadenceRef.current = next;
         // A fetch already in flight when the tab hid used to schedule its own
         // successor, so polling carried on in a hidden tab and returning to it
         // could briefly run two chains. The visibility handler re-arms this
@@ -473,9 +526,9 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
         stoppedRef.current = true;
         // A run that ENDED is settled; "there is no run" never started, and the
         // host has nothing to refresh.
-        if (result.activity && !settledRef.current) {
+        if (view.activity && !settledRef.current) {
           settledRef.current = true;
-          onSettledRef.current?.(result.activity);
+          onSettledRef.current?.(view.activity);
         }
       } catch (loadError) {
         if (!current()) return;
