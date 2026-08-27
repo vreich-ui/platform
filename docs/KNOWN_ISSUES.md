@@ -361,9 +361,20 @@ Part B. Known-and-accepted (not an issue): a suspended/removed member's JWT
 stays valid ≤ 1 h; every function re-resolves roles per call, so they cannot
 act — there is no server-side GoTrue logout.
 
-## 6. OAuth refresh-token rotation has no grace window — a retried refresh kills the grant
+## 6. OAuth refresh-token rotation has no grace window — a retried refresh kills the grant — FIXED
 
-**Status:** open, deliberately NOT fixed in the MCP-auth hardening change.
+**Status:** CLOSED. Fixed as described under "If it is taken" below: a 90s
+reuse grace window plus family revocation, in `handleTokenRequest`
+(`oauth-server.ts`), with `family_id` and `rotated_at` added schema-additively
+to `refreshTokenSchema`. The pinned test in `mcp-oauth.test.ts` changed from
+"the replay is dead" to "the replay inside the window succeeds"; the
+after-the-window replay and its family revocation are pinned in
+`mcp-oauth-hardening.test.ts` §4. The original analysis is kept below because
+it is the reason the shape of the fix is what it is.
+
+---
+
+**Original (open) writeup:**
 
 `handleTokenRequest`'s `refresh_token` branch (`oauth-server.ts`) deletes the
 presented refresh token BEFORE it issues the replacement pair, and a second

@@ -40,6 +40,7 @@ import {
   handleTokenRequest,
   registerClient,
   resolveRequestOrigin,
+  type OAuthLog,
 } from '../lib/oauth-server.js';
 import type { OAuthBlobStore } from '../lib/oauth-store.js';
 
@@ -232,6 +233,15 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   const store = await getOAuthStore(event);
   const site = identity.siteId;
 
+  /**
+   * The operator's channel. Everything here is a SERVER-side condition the
+   * client is deliberately not told about — a write that could not be
+   * confirmed, a detected refresh reuse — and each one used to be invisible,
+   * which is how they got debugged as credential problems.
+   */
+  const log: OAuthLog = (name, detail) =>
+    console.warn(JSON.stringify({ ts: nowIso, event: name, endpoint, site, ...detail }));
+
   if (endpoint === 'authorize') {
     if (event.httpMethod !== 'GET') return json(405, { error: 'invalid_request', error_description: 'Use GET.' });
 
@@ -267,6 +277,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       site,
       nowMs,
       nowIso,
+      log,
     });
     return json(result.status, result.body);
   }
@@ -327,6 +338,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     site,
     nowMs,
     nowIso,
+    log,
   });
 
   if (!completed.ok) {

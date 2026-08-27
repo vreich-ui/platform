@@ -31,6 +31,7 @@ import {
   MCP_OAUTH_SCOPES,
   MCP_SCOPE,
   PENDING_AUTHORIZATION_TTL_MS,
+  REFRESH_REUSE_GRACE_MS,
   REFRESH_TOKEN_TTL_MS,
   clientSecretMatches,
   deleteAccessTokenRecord,
@@ -46,6 +47,8 @@ import {
   isAllowedRedirectUri,
   isExpired,
   OAuthStoreReadError,
+  confirmRecordVisible,
+  markRefreshTokenRotated,
   mintOAuthValue,
   putAccessTokenRecord,
   putAuthorizationCode,
@@ -53,6 +56,7 @@ import {
   putPendingAuthorization,
   putRefreshTokenRecord,
   redirectUriRegistered,
+  revokeRefreshTokenFamily,
   verifyPkceS256,
   type AccessTokenRecord,
   type OAuthBlobStore,
@@ -60,6 +64,13 @@ import {
 } from './oauth-store.js';
 
 export type OAuthErrorBody = { error: string; error_description: string };
+/**
+ * Where a handler reports something an OPERATOR needs to know but a client
+ * must not be told — a write that could not be confirmed, a detected refresh
+ * reuse. Optional everywhere: unit tests pass nothing and lose nothing.
+ */
+export type OAuthLog = (event: string, detail?: Record<string, unknown>) => void;
+
 export type OAuthResult = { status: number; body: Record<string, unknown> };
 
 const errorResult = (status: number, error: string, error_description: string): OAuthResult => ({
@@ -235,6 +246,15 @@ export const registerClient = async (store: OAuthBlobStore, input: RegisterClien
       client_id: record.client_id,
       ...(clientSecret ? { client_secret: clientSecret } : {}),
       client_id_issued_at: Math.floor(Date.parse(input.nowIso) / 1000),
+      /**
+       * RFC 7591 §3.2.1 makes this REQUIRED whenever a `client_secret` is
+       * issued, and 0 is its spelling for "never expires" — which is the truth
+       * here, since nothing in this server ages a client secret out. Omitting
+       * it is a spec violation a strict registration client is entitled to
+       * reject outright, and a client that rejects registration never reaches
+       * the flow at all.
+       */
+      ...(clientSecret ? { client_secret_expires_at: 0 } : {}),
       client_name: record.client_name,
       redirect_uris: record.redirect_uris,
       grant_types: record.grant_types,
@@ -397,6 +417,7 @@ export type CompleteAuthorizationInput = {
   site: string;
   nowMs: number;
   nowIso: string;
+  log?: OAuthLog;
 };
 
 export type CompleteAuthorizationResult =
@@ -456,6 +477,17 @@ export const completeAuthorization = async (
     expires_at: new Date(input.nowMs + AUTHORIZATION_CODE_TTL_MS).toISOString(),
   });
 
+  /**
+   * The browser is about to carry this code straight back to the client, which
+   * redeems it within a second. Confirm the record is readable before the
+   * redirect, or an eventually-consistent replica turns a just-approved
+   * consent into `invalid_grant` — the failure that looks exactly like the
+   * human approving the wrong thing.
+   */
+  if (!(await confirmRecordVisible(() => getAuthorizationCode(store, code, input.site, { retryOnMiss: false })))) {
+    input.log?.('mcp_oauth_code_write_unconfirmed', { client_id: pending.client_id, site: input.site });
+  }
+
   return {
     ok: true,
     redirect_to: withParams(pending.redirect_uri, { code, state: pending.state }),
@@ -495,6 +527,7 @@ export type TokenRequestInput = {
   site: string;
   nowMs: number;
   nowIso: string;
+  log?: OAuthLog;
 };
 
 const authenticateClient = async (
@@ -534,12 +567,16 @@ const issueTokenPair = async (
     scope: string;
     resource?: string;
     site: string;
+    /** The rotation chain to extend. Absent on a fresh authorization_code grant. */
+    family_id?: string;
     nowMs: number;
     nowIso: string;
+    log?: OAuthLog;
   }
 ): Promise<OAuthResult> => {
   const accessToken = mintOAuthValue();
   const refreshToken = mintOAuthValue();
+  const familyId = input.family_id ?? mintOAuthValue();
   const common = {
     client_id: input.client.client_id,
     client_name: input.client.client_name,
@@ -559,8 +596,25 @@ const issueTokenPair = async (
   await putRefreshTokenRecord(store, refreshToken, {
     schema_version: 'oauth-refresh-token.v1',
     ...common,
+    family_id: familyId,
     expires_at: new Date(input.nowMs + REFRESH_TOKEN_TTL_MS).toISOString(),
   });
+
+  /**
+   * Do not hand the client an access token that its very next request will be
+   * told is invalid. The `/oauth/token` → `/mcp` hop is ~100ms; on a store
+   * whose requested strong consistency is silently eventual, that is inside
+   * the replication window, and the connector reads the resulting 401 as a
+   * credentials failure on a grant a human just approved.
+   */
+  const visible = await confirmRecordVisible(() =>
+    getAccessTokenRecord(store, accessToken, input.site, { retryOnMiss: false })
+  );
+  if (!visible) {
+    // The write itself succeeded, so the token WILL become usable; returning it
+    // is strictly better than failing an exchange that is otherwise correct.
+    input.log?.('mcp_oauth_token_write_unconfirmed', { client_id: input.client.client_id, site: input.site });
+  }
 
   return {
     status: 200,
@@ -593,13 +647,50 @@ export const handleTokenRequest = async (store: OAuthBlobStore, input: TokenRequ
     if (!record || record.client_id !== client.client_id) {
       return errorResult(400, 'invalid_grant', 'Unknown or mismatched refresh token.');
     }
-    // ROTATION (OAuth 2.1 §4.3.1, required for public clients): the presented
-    // refresh token dies here whether or not the rest succeeds, so a replay of
-    // a stolen one finds nothing.
-    await deleteRefreshTokenRecord(store, refreshToken);
+
+    /**
+     * ROTATION WITH A REUSE GRACE (OAuth 2.1 §4.3.1, both halves).
+     *
+     * Strict rotation deleted the presented token here, before anything else.
+     * That is correct against a thief and wrong against the client's own retry
+     * — and a retry is the ordinary case: a lost response, an HTTP layer that
+     * re-POSTs, two workers refreshing the same grant at once. It cost the
+     * grant, permanently, and said "check your credentials".
+     *
+     * Now: a token already marked rotated is a RE-presentation. Inside the
+     * grace window it is a retry and is honoured with a fresh pair in the same
+     * family. Outside it, it is reuse — refused, AND the whole family dies,
+     * which is the detection half that strict deletion could never do, because
+     * a deleted record detects nothing.
+     */
+    if (record.rotated_at) {
+      const rotatedAtMs = Date.parse(record.rotated_at);
+      const withinGrace = Number.isFinite(rotatedAtMs) && input.nowMs - rotatedAtMs <= REFRESH_REUSE_GRACE_MS;
+      if (!withinGrace) {
+        const { revoked } = await revokeRefreshTokenFamily(store, record.family_id);
+        await deleteRefreshTokenRecord(store, refreshToken);
+        input.log?.('mcp_oauth_refresh_reuse_detected', {
+          client_id: client.client_id,
+          site: input.site,
+          family_revoked: revoked,
+        });
+        return errorResult(
+          400,
+          'invalid_grant',
+          'This refresh token was already exchanged. The grant has been revoked; reconnect to authorize again.'
+        );
+      }
+      input.log?.('mcp_oauth_refresh_retry_within_grace', { client_id: client.client_id, site: input.site });
+    }
+
     if (isExpired(record, input.nowMs)) {
+      await deleteRefreshTokenRecord(store, refreshToken);
       return errorResult(400, 'invalid_grant', 'The refresh token has expired. Reconnect to authorize again.');
     }
+
+    // Marked, not deleted: the successor is issued below, and this record stays
+    // only long enough to recognise a retry of the exchange that created it.
+    await markRefreshTokenRotated(store, refreshToken, record, input.nowIso);
 
     return issueTokenPair(store, {
       client,
@@ -608,8 +699,10 @@ export const handleTokenRequest = async (store: OAuthBlobStore, input: TokenRequ
       scope: record.scope,
       ...(record.resource ? { resource: record.resource } : {}),
       site: input.site,
+      ...(record.family_id ? { family_id: record.family_id } : {}),
       nowMs: input.nowMs,
       nowIso: input.nowIso,
+      ...(input.log ? { log: input.log } : {}),
     });
   }
 
@@ -654,6 +747,7 @@ export const handleTokenRequest = async (store: OAuthBlobStore, input: TokenRequ
     site: input.site,
     nowMs: input.nowMs,
     nowIso: input.nowIso,
+    ...(input.log ? { log: input.log } : {}),
   });
 };
 

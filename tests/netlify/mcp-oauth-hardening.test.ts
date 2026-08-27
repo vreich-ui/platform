@@ -24,11 +24,15 @@ import test from 'node:test';
 import { handler as oauthHandler } from '../../netlify/functions/mcp-oauth.js';
 import { handler as mcpHandler } from '../../netlify/functions/mcp.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
-import { describeOAuthPrincipal } from '../../packages/core/server/lib/oauth-server.js';
+import { describeOAuthPrincipal, handleTokenRequest } from '../../packages/core/server/lib/oauth-server.js';
 import {
+  REFRESH_REUSE_GRACE_MS,
   accessTokenKey,
   putAccessTokenRecord,
+  putOAuthClient,
+  putRefreshTokenRecord,
   type OAuthBlobStore,
+  type OAuthClientRecord,
 } from '../../packages/core/server/lib/oauth-store.js';
 import { runTenantOAuthFlow, type LambdaLikeHandler, type LambdaLikeResponse } from './tenant-oauth-flow.js';
 
@@ -421,4 +425,151 @@ test('metadata discovery survives an unreachable blob store — it reads no stor
   });
 
   assert.equal(response.statusCode, 200, response.body);
+});
+
+// ─── 4. refresh rotation: a retry must not destroy the grant ─────────────────
+
+/**
+ * The fourth shape of "Authorization with the MCP server failed", and the one
+ * that survived the first hardening pass because it was deliberately left open
+ * (KNOWN_ISSUES §6). Strict rotation deletes the presented refresh token before
+ * it issues the replacement, so a RETRIED refresh — a lost response, an HTTP
+ * layer that re-POSTs, two workers on the same grant — is `invalid_grant`
+ * forever and the grant is gone. Nothing about that is distinguishable, to the
+ * human, from a bad credential.
+ *
+ * These tests drive `handleTokenRequest` directly rather than over HTTP,
+ * because the property under test is about the passage of time and `nowMs` is
+ * an input here.
+ */
+const listableStore = (): OAuthBlobStore => {
+  const map = new Map<string, string>();
+  return {
+    async get(key: string) {
+      return map.get(key) ?? null;
+    },
+    async setJSON(key: string, value: unknown) {
+      map.set(key, JSON.stringify(value));
+    },
+    async delete(key: string) {
+      map.delete(key);
+    },
+    list({ prefix }: { prefix: string }) {
+      return { blobs: [...map.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })) };
+    },
+  } as unknown as OAuthBlobStore;
+};
+
+const CLIENT: OAuthClientRecord = {
+  schema_version: 'oauth-client.v1',
+  client_id: 'client-rotation',
+  client_name: 'Connector',
+  redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+  token_endpoint_auth_method: 'none',
+  grant_types: ['authorization_code', 'refresh_token'],
+  response_types: ['code'],
+  scope: 'mcp offline_access',
+  site: SITE,
+  created_at: new Date(0).toISOString(),
+  registration: 'dynamic',
+};
+
+const seedGrant = async (store: OAuthBlobStore, nowMs: number) => {
+  await putOAuthClient(store, CLIENT);
+  const refreshToken = 'refresh-original';
+  await putRefreshTokenRecord(store, refreshToken, {
+    schema_version: 'oauth-refresh-token.v1',
+    client_id: CLIENT.client_id,
+    client_name: CLIENT.client_name,
+    subject_email: ADMIN_EMAIL,
+    subject_id: 'sub-1',
+    scope: 'mcp offline_access',
+    site: SITE,
+    family_id: 'family-1',
+    issued_at: new Date(nowMs).toISOString(),
+    expires_at: new Date(nowMs + 30 * 24 * 3_600_000).toISOString(),
+  });
+  return refreshToken;
+};
+
+const refresh = (store: OAuthBlobStore, refreshToken: string, nowMs: number) =>
+  handleTokenRequest(store, {
+    params: { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT.client_id },
+    site: SITE,
+    nowMs,
+    nowIso: new Date(nowMs).toISOString(),
+  });
+
+test('a refresh retried inside the grace window is honoured instead of killing the grant', async () => {
+  const store = listableStore();
+  const t0 = Date.parse('2026-01-01T00:00:00.000Z');
+  const original = await seedGrant(store, t0);
+
+  const first = await refresh(store, original, t0);
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+
+  // The client never saw that response and retried, one second later.
+  const retry = await refresh(store, original, t0 + 1_000);
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  assert.notEqual(retry.body.refresh_token, first.body.refresh_token);
+
+  // And the successor from the first exchange is still usable — the retry
+  // widened nothing and destroyed nothing.
+  const successor = await refresh(store, first.body.refresh_token as string, t0 + 2_000);
+  assert.equal(successor.status, 200, JSON.stringify(successor.body));
+});
+
+test('a refresh replayed AFTER the grace window is reuse: refused, and the whole family is revoked', async () => {
+  const store = listableStore();
+  const t0 = Date.parse('2026-01-01T00:00:00.000Z');
+  const original = await seedGrant(store, t0);
+
+  const first = await refresh(store, original, t0);
+  assert.equal(first.status, 200);
+  const successorToken = first.body.refresh_token as string;
+
+  // Well past the window: this is a stolen token being replayed, not a retry.
+  const replay = await refresh(store, original, t0 + REFRESH_REUSE_GRACE_MS + 1_000);
+  assert.equal(replay.status, 400);
+  assert.equal(replay.body.error, 'invalid_grant');
+
+  // Reuse detection's whole point: the token the attacker (or the client) holds
+  // dies too. Strict deletion could never do this — a deleted record detects
+  // nothing and its successor kept working.
+  const successorAfterRevocation = await refresh(store, successorToken, t0 + REFRESH_REUSE_GRACE_MS + 2_000);
+  assert.equal(successorAfterRevocation.status, 400);
+  assert.equal(successorAfterRevocation.body.error, 'invalid_grant');
+});
+
+test('an access token is not handed out until its record reads back', async () => {
+  // Two misses before the record becomes visible — the replication lag that
+  // makes a brand-new token 401 on the connector's very first call.
+  const store = laggingStore(2);
+  await putOAuthClient(store, CLIENT);
+  const t0 = Date.parse('2026-01-01T00:00:00.000Z');
+  await putRefreshTokenRecord(store, 'refresh-lagging', {
+    schema_version: 'oauth-refresh-token.v1',
+    client_id: CLIENT.client_id,
+    client_name: CLIENT.client_name,
+    subject_email: ADMIN_EMAIL,
+    subject_id: 'sub-1',
+    scope: 'mcp offline_access',
+    site: SITE,
+    family_id: 'family-lag',
+    issued_at: new Date(t0).toISOString(),
+    expires_at: new Date(t0 + 30 * 24 * 3_600_000).toISOString(),
+  });
+
+  const issued = await refresh(store, 'refresh-lagging', t0);
+  assert.equal(issued.status, 200, JSON.stringify(issued.body));
+
+  // The token handed to the client resolves on the very next read — which is
+  // what the connector's first /mcp call does.
+  const resolved = await describeOAuthPrincipal(store, {
+    token: issued.body.access_token as string,
+    site: SITE,
+    resourceUris: [`https://${HOST}/mcp`],
+    nowMs: t0,
+  });
+  assert.equal(resolved.ok, true, JSON.stringify(resolved));
 });
