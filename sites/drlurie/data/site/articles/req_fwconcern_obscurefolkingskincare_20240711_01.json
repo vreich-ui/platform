@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-27T20:56:04.107Z",
+    "at": "2026-08-27T21:38:44.611Z",
     "from": "objects/content_item/by-id/req_fwconcern_obscurefolkingskincare_20240711_01.json",
-    "record_version": 2
+    "record_version": 7
   },
   "author": "Dr. Lurie Dermatology",
   "deck": "Traditional and natural skincare ingredients can be meaningful, but meaning is not the same as evidence. Here is a practical way to judge the claim, the product, and your own skin context before you try something new.",
@@ -22,6 +22,12 @@
       },
       "public": {
         "body": "If you have ever heard about a skincare ingredient from a relative, a cultural practice, a creator, a product review, or a natural-product brand, you are not alone. Skincare advice often travels through personal stories long before it reaches a study.\n\nThat does not make the story meaningless. It also does not make the claim reliable.\n\nA better question is not simply, “Is this ingredient good or bad?” The more useful question is: what evidence supports this exact use, in this exact product, for this exact skin situation?\n\nThat framing leaves room for curiosity. It also protects you from treating tradition, marketing, or a single positive review as more certain than it is.",
+        "media": {
+          "alt": "A flat lay of botanical skincare ingredients: dried herbs, a small amber glass bottle of oil, and a shallow ceramic dish on a pale surface.",
+          "caption": "Traditional and botanical ingredients are worth curiosity — and the same evidence questions you would ask of anything else.",
+          "src": "/img/req_fwconcern_obscurefolkingskincare_20240711_01/e5c9396703c1b076da5aa427f62281d3985ea83997c51731cbbf7aad09170fcb.webp",
+          "type": "image"
+        },
         "title": "Why unusual skincare ingredients are so compelling"
       },
       "rendering": {
@@ -200,6 +206,13 @@
           "Well-designed human study or review — Generally stronger when it matches the concern, product type, ingredient form, concentration, and way the product is used.",
           "Use-with-caution context — Be more careful with broken or inflamed skin, eczema or rosacea, severe acne, known allergies, pigment-prone or irritation-prone skin, pregnancy, childhood, eye-area use, recent procedures, or prescription-treated skin."
         ],
+        "media": {
+          "caption": "A printable one-page worksheet for tracking one ingredient over seven days.",
+          "contentType": "application/pdf",
+          "src": "/pdf/req_fwconcern_obscurefolkingskincare_20240711_01/8e25412cc41d6993eb1306d7909b49acc9b434b1429031dcd6fdff674eeb6911.pdf",
+          "title": "Trying a new skincare ingredient: a 7-day record",
+          "type": "document"
+        },
         "title": "A quick confidence check"
       },
       "rendering": {
