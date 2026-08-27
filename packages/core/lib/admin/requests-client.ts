@@ -212,7 +212,7 @@ export const requestPollIntervalFor = (rows: readonly { status: RequestStatus }[
  */
 export { requestStatusLabel } from './request-logic.js';
 
-// ─── W19: the live watch path (admin-request-activity) ─────────────────────
+// ─── W19: the live watch path (admin-request-activity) ───────────────────────
 
 const ACTIVITY_ENDPOINT = '/.netlify/functions/admin-request-activity';
 
