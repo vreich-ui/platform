@@ -296,6 +296,49 @@ export const getRequestActivity = async (
   return json as unknown as ActivityResponse;
 };
 
+const VIEW_ENDPOINT = '/.netlify/functions/admin-requests-view';
+
+export interface ActivityViewResponse extends ActivityResponse {
+  /** Handed back once resolved — cache it and send it as `run_id` on the next poll (T5.1 F13). */
+  run_id?: string;
+}
+
+/**
+ * T5.1 (T0.2 F13) — the polling form `RequestActivity.tsx` uses. Read-only
+ * (the decision stays on `getRequestActivity`/`decideRunPublish` above,
+ * against `admin-request-activity`, per W19: only the sweeper writes a
+ * running request's status, and a view must never become a second writer).
+ *
+ * Two things a plain `getRequestActivity` poll pays every tick that this
+ * skips once the caller has them: the request-doc read (pass the CACHED
+ * `run_id` back and the server skips `loadRequest` entirely — it can never
+ * change for a given request), and the response bytes for an unmoved run
+ * (pass the previous `ETag` as `If-None-Match`; unchanged comes back `304`).
+ */
+export async function getRequestActivityIfChanged(
+  getToken: GetToken,
+  target: { request_id?: string; run_id?: string },
+  etag: string | undefined
+): Promise<
+  { unchanged: true; etag: string | undefined } | { unchanged: false; view: ActivityViewResponse; etag?: string }
+> {
+  const token = await getToken();
+  const res = await fetch(VIEW_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(etag ? { 'If-None-Match': etag } : {}),
+    },
+    body: JSON.stringify(target),
+  });
+  if (res.status === 304) return { unchanged: true, etag: res.headers.get('etag') ?? etag };
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  const nextEtag = res.headers.get('etag');
+  return { unchanged: false, view: json as unknown as ActivityViewResponse, ...(nextEtag ? { etag: nextEtag } : {}) };
+}
+
 /**
  * The watch cadence. Fast while a node can move under us; a terminal run is
  * polled once more and then left alone — an editor rereading a finished run

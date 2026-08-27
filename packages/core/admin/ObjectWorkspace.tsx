@@ -93,6 +93,7 @@ import {
   invalidateReleaseOverview,
   type ReleaseObjectView,
 } from '@core/lib/admin/release-client';
+import { fetchObjectLockStatusIfChanged, type ObjectLockView } from '@core/lib/admin/content-view-client';
 import { pageSectionLabel } from '@core/lib/admin/preview-logic';
 import type { Role as ReviewerRole } from '@core/lib/admin/object-review-ui';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
@@ -626,6 +627,14 @@ function ArticleTaxonomyCard({
 function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const { toast } = useToast();
   const [record, setRecord] = useState<Rec | null>(null);
+  /**
+   * T5.1 (T0.2 F9): the lock heartbeat's own state, separate from `record`.
+   * The 4 s poll used to overwrite the WHOLE record just to refresh this;
+   * now it refreshes only this, through `admin-content-view`'s lock-only
+   * projection. `record.lock` (set once, at load) is still the fallback for
+   * the render between mount and the poll's first tick.
+   */
+  const [lockView, setLockView] = useState<ObjectLockView | undefined>(undefined);
   const [releaseObject, setReleaseObject] = useState<ReleaseObjectView>();
   const [releaseKnown, setReleaseKnown] = useState(false);
   const [readiness, setReadiness] = useState<ReadinessGroup[] | null>(null);
@@ -763,16 +772,28 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     }
   }, [chat.writeStamp]);
 
-  // Locks are short-lived coordination state. Refresh only the record while a
-  // lock is visible so an agent check-in clears the icon without a page reload.
+  // Locks are short-lived coordination state. T5.1 (T0.2 F9): this used to
+  // re-fetch the WHOLE record every 4s just to read one boolean and an
+  // expiry timestamp — 15 full-record reads/min while a lock was visible, the
+  // body tree dominating the wire on any large article. `admin-content-view`
+  // projects exactly `{locked, lock, version}`, and an unmoved lock between
+  // two heartbeats (the common case) comes back a bodyless 304 (R8's shape).
   useEffect(() => {
+    // A fresh `record` (a full reload after a write, or a checkin elsewhere)
+    // is always more authoritative than a stale poll snapshot from the
+    // PREVIOUS lock state — reset before the guard below, or a checkin would
+    // leave `lockView` reporting a lock that is already gone (the guard stops
+    // the poll that would otherwise have cleared it).
+    setLockView(undefined);
     if (!record?.lock?.token || !typeRef.current) return;
     let active = true;
+    let etag: string | undefined;
     const refreshLock = async () => {
       try {
-        const { getObjectRecord } = await import('@core/lib/edit-mode/verbs-client');
-        const result = await getObjectRecord(getToken, typeRef.current!, loc.id);
-        if (active && result.record) setRecord(result.record as Rec);
+        const result = await fetchObjectLockStatusIfChanged(getToken, typeRef.current!, loc.id, etag);
+        if (!active) return;
+        etag = result.etag;
+        if (!result.unchanged) setLockView(result.view);
       } catch {
         // Keep the last known state; the next interval retries quietly.
       }
@@ -998,14 +1019,20 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const lifecycle = resolveReleaseAwareLifecycle(releaseObject);
   const status = releaseAwareLifecyclePresentation(lifecycle);
   const url = liveUrl(record);
-  const lockHeld = Boolean(record.lock && record.lock.token);
+  // T5.1 (F9): once the lock-only poll has ticked at least once, its view is
+  // the live truth; `record.lock` (set at load, never touched by the poll
+  // any more) is only the fallback for the render before the first tick.
+  // Deliberately mirrors the OLD truthiness check (a lock object present),
+  // not `lockView.locked`'s expiry-awareness — same behavior, faster wire.
+  const lockHeld = lockView ? Boolean(lockView.lock) : Boolean(record.lock && record.lock.token);
+  const lockOwnerLabel = lockView ? lockView.lock?.owner_label : record.lock?.owner_label;
   // `lockOwnerFromPrincipal` (server/lib/object-lock.ts) writes a HUMAN
   // holder's email as `owner_label` and an agent's name for both fields, so
   // the caller's email is the one comparable identity the browser has. An
   // unknown viewer email fails toward "held by someone else", which is the
   // safe direction for a lock.
   const lockHeldByOther =
-    lockHeld && (currentUser.user?.email === undefined || record.lock?.owner_label !== currentUser.user.email);
+    lockHeld && (currentUser.user?.email === undefined || lockOwnerLabel !== currentUser.user.email);
   const isContentItem = record.object_type === 'content_item';
   const stageMode = objectLensMode(record.object_type);
   const editMode = objectEditMode(record.object_type);
@@ -1237,7 +1264,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     availability,
     lock: {
       held: lockHeld,
-      ...(record.lock?.owner_label ? { ownerLabel: record.lock.owner_label } : {}),
+      ...(lockOwnerLabel ? { ownerLabel: lockOwnerLabel } : {}),
     },
     // T3.2 key-space fix: gives the overlay entry the request keying every
     // inbox-shaped reader actually looks up, so approving here moves the row
@@ -1575,8 +1602,8 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
             {lockHeld ? (
               <span
                 role="status"
-                aria-label={`Checked out by ${record.lock?.owner_label ?? 'another editor'}`}
-                title={`Checked out by ${record.lock?.owner_label ?? 'another editor'}. This status refreshes automatically.`}
+                aria-label={`Checked out by ${lockOwnerLabel ?? 'another editor'}`}
+                title={`Checked out by ${lockOwnerLabel ?? 'another editor'}. This status refreshes automatically.`}
                 className="inline-grid h-6 w-6 place-items-center rounded-full border border-[var(--adm-border-strong)] bg-[var(--adm-surface-sunken)] text-[var(--adm-warning-text)]"
               >
                 <IconLock size={13} />
