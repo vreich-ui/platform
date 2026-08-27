@@ -45,6 +45,7 @@ import {
   hashOAuthValue,
   isAllowedRedirectUri,
   isExpired,
+  OAuthStoreReadError,
   mintOAuthValue,
   putAccessTokenRecord,
   putAuthorizationCode,
@@ -700,11 +701,12 @@ export type ResolvedOAuthPrincipal = {
  * `audience_mismatch` in particular (a permanent, silent 401 on a grant that
  * was genuinely approved) could not be told apart from a bad token at all.
  */
-export type OAuthPrincipalFailure = 'no_record' | 'expired' | 'audience_mismatch';
+export type OAuthPrincipalFailure = 'no_record' | 'expired' | 'audience_mismatch' | 'store_error';
 
 export type OAuthPrincipalResolution =
   | { ok: true; principal: ResolvedOAuthPrincipal }
-  | { ok: false; reason: OAuthPrincipalFailure };
+  /** `detail` carries the underlying store message on `store_error`, for the log line only — never for the caller. */
+  | { ok: false; reason: OAuthPrincipalFailure; detail?: string };
 
 export type ResolveOAuthPrincipalInput = {
   token: string;
@@ -740,7 +742,20 @@ export const describeOAuthPrincipal = async (
   store: OAuthBlobStore,
   input: ResolveOAuthPrincipalInput
 ): Promise<OAuthPrincipalResolution> => {
-  const record: AccessTokenRecord | null = await getAccessTokenRecord(store, input.token, input.site);
+  let record: AccessTokenRecord | null;
+  try {
+    record = await getAccessTokenRecord(store, input.token, input.site);
+  } catch (error) {
+    // A store that could not be READ is not a token that does not exist. The
+    // MCP endpoint still answers 401 either way — a resource server does not
+    // 500 because its own store is sick, or a caller who never needed OAuth
+    // pays for an outage they have nothing to do with — but the log, and the
+    // operator, now get the truth instead of `no_record`.
+    if (error instanceof OAuthStoreReadError) {
+      return { ok: false, reason: 'store_error', detail: error.message };
+    }
+    throw error;
+  }
   if (!record) return { ok: false, reason: 'no_record' };
   if (isExpired(record, input.nowMs)) return { ok: false, reason: 'expired' };
   if (record.resource && !input.resourceUris.some((uri) => resourceMatches(record.resource as string, uri))) {

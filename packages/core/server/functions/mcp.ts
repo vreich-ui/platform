@@ -454,7 +454,7 @@ type AuthResult =
       ok: false;
       reason: 'missing_token' | 'missing_authorization' | 'invalid_authorization';
       /** Set when a bearer WAS presented and the OAuth path was the one that refused it. */
-      oauthFailure?: OAuthPrincipalFailure | 'store_error';
+      oauthFailure?: OAuthPrincipalFailure;
     };
 
 /** The audience this deployment issues and accepts tokens for (W14 F10). */
@@ -562,7 +562,17 @@ const writeAuthMemo = <T>(memo: Map<string, AuthMemoEntry<T>>, key: string, valu
 const resolveOAuthPrincipalForRequest = async (
   event: LambdaEvent,
   token: string
-): Promise<{ principal?: ResolvedOAuthPrincipal; failure?: OAuthPrincipalFailure | 'store_error' }> => {
+): Promise<{ principal?: ResolvedOAuthPrincipal; failure?: OAuthPrincipalFailure }> => {
+  /**
+   * Still silent to the CALLER (no principal, so the gate falls through to the
+   * shared-secret path and, absent that, to a 401) — but never again silent to
+   * the operator. A governance-store outage used to be indistinguishable in
+   * the logs from a bad token, which is how an infrastructure failure got
+   * debugged as a credentials problem.
+   */
+  const logStoreError = (detail: string) =>
+    event.log?.({ event: 'mcp_oauth_store_error', rpcMethod: null, slug: null, error: detail });
+
   try {
     const store = (await getGovernanceBlobStore(event)) as unknown as OAuthBlobStore;
     const resolved = await describeOAuthPrincipal(store, {
@@ -571,19 +581,17 @@ const resolveOAuthPrincipalForRequest = async (
       resourceUris: mcpResourceAudiences(event),
       nowMs: Date.now(),
     });
-    return resolved.ok ? { principal: resolved.principal } : { failure: resolved.reason };
+    if (resolved.ok) return { principal: resolved.principal };
+    // The store was ACQUIRED but could not be READ. That reaches here as a
+    // resolution rather than a throw (the MCP endpoint must answer 401, not
+    // 500, when its own store is sick) — so the log line has to be emitted
+    // here too, or a read outage would pass through unremarked while only an
+    // ACQUISITION outage got recorded.
+    if (resolved.reason === 'store_error') logStoreError(resolved.detail ?? 'The OAuth store could not be read.');
+    return { failure: resolved.reason };
   } catch (error) {
-    // Still silent to the CALLER (this returns no principal, so the gate falls
-    // through to the shared-secret path and, absent that, to a 401) — but no
-    // longer silent to the operator. A governance-store outage used to be
-    // indistinguishable in the logs from a bad token, which is how an
-    // infrastructure failure got debugged as a credentials problem.
-    event.log?.({
-      event: 'mcp_oauth_store_error',
-      rpcMethod: null,
-      slug: null,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    // The store could not even be acquired (blob context missing, fail-closed).
+    logStoreError(error instanceof Error ? error.message : String(error));
     return { failure: 'store_error' };
   }
 };
@@ -639,7 +647,7 @@ const getAuthResult = async (event: LambdaEvent): Promise<AuthResult> => {
 
   // Try OAuth only when the bearer is not simply the shared secret — the
   // common case must not pay a second blob read.
-  let oauthFailure: OAuthPrincipalFailure | 'store_error' | undefined;
+  let oauthFailure: OAuthPrincipalFailure | undefined;
   if (bearerToken && !(token && safeSecretsMatch(bearerToken, token))) {
     const resolved = await resolveOAuthPrincipalForRequest(event, bearerToken);
     if (resolved.principal) return { ok: true, oauthPrincipal: resolved.principal };
