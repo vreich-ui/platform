@@ -36,6 +36,8 @@
  */
 import { useEffect, useSyncExternalStore } from 'react';
 
+import { REQUEST_LIST_MAX_LIMIT } from './request-list-limits.js';
+
 import {
   listRequestsIfChanged,
   pollIntervalWithBackoff,
@@ -118,7 +120,7 @@ async function tick(getToken: GetToken, myGeneration: number): Promise<void> {
     // that the quick-filter tabs (all subsets of this same active set) stay
     // accurate — see the module comment for what is deliberately NOT served
     // from this cache.
-    const response = await listRequestsIfChanged(getToken, { limit: 200 }, lastEtag);
+    const response = await listRequestsIfChanged(getToken, { limit: REQUEST_LIST_MAX_LIMIT }, lastEtag);
     if (myGeneration !== generation) return;
     lastEtag = response.etag;
 
@@ -215,7 +217,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-// ─── T3.2: the shared optimistic decision overlay ────────────────────────────
+// ─── T3.2: the shared optimistic decision overlay ──────────────────────────
 //
 // This lives HERE, next to the index it annotates, because cross-surface sync
 // is the acceptance criterion: the header pill, the inbox row and the chat
