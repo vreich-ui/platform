@@ -335,5 +335,44 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   return json(200, { redirect_to: completed.redirect_to, decision });
 };
 
+/**
+ * Nothing above may throw out of the function.
+ *
+ * Every endpoint here reaches the governance blob store, and `blob-store.ts`
+ * throws outright when Blobs is unavailable in a production runtime (its
+ * deliberate fail-closed guard). Unhandled, that leaves the Netlify runtime to
+ * answer a bare 502 with an HTML body — and an OAuth client reading a 502 from
+ * `/oauth/token` reports only "authorization failed", which is how an
+ * infrastructure outage gets debugged as a credentials problem. RFC 6749 §5.2
+ * has a shape for exactly this: answer `server_error` as JSON, so the client
+ * says something true and the operator gets one log line naming the endpoint
+ * that failed.
+ *
+ * The catch deliberately does NOT swallow anything into a success: every path
+ * out of here is either the endpoint's own answer or an explicit 500.
+ */
+const guardedHandler = async (event: LambdaEvent, context?: LambdaContext) => {
+  try {
+    return await handlerImpl(event, context);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        event: 'mcp_oauth_unhandled_error',
+        endpoint: resolveEndpoint(event) ?? 'unknown',
+        httpMethod: event.httpMethod ?? null,
+        error: message,
+      })
+    );
+
+    return json(500, {
+      error: 'server_error',
+      error_description:
+        'This authorization server could not complete the request. This is a fault on the server, not with your credentials — retry, and if it persists check the site function logs for mcp_oauth_unhandled_error.',
+    });
+  }
+};
+
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding?: SiteBinding) => handlerImpl;
+export const createHandler = (_binding?: SiteBinding) => guardedHandler;

@@ -147,6 +147,39 @@ For everything NOT auto-generated in step 2:
      — query strings land in proxy and CDN logs — and note that rotating
      `MCP_HTTP_AUTH_TOKEN` means re-pasting it everywhere.
 
+- **When a connector says "Authorization with the MCP server failed"** — that
+  message is what a client shows for ANY 401 or 5xx anywhere in the flow, so it
+  is not evidence that the credentials are wrong. Ask the endpoint before
+  changing anything:
+
+  ```
+  curl -s "https://<site>/mcp?health=auth"
+  ```
+
+  It answers unauthenticated with `oauth.accepted_audiences` (every host this
+  deploy will honour a token for) and `oauth.token_store_reachable`. Two
+  failures that look identical from the client are separated here:
+
+  - **The host is not in `accepted_audiences`.** A token approved through one
+    of the site's names and presented on another is refused, permanently. The
+    list is the request host plus Netlify's own `URL` and `DEPLOY_URL`, so this
+    now covers apex/`www.`/`*.netlify.app`/deploy aliases automatically —
+    if a host is still missing, the connector is pointed at a name this
+    deployment does not serve. The refusal also names itself: the 401 body
+    carries `oauth_failure: "audience_mismatch"` and the function log carries
+    an `mcp_auth_rejected` line with the audiences it compared against.
+  - **`token_store_reachable: false`.** The governance blob store is down or
+    unconfigured, so no OAuth token can resolve. This is an outage, not a
+    credential problem; the 401 body says `oauth_failure: "store_error"` and
+    the log carries `mcp_oauth_store_error` with the underlying message.
+
+  If both look right, the function logs for that site carry one
+  `mcp_auth_rejected` line per refusal with a `reason` and (whenever a bearer
+  was presented) an `oauthFailure` of `no_record` / `expired` /
+  `audience_mismatch` / `store_error`. `no_record` after a fresh approval is
+  the only one that should ever be transient — see the read-after-write note in
+  `oauth-store.ts`.
+
 - **Secret rotation**: `PUBLISH_SECRET`'s rotation runbook is standing debt
   tracked at T11.10 — this scaffold mints an initial value but does not
   automate rotation.

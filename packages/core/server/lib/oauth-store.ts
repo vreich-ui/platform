@@ -215,29 +215,78 @@ const deleteKey = async (store: OAuthBlobStore, key: string): Promise<void> => {
 };
 
 /**
+ * READ-AFTER-WRITE LAG (the reason every getter below retries).
+ *
+ * Every record in this module is written by ONE lambda invocation and read by
+ * the NEXT one, seconds or milliseconds later, across the whole connect flow:
+ *
+ *   /oauth/register  writes the client   → /oauth/authorize reads it
+ *   /oauth/authorize writes the request  → /oauth/consent   reads it
+ *   /oauth/consent   writes the code     → /oauth/token     reads it  (~1s)
+ *   /oauth/token     writes the token    → /mcp             reads it  (~100ms)
+ *
+ * `blob-store.ts` records the trap in full: on the Netlify Blobs NAME-LOOKUP
+ * path (any site without an explicit `NETLIFY_SITE_ID` + blobs token pair) the
+ * `consistency: 'strong'` this store asks for is SILENTLY DOWNGRADED to
+ * eventual, and "read-after-write can lag tens of seconds". A lagging read here
+ * is not a slow read — it is a MISSING record, which every caller correctly
+ * reads as "this does not authorize you". The connector then reports
+ * `Authorization with the MCP server failed` on a grant that was in fact just
+ * approved, and the human is told to check credentials that were never wrong.
+ *
+ * So a miss is retried a few times before it is believed. The budget is small
+ * and bounded (~200ms worst case) and is only ever paid on a MISS: a hit — the
+ * overwhelmingly common case, since a live connector presents a token that
+ * exists — returns on the first read with no added latency.
+ *
+ * This does not weaken anything. A record that is genuinely absent (unknown,
+ * revoked, already-redeemed, wrong-site) is still absent after the last
+ * attempt, so every refusal this module makes it still makes; the retry only
+ * removes the window in which a PRESENT record reads as absent.
+ */
+const READ_RETRY_DELAYS_MS = [50, 150] as const;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
  * Read + validate one record. Missing OR corrupt OR wrong-site → null. A
  * malformed blob must never authenticate anyone, and must never throw a 500
  * into a protocol response either: absent is the safe reading of both.
+ *
+ * `retryOnMiss` (default: on) covers the consistency lag documented above. It
+ * retries only the two outcomes a lagging store produces — a null body and a
+ * throwing GET — never a corrupt or wrong-site record, which are decisions,
+ * not transients, and re-reading them would only burn the budget.
  */
 const readRecord = async <T extends z.ZodTypeAny>(
   store: OAuthBlobStore,
   key: string,
   schema: T,
-  site: string
+  site: string,
+  options: { retryOnMiss?: boolean } = {}
 ): Promise<z.infer<T> | null> => {
-  let raw: string | null = null;
-  try {
-    raw = await store.get(key);
-  } catch {
-    return null;
+  const attempts = options.retryOnMiss === false ? 1 : READ_RETRY_DELAYS_MS.length + 1;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) await sleep(READ_RETRY_DELAYS_MS[attempt - 1]);
+
+    let raw: string | null = null;
+    try {
+      raw = await store.get(key);
+    } catch {
+      continue; // a store hiccup is a transient, not an answer
+    }
+    if (!raw) continue;
+
+    try {
+      const parsed = schema.parse(JSON.parse(raw)) as { site: string };
+      return parsed.site === site ? (parsed as z.infer<T>) : null;
+    } catch {
+      return null; // corrupt: a decision, not a transient
+    }
   }
-  if (!raw) return null;
-  try {
-    const parsed = schema.parse(JSON.parse(raw)) as { site: string };
-    return parsed.site === site ? (parsed as z.infer<T>) : null;
-  } catch {
-    return null;
-  }
+
+  return null;
 };
 
 export const getOAuthClient = (store: OAuthBlobStore, clientId: string, site: string) =>
