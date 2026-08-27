@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { REQUEST_PAGE_SIZE, canArchive, requestSchema } from './admin-requests.js';
+import { REQUEST_LIST_MAX_LIMIT } from '../../lib/admin/request-list-limits.js';
 
 /** The compiled test runs from `.tmp/ci-test`, so walk up to the repo root (the admin-governance.test.ts precedent). */
 const repoRoot = (): string => {
@@ -53,6 +54,12 @@ describe('admin-requests requestSchema', () => {
 
   it('caps the page size at the server bound', () => {
     assert.equal(requestSchema.safeParse({ action: 'list', limit: REQUEST_PAGE_SIZE }).success, true);
+    // The shared poll store asks for REQUEST_LIST_MAX_LIMIT rows. If that ever
+    // exceeds REQUEST_PAGE_SIZE the handler 400s the call rather than
+    // truncating it, and the runs inbox renders a permanent skeleton — which
+    // is what shipped when the store asked for 200 against a cap of 100.
+    assert.equal(REQUEST_LIST_MAX_LIMIT, REQUEST_PAGE_SIZE);
+    assert.equal(requestSchema.safeParse({ action: 'list', limit: REQUEST_LIST_MAX_LIMIT }).success, true);
     assert.equal(requestSchema.safeParse({ action: 'list', limit: REQUEST_PAGE_SIZE + 1 }).success, false);
     assert.equal(requestSchema.safeParse({ action: 'list', limit: 0 }).success, false);
   });
