@@ -55,6 +55,7 @@ import { SeverityCountPill } from './severity';
 import { NeedsYouMenu } from './NeedsYouMenu';
 import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
 import { settingsNavigationLabel, visibleNavGroups } from '@core/lib/admin/admin-navigation';
+import { NAV_ITEMS, type NavIconName } from '@core/lib/admin/admin-nav-items';
 
 async function shellToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -81,49 +82,32 @@ interface NavGroup {
   ownerOnly?: boolean;
 }
 
+/** `NavIconName` (`admin-nav-items.ts`) → the actual icon component. */
+const NAV_ICON_MAP: Record<NavIconName, (p: IconProps) => ReactNode> = {
+  home: IconHome,
+  clock: IconClock,
+  library: IconLibrary,
+  layoutGrid: IconLayoutGrid,
+  chartBar: IconChartBar,
+  rocket: IconRocket,
+  palette: IconPalette,
+  settings: IconSettings,
+  user: IconUser,
+  wrench: IconWrench,
+  sparkles: IconSparkles,
+  mail: IconMail,
+};
+
+// The nav tree itself lives in `lib/admin/admin-nav-items.ts` — a plain data
+// module (no React, no icon components) so the F2 nav↔route parity guard can
+// import the REAL tree in a `node --test` compile, rather than checking a
+// hand-copied fixture that can silently drift from what actually renders.
 // Target IA (plan §2). Routes not yet built are marked `soon` — shown but not
 // linked — so the sidebar reflects the destination without dead links.
-export const NAV: NavGroup[] = [
-  {
-    items: [
-      { label: 'Editorial', href: '/admin', icon: IconHome },
-      { label: 'Requests', href: '/admin/requests', icon: IconClock },
-      // T2.1 D1(a): Templates/Media/Content collapsed into the one objects
-      // plane — the old three routes still exist (netlify.toml redirects
-      // them here) but are no longer separate nav entries.
-      { label: 'Objects', href: '/admin/objects', icon: IconLibrary },
-      // T4.4: article variant families + winner selection. Deliberately NOT
-      // labelled "A/B tests" — nothing serves a traffic split today, so the
-      // route never uses that phrase (see docs 12-object-tracking §15.4).
-      { label: 'Variants', href: '/admin/variants', icon: IconLayoutGrid },
-      { label: 'Traffic', href: '/admin/traffic', icon: IconChartBar },
-      { label: 'Release', href: '/admin/release', icon: IconRocket },
-    ],
-  },
-  {
-    label: 'Settings',
-    items: [
-      { label: 'Visual identity', href: '/admin/settings/visual-identity', icon: IconPalette, ownerOnly: true },
-      { label: 'Guardrails', href: '/admin/settings/guardrails', icon: IconSettings, ownerOnly: true },
-      // T4.3: was inside the (then wholly owner-only) Settings group, so a
-      // non-owner Admin — whom `AdminUsers.tsx` explicitly supports as a
-      // read-only viewer (`list` is admin-tier, not owner-tier) — had no nav
-      // link to this page at all, only a typed-URL path to it. The server
-      // wall (`admin-users.ts`) is and remains the real boundary; this only
-      // changes whether the link is shown.
-      { label: 'Admins', href: '/admin/settings/admins', icon: IconUser },
-      { label: 'Profile', href: '/admin/profile', icon: IconUser, ownerOnly: true },
-      { label: 'Maintenance', href: '/admin/maintenance', icon: IconWrench, ownerOnly: true },
-      { label: 'Component kit', href: '/admin/kit', icon: IconLibrary, ownerOnly: true },
-      { label: 'Agents', href: '/admin/agents', icon: IconSparkles, ownerOnly: true },
-      // G2 (email list administration, deferred): the nav entry exists so the
-      // destination is discoverable, but it is deliberately inert — no
-      // route, no page, no email API client. Visible to any admin (not
-      // ownerOnly) since it does nothing yet regardless of role.
-      { label: 'Email', href: '/admin/settings/email', icon: IconMail, soon: true },
-    ],
-  },
-];
+export const NAV: NavGroup[] = NAV_ITEMS.map((group) => ({
+  ...group,
+  items: group.items.map((item) => ({ ...item, icon: NAV_ICON_MAP[item.icon] })),
+}));
 
 function isActive(currentPath: string, href: string): boolean {
   if (href === '/admin') return currentPath === '/admin' || currentPath === '/admin/';

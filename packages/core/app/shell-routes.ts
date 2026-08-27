@@ -69,6 +69,8 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   // T4.4: article variant families + winner selection. Not an A/B monitor —
   // no traffic split exists (OQ-W7-2) and the page says so on its face.
   { pattern: '/admin/variants', entry: 'admin/variants.astro' },
+  // T4.1: visits/sources/top-content dashboard, reading Netlify Analytics.
+  { pattern: '/admin/traffic', entry: 'admin/traffic.astro' },
   { pattern: '/admin/media', entry: 'admin/media.astro' },
   { pattern: '/admin/release', entry: 'admin/release.astro' },
   { pattern: '/admin/kit', entry: 'admin/kit.astro' },
