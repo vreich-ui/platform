@@ -337,7 +337,7 @@ function readinessFromValidate(body: Record<string, unknown>): ReadinessGroup[] 
   return [{ id: 'validation', label: 'Validation', criteria }];
 }
 
-// ─── hover-revealed inline edit (title / excerpt) ───────────────────────
+// ─── hover-revealed inline edit (title / excerpt) ───────────────────────────
 //
 // Same verbs as the form below it: `commitFieldOps` → checkout → patch →
 // checkin. The pencil is hover/focus-only chrome; the write is identical.
