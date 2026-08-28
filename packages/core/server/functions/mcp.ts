@@ -792,7 +792,8 @@ export const invokeSaveArtifact = async (event: LambdaEvent, payload: Record<str
 
 // W11 T11.10: tool names whose `agent_name` argument is the free-form CMS
 // object-store attribution string (creation-policy allowlists, object
-// history) — the ONLY place a verified per-agent token should override it.
+// history, lock ownership) — the ONLY place a verified per-agent token
+// should override it.
 const CMS_AGENT_NAME_ATTRIBUTION_TOOLS = new Set([
   'object_create',
   'object_create_variant',
@@ -801,6 +802,13 @@ const CMS_AGENT_NAME_ATTRIBUTION_TOOLS = new Set([
   'site_apply_theme',
   'product_set_price',
   'order_reissue',
+  // Object-lock owner attribution bug (2026-08-28): these three forward
+  // agent_name into the same object-store.ts `agentPrincipal()` derivation
+  // as the tools above, so a verified per-agent token must override a
+  // self-declared name here too, not just on the write verbs.
+  'object_checkout',
+  'object_refresh_lock',
+  'object_checkin',
 ]);
 
 const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
@@ -1063,11 +1071,16 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         agent_name: input.agent_name,
       });
     case 'object_checkout':
+      // Object-lock owner attribution bug (2026-08-28): agent_name was never
+      // forwarded here, so every agent checkout recorded the object-store.ts
+      // `agentPrincipal()` fallback ('unattributed-agent') as the lock owner
+      // regardless of what the caller declared.
       return callObjectAction(event, {
         action: 'checkout',
         object_type: input.object_type,
         object_id: input.object_id,
         lease_seconds: input.lease_seconds,
+        agent_name: input.agent_name,
       });
     case 'object_refresh_lock':
       return callObjectAction(event, {
@@ -1076,6 +1089,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         object_id: input.object_id,
         lock_token: input.lock_token,
         lease_seconds: input.lease_seconds,
+        agent_name: input.agent_name,
       });
     case 'object_checkin':
       return callObjectAction(event, {
@@ -1083,6 +1097,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         object_type: input.object_type,
         object_id: input.object_id,
         lock_token: input.lock_token,
+        agent_name: input.agent_name,
       });
     case 'object_patch':
       return callObjectAction(event, {
