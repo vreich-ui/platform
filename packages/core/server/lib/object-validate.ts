@@ -85,7 +85,12 @@ import { siteBodySchema } from '../../schema/bodies/site-v1.js';
 import { taxonomyBodySchema } from '../../schema/bodies/taxonomy-v1.js';
 import { templateBodySchema } from '../../schema/bodies/template-v1.js';
 import type { ObjectRecord, ObjectType, Principal } from '../../schema/object-record-v1.js';
-import { MAJOR_KEY_ARTIFACT_REF_RE, publicPathForArtifactRef, rawArtifactRefForPublicPath } from './artifact-trust.js';
+import {
+  MAJOR_KEY_ARTIFACT_REF_RE,
+  PUBLIC_ARTIFACT_PATH_RE,
+  publicPathForArtifactRef,
+  rawArtifactRefForPublicPath,
+} from './artifact-trust.js';
 import { activeMediaPolicy, type MediaPolicy } from '../../lib/media-policy.js';
 
 export type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
@@ -744,12 +749,40 @@ export const checkArtifactTrust = (
   let sawAssetRef = false;
 
   walkStrings(body, (path, value) => {
+    if (!value) return;
     const key = path[path.length - 1] ?? '';
-    if (!ASSET_REF_KEY_RE.test(key) || !value) return;
-    sawAssetRef = true;
-    const problem = validateAssetRef(path.join('.'), value, context);
-    if (!problem) return;
-    (problem.kind === 'existence' ? existence : blocking).push(problem.message);
+
+    if (ASSET_REF_KEY_RE.test(key)) {
+      sawAssetRef = true;
+      const problem = validateAssetRef(path.join('.'), value, context);
+      if (!problem) return;
+      (problem.kind === 'existence' ? existence : blocking).push(problem.message);
+      return;
+    }
+
+    // Article bodies (content_item) never populate a `*AssetRef` field — their
+    // artifacts live at `nodes[].public.media.src` etc. as PUBLIC paths
+    // (`/img|/pdf/{id}/{sha256}.{ext}`), not raw blobKeys. Proven live
+    // 2026-08-27: an article carrying a generated image and PDF validated
+    // with "No asset references present." — this check was inert on the
+    // article path even though the refs were right there in the body.
+    //
+    // Recognise those public paths too, so the signal is honest. But do NOT
+    // re-report existence: `article_media` (checkContentItemMedia, below)
+    // already resolves every one of these same fields against the artifact
+    // index and blocks at publish — a missing/deleted artifact is enforced
+    // there, not here. Reporting it again here would just be a duplicate
+    // error under a different criterion id. So this check trusts the SAME
+    // way `*AssetRef` fields are trusted (shape + the `trustedAssetRefs`
+    // allow-list, which `article_media` does not consult) and leaves
+    // existence to `article_media`.
+    if (PUBLIC_ARTIFACT_PATH_RE.test(value)) {
+      sawAssetRef = true;
+      const raw = rawArtifactRefForPublicPath(value);
+      const problem = validateAssetRef(path.join('.'), raw, context);
+      if (!problem || problem.kind === 'existence') return;
+      blocking.push(problem.message);
+    }
   });
 
   if (blocking.length > 0)

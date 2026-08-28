@@ -73,6 +73,7 @@ import {
   callPublishPdfTemplate,
   callRegistryGet,
   callReleaseToProduction,
+  callResumeAgentArtifactJob,
   callSearchImages,
   callSetImageModelPolicy,
   callSetImageSearchPolicy,
@@ -183,6 +184,7 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
       callCreateAgentArtifactJob(event, args)
     ),
   get_agent_artifact_job_status: callGetAgentArtifactJobStatus,
+  resume_agent_artifact_job: callResumeAgentArtifactJob,
   get_agent_artifact_by_slot: callGetAgentArtifactBySlot,
   create_pdf_template: (event, args) =>
     withIdempotentToolCall(event, 'create_pdf_template', args.idempotency_key, () =>

@@ -10,8 +10,12 @@ import { toolError } from '../functions/mcp.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { ARTIFACT_BRIDGE_SCOPE_CACHE_TTL_MS, resolveArtifactBridgeScopeForJobWithStore } from './mcp-tool-handlers.js';
-import type { IdempotencyBlobStore } from './idempotency-store.js';
+import {
+  ARTIFACT_BRIDGE_SCOPE_CACHE_TTL_MS,
+  resolveArtifactBridgeScopeForJobWithStore,
+  callResumeAgentArtifactJob,
+} from './mcp-tool-handlers.js';
+import type { IdempotencyBlobStore, ToolCallResponse } from './idempotency-store.js';
 
 // ─── injected-store pattern (idempotency-store.test.ts's makeStore) ─────────
 const makeStore = (): IdempotencyBlobStore & { blobs: Map<string, string> } => {
@@ -161,5 +165,59 @@ describe('resolveArtifactBridgeScopeForJobWithStore (perf/drop-verify-hop-cache-
 
     assert.strictEqual(liveCalls, 1, 'an expired entry must not short-circuit the live resolve');
     assert.deepStrictEqual(result, okScope('site_drlurie', 'req_1'));
+  });
+});
+
+// W16-ish: resume_agent_artifact_job's tenant-facing bridge, mirroring
+// get_agent_artifact_job_status's shape. These cover only the cheap,
+// synchronous fail-fast checks (site_id/request_id/job_id/resume_token/
+// approval_token) that run BEFORE resolveArtifactBridgeScopeForJob or any
+// pdf-tool network call — everything past that needs a live object store and
+// pdf-tool bridge, out of scope for a unit test here.
+const call = async (input: Record<string, unknown>): Promise<ToolCallResponse> =>
+  (await callResumeAgentArtifactJob({}, input)) as ToolCallResponse;
+
+const errorText = (result: ToolCallResponse): string => (result.content as Array<{ text: string }>)[0].text;
+
+describe('callResumeAgentArtifactJob — fail-fast input validation', () => {
+  const validInput = {
+    site_id: 'site_drlurie',
+    request_id: 'req_1',
+    job_id: 'job-1',
+    resume_token: 'resume-token-abc',
+    approval_token: 'approval-token-xyz',
+  };
+
+  it('requires site_id and request_id', async () => {
+    const result = await call({ job_id: 'job-1' });
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.structuredContent?.error_code, 'artifact_scope_required');
+  });
+
+  it('rejects a site_id that does not match this deployment', async () => {
+    const result = await call({ ...validInput, site_id: 'site_someone_else' });
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.structuredContent?.error_code, 'artifact_site_mismatch');
+  });
+
+  it('requires job_id', async () => {
+    const { job_id: _jobId, ...rest } = validInput;
+    const result = await call(rest);
+    assert.strictEqual(result.isError, true);
+    assert.match(errorText(result), /job_id is required/);
+  });
+
+  it('requires resume_token', async () => {
+    const { resume_token: _resumeToken, ...rest } = validInput;
+    const result = await call(rest);
+    assert.strictEqual(result.isError, true);
+    assert.match(errorText(result), /resume_token is required/);
+  });
+
+  it('requires approval_token', async () => {
+    const { approval_token: _approvalToken, ...rest } = validInput;
+    const result = await call(rest);
+    assert.strictEqual(result.isError, true);
+    assert.match(errorText(result), /approval_token is required/);
   });
 });

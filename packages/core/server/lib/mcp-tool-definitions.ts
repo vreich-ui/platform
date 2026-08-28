@@ -490,6 +490,22 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     governance: { toolClass: 'read' },
   },
   {
+    name: 'resume_agent_artifact_job',
+    description:
+      "Resume a job created through this Platform bridge that pdf-tool blocked awaiting operator approval (create_agent_artifact_job's requireApproval) through THIS site's trusted Platform bridge. Platform re-validates site/request scope and injects the canonical project and a fresh storage grant server-side; never returns the grant. Pass resume_token from the blocked job's status (get_agent_artifact_job_status returns it on the blocked job as resume.input.resumeToken) and approval_token, the operator's approval secret. On success the job returns to pending and generation proceeds — poll get_agent_artifact_job_status with the same job_id for the outcome; do not recreate the job.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        request_id: stringSchema('The same content_item request id used to create the job.'),
+        job_id: stringSchema('Job id returned by create_agent_artifact_job.'),
+        resume_token: stringSchema("The resume token from the blocked job's status (resume.input.resumeToken)."),
+        approval_token: stringSchema('The operator approval secret authorizing this job to proceed.'),
+      },
+      ['site_id', 'request_id', 'job_id', 'resume_token', 'approval_token']
+    ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+  },
+  {
     name: 'get_agent_artifact_by_slot',
     description:
       'Retrieve and verify the canonical artifact for a request-scoped slot through the trusted Platform bridge. Site ownership, canonical project, storage grant, and materialization verification are handled server-side. Returns ArtifactReference + public_path with no grant or proof.',
