@@ -115,6 +115,21 @@ test('pageview fires on page-load; UTM + referrer + viewport ride ONLY the first
   assert.equal((pageviews[1]! as { context?: unknown }).context, undefined, 'later pageviews carry no context');
 });
 
+test('term pages emit one term_view on page-load and non-term pages emit none', () => {
+  const { tracker, allEvents, fireTimers } = makeTracker();
+  tracker.pageLoad({
+    path: '/learn/topics/barrier',
+    route: '/learn/topics/[topicSlug]',
+    object: { object_type: 'page', object_id: 'page_topic_detail' },
+    term: { term_id: 't_skinbarrier' },
+  });
+  tracker.pageLoad({ path: '/about', route: '/about', object: { object_type: 'page', object_id: 'page_about' } });
+  fireTimers();
+  const termViews = allEvents().filter((event) => event.event === 'term_view');
+  assert.equal(termViews.length, 1);
+  assert.deepEqual((termViews[0] as { object?: unknown }).object, { object_type: 'taxonomy', term_id: 't_skinbarrier' });
+});
+
 test('/admin pages never track — hard bail', () => {
   const { tracker, allEvents, fireTimers } = makeTracker();
   tracker.pageLoad({ path: '/admin/agents', route: null });

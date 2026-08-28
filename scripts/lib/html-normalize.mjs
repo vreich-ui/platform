@@ -26,7 +26,10 @@
  *   6. Astro scoped-style ids — `data-astro-cid-<hash>` is derived from the
  *      component's FILE PATH (the attribute twin of rule 1's chunk hashes) and
  *      moves in lockstep with the CSS selector that matches it, so relocating a
- *      component changes it site-wide with zero rendered difference.
+ *      component changes it site-wide with zero rendered difference;
+ *   7. taxonomy tracking identity — `data-cms-term-id` is a non-visual loader
+ *      annotation. Its behavior is guarded by the tracking route/loader tests,
+ *      while this harness remains a comparison of reader-visible content.
  *
  * <script> and <style> contents are treated as opaque (inline scripts on this
  * site legitimately contain `<div …>` template-literal HTML that a naive tag
@@ -102,6 +105,7 @@ const sortTagAttributes = (tag) => {
   const [, name, rawAttrs, selfClose] = match;
   const attrs = [];
   for (const attr of rawAttrs.matchAll(ATTR_RE)) {
+    if (attr[1] === 'data-cms-term-id') continue;
     attrs.push(sortClassAttribute(`${attr[1]}${attr[2] ? `=${attr[3]}` : ''}`));
   }
   attrs.sort();

@@ -17,6 +17,9 @@ import {
   RESTRICTED_REGIONS,
   trackingConfigBody,
 } from '../../sites/drlurie/seeds/tracking-config-seed-data.mjs';
+import { RESTRICTED_REGIONS as FERNWELL_RESTRICTED_REGIONS } from '../../sites/fernwell/seeds/tracking-config-seed-data.mjs';
+import { RESTRICTED_REGIONS as PLATFORM_RESTRICTED_REGIONS } from '../../sites/platform/seeds/tracking-config-seed-data.mjs';
+import { RESTRICTED_REGIONS as ZILBERMAN_RESTRICTED_REGIONS } from '../../sites/zilberman/seeds/tracking-config-seed-data.mjs';
 import {
   applyPatchOps,
   deepEqualJson,
@@ -53,7 +56,7 @@ const record = (objectType: ObjectType, body: unknown) => ({
 test('trk_drlurie seed: schema-parses as the ratified posture (OQ-W13-1/-3/-6, §6 matrix)', () => {
   const parsed = trackingConfigBodySchema.parse(trackingConfigBody);
   assert.equal(parsed.consent.posture, 'geo-adaptive');
-  assert.equal(RESTRICTED_REGIONS.length, 32, 'EEA-30 (EU-27 + IS/LI/NO) + UK + CH');
+  assert.equal(RESTRICTED_REGIONS.length, 33, 'EEA-30 (EU-27 + IS/LI/NO) + UK + CH + IL');
   for (const code of ['DE', 'FR', 'IS', 'LI', 'NO', 'GB', 'CH']) {
     assert.ok(parsed.consent.restricted_regions.includes(code), `${code} restricted`);
   }
@@ -71,6 +74,17 @@ test('trk_drlurie seed: schema-parses as the ratified posture (OQ-W13-1/-3/-6, �
   assert.deepEqual(CONVERSION_SEEDS, [
     { objectType: 'tracking_config', objectId: 'trk_drlurie', body: trackingConfigBody },
   ]);
+});
+
+test('all four tracking seeds include IL in restricted_regions', () => {
+  for (const regions of [
+    RESTRICTED_REGIONS,
+    PLATFORM_RESTRICTED_REGIONS,
+    FERNWELL_RESTRICTED_REGIONS,
+    ZILBERMAN_RESTRICTED_REGIONS,
+  ]) {
+    assert.ok(regions.includes('IL'));
+  }
 });
 
 // ═══ the singleton drill ════════════════════════════════════════════════

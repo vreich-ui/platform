@@ -58,6 +58,7 @@ export const RESTRICTED_REGIONS = [
   'NO',
   'GB',
   'CH',
+  'IL',
 ];
 
 export const trackingConfigBody = {

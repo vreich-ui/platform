@@ -7,7 +7,12 @@ import Headline from '~/components/blog/Headline.astro';
 import Pagination from '~/components/blog/Pagination.astro';
 import ObjectSections from '~/components/cms/ObjectSections.astro';
 import { blogCategoryRobots, getStaticPathsBlogCategory } from '~/utils/blog';
-import { loadRoutePageObject, routeHeaderAnnotation, type RoutePageHeader } from '~/utils/route-page-object';
+import {
+  loadRoutePageObject,
+  resolveRouteTermId,
+  routeHeaderAnnotation,
+  type RoutePageHeader,
+} from '~/utils/route-page-object';
 
 export const prerender = true;
 
@@ -16,7 +21,7 @@ export const getStaticPaths = (async ({ paginate }) => {
   return await getStaticPathsBlogCategory({ paginate });
 }) satisfies GetStaticPaths;
 
-type Props = InferGetStaticPropsType<typeof getStaticPaths> & { category: { title: string } };
+type Props = InferGetStaticPropsType<typeof getStaticPaths> & { category: { slug: string; title: string } };
 
 const { page, category } = Astro.props as Props;
 const currentPage = page.currentPage ?? 1;
@@ -24,6 +29,7 @@ const listing = await loadRoutePageObject('page_category', category.title);
 const header: RoutePageHeader = listing?.header ?? { heading: 'Category: ' + category.title, paragraphs: [] };
 const baseTitle = listing?.title ?? 'Category: ' + category.title;
 const headerAnnotation = routeHeaderAnnotation('page_category', listing?.header);
+const categoryTermId = await resolveRouteTermId('category', category.slug);
 const metadata = {
   title: `${baseTitle}${currentPage > 1 ? ` — Page ${currentPage}` : ''}`,
   ...(listing?.seo.description ? { description: listing.seo.description } : {}),
@@ -35,9 +41,13 @@ const metadata = {
 ---
 
 <Layout metadata={metadata}>
-  <section class="px-4 md:px-6 py-12 sm:py-16 lg:py-20 mx-auto max-w-4xl">
+  <section class="px-4 md:px-6 py-12 sm:py-16 lg:py-20 mx-auto max-w-4xl" data-cms-term-id={categoryTermId}>
     <div style="display:contents" {...headerAnnotation}>
-      {header.kicker && <p class="mb-4 text-center text-sm font-semibold uppercase tracking-[0.18em] text-accent">{header.kicker}</p>}
+      {
+        header.kicker && (
+          <p class="mb-4 text-center text-sm font-semibold uppercase tracking-[0.18em] text-accent">{header.kicker}</p>
+        )
+      }
       <Headline subtitle={header.paragraphs.join(' ')}>{header.heading}</Headline>
     </div>
     <BlogList posts={page.data} />

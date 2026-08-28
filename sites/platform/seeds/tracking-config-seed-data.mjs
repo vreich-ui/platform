@@ -21,13 +21,49 @@
 
 export const SEED_SITE = 'site_platform';
 
+export const RESTRICTED_REGIONS = [
+  'AT',
+  'BE',
+  'BG',
+  'HR',
+  'CY',
+  'CZ',
+  'DK',
+  'EE',
+  'FI',
+  'FR',
+  'DE',
+  'GR',
+  'HU',
+  'IE',
+  'IT',
+  'LV',
+  'LT',
+  'LU',
+  'MT',
+  'NL',
+  'PL',
+  'PT',
+  'RO',
+  'SK',
+  'SI',
+  'ES',
+  'SE',
+  'IS',
+  'LI',
+  'NO',
+  'GB',
+  'CH',
+  'IL',
+];
+
 export const trackingConfigBody = {
   // Copied verbatim from the committed export — platform documents the CMS,
   // it does not itself run any third-party pixel provider today.
   providers: {},
   consent: {
     posture: 'consent-first',
-    restricted_regions: [],
+    restricted_regions: RESTRICTED_REGIONS,
     honor_gpc: true,
     banner: {
       headline: 'Your privacy choices',
