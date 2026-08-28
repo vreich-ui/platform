@@ -2,6 +2,7 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { randomUUID } from 'node:crypto';
 
 import { getOptInBlobStore } from '../lib/blob-store.js';
+import { enqueueMemberLink, type MemberLinkDeps } from '../lib/member-link.js';
 import { buildRecord, getHeader, isParseBodyFailure, parseBody } from '../lib/opt-in-record.js';
 
 type LambdaEvent = {
@@ -17,7 +18,7 @@ const jsonHeaders = {
   'Cache-Control': 'no-store',
 };
 
-const handlerImpl = async (event: LambdaEvent) => {
+const handlerImpl = async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = {}) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
@@ -58,6 +59,8 @@ const handlerImpl = async (event: LambdaEvent) => {
       },
     });
 
+    enqueueMemberLink(event, record.email, memberLinkDeps);
+
     return {
       statusCode: 202,
       headers: jsonHeaders,
@@ -75,4 +78,7 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler =
+  (_binding: SiteBinding, memberLinkDeps: MemberLinkDeps = {}) =>
+  (event: LambdaEvent) =>
+    handlerImpl(event, memberLinkDeps);
