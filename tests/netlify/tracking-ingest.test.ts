@@ -68,6 +68,22 @@ test('client schema: valid kinds parse; unknown kinds/extra keys/PII-shaped fiel
   assert.ok(!clientTrackingEventSchema.safeParse(clientEvent({ props: { raw_ip: '1.2.3.4' } })).success);
 });
 
+test('client schema: first pageview accepts live partial context without referrer but stays strict', () => {
+  const liveFirstPageview = clientEvent({
+    object: { object_type: 'page', object_id: 'page_home' },
+    context: { viewport: { w: 1200, h: 800 }, lang: 'en-US' },
+  });
+  const parsed = clientTrackingEventSchema.safeParse(liveFirstPageview);
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.success ? parsed.data.context?.referrer : undefined, undefined);
+  assert.ok(
+    !clientTrackingEventSchema.safeParse(
+      clientEvent({ context: { viewport: { w: 1200, h: 800 }, lang: 'en-US', email: 'a@b.com' } })
+    ).success,
+    'client context remains strict'
+  );
+});
+
 test('full schema: the enriched event parses; a client event does NOT (server stamps are required)', () => {
   const full = buildTrackingEvent(clientTrackingEventSchema.parse(clientEvent()), enrichment);
   assert.ok(trackingEventSchema.safeParse(full).success);
@@ -195,6 +211,30 @@ test('a valid batch 202s; invalid events and /admin paths drop INDIVIDUALLY; res
   const persisted = [...store.blobs.values()].join('');
   assert.ok(!persisted.includes('203.0.113.7'), 'the raw IP is never persisted');
   assert.ok(!persisted.includes('Berlin'), 'city is dropped at ingest');
+});
+
+test('live first pageview payload with viewport/lang and no referrer is accepted by /api/t', async () => {
+  const store = memoryEventsStore();
+  const handler = makeHandler({ getEventsStore: async () => store, env: { TRACKING_SALT: 's' } });
+  const res = await handler(
+    post(
+      batchOf(
+        clientEvent({
+          object: { object_type: 'page', object_id: 'page_home' },
+          context: { viewport: { w: 1200, h: 800 }, lang: 'en-US' },
+        })
+      )
+    )
+  );
+  assert.equal(res.statusCode, 202, res.body);
+  assert.deepEqual(JSON.parse(res.body), { ok: true, accepted: 1, dropped: 0, country: 'DE' });
+  assert.equal(store.blobs.size, 1);
+  const persisted = JSON.parse([...store.blobs.values()][0]!) as Record<string, unknown>;
+  const context = persisted.context as Record<string, unknown>;
+  assert.equal(context.referrer, null);
+  assert.deepEqual(context.viewport, { w: 1200, h: 800 });
+  assert.equal(context.lang, 'en-US');
+  assert.ok(!('email' in context), 'strict client context prevents PII-shaped passthroughs');
 });
 
 test('foreign Origin is rejected; same-origin and absent Origin pass', async () => {
