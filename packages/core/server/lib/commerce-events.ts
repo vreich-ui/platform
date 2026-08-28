@@ -147,6 +147,45 @@ type EventStore = {
 
 export type AppendCommerceEventResult = { key: string; appended: boolean };
 
+const COMMERCE_SINK_TIMEOUT_MS = 2_000;
+
+type CommerceSinkEnv = Partial<Pick<NodeJS.ProcessEnv, 'TRACKING_SINK_URL' | 'TRACKING_SINK_TOKEN'>>;
+
+export type CommerceEventForwardOptions = {
+  env?: CommerceSinkEnv;
+  fetchImpl?: typeof fetch;
+  timeoutSignal?: (delay: number) => AbortSignal;
+};
+
+/**
+ * Best-effort owner-DB forwarding after the durable blob append. The caller
+ * deliberately does not await this work: sink latency or failure must never
+ * change the commerce response (especially Stripe webhook acknowledgements).
+ */
+const forwardCommerceEventToSink = async (
+  event: CommerceEvent,
+  options: CommerceEventForwardOptions = {}
+): Promise<void> => {
+  const env = options.env ?? process.env;
+  const endpoint = env.TRACKING_SINK_URL?.trim();
+  const token = env.TRACKING_SINK_TOKEN?.trim();
+  if (!endpoint || !token) return;
+
+  try {
+    await (options.fetchImpl ?? fetch)(`${endpoint.replace(/\/+$/, '')}/commerce`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-ndjson',
+        Authorization: `Bearer ${token}`,
+      },
+      body: `${JSON.stringify(event)}\n`,
+      signal: (options.timeoutSignal ?? AbortSignal.timeout)(COMMERCE_SINK_TIMEOUT_MS),
+    });
+  } catch {
+    // At-most-once best effort: the append-only blob remains authoritative.
+  }
+};
+
 /**
  * Append one validated event, create-if-absent. `onlyIfNew` makes the write
  * atomic on Netlify Blobs; the pre-read guards the local file-backed store
@@ -155,12 +194,14 @@ export type AppendCommerceEventResult = { key: string; appended: boolean };
  */
 export const appendCommerceEvent = async (
   store: EventStore,
-  event: CommerceEvent
+  event: CommerceEvent,
+  forwardOptions: CommerceEventForwardOptions = {}
 ): Promise<AppendCommerceEventResult> => {
   const parsed = commerceEventSchema.parse(event);
   const key = commerceEventKey(parsed);
   if ((await store.get(key)) !== null) return { key, appended: false };
   const result = await store.setJSON(key, parsed, { onlyIfNew: true });
   if (result && typeof result === 'object' && result.modified === false) return { key, appended: false };
+  void forwardCommerceEventToSink(parsed, forwardOptions);
   return { key, appended: true };
 };

@@ -108,3 +108,100 @@ test('appendCommerceEvent is create-if-absent: replays no-op, events are never o
   const raced = await appendCommerceEvent(racing, sampleEvent());
   assert.equal(raced.appended, false);
 });
+
+test('a successful commerce append forwards the event once as authenticated NDJSON', async () => {
+  const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+  const sequence: string[] = [];
+  let stored = false;
+  let timeoutMs: number | undefined;
+  const store = {
+    async get() {
+      return stored ? '{}' : null;
+    },
+    async setJSON() {
+      sequence.push('append');
+      stored = true;
+      return { modified: true };
+    },
+  };
+  const fetchImpl: typeof fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    sequence.push('forward');
+    calls.push({ input, init });
+    return new Response(null, { status: 202 });
+  };
+
+  const event = sampleEvent();
+  const result = await appendCommerceEvent(store, event, {
+    env: { TRACKING_SINK_URL: 'https://sink.example/base/', TRACKING_SINK_TOKEN: 'test-token' },
+    fetchImpl,
+    timeoutSignal: (delay) => {
+      timeoutMs = delay;
+      return new AbortController().signal;
+    },
+  });
+  const replay = await appendCommerceEvent(store, event, {
+    env: { TRACKING_SINK_URL: 'https://sink.example/base/', TRACKING_SINK_TOKEN: 'test-token' },
+    fetchImpl,
+  });
+
+  assert.equal(result.appended, true);
+  assert.equal(replay.appended, false);
+  assert.deepEqual(sequence, ['append', 'forward'], 'forwarding starts only after the blob append succeeds');
+  assert.equal(calls.length, 1, 'a replayed event is not forwarded again');
+  assert.equal(String(calls[0].input), 'https://sink.example/base/commerce');
+  assert.equal(calls[0].init?.method, 'POST');
+  assert.deepEqual(calls[0].init?.headers, {
+    'Content-Type': 'application/x-ndjson',
+    Authorization: 'Bearer test-token',
+  });
+  assert.equal(calls[0].init?.body, `${JSON.stringify(event)}\n`);
+  assert.equal(timeoutMs, 2_000, 'the sink request has a two-second timeout');
+});
+
+test('commerce sink failure is swallowed after a successful blob append', async () => {
+  const result = await appendCommerceEvent(
+    {
+      async get() {
+        return null;
+      },
+      async setJSON() {
+        return { modified: true };
+      },
+    },
+    sampleEvent(),
+    {
+      env: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_SINK_TOKEN: 'test-token' },
+      fetchImpl: async () => {
+        throw new Error('sink unavailable');
+      },
+    }
+  );
+
+  assert.equal(result.appended, true, 'sink failure cannot fail the authoritative append');
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('absent commerce sink env is a no-op', async () => {
+  let calls = 0;
+  const result = await appendCommerceEvent(
+    {
+      async get() {
+        return null;
+      },
+      async setJSON() {
+        return { modified: true };
+      },
+    },
+    sampleEvent(),
+    {
+      env: {},
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(null, { status: 202 });
+      },
+    }
+  );
+
+  assert.equal(result.appended, true);
+  assert.equal(calls, 0);
+});
