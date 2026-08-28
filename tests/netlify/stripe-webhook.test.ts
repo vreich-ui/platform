@@ -158,6 +158,7 @@ test('completed session: order created, token issued (hash only), authoritative 
 
 test('completed session with email enqueues one leak-safe member link without affecting 2xx', async () => {
   await reset();
+  const checkoutVisitorShash = 'a'.repeat(64);
   const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
   const linkedHandler = createHandler(drlurieSiteBinding, {
     env: {
@@ -172,7 +173,16 @@ test('completed session with email enqueues one leak-safe member link without af
     },
     nowMs: () => Date.parse('2026-08-28T12:34:56.000Z'),
   });
-  const body = stripeEventBody('checkout.session.completed', paidSession());
+  const body = stripeEventBody(
+    'checkout.session.completed',
+    paidSession({
+      metadata: {
+        product_id: PRODUCT_ID,
+        event_id: 'a1b2c3d4-0000-4000-8000-000000000000',
+        visitor_shash: checkoutVisitorShash,
+      },
+    })
+  );
   const response = await linkedHandler({
     httpMethod: 'POST',
     headers: {
@@ -189,8 +199,39 @@ test('completed session with email enqueues one leak-safe member link without af
   const requestBody = String(calls[0].init?.body);
   assert.equal(requestBody.includes('Buyer@Example.com'), false);
   assert.deepEqual(Object.keys(JSON.parse(requestBody)).sort(), ['member_hash', 'project_id', 'shash']);
-  assert.match(requestBody, /"shash":"[0-9a-f]{64}"/);
+  assert.equal(JSON.parse(requestBody).shash, checkoutVisitorShash, 'uses the checkout browser shash exactly');
   assert.match(requestBody, /"member_hash":"[0-9a-f]{64}"/);
+});
+
+test('completed session without checkout visitor shash does not link against the webhook request identity', async () => {
+  await reset();
+  const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+  const linkedHandler = createHandler(drlurieSiteBinding, {
+    env: {
+      TRACKING_SINK_URL: 'https://sink.example/ingest/',
+      TRACKING_SINK_TOKEN: 'test-bearer',
+      TRACKING_SALT: 'test-salt',
+      TRACKING_PROJECT_ID: 'drlurie',
+    },
+    fetchImpl: (input, init) => {
+      calls.push({ input, init });
+      return Promise.resolve(new Response(null, { status: 202 }));
+    },
+    nowMs: () => Date.parse('2026-08-28T12:34:56.000Z'),
+  });
+  const body = stripeEventBody('checkout.session.completed', paidSession());
+  const response = await linkedHandler({
+    httpMethod: 'POST',
+    headers: {
+      'stripe-signature': stripe.webhooks.generateTestHeaderString({ payload: body, secret: WEBHOOK_SECRET }),
+      'x-forwarded-for': '203.0.113.9, 10.0.0.1',
+      'user-agent': 'stripe-link-test-agent',
+    },
+    body,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(calls.length, 0);
 });
 
 test('THE EXIT-TEST MECHANIC: the webhook replayed twice → one order, no duplicate events', async () => {

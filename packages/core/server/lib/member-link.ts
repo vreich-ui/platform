@@ -2,6 +2,7 @@ import { sha256Hex } from './crypto.js';
 import { computeVisitorHashes } from './tracking-events.js';
 
 const LINK_TIMEOUT_MS = 2_000;
+const HEX64_RE = /^[0-9a-f]{64}$/;
 
 type LinkRequest = {
   headers?: Record<string, string | undefined>;
@@ -26,24 +27,11 @@ const getHeader = (headers: LinkRequest['headers'], name: string): string | unde
 
 const linkEndpoint = (sinkUrl: string): string => `${sinkUrl.replace(/\/+$/, '')}/link`;
 
-/**
- * Best-effort member/session link. Raw email and IP are reduced to one-way
- * hashes before fetch is called and are never included in its payload.
- */
-export const enqueueMemberLink = (
-  request: LinkRequest,
-  email: string | null | undefined,
-  deps: MemberLinkDeps = {}
-): boolean => {
-  const normalizedEmail = email?.trim().toLowerCase();
-  if (!normalizedEmail) return false;
-
+export const visitorShashForRequest = (request: LinkRequest, deps: MemberLinkDeps = {}): string | null => {
   const env = deps.env ?? process.env;
-  const sinkUrl = env.TRACKING_SINK_URL?.trim();
-  const sinkToken = env.TRACKING_SINK_TOKEN?.trim();
   const salt = env.TRACKING_SALT?.trim();
   const projectId = env.TRACKING_PROJECT_ID?.trim();
-  if (!sinkUrl || !sinkToken || !salt || !projectId) return false;
+  if (!salt || !projectId) return null;
 
   const nowMs = deps.nowMs ? deps.nowMs() : Date.now();
   const utcDate = new Date(nowMs).toISOString().slice(0, 10);
@@ -52,7 +40,23 @@ export const enqueueMemberLink = (
     getHeader(request.headers, 'x-forwarded-for')?.split(',')[0]?.trim() ??
     '';
   const ua = getHeader(request.headers, 'user-agent') ?? '';
-  const { shash } = computeVisitorHashes({ salt, utcDate, ip, ua, projectId, nowMs });
+  return computeVisitorHashes({ salt, utcDate, ip, ua, projectId, nowMs }).shash;
+};
+
+export const enqueueMemberLinkForShash = (
+  shash: string | null | undefined,
+  email: string | null | undefined,
+  deps: MemberLinkDeps = {}
+): boolean => {
+  const normalizedEmail = email?.trim().toLowerCase();
+  if (!normalizedEmail || !shash || !HEX64_RE.test(shash)) return false;
+
+  const env = deps.env ?? process.env;
+  const sinkUrl = env.TRACKING_SINK_URL?.trim();
+  const sinkToken = env.TRACKING_SINK_TOKEN?.trim();
+  const projectId = env.TRACKING_PROJECT_ID?.trim();
+  if (!sinkUrl || !sinkToken || !projectId) return false;
+
   const payload: MemberLinkPayload = {
     project_id: projectId,
     shash,
@@ -75,4 +79,16 @@ export const enqueueMemberLink = (
   }
 
   return true;
+};
+
+/**
+ * Best-effort member/session link. Raw email and IP are reduced to one-way
+ * hashes before fetch is called and are never included in its payload.
+ */
+export const enqueueMemberLink = (
+  request: LinkRequest,
+  email: string | null | undefined,
+  deps: MemberLinkDeps = {}
+): boolean => {
+  return enqueueMemberLinkForShash(visitorShashForRequest(request, deps), email, deps);
 };

@@ -34,7 +34,7 @@ import { getCommerceBlobStore, getCommerceEventsBlobStore, getSiteObjectsBlobSto
 import { appendCommerceEvent, hashEmail, newCommerceEvent, type CommerceEventType } from '../lib/commerce-events.js';
 import { COMMERCE_ORDER_SCHEMA_VERSION, writeOrderIfAbsent, type OrderRecord } from '../lib/commerce-orders.js';
 import { loadPublishedProduct } from '../lib/commerce-products.js';
-import { enqueueMemberLink, type MemberLinkDeps } from '../lib/member-link.js';
+import { enqueueMemberLinkForShash, type MemberLinkDeps } from '../lib/member-link.js';
 import {
   DEFAULT_PURCHASE_TOKEN_TTL_MS,
   mintPurchaseToken,
@@ -235,7 +235,7 @@ const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event, me
     });
   }
 
-  enqueueMemberLink(event, buyerEmail, memberLinkDeps);
+  enqueueMemberLinkForShash(session.metadata?.visitor_shash, buyerEmail, memberLinkDeps);
 
   return reply(200, {
     received: true,
