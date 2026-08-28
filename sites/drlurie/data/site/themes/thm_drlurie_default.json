@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-07-14T16:04:34.127Z",
+    "at": "2026-08-28T19:14:34.056Z",
     "from": "objects/theme/by-id/thm_drlurie_default.json",
-    "record_version": 4
+    "record_version": 10
   },
   "description": "The production palette, verbatim from the site seed — applying it to the untouched site is a no-op.",
   "name": "Dr. Lurié default",
