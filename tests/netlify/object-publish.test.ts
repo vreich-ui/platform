@@ -6,13 +6,25 @@ import test from 'node:test';
 import { materialize } from '../../packages/core/server/lib/materialize.js';
 import { publishObject, type PublishObjectDeps } from '../../packages/core/server/lib/object-publish.js';
 import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
-import { publishReceiptSchema, type ObjectRecord, type Principal } from '../../packages/core/schema/object-record-v1.js';
+import { objectVerbRequestSchema } from '../../packages/core/server/lib/object-verbs.js';
+import {
+  publishReceiptSchema,
+  type ObjectRecord,
+  type Principal,
+  type ProducerContext,
+} from '../../packages/core/schema/object-record-v1.js';
 
 const NOW = Date.parse('2026-07-04T12:00:00.000Z');
 const iso = (ms: number) => new Date(ms).toISOString();
 const PUBLISHED_TIME = '2026-07-04T11:59:00.000Z';
 
 const actor: Principal = { kind: 'human', id: 'u1', email: 'wolf@example.com' };
+const producer: ProducerContext = {
+  run_id: 'run_publish_article_20260828_01',
+  node_id: 'node_publish',
+  prompt_version: 'publisher.v7',
+  model: 'gpt-5.6-sol',
+};
 const LOCK = {
   token: 'tok1',
   owner_id: 'u1',
@@ -255,6 +267,47 @@ test('happy path: validates, materializes, commits, then stamps — in that orde
     // (one source of truth for consumers like the object inventory).
     const parsed = publishReceiptSchema.safeParse(receipt);
     assert.ok(parsed.success, JSON.stringify(parsed.success ? undefined : parsed.error.issues));
+  });
+});
+
+test('producer context is strict and bounded when supplied to publish', () => {
+  const base = {
+    action: 'publish_by_time' as const,
+    object_type: 'navigation' as const,
+    object_id: 'nav_footer',
+    lock_token: 'tok1',
+  };
+  assert.equal(objectVerbRequestSchema.safeParse({ ...base, producer }).success, true);
+  assert.equal(objectVerbRequestSchema.safeParse({ ...base, producer: { ...producer, extra: 'no' } }).success, false);
+  assert.equal(
+    objectVerbRequestSchema.safeParse({ ...base, producer: { ...producer, model: 'x'.repeat(129) } }).success,
+    false
+  );
+  const { model: _model, ...missingModel } = producer;
+  assert.equal(objectVerbRequestSchema.safeParse({ ...base, producer: missingModel }).success, false);
+});
+
+test('publish stores producer in history and exports it with the published record version', async () => {
+  await withGitHubEnv(async () => {
+    const events: PublishEvent[] = [];
+    const github = createGitHubApiMock(events);
+    const store = createStore(events);
+    store.seed(navRecord());
+
+    const result = await publishNav(store, github.fetchImpl, { producer });
+    assert.equal(result.status, 200);
+
+    const stored = store.read({ object_type: 'navigation', object_id: 'nav_footer' });
+    const lastHistory = stored.history.at(-1);
+    assert.equal(lastHistory?.action, 'publish');
+    assert.deepEqual(lastHistory?.details?.producer, producer);
+
+    const exportPath = expectedExport().path;
+    const parsed = JSON.parse(github.readFileAtHead(exportPath) as string) as {
+      __generated: { record_version: number; producer?: ProducerContext };
+    };
+    assert.equal(parsed.__generated.record_version, navRecord().version);
+    assert.deepEqual(parsed.__generated.producer, producer);
   });
 });
 

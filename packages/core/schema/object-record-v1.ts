@@ -40,6 +40,22 @@ export const principalSchema = z.discriminatedUnion('kind', [
 ]);
 export type Principal = z.infer<typeof principalSchema>;
 
+/**
+ * The execution context that produced a published object revision (T20.6a).
+ * Optional on publish for backwards compatibility, but all four fields are
+ * required together when present. The strict, bounded shape keeps arbitrary
+ * run data out of the governed history and derived exports.
+ */
+export const producerContextSchema = z
+  .object({
+    run_id: z.string().min(1).max(128),
+    node_id: z.string().min(1).max(128),
+    prompt_version: z.string().min(1).max(128),
+    model: z.string().min(1).max(128),
+  })
+  .strict();
+export type ProducerContext = z.infer<typeof producerContextSchema>;
+
 export const reviewStateSchema = z.object({
   state: z.enum(['open', 'changes_requested', 'approved']),
   decisions: z.array(

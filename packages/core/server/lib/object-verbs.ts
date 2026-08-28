@@ -76,6 +76,7 @@ import { THEME_AXIS_GROUPS, THEME_COLOR_KEYS } from '../../lib/registry/theme-to
 import {
   objectTypes,
   objectTypeSchema,
+  producerContextSchema,
   type ObjectRecord,
   type ObjectType,
   type Principal,
@@ -329,6 +330,7 @@ export const objectVerbRequestSchema = z.discriminatedUnion('action', [
     // release_build here is the authorized intent the gate checks, not an executor.
     artifact_set: z.array(z.string().min(1)).optional(),
     release_build: z.enum(['defer', 'release']).optional(),
+    producer: producerContextSchema.optional(),
   }),
   // ─── W15 S4 (MVP): Marginalia — canvas commenting/annotation threads,
   // persisted in a DEDICATED blob store (getMarginaliaBlobStore), not the
@@ -1941,6 +1943,7 @@ export const handleObjectVerb = async (
           published_time: request.published_time,
           lock_token: request.lock_token,
           actor: principal,
+          ...(request.producer ? { producer: request.producer } : {}),
         },
         { nowMs: ts, validationContext: context, ...options.publishDeps }
       );

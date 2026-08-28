@@ -1219,6 +1219,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
           published_time: input.published_time,
           artifact_set: input.artifact_set,
           release_build: input.release_build,
+          producer: input.producer,
         })
       );
     case 'product_set_price':

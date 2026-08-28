@@ -20,13 +20,15 @@
  * unchanged — same determinism contract as `at`/`record_version`.
  */
 import { objectRecordKey } from '../object-store-keys.js';
-import type { ObjectType } from '../../../schema/object-record-v1.js';
+import type { ObjectType, ProducerContext } from '../../../schema/object-record-v1.js';
 
 export interface MaterializeMeta {
   /** ISO timestamp of this materialization. An input, not generated here. */
   at: string;
   /** ObjectRecord.version at the moment of materialization. */
   record_version: number;
+  /** Optional execution context responsible for this published revision. */
+  producer?: ProducerContext;
   /** The site's export root (from its SiteBinding.dataRoot), e.g. `sites/drlurie/data/site`. */
   exportRoot: string;
 }
@@ -39,6 +41,7 @@ export interface GeneratedMarker {
   from: string;
   at: string;
   record_version: number;
+  producer?: ProducerContext;
 }
 
 export interface MaterializedFile {
@@ -80,6 +83,7 @@ const generatedMarker = (objectType: ObjectType, objectId: string, meta: Materia
     from: objectRecordKey(objectType, objectId),
     at: meta.at,
     record_version: meta.record_version,
+    ...(meta.producer ? { producer: meta.producer } : {}),
   };
 };
 

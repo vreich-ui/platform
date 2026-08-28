@@ -421,7 +421,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'object_publish',
     description:
-      'Publish a CMS object (any of the nine governed types) through the generic publish operation: run the approval-policy publish gate, then validate → materialize → commit the export to git → stamp the record, in that order (the record is never stamped before the export commits). Requires a held lock_token. Omit published_time to publish now; null (unpublish) and future timestamps are rejected in this phase. The gate is identical to the admin UI: autonomous object types publish directly with no human; approval-gated types require a current human approval pinned (M-6) to the exact action being attempted. content_item (article objects) publishes here too since W7.3 — Tier 1 stays autonomous under the committed policy. The export commit carries [skip netlify], so a successful publish does NOT deploy — the change commits to main and goes live only on an explicit release (release_to_production); the response "production" block spells this out. Publish deliberately KEEPS your lock (it re-stamps under the live lease so concurrent body drift is caught, not silently overwritten) — it is NOT terminal for the lock. Call object_checkin when you are done, or the object stays locked to everyone else for the rest of the 15-minute lease. If this call itself times out or 502s (ambiguous whether the publish landed), retry with the SAME idempotency_key to get back the original publish receipt instead of re-running the commit/stamp.',
+      'Publish a governed CMS object through the generic publish operation: run the approval-policy publish gate, then validate → materialize → commit the export to git → stamp the record, in that order (the record is never stamped before the export commits). Requires a held lock_token. Omit published_time to publish now; null (unpublish) and future timestamps are rejected in this phase. Pass producer only when real run/node/prompt/model context is available; it is recorded in publish history and the derived export. The gate is identical to the admin UI: autonomous object types publish directly with no human; approval-gated types require a current human approval pinned (M-6) to the exact action being attempted. content_item (article objects) publishes here too since W7.3 — Tier 1 stays autonomous under the committed policy. The export commit carries [skip netlify], so a successful publish does NOT deploy — the change commits to main and goes live only on an explicit release (release_to_production); the response "production" block spells this out. Publish deliberately KEEPS your lock (it re-stamps under the live lease so concurrent body drift is caught, not silently overwritten) — it is NOT terminal for the lock. Call object_checkin when you are done, or the object stays locked to everyone else for the rest of the 15-minute lease. If this call itself times out or 502s (ambiguous whether the publish landed), retry with the SAME idempotency_key to get back the original publish receipt instead of re-running the commit/stamp.',
     inputSchema: objectSchema(
       {
         object_type: objectTypeEnumSchema(),
@@ -442,6 +442,35 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
           description:
             'Optional. The release/build behavior this publish uses, so an approval that pins release_build can be satisfied. Object publishes always defer the deploy (release is the separate release_to_production step); this declares the approved intent for the gate.',
         },
+        producer: objectSchema(
+          {
+            run_id: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              description: 'CMS-Agent run id that produced this revision.',
+            },
+            node_id: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              description: 'CMS-Agent workflow node id that produced this revision.',
+            },
+            prompt_version: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              description: 'Prompt/version identifier used by the producer.',
+            },
+            model: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              description: 'Model identifier used by the producer.',
+            },
+          },
+          ['run_id', 'node_id', 'prompt_version', 'model']
+        ),
         idempotency_key: idempotencyKeyJsonSchema,
       },
       ['object_type', 'object_id', 'lock_token']
