@@ -17,6 +17,9 @@ import { clearPersistentId, readOrMintPersistentId } from './persistent-id.js';
 
 let tracker: Tracker | null = null;
 let observer: IntersectionObserver | null = null;
+let started = false;
+let boundPageKey: string | null = null;
+let deferredBindQueued = false;
 
 // ── consent wiring (T13.6) — the runtime owns policy; the loader reacts ──────
 type ConsentSnapshot = { analytics: boolean; ads: boolean; gpc: boolean };
@@ -55,7 +58,8 @@ const TYPE_BY_PREFIX: Record<string, string> = {
 };
 
 const readPageContext = (): PageContext => {
-  const first = document.querySelector('[data-cms-object-id]');
+  const first =
+    document.querySelector('[data-cms-object-id^="page_"]') ?? document.querySelector('[data-cms-object-id]');
   const objectId = first?.getAttribute('data-cms-object-id') ?? null;
   const prefix = objectId ? Object.keys(TYPE_BY_PREFIX).find((candidate) => objectId.startsWith(candidate)) : undefined;
   const termId = document.querySelector('[data-cms-term-id]')?.getAttribute('data-cms-term-id') ?? undefined;
@@ -75,6 +79,20 @@ const readPageContext = (): PageContext => {
           }
         : undefined,
   };
+};
+
+const pageKey = (): string => `${location.pathname}\n${location.search}`;
+
+const deferBindUntilDomReady = (): void => {
+  if (deferredBindQueued) return;
+  deferredBindQueued = true;
+  const run = (): void => {
+    deferredBindQueued = false;
+    bindPage();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true });
+  else if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 0);
 };
 
 const send = (path: string, body: string): void => {
@@ -114,6 +132,12 @@ const nativePush = (provider: string, args: unknown[]): void => {
 
 const bindPage = (): void => {
   if (location.pathname.startsWith('/admin')) return;
+  if (!document.body) {
+    deferBindUntilDomReady();
+    return;
+  }
+  const key = pageKey();
+  if (boundPageKey === key) return;
   const configElement = document.getElementById('trk-config');
   if (!configElement?.textContent) return;
   let rawConfig: unknown;
@@ -138,6 +162,7 @@ const bindPage = (): void => {
     });
   }
   applyConsent(readConsentSnapshot());
+  boundPageKey = key;
   tracker.pageLoad(readPageContext(), location.search);
 
   observer?.disconnect();
@@ -155,6 +180,13 @@ const bindPage = (): void => {
   }
 };
 
+const endPage = (): void => {
+  observer?.disconnect();
+  observer = null;
+  tracker?.pageEnd();
+  boundPageKey = null;
+};
+
 const onScroll = (): void => {
   if (!tracker) return;
   const height = document.documentElement.scrollHeight;
@@ -162,9 +194,11 @@ const onScroll = (): void => {
 };
 
 export const startTracker = (): void => {
+  if (started) return;
+  started = true;
   document.addEventListener('astro:page-load', bindPage);
-  document.addEventListener('astro:before-swap', () => tracker?.pageEnd());
-  addEventListener('pagehide', () => tracker?.pageEnd());
+  document.addEventListener('astro:before-swap', endPage);
+  addEventListener('pagehide', endPage);
   document.addEventListener('visibilitychange', () => {
     tracker?.visibility(!document.hidden);
     if (document.hidden) tracker?.flush();
@@ -211,4 +245,5 @@ export const startTracker = (): void => {
   );
   // The module loads after astro:page-load fired for the first page — bind now.
   if (document.readyState !== 'loading') bindPage();
+  else deferBindUntilDomReady();
 };

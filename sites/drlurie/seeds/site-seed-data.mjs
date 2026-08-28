@@ -84,23 +84,6 @@ export const siteBody = {
       heading: "'Playfair Display', 'Times New Roman', serif",
     },
   },
-  // W16 C1 (§4 vocabulary): the visual-identity contract for AI image
-  // generation/search — the STYLE half agents never supply themselves.
-  // Minimal starter stanza; no composition/lora tuning yet.
-  brandImagery: {
-    version: 1,
-    medium: 'photograph',
-    styleSentence:
-      'Clinical-clean skincare editorial photography with soft studio light and a minimal, uncluttered composition.',
-    palette: ['#5E8C8A', '#2E6F95', '#C2A878'],
-    negative: ['no stock-photo gloss', 'no harsh flash', 'no cluttered backgrounds'],
-    aspectRatios: {
-      article_header: '3:2',
-      article_body: '4:3',
-      pdf_cover: '1:1',
-    },
-    seedBase: 100001,
-  },
   chrome: {
     showRssFeed: true,
     showThemeToggle: true,

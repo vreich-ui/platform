@@ -115,6 +115,156 @@ test('pageview fires on page-load; UTM + referrer + viewport ride ONLY the first
   assert.equal((pageviews[1]! as { context?: unknown }).context, undefined, 'later pageviews carry no context');
 });
 
+test('browser startup waits for page markers and does not duplicate the initial pageview', async () => {
+  const listeners = new Map<string, ((event?: Event) => void)[]>();
+  const sent: SentBatch[] = [];
+  let readyState: Document['readyState'] = 'loading';
+  let body: unknown = null;
+  let objectId: string | null = null;
+
+  const addDocumentListener = (type: string, callback: EventListenerOrEventListenerObject): void => {
+    const list = listeners.get(type) ?? [];
+    list.push(typeof callback === 'function' ? callback : (event?: Event) => callback.handleEvent(event!));
+    listeners.set(type, list);
+  };
+  const fire = (type: string): void => {
+    for (const callback of listeners.get(type) ?? []) callback(new Event(type));
+  };
+  const element = (attrs: Record<string, string>) =>
+    ({
+      getAttribute: (name: string) => attrs[name] ?? null,
+      closest: (selector: string) => (selector === '[data-cms-track="off"]' ? null : null),
+    }) as Element;
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    navigator: globalThis.navigator,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+    crypto: globalThis.crypto,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+    addEventListener: globalThis.addEventListener,
+    IntersectionObserver: globalThis.IntersectionObserver,
+  };
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: globalThis,
+  });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      get readyState() {
+        return readyState;
+      },
+      get body() {
+        return body;
+      },
+      referrer: '',
+      hidden: false,
+      documentElement: { scrollHeight: 1000 },
+      addEventListener: addDocumentListener,
+      getElementById: (id: string) =>
+        id === 'trk-config'
+          ? {
+              textContent: JSON.stringify({
+                defaults: DEFAULTS,
+                batch: { max_events: 1, max_wait_ms: 10000 },
+              }),
+            }
+          : null,
+      querySelector: (selector: string) => {
+        if (!objectId) return null;
+        if (selector === '[data-cms-object-id^="page_"]' && objectId.startsWith('page_')) {
+          return element({ 'data-cms-object-id': objectId });
+        }
+        if (selector === '[data-cms-object-id]') return element({ 'data-cms-object-id': objectId });
+        return null;
+      },
+      querySelectorAll: () => [],
+    },
+  });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { pathname: '/', search: '?utm_source=live', hostname: 'drluriescience.netlify.app' },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      language: 'en-US',
+      sendBeacon: (sendPath: string, bodyText: string) => {
+        const parsed = JSON.parse(bodyText) as { schema: string; events: Record<string, unknown>[] };
+        assert.equal(parsed.schema, 'tracking_batch.v1');
+        sent.push({ path: sendPath, events: parsed.events });
+        return true;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 1200 });
+  Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: 800 });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => '00000000-0000-4000-8000-000000000999' },
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+  });
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: () => Promise.resolve(new Response(null, { status: 204 })),
+  });
+  Object.defineProperty(globalThis, 'addEventListener', {
+    configurable: true,
+    value: addDocumentListener,
+  });
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    value: class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  });
+
+  try {
+    const { startTracker } = await import(`../../packages/core/lib/tracking/loader/index.js?startup=${Date.now()}`);
+    startTracker();
+    fire('astro:page-load');
+    assert.equal(sent.length, 0, 'loading document does not emit a contextless pageview');
+
+    readyState = 'interactive';
+    body = {};
+    objectId = 'page_home';
+    fire('DOMContentLoaded');
+    fire('astro:page-load');
+
+    const pageviews = sent.flatMap((batch) => batch.events).filter((event) => event.event === 'pageview');
+    assert.equal(pageviews.length, 1);
+    assert.deepEqual((pageviews[0] as { object?: unknown }).object, {
+      object_type: 'page',
+      object_id: 'page_home',
+    });
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous.window });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previous.document });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: previous.location });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previous.navigator });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: previous.innerWidth });
+    Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: previous.innerHeight });
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous.crypto });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous.localStorage });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: previous.fetch });
+    Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: previous.addEventListener });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: previous.IntersectionObserver,
+    });
+  }
+});
+
 test('term pages emit one term_view on page-load and non-term pages emit none', () => {
   const { tracker, allEvents, fireTimers } = makeTracker();
   tracker.pageLoad({

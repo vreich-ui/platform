@@ -11,5 +11,10 @@
     "types": ["node"],
     "noEmit": false
   },
-  "include": ["../../netlify/**/*.ts", "../../src/netlify-blobs.d.ts", "./**/*.ts"]
+  "include": [
+    "../../netlify/**/*.ts",
+    "../../packages/core/lib/tracking/loader/**/*.ts",
+    "../../src/netlify-blobs.d.ts",
+    "./**/*.ts"
+  ]
 }
