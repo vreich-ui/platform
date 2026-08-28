@@ -1,0 +1,127 @@
+{
+  "__generated": {
+    "at": "2026-08-28T18:48:10.894Z",
+    "from": "objects/tracking_config/by-id/trk_drlurie.json",
+    "record_version": 4
+  },
+  "consent": {
+    "banner": {
+      "accept_label": "Accept all",
+      "body": "We measure how this site is used with a cookieless, first-party counter that stores nothing on your device. With your permission we would also use advertising measurement and a persistent analytics identifier. You can change your choice any time via the privacy choices link in the footer.",
+      "headline": "Privacy choices",
+      "manage_label": "Manage choices",
+      "reject_label": "Decline"
+    },
+    "honor_gpc": true,
+    "posture": "geo-adaptive",
+    "restricted_regions": [
+      "AT",
+      "BE",
+      "BG",
+      "HR",
+      "CY",
+      "CZ",
+      "DK",
+      "EE",
+      "FI",
+      "FR",
+      "DE",
+      "GR",
+      "HU",
+      "IE",
+      "IT",
+      "LV",
+      "LT",
+      "LU",
+      "MT",
+      "NL",
+      "PL",
+      "PT",
+      "RO",
+      "SK",
+      "SI",
+      "ES",
+      "SE",
+      "IS",
+      "LI",
+      "NO",
+      "GB",
+      "CH",
+      "IL"
+    ]
+  },
+  "defaults": {
+    "content_item": [
+      "read_progress",
+      "node_impression",
+      "node_dwell",
+      "completion"
+    ],
+    "navigation": [
+      "nav_click"
+    ],
+    "outbound_links": true,
+    "page": [
+      "pageview",
+      "scroll_depth",
+      "engagement"
+    ],
+    "product": [
+      "buy_click"
+    ],
+    "section": [
+      "section_impression",
+      "section_dwell",
+      "cta_click",
+      "form_start",
+      "form_submit"
+    ],
+    "taxonomy": [
+      "term_view",
+      "tag_click"
+    ],
+    "utm_capture": true
+  },
+  "providers": {
+    "ga4": {
+      "consent_class": "analytics",
+      "enabled": false
+    },
+    "google_ads": {
+      "consent_class": "advertising",
+      "enabled": false
+    },
+    "gtm": {
+      "consent_class": "advertising",
+      "enabled": false
+    },
+    "meta_pixel": {
+      "consent_class": "advertising",
+      "enabled": false
+    },
+    "mgid": {
+      "consent_class": "advertising",
+      "enabled": false
+    },
+    "outbrain": {
+      "consent_class": "advertising",
+      "enabled": false
+    },
+    "own": {
+      "auth_env": "TRACKING_SINK_TOKEN",
+      "blob_mirror": "fallback",
+      "consent_class": "essential",
+      "enabled": true,
+      "endpoint_env": "TRACKING_SINK_URL",
+      "ingest_path": "/api/t"
+    },
+    "plausible": {
+      "consent_class": "analytics",
+      "enabled": false
+    },
+    "taboola": {
+      "consent_class": "advertising",
+      "enabled": false
+    }
+  }
+}
