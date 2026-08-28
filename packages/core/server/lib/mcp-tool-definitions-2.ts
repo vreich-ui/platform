@@ -166,6 +166,9 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
         object_type: objectTypeEnumSchema(),
         object_id: stringSchema(),
         lease_seconds: intSchema('Optional lease seconds (default 900, max 3600).'),
+        agent_name: stringSchema(
+          'Optional self-declared agent name recorded as the lock owner (attribution only; falls back to "unattributed-agent" when omitted).'
+        ),
       },
       ['object_type', 'object_id']
     ),
@@ -180,6 +183,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
         object_id: stringSchema(),
         lock_token: stringSchema(),
         lease_seconds: intSchema('Optional lease seconds (default 900, max 3600).'),
+        agent_name: stringSchema('Optional self-declared agent name recorded on history (attribution only).'),
       },
       ['object_type', 'object_id', 'lock_token']
     ),
@@ -189,7 +193,12 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     name: 'object_checkin',
     description: 'Release a held record lease; requires the matching lock_token.',
     inputSchema: objectSchema(
-      { object_type: objectTypeEnumSchema(), object_id: stringSchema(), lock_token: stringSchema() },
+      {
+        object_type: objectTypeEnumSchema(),
+        object_id: stringSchema(),
+        lock_token: stringSchema(),
+        agent_name: stringSchema('Optional self-declared agent name recorded on history (attribution only).'),
+      },
       ['object_type', 'object_id', 'lock_token']
     ),
     governance: { toolClass: 'draft' },

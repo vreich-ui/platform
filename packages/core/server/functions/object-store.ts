@@ -75,7 +75,7 @@ const verifyPublishKey = (event: LambdaEvent) => {
   return undefined;
 };
 
-const agentPrincipal = (payload: unknown): Principal => {
+export const agentPrincipal = (payload: unknown): Principal => {
   const declared = isRecord(payload) && typeof payload.agent_name === 'string' ? payload.agent_name.trim() : '';
   return { kind: 'agent', agent_name: declared || 'unattributed-agent', auth: 'publish_key' };
 };
