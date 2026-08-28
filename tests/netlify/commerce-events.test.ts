@@ -6,6 +6,7 @@ import {
   COMMERCE_EVENT_SCHEMA_VERSION,
   appendCommerceEvent,
   clientCommerceEventTypes,
+  commerceSinkPayload,
   commerceEventKey,
   commerceEventSchema,
   commerceEventTypes,
@@ -109,7 +110,23 @@ test('appendCommerceEvent is create-if-absent: replays no-op, events are never o
   assert.equal(raced.appended, false);
 });
 
-test('a successful commerce append forwards the event once as authenticated NDJSON', async () => {
+test('commerceSinkPayload flattens commerce_event.v1 into the kugel-data /commerce contract', () => {
+  const event = sampleEvent();
+  assert.deepEqual(commerceSinkPayload(event, 'drlurie'), {
+    event_id: event.event_id,
+    project_id: 'drlurie',
+    ts: event.ts,
+    kind: 'checkout_completed',
+    product_id: 'prod_barrier_repair_guide',
+    order_id: 'ord_1',
+    session_id: 'cs_test_abc',
+    amount_cents: 1900,
+    currency: 'usd',
+    payload: event,
+  });
+});
+
+test('a successful commerce append forwards a sink-compatible event once as authenticated NDJSON', async () => {
   const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
   const sequence: string[] = [];
   let stored = false;
@@ -132,7 +149,11 @@ test('a successful commerce append forwards the event once as authenticated NDJS
 
   const event = sampleEvent();
   const result = await appendCommerceEvent(store, event, {
-    env: { TRACKING_SINK_URL: 'https://sink.example/base/', TRACKING_SINK_TOKEN: 'test-token' },
+    env: {
+      TRACKING_PROJECT_ID: 'drlurie',
+      TRACKING_SINK_URL: 'https://sink.example/base/',
+      TRACKING_SINK_TOKEN: 'test-token',
+    },
     fetchImpl,
     timeoutSignal: (delay) => {
       timeoutMs = delay;
@@ -140,7 +161,11 @@ test('a successful commerce append forwards the event once as authenticated NDJS
     },
   });
   const replay = await appendCommerceEvent(store, event, {
-    env: { TRACKING_SINK_URL: 'https://sink.example/base/', TRACKING_SINK_TOKEN: 'test-token' },
+    env: {
+      TRACKING_PROJECT_ID: 'drlurie',
+      TRACKING_SINK_URL: 'https://sink.example/base/',
+      TRACKING_SINK_TOKEN: 'test-token',
+    },
     fetchImpl,
   });
 
@@ -154,7 +179,7 @@ test('a successful commerce append forwards the event once as authenticated NDJS
     'Content-Type': 'application/x-ndjson',
     Authorization: 'Bearer test-token',
   });
-  assert.equal(calls[0].init?.body, `${JSON.stringify(event)}\n`);
+  assert.equal(calls[0].init?.body, `${JSON.stringify(commerceSinkPayload(event, 'drlurie'))}\n`);
   assert.equal(timeoutMs, 2_000, 'the sink request has a two-second timeout');
 });
 
@@ -170,7 +195,11 @@ test('commerce sink failure is swallowed after a successful blob append', async 
     },
     sampleEvent(),
     {
-      env: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_SINK_TOKEN: 'test-token' },
+      env: {
+        TRACKING_PROJECT_ID: 'drlurie',
+        TRACKING_SINK_URL: 'https://sink.example',
+        TRACKING_SINK_TOKEN: 'test-token',
+      },
       fetchImpl: async () => {
         throw new Error('sink unavailable');
       },

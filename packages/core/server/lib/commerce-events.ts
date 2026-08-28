@@ -149,7 +149,7 @@ export type AppendCommerceEventResult = { key: string; appended: boolean };
 
 const COMMERCE_SINK_TIMEOUT_MS = 2_000;
 
-type CommerceSinkEnv = Partial<Pick<NodeJS.ProcessEnv, 'TRACKING_SINK_URL' | 'TRACKING_SINK_TOKEN'>>;
+type CommerceSinkEnv = Partial<Pick<NodeJS.ProcessEnv, 'TRACKING_PROJECT_ID' | 'TRACKING_SINK_URL' | 'TRACKING_SINK_TOKEN'>>;
 
 export type CommerceEventForwardOptions = {
   env?: CommerceSinkEnv;
@@ -157,32 +157,70 @@ export type CommerceEventForwardOptions = {
   timeoutSignal?: (delay: number) => AbortSignal;
 };
 
+export type CommerceSinkPayload = {
+  event_id: string;
+  project_id: string;
+  ts: string;
+  kind: CommerceEventType;
+  product_id: string | null;
+  order_id: string | null;
+  session_id: string | null;
+  amount_cents: number | null;
+  currency: string | null;
+  payload: CommerceEvent;
+};
+
+const moneyField = (event: CommerceEvent, field: 'amount_cents'): number | null => {
+  const value = event.data[field];
+  return typeof value === 'number' && Number.isInteger(value) ? value : null;
+};
+
+const currencyField = (event: CommerceEvent): string | null => {
+  const value = event.data.currency;
+  return typeof value === 'string' && /^[a-z]{3}$/.test(value) ? value : null;
+};
+
+export const commerceSinkPayload = (event: CommerceEvent, projectId: string): CommerceSinkPayload => ({
+  event_id: event.event_id,
+  project_id: projectId,
+  ts: event.ts,
+  kind: event.type,
+  product_id: event.subject.product_id,
+  order_id: event.subject.order_id,
+  session_id: event.subject.session_id,
+  amount_cents: moneyField(event, 'amount_cents'),
+  currency: currencyField(event),
+  payload: event,
+});
+
 /**
  * Best-effort owner-DB forwarding after the durable blob append. The caller
  * deliberately does not await this work: sink latency or failure must never
  * change the commerce response (especially Stripe webhook acknowledgements).
  */
-const forwardCommerceEventToSink = async (
+const forwardCommerceEventToSink = (
   event: CommerceEvent,
   options: CommerceEventForwardOptions = {}
-): Promise<void> => {
+): void => {
   const env = options.env ?? process.env;
   const endpoint = env.TRACKING_SINK_URL?.trim();
   const token = env.TRACKING_SINK_TOKEN?.trim();
-  if (!endpoint || !token) return;
+  const projectId = env.TRACKING_PROJECT_ID?.trim();
+  if (!endpoint || !token || !projectId) return;
 
   try {
-    await (options.fetchImpl ?? fetch)(`${endpoint.replace(/\/+$/, '')}/commerce`, {
+    void (options.fetchImpl ?? fetch)(`${endpoint.replace(/\/+$/, '')}/commerce`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-ndjson',
         Authorization: `Bearer ${token}`,
       },
-      body: `${JSON.stringify(event)}\n`,
+      body: `${JSON.stringify(commerceSinkPayload(event, projectId))}\n`,
       signal: (options.timeoutSignal ?? AbortSignal.timeout)(COMMERCE_SINK_TIMEOUT_MS),
-    });
+    }).catch(() => undefined);
   } catch {
-    // At-most-once best effort: the append-only blob remains authoritative.
+    // Synchronous transport failures are also best-effort: the append-only
+    // blob remains authoritative.
   }
 };
 
@@ -202,6 +240,6 @@ export const appendCommerceEvent = async (
   if ((await store.get(key)) !== null) return { key, appended: false };
   const result = await store.setJSON(key, parsed, { onlyIfNew: true });
   if (result && typeof result === 'object' && result.modified === false) return { key, appended: false };
-  void forwardCommerceEventToSink(parsed, forwardOptions);
+  forwardCommerceEventToSink(parsed, forwardOptions);
   return { key, appended: true };
 };
