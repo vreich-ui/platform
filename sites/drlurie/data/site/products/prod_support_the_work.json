@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-08-09T18:20:02.391Z",
+    "at": "2026-08-28T19:40:34.206Z",
     "from": "objects/product/by-id/prod_support_the_work.json",
-    "record_version": 18
+    "record_version": 30
   },
   "commerce": {
     "availability": "available",
