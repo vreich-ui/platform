@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-07-13T19:11:53.768Z",
+    "at": "2026-08-28T19:14:52.428Z",
     "from": "objects/content_item/by-id/req_agent_minimal_routine_20260713_01.json",
-    "record_version": 2
+    "record_version": 8
   },
   "deck": "Cleanse, moisturize, protect. Everything else is optional.",
   "description": "A minimal, evidence-aligned skincare routine — three steps that do most of the work.",
@@ -77,7 +77,10 @@
   "slug": "the-three-step-routine",
   "taxonomy": {
     "category": "skincare",
-    "tags": ["skincare-basics", "skincare-routine"]
+    "tags": [
+      "skincare-basics",
+      "skincare-routine"
+    ]
   },
   "title": "The three-step routine that is genuinely enough"
 }
