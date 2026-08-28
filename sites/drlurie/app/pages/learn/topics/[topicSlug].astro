@@ -5,7 +5,7 @@ import GridItem from '~/components/blog/GridItem.astro';
 import ObjectSections from '~/components/cms/ObjectSections.astro';
 import { fetchPosts } from '~/utils/blog';
 import { getPermalink } from '~/utils/permalinks';
-import { loadRoutePageObject, routeHeaderAnnotation } from '~/utils/route-page-object';
+import { loadRoutePageObject, resolveRouteTermId, routeHeaderAnnotation } from '~/utils/route-page-object';
 
 export const prerender = true;
 
@@ -34,6 +34,7 @@ const { topic, posts } = Astro.props as Props;
 // display label (topics remain category presentations, D§5.5). The post grid
 // and the back-link stay computed furniture.
 const detail = await loadRoutePageObject('page_topic_detail', topic.title);
+const topicTermId = await resolveRouteTermId('category', topic.slug);
 const header = detail?.header ?? {
   kicker: 'Topic',
   heading: topic.title,
@@ -47,7 +48,7 @@ const metadata = {
 ---
 
 <Layout metadata={metadata}>
-  <section class="dl-section">
+  <section class="dl-section" data-cms-term-id={topicTermId}>
     <a class="text-sm font-semibold text-primary hover:text-secondary" href={getPermalink('/learn/topics')}>
       ← All topics
     </a>

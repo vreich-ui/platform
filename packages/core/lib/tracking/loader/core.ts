@@ -47,6 +47,8 @@ export type PageContext = {
   route: string | null;
   /** The page's own object identity (from the render seam). */
   object?: { object_type?: string; object_id?: string };
+  /** Present on term pages: the taxonomy term whose route is being viewed. */
+  term?: { term_id: string };
   /** Present on article pages: public node count + last node id. */
   article?: { object_id: string; node_count: number; last_node_id: string | null };
 };
@@ -297,6 +299,9 @@ export const createTracker = (
       if (page.path.startsWith('/admin')) return; // hard bail — never tracked
       if (collects(page.object?.object_type ?? 'page', 'pageview') || collects('page', 'pageview')) {
         push('pageview', null);
+      }
+      if (page.term?.term_id && collects('taxonomy', 'term_view')) {
+        push('term_view', null, undefined, { object_type: 'taxonomy', term_id: page.term.term_id });
       }
       // T13.7: page-scoped `view` goals + ga4's manual page_view
       // (send_page_view:false in its config — the loader owns navigation

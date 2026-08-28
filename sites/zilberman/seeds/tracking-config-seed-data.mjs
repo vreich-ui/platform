@@ -16,6 +16,42 @@
 
 export const SEED_SITE = 'site_zilberman';
 
+export const RESTRICTED_REGIONS = [
+  'AT',
+  'BE',
+  'BG',
+  'HR',
+  'CY',
+  'CZ',
+  'DK',
+  'EE',
+  'FI',
+  'FR',
+  'DE',
+  'GR',
+  'HU',
+  'IE',
+  'IT',
+  'LV',
+  'LT',
+  'LU',
+  'MT',
+  'NL',
+  'PL',
+  'PT',
+  'RO',
+  'SK',
+  'SI',
+  'ES',
+  'SE',
+  'IS',
+  'LI',
+  'NO',
+  'GB',
+  'CH',
+  'IL',
+];
+
 export const trackingConfigBody = {
   // No analytics/ad provider is enabled by default — onboarding: fill with the client
   // (docs/cms-architecture/12-object-tracking-and-analytics.md §4 has the
@@ -25,7 +61,7 @@ export const trackingConfigBody = {
     // onboarding: fill with the client — pick the posture that matches this client's
     // real audience geography: 'geo-adaptive' | 'consent-first' | 'us-first'.
     posture: 'consent-first',
-    restricted_regions: [],
+    restricted_regions: RESTRICTED_REGIONS,
     honor_gpc: true,
     banner: {
       headline: 'Privacy choices',

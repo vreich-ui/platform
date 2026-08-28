@@ -42,6 +42,18 @@ test('attribute VALUES are content — a changed href is caught', () => {
   assert.notEqual(normalizeHtml('<a href="/about">x</a>'), normalizeHtml('<a href="/about-us">x</a>'));
 });
 
+test('taxonomy term identity is a non-visual tracking annotation, not a reader-content diff', () => {
+  const without = '<section class="term">content</section>';
+  const withTermIdentity = '<section class="term" data-cms-term-id="t_stable_original">content</section>';
+  assert.equal(normalizeHtml(without), normalizeHtml(withTermIdentity));
+});
+
+test('term-id normalization does not hide other changes on the same wrapper', () => {
+  const before = '<section class="term">content</section>';
+  const changed = '<section class="term changed" data-cms-term-id="t_stable_original">content</section>';
+  assert.notEqual(normalizeHtml(before), normalizeHtml(changed));
+});
+
 test('shared CSS chunk stems collapse to CHUNK (a rename is not a page change)', () => {
   assert.equal(
     normalizeCssChunkStems('<link href="/_astro/privacy.HASH.css">'),

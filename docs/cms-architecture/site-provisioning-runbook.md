@@ -60,6 +60,13 @@ Provisioning fails closed if either required bridge value cannot be installed,
 so a site cannot look successfully provisioned while artifact publishing is
 silently broken.
 
+When the operator provisioning environment carries `TRACKING_SINK_URL` and
+`TRACKING_SINK_TOKEN`, the same run also copies them into the new site's
+Netlify env store as Functions-only secrets for all contexts. Missing tracking
+operator values are reported as checklist gaps, not fatal errors, so the run
+can finish while still telling you exactly which env names remain to set before
+the site can forward events.
+
 Normally the command reads `AGENT_RUN_TOKEN` from the `pdf-x` service through
 the Netlify API. If that source value has been marked secret (and is therefore
 not readable), inject `PDF_TOOL_AGENT_RUN_TOKEN` into the provisioning process;
@@ -101,8 +108,13 @@ For everything NOT auto-generated in step 2:
   `SITE_ID` has always resolved to itself, so it already passes the letter of
   the rule; rotating its token off the old fleet-shared credential is an open
   hygiene question, not a confirmed gap — treat the shared pair as legacy,
-  not the default for a new client.) Tracking sink may be one shared owner-DB
-  (partitioned by `TRACKING_PROJECT_ID`) or per-site — your call.
+  not the default for a new client.) `TRACKING_PROJECT_ID` remains per-site;
+  `TRACKING_SINK_URL`/`TRACKING_SINK_TOKEN` are normally copied automatically
+  from the operator provisioning env in step 2. If those operator values are
+  absent, `create-site` leaves the rows unchecked and tells you to set those
+  env names before re-running `--provision-only`. Tracking sink may be one
+  shared owner-DB (partitioned by `TRACKING_PROJECT_ID`) or per-site — your
+  call.
 
   **This is enforced, not just documented, as of 2026-08-05.** Re-run step 2
   with `--known-tenant-site <name>` (repeatable — every other live tenant's

@@ -214,10 +214,33 @@ test('the dry-run report never contains a generated secret value — checklist e
 });
 
 test('renderEnvChecklist(executed=true) reports generated secrets as set, never prints their value', () => {
-  const text = renderEnvChecklist(true);
+  const text = renderEnvChecklist({ executed: true, provisionResult: { secretsSet: ['PDF_TOOL_AGENT_RUN_TOKEN'] } });
   assert.match(text, /PUBLISH_SECRET.*generated \+ set on the new site \(value not shown\)/s);
   assert.match(text, /PDF_TOOL_AGENT_RUN_TOKEN.*inherited \+ set on the new site \(value not shown\)/s);
   assert.equal(/\b[0-9a-f]{32,}\b/i.test(text), false);
+});
+
+test('dry-run with --netlify-token marks the four inherited fleet rows with tick or gap status from the operator env', () => {
+  const text = renderPlan(buildPlan({ name: 'acme' }), {
+    netlifyToken: true,
+    fleetEnv: {},
+  });
+  assert.match(
+    text,
+    /PDF_TOOL_BASE_URL\s+\[fleet-shared\]\s+☐ operator env override absent — provisioning will fall back to the shared pdf-tool service/s
+  );
+  assert.match(
+    text,
+    /PDF_TOOL_AGENT_RUN_TOKEN\s+\[fleet-shared\]\s+☐ operator env override absent — provisioning will fall back to the shared pdf-tool service/s
+  );
+  assert.match(
+    text,
+    /TRACKING_SINK_URL\s+\[fleet-shared\]\s+☐ set TRACKING_SINK_URL in the provisioning environment before running --netlify-token/s
+  );
+  assert.match(
+    text,
+    /TRACKING_SINK_TOKEN\s+\[fleet-shared\]\s+☐ set TRACKING_SINK_TOKEN in the provisioning environment before running --netlify-token/s
+  );
 });
 
 test('Netlify provisioning inherits the pdf-tool bridge env and stores the bearer as a Functions-only secret', async () => {
@@ -306,6 +329,74 @@ test('Netlify provisioning inherits the pdf-tool bridge env and stores the beare
   assert.equal(JSON.stringify(result).includes(inheritedToken), false);
 });
 
+test('Netlify provisioning copies tracking sink env from the operator env into Functions-only secrets', async () => {
+  const envPosts: Array<Record<string, unknown>> = [];
+  const envMethods = new Map<string, string>();
+  const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = init.method || 'GET';
+    if (method === 'GET' && url.endsWith('/sites?name=acme')) return Response.json([]);
+    if (method === 'POST' && url.endsWith('/api/v1/sites')) {
+      return Response.json({ id: 'site-target', account_id: 'account-target', name: 'acme' });
+    }
+    if (method === 'GET' && url.endsWith('/sites?name=pdf-x')) {
+      return Response.json([
+        { id: 'site-pdf-tool', account_id: 'account-pdf-tool', name: 'pdf-x', ssl_url: 'https://pdf-x.netlify.app/' },
+      ]);
+    }
+    if (method === 'GET' && url.includes('/accounts/account-pdf-tool/env?site_id=site-pdf-tool')) {
+      return Response.json([{ key: 'AGENT_RUN_TOKEN', values: [{ context: 'all', value: 'pdf-token' }] }]);
+    }
+    if (method === 'GET' && url.includes('/accounts/account-target/env/')) return new Response('', { status: 404 });
+    if (method === 'POST' && url.includes('/accounts/account-target/env?site_id=site-target')) {
+      const parsed = JSON.parse(String(init.body)) as Record<string, unknown> | Array<Record<string, unknown>>;
+      const variable = Array.isArray(parsed) ? parsed[0] : parsed;
+      envPosts.push(variable);
+      envMethods.set(String(variable.key), method);
+      return Response.json(variable);
+    }
+    return new Response(`unexpected request: ${method} ${url}`, { status: 500 });
+  };
+  const getStoreImpl = () => {
+    let stored: unknown;
+    return {
+      async setJSON(_key: string, value: unknown) {
+        stored = value;
+      },
+      async get() {
+        return stored;
+      },
+      async delete() {},
+    };
+  };
+
+  const result = await executeNetlifyProvisioning(buildPlan({ name: 'acme' }), {
+    token: 'netlify-test-token',
+    fetchImpl,
+    getStoreImpl,
+    fleetEnv: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_SINK_TOKEN: 'sink-token' },
+  });
+
+  assert.deepEqual(envPosts.find((entry) => entry.key === 'TRACKING_SINK_URL'), {
+    key: 'TRACKING_SINK_URL',
+    scopes: ['functions'],
+    values: [{ value: 'https://sink.example', context: 'all' }],
+    is_secret: true,
+  });
+  assert.deepEqual(envPosts.find((entry) => entry.key === 'TRACKING_SINK_TOKEN'), {
+    key: 'TRACKING_SINK_TOKEN',
+    scopes: ['functions'],
+    values: [{ value: 'sink-token', context: 'all' }],
+    is_secret: true,
+  });
+  assert.equal(envMethods.get('TRACKING_SINK_URL'), 'POST');
+  assert.equal(envMethods.get('TRACKING_SINK_TOKEN'), 'POST');
+  assert.ok(result.secretsSet.includes('TRACKING_SINK_URL'));
+  assert.ok(result.secretsSet.includes('TRACKING_SINK_TOKEN'));
+  assert.equal(result.inheritedMissing.length, 0);
+  assert.equal(JSON.stringify(result).includes('sink-token'), false);
+});
+
 test('Netlify provisioning reports both required bridge vars when inheritance is unavailable', async () => {
   const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input);
@@ -348,6 +439,101 @@ test('Netlify provisioning reports both required bridge vars when inheritance is
     ['PDF_TOOL_BASE_URL', 'PDF_TOOL_AGENT_RUN_TOKEN']
   );
   assert.match(result.secretsFailed.at(-1)?.message || '', /set PDF_TOOL_BASE_URL and PDF_TOOL_AGENT_RUN_TOKEN/);
+});
+
+test('Netlify provisioning leaves tracking sink rows unchecked when the operator env is missing them', async () => {
+  const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = init.method || 'GET';
+    if (method === 'GET' && url.endsWith('/sites?name=acme')) return Response.json([]);
+    if (method === 'POST' && url.endsWith('/api/v1/sites')) {
+      return Response.json({ id: 'site-target', account_id: 'account-target', name: 'acme' });
+    }
+    if (method === 'GET' && url.endsWith('/sites?name=pdf-x')) {
+      return Response.json([
+        { id: 'site-pdf-tool', account_id: 'account-pdf-tool', name: 'pdf-x', ssl_url: 'https://pdf-x.netlify.app/' },
+      ]);
+    }
+    if (method === 'GET' && url.includes('/accounts/account-pdf-tool/env?site_id=site-pdf-tool')) {
+      return Response.json([{ key: 'AGENT_RUN_TOKEN', values: [{ context: 'all', value: 'pdf-token' }] }]);
+    }
+    if (method === 'GET' && url.includes('/accounts/account-target/env/')) return new Response('', { status: 404 });
+    if (method === 'POST' && url.includes('/accounts/account-target/env?site_id=site-target')) return Response.json({});
+    return new Response(`unexpected request: ${method} ${url}`, { status: 500 });
+  };
+  const getStoreImpl = () => {
+    let stored: unknown;
+    return {
+      async setJSON(_key: string, value: unknown) {
+        stored = value;
+      },
+      async get() {
+        return stored;
+      },
+      async delete() {},
+    };
+  };
+
+  const result = await executeNetlifyProvisioning(buildPlan({ name: 'acme' }), {
+    token: 'netlify-test-token',
+    fetchImpl,
+    getStoreImpl,
+    fleetEnv: {},
+  });
+
+  assert.deepEqual(result.inheritedMissing, ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']);
+  assert.equal(result.secretsFailed.some((failure) => failure.name.startsWith('TRACKING_SINK_')), false);
+  const text = renderEnvChecklist({ executed: true, netlifyToken: true, provisionResult: result });
+  assert.match(text, /TRACKING_SINK_URL.*☐ set TRACKING_SINK_URL in the provisioning environment, then re-run --provision-only/s);
+  assert.match(
+    text,
+    /TRACKING_SINK_TOKEN.*☐ set TRACKING_SINK_TOKEN in the provisioning environment, then re-run --provision-only/s
+  );
+});
+
+test('Netlify provisioning reports tracking sink rows unresolved when Netlify returns no account id', async () => {
+  const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = init.method || 'GET';
+    if (method === 'GET' && url.endsWith('/sites?name=acme')) return Response.json([]);
+    if (method === 'POST' && url.endsWith('/api/v1/sites')) {
+      return Response.json({ id: 'site-target', name: 'acme' });
+    }
+    return new Response(`unexpected request: ${method} ${url}`, { status: 500 });
+  };
+  const getStoreImpl = () => {
+    let stored: unknown;
+    return {
+      async setJSON(_key: string, value: unknown) {
+        stored = value;
+      },
+      async get() {
+        return stored;
+      },
+      async delete() {},
+    };
+  };
+
+  const result = await executeNetlifyProvisioning(buildPlan({ name: 'acme' }), {
+    token: 'netlify-test-token',
+    fetchImpl,
+    getStoreImpl,
+    fleetEnv: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_SINK_TOKEN: 'sink-token' },
+  });
+
+  assert.deepEqual(
+    result.secretsFailed.map((failure) => failure.name),
+    ['PDF_TOOL_BASE_URL', 'PDF_TOOL_AGENT_RUN_TOKEN']
+  );
+  assert.deepEqual(result.inheritedMissing, ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']);
+  const text = renderEnvChecklist({ executed: true, netlifyToken: true, provisionResult: result });
+  assert.match(text, /TRACKING_SINK_URL.*☐ set TRACKING_SINK_URL in the provisioning environment, then re-run --provision-only/s);
+  assert.match(
+    text,
+    /TRACKING_SINK_TOKEN.*☐ set TRACKING_SINK_TOKEN in the provisioning environment, then re-run --provision-only/s
+  );
+  assert.equal(text.includes('sink-token'), false);
+  assert.equal(JSON.stringify(result).includes('sink-token'), false);
 });
 
 test('dry-run output matches the committed fixture (tests/fixtures/create-site-dry-run-acme.mjs)', () => {

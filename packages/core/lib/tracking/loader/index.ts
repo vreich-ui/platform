@@ -58,12 +58,14 @@ const readPageContext = (): PageContext => {
   const first = document.querySelector('[data-cms-object-id]');
   const objectId = first?.getAttribute('data-cms-object-id') ?? null;
   const prefix = objectId ? Object.keys(TYPE_BY_PREFIX).find((candidate) => objectId.startsWith(candidate)) : undefined;
+  const termId = document.querySelector('[data-cms-term-id]')?.getAttribute('data-cms-term-id') ?? undefined;
   const nodes = document.querySelectorAll('[data-cms-node-id]');
   const articleId = nodes[0]?.getAttribute('data-cms-object-id') ?? undefined;
   return {
     path: location.pathname,
     route: null,
     object: objectId && prefix ? { object_type: TYPE_BY_PREFIX[prefix], object_id: objectId } : undefined,
+    term: termId ? { term_id: termId } : undefined,
     article:
       nodes.length > 0 && articleId
         ? {

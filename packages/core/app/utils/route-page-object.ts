@@ -28,6 +28,7 @@
 import { getEntry } from 'astro:content';
 
 import { applyListingTerm } from '../../lib/renderer/listing-term';
+import { termIdForSlug, type TaxonomyTermKind } from '../../lib/tracking/term-identity';
 import { parsePageExport } from '../../lib/renderer/resolve';
 import { sectionAnnotationAttrs, type SectionAnnotationAttrs } from '../../lib/renderer/section-annotations';
 import { splitRichTextParagraphs } from '../../lib/richtext/paragraphs';
@@ -98,3 +99,8 @@ export const routeHeaderAnnotation = (
   header: RoutePageHeader | undefined
 ): SectionAnnotationAttrs | undefined =>
   header?.sectionId ? sectionAnnotationAttrs(objectId, { id: header.sectionId, type: 'lede' }) : undefined;
+
+export const resolveRouteTermId = async (kind: TaxonomyTermKind, slug: string): Promise<string | undefined> => {
+  const entry = await Promise.resolve(getEntry('taxonomyObject', 'taxonomy')).catch(() => undefined);
+  return termIdForSlug(entry?.data, kind, slug);
+};

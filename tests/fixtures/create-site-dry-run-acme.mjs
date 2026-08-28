@@ -160,10 +160,10 @@ Env checklist:
       This client's partition in the tracking owner-DB (trk_<shortId> convention).
     TRACKING_SALT                    [per-site]  ☐ human-supplied — see the provisioning runbook
       Hashing salt — MUST differ per site for cross-client privacy isolation.
-    TRACKING_SINK_URL                [per-site (may be fleet-shared)]  ☐ human-supplied — see the provisioning runbook
-      Owner-DB sink endpoint — one shared DB is allowed with TRACKING_PROJECT_ID as the partition.
-    TRACKING_SINK_TOKEN              [per-site (may be fleet-shared)]  ☐ human-supplied — see the provisioning runbook
-      Bearer for the sink; pairs with TRACKING_SINK_URL.
+    TRACKING_SINK_URL                [fleet-shared]  reuse the fleet value — do not create a new one
+      Inherited automatically from the operator provisioning env and stored as a Functions-only secret. One shared owner DB is allowed with TRACKING_PROJECT_ID as the partition.
+    TRACKING_SINK_TOKEN              [fleet-shared]  reuse the fleet value — do not create a new one
+      Inherited automatically from the operator provisioning env and stored as a Functions-only secret; pairs with TRACKING_SINK_URL.
   AI + integrations:
     ANTHROPIC_API_KEY                [fleet-shared]  reuse the fleet value — do not create a new one
       AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.
