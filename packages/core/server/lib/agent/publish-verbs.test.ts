@@ -235,6 +235,81 @@ test('readiness is read out of the envelope the server really sends, not the fla
   assert.deepEqual(seen.blockers, GO.blockers);
 });
 
+// 2026-08-28, run_1787930929962_njffct — the chat said the article had published. It had not.
+//
+// workflow_publish_run returns ok({ publish: <PublishResult> }); callTool strips only the outer
+// {ok,data}, so the result sits one key in — the same wrapper the readiness verdict hides behind.
+// This read was `data.published ?? data.status ?? true` against the WRAPPED payload, so both
+// operands were undefined and the `?? true` reported EVERY call as a successful publish, with
+// is_error:false. The sequence had actually stopped at its second client call, leaving the object
+// created, checked out and unpublished on the live site.
+//
+// A publish that did not happen must never read as one, and an unreadable result must never read as
+// one either.
+const BLOCKED_PUBLISH = {
+  publish: {
+    published: false,
+    mode: 'blocked_for_publish_execution',
+    publishCommitted: false,
+    blocker: {
+      code: 'publish_sequence_error',
+      step: 'checkout_missing_lock_token',
+      clientError: 'checkout_missing_lock_token: object_checkout returned a SUCCESS result that carries no lock_token.',
+    },
+    blockers: ['publish_sequence_error at checkout_missing_lock_token'],
+    receipts: { toolSequence: ['object_create', 'object_checkout'], publishedTime: null },
+  },
+};
+const LIVE_PUBLISH = {
+  publish: {
+    published: true,
+    mode: 'live',
+    objectId: 'req_conductor_x_20260828_01',
+    result: { article_path: '/beauty-claim-playbook', receipt: { commit_sha: 'abc1234' } },
+  },
+};
+
+test('publish_workspace_run reports a BLOCKED publish as an error, never as published', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : BLOCKED_PUBLISH), calls);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, true, 'a publish that did not happen must be an error');
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, false);
+  assert.match(String(body.error), /did not complete/);
+  assert.equal(body.mode, 'blocked_for_publish_execution');
+  assert.deepEqual(body.tool_sequence, ['object_create', 'object_checkout'], 'say how far it actually got');
+  assert.deepEqual(body.blockers, BLOCKED_PUBLISH.publish.blockers);
+});
+
+// The fabrication itself: an unreadable shape used to become `published: true`. It must now be an
+// error that says the outcome is unknown — silence about an unreadable result is what cost the day.
+test('publish_workspace_run refuses to invent a success from an unreadable result', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : { publish: { mode: 'mystery' } }), calls);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, true);
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, false);
+  assert.match(String(body.error), /could not be read/);
+});
+
+test('publish_workspace_run reports a real publish, with the receipt dug out of the nested result', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : LIVE_PUBLISH), calls);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, false, result.content);
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, true);
+  assert.equal(body.article_path, '/beauty-claim-playbook');
+  assert.deepEqual(body.receipt, { commit_sha: 'abc1234' });
+  // "Published" is not "live" and the copy must not let an editor believe otherwise.
+  assert.match(String(body.note), /NOT live until an explicit release/);
+});
+
 test('publish_workspace_run PUBLISHES a nested "go" — the refusal that blocked every real publish', async () => {
   const calls: Call[] = [];
   const ctx = makeCtx(
