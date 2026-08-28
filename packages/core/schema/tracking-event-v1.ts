@@ -93,6 +93,7 @@ const clientContextSchema = z
       .optional(),
     lang: z.string().max(35).optional(),
   })
+  .partial()
   .optional();
 
 /** What the loader is allowed to author. Everything else is server-stamped. */
