@@ -296,6 +296,60 @@ test('publish_workspace_run refuses to invent a success from an unreadable resul
   assert.match(String(body.error), /could not be read/);
 });
 
+// THE LEDGER TRAP (2026-08-28, run_1787930929962_njffct). The idempotency ledger replays a stored
+// result verbatim and calls nothing. Its own rule is that only a SUCCESSFUL write may be stored —
+// but `isError` is a TRANSPORT verdict, and a refused publish arrives as a perfectly successful MCP
+// call carrying published:false. So a failed publish was stored under `publish:<runId>` and every
+// later attempt on that run replayed the refusal without calling anything: two separate fixes were
+// deployed and verified live, and each retry returned the identical pre-fix error, with no new lock
+// and no version bump on the client object. The failure looked like the fixes had not worked.
+test('a failed publish never enters the idempotency ledger, so a retry is a real retry', async () => {
+  const calls: Call[] = [];
+  const stored: Array<{ tool: string; key: string }> = [];
+  const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : BLOCKED_PUBLISH), calls, {
+    // Stands in for withIdempotentToolCall: it stores only results that are NOT isError.
+    idempotent: async (toolName: string, key: string, run: () => Promise<Record<string, unknown>>) => {
+      const outcome = await run();
+      if (!outcome.isError) stored.push({ tool: toolName, key });
+      return outcome;
+    },
+  } as unknown as Partial<ToolContext>);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+
+  assert.equal(result.is_error, true);
+  assert.deepEqual(stored, [], 'a refused publish must not be stored — storing it makes the run permanently unretryable');
+  // And it must still report the client's own blocker, not a bare transport message.
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, false);
+  assert.deepEqual(body.tool_sequence, ['object_create', 'object_checkout']);
+});
+
+test('a successful publish IS stored, and a replay of one says so', async () => {
+  const stored: Array<{ tool: string; key: string }> = [];
+  const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : LIVE_PUBLISH), [], {
+    idempotent: async (toolName: string, key: string, run: () => Promise<Record<string, unknown>>) => {
+      const outcome = await run();
+      if (!outcome.isError) stored.push({ tool: toolName, key });
+      return outcome;
+    },
+  } as unknown as Partial<ToolContext>);
+  const tool = chatToolByName('publish_workspace_run')!;
+  assert.equal((await tool.execute(ctx, { run_id: 'run_1', request_id: REQ })).is_error, false);
+  assert.deepEqual(stored, [{ tool: 'publish_workspace_run', key: 'publish:run_1' }]);
+
+  // A replay published EARLIER and ran nothing now — the operator has to be able to tell.
+  const replayCtx = makeCtx(() => GO_NESTED, [], {
+    idempotent: async () => ({ ok: true, data: LIVE_PUBLISH, structuredContent: { replayed_from_idempotency_key: true } }),
+  } as unknown as Partial<ToolContext>);
+  const replay = await tool.execute(replayCtx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(replay.is_error, false);
+  const body = JSON.parse(replay.content) as Record<string, unknown>;
+  assert.equal(body.published, true);
+  assert.equal(body.replayed_from_earlier_publish, true);
+  assert.match(String(body.note), /REPLAYED/);
+});
+
 test('publish_workspace_run reports a real publish, with the receipt dug out of the nested result', async () => {
   const calls: Call[] = [];
   const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : LIVE_PUBLISH), calls);
