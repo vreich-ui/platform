@@ -88,7 +88,12 @@ export type TrackerClientConfig = {
   batch: { max_events: number; max_wait_ms: number };
   sample_rate: number;
   defaults: TrackingConfigBody['defaults'];
-  consent: { posture: string; regions: string[]; gpc: boolean };
+  consent: {
+    posture: string;
+    regions: string[];
+    gpc: boolean;
+    analytics_id_mode: TrackingConfigBody['consent']['analytics_id_mode'];
+  };
   goals: TrackerGoalMap;
   /** Enabled ad providers the T13.7/T13.8 bridge may call (ids are
    *  already public — they sit in the head snippets). */
@@ -124,6 +129,7 @@ export const buildTrackerClientConfig = (
       posture: body.consent.posture,
       regions: body.consent.restricted_regions,
       gpc: body.consent.honor_gpc,
+      analytics_id_mode: body.consent.analytics_id_mode,
     },
     goals: buildGoalMap(goalSources),
   };

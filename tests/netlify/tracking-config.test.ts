@@ -14,7 +14,11 @@ import '../../sites/drlurie/config/policy-bindings.js'; // W11 T11.2: register p
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { handleObjectVerb, type ObjectVerbRequest, type ObjectVerbStore } from '../../packages/core/server/lib/object-verbs.js';
+import {
+  handleObjectVerb,
+  type ObjectVerbRequest,
+  type ObjectVerbStore,
+} from '../../packages/core/server/lib/object-verbs.js';
 import { buildStoreValidationContext } from '../../packages/core/server/lib/object-validation-context.js';
 import { checkStructuralInvariants } from '../../packages/core/server/lib/object-validate.js';
 import {
@@ -26,7 +30,10 @@ import {
 import { buildObjectContract } from '../../packages/core/lib/registry/object-contract.js';
 import { validateObjectIdForType } from '../../packages/core/lib/object-ids.js';
 import { mintId } from '../../packages/core/lib/object-ids-mint.js';
-import { trackingConfigBodySchema, type TrackingConfigBody } from '../../packages/core/schema/bodies/tracking-config-v1.js';
+import {
+  trackingConfigBodySchema,
+  type TrackingConfigBody,
+} from '../../packages/core/schema/bodies/tracking-config-v1.js';
 import type { ObjectRecord, Principal } from '../../packages/core/schema/object-record-v1.js';
 
 const AGENT: Principal = { kind: 'agent', agent_name: 'trk-test', auth: 'publish_key' };
@@ -64,6 +71,21 @@ const validBody = (): TrackingConfigBody =>
 test('schema: valid body parses; ingest_path defaults; unknown keys reject', () => {
   const body = validBody();
   assert.equal(body.providers.own?.ingest_path, '/api/t');
+  assert.equal(body.consent.analytics_id_mode, 'granted-only', 'older records default to the consent-only mode');
+  assert.equal(
+    trackingConfigBodySchema.parse({
+      ...validBody(),
+      consent: { ...validBody().consent, analytics_id_mode: 'unrestricted-auto' },
+    }).consent.analytics_id_mode,
+    'unrestricted-auto'
+  );
+  assert.ok(
+    !trackingConfigBodySchema.safeParse({
+      ...validBody(),
+      consent: { ...validBody().consent, analytics_id_mode: 'always' },
+    }).success,
+    'unknown analytics identity modes reject'
+  );
   assert.ok(!trackingConfigBodySchema.safeParse({ ...validBody(), extra: true }).success);
   assert.ok(
     !trackingConfigBodySchema.safeParse({ ...validBody(), providers: { fullstory: { enabled: true } } }).success,

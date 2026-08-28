@@ -116,4 +116,9 @@ test('the write path is the Owner-only governance endpoint (the T9.15 boundary â
     'the card uses the shared override write'
   );
   assert.ok(!card.includes('admin-governance-tracking'), 'no bespoke endpoint');
+  assert.match(card, /Analytics ID mode: \{analyticsIdMode\}/, 'the effective identity mode is shown read-only');
+  assert.ok(
+    !card.includes('setAnalyticsIdMode'),
+    'the guardrails card does not add a write path for the identity mode'
+  );
 });

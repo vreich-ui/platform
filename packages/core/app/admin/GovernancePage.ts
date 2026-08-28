@@ -6,4 +6,26 @@
  */
 import '@site/config/policy-bindings';
 
-export { default } from '@core/admin/GovernancePage';
+import { createElement } from 'react';
+
+import CoreGovernancePage, { type GovernancePageProps } from '@core/admin/GovernancePage';
+import { parseTrackingExport } from '@core/lib/tracking/assemble';
+
+const trackingExports = import.meta.glob('@site/data/site/tracking.json', {
+  eager: true,
+  import: 'default',
+}) as Record<string, unknown>;
+
+const loadAnalyticsIdMode = (): GovernancePageProps['analyticsIdMode'] => {
+  const [exported] = Object.values(trackingExports);
+  if (!exported) return 'granted-only';
+  const body = { ...(exported as Record<string, unknown>) };
+  delete body.__generated;
+  return parseTrackingExport(body).consent.analytics_id_mode;
+};
+
+const analyticsIdMode = loadAnalyticsIdMode();
+
+export default function GovernancePage(props: Omit<GovernancePageProps, 'analyticsIdMode'>) {
+  return createElement(CoreGovernancePage, { ...props, analyticsIdMode });
+}
