@@ -165,7 +165,7 @@ export const consentRuntime = (win: ConsentWindowLike): void => {
   const idUpgradeAllowed = (): boolean => {
     if (gpc) return false;
     if (analyticsIdMode === 'granted-only') return !!stored && stored.analytics === true;
-    return stored ? stored.analytics === true : regionKnown && !restricted();
+    return stored ? stored.analytics === true : regionKnown && region !== null && !restricted();
   };
   const bannerNeeded = (): boolean => {
     if (stored || gpc) return false; // a choice exists / GPC already decided

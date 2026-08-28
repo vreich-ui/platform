@@ -333,6 +333,11 @@ test('unrestricted-auto upgrades identity only for a confirmed unrestricted visi
   assert.equal(unknown.consentState().analytics, false, 'unknown region is fail-closed');
   await unknown.settleOracle();
   assert.equal(unknown.consentState().analytics, true, 'confirmed US oracle result permits the upgrade');
+
+  const noCountry = makeHarness({ posture: 'us-first', oracleCountry: null, analyticsIdMode: 'unrestricted-auto' });
+  assert.equal(noCountry.consentState().analytics, false, 'missing country starts cookieless');
+  await noCountry.settleOracle();
+  assert.equal(noCountry.consentState().analytics, false, 'missing country stays cookieless even under us-first');
 });
 
 test('unrestricted-auto honors explicit choice and GPC; granted-only remains unchanged', () => {
