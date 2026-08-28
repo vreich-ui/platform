@@ -211,12 +211,14 @@ export const ENV_CHECKLIST = [
       {
         name: 'PDF_TOOL_BASE_URL',
         cls: 'fleet-shared',
+        inheritedEnvKey: 'PDF_TOOL_BASE_URL',
         inheritFromPdfTool: true,
         note: 'Inherited automatically from the shared pdf-tool Netlify service for the server-side artifact bridge.',
       },
       {
         name: 'PDF_TOOL_AGENT_RUN_TOKEN',
         cls: 'fleet-shared',
+        inheritedEnvKey: 'PDF_TOOL_AGENT_RUN_TOKEN',
         inheritFromPdfTool: true,
         note: 'Inherited automatically and stored as a Functions-only secret; never written to the scaffold or printed.',
       },
@@ -252,13 +254,19 @@ export const ENV_CHECKLIST = [
       },
       {
         name: 'TRACKING_SINK_URL',
-        cls: 'per-site (may be fleet-shared)',
-        note: 'Owner-DB sink endpoint — one shared DB is allowed with TRACKING_PROJECT_ID as the partition.',
+        cls: 'fleet-shared',
+        inheritedEnvKey: 'TRACKING_SINK_URL',
+        note:
+          'Inherited automatically from the operator provisioning env and stored as a Functions-only secret. One ' +
+          'shared owner DB is allowed with TRACKING_PROJECT_ID as the partition.',
       },
       {
         name: 'TRACKING_SINK_TOKEN',
-        cls: 'per-site (may be fleet-shared)',
-        note: 'Bearer for the sink; pairs with TRACKING_SINK_URL.',
+        cls: 'fleet-shared',
+        inheritedEnvKey: 'TRACKING_SINK_TOKEN',
+        note:
+          'Inherited automatically from the operator provisioning env and stored as a Functions-only secret; pairs ' +
+          'with TRACKING_SINK_URL.',
       },
     ],
   },
@@ -1887,18 +1895,67 @@ export const buildPlan = (opts) => {
 
 // ─── rendering (dry-run / execution report) ───
 
-export const renderEnvChecklist = (executed) => {
+const nonEmpty = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
+
+/**
+ * @typedef {{
+ *   executed?: boolean,
+ *   netlifyToken?: boolean,
+ *   fleetEnv?: NodeJS.ProcessEnv,
+ *   provisionResult?: {
+ *     secretsSet?: string[],
+ *     inheritedMissing?: string[],
+ *     secretsFailed?: Array<{ name: string }>
+ *   } | null,
+ * }} EnvChecklistRenderOptions
+ */
+
+/**
+ * @param {typeof ENV_CHECKLIST[number]['rows'][number]} row
+ * @param {EnvChecklistRenderOptions} options
+ */
+const inheritedEnvStatus = (row, { executed = false, netlifyToken = false, fleetEnv = process.env, provisionResult = null }) => {
+  const envKey = row.inheritedEnvKey;
+  if (!envKey) return null;
+  const hasValue = Boolean(nonEmpty(fleetEnv?.[envKey]));
+  const setNames = new Set(provisionResult?.secretsSet || []);
+  const missingNames = new Set(provisionResult?.inheritedMissing || []);
+  const failedNames = new Set((provisionResult?.secretsFailed || []).map((failure) => failure.name));
+
+  if (executed) {
+    if (setNames.has(row.name)) return '✓ inherited + set on the new site (value not shown)';
+    if (missingNames.has(row.name)) {
+      return `☐ set ${envKey} in the provisioning environment, then re-run --provision-only`;
+    }
+    if (failedNames.has(row.name)) return '☐ provisioning failed — see failure report above';
+    if (row.inheritFromPdfTool) return '✓ inherited + set on the new site (value not shown)';
+  }
+
+  if (netlifyToken) {
+    if (hasValue) return '✓ available in the operator env — will be copied when provisioning runs (value not shown)';
+    if (row.inheritFromPdfTool) {
+      return '☐ operator env override absent — provisioning will fall back to the shared pdf-tool service';
+    }
+    return `☐ set ${envKey} in the provisioning environment before running --netlify-token`;
+  }
+
+  if (row.inheritFromPdfTool) return 'inherited automatically from the shared pdf-tool service';
+  return 'reuse the fleet value — do not create a new one';
+};
+
+/**
+ * @param {EnvChecklistRenderOptions} [options]
+ */
+export const renderEnvChecklist = ({ executed = false, netlifyToken = false, fleetEnv = process.env, provisionResult = null } = {}) => {
   const lines = [];
   for (const { group, rows } of ENV_CHECKLIST) {
     lines.push(`  ${group}:`);
     for (const row of rows) {
-      let status;
-      if (executed && row.inheritFromPdfTool) status = '✓ inherited + set on the new site (value not shown)';
-      else if (executed && row.generate) status = '✓ generated + set on the new site (value not shown)';
-      else if (row.provisionedByGenesis) status = 'managed automatically by CMS-Agent genesis/cloning';
-      else if (row.inheritFromPdfTool) status = 'inherited automatically from the shared pdf-tool service';
-      else if (row.cls === 'fleet-shared') status = 'reuse the fleet value — do not create a new one';
-      else status = '☐ human-supplied — see the provisioning runbook';
+      let status = inheritedEnvStatus(row, { executed, netlifyToken, fleetEnv, provisionResult });
+      if (!status && executed && row.generate) status = '✓ generated + set on the new site (value not shown)';
+      else if (!status && row.provisionedByGenesis) status = 'managed automatically by CMS-Agent genesis/cloning';
+      else if (!status && row.cls === 'fleet-shared') status = 'reuse the fleet value — do not create a new one';
+      else if (!status) status = '☐ human-supplied — see the provisioning runbook';
       lines.push(`    ${row.name.padEnd(32)} [${row.cls}]  ${status}`);
       lines.push(`      ${row.note}`);
     }
@@ -1940,7 +1997,11 @@ export const renderAdminBootstrapChecklist = () =>
     '  Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>',
   ].join('\n');
 
-export const renderPlan = (plan, { netlifyToken }) => {
+/**
+ * @param {ReturnType<typeof buildPlan>} plan
+ * @param {{ netlifyToken?: boolean, fleetEnv?: NodeJS.ProcessEnv }} [options]
+ */
+export const renderPlan = (plan, { netlifyToken = false, fleetEnv = process.env } = {}) => {
   const lines = [];
   lines.push(`create-site plan for '${plan.clientSlug}' (${plan.brandName})`);
   lines.push(`  site id:        ${plan.ids.siteId}`);
@@ -1963,12 +2024,15 @@ export const renderPlan = (plan, { netlifyToken }) => {
     lines.push(
       '  - inherit PDF_TOOL_BASE_URL + PDF_TOOL_AGENT_RUN_TOKEN from the shared pdf-tool service; store the token as a Functions-only production secret'
     );
+    lines.push(
+      '  - copy TRACKING_SINK_URL + TRACKING_SINK_TOKEN from the operator provisioning env into Functions-only secrets on the new site'
+    );
   } else {
     lines.push('Netlify actions: none (no --netlify-token supplied — scaffold only).');
   }
   lines.push('');
   lines.push('Env checklist:');
-  lines.push(renderEnvChecklist(false));
+  lines.push(renderEnvChecklist({ executed: false, netlifyToken: Boolean(netlifyToken), fleetEnv }));
   lines.push('');
   lines.push(renderAdminBootstrapChecklist());
   return lines.join('\n');
@@ -2254,6 +2318,7 @@ export const executeNetlifyProvisioning = async (
 
   const secretsSet = [];
   const secretsFailed = [];
+  const inheritedMissing = [];
   if (accountId) {
     // W14 T14.4: NETLIFY_SITE_ID is knowable HERE — it is the id of the site
     // this run just created — and leaving it to the by-hand checklist is what
@@ -2297,13 +2362,36 @@ export const executeNetlifyProvisioning = async (
         if (!secretsSet.includes(name)) secretsFailed.push({ name, message });
       }
     }
+
+    for (const row of ENV_CHECKLIST.flatMap(({ rows }) => rows).filter((entry) =>
+      ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN'].includes(entry.name)
+    )) {
+      const value = nonEmpty(fleetEnv?.[row.inheritedEnvKey]);
+      if (!value) {
+        inheritedMissing.push(row.name);
+        continue;
+      }
+      try {
+        await setNetlifyEnvVar(fetchImpl, token, accountId, siteId, row.name, value, {
+          scopes: ['functions'],
+          context: 'all',
+          isSecret: true,
+        });
+        secretsSet.push(row.name);
+      } catch (error) {
+        secretsFailed.push({ name: row.name, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
   } else {
     for (const name of ['PDF_TOOL_BASE_URL', 'PDF_TOOL_AGENT_RUN_TOKEN']) {
       secretsFailed.push({ name, message: 'new Netlify site response has no account id' });
     }
+    for (const name of ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']) {
+      inheritedMissing.push(name);
+    }
   }
 
-  return { site, siteId, accountId, storeFailures, secretsSet, secretsFailed, storageParity };
+  return { site, siteId, accountId, storeFailures, secretsSet, secretsFailed, inheritedMissing, storageParity };
 };
 
 // ─── CLI entry ───
@@ -2390,6 +2478,7 @@ const safeNetlifyResult = (result) => ({
   siteUrl: result.site?.ssl_url || result.site?.url,
   storeFailures: result.storeFailures.map(({ storeName, message }) => ({ storeName, message })),
   secretsSet: result.secretsSet,
+  inheritedMissing: result.inheritedMissing,
   secretsFailed: result.secretsFailed.map(({ name, message }) => ({ name, message })),
   storageParity: result.storageParity ? result.storageParity.rows : null,
 });
@@ -2512,7 +2601,13 @@ export const main = async (argv) => {
   console.log('      A new site is a new npm workspace; without it every `npm ci` fails.');
   console.log('');
   console.log('Env checklist:');
-  console.log(renderEnvChecklist(Boolean(netlifyToken)));
+  console.log(
+    renderEnvChecklist({
+      executed: Boolean(netlifyToken),
+      netlifyToken: Boolean(netlifyToken),
+      provisionResult: netlifyExecution,
+    })
+  );
   console.log('');
   console.log(renderAdminBootstrapChecklist());
   console.log('');
