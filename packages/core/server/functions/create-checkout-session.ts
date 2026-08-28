@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 
 import { getArtifactBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import { checkBuyability, loadPublishedProduct } from '../lib/commerce-products.js';
+import { visitorShashForRequest, type MemberLinkDeps } from '../lib/member-link.js';
 import { getStripeClient } from '../lib/stripe-env.js';
 import { isObjectIdForType } from '../../lib/object-ids.js';
 
@@ -35,14 +36,17 @@ type LambdaEvent = {
 const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 const reply = (statusCode: number, body: Record<string, unknown>) => ({
   statusCode,
-  headers: jsonHeaders,
+  headers: {
+    ...jsonHeaders,
+    ...(typeof body.event_id === 'string' ? { 'X-CEID': body.event_id } : {}),
+  },
   body: JSON.stringify(body),
 });
 
 /** The deploy's own URL (Netlify-provided); localhost for local dev. */
 const siteOrigin = (): string => (process.env.URL ?? '').trim().replace(/\/$/, '') || 'http://localhost:8888';
 
-const handlerImpl = async (event: LambdaEvent) => {
+const handlerImpl = async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = {}) => {
   if (event.httpMethod !== 'POST') return reply(405, { error: 'Method not allowed' });
 
   if (!event.body) return reply(400, { error: 'A JSON body is required.' });
@@ -115,6 +119,8 @@ const handlerImpl = async (event: LambdaEvent) => {
     // and the webhook only flips retrieval. The key must sit under the
     // product's own prefix AND already exist — nobody pays for a ghost.
     const metadata: Record<string, string> = { product_id: productId, event_id: randomUUID() };
+    const visitorShash = visitorShashForRequest(event, memberLinkDeps);
+    if (visitorShash) metadata.visitor_shash = visitorShash;
     if (product.body.fulfillment.kind === 'unlock') {
       const unlockKey = typeof input.unlock_key === 'string' ? input.unlock_key.trim() : '';
       const prefix = product.body.fulfillment.unlock_prefix;
@@ -146,4 +152,7 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler =
+  (_binding: SiteBinding, memberLinkDeps: MemberLinkDeps = {}) =>
+  (event: LambdaEvent) =>
+    handlerImpl(event, memberLinkDeps);

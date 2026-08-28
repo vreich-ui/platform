@@ -87,6 +87,7 @@ export const trackingConfigBody = {
     posture: 'geo-adaptive',
     restricted_regions: RESTRICTED_REGIONS,
     honor_gpc: true,
+    analytics_id_mode: 'unrestricted-auto',
     banner: {
       headline: 'Privacy choices',
       body:

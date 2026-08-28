@@ -9,7 +9,17 @@ import { setLocalBlobsRootForTesting, createLocalBlobStore } from '../../package
 const LOCAL_BLOBS_ROOT = join(process.cwd(), '.netlify', 'local-blobs-test', 'checkout-session');
 setLocalBlobsRootForTesting(LOCAL_BLOBS_ROOT);
 
-for (const key of ['NETLIFY', 'NETLIFY_SITE_ID', 'NETLIFY_BLOBS_TOKEN', 'NETLIFY_AUTH_TOKEN', 'SITE_ID']) {
+for (const key of [
+  'NETLIFY',
+  'NETLIFY_SITE_ID',
+  'NETLIFY_BLOBS_TOKEN',
+  'NETLIFY_AUTH_TOKEN',
+  'SITE_ID',
+  'TRACKING_PROJECT_ID',
+  'TRACKING_SALT',
+  'TRACKING_SINK_TOKEN',
+  'TRACKING_SINK_URL',
+]) {
   delete process.env[key];
 }
 process.env.STRIPE_MODE = 'test';
@@ -18,9 +28,14 @@ process.env.URL = 'https://drluriescience.netlify.app';
 
 const { handler: createSession } = await import('../../netlify/functions/create-checkout-session.js');
 const { handler: sessionStatus } = await import('../../netlify/functions/checkout-session-status.js');
+const { createHandler: createCheckoutHandler } = await import(
+  '../../packages/core/server/functions/create-checkout-session.js'
+);
+const { computeVisitorHashes } = await import('../../packages/core/server/lib/tracking-events.js');
 const { setStripeClientForTesting, resetStripeClientForTesting, stripeMode, stripeSecretKey, stripeLinkageForMode } =
   await import('../../packages/core/server/lib/stripe-env.js');
 const { objectRecordKey } = await import('../../packages/core/server/lib/object-store-keys.js');
+const { drlurieSiteBinding } = await import('../../sites/drlurie/config/site-binding.js');
 
 const SESSION_ID = 'cs_test_a1B2c3d4';
 const PRODUCT_ID = 'prod_barrier_repair_guide';
@@ -113,17 +128,68 @@ test('create-checkout-session charges the LINKED price and stamps metadata (§3/
   const body = JSON.parse(response.body) as { url: string; session_id: string; event_id: string };
   assert.equal(body.url, 'https://checkout.stripe.com/c/pay/x');
   assert.equal(body.session_id, SESSION_ID);
+  assert.equal(response.headers['X-CEID'], body.event_id);
 
   assert.ok(received);
   assert.equal(received.mode, 'payment');
   assert.deepEqual(received.line_items, [{ price: 'price_Test1', quantity: 1 }], 'charges price_id, never the cache');
   assert.equal(received.metadata.product_id, PRODUCT_ID);
   assert.equal(received.metadata.event_id, body.event_id);
+  assert.equal(received.metadata.visitor_shash, undefined, 'visitor hash metadata is present only with tracking env');
   assert.equal(
     received.success_url,
     'https://drluriescience.netlify.app/shop/thank-you?session_id={CHECKOUT_SESSION_ID}'
   );
   assert.equal(received.cancel_url, 'https://drluriescience.netlify.app/shop/barrier-repair-guide');
+});
+
+test('create-checkout-session stamps the browser visitor shash for the later Stripe webhook link', async () => {
+  await seedProduct();
+  const nowMs = Date.parse('2026-08-28T12:34:56.000Z');
+  let received: CreateParams | undefined;
+  const fake = {
+    checkout: {
+      sessions: {
+        create: async (params: CreateParams) => {
+          received = params;
+          return { id: SESSION_ID, url: 'https://checkout.stripe.com/c/pay/x' };
+        },
+      },
+    },
+  };
+  const linkedCreateSession = createCheckoutHandler(drlurieSiteBinding, {
+    env: {
+      TRACKING_SALT: 'test-salt',
+      TRACKING_PROJECT_ID: 'drlurie',
+    },
+    nowMs: () => nowMs,
+  });
+
+  const response = await withFakeStripe(fake, () =>
+    linkedCreateSession({
+      httpMethod: 'POST',
+      headers: {
+        'x-forwarded-for': '198.51.100.7, 10.0.0.1',
+        'user-agent': 'checkout-browser-agent',
+      },
+      body: JSON.stringify({ product_id: PRODUCT_ID }),
+    })
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(received);
+  const expected = computeVisitorHashes({
+    salt: 'test-salt',
+    utcDate: '2026-08-28',
+    ip: '198.51.100.7',
+    ua: 'checkout-browser-agent',
+    projectId: 'drlurie',
+    nowMs,
+  }).shash;
+  assert.deepEqual(Object.keys(received.metadata).sort(), ['event_id', 'product_id', 'visitor_shash']);
+  assert.equal(received.metadata.visitor_shash, expected);
+  assert.equal(JSON.stringify(received.metadata).includes('198.51.100.7'), false);
+  assert.equal(JSON.stringify(received.metadata).includes('checkout-browser-agent'), false);
 });
 
 test('create-checkout-session refuses: bad ids, missing/unpublished products, unbuyable states', async () => {
@@ -181,6 +247,7 @@ test('status: paid but webhook not landed → order_ready:false (the page keeps 
 
 test('status: order present → fresh download link minted from the product fulfillment', async () => {
   await seedProduct();
+  const checkoutEventId = 'a1b2c3d4-0000-4000-8000-000000000000';
   await createLocalBlobStore('commerce').setJSON(`orders/${SESSION_ID}.json`, {
     schema: 'commerce_order.v1',
     order_id: 'ord_abc123def456',
@@ -195,14 +262,25 @@ test('status: order present → fresh download link minted from the product fulf
     flags: {},
   });
   const fake = {
-    checkout: { sessions: { retrieve: async () => ({ id: SESSION_ID, payment_status: 'paid' }) } },
+    checkout: {
+      sessions: {
+        retrieve: async () => ({
+          id: SESSION_ID,
+          payment_status: 'paid',
+          metadata: { event_id: checkoutEventId },
+        }),
+      },
+    },
   };
   const response = await withFakeStripe(fake, () => statusFor(SESSION_ID));
   const body = JSON.parse(response.body) as {
     order_ready: boolean;
+    commerce_event_id: string;
     download: { url: string; filename: string } | null;
   };
   assert.equal(body.order_ready, true);
+  assert.equal(body.commerce_event_id, checkoutEventId);
+  assert.equal(response.headers['X-CEID'], checkoutEventId);
   assert.ok(body.download);
   assert.equal(body.download.filename, 'barrier-repair-guide.pdf');
   assert.match(body.download.url, /^\/\.netlify\/functions\/get-purchase\?token=/);

@@ -96,6 +96,8 @@ export const consentRuntime = (win: ConsentWindowLike): void => {
       : 'geo-adaptive';
   const regions = Array.isArray(consentConfig.regions) ? (consentConfig.regions as string[]) : [];
   const honorGpc = consentConfig.gpc !== false;
+  const analyticsIdMode =
+    consentConfig.analytics_id_mode === 'unrestricted-auto' ? 'unrestricted-auto' : 'granted-only';
   const gpc = honorGpc && !!win.navigator && win.navigator.globalPrivacyControl === true;
 
   const read = (storage: StorageLike, key: string): string | null => {
@@ -160,7 +162,11 @@ export const consentRuntime = (win: ConsentWindowLike): void => {
     if (stored) return stored.ads === true; // an explicit choice is honored in every region
     return !restricted();
   };
-  const idUpgradeAllowed = (): boolean => !gpc && !!stored && stored.analytics === true;
+  const idUpgradeAllowed = (): boolean => {
+    if (gpc) return false;
+    if (analyticsIdMode === 'granted-only') return !!stored && stored.analytics === true;
+    return stored ? stored.analytics === true : regionKnown && region !== null && !restricted();
+  };
   const bannerNeeded = (): boolean => {
     if (stored || gpc) return false; // a choice exists / GPC already decided
     if (posture === 'consent-first') return true;

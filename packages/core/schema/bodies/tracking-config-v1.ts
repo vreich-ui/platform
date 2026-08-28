@@ -136,12 +136,14 @@ const providersSchema = z
   });
 
 export const consentPostureSchema = z.enum(['geo-adaptive', 'consent-first', 'us-first']);
+export const analyticsIdModeSchema = z.enum(['granted-only', 'unrestricted-auto']);
 
 const consentSchema = z.strictObject({
   posture: consentPostureSchema,
   /** ISO-3166 alpha-2 (seed = EEA-30 + UK + CH per OQ-W13-1). */
   restricted_regions: z.array(z.string().regex(/^[A-Z]{2}$/)),
   honor_gpc: z.boolean(),
+  analytics_id_mode: analyticsIdModeSchema.default('granted-only'),
   banner: z
     .strictObject({
       headline: z.string().max(120),

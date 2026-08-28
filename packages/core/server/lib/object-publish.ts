@@ -62,7 +62,13 @@ import {
 import { isObjectLockActive, sanitizeObjectLock, type ObjectLockStore } from './object-lock.js';
 import { objectRecordKey } from './object-store-keys.js';
 import { summarizeValidation, validateObject, type ObjectValidationContext } from './object-validate.js';
-import type { ObjectRecord, ObjectType, Principal, PublishReceipt } from '../../schema/object-record-v1.js';
+import type {
+  ObjectRecord,
+  ObjectType,
+  Principal,
+  ProducerContext,
+  PublishReceipt,
+} from '../../schema/object-record-v1.js';
 
 /** Tolerance for caller-computed "now" timestamps before a time counts as future. */
 const SCHEDULING_SKEW_MS = 30_000;
@@ -94,6 +100,8 @@ export type PublishObjectInput = {
   published_time?: string | null;
   lock_token?: string;
   actor: Principal;
+  /** Optional execution context recorded on this published revision. */
+  producer?: ProducerContext;
   commit_message?: string;
 };
 
@@ -253,6 +261,7 @@ export const publishObject = async (
       at: effectivePublishedTime,
       record_version: record.version,
       exportRoot: deps.exportRoot,
+      ...(input.producer ? { producer: input.producer } : {}),
     });
     if (!file.path || !file.content) throw new Error('Materializer returned an empty export.');
   } catch (error) {
@@ -337,6 +346,7 @@ export const publishObject = async (
           commit_sha: receipt.commit_sha,
           no_op: receipt.no_op,
           files: receipt.files,
+          ...(input.producer ? { producer: input.producer } : {}),
         },
       },
     ],

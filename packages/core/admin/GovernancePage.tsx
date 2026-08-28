@@ -61,7 +61,9 @@ function TechnicalDetails({ children }: { children: ReactNode }) {
   );
 }
 
-function GovernanceBody({ identity }: { identity: SiteIdentity }) {
+type AnalyticsIdMode = 'granted-only' | 'unrestricted-auto';
+
+function GovernanceBody({ identity, analyticsIdMode }: { identity: SiteIdentity; analyticsIdMode: AnalyticsIdMode }) {
   const { toast } = useToast();
   const [gov, setGov] = useState<GovernanceState | null>(null);
   const [owner, setOwner] = useState(false);
@@ -148,7 +150,13 @@ function GovernanceBody({ identity }: { identity: SiteIdentity }) {
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
-      <TrackingGovernanceCard gov={gov} owner={owner} onSaved={refresh} identity={identity} />
+      <TrackingGovernanceCard
+        gov={gov}
+        owner={owner}
+        onSaved={refresh}
+        identity={identity}
+        analyticsIdMode={analyticsIdMode}
+      />
 
       <Card kicker="Effective policy" title="How these settings work together">
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
@@ -392,11 +400,13 @@ function TrackingGovernanceCard({
   owner,
   onSaved,
   identity,
+  analyticsIdMode,
 }: {
   gov: GovernanceState;
   owner: boolean;
   onSaved: () => Promise<void>;
   identity: SiteIdentity;
+  analyticsIdMode: AnalyticsIdMode;
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -479,6 +489,7 @@ function TrackingGovernanceCard({
 
       <TechnicalDetails>
         <p>Tracker registry project: {identity.trackingProjectId}</p>
+        <p>Analytics ID mode: {analyticsIdMode}</p>
         <p>Creation policy source: {view.creation.creationProvenance}.</p>
       </TechnicalDetails>
 
@@ -720,12 +731,13 @@ function ChatToolAutonomyCard({
 
 export interface GovernancePageProps {
   identity: SiteIdentity;
+  analyticsIdMode: AnalyticsIdMode;
 }
 
-export default function GovernancePage({ identity }: GovernancePageProps) {
+export default function GovernancePage({ identity, analyticsIdMode }: GovernancePageProps) {
   return (
     <AdminShell currentPath="/admin/settings/guardrails" title="Guardrails" identity={identity}>
-      <GovernanceBody identity={identity} />
+      <GovernanceBody identity={identity} analyticsIdMode={analyticsIdMode} />
     </AdminShell>
   );
 }

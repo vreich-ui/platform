@@ -34,6 +34,7 @@ import { getCommerceBlobStore, getCommerceEventsBlobStore, getSiteObjectsBlobSto
 import { appendCommerceEvent, hashEmail, newCommerceEvent, type CommerceEventType } from '../lib/commerce-events.js';
 import { COMMERCE_ORDER_SCHEMA_VERSION, writeOrderIfAbsent, type OrderRecord } from '../lib/commerce-orders.js';
 import { loadPublishedProduct } from '../lib/commerce-products.js';
+import { enqueueMemberLinkForShash, type MemberLinkDeps } from '../lib/member-link.js';
 import {
   DEFAULT_PURCHASE_TOKEN_TTL_MS,
   mintPurchaseToken,
@@ -76,7 +77,7 @@ export const deterministicUuid = (seed: string): string => {
 
 const isoFromEpochSeconds = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
-const handlerImpl = async (event: LambdaEvent) => {
+const handlerImpl = async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = {}) => {
   if (event.httpMethod !== 'POST') return reply(405, { error: 'Method not allowed' });
 
   const webhookSecret = stripeWebhookSecret();
@@ -99,7 +100,7 @@ const handlerImpl = async (event: LambdaEvent) => {
 
   try {
     if (stripeEvent.type === 'checkout.session.completed') {
-      return await handleCompleted(event, stripeEvent);
+      return await handleCompleted(event, stripeEvent, memberLinkDeps);
     }
     if (stripeEvent.type === 'checkout.session.expired') {
       return await handleExpired(event, stripeEvent);
@@ -113,7 +114,7 @@ const handlerImpl = async (event: LambdaEvent) => {
   }
 };
 
-const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event) => {
+const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event, memberLinkDeps: MemberLinkDeps) => {
   const session = stripeEvent.data.object as Stripe.Checkout.Session;
 
   // v1 sells by card through hosted Checkout: completed ⇒ paid. Delayed
@@ -234,6 +235,8 @@ const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event) =>
     });
   }
 
+  enqueueMemberLinkForShash(session.metadata?.visitor_shash, buyerEmail, memberLinkDeps);
+
   return reply(200, {
     received: true,
     order_created: written.created,
@@ -258,4 +261,7 @@ const handleExpired = async (event: LambdaEvent, stripeEvent: Stripe.Event) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler =
+  (_binding: SiteBinding, memberLinkDeps: MemberLinkDeps = {}) =>
+  (event: LambdaEvent) =>
+    handlerImpl(event, memberLinkDeps);

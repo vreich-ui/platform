@@ -15,6 +15,7 @@
     "dev": "astro dev",
     "start": "astro dev",
     "build": "node scripts/validate-upload-images.mjs && astro build",
+    "postbuild": "node scripts/tracking-dims-push.mjs --export-root sites/drlurie/data/site",
     "preview": "astro preview",
     "astro": "astro",
     "check": "npm run check:astro && npm run check:eslint && npm run check:prettier",

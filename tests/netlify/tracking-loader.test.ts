@@ -265,6 +265,313 @@ test('browser startup waits for page markers and does not duplicate the initial 
   }
 });
 
+test('browser checkout bridge emits exactly one buy_click after checkout response and links the purchase goal', async () => {
+  const listeners = new Map<string, ((event?: Event) => void)[]>();
+  const sent: SentBatch[] = [];
+  const checkoutEventId = '11111111-1111-4111-8111-111111111111';
+
+  const addDocumentListener = (type: string, callback: EventListenerOrEventListenerObject): void => {
+    const list = listeners.get(type) ?? [];
+    list.push(typeof callback === 'function' ? callback : (event?: Event) => callback.handleEvent(event!));
+    listeners.set(type, list);
+  };
+  const fire = (type: string, event?: Event): void => {
+    for (const callback of listeners.get(type) ?? []) callback(event ?? new Event(type));
+  };
+  const buyBox = {
+    getAttribute: (name: string) => (name === 'data-product-id' ? 'prod_guide' : null),
+  };
+  const buyButton = {
+    closest: (selector: string) => {
+      if (selector === '#buy-box') return buyBox;
+      if (selector === '[data-role="buy"]') return buyButton;
+      return null;
+    },
+    getAttribute: () => null,
+    textContent: 'Buy now',
+    tagName: 'BUTTON',
+  };
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    navigator: globalThis.navigator,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+    crypto: globalThis.crypto,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+    addEventListener: globalThis.addEventListener,
+    IntersectionObserver: globalThis.IntersectionObserver,
+  };
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      readyState: 'complete',
+      body: {},
+      referrer: '',
+      hidden: false,
+      documentElement: { scrollHeight: 1000 },
+      addEventListener: addDocumentListener,
+      getElementById: (id: string) =>
+        id === 'trk-config'
+          ? {
+              textContent: JSON.stringify({
+                defaults: { ...DEFAULTS, page: [], product: ['buy_click'] },
+                goals: { prod_guide: { goals: [{ goal: 'purchase', on: 'buy_click' }] } },
+                batch: { max_events: 20, max_wait_ms: 10000 },
+              }),
+            }
+          : null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+  });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { pathname: '/shop/guide', search: '', hostname: 'drlurie.com' },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      language: 'en-US',
+      sendBeacon: (sendPath: string, bodyText: string) => {
+        const parsed = JSON.parse(bodyText) as { schema: string; events: Record<string, unknown>[] };
+        assert.equal(parsed.schema, 'tracking_batch.v1');
+        sent.push({ path: sendPath, events: parsed.events });
+        return true;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 1200 });
+  Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: 800 });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => '00000000-0000-4000-8000-000000000999' },
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+  });
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('create-checkout-session')) {
+        return Promise.resolve(
+          Response.json(
+            { ok: true, url: 'https://checkout.stripe.com/c/pay/x', event_id: checkoutEventId },
+            { headers: { 'X-CEID': checkoutEventId } }
+          )
+        );
+      }
+      if (url.includes('checkout-session-status')) {
+        return Promise.resolve(
+          Response.json(
+            { ok: true, paid: true, order_ready: true, commerce_event_id: checkoutEventId },
+            { headers: { 'X-CEID': checkoutEventId } }
+          )
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    },
+  });
+  Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: addDocumentListener });
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    value: class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  });
+
+  try {
+    const { startTracker } = await import(`../../packages/core/lib/tracking/loader/index.js?checkout=${Date.now()}`);
+    startTracker();
+    const click = new Event('click');
+    Object.defineProperty(click, 'target', { configurable: true, value: buyButton });
+    fire('click', click);
+    await fetch('/.netlify/functions/create-checkout-session', { method: 'POST' });
+    await fetch('/.netlify/functions/checkout-session-status?session_id=cs_test_123');
+    fire('trk:goal', new CustomEvent('trk:goal', { detail: { goal: 'purchase' } }));
+    fire('pagehide');
+
+    const events = sent.flatMap((batch) => batch.events);
+    const buyClicks = events.filter((event) => event.event === 'buy_click') as { props?: Record<string, unknown> }[];
+    assert.equal(buyClicks.length, 1);
+    const buyClick = buyClicks[0];
+    assert.equal(buyClick?.props?.commerce_event_id, checkoutEventId);
+    const goals = events.filter((event) => event.event === 'goal') as { props?: Record<string, unknown> }[];
+    assert.equal(goals.length, 2, 'buy-click bridge goal plus status-upgraded purchase goal');
+    assert.ok(goals.every((event) => event.props?.commerce_event_id === checkoutEventId));
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous.window });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previous.document });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: previous.location });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previous.navigator });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: previous.innerWidth });
+    Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: previous.innerHeight });
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous.crypto });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous.localStorage });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: previous.fetch });
+    Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: previous.addEventListener });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: previous.IntersectionObserver,
+    });
+  }
+});
+
+test('browser checkout bridge emits buy_click without commerce_event_id on checkout failure', async () => {
+  const listeners = new Map<string, ((event?: Event) => void)[]>();
+  const sent: SentBatch[] = [];
+  let checkoutAttempts = 0;
+
+  const addDocumentListener = (type: string, callback: EventListenerOrEventListenerObject): void => {
+    const list = listeners.get(type) ?? [];
+    list.push(typeof callback === 'function' ? callback : (event?: Event) => callback.handleEvent(event!));
+    listeners.set(type, list);
+  };
+  const fire = (type: string, event?: Event): void => {
+    for (const callback of listeners.get(type) ?? []) callback(event ?? new Event(type));
+  };
+  const buyBox = {
+    getAttribute: (name: string) => (name === 'data-product-id' ? 'prod_guide' : null),
+  };
+  const buyButton = {
+    closest: (selector: string) => {
+      if (selector === '#buy-box') return buyBox;
+      if (selector === '[data-role="buy"]') return buyButton;
+      return null;
+    },
+    getAttribute: () => null,
+    textContent: 'Buy now',
+    tagName: 'BUTTON',
+  };
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    navigator: globalThis.navigator,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+    crypto: globalThis.crypto,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+    addEventListener: globalThis.addEventListener,
+    IntersectionObserver: globalThis.IntersectionObserver,
+  };
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      readyState: 'complete',
+      body: {},
+      referrer: '',
+      hidden: false,
+      documentElement: { scrollHeight: 1000 },
+      addEventListener: addDocumentListener,
+      getElementById: (id: string) =>
+        id === 'trk-config'
+          ? {
+              textContent: JSON.stringify({
+                defaults: { ...DEFAULTS, page: [], product: ['buy_click'] },
+                batch: { max_events: 20, max_wait_ms: 10000 },
+              }),
+            }
+          : null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+  });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { pathname: '/shop/guide', search: '', hostname: 'drlurie.com' },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      language: 'en-US',
+      sendBeacon: (sendPath: string, bodyText: string) => {
+        const parsed = JSON.parse(bodyText) as { schema: string; events: Record<string, unknown>[] };
+        assert.equal(parsed.schema, 'tracking_batch.v1');
+        sent.push({ path: sendPath, events: parsed.events });
+        return true;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 1200 });
+  Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: 800 });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => '00000000-0000-4000-8000-000000000998' },
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+  });
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('create-checkout-session')) {
+        checkoutAttempts += 1;
+        if (checkoutAttempts === 1) return Promise.resolve(Response.json({ ok: false }, { status: 500 }));
+        return Promise.reject(new Error('network checkout failure'));
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    },
+  });
+  Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: addDocumentListener });
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    value: class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  });
+
+  try {
+    const { startTracker } = await import(
+      `../../packages/core/lib/tracking/loader/index.js?checkoutFailure=${Date.now()}`
+    );
+    startTracker();
+    const click = new Event('click');
+    Object.defineProperty(click, 'target', { configurable: true, value: buyButton });
+    fire('click', click);
+    await fetch('/.netlify/functions/create-checkout-session', { method: 'POST' });
+    fire('click', click);
+    await assert.rejects(fetch('/.netlify/functions/create-checkout-session', { method: 'POST' }));
+    fire('pagehide');
+
+    const buyClicks = sent.flatMap((batch) => batch.events).filter((event) => event.event === 'buy_click') as {
+      props?: Record<string, unknown>;
+    }[];
+    assert.equal(buyClicks.length, 2);
+    assert.ok(buyClicks.every((event) => event.props?.commerce_event_id === undefined));
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous.window });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previous.document });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: previous.location });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previous.navigator });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: previous.innerWidth });
+    Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: previous.innerHeight });
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous.crypto });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous.localStorage });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: previous.fetch });
+    Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: previous.addEventListener });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: previous.IntersectionObserver,
+    });
+  }
+});
+
 test('term pages emit one term_view on page-load and non-term pages emit none', () => {
   const { tracker, allEvents, fireTimers } = makeTracker();
   tracker.pageLoad({
@@ -277,7 +584,10 @@ test('term pages emit one term_view on page-load and non-term pages emit none', 
   fireTimers();
   const termViews = allEvents().filter((event) => event.event === 'term_view');
   assert.equal(termViews.length, 1);
-  assert.deepEqual((termViews[0] as { object?: unknown }).object, { object_type: 'taxonomy', term_id: 't_skinbarrier' });
+  assert.deepEqual((termViews[0] as { object?: unknown }).object, {
+    object_type: 'taxonomy',
+    term_id: 't_skinbarrier',
+  });
 });
 
 test('/admin pages never track — hard bail', () => {
@@ -512,6 +822,39 @@ test('goal events validate the slug and value; GPC suppresses the consent upgrad
   assert.equal(last.consent.ads, false);
 });
 
+test('checkout purchase flow carries the checkout commerce_event_id onto buy_click and purchase goal', () => {
+  const checkoutEventId = '11111111-1111-4111-8111-111111111111';
+  const trackerConfig = parseTrackerConfig({
+    defaults: DEFAULTS,
+    batch: { max_events: 20, max_wait_ms: 10000 },
+    goals: {
+      prod_guide: {
+        goals: [{ goal: 'purchase', on: 'buy_click' }],
+      },
+    },
+  });
+  const harness = makeEnv();
+  const tracker = createTracker(trackerConfig, harness.env, harness.timerApi);
+  tracker.pageLoad({ path: '/shop/guide', route: null });
+  tracker.click(
+    'buy_click',
+    null,
+    { commerce_event_id: checkoutEventId },
+    { object_type: 'product', object_id: 'prod_guide' }
+  );
+  tracker.goal('purchase', undefined, checkoutEventId);
+  tracker.flush();
+  const events = harness.allEvents();
+  const buyClick = events.find((event) => event.event === 'buy_click') as { props?: Record<string, unknown> };
+  assert.equal(buyClick?.props?.commerce_event_id, checkoutEventId);
+  const goals = events.filter((event) => event.event === 'goal') as { props?: Record<string, unknown> }[];
+  assert.equal(goals.length, 2);
+  assert.ok(
+    goals.every((event) => event.props?.commerce_event_id === checkoutEventId),
+    'both the buy-click bridge goal and thank-you purchase goal keep the same id'
+  );
+});
+
 // ═══ helpers + size budget ════════════════════════════════════════════════════
 
 test('slugify and hostOf are bounded and conservative', () => {
@@ -523,7 +866,7 @@ test('slugify and hostOf are bounded and conservative', () => {
   assert.equal(hostOf('javascript:alert(1)'), null);
 });
 
-test('SIZE BUDGET: the built loader chunk is ≤5KB min+gzip (hard ceiling 6KB)', () => {
+test('SIZE BUDGET: the built loader chunk stays under the commerce-era soft target (hard ceiling 6KB)', () => {
   // Under the ci-test harness this file runs COMPILED from .tmp/ci-test, so
   // resolve the REAL repo root (the nearest ancestor with a package.json that
   // is not the harness dir) and bundle the actual TS source — the exact bytes
@@ -553,7 +896,8 @@ test('SIZE BUDGET: the built loader chunk is ≤5KB min+gzip (hard ceiling 6KB)'
   const gzipped = gzipSync(code).byteLength;
   assert.ok(gzipped <= 6144, `HARD CEILING: loader is ${gzipped}B min+gzip (>6KB)`);
   // 4KB was the T13.4 pre-bridge target; T13.6 (consent/id wiring), T13.7
-  // (the goal→conversion bridge), and T13.8 (native fan-out) grew the chunk
-  // deliberately — the 6KB ceiling is the hard line.
-  assert.ok(gzipped <= 5120, `BUDGET: loader is ${gzipped}B min+gzip (>5KB target)`);
+  // (the goal→conversion bridge), T13.8 (native fan-out), and T20.4
+  // (checkout commerce-event correlation) grew the chunk deliberately — the
+  // 6KB ceiling is the hard line.
+  assert.ok(gzipped <= 5376, `BUDGET: loader is ${gzipped}B min+gzip (>5.25KB target)`);
 });

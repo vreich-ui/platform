@@ -122,6 +122,7 @@ const makeStorage = (initial: Record<string, string> = {}) => {
 type HarnessOptions = {
   posture?: string;
   regions?: string[];
+  analyticsIdMode?: string;
   honorGpc?: boolean;
   gpc?: boolean;
   storedConsent?: { analytics: boolean; ads: boolean };
@@ -138,7 +139,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
     ingest_path: '/api/t',
     consent: {
       posture: options.posture ?? 'geo-adaptive',
-      regions: options.regions ?? ['DE', 'FR', 'GB', 'CH'],
+      regions: options.regions ?? ['DE', 'FR', 'GB', 'CH', 'IL'],
+      analytics_id_mode: options.analyticsIdMode ?? 'granted-only',
       gpc: options.honorGpc ?? true,
     },
   });
@@ -314,6 +316,43 @@ test('GPC suppresses in restricted AND unrestricted regions, beats a stored gran
 test('honor_gpc:false ignores the signal (the config switch is respected)', () => {
   const harness = makeHarness({ cachedRegion: 'US', gpc: true, honorGpc: false });
   assert.equal(harness.gatedPixel.activated, true);
+});
+
+// ═══ analytics identity mode ═════════════════════════════════════════════════
+
+test('unrestricted-auto upgrades identity only for a confirmed unrestricted visitor without a choice', async () => {
+  const us = makeHarness({ cachedRegion: 'US', analyticsIdMode: 'unrestricted-auto' });
+  assert.equal(us.consentState().analytics, true, 'confirmed US visitor may mint an analytics id');
+
+  for (const cachedRegion of ['IL', 'DE']) {
+    const restricted = makeHarness({ cachedRegion, analyticsIdMode: 'unrestricted-auto' });
+    assert.equal(restricted.consentState().analytics, false, `${cachedRegion} stays cookieless without a choice`);
+  }
+
+  const unknown = makeHarness({ oracleCountry: 'US', analyticsIdMode: 'unrestricted-auto' });
+  assert.equal(unknown.consentState().analytics, false, 'unknown region is fail-closed');
+  await unknown.settleOracle();
+  assert.equal(unknown.consentState().analytics, true, 'confirmed US oracle result permits the upgrade');
+
+  const noCountry = makeHarness({ posture: 'us-first', oracleCountry: null, analyticsIdMode: 'unrestricted-auto' });
+  assert.equal(noCountry.consentState().analytics, false, 'missing country starts cookieless');
+  await noCountry.settleOracle();
+  assert.equal(noCountry.consentState().analytics, false, 'missing country stays cookieless even under us-first');
+});
+
+test('unrestricted-auto honors explicit choice and GPC; granted-only remains unchanged', () => {
+  const eeaGrant = makeHarness({
+    cachedRegion: 'DE',
+    analyticsIdMode: 'unrestricted-auto',
+    storedConsent: { analytics: true, ads: false },
+  });
+  assert.equal(eeaGrant.consentState().analytics, true, 'explicit analytics grant works in the EEA');
+
+  const gpc = makeHarness({ cachedRegion: 'US', analyticsIdMode: 'unrestricted-auto', gpc: true });
+  assert.equal(gpc.consentState().analytics, false, 'GPC prevents the upgrade everywhere');
+
+  const grantedOnly = makeHarness({ cachedRegion: 'US', analyticsIdMode: 'granted-only' });
+  assert.equal(grantedOnly.consentState().analytics, false, 'the compatibility default still requires a grant');
 });
 
 // ═══ the banner flow ══════════════════════════════════════════════════════════

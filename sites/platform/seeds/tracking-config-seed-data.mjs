@@ -65,6 +65,7 @@ export const trackingConfigBody = {
     posture: 'consent-first',
     restricted_regions: RESTRICTED_REGIONS,
     honor_gpc: true,
+    analytics_id_mode: 'unrestricted-auto',
     banner: {
       headline: 'Your privacy choices',
       body:
@@ -87,6 +88,4 @@ export const trackingConfigBody = {
   },
 };
 
-export const CONVERSION_SEEDS = [
-  { objectType: 'tracking_config', objectId: 'trk_platform', body: trackingConfigBody },
-];
+export const CONVERSION_SEEDS = [{ objectType: 'tracking_config', objectId: 'trk_platform', body: trackingConfigBody }];

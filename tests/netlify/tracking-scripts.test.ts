@@ -38,7 +38,12 @@ const trackingBody = (overrides: Partial<TrackingConfigBody['providers']> = {}):
       },
       ...overrides,
     },
-    consent: { posture: 'geo-adaptive', restricted_regions: ['DE', 'GB'], honor_gpc: true },
+    consent: {
+      posture: 'geo-adaptive',
+      restricted_regions: ['DE', 'GB'],
+      honor_gpc: true,
+      analytics_id_mode: 'unrestricted-auto',
+    },
     defaults: {
       page: ['pageview'],
       section: ['section_impression'],
@@ -59,7 +64,12 @@ test('client config: project from trk_<project>, own-block knobs, consent + defa
   assert.equal(config.ingest_path, '/api/t');
   assert.deepEqual(config.batch, { max_events: 15, max_wait_ms: 8000 });
   assert.equal(config.sample_rate, 0.5);
-  assert.deepEqual(config.consent, { posture: 'geo-adaptive', regions: ['DE', 'GB'], gpc: true });
+  assert.deepEqual(config.consent, {
+    posture: 'geo-adaptive',
+    regions: ['DE', 'GB'],
+    gpc: true,
+    analytics_id_mode: 'unrestricted-auto',
+  });
   assert.deepEqual(config.defaults.page, ['pageview']);
 });
 

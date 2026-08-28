@@ -245,6 +245,7 @@ const VERB_PAYLOAD_BUILDERS: Record<string, VerbPayloadBuilder> = {
     published_time: args.published_time,
     artifact_set: args.artifact_set,
     release_build: args.release_build,
+    producer: args.producer,
   }),
 };
 

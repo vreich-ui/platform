@@ -327,6 +327,14 @@ test('the P1 review + publish tools declare the right required fields', async ()
     'entries',
   ]);
   assert.deepEqual(getTool(tools, 'object_publish').inputSchema.required, ['object_type', 'object_id', 'lock_token']);
+  const producer = getTool(tools, 'object_publish').inputSchema.properties?.producer as {
+    additionalProperties?: boolean;
+    required?: string[];
+    properties?: Record<string, { maxLength?: number }>;
+  };
+  assert.equal(producer.additionalProperties, false);
+  assert.deepEqual(producer.required, ['run_id', 'node_id', 'prompt_version', 'model']);
+  for (const field of producer.required) assert.equal(producer.properties?.[field]?.maxLength, 128);
   // object_review_decide exposes the closed approve | request_changes enum.
   const decision = getTool(tools, 'object_review_decide').inputSchema.properties?.decision as { enum?: string[] };
   assert.deepEqual(decision.enum, ['approve', 'request_changes']);

@@ -17,9 +17,18 @@ import {
   RESTRICTED_REGIONS,
   trackingConfigBody,
 } from '../../sites/drlurie/seeds/tracking-config-seed-data.mjs';
-import { RESTRICTED_REGIONS as FERNWELL_RESTRICTED_REGIONS } from '../../sites/fernwell/seeds/tracking-config-seed-data.mjs';
-import { RESTRICTED_REGIONS as PLATFORM_RESTRICTED_REGIONS } from '../../sites/platform/seeds/tracking-config-seed-data.mjs';
-import { RESTRICTED_REGIONS as ZILBERMAN_RESTRICTED_REGIONS } from '../../sites/zilberman/seeds/tracking-config-seed-data.mjs';
+import {
+  RESTRICTED_REGIONS as FERNWELL_RESTRICTED_REGIONS,
+  trackingConfigBody as fernwellTrackingConfigBody,
+} from '../../sites/fernwell/seeds/tracking-config-seed-data.mjs';
+import {
+  RESTRICTED_REGIONS as PLATFORM_RESTRICTED_REGIONS,
+  trackingConfigBody as platformTrackingConfigBody,
+} from '../../sites/platform/seeds/tracking-config-seed-data.mjs';
+import {
+  RESTRICTED_REGIONS as ZILBERMAN_RESTRICTED_REGIONS,
+  trackingConfigBody as zilbermanTrackingConfigBody,
+} from '../../sites/zilberman/seeds/tracking-config-seed-data.mjs';
 import {
   applyPatchOps,
   deepEqualJson,
@@ -61,6 +70,7 @@ test('trk_drlurie seed: schema-parses as the ratified posture (OQ-W13-1/-3/-6, Â
     assert.ok(parsed.consent.restricted_regions.includes(code), `${code} restricted`);
   }
   assert.equal(parsed.consent.honor_gpc, true);
+  assert.equal(parsed.consent.analytics_id_mode, 'unrestricted-auto');
   assert.ok(parsed.consent.banner, 'banner copy seeded (the T13.6 component reads it)');
   assert.equal(parsed.providers.own?.enabled, true);
   assert.equal(parsed.providers.own?.endpoint_env, 'TRACKING_SINK_URL');
@@ -84,6 +94,18 @@ test('all four tracking seeds include IL in restricted_regions', () => {
     ZILBERMAN_RESTRICTED_REGIONS,
   ]) {
     assert.ok(regions.includes('IL'));
+  }
+  for (const body of [
+    trackingConfigBody,
+    platformTrackingConfigBody,
+    fernwellTrackingConfigBody,
+    zilbermanTrackingConfigBody,
+  ]) {
+    assert.equal(
+      trackingConfigBodySchema.parse(body).consent.analytics_id_mode,
+      'unrestricted-auto',
+      'seed enables automatic analytics identity only outside restricted regions'
+    );
   }
 });
 

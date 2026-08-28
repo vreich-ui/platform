@@ -28,9 +28,18 @@ type LambdaEvent = {
 const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 const reply = (statusCode: number, body: Record<string, unknown>) => ({
   statusCode,
-  headers: jsonHeaders,
+  headers: {
+    ...jsonHeaders,
+    ...(typeof body.commerce_event_id === 'string' ? { 'X-CEID': body.commerce_event_id } : {}),
+  },
   body: JSON.stringify(body),
 });
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const checkoutEventId = (session: { metadata?: Record<string, string | null> | null }): string | undefined => {
+  const eventId = session.metadata?.event_id;
+  return typeof eventId === 'string' && UUID_RE.test(eventId) ? eventId : undefined;
+};
 
 const handlerImpl = async (event: LambdaEvent) => {
   if (event.httpMethod !== 'GET') return reply(405, { error: 'Method not allowed' });
@@ -46,6 +55,7 @@ const handlerImpl = async (event: LambdaEvent) => {
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     const paid = session.payment_status === 'paid';
+    const commerceEventId = checkoutEventId(session);
 
     const commerce = await getCommerceBlobStore(event);
     const order = await readOrder(commerce, sessionId);
@@ -56,7 +66,13 @@ const handlerImpl = async (event: LambdaEvent) => {
 
     if (order.fulfillment.state !== 'issued') {
       // Nothing to deliver (tips / kind 'none') — the thank-you itself is the outcome.
-      return reply(200, { ok: true, paid, order_ready: true, download: null });
+      return reply(200, {
+        ok: true,
+        paid,
+        order_ready: true,
+        download: null,
+        ...(commerceEventId ? { commerce_event_id: commerceEventId } : {}),
+      });
     }
 
     const secret = purchaseTokenSecret();
@@ -64,7 +80,13 @@ const handlerImpl = async (event: LambdaEvent) => {
     const product = await loadPublishedProduct(siteObjects, order.product_id);
     if (!secret || product?.body.fulfillment.kind !== 'download') {
       // Fulfilled order but no mintable link right now — surface a support path.
-      return reply(200, { ok: true, paid, order_ready: true, download: null });
+      return reply(200, {
+        ok: true,
+        paid,
+        order_ready: true,
+        download: null,
+        ...(commerceEventId ? { commerce_event_id: commerceEventId } : {}),
+      });
     }
 
     const token = mintPurchaseToken(
@@ -80,6 +102,7 @@ const handlerImpl = async (event: LambdaEvent) => {
       ok: true,
       paid,
       order_ready: true,
+      ...(commerceEventId ? { commerce_event_id: commerceEventId } : {}),
       download: {
         url: `/.netlify/functions/get-purchase?token=${encodeURIComponent(token)}`,
         filename: product.body.fulfillment.filename,

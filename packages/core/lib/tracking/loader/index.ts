@@ -11,7 +11,7 @@
  * `astro:page-load` and disconnect on `astro:before-swap` (VT navigations
  * never fire pagehide — the flush rides before-swap).
  */
-import { createTracker, parseTrackerConfig, type PageContext, type Tracker } from './core.js';
+import { COMMERCE_EVENT_ID, createTracker, parseTrackerConfig, type PageContext, type Tracker } from './core.js';
 import { classifyClick, trackableRefOf, type ElementLike } from './dom.js';
 import { clearPersistentId, readOrMintPersistentId } from './persistent-id.js';
 
@@ -20,6 +20,8 @@ let observer: IntersectionObserver | null = null;
 let started = false;
 let boundPageKey: string | null = null;
 let deferredBindQueued = false;
+let pendingCheckoutProductId: string | null = null;
+let statusPurchaseGoalId: string | null = null;
 
 // ── consent wiring (T13.6) — the runtime owns policy; the loader reacts ──────
 type ConsentSnapshot = { analytics: boolean; ads: boolean; gpc: boolean };
@@ -99,6 +101,32 @@ const send = (path: string, body: string): void => {
   if (!(navigator.sendBeacon && navigator.sendBeacon(path, body))) {
     void fetch(path, { method: 'POST', body, keepalive: true }).catch(() => undefined);
   }
+};
+
+const emitPendingBuyClick = (commerceEventId?: string): void => {
+  if (!pendingCheckoutProductId) return;
+  tracker?.click('buy_click', null, commerceEventId ? { [COMMERCE_EVENT_ID]: commerceEventId } : undefined, {
+    object_type: 'product',
+    object_id: pendingCheckoutProductId,
+  });
+  pendingCheckoutProductId = null;
+};
+
+const installCommerceFetchBridge = (): void => {
+  const originalFetch = window.fetch?.bind(window);
+  if (!originalFetch) return;
+  window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const isCheckoutCreate = String(input).includes('create-checkout');
+    let commerceEventId: string | undefined;
+    try {
+      const response = await originalFetch(input, init);
+      commerceEventId = response.headers.get('x-ceid') ?? undefined;
+      if (commerceEventId) statusPurchaseGoalId = commerceEventId;
+      return response;
+    } finally {
+      if (isCheckoutCreate) emitPendingBuyClick(commerceEventId);
+    }
+  }) as typeof fetch;
 };
 
 // T13.7: the bridge's gtag transport — a REAL `arguments` object push
@@ -196,6 +224,7 @@ const onScroll = (): void => {
 export const startTracker = (): void => {
   if (started) return;
   started = true;
+  installCommerceFetchBridge();
   document.addEventListener('astro:page-load', bindPage);
   document.addEventListener('astro:before-swap', endPage);
   addEventListener('pagehide', endPage);
@@ -208,14 +237,21 @@ export const startTracker = (): void => {
     if (!tracker) return;
     const target = rawEvent.target as unknown as ElementLike | null;
     if (!target?.closest) return;
+    const checkoutBox = target.closest('#buy-box');
+    if (checkoutBox && target.closest('[data-role="buy"]'))
+      pendingCheckoutProductId = checkoutBox.getAttribute('data-product-id');
     const classified = classifyClick(target, location.hostname);
     if (classified) tracker.click(classified.kind, classified.ref, classified.props, classified.extraObject);
   };
   document.addEventListener('click', onClick);
   document.addEventListener('auxclick', onClick);
   document.addEventListener('trk:goal', (rawEvent) => {
-    const detail = (rawEvent as CustomEvent<{ goal?: string; value_cents?: number }>).detail;
-    if (detail?.goal) tracker?.goal(detail.goal, detail.value_cents);
+    const detail = (rawEvent as CustomEvent<{ goal?: string; value_cents?: number; commerce_event_id?: string }>)
+      .detail;
+    if (!detail?.goal) return;
+    const commerceEventId = detail[COMMERCE_EVENT_ID] ?? statusPurchaseGoalId ?? undefined;
+    statusPurchaseGoalId = null;
+    tracker?.goal(detail.goal, detail.value_cents, commerceEventId);
   });
   document.addEventListener('trk:consent', (rawEvent) => {
     const detail = (rawEvent as CustomEvent<Partial<ConsentSnapshot>>).detail;

@@ -625,7 +625,7 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 # site-relative (Netlify runs this command with sites/${ids.clientSlug} as cwd).
 [build]
   publish = "dist"
-  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts"
+  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts && (node ../../scripts/tracking-dims-push.mjs --export-root data/site || true)"
   # Netlify skips a build when nothing under the base directory (sites/${ids.clientSlug}) changed.
   # Our MCP functions bundle the shared packages/core workspace, which lives OUTSIDE this
   # base dir — so a packages/core-only change was being skipped and shipped stale functions
