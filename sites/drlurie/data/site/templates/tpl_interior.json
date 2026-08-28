@@ -1,16 +1,20 @@
 {
   "__generated": {
-    "at": "2026-07-14T15:40:45.320Z",
+    "at": "2026-08-28T19:14:11.758Z",
     "from": "objects/template/by-id/tpl_interior.json",
-    "record_version": 33
+    "record_version": 39
   },
-  "appliesTo": ["standard"],
+  "appliesTo": [
+    "standard"
+  ],
   "description": "The standard interior-page shape: a quiet lede opener, one or more prose body sections, and an optional closing CTA banner.",
   "name": "Interior page",
   "scope": "evergreen",
   "slots": [
     {
-      "allowed": ["lede"],
+      "allowed": [
+        "lede"
+      ],
       "blueprint": {
         "data": {
           "actions": [],
@@ -25,7 +29,9 @@
       "slotId": "slot_lede"
     },
     {
-      "allowed": ["prose"],
+      "allowed": [
+        "prose"
+      ],
       "blueprint": {
         "data": {
           "body": "<p></p>"
@@ -38,7 +44,9 @@
       "slotId": "slot_body"
     },
     {
-      "allowed": ["cta_banner"],
+      "allowed": [
+        "cta_banner"
+      ],
       "blueprint": {
         "data": {
           "actions": [],
