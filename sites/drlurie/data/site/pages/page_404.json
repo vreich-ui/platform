@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-07-11T11:30:30.356Z",
+    "at": "2026-08-28T19:13:12.269Z",
     "from": "objects/page/by-id/page_404.json",
-    "record_version": 22
+    "record_version": 28
   },
   "pageType": "system",
   "route": "/404",
