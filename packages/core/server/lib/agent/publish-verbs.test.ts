@@ -57,6 +57,26 @@ const NO_GO = {
   blockers: ['taxonomy_unresolved'],
 };
 
+// THE SHAPE THE SERVER ACTUALLY RETURNS (2026-08-28, run_1787930929962_njffct).
+//
+// The two fixtures above are FLAT, and that is why nothing here ever failed while
+// publish_workspace_run could not publish anything at all. cmsAgent.callTool
+// unwraps the outer {ok:true,data}; what workflow_publish_readiness leaves behind
+// is then TWO more levels deep — {readiness:{available, articleBodyValid,
+// readiness:{status,...}}} — so reading `data.status` yielded undefined, which is
+// not "no_go" but "no answer", and every caller treated it as a refusal. A run
+// whose readiness was "go" with all twelve checks passing was refused every time
+// it was asked, and the editor was told to go look at a checklist that had never
+// been produced.
+//
+// These fixtures are the wire, verbatim in shape. Anything that reads readiness
+// must satisfy them AND the flat ones above.
+const nested = (verdict: Record<string, unknown>) => ({
+  readiness: { available: true, articleBodyValid: true, readiness: verdict },
+});
+const GO_NESTED = nested(GO);
+const NO_GO_NESTED = nested(NO_GO);
+
 const makeCtx = (
   respond: (name: string, args: Record<string, unknown>) => unknown,
   calls: Call[],
@@ -199,6 +219,73 @@ test('publish_workspace_run refuses when readiness is not "go" — workflow_publ
   const body = JSON.parse(result.content) as { error: string; readiness: { status: string } };
   assert.match(body.error, /not ready/);
   assert.equal(body.readiness.status, 'no_go');
+});
+
+test('readiness is read out of the envelope the server really sends, not the flat shape the old fixtures used', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx(() => GO_NESTED, calls);
+  const check = chatToolByName('check_workspace_run_readiness')!;
+  const seen = JSON.parse((await check.execute(ctx, { run_id: 'run_1', request_id: REQ })).content) as {
+    status: string;
+    checklist: unknown;
+    blockers: unknown;
+  };
+  assert.equal(seen.status, 'go', 'the verdict must survive the two levels of nesting');
+  assert.deepEqual(seen.checklist, GO.checklist);
+  assert.deepEqual(seen.blockers, GO.blockers);
+});
+
+test('publish_workspace_run PUBLISHES a nested "go" — the refusal that blocked every real publish', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx(
+    (name) =>
+      name === 'workflow_publish_readiness' ? GO_NESTED : { published: true, commit: 'abc1234', receipt: { id: 'rcpt_1' } },
+    calls
+  );
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ, tags: ['retinol'] });
+  assert.equal(result.is_error, false, result.content);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_publish_readiness', 'workflow_publish_run'],
+    'a nested go must reach workflow_publish_run'
+  );
+});
+
+test('publish_workspace_run still refuses a nested no_go, and reports its real blockers', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx(() => NO_GO_NESTED, calls);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, true);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_publish_readiness'],
+    'a no_go must never reach workflow_publish_run'
+  );
+  const body = JSON.parse(result.content) as { error: string; readiness: { status: string; blockers: unknown } };
+  assert.match(body.error, /not ready to publish/);
+  assert.equal(body.readiness.status, 'no_go');
+  assert.deepEqual(body.readiness.blockers, NO_GO.blockers);
+});
+
+// A missing verdict and a no_go are different facts and must read differently: one
+// is the checklist speaking, the other is nothing having judged the run at all.
+// Conflating them is what made an envelope bug look like a content problem.
+test('publish_workspace_run names a MISSING verdict as a system fault, not as "not ready"', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx(() => ({ readiness: { available: false, articleBodyValid: true, readiness: null } }), calls);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, true);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_publish_readiness'],
+    'no verdict must never reach workflow_publish_run either'
+  );
+  const body = JSON.parse(result.content) as { error: string };
+  assert.match(body.error, /no readiness verdict/);
+  assert.doesNotMatch(body.error, /not ready to publish/);
 });
 
 test('publish_workspace_run on "go" sends the exact workflow_publish_run payload with the approval pinned to the human, under a stored publish:<runId> idempotency key', async () => {

@@ -1047,13 +1047,48 @@ const callReadiness = async (
   });
 };
 
+/**
+ * The readiness VERDICT, dug out of the envelope CMS-Agent actually returns.
+ *
+ * `cmsAgent.callTool` already unwraps the outer `{ok:true,data}`. What it hands
+ * back for `workflow_publish_readiness` is then TWO more levels deep:
+ *
+ *   { readiness: { available, articleBodyValid, readiness: { status, checklist, blockers, ... } } }
+ *
+ * Reading `data.status` off that yields `undefined` — which is not "no_go", it
+ * is "no answer", and every caller below treated it as a refusal. The result:
+ * `publish_workspace_run` could never publish anything, on any run, whatever its
+ * real readiness, and `check_workspace_run_readiness` reported a verdict of
+ * `undefined` with no checklist — which reads to an editor as "the check didn't
+ * return a result" and sends them looking for a problem in the run. On
+ * 2026-08-28 that cost an afternoon on run_1787930929962_njffct, a run whose
+ * readiness was `go` with all twelve checks passing every time it was asked.
+ *
+ * Unwrapped by shape rather than by a fixed path: whichever level carries a
+ * `status` is the verdict, so a future flattening of the tool's envelope keeps
+ * working instead of silently regressing to `undefined` again.
+ */
+const readinessVerdict = (data: Record<string, unknown>): Record<string, unknown> => {
+  let node: Record<string, unknown> = data;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (typeof node.status === 'string') return node;
+    const inner = node.readiness;
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) break;
+    node = inner as Record<string, unknown>;
+  }
+  return node;
+};
+
 /** Bounded, editor-safe readiness projection: status + checklist + blockers verbatim (they are already editor copy). */
-const projectReadiness = (data: Record<string, unknown>): Record<string, unknown> => ({
-  status: data.status,
-  ...(Array.isArray(data.checklist) ? { checklist: (data.checklist as unknown[]).slice(0, 64) } : {}),
-  ...(Array.isArray(data.blockers) ? { blockers: (data.blockers as unknown[]).slice(0, 64) } : {}),
-  ...(data.requestId !== undefined ? { request_id: data.requestId } : {}),
-});
+const projectReadiness = (envelope: Record<string, unknown>): Record<string, unknown> => {
+  const data = readinessVerdict(envelope);
+  return {
+    status: data.status,
+    ...(Array.isArray(data.checklist) ? { checklist: (data.checklist as unknown[]).slice(0, 64) } : {}),
+    ...(Array.isArray(data.blockers) ? { blockers: (data.blockers as unknown[]).slice(0, 64) } : {}),
+    ...(data.requestId !== undefined ? { request_id: data.requestId } : {}),
+  };
+};
 
 const checkWorkspaceRunReadiness: ChatTool = {
   name: 'check_workspace_run_readiness',
@@ -1136,10 +1171,18 @@ const publishWorkspaceRun: ChatTool = {
     // may have moved — a no_go never reaches workflow_publish_run.
     const readiness = await callReadiness(ctx, input);
     if (!readiness.ok) return { content: json({ error: readiness.message, code: readiness.code }), is_error: true };
-    if (readiness.data.status !== 'go') {
+    const verdict = readinessVerdict(readiness.data);
+    if (verdict.status !== 'go') {
+      // Name the two apart. A no_go is the checklist speaking and the blockers
+      // say what to fix; a MISSING status means nothing judged this run, and
+      // sending an editor to look at a checklist that was never produced is how
+      // an envelope bug spends an afternoon looking like a content problem.
+      const spoke = typeof verdict.status === 'string';
       return {
         content: json({
-          error: 'Run is not ready to publish (readiness is not "go").',
+          error: spoke
+            ? 'Run is not ready to publish (readiness is not "go").'
+            : 'Publish refused: no readiness verdict was returned for this run, so nothing has judged it ready. This is a system fault, not a problem with the article — report it rather than editing the run.',
           readiness: projectReadiness(readiness.data),
         }),
         is_error: true,
