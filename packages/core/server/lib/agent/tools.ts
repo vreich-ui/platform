@@ -1068,6 +1068,9 @@ const callReadiness = async (
  * `status` is the verdict, so a future flattening of the tool's envelope keeps
  * working instead of silently regressing to `undefined` again.
  */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
 const readinessVerdict = (data: Record<string, unknown>): Record<string, unknown> => {
   let node: Record<string, unknown> = data;
   for (let depth = 0; depth < 4; depth += 1) {
@@ -1216,17 +1219,64 @@ const publishWorkspaceRun: ChatTool = {
       ? await ctx.idempotent('publish_workspace_run', `publish:${input.runId}`, run)
       : await run();
     if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
-    const data = result.data as Record<string, unknown>;
+    // `workflow_publish_run` returns ok({ publish: <PublishResult> }), and callTool strips only the
+    // outer {ok,data} — so the result lives one key in, exactly as the readiness verdict does.
+    const outer = result.data as Record<string, unknown>;
+    const data = (isRecord(outer.publish) ? outer.publish : outer) as Record<string, unknown>;
+
+    // NEVER FABRICATE A PUBLISH. This read used to be
+    //     published: data.published ?? data.status ?? true
+    // against the WRAPPED payload, so both operands were undefined and the `?? true` reported every
+    // call as a successful publish, with is_error:false. On 2026-08-28 that told an editor
+    // run_1787930929962_njffct had published when the sequence had in fact stopped at its second
+    // client call, leaving the object created, checked out and unpublished. A publish that did not
+    // happen must never read as one: `published` is now strictly the client's own boolean, and
+    // anything that is not an explicit success is an error the caller has to look at.
+    const published = data.published === true || data.publishCommitted === true;
+    const claimsFailure = data.published === false || data.publishCommitted === false;
+    if (!published) {
+      const blocked = isRecord(data.blocked) ? data.blocked : undefined;
+      const blocker = isRecord(data.blocker) ? data.blocker : undefined;
+      return {
+        content: json({
+          run_id: input.runId,
+          request_id: input.requestId,
+          published: false,
+          // A shape this code cannot read is its own failure, and saying so is the whole point: the
+          // previous version's silence about it is what let a blocked publish be reported as done.
+          error: claimsFailure
+            ? 'The publish did not complete. Nothing was published.'
+            : 'The publish result could not be read, so whether anything published is unknown. Treat this as NOT published and report it — do not retry blindly.',
+          ...(data.mode !== undefined ? { mode: data.mode } : {}),
+          ...(data.reason !== undefined ? { reason: data.reason } : {}),
+          ...(data.error !== undefined ? { client_error: data.error } : {}),
+          ...(Array.isArray(data.blockers) ? { blockers: (data.blockers as unknown[]).slice(0, 32) } : {}),
+          ...(blocker ? { blocker } : {}),
+          ...(blocked ? { blocked } : {}),
+          ...(isRecord(data.receipts) && Array.isArray((data.receipts as Record<string, unknown>).toolSequence)
+            ? { tool_sequence: (data.receipts as { toolSequence: unknown[] }).toolSequence.slice(0, 16) }
+            : {}),
+          ...(Array.isArray(data.steps) ? { steps: (data.steps as unknown[]).slice(0, 16) } : {}),
+        }),
+        is_error: true,
+      };
+    }
+
+    // The receipt fields live on the client's own publish result, one level in again.
+    const receipt = isRecord(data.result) ? (data.result as Record<string, unknown>) : data;
+    const commit = data.commit ?? receipt.commit ?? (isRecord(receipt.receipt) ? receipt.receipt.commit_sha : undefined);
+    const articlePath = data.articlePath ?? receipt.article_path ?? receipt.articlePath;
     return {
       content: json({
         run_id: input.runId,
         request_id: input.requestId,
-        published: data.published ?? data.status ?? true,
-        ...(data.commit !== undefined ? { commit: data.commit } : {}),
-        ...(data.receipt !== undefined ? { receipt: data.receipt } : {}),
+        published: true,
+        ...(commit !== undefined ? { commit } : {}),
+        ...(receipt.receipt !== undefined ? { receipt: receipt.receipt } : {}),
         ...(data.publishReceipt !== undefined ? { receipt: data.publishReceipt } : {}),
-        ...(data.articlePath !== undefined ? { article_path: data.articlePath } : {}),
+        ...(articlePath !== undefined ? { article_path: articlePath } : {}),
         approved_by: payload.readiness.approval.approvedBy,
+        note: 'Published means committed to main with the Netlify skip marker: the change is NOT live until an explicit release.',
       }),
       is_error: false,
     };
