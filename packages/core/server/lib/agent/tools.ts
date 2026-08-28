@@ -1071,6 +1071,13 @@ const callReadiness = async (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
+/** Did the client actually commit a publish? Strictly its own booleans — never an inferred default. */
+const isPublished = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  const data = isRecord(value.publish) ? value.publish : value;
+  return data.published === true || data.publishCommitted === true;
+};
+
 const readinessVerdict = (data: Record<string, unknown>): Record<string, unknown> => {
   let node: Record<string, unknown> = data;
   for (let depth = 0; depth < 4; depth += 1) {
@@ -1211,18 +1218,41 @@ const publishWorkspaceRun: ChatTool = {
     };
     const run = async () => {
       const published = await cmsAgent.callTool<Record<string, unknown>>('workflow_publish_run', payload);
-      return published.ok
+      if (!published.ok) return { ok: false as const, isError: true, code: published.code, message: published.message };
+      // A PUBLISH THAT DID NOT COMMIT MUST NOT ENTER THE IDEMPOTENCY LEDGER.
+      //
+      // The ledger's own rule is that only a successful write is safe to replay — "nothing landed
+      // server-side for a toolError, so the correct behavior on retry is to try again, not to keep
+      // replaying the same failure". But its notion of failure is `isError`, which is TRANSPORT-level,
+      // and a refused publish arrives as a perfectly successful MCP call carrying `published: false`.
+      // So the ledger stored it, keyed `publish:<runId>`, and every later publish of that run replayed
+      // the stored refusal verbatim and CALLED NOTHING.
+      //
+      // On 2026-08-28 that made run_1787930929962_njffct permanently unretryable: two separate fixes
+      // were deployed and verified live, and each subsequent publish returned the identical
+      // pre-fix error — no new lock, no version bump on the client object, no call made at all. The
+      // failure looked like the fixes had not worked. Marking the failure as an error here is what
+      // keeps a retry a retry.
+      return isPublished(published.data)
         ? { ok: true as const, data: published.data }
-        : { ok: false as const, isError: true, code: published.code, message: published.message };
+        : { ok: false as const, isError: true, failedPublish: true, data: published.data };
     };
     const result = ctx.idempotent
       ? await ctx.idempotent('publish_workspace_run', `publish:${input.runId}`, run)
       : await run();
-    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    // A transport failure has no payload; a refused publish has the whole one. Both are errors, and
+    // the second must still report what the client said.
+    if (!result.ok && !(result as { failedPublish?: boolean }).failedPublish) {
+      return { content: json({ error: result.message, code: result.code }), is_error: true };
+    }
     // `workflow_publish_run` returns ok({ publish: <PublishResult> }), and callTool strips only the
     // outer {ok,data} — so the result lives one key in, exactly as the readiness verdict does.
-    const outer = result.data as Record<string, unknown>;
+    const outer = (result.data ?? {}) as Record<string, unknown>;
     const data = (isRecord(outer.publish) ? outer.publish : outer) as Record<string, unknown>;
+    // A replay is a different fact from a fresh publish and the operator has to be able to see it:
+    // "published" on a replay means it published EARLIER, and nothing ran just now.
+    const replayEnvelope = (result as unknown as { structuredContent?: unknown }).structuredContent;
+    const replayed = isRecord(replayEnvelope) && replayEnvelope.replayed_from_idempotency_key === true;
 
     // NEVER FABRICATE A PUBLISH. This read used to be
     //     published: data.published ?? data.status ?? true
@@ -1232,7 +1262,7 @@ const publishWorkspaceRun: ChatTool = {
     // client call, leaving the object created, checked out and unpublished. A publish that did not
     // happen must never read as one: `published` is now strictly the client's own boolean, and
     // anything that is not an explicit success is an error the caller has to look at.
-    const published = data.published === true || data.publishCommitted === true;
+    const published = isPublished(data);
     const claimsFailure = data.published === false || data.publishCommitted === false;
     if (!published) {
       const blocked = isRecord(data.blocked) ? data.blocked : undefined;
@@ -1276,7 +1306,10 @@ const publishWorkspaceRun: ChatTool = {
         ...(data.publishReceipt !== undefined ? { receipt: data.publishReceipt } : {}),
         ...(articlePath !== undefined ? { article_path: articlePath } : {}),
         approved_by: payload.readiness.approval.approvedBy,
-        note: 'Published means committed to main with the Netlify skip marker: the change is NOT live until an explicit release.',
+        ...(replayed ? { replayed_from_earlier_publish: true } : {}),
+        note: replayed
+          ? 'REPLAYED from the idempotency ledger: this run published EARLIER and nothing ran just now. Published means committed to main with the Netlify skip marker — NOT live until an explicit release.'
+          : 'Published means committed to main with the Netlify skip marker: the change is NOT live until an explicit release.',
       }),
       is_error: false,
     };
