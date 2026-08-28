@@ -59,6 +59,8 @@ export type TrackableRef =
 
 export type ClientEventShape = Record<string, unknown>;
 
+export const COMMERCE_EVENT_ID = 'commerce_event_id';
+
 export type TrackerEnv = {
   /** Deliver one tracking_batch.v1 payload (sendBeacon / fetch-keepalive). */
   send: (path: string, body: string) => void;
@@ -248,7 +250,8 @@ export const createTracker = (
   const fireGoalBindings = (
     bindings: readonly GoalBinding[],
     ref: TrackableRef | null,
-    extraObject?: Record<string, string>
+    extraObject?: Record<string, string>,
+    sharedProps?: Record<string, unknown>
   ): void => {
     if (bindings.length === 0) return;
     for (const binding of bindings) {
@@ -257,6 +260,8 @@ export const createTracker = (
         (conversion) => typeof conversion.value_cents === 'number'
       )?.value_cents;
       if (typeof valueCents === 'number') props.value_cents = valueCents;
+      const commerceEventId = sharedProps?.[COMMERCE_EVENT_ID];
+      if (typeof commerceEventId === 'string') props[COMMERCE_EVENT_ID] = commerceEventId;
       push('goal', ref, props, extraObject);
     }
     fanOutProviders(bindings);
@@ -273,12 +278,18 @@ export const createTracker = (
     }
   };
 
-  const bridgeActivity = (activity: string, ref: TrackableRef | null, extraObject?: Record<string, string>): void => {
+  const bridgeActivity = (
+    activity: string,
+    ref: TrackableRef | null,
+    extraObject?: Record<string, string>,
+    sharedProps?: Record<string, unknown>
+  ): void => {
     const object = extraObject ?? objectOf(ref);
     fireGoalBindings(
       matchActivityGoals(config.goals, activity, [object?.object_id, object?.section_id, object?.term_id]),
       ref,
-      extraObject
+      extraObject,
+      sharedProps
     );
   };
 
@@ -391,7 +402,7 @@ export const createTracker = (
       // collection matrix (EVENT_ACTIVITY projects nav_click → cta_click;
       // kinds without a goal activity fall through).
       const activity = EVENT_ACTIVITY[kind];
-      if (activity && activity !== 'view') bridgeActivity(activity, ref, extraObject);
+      if (activity && activity !== 'view') bridgeActivity(activity, ref, extraObject, props);
       const rule = gate[kind];
       if (rule && !collects(rule[0], rule[1])) {
         if (!(kind === 'outbound_click' && config.defaults.outbound_links)) return;
@@ -402,12 +413,13 @@ export const createTracker = (
     /** trk:goal CustomEvent — the by-NAME bridge path (T13.7): the own goal
      *  event always; provider conversions only for map-declared goals under
      *  a released ads-consent state. */
-    goal(name: string, valueCents?: number): void {
+    goal(name: string, valueCents?: number, commerceEventId?: string): void {
       if (page.path.startsWith('/admin')) return;
       if (!/^[a-z][a-z0-9_]{1,31}$/.test(name)) return;
       const props: Record<string, unknown> = { goal: name };
       if (typeof valueCents === 'number' && Number.isInteger(valueCents) && valueCents >= 0)
         props.value_cents = valueCents;
+      if (typeof commerceEventId === 'string') props[COMMERCE_EVENT_ID] = commerceEventId;
       push('goal', null, props);
       fanOutProviders(matchNamedGoals(config.goals, name));
     },

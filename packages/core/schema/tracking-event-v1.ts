@@ -59,6 +59,7 @@ export const trackingPropsSchema = z
     goal: z.string().regex(/^[a-z][a-z0-9_]{1,31}$/),
     label_slug: z.string().regex(/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/),
     value_cents: z.number().int().min(0),
+    commerce_event_id: z.uuid(),
   })
   .partial();
 export type TrackingProps = z.infer<typeof trackingPropsSchema>;

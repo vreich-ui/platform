@@ -104,6 +104,36 @@ test('props sanitizer is an allowlist per event kind — never a passthrough', (
     goal: 'opt_in',
     value_cents: 900,
   });
+  assert.deepEqual(
+    sanitizeTrackingProps('buy_click', {
+      label_slug: 'buy-now',
+      commerce_event_id: '11111111-1111-4111-8111-111111111111',
+      href_host: 'example.com',
+    }),
+    {
+      label_slug: 'buy-now',
+      commerce_event_id: '11111111-1111-4111-8111-111111111111',
+    }
+  );
+  assert.deepEqual(
+    sanitizeTrackingProps('goal', {
+      goal: 'purchase',
+      commerce_event_id: '11111111-1111-4111-8111-111111111111',
+      href_host: 'example.com',
+    }),
+    {
+      goal: 'purchase',
+      commerce_event_id: '11111111-1111-4111-8111-111111111111',
+    }
+  );
+  assert.deepEqual(
+    sanitizeTrackingProps('cta_click', {
+      label_slug: 'buy-now',
+      commerce_event_id: '11111111-1111-4111-8111-111111111111',
+    }),
+    { label_slug: 'buy-now' },
+    'commerce_event_id is stripped outside buy_click/goal'
+  );
   assert.deepEqual(sanitizeTrackingProps('outbound_click', { href_host: 'example.com' }), {
     href_host: 'example.com',
   });

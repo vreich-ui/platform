@@ -36,7 +36,10 @@ type LambdaEvent = {
 const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 const reply = (statusCode: number, body: Record<string, unknown>) => ({
   statusCode,
-  headers: jsonHeaders,
+  headers: {
+    ...jsonHeaders,
+    ...(typeof body.event_id === 'string' ? { 'X-CEID': body.event_id } : {}),
+  },
   body: JSON.stringify(body),
 });
 

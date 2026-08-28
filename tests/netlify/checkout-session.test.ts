@@ -128,6 +128,7 @@ test('create-checkout-session charges the LINKED price and stamps metadata (§3/
   const body = JSON.parse(response.body) as { url: string; session_id: string; event_id: string };
   assert.equal(body.url, 'https://checkout.stripe.com/c/pay/x');
   assert.equal(body.session_id, SESSION_ID);
+  assert.equal(response.headers['X-CEID'], body.event_id);
 
   assert.ok(received);
   assert.equal(received.mode, 'payment');
@@ -246,6 +247,7 @@ test('status: paid but webhook not landed → order_ready:false (the page keeps 
 
 test('status: order present → fresh download link minted from the product fulfillment', async () => {
   await seedProduct();
+  const checkoutEventId = 'a1b2c3d4-0000-4000-8000-000000000000';
   await createLocalBlobStore('commerce').setJSON(`orders/${SESSION_ID}.json`, {
     schema: 'commerce_order.v1',
     order_id: 'ord_abc123def456',
@@ -260,14 +262,25 @@ test('status: order present → fresh download link minted from the product fulf
     flags: {},
   });
   const fake = {
-    checkout: { sessions: { retrieve: async () => ({ id: SESSION_ID, payment_status: 'paid' }) } },
+    checkout: {
+      sessions: {
+        retrieve: async () => ({
+          id: SESSION_ID,
+          payment_status: 'paid',
+          metadata: { event_id: checkoutEventId },
+        }),
+      },
+    },
   };
   const response = await withFakeStripe(fake, () => statusFor(SESSION_ID));
   const body = JSON.parse(response.body) as {
     order_ready: boolean;
+    commerce_event_id: string;
     download: { url: string; filename: string } | null;
   };
   assert.equal(body.order_ready, true);
+  assert.equal(body.commerce_event_id, checkoutEventId);
+  assert.equal(response.headers['X-CEID'], checkoutEventId);
   assert.ok(body.download);
   assert.equal(body.download.filename, 'barrier-repair-guide.pdf');
   assert.match(body.download.url, /^\/\.netlify\/functions\/get-purchase\?token=/);

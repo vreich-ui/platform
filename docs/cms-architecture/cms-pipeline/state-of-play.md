@@ -9,6 +9,25 @@ store before building on anything below.**
 
 ---
 
+## 2026-08-28 — T20.4: commerce_event_id joins checkout buy_click to purchase goal
+
+T20.4 adds the behaviour ↔ money join key on the Platform side only:
+`tracking_event.v1` props now admit `commerce_event_id`, and ingest allows it
+only on `buy_click` and `goal` events. The real checkout path waits for
+`create-checkout-session` to return before emitting the buy-click tracking
+event; successful checkout carries the returned `event_id`, while a failed
+checkout emits the same buy-click signal without the join key. The thank-you
+purchase bridge receives the same id back from `checkout-session-status` via
+Stripe Checkout metadata and attaches it to the `purchase` goal once the order
+is ready.
+
+**E2E note.** The covered path is one fixed/PWYW checkout start followed by the
+thank-you purchase confirmation: local loader coverage asserts
+`buy_click.props.commerce_event_id` equals the checkout response id and both
+purchase goal surfaces carry the same id. No production purchase was executed in
+this task; live end-to-end sink observation remains the deployment/acceptance
+step after PR #630 is updated.
+
 ## 2026-08-18 — T12.16: captured images bind for real (the extensionless blobKey and the `media` kind that was never fetched)
 
 T12.14 built the binding path; the first live run through it bound **nothing**.

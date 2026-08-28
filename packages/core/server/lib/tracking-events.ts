@@ -41,7 +41,7 @@ export const TRACKING_PROPS_ALLOWLIST: Record<TrackingEventKind, readonly string
   engagement: ['dwell_ms'],
   cta_click: ['label_slug'],
   nav_click: ['label_slug'],
-  buy_click: ['label_slug', 'value_cents'],
+  buy_click: ['label_slug', 'value_cents', 'commerce_event_id'],
   outbound_click: ['href_host'],
   form_start: ['label_slug'],
   form_submit: ['label_slug'],
@@ -49,7 +49,7 @@ export const TRACKING_PROPS_ALLOWLIST: Record<TrackingEventKind, readonly string
   tag_click: ['label_slug'],
   read_progress: ['pct_read'],
   completion: [],
-  goal: ['goal', 'value_cents', 'label_slug'],
+  goal: ['goal', 'value_cents', 'label_slug', 'commerce_event_id'],
 };
 
 /** Keep only the allowlisted keys for this event kind (drop the rest silently). */
