@@ -85,6 +85,12 @@ const makeCtx = (
   ({
     roles: ['owner'],
     principal: { id: 'u_editor', email: 'editor@example.com' },
+    // Every test below simulates the ordinary path: an editor's approval card
+    // was already accepted (loop.ts's pre-approved branch stamps exactly this
+    // shape onto ToolContext right before execute() runs — see tools.ts's own
+    // doc on `humanApprovedCall`). The dedicated autonomous-mode test
+    // overrides this back to `undefined` to prove the OTHER path.
+    humanApprovedCall: { call_id: 'c1', by: 'editor@example.com', edited: false },
     cmsAgent: {
       projectId: 'platform',
       async callTool(name: string, args: Record<string, unknown>) {
@@ -214,7 +220,7 @@ test('publish_workspace_run refuses when readiness is not "go" — workflow_publ
   assert.equal(result.is_error, true);
   assert.deepEqual(
     calls.map((call) => call.name),
-    ['workflow_publish_readiness']
+    ['workflow_get_run', 'workflow_publish_readiness']
   );
   const body = JSON.parse(result.content) as { error: string; readiness: { status: string } };
   assert.match(body.error, /not ready/);
@@ -287,7 +293,10 @@ test('publish_workspace_run reports a BLOCKED publish as an error, never as publ
 // error that says the outcome is unknown — silence about an unreadable result is what cost the day.
 test('publish_workspace_run refuses to invent a success from an unreadable result', async () => {
   const calls: Call[] = [];
-  const ctx = makeCtx((name) => (name === 'workflow_publish_readiness' ? GO_NESTED : { publish: { mode: 'mystery' } }), calls);
+  const ctx = makeCtx(
+    (name) => (name === 'workflow_publish_readiness' ? GO_NESTED : { publish: { mode: 'mystery' } }),
+    calls
+  );
   const tool = chatToolByName('publish_workspace_run')!;
   const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
   assert.equal(result.is_error, true);
@@ -318,7 +327,11 @@ test('a failed publish never enters the idempotency ledger, so a retry is a real
   const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
 
   assert.equal(result.is_error, true);
-  assert.deepEqual(stored, [], 'a refused publish must not be stored — storing it makes the run permanently unretryable');
+  assert.deepEqual(
+    stored,
+    [],
+    'a refused publish must not be stored — storing it makes the run permanently unretryable'
+  );
   // And it must still report the client's own blocker, not a bare transport message.
   const body = JSON.parse(result.content) as Record<string, unknown>;
   assert.equal(body.published, false);
@@ -340,7 +353,11 @@ test('a successful publish IS stored, and a replay of one says so', async () => 
 
   // A replay published EARLIER and ran nothing now — the operator has to be able to tell.
   const replayCtx = makeCtx(() => GO_NESTED, [], {
-    idempotent: async () => ({ ok: true, data: LIVE_PUBLISH, structuredContent: { replayed_from_idempotency_key: true } }),
+    idempotent: async () => ({
+      ok: true,
+      data: LIVE_PUBLISH,
+      structuredContent: { replayed_from_idempotency_key: true },
+    }),
   } as unknown as Partial<ToolContext>);
   const replay = await tool.execute(replayCtx, { run_id: 'run_1', request_id: REQ });
   assert.equal(replay.is_error, false);
@@ -368,7 +385,9 @@ test('publish_workspace_run PUBLISHES a nested "go" — the refusal that blocked
   const calls: Call[] = [];
   const ctx = makeCtx(
     (name) =>
-      name === 'workflow_publish_readiness' ? GO_NESTED : { published: true, commit: 'abc1234', receipt: { id: 'rcpt_1' } },
+      name === 'workflow_publish_readiness'
+        ? GO_NESTED
+        : { published: true, commit: 'abc1234', receipt: { id: 'rcpt_1' } },
     calls
   );
   const tool = chatToolByName('publish_workspace_run')!;
@@ -376,8 +395,13 @@ test('publish_workspace_run PUBLISHES a nested "go" — the refusal that blocked
   assert.equal(result.is_error, false, result.content);
   assert.deepEqual(
     calls.map((call) => call.name),
-    ['workflow_publish_readiness', 'workflow_publish_run'],
-    'a nested go must reach workflow_publish_run'
+    [
+      'workflow_get_run',
+      'workflow_publish_readiness',
+      'workflow_set_operator_publish_decision',
+      'workflow_publish_run',
+    ],
+    'a nested go must reach workflow_publish_run, after checking for a withheld decision and recording the operator decision'
   );
 });
 
@@ -389,7 +413,7 @@ test('publish_workspace_run still refuses a nested no_go, and reports its real b
   assert.equal(result.is_error, true);
   assert.deepEqual(
     calls.map((call) => call.name),
-    ['workflow_publish_readiness'],
+    ['workflow_get_run', 'workflow_publish_readiness'],
     'a no_go must never reach workflow_publish_run'
   );
   const body = JSON.parse(result.content) as { error: string; readiness: { status: string; blockers: unknown } };
@@ -409,7 +433,7 @@ test('publish_workspace_run names a MISSING verdict as a system fault, not as "n
   assert.equal(result.is_error, true);
   assert.deepEqual(
     calls.map((call) => call.name),
-    ['workflow_publish_readiness'],
+    ['workflow_get_run', 'workflow_publish_readiness'],
     'no verdict must never reach workflow_publish_run either'
   );
   const body = JSON.parse(result.content) as { error: string };
@@ -417,7 +441,7 @@ test('publish_workspace_run names a MISSING verdict as a system fault, not as "n
   assert.doesNotMatch(body.error, /not ready to publish/);
 });
 
-test('publish_workspace_run on "go" sends the exact workflow_publish_run payload with the approval pinned to the human, under a stored publish:<runId> idempotency key', async () => {
+test('publish_workspace_run on "go" records the operator decision BEFORE workflow_publish_run, sends the exact payload with the approval pinned to the human and NO deprecated `approved` field, under a stored publish:<runId> idempotency key', async () => {
   const calls: Call[] = [];
   const idempotentCalls: Array<{ tool: string; key: string }> = [];
   const ctx = makeCtx(
@@ -437,9 +461,22 @@ test('publish_workspace_run on "go" sends the exact workflow_publish_run payload
   assert.equal(result.is_error, false, result.content);
   assert.deepEqual(
     calls.map((call) => call.name),
-    ['workflow_publish_readiness', 'workflow_publish_run']
+    [
+      'workflow_get_run',
+      'workflow_publish_readiness',
+      'workflow_set_operator_publish_decision',
+      'workflow_publish_run',
+    ],
+    'the durable operator decision must be recorded before the publish call, not folded into it via the deprecated `approved` field'
   );
-  const sent = calls[1]!.args as {
+  // The decision write itself: pinned to this runId, unconditionally "approved" (this
+  // ctx simulates the "ask"-gated approval card having just been accepted —
+  // ctx.humanApprovedCall — which is what actually gates this write now),
+  // and NOT wrapped by the publish idempotency key — it is not inside idempotentCalls.
+  assert.deepEqual(calls[2]!.args, { runId: 'run_1', decision: 'approved' });
+  assert.deepEqual(idempotentCalls, [{ tool: 'publish_workspace_run', key: 'publish:run_1' }]);
+
+  const sent = calls[3]!.args as {
     readiness: { approval: { approvedBy: string; approvedAt: string; pinned: boolean } };
   } & Record<string, unknown>;
   const approvedAt = sent.readiness.approval.approvedAt;
@@ -447,11 +484,15 @@ test('publish_workspace_run on "go" sends the exact workflow_publish_run payload
     Date.parse(approvedAt) >= before - 1000 && Date.parse(approvedAt) <= Date.now() + 1000,
     'approvedAt is now (ISO)'
   );
+  assert.equal(
+    'approved' in sent,
+    false,
+    '`approved` is deprecated/ignored by workflow_publish_run and must not be sent'
+  );
   assert.deepEqual(sent, {
     runId: 'run_1',
     projectId: 'platform',
     requestId: REQ,
-    approved: true,
     live: true,
     readiness: {
       approval: { approvedBy: 'editor@example.com', approvedAt, pinned: true },
@@ -460,13 +501,67 @@ test('publish_workspace_run on "go" sends the exact workflow_publish_run payload
       verifiedMediaRefs: EXPECTED_REFS,
     },
   });
-  assert.deepEqual(idempotentCalls, [{ tool: 'publish_workspace_run', key: 'publish:run_1' }]);
   const body = JSON.parse(result.content) as Record<string, unknown>;
   assert.equal(body.run_id, 'run_1');
   assert.equal(body.request_id, REQ);
   assert.equal(body.published, true);
   assert.equal(body.commit, 'abc1234');
   assert.equal(body.approved_by, 'editor@example.com');
+});
+
+// The recorded-decision half of the D2a payload test above, isolated: a "go" readiness
+// plus a successfully recorded operator decision is what reaches the client as a
+// published result — proving the fix end to end, not just the outbound call shape.
+test('publish_workspace_run: a "go" readiness plus a recorded operator decision is what reaches the client as published', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx(
+    (name) =>
+      name === 'workflow_publish_readiness'
+        ? GO
+        : name === 'workflow_set_operator_publish_decision'
+          ? { runId: 'run_1', operatorPublishDecision: 'approved' }
+          : LIVE_PUBLISH,
+    calls
+  );
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, false, result.content);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_get_run', 'workflow_publish_readiness', 'workflow_set_operator_publish_decision', 'workflow_publish_run']
+  );
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, true);
+});
+
+// The other half of the same fix: when recording the decision itself fails, the publish
+// must NOT proceed — mirroring `admin-request-activity.ts`'s "approve" action, which
+// returns without ever calling its advance when `workflow_set_operator_publish_decision`
+// comes back !ok. `workflow_publish_run` must never be reached in that case.
+test('publish_workspace_run refuses to publish when recording the operator decision fails, and never reaches workflow_publish_run', async () => {
+  const calls: Call[] = [];
+  const ctx = makeCtx(() => GO, calls, {
+    cmsAgent: {
+      projectId: 'platform',
+      async callTool(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        if (name === 'workflow_set_operator_publish_decision') {
+          return { ok: false, code: 'cms_agent_auth_failed', message: 'CMS-Agent rejected the credential.' };
+        }
+        return { ok: true, data: name === 'workflow_publish_readiness' ? GO : LIVE_PUBLISH };
+      },
+    },
+  } as unknown as Partial<ToolContext>);
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, true);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_get_run', 'workflow_publish_readiness', 'workflow_set_operator_publish_decision'],
+    'a failed decision write must never be followed by workflow_publish_run'
+  );
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.match(String(body.error), /rejected the credential/);
 });
 
 test('publish_workspace_run refuses without a human principal and without the bridge', async () => {
@@ -478,6 +573,94 @@ test('publish_workspace_run refuses without a human principal and without the br
   const noBridge = makeCtx(() => GO, [], { cmsAgent: undefined } as unknown as Partial<ToolContext>);
   const r2 = await tool.execute(noBridge, { run_id: 'run_1', request_id: REQ });
   assert.equal(r2.is_error, true);
+});
+
+// ─── W20 (Wolf, 2026-08-29 review) — withheld halts first; the decision write ─────
+// is a HUMAN-approval fact, not an ctx.principal-presence one ───────────────────────
+
+const WITHHELD_RUN = { run: { runId: 'run_1', operatorPublishDecision: 'withheld' } };
+const NOT_WITHHELD_RUN = { run: { runId: 'run_1', operatorPublishDecision: null } };
+
+test('publish_workspace_run: an operator-withheld run is refused before anything else is called — workflow_publish_run never reached', async () => {
+  const calls: Call[] = [];
+  // Every OTHER name would answer "go"/"published" if it were ever called —
+  // proving the refusal really does stop at workflow_get_run, not merely
+  // that some later gate also happens to refuse.
+  const ctx = makeCtx(
+    (name) => (name === 'workflow_get_run' ? WITHHELD_RUN : name === 'workflow_publish_readiness' ? GO : LIVE_PUBLISH),
+    calls
+  );
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, true);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_get_run'],
+    'withheld must halt before readiness, before any decision write, before workflow_publish_run — nothing else is called'
+  );
+  const body = JSON.parse(result.content) as { error: string; code: string; reason: string };
+  assert.equal(body.code, 'refused');
+  assert.equal(body.reason, 'operator withheld publish for this run');
+});
+
+test('publish_workspace_run: agent-initiated (autonomous, no approval card) never writes the operator decision, and the publish still proceeds on autonomyMode', async () => {
+  const calls: Call[] = [];
+  // No `humanApprovedCall` on ctx — exactly what an 'auto'-resolved (autonomous
+  // project) execute() looks like: loop.ts's ordinary auto path never stamps it.
+  const ctx = makeCtx(
+    (name) =>
+      name === 'workflow_get_run' ? NOT_WITHHELD_RUN : name === 'workflow_publish_readiness' ? GO : LIVE_PUBLISH,
+    calls,
+    { humanApprovedCall: undefined } as unknown as Partial<ToolContext>
+  );
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, false, result.content);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['workflow_get_run', 'workflow_publish_readiness', 'workflow_publish_run'],
+    'an agent-initiated call must never write workflow_set_operator_publish_decision — the project autonomyMode authorises it instead'
+  );
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, true);
+});
+
+test('publish_workspace_run: a human-accepted approval card writes the operator decision, pinned to ctx.principal, then publishes', async () => {
+  const calls: Call[] = [];
+  // makeCtx's default already carries humanApprovedCall (the ordinary approved
+  // path) and principal editor@example.com — both exercised explicitly here.
+  const ctx = makeCtx(
+    (name) =>
+      name === 'workflow_get_run' ? NOT_WITHHELD_RUN : name === 'workflow_publish_readiness' ? GO : LIVE_PUBLISH,
+    calls
+  );
+  assert.ok(
+    (ctx as unknown as { humanApprovedCall?: unknown }).humanApprovedCall,
+    'sanity: the card-accepted path is what this ctx simulates'
+  );
+  const tool = chatToolByName('publish_workspace_run')!;
+  const result = await tool.execute(ctx, { run_id: 'run_1', request_id: REQ });
+  assert.equal(result.is_error, false, result.content);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    [
+      'workflow_get_run',
+      'workflow_publish_readiness',
+      'workflow_set_operator_publish_decision',
+      'workflow_publish_run',
+    ],
+    'a card-accepted call must write the decision before publishing'
+  );
+  const decisionCall = calls.find((call) => call.name === 'workflow_set_operator_publish_decision')!;
+  assert.deepEqual(decisionCall.args, { runId: 'run_1', decision: 'approved' });
+  const publishCall = calls.find((call) => call.name === 'workflow_publish_run')!;
+  const sent = publishCall.args as { readiness: { approval: { approvedBy: string } } };
+  // "Pinned to ctx.principal": the approval that reaches CMS-Agent identifies
+  // the run's own principal, not the tool call's raw args or anything else.
+  assert.equal(sent.readiness.approval.approvedBy, ctx.principal!.email);
+  const body = JSON.parse(result.content) as Record<string, unknown>;
+  assert.equal(body.published, true);
+  assert.equal(body.approved_by, ctx.principal!.email);
 });
 
 // ─── release_workspace_run ────────────────────────────────────────────────────────

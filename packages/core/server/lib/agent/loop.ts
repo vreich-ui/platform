@@ -31,7 +31,7 @@ import {
   type RunProfile,
   type ToolAutonomy,
 } from './chat-store.js';
-import type { ToolContext } from './tools.js';
+import type { ToolContext, ToolResult } from './tools.js';
 import { autonomyForCall, registryTools, runRegistryKind, toolByName } from './registry.js';
 import { CmsAgentEngineError, humanCopyForCmsAgentError, type TurnEngine } from './engine.js';
 import type { WireTool } from './provider.js';
@@ -322,7 +322,26 @@ export const runAgentLoop = async (
             tool: call.name,
             summary: approvedTool.describe(effectiveArgs),
           });
-          const result = await approvedTool.execute(deps.toolContext, effectiveArgs);
+          // W20 (review fix, Wolf 2026-08-29): stamp the fact that a HUMAN
+          // just accepted THIS call's approval card onto the shared
+          // ToolContext for the duration of this one execute() only — a tool
+          // like publish_workspace_run reads it to decide whether IT (rather
+          // than the project's autonomyMode) is what authorises a privileged
+          // write. Cleared immediately after, synchronously, before the next
+          // queued call (auto or pre-approved) can ever see it — this loop
+          // drains call_queue strictly sequentially, never concurrently, so
+          // there is no window where a second call could observe this flag.
+          deps.toolContext.humanApprovedCall = {
+            call_id: call.id,
+            by: approved.by,
+            edited: approved.edited === true,
+          };
+          let result: ToolResult;
+          try {
+            result = await approvedTool.execute(deps.toolContext, effectiveArgs);
+          } finally {
+            delete deps.toolContext.humanApprovedCall;
+          }
           run.transcript.push({
             role: 'tool',
             tool_call_id: call.id,
