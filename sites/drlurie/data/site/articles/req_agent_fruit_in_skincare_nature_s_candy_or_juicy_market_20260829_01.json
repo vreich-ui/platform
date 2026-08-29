@@ -1,0 +1,276 @@
+{
+  "__generated": {
+    "at": "2026-08-29T21:13:13.644Z",
+    "from": "objects/content_item/by-id/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01.json",
+    "record_version": 15
+  },
+  "author": "Dr. Lurié Science Editorial",
+  "claims": {
+    "claim_list": [
+      {
+        "claim_id": "clm_fda_claims",
+        "node_ids": [
+          "n_claims"
+        ],
+        "risk": "low",
+        "source_ids": [
+          "src_fda_claims"
+        ],
+        "status": "verified",
+        "text": "Cosmetic claims are regulated differently from drug claims, and a skincare product that claims to treat or affect body structure or function may cross into drug-claim territory."
+      },
+      {
+        "claim_id": "clm_botanical_fragrance",
+        "node_ids": [
+          "n_sensitive"
+        ],
+        "risk": "low",
+        "source_ids": [
+          "src_aad_test"
+        ],
+        "status": "verified",
+        "text": "Some plant-based botanical ingredients can still contain fragrance-related components that may bother sensitive skin."
+      },
+      {
+        "claim_id": "clm_fragrance_sensitive",
+        "node_ids": [
+          "n_sensitive"
+        ],
+        "risk": "low",
+        "source_ids": [
+          "src_aad_moisturizer"
+        ],
+        "status": "verified",
+        "text": "Fragrance can aggravate sensitive or dry skin for some people, so fragrance-free products are often a safer starting point when irritation is a concern."
+      }
+    ]
+  },
+  "deck": "Fruit extracts make skincare feel fresh, natural, and edible. The better question is not whether fruit sounds healthy, but whether the formula earns its place on your face.",
+  "description": "A calm guide to fruit-based skincare claims, botanical extracts, fragrance, sensitive skin, and how to judge a formula beyond the label story.",
+  "editorial": {
+    "framework": "Marketing-claim literacy: separate the fruit story from formula performance, irritation risk, and label discipline.",
+    "writer_notes": "Recovered from an empty artifact-planning shell using the three already-created trusted image artifacts for this request. Kept claims conservative and sourced to FDA/AAD guidance."
+  },
+  "image": {
+    "alt": "Fruit-inspired skincare formula arranged as a clean editorial texture",
+    "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/a1b9a25c07c9f6985d2dfb07cd9634abc1ea71de7b3a033ac4c9ea87766fd795.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_intro",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Reframes fruit imagery away from automatic trust and toward formula-level evaluation.",
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "Fruit is one of the easiest stories to sell in skincare. It looks fresh. It sounds harmless. It borrows the emotional glow of food: vitamins, juice, antioxidants, sweetness, nature.\n\nThat does not make fruit-based skincare fake. It also does not make it automatically gentle, effective, or better than a less romantic formula.\n\nThe useful question is simpler: what is the ingredient doing in this product, at this concentration, inside this full formula, on your actual skin?",
+        "title": "Fruit makes skincare feel healthier than it automatically is"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_visual",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Uses the generated hero artifact as a soft visual pause.",
+        "intent": "reassure",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Fruit-inspired skincare formula arranged as a clean editorial texture",
+          "caption": "Fruit imagery can be useful, but it should not replace formula judgment.",
+          "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/a1b9a25c07c9f6985d2dfb07cd9634abc1ea71de7b3a033ac4c9ea87766fd795.webp",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "placement": "section",
+        "presentation": "plain"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_claims",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Separates label romance from formulation reality without making a blanket anti-natural claim.",
+        "intent": "educate",
+        "strategy": "agitation"
+      },
+      "public": {
+        "body": "A product can say “with pomegranate,” “berry complex,” or “citrus antioxidant blend” and still be mostly built from water, emollients, emulsifiers, preservatives, fragrance, or other functional ingredients.\n\nThat is not necessarily bad. Good formulas need boring ingredients. Preservatives help keep products safer. Emulsifiers help oil and water stay together. Texture ingredients can make a product easier to use.\n\nThe problem begins when the fruit story does all the emotional work while the actual formula gets ignored. A label can sound like a smoothie and still behave like a fragranced cosmetic.",
+        "title": "The marketing story is not the same as the formula"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_label",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Gives the reader a concrete label-reading sequence.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Do not start with the prettiest ingredient on the front label. Start with the ingredient list.\n\nA practical scan:\n\n1. Look for fragrance, parfum, essential oils, citrus peel oils, or other scent-heavy materials if your skin is reactive.\n2. Notice whether the fruit extract is central to the formula or appears late in the list.\n3. Ask what the product is mainly trying to do: moisturize, exfoliate, brighten the appearance of tone, cleanse, or simply smell pleasant.\n4. Compare the claim with the category. A moisturizer should still moisturize. A cleanser should still cleanse without leaving your skin stripped.\n\nThis is not about becoming suspicious of everything. It is about refusing to let the front label do all the thinking for you.",
+        "title": "Read the ingredient list from the boring end first"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_labelimg",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Uses the label-reading artifact at the point where the reader is learning how to inspect the formula.",
+        "intent": "navigate",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Editorial diagram showing skincare label reading and ingredient evaluation",
+          "caption": "The front label sells the story. The ingredient list tells you what you are actually applying.",
+          "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/729b78f4f66c0d69c13469eb05ab25f78307e36f314cbd89dd03d17450ce2ad8.webp",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "placement": "section",
+        "presentation": "plain"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sensitive",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Addresses the natural equals gentle assumption using conservative AAD-backed guidance.",
+        "intent": "reassure",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "This is the trap with fruit, flowers, herbs, and botanical language: “natural” feels emotionally safer than “synthetic.” But skin does not read branding.\n\nSome people tolerate botanical extracts well. Others react to fragrance components, essential oils, acids, or a formula that is simply too active for their barrier at that moment.\n\nThe American Academy of Dermatology advises caution with plant-based botanical ingredients when irritation is a concern, because they may still include fragrance-related ingredients. It also commonly recommends fragrance-free products for sensitive or dry skin.\n\nSo the better rule is not “avoid fruit.” It is: if your skin is reactive, do not give fruit language a free pass.",
+        "title": "Natural does not always mean gentle"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_texture",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Uses the product-texture artifact to support the point that sensorial appeal is useful but not proof.",
+        "intent": "reassure",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Close-up product texture with a clean fruit-inspired skincare mood",
+          "caption": "A pleasant texture can make a routine easier to keep. It still has to suit your skin.",
+          "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/38881916410359e803effeb8fdbc5dfb0ebe30f4c15945ab2797e76905ba834c.webp",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "placement": "section",
+        "presentation": "plain"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_helpful",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Keeps the article balanced and avoids cynical overcorrection.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Fruit-derived ingredients can be reasonable in a skincare formula when they have a clear job and the product is well balanced.\n\nFor example, fruit acids may be part of exfoliating products. Some fruit extracts are included for antioxidant positioning, scent, color, texture, or marketing identity. Oils and butters from plants can contribute to the feel of a product, though the full formula still matters more than the ingredient story alone.\n\nThe point is not to reject every fruit ingredient. The point is to ask whether it is doing a useful job in a product that your skin can tolerate.",
+        "title": "When fruit ingredients can make sense"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_judge",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Creates a scan-friendly decision checklist.",
+        "intent": "navigate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "Use the same standard you would use for any skincare product:",
+        "items": [
+          "Does it match the job you bought it for?",
+          "Does your skin feel comfortable after repeated use?",
+          "Does the ingredient list fit your sensitivity level?",
+          "Are the claims cosmetic and realistic, or are they drifting into treatment language?",
+          "Would the product still make sense if the fruit image disappeared from the packaging?"
+        ],
+        "title": "A calmer way to judge a fruit-based product"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "summary"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_close",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Closes with the article’s practical rule without overstating medical advice.",
+        "intent": "reassure",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "Fruit in skincare is not the problem. The shortcut is the problem.\n\nIf fruit language makes a product easier to enjoy, that can have value. A routine you like is easier to keep. But enjoyment is not the same as evidence, and natural imagery is not the same as skin compatibility.\n\nBuy the formula, not the fruit bowl. If your skin is sensitive, patch test carefully, keep the routine simple, and treat irritation as information rather than as something to push through.",
+        "title": "The bottom line"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Fruit extracts can make skincare sound fresh and natural, but sensitive skin still needs careful label reading. Learn how to judge fruit-based skincare claims calmly.",
+    "meta_title": "Fruit in Skincare: Natural Ingredient or Marketing Story?"
+  },
+  "slug": "fruit-in-skincare-natures-candy-or-juicy-market",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-08-29",
+        "name": "Cosmetics Labeling Claims",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_claims",
+        "url": "https://www.fda.gov/cosmetics/cosmetics-labeling/cosmetics-labeling-claims"
+      },
+      {
+        "accessed_at": "2026-08-29",
+        "name": "How to test skin care products",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_test",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-secrets/prevent-skin-problems/test-skin-care-products"
+      },
+      {
+        "accessed_at": "2026-08-29",
+        "name": "How to pick the right moisturizer for your skin",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_moisturizer",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-basics/dry/pick-moisturizer"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skincare",
+    "tags": [
+      "skincare",
+      "ingredients",
+      "marketing-claims",
+      "sensitive-skin"
+    ]
+  },
+  "title": "Fruit in Skincare: Nature’s Candy or Just a Juicy Market?"
+}
