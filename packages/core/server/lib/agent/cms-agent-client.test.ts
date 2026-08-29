@@ -375,20 +375,64 @@ describe('error mapping', () => {
   });
 
   it('reads the frozen machine code at error.data.error.code', async () => {
-    for (const code of ['unknown_project', 'transcript_too_large', 'model_timeout', 'invalid_turn_request']) {
+    for (const code of [
+      'unknown_project',
+      'transcript_too_large',
+      'model_timeout',
+      'invalid_turn_request',
+      // Provider-error-details (CMS-Agent PR #233): the two new codes must be
+      // recognized, not swallowed into cms_agent_error like the original bug.
+      'provider_quota',
+      'provider_rate_limit',
+    ]) {
       state.behavior.toolError = { code: -32000, message: `${code}: rejected`, data: { error: { code } } };
       const result = await new CmsAgentClient().converse(validRequest());
       assert.equal(result.ok, false);
       assert.equal(result.ok === false && result.code, code);
       // Anything the server answered has already claimed the turn_id.
       assert.equal(result.ok === false && result.retryableWithSameTurnId, false);
+      // A real, parsed JSON-RPC error body — never the "no body" case.
+      assert.equal(result.ok === false && result.fromJsonBody, true);
     }
   });
 
-  it('an unknown machine code degrades to cms_agent_error rather than being trusted', async () => {
+  it('an unknown machine code degrades to cms_agent_error rather than being trusted, but is still marked fromJsonBody', async () => {
     state.behavior.toolError = { code: -32000, message: 'weird', data: { error: { code: 'not_in_the_frozen_list' } } };
     const result = await new CmsAgentClient().converse(validRequest());
     assert.equal(result.ok === false && result.code, 'cms_agent_error');
+    assert.equal(result.ok === false && result.fromJsonBody, true);
+  });
+
+  // Task B: the 2026-08-29 incident this exists to fix — a real 429
+  // credit_balance_exhausted body must reach Platform with providerStatus,
+  // providerMessage and operatorAction intact, not just a bare code.
+  it('surfaces CMS-Agent’s own providerStatus/providerMessage/operatorAction for a provider_quota error', async () => {
+    state.behavior.toolError = {
+      code: -32000,
+      message: 'provider_quota: Node "article_body" received 429 from openai: Your credit balance is too low.',
+      data: {
+        error: {
+          code: 'provider_quota',
+          providerStatus: 429,
+          providerMessage: 'Your credit balance is too low',
+          operatorAction: "Top up openai credit for this project's key, then workflow.retry_node article_body.",
+        },
+      },
+    };
+    const result = await new CmsAgentClient().converse(validRequest());
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.code, 'provider_quota');
+    assert.equal(result.ok === false && result.providerStatus, 429);
+    assert.equal(result.ok === false && result.providerMessage, 'Your credit balance is too low');
+    assert.match(result.ok === false ? (result.operatorAction ?? '') : '', /Top up/);
+    assert.equal(result.ok === false && result.fromJsonBody, true);
+  });
+
+  it('a transport-class failure (5xx, no body) never carries fromJsonBody', async () => {
+    state.behavior.callStatus = 503;
+    const result = await new CmsAgentClient().converse(validRequest());
+    assert.equal(result.ok === false && result.fromJsonBody, undefined);
+    assert.equal(result.ok === false && result.operatorAction, undefined);
   });
 
   it('a 5xx is transport-class: it never reached tool code, so the turn_id survives', async () => {

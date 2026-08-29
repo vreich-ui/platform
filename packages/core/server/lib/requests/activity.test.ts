@@ -113,6 +113,76 @@ describe('a run that died', () => {
   });
 });
 
+/**
+ * Task B (provider-error-details) — the failed node's `output.error`
+ * (executor.ts, CMS-Agent PR #233) must reach the "Stopped at …" card: a
+ * per-node `failure` on `ActivityNode`, and `operator_action` on the run's
+ * `recovery`, so the UI can show WHY and stop offering a "Retry this step"
+ * button that would only fail the same way again.
+ */
+describe('a run that died on a classified provider error', () => {
+  const providerFailedRun = {
+    runId: 'run_provider_quota',
+    status: 'failed',
+    currentNodeId: 'article_body',
+    nodeCount: 2,
+    executionMode: 'openai',
+    mode: { live: true },
+    errors: ['article_body:provider_quota'],
+    approvalsRequired: [],
+    nodes: [
+      { nodeId: 'input_triage', status: 'completed', durationMs: 5000 },
+      {
+        nodeId: 'article_body',
+        status: 'failed',
+        durationMs: 900,
+        errors: ['provider_quota', 'Node "article_body" received 429 from openai: Your credit balance is too low.'],
+        output: {
+          error: {
+            code: 'provider_quota',
+            message: 'Node "article_body" received 429 from openai: Your credit balance is too low.',
+            providerStatus: 429,
+            providerMessage: 'Your credit balance is too low',
+            operatorAction: "Top up openai credit for this project's key, then workflow.retry_node article_body.",
+          },
+        },
+      },
+    ],
+  };
+  const providerFailedCost = {
+    ledger: { totalInputTokens: 100, totalOutputTokens: 20, totalTokens: 120, totalCostUsdEstimate: 0.01, stages: [] },
+    plan: {
+      strategy: 'retry_node',
+      retryNodeId: 'article_body',
+      reason:
+        'Run failed at article_body (provider_quota) — Your credit balance is too low. Top up openai credit ' +
+        'for this project\'s key, then workflow.retry_node article_body. with 1 completed stage(s) intact. ' +
+        'workflow.retry_node with nodeId "article_body" re-runs just that node and continues; nothing completed is recomputed.',
+      reusableStages: ['input_triage'],
+    },
+  };
+
+  it("carries the failed node's providerStatus/providerMessage/operatorAction", () => {
+    const view = projectActivity(providerFailedRun, providerFailedCost)!;
+    const node = view.nodes.find((n) => n.id === 'article_body')!;
+    assert.equal(node.failure?.code, 'provider_quota');
+    assert.equal(node.failure?.providerStatus, 429);
+    assert.equal(node.failure?.providerMessage, 'Your credit balance is too low');
+    assert.match(String(node.failure?.operatorAction), /Top up/);
+  });
+
+  it('surfaces operator_action on the run-level recovery, so the UI knows to hide the retry button', () => {
+    const view = projectActivity(providerFailedRun, providerFailedCost)!;
+    assert.match(String(view.recovery?.operator_action), /Top up/);
+  });
+
+  it('a node with no output.error carries no failure field (tolerant of every prior fixture)', () => {
+    const view = projectActivity(providerFailedRun, providerFailedCost)!;
+    const node = view.nodes.find((n) => n.id === 'input_triage')!;
+    assert.equal(node.failure, undefined);
+  });
+});
+
 describe('a run blocked on a human', () => {
   const blocked = {
     runId: 'run_blocked',

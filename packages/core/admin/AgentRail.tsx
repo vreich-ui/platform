@@ -19,6 +19,7 @@ export function AgentRail({
   draftSeed,
   approvalInStage = false,
   canUseTestMode = false,
+  isOwner = false,
   className,
   collapsed = false,
   onToggleCollapsed,
@@ -40,6 +41,13 @@ export function AgentRail({
    * caller renders exactly as it did before test mode existed.
    */
   canUseTestMode?: boolean;
+  /**
+   * Task B (provider-error-details): whether the CURRENT viewer is an Owner —
+   * the rail does not resolve roles itself, exactly like `canUseTestMode`
+   * above. Gates the Owner-only provider detail line on a failed run's error
+   * text, in both the transcript and the "Stopped at …" activity card.
+   */
+  isOwner?: boolean;
   /** Layout override for the host (T2.2 docks it sticky). Height/border stay the rail's. */
   className?: string;
   /**
@@ -140,7 +148,7 @@ export function AgentRail({
           live line until the editor asks for the detail. */}
       {chat.request ? (
         <div className="shrink-0 pt-3">
-          <RequestActivity requestId={chat.request.request_id} />
+          <RequestActivity requestId={chat.request.request_id} isOwner={isOwner} />
         </div>
       ) : null}
       <ChatThread
@@ -163,6 +171,7 @@ export function AgentRail({
         lastOutcome={chat.lastOutcome}
         lastEventAtMs={chat.lastEventAtMs}
         onUndo={(prompt) => void chat.send(prompt)}
+        isOwner={isOwner}
         emptyHint={
           <EmptyState
             title="Ready when you are"

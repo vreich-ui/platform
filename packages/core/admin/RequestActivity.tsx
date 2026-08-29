@@ -43,6 +43,7 @@ import {
 } from '@core/lib/admin/requests-client';
 import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
 import { relativeAge } from '@core/lib/admin/request-logic';
+import { cmsAgentErrorCopy, hasOperatorAction } from '@core/lib/admin/cms-agent-error-copy';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -254,11 +255,26 @@ function NodeGlyph({ node, retryNodeId }: { node: ActivityNodeView; retryNodeId?
 
 // ─── level 3: one node's detail ──────────────────────────────────────────────
 
-function NodeDetail({ node, retryNodeId }: { node: ActivityNodeView; retryNodeId?: string }) {
+function NodeDetail({ node, retryNodeId, isOwner }: { node: ActivityNodeView; retryNodeId?: string; isOwner: boolean }) {
   const canRetry = node.id === retryNodeId;
+  // Task B, item 3: "same text" as the admin chat's run_error line — the
+  // SAME `cmsAgentErrorCopy` function, so a node's own code/message/
+  // operatorAction render identically wherever a failure shows up. A node's
+  // failure is always CMS-Agent's own structured detail (never a network/
+  // timeout ambiguity — that layer is CMS-Agent's problem, not this UI's),
+  // so `fromJsonBody` is unconditionally true here. Falls back to the raw
+  // `errors` pair only for a run recorded before this field existed.
+  const failureCopy = node.failure ? cmsAgentErrorCopy({ ...node.failure, fromJsonBody: true }, { isOwner }) : undefined;
   return (
     <div className="flex flex-col gap-2 pb-2 text-[length:var(--adm-text-xs)]">
-      {node.errors.length > 0 ? (
+      {failureCopy ? (
+        <ul className="flex flex-col gap-1 rounded-[var(--adm-radius-sm)] bg-[var(--adm-danger-soft)] px-2 py-1.5">
+          <li className="whitespace-pre-wrap text-[var(--adm-danger-text)]">{failureCopy.text}</li>
+          {failureCopy.providerDetail ? (
+            <li className="whitespace-pre-wrap text-[var(--adm-danger-text)]">{failureCopy.providerDetail}</li>
+          ) : null}
+        </ul>
+      ) : node.errors.length > 0 ? (
         <ul className="flex flex-col gap-1 rounded-[var(--adm-radius-sm)] bg-[var(--adm-danger-soft)] px-2 py-1.5">
           {node.errors.map((error, index) => (
             <li key={index} className="whitespace-pre-wrap text-[var(--adm-danger-text)]">
@@ -328,7 +344,17 @@ function NodeDetail({ node, retryNodeId }: { node: ActivityNodeView; retryNodeId
 
 // ─── level 2: one node row ───────────────────────────────────────────────────
 
-function NodeRow({ node, nowMs, retryNodeId }: { node: ActivityNodeView; nowMs: number; retryNodeId?: string }) {
+function NodeRow({
+  node,
+  nowMs,
+  retryNodeId,
+  isOwner,
+}: {
+  node: ActivityNodeView;
+  nowMs: number;
+  retryNodeId?: string;
+  isOwner: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
   const expandable = nodeHasDetail(node);
@@ -387,7 +413,7 @@ function NodeRow({ node, nowMs, retryNodeId }: { node: ActivityNodeView; nowMs: 
         </p>
       ) : null}
       <div id={detailId} hidden={!expandable || !open} className="pl-7 pr-1.5">
-        {expandable && open ? <NodeDetail node={node} retryNodeId={retryNodeId} /> : null}
+        {expandable && open ? <NodeDetail node={node} retryNodeId={retryNodeId} isOwner={isOwner} /> : null}
       </div>
     </li>
   );
@@ -406,9 +432,16 @@ export interface RequestActivityProps {
   onSettled?: (activity: ActivityView) => void;
   /** Offered on the recovery block. Absent means no button at all. */
   onRetry?: (nodeId: string) => void;
+  /**
+   * Task B (provider-error-details): whether the CURRENT viewer is an Owner —
+   * this component does not resolve roles itself, the same convention
+   * `AgentRail`'s `canUseTestMode` already established. Gates the Owner-only
+   * "provider <status>: <message>" line on a failed node's detail.
+   */
+  isOwner?: boolean;
 }
 
-export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, onRetry }: RequestActivityProps) {
+export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, onRetry, isOwner = false }: RequestActivityProps) {
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
   const [activity, setActivity] = useState<ActivityView | null>(null);
   const [reason, setReason] = useState<string | undefined>(undefined);
@@ -682,7 +715,12 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
    * softer `error` icon; every other failed node on the same card, and every
    * warning/tool-call under it, stays `blocked`.
    */
-  const effectiveRetryNodeId = onRetry ? retryNodeId : undefined;
+  // Task B, item 4: a classified provider error or CMS-Agent's own budget
+  // guard already NAMES the next step (top up credit, wait, raise the
+  // budget) — offering "Retry this step" next to it invites clicking the one
+  // action that will only fail the same way again. Read as no retry
+  // affordance at all: same B1/B2 split as the `onRetry`-absent case above.
+  const effectiveRetryNodeId = onRetry && !hasOperatorAction({ operatorAction: recovery?.operator_action }) ? retryNodeId : undefined;
   // D4/T2.3: the whole-run level of the same B1/B2 split — a retry exists
   // SOMEWHERE on this run iff `effectiveRetryNodeId` names a node for it.
   // `notice` keeps its pre-existing neutral/accent bar rather than D4's
@@ -824,7 +862,14 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
           <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
             {recoveryReassurance(recovery.reusable_stages)}
           </p>
-          {onRetry && retryNodeId ? (
+          {hasOperatorAction({ operatorAction: recovery.operator_action }) ? (
+            // Task B, item 4: the operator action REPLACES the retry button,
+            // it does not sit next to it — retrying would only reach the
+            // same failure again until this is done.
+            <p className="mt-2 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">
+              {recovery.operator_action}
+            </p>
+          ) : onRetry && retryNodeId ? (
             <Button size="sm" variant="secondary" className="mt-2" onClick={() => onRetry(retryNodeId)}>
               Retry this step
             </Button>
@@ -846,7 +891,7 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
             ) : null}
             <ol className="flex flex-col">
               {activity.nodes.map((node, nodeIndex) => (
-                <NodeRow key={`${node.id}-${nodeIndex}`} node={node} nowMs={nowMs} retryNodeId={effectiveRetryNodeId} />
+                <NodeRow key={`${node.id}-${nodeIndex}`} node={node} nowMs={nowMs} retryNodeId={effectiveRetryNodeId} isOwner={isOwner} />
               ))}
             </ol>
             {spend ? (

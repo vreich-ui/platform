@@ -52,6 +52,7 @@ import { DECISION_LABEL } from '@core/lib/admin/approval-actions';
 import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/chat-quote';
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
 import { useDictation } from '@core/lib/admin/use-dictation';
+import { cmsAgentErrorCopy, type CmsAgentErrorDetail } from '@core/lib/admin/cms-agent-error-copy';
 
 // ─── useChat: since_seq polling over get_chat ───────────────────────
 
@@ -577,6 +578,27 @@ function JsonDisclosure({ label, value }: { label: string; value: unknown }) {
  * and read worst: for a long article it is the NORMAL ending of a turn, and it
  * does not mean the job stopped.
  */
+/**
+ * Task B (provider-error-details) — turns a `run_error` event's `detail` into
+ * display copy, handling both the current structured shape
+ * (code/message/operatorAction/providerStatus/providerMessage/fromJsonBody)
+ * and a pre-existing chat document's events, which only ever carried a
+ * precomposed `message` string and no `code` at all.
+ */
+function runErrorCopy(detail: Record<string, unknown> | undefined, isOwner: boolean): { text: string; providerDetail?: string } {
+  const code = typeof detail?.code === 'string' ? detail.code : undefined;
+  if (!code) return { text: String(detail?.message ?? 'unknown error') };
+  const error: CmsAgentErrorDetail = {
+    code,
+    message: typeof detail?.message === 'string' ? detail.message : '',
+    ...(typeof detail?.operatorAction === 'string' ? { operatorAction: detail.operatorAction } : {}),
+    ...(typeof detail?.providerStatus === 'number' ? { providerStatus: detail.providerStatus } : {}),
+    ...(typeof detail?.providerMessage === 'string' ? { providerMessage: detail.providerMessage } : {}),
+    ...(detail?.fromJsonBody === true ? { fromJsonBody: true } : {}),
+  };
+  return cmsAgentErrorCopy(error, { isOwner });
+}
+
 function RunFinishedLine({ event }: { event: ChatEventView }) {
   // `reason` is the loop's own vocabulary (agent/loop.ts): `caps` and
   // `wall_clock` both mean the TURN ran out of budget — never that the job
@@ -614,6 +636,7 @@ function RunFinishedLine({ event }: { event: ChatEventView }) {
 function RunReceipt({
   outcome,
   message,
+  providerDetail,
   events,
   onUndo,
   busy,
@@ -621,6 +644,8 @@ function RunReceipt({
   outcome: RunSummaryView;
   /** The `run_error` event's human message, when this receipt is for a failed run. */
   message?: string;
+  /** Task B: an Owner-only second line — "provider <status>: <message>" — when the failure carried one. */
+  providerDetail?: string;
   events: ChatEventView[];
   onUndo?: (prompt: string) => void;
   busy?: boolean;
@@ -640,6 +665,7 @@ function RunReceipt({
         ) : null}
       </div>
       {message ? <p className="text-[var(--adm-text-muted)]">{message}</p> : null}
+      {providerDetail ? <p className="text-[var(--adm-text-muted)]">{providerDetail}</p> : null}
       {outcome.chips.length > 0 ? <p className="text-[var(--adm-text-muted)]">{outcome.chips.join(' · ')}</p> : null}
       {created.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
@@ -1071,6 +1097,7 @@ export function ChatThread({
   lastOutcome,
   lastEventAtMs,
   onUndo,
+  isOwner = false,
 }: {
   events: ChatEventView[];
   status: ChatStatus | undefined;
@@ -1098,6 +1125,15 @@ export function ChatThread({
   lastEventAtMs?: number;
   /** T3.1 (D5): the receipt's Undo button sends this prompt back into the chat. */
   onUndo?: (prompt: string) => void;
+  /**
+   * Task B (provider-error-details): whether the CURRENT viewer is an Owner —
+   * decided by the surface that already resolves roles (mirrors
+   * `AgentRail`'s `canUseTestMode`: this component does not resolve roles
+   * itself). Gates the second "provider <status>: <message>" line on a
+   * `run_error`; default false, so every existing caller renders exactly as
+   * it did before this line existed.
+   */
+  isOwner?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1256,13 +1292,14 @@ export function ChatThread({
           return <RunFinishedLine key={event.seq} event={event} />;
         }
         if (event.type === 'run_error') {
-          const message = String(event.detail?.message ?? 'unknown error');
+          const copy = runErrorCopy(event.detail, isOwner);
           if (isLatestRun) {
             return (
               <RunReceipt
                 key={event.seq}
                 outcome={lastOutcome}
-                message={message}
+                message={copy.text}
+                providerDetail={copy.providerDetail}
                 events={events}
                 onUndo={onUndo}
                 busy={busy}
@@ -1271,7 +1308,8 @@ export function ChatThread({
           }
           return (
             <p key={event.seq} className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">
-              The run hit a problem: {message}
+              The run hit a problem: {copy.text}
+              {copy.providerDetail ? ` — ${copy.providerDetail}` : ''}
             </p>
           );
         }

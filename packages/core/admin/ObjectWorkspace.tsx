@@ -1132,6 +1132,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       contextActions={chatContextActions}
       draftSeed={composerSeed}
       approvalInStage={sequentialProposal}
+      isOwner={owner}
       collapsed={expandedWorkspace && dockCollapsed}
       {...(expandedWorkspace ? { onToggleCollapsed: () => setDockCollapsed((value) => !value) } : {})}
       belowHeader={

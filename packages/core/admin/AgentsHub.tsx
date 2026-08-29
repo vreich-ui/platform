@@ -505,7 +505,7 @@ function HubBody() {
                 23-node article being written instead of asking for an update. */}
             {chat.request ? (
               <div className="mb-3">
-                <RequestActivity requestId={chat.request.request_id} />
+                <RequestActivity requestId={chat.request.request_id} isOwner={owner} />
               </div>
             ) : null}
             {createdObjects.length > 0 ? (
@@ -541,6 +541,7 @@ function HubBody() {
               lastOutcome={chat.lastOutcome}
               lastEventAtMs={chat.lastEventAtMs}
               onUndo={(prompt) => void chat.send(prompt, undefined, testMode)}
+              isOwner={owner}
             />
             {chat.error ? (
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>

@@ -409,6 +409,10 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   }, [queryInput]);
 
   const canArchive = user.roles.includes('owner') || user.roles.includes('publisher');
+  // Task B (provider-error-details): gates the Owner-only provider detail
+  // line on a failed run's error text — the surface already resolves roles,
+  // so `RequestActivity` reads it from here rather than resolving its own.
+  const isOwner = user.roles.includes('owner');
   // T3.2: the same overlay the shell's pill reads, so a decision taken here
   // and a decision taken from the header are the same fact to both surfaces.
   const decisionOverlay = useDecisionOverlay();
@@ -658,7 +662,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
             editor who opened THIS request wants the detail, not a summary. */}
         {selectedId ? (
           <div className="mb-3">
-            <RequestActivity requestId={selectedId} defaultExpanded onSettled={refresh} />
+            <RequestActivity requestId={selectedId} defaultExpanded onSettled={refresh} isOwner={isOwner} />
           </div>
         ) : null}
         {loading ? (
@@ -749,7 +753,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                   </Button>
                 </div>
               ) : null}
-              <RequestActivity requestId={openId} defaultExpanded onSettled={refresh} />
+              <RequestActivity requestId={openId} defaultExpanded onSettled={refresh} isOwner={isOwner} />
             </div>
           ) : null}
         </Drawer>

@@ -44,6 +44,7 @@ import {
   providerEngine,
   type CmsAgentTurnClient,
 } from '../../packages/core/server/lib/agent/engine.js';
+import { cmsAgentErrorCopy } from '../../packages/core/lib/admin/cms-agent-error-copy.js';
 import type { CmsAgentConverseRequest } from '../../packages/core/server/lib/agent/cms-agent-client.js';
 import { emptyProfilesDoc, resolveProfile } from '../../packages/core/server/lib/agent/profiles.js';
 import { resolveAutonomy } from '../../packages/core/server/lib/agent/tools.js';
@@ -948,9 +949,21 @@ test('PF3: a CMS-Agent engine failure produces a coded run_error with human copy
   assert.equal(doc.status, 'error');
   const errorEvent = doc.events.find((event) => event.type === 'run_error')!;
   assert.equal(errorEvent.detail!.code, 'cms_agent_unreachable');
-  assert.match(String(errorEvent.detail!.message), /Publishing Agent service is unavailable — nothing was changed/);
+  // Task B: the event now persists CMS-Agent's own RAW detail (for a future
+  // viewer who is an Owner and a JSON-body failure worth showing raw); the
+  // FINAL editor-facing text is computed at render time, not baked in here.
+  // A connect error never carries a JSON body, so `fromJsonBody` is absent —
+  // exactly the "no body" case the generic sentence exists for.
+  assert.equal(errorEvent.detail!.message, 'CMS-Agent is unreachable from Platform.');
+  assert.equal(errorEvent.detail!.fromJsonBody, undefined);
+  const copy = cmsAgentErrorCopy({
+    code: String(errorEvent.detail!.code),
+    message: String(errorEvent.detail!.message),
+    fromJsonBody: errorEvent.detail!.fromJsonBody === true,
+  });
+  assert.match(copy.text, /Publishing Agent service is unavailable — nothing was changed/);
   // Editor-facing copy carries no internals and no raw technical message.
-  assert.equal(/unreachable from Platform/i.test(String(errorEvent.detail!.message)), false);
+  assert.equal(/unreachable from Platform/i.test(copy.text), false);
 
   // The service "recovers": the same chat accepts a new send and completes.
   deps.engine = providerEngine(async () => ({ text: 'Recovered.', toolCalls: [], outputTokens: 1 }));
@@ -979,7 +992,7 @@ test('PF5: send fails closed when unconfigured and the background hop cannot con
   // startRun can mint a doomed run.
   assert.match(source, /if \(!isCmsAgentConfigured\(\)\)/);
   assert.doesNotMatch(source, /resolveEffectiveChatMode|CMS_AGENT_CHAT_MODE/);
-  assert.match(source, /humanCopyForCmsAgentError\('cms_agent_not_configured'\)/);
+  assert.match(source, /humanCopyForCmsAgentError\(\{ code: 'cms_agent_not_configured'/);
   assert.ok(source.indexOf("!isCmsAgentConfigured()") < source.indexOf('await startRun('));
   // The production hop imports neither the profile adapter nor a mode
   // resolver. Its sole engine constructor is the CMS-Agent-backed one.

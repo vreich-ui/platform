@@ -58,6 +58,16 @@ export interface ActivityNode {
   skip_reason?: string;
   warnings: ClassifiedWarning[];
   errors: string[];
+  /**
+   * Task B (provider-error-details) — CMS-Agent's own structured detail for
+   * this node's failure (executor.ts's `state.output.error`), when present.
+   * `operatorAction`/`providerStatus`/`providerMessage` exist only for a
+   * classified provider HTTP error (provider_quota/provider_rate_limit) or
+   * CMS-Agent's own budget guard (budget_exceeded) — absent for every other
+   * failure code, exactly like `errors` above already is for a node that
+   * never failed.
+   */
+  failure?: { code: string; message: string; operatorAction?: string; providerStatus?: number; providerMessage?: string };
   tools: ActivityToolCall[];
   cost?: { tokens: number; usd: number };
 }
@@ -77,7 +87,21 @@ export interface ActivityView {
   eta?: { p50_ms: number; p95_ms: number; based_on_runs: number };
   cost?: { input_tokens: number; output_tokens: number; usd: number; most_expensive_node?: string };
   /** CMS-Agent's own recovery advice for a stopped run, verbatim. */
-  recovery?: { strategy: string; node_id?: string; sentence: string; reusable_stages: number };
+  recovery?: {
+    strategy: string;
+    node_id?: string;
+    sentence: string;
+    reusable_stages: number;
+    /**
+     * Task B, item 4: present only when the node `node_id` names failed with
+     * a classified provider error or CMS-Agent's own budget guard. A "Retry
+     * this step" affordance must not be offered when this is set — the
+     * operator action IS the next step (top up credit, wait, raise the
+     * budget), and offering "retry" next to it invites clicking the one that
+     * will only fail the same way again.
+     */
+    operator_action?: string;
+  };
   approvals: Array<{ node_id: string; reason: string; requested_at?: string }>;
   nodes: ActivityNode[];
 }
@@ -222,6 +246,25 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
       const durationMs = num(node.durationMs);
       const elapsed = nodeStatus === 'running' && startedAt ? nowMs - Date.parse(startedAt) : undefined;
       const money = stageCost.get(id);
+      // Task B: executor.ts persists `state.output = { error: { code, message,
+      // operatorAction?, providerStatus?, providerMessage? } }` on a failed
+      // node. Tolerant by construction, like everything else in this
+      // projection — a node with no `output.error` (every prior fixture,
+      // every non-failed node) simply gets no `failure`.
+      const output = isRecord(node.output) ? node.output : undefined;
+      const rawFailure = output && isRecord(output.error) ? output.error : undefined;
+      const failureCode = rawFailure ? str(rawFailure.code) : undefined;
+      const failureMessage = rawFailure ? str(rawFailure.message) : undefined;
+      const failure =
+        failureCode && failureMessage
+          ? {
+              code: failureCode,
+              message: failureMessage,
+              ...(str(rawFailure!.operatorAction) ? { operatorAction: str(rawFailure!.operatorAction)! } : {}),
+              ...(num(rawFailure!.providerStatus) !== undefined ? { providerStatus: num(rawFailure!.providerStatus)! } : {}),
+              ...(str(rawFailure!.providerMessage) ? { providerMessage: str(rawFailure!.providerMessage)! } : {}),
+            }
+          : undefined;
       return {
         id,
         label: nodeLabel(id) ?? id,
@@ -243,6 +286,7 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
         ...(skip && str(skip.reason) ? { skip_reason: str(skip.reason)! } : {}),
         warnings,
         errors: strings(node.errors),
+        ...(failure ? { failure } : {}),
         tools: projectTools(node.toolCalls),
         ...(money && money.tokens > 0 ? { cost: money } : {}),
       };
@@ -304,15 +348,20 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
       : {}),
     ...(strategy && reason
       ? {
-          recovery: {
-            strategy,
+          recovery: (() => {
             // `retryNodeId` is absent exactly when a run failed in an unusual
             // way — i.e. when a retry button matters most. The node that
             // actually failed is the honest fallback.
-            ...((str(plan.retryNodeId) ?? failed?.id) ? { node_id: (str(plan.retryNodeId) ?? failed?.id)! } : {}),
-            sentence: reason,
-            reusable_stages: arr(plan.reusableStages).length,
-          },
+            const recoveryNodeId = str(plan.retryNodeId) ?? failed?.id;
+            const recoveryNode = recoveryNodeId ? nodes.find((node) => node.id === recoveryNodeId) : undefined;
+            return {
+              strategy,
+              ...(recoveryNodeId ? { node_id: recoveryNodeId } : {}),
+              sentence: reason,
+              reusable_stages: arr(plan.reusableStages).length,
+              ...(recoveryNode?.failure?.operatorAction ? { operator_action: recoveryNode.failure.operatorAction } : {}),
+            };
+          })(),
         }
       : {}),
     approvals,
