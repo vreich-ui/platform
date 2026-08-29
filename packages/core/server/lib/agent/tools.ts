@@ -135,6 +135,31 @@ export interface ToolContext {
    * idempotent (`publish_workspace_run`). Absent → the call runs unguarded.
    */
   idempotent?<T extends Record<string, unknown>>(toolName: string, key: string, run: () => Promise<T>): Promise<T>;
+  /**
+   * W20 (review fix, Wolf 2026-08-29) — set ONLY for the ONE `execute()` call
+   * that is running because a HUMAN just clicked Approve (or Edit-and-approve)
+   * on THIS call's own approval card. `loop.ts`'s pre-approved branch (the
+   * `run.approved_call` marker `approvePendingTool` stamps) sets this
+   * immediately before invoking `execute()` and deletes it immediately after,
+   * so it never leaks onto any other call the same hop goes on to drain.
+   *
+   * Absent (undefined) on every other execute():
+   *   - the ordinary 'auto' path — no card was EVER shown for this call,
+   *     including an 'ask'-floored tool resolved to 'auto' by the project's
+   *     `publishingPolicy.autonomyMode` being `'autonomous'` (`registry.ts`'s
+   *     `autonomyForCall`) — that is an AGENT-initiated call, not a human one;
+   *   - the pause itself (the `dryRun` call that renders the card) and any
+   *     call still queued behind it.
+   *
+   * Do NOT infer this from `ctx.principal` alone: `chatRunSchema.principal` is
+   * always `kind:'human'` — the signed-in editor who started the CHAT — and is
+   * present on autonomous-mode 'auto' calls exactly as it is on approved ones.
+   * It says who owns the run, never that a human just accepted a card for
+   * THIS specific call. A tool that needs to know "did a human just approve
+   * ME, right now" (as opposed to "who is this run's editor of record") reads
+   * this field, not `ctx.principal`.
+   */
+  humanApprovedCall?: { call_id: string; by: string; edited: boolean };
 }
 
 export interface ChatTool {
@@ -1177,6 +1202,30 @@ const publishWorkspaceRun: ChatTool = {
       requestId: args.request_id as string,
       tags: args.tags as string[] | undefined,
     };
+    // THE OPERATOR'S WITHHELD DECISION, BEFORE ANYTHING ELSE (Wolf, 2026-08-29
+    // review). An operator who has withheld publish for this run must halt
+    // this tool outright — before readiness is even checked, before any
+    // decision is (re-)written, before workflow_publish_run is anywhere in
+    // reach. Read the run's CURRENT operatorPublishDecision fresh (the
+    // readiness envelope below doesn't carry it) and refuse with nothing else
+    // called when it reads "withheld". `workflow_get_run` answers
+    // `ok({ run, mode, stall })` — the run row is nested one key in, exactly
+    // like every other workflow_get_run call site in this file (see
+    // `runRowFrom`, used the same way by list_workspace_nodes et al.);
+    // `callTool` unwraps only the outer {ok,data} envelope.
+    const got = await cmsAgent.callTool<Record<string, unknown>>('workflow_get_run', { runId: input.runId });
+    if (!got.ok) return { content: json({ error: got.message, code: got.code }), is_error: true };
+    const currentRun = runRowFrom(got.data);
+    if (currentRun.operatorPublishDecision === 'withheld') {
+      return {
+        content: json({
+          error: 'Publish refused: the operator has withheld approval for this run.',
+          code: 'refused',
+          reason: 'operator withheld publish for this run',
+        }),
+        is_error: true,
+      };
+    }
     // Re-check readiness at execution: the card previewed it, but the world
     // may have moved — a no_go never reaches workflow_publish_run.
     const readiness = await callReadiness(ctx, input);
@@ -1198,12 +1247,65 @@ const publishWorkspaceRun: ChatTool = {
         is_error: true,
       };
     }
+    // THE OPERATOR DECISION, BEFORE THE PUBLISH — `approved` on `workflow_publish_run`
+    // is DEPRECATED. CMS-Agent's own live tool description says so directly: "approved
+    // is DEPRECATED as an authority input (accepted for compatibility, no longer
+    // consulted) and can never override an operator's 'withheld'." Publish authority is
+    // resolved ONLY from `run.operatorPublishDecision` — written solely by
+    // `workflow_set_operator_publish_decision` — or the project's `autonomyMode` policy
+    // (`../../../lib/publishing-policy.js`). This tool used to send `approved: true` and
+    // never write that decision, so a publish driven from admin chat could not be
+    // authorised on any operator-gated project, no matter what the signed-in human
+    // clicked — while the OTHER approve path, `admin-request-activity.ts`'s "approve"
+    // action, called `workflow_set_operator_publish_decision` first and worked. Two
+    // approve paths that disagreed, one of them silently unable to publish anything on a
+    // gated site. Found live 2026-08-29.
+    //
+    // BUT only a HUMAN clicking Approve on THIS call's own approval card gets to WRITE
+    // that "approved" (Wolf, 2026-08-29 review): `ctx.humanApprovedCall` is set ONLY by
+    // loop.ts's pre-approved branch, for the one execute() it just resumed after a real
+    // approval — never inferred from `ctx.principal` alone, which is present on every
+    // run (autonomous included; see that field's own doc on ToolContext). A call that
+    // reached here WITHOUT a human having just approved it is agent-initiated under an
+    // autonomous project (this tool's `autonomyFloor:'ask'` resolved to 'auto' by
+    // `publishingPolicy.autonomyMode`, `registry.ts`'s `autonomyForCall`) — writing
+    // "approved" behind it would forge a human record of approval that never happened,
+    // and would also be redundant: the project's own autonomyMode is what CMS-Agent's
+    // `resolvePublishAuthority` already consults when no operator decision is on file.
+    // So an agent-initiated call skips this write entirely and lets that policy authorise
+    // the publish below, on its own.
+    //
+    // Deliberately OUTSIDE `ctx.idempotent` below, for the same reason
+    // `admin-request-activity.ts` records this decision unconditionally on every approve
+    // click rather than folding it into `workflow_run_all`'s own guard: recording
+    // "approved" for a runId is idempotent on CMS-Agent's side (it just overwrites the
+    // same field), so there is nothing to protect against a duplicate write, but there IS
+    // something to lose by hiding it inside the publish idempotency key — a REPLAY of an
+    // already-published run would then never re-assert the decision, and the human
+    // approver's record of record would depend on whether this call happened to be the
+    // first attempt or a retry. It should not. And if this call fails, the publish must
+    // NOT proceed: same policy as the sibling path (`admin-request-activity.ts` returns
+    // without ever calling its advance when the decision write fails), stayed with here
+    // rather than inventing a "publish anyway" fallback for a tool that exists specifically
+    // to gate publishing on operator say-so.
+    if (ctx.humanApprovedCall) {
+      const decided = await cmsAgent.callTool<Record<string, unknown>>('workflow_set_operator_publish_decision', {
+        runId: input.runId,
+        decision: 'approved',
+      });
+      if (!decided.ok) {
+        return { content: json({ error: decided.message, code: decided.code }), is_error: true };
+      }
+    }
     const base = await readinessPayload(ctx, input);
     const payload = {
       runId: input.runId,
       projectId: cmsAgent.projectId,
       requestId: input.requestId,
-      approved: true,
+      // NOT `approved: true`. It is accepted-but-ignored by `workflow_publish_run` (see
+      // above) — sending it back would read as though IT were what authorised this
+      // publish, when the operator decision just recorded above is what actually did.
+      // A field that lies about what authorised the call is worse than no field.
       live: true,
       readiness: {
         approval: {
@@ -1294,7 +1396,8 @@ const publishWorkspaceRun: ChatTool = {
 
     // The receipt fields live on the client's own publish result, one level in again.
     const receipt = isRecord(data.result) ? (data.result as Record<string, unknown>) : data;
-    const commit = data.commit ?? receipt.commit ?? (isRecord(receipt.receipt) ? receipt.receipt.commit_sha : undefined);
+    const commit =
+      data.commit ?? receipt.commit ?? (isRecord(receipt.receipt) ? receipt.receipt.commit_sha : undefined);
     const articlePath = data.articlePath ?? receipt.article_path ?? receipt.articlePath;
     return {
       content: json({
