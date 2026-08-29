@@ -452,7 +452,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         // mode can queue a run for Platform's generic provider adapters.
         if (!isCmsAgentConfigured()) {
           return jsonResponse(503, {
-            error: humanCopyForCmsAgentError('cms_agent_not_configured'),
+            error: humanCopyForCmsAgentError({ code: 'cms_agent_not_configured', message: '' }).text,
             code: 'cms_agent_not_configured',
           });
         }

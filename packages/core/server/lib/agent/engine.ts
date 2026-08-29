@@ -63,13 +63,35 @@ export const providerEngine =
  * `run_error` event — so the stable `cms_agent_*` code leads the message.
  * PF3 reads `.code` to emit named error events and human copy; nothing here
  * ever contains a bearer (the client sanitizes every message it returns).
+ *
+ * Task B (provider-error-details): carries CMS-Agent's own structured detail
+ * (`operatorAction`/`providerStatus`/`providerMessage`/`fromJsonBody`) so the
+ * loop's `run_error` event can persist it verbatim instead of losing it to a
+ * single precomposed `.message` string — `humanCopyForCmsAgentError` (below)
+ * decides the FINAL display text at render time, not here, because whether
+ * the viewer is an Owner can only be known then.
  */
 export class CmsAgentEngineError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  /** The raw CMS-Agent message, WITHOUT the `${code}: ` prefix `.message` carries — that prefix is for log lines, not for rebuilding copy. */
+  readonly detailMessage: string;
+  readonly operatorAction?: string;
+  readonly providerStatus?: number;
+  readonly providerMessage?: string;
+  readonly fromJsonBody: boolean;
+  constructor(
+    code: string,
+    message: string,
+    options: { operatorAction?: string; providerStatus?: number; providerMessage?: string; fromJsonBody?: boolean } = {}
+  ) {
     super(`${code}: ${message}`);
     this.name = 'CmsAgentEngineError';
     this.code = code;
+    this.detailMessage = message;
+    this.operatorAction = options.operatorAction;
+    this.providerStatus = options.providerStatus;
+    this.providerMessage = options.providerMessage;
+    this.fromJsonBody = options.fromJsonBody ?? false;
   }
 }
 
@@ -77,34 +99,30 @@ export class CmsAgentEngineError extends Error {
 const engineFailure = (failure: CmsAgentError): CmsAgentEngineError =>
   new CmsAgentEngineError(
     failure.code.startsWith('cms_agent_') ? failure.code : `cms_agent_${failure.code}`,
-    failure.message
+    failure.message,
+    {
+      operatorAction: failure.operatorAction,
+      providerStatus: failure.providerStatus,
+      providerMessage: failure.providerMessage,
+      fromJsonBody: failure.fromJsonBody,
+    }
   );
 
 /**
- * PF3 — the editor-facing sentence for each failure class. Editor-safe by the
- * house rule: no raw ids, schemas, providers or internals; "nothing was
- * changed" is literally true because the engine fails before any tool
- * executes on this turn.
+ * PF3 / Task B — the editor-facing copy for a CMS-Agent failure. Delegates to
+ * the isomorphic `cmsAgentErrorCopy` (`@core/lib/admin/cms-agent-error-copy`)
+ * so the admin chat's `run_error` line and the workflow run's "Stopped at …"
+ * card render the exact same rule from the exact same function — re-exported
+ * here so existing server-side callers (loop.ts, admin-agent-chat.ts) do not
+ * need a second import path.
  */
-export const humanCopyForCmsAgentError = (code: string): string => {
-  switch (code) {
-    case 'cms_agent_not_configured':
-      return 'The Publishing Agent service is not configured for this site — nothing was changed. Contact the owner.';
-    case 'cms_agent_auth_failed':
-      return 'The Publishing Agent service rejected this site’s credentials — nothing was changed. Contact the owner.';
-    case 'cms_agent_timeout':
-    case 'cms_agent_model_timeout':
-      return 'The Publishing Agent service took too long to respond — nothing was changed. Try again.';
-    case 'cms_agent_transcript_too_large':
-      return 'This conversation has grown too long for the Publishing Agent — start a new conversation to continue.';
-    case 'cms_agent_budget_exceeded':
-      return 'The Publishing Agent service declined this turn for budget reasons — nothing was changed. Contact the owner.';
-    case 'cms_agent_invalid_actor':
-      return 'This session could not be attributed to a signed-in editor — nothing was changed. Sign out and back in, then try again.';
-    default:
-      return 'The Publishing Agent service is unavailable — nothing was changed. Try again or contact the owner.';
-  }
-};
+export {
+  cmsAgentErrorCopy as humanCopyForCmsAgentError,
+  CMS_AGENT_UNAVAILABLE_TEXT,
+  hasOperatorAction,
+  type CmsAgentErrorCopy,
+  type CmsAgentErrorDetail,
+} from '../../../lib/admin/cms-agent-error-copy.js';
 
 // ─── transcript trim (constraints 4 + 5) ─────────────────────────────────────
 

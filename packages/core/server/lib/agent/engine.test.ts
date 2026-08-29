@@ -23,6 +23,7 @@ import {
   buildChatEngine,
   cmsAgentEngine,
   CmsAgentEngineError,
+  CMS_AGENT_UNAVAILABLE_TEXT,
   humanCopyForCmsAgentError,
   providerEngine,
   trimTranscriptForCmsAgent,
@@ -256,6 +257,35 @@ test('a wire error throws cms_agent_<code> after exactly one call — no blind r
   assert.equal(converseCalls.length, 1);
 });
 
+// Task B (provider-error-details): CMS-Agent's own structured detail must
+// survive the wire -> CmsAgentEngineError hop unchanged, so the loop's
+// run_error event (and from there, the chat and the "Stopped at …" card) can
+// show WHY a provider call failed, not just that it did.
+test('a provider_quota wire error carries operatorAction/providerStatus/providerMessage/fromJsonBody onto the thrown error', async () => {
+  const { engine } = engineWith([
+    {
+      ok: false,
+      code: 'provider_quota',
+      message: 'Node "article_body" received 429 from openai: Your credit balance is too low.',
+      retryableWithSameTurnId: false,
+      operatorAction: "Top up openai credit for this project's key, then workflow.retry_node article_body.",
+      providerStatus: 429,
+      providerMessage: 'Your credit balance is too low',
+      fromJsonBody: true,
+    },
+  ]);
+  await assert.rejects(
+    () => engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS }),
+    (error: unknown) =>
+      error instanceof CmsAgentEngineError &&
+      error.code === 'cms_agent_provider_quota' &&
+      error.providerStatus === 429 &&
+      error.providerMessage === 'Your credit balance is too low' &&
+      /Top up/.test(error.operatorAction ?? '') &&
+      error.fromJsonBody === true
+  );
+});
+
 test('a transport code already carrying the prefix is not double-prefixed', async () => {
   const { engine } = engineWith([
     { ok: false, code: 'cms_agent_auth_failed', message: 'opaque 401', retryableWithSameTurnId: true, statusCode: 401 },
@@ -352,7 +382,7 @@ test('buildChatEngine fails closed when CMS-Agent is unavailable', async () => {
   );
 });
 
-test('humanCopyForCmsAgentError: every named class gets editor-safe copy; unknown codes get the generic sentence', () => {
+test('humanCopyForCmsAgentError: every named class keeps its editor-safe copy, unaffected by a JSON body', () => {
   for (const code of [
     'cms_agent_not_configured',
     'cms_agent_auth_failed',
@@ -361,10 +391,52 @@ test('humanCopyForCmsAgentError: every named class gets editor-safe copy; unknow
     'cms_agent_transcript_too_large',
     'cms_agent_budget_exceeded',
     'cms_agent_invalid_actor',
-    'cms_agent_something_new',
   ]) {
-    const copy = humanCopyForCmsAgentError(code);
-    assert.ok(copy.length > 20);
-    assert.equal(/gpt|openai|anthropic|claude|agt_|schema/i.test(copy), false, `no internals in copy for ${code}`);
+    const copy = humanCopyForCmsAgentError({ code, message: 'raw upstream text', fromJsonBody: true });
+    assert.ok(copy.text.length > 20);
+    assert.equal(/gpt|openai|anthropic|claude|agt_|schema/i.test(copy.text), false, `no internals in copy for ${code}`);
+    assert.equal(copy.providerDetail, undefined);
   }
+});
+
+// Task B, case 1/4: "no JSON body" (connect error, timeout, HTML 5xx) — the
+// generic sentence, and ONLY the generic sentence, with no raw detail leaked.
+test('humanCopyForCmsAgentError: an unrecognized code with no JSON body gets the generic sentence', () => {
+  const copy = humanCopyForCmsAgentError({ code: 'cms_agent_error', message: '<html>502 Bad Gateway</html>' });
+  assert.equal(copy.text, CMS_AGENT_UNAVAILABLE_TEXT);
+  assert.equal(copy.providerDetail, undefined);
+});
+
+// Task B, case 2/4: CMS-Agent DID answer with a parsed JSON error body — the
+// real code/message/operatorAction render instead of the generic sentence.
+// This is the 2026-08-29 incident itself: a provider_quota 429 must show WHY.
+test('humanCopyForCmsAgentError: a JSON body with a code renders "<code>: <message> — <operatorAction>"', () => {
+  const copy = humanCopyForCmsAgentError({
+    code: 'provider_quota',
+    message: 'Node "article_body" received 429 from openai: Your credit balance is too low.',
+    operatorAction: "Top up openai credit for this project's key, then workflow.retry_node article_body.",
+    providerStatus: 429,
+    providerMessage: 'Your credit balance is too low',
+    fromJsonBody: true,
+  });
+  assert.equal(
+    copy.text,
+    'provider_quota: Node "article_body" received 429 from openai: Your credit balance is too low. — ' +
+      "Top up openai credit for this project's key, then workflow.retry_node article_body."
+  );
+});
+
+// Task B, cases 3+4/4: the provider line is Owner-only.
+test('humanCopyForCmsAgentError: an Owner sees the provider detail line; an editor does not', () => {
+  const error = {
+    code: 'provider_quota',
+    message: 'received 429 from openai',
+    operatorAction: "Top up openai credit for this project's key, then workflow.retry_node article_body.",
+    providerStatus: 429,
+    providerMessage: 'Your credit balance is too low',
+    fromJsonBody: true,
+  };
+  assert.equal(humanCopyForCmsAgentError(error, { isOwner: true }).providerDetail, 'provider 429: Your credit balance is too low');
+  assert.equal(humanCopyForCmsAgentError(error, { isOwner: false }).providerDetail, undefined);
+  assert.equal(humanCopyForCmsAgentError(error).providerDetail, undefined, 'isOwner defaults to false');
 });

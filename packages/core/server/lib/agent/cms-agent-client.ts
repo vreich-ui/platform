@@ -74,6 +74,16 @@ export const CMS_AGENT_WIRE_ERROR_CODES = [
   'model_error',
   'budget_exceeded',
   'invalid_turn_request',
+  /**
+   * Provider-error-details (CMS-Agent PR #233): a provider's own 429 is now
+   * split by WHY — out of credit vs. merely rate-limited — instead of
+   * collapsing into `budget_exceeded` (reserved for CMS-Agent's OWN usd
+   * guard) or the opaque `model_error`/`cms_agent_error` bucket. Without these
+   * two in the frozen list, `callTool` would not recognize either code and
+   * would degrade them to `cms_agent_error` exactly like the bug this closes.
+   */
+  'provider_quota',
+  'provider_rate_limit',
 ] as const;
 export type CmsAgentWireErrorCode = (typeof CMS_AGENT_WIRE_ERROR_CODES)[number];
 
@@ -122,8 +132,27 @@ export type CmsAgentError = {
    *    unclaimed entirely, so it is free to use for whatever is sent next.
    */
   retryableWithSameTurnId: boolean;
-  /** Present when the failure carried an HTTP status. */
+  /** Present when the failure carried an HTTP status (Platform's OWN call TO CMS-Agent). */
   statusCode?: number;
+  /**
+   * Provider-error-details (Task B) — CMS-Agent's own structured error detail,
+   * present only on a `provider_quota`/`provider_rate_limit`/`budget_exceeded`
+   * wire error. `providerStatus` is the UPSTREAM model provider's HTTP status
+   * (e.g. 429) — never to be confused with `statusCode` above, which is
+   * Platform's own call status (always 200 for a JSON-RPC-level tool error).
+   */
+  operatorAction?: string;
+  providerStatus?: number;
+  providerMessage?: string;
+  /**
+   * True only when CMS-Agent actually answered with a parseable JSON-RPC
+   * error body (`parsed.error` in `callTool`) — i.e. `code`/`message` here
+   * are real detail, not a guess. False/absent for every transport-class
+   * failure (connect error, timeout, an HTML 5xx, an unparseable body): the
+   * caller must show the generic "service unavailable" copy for those,
+   * never a raw `code: message` built from garbage.
+   */
+  fromJsonBody?: boolean;
 };
 
 export type CmsAgentResult<T> = { ok: true; data: T } | ({ ok: false } & CmsAgentError);
@@ -131,7 +160,14 @@ export type CmsAgentResult<T> = { ok: true; data: T } | ({ ok: false } & CmsAgen
 const fail = (
   code: CmsAgentErrorCode,
   message: string,
-  options: { retryableWithSameTurnId?: boolean; statusCode?: number } = {}
+  options: {
+    retryableWithSameTurnId?: boolean;
+    statusCode?: number;
+    operatorAction?: string;
+    providerStatus?: number;
+    providerMessage?: string;
+    fromJsonBody?: boolean;
+  } = {}
 ): { ok: false } & CmsAgentError => ({
   ok: false,
   code,
@@ -140,6 +176,10 @@ const fail = (
   // wrong `true` conflicts that id forever.
   retryableWithSameTurnId: options.retryableWithSameTurnId ?? false,
   ...(options.statusCode === undefined ? {} : { statusCode: options.statusCode }),
+  ...(options.operatorAction === undefined ? {} : { operatorAction: options.operatorAction }),
+  ...(options.providerStatus === undefined ? {} : { providerStatus: options.providerStatus }),
+  ...(options.providerMessage === undefined ? {} : { providerMessage: options.providerMessage }),
+  ...(options.fromJsonBody === undefined ? {} : { fromJsonBody: options.fromJsonBody }),
 });
 
 // ─── config (NAMES, never values; resolved at call time) ─────────────────────
@@ -701,12 +741,28 @@ export class CmsAgentClient {
     if (parsed.error) {
       // Machine codes live at error.data.error.code (as-built delta 6).
       const data = isRecord(parsed.error.data) ? parsed.error.data : undefined;
-      const inner = data && isRecord(data.error) ? (data.error as { code?: unknown }) : undefined;
+      const inner = data && isRecord(data.error)
+        ? (data.error as { code?: unknown; operatorAction?: unknown; providerStatus?: unknown; providerMessage?: unknown })
+        : undefined;
       const wire = typeof inner?.code === 'string' && WIRE_ERROR_CODES.has(inner.code) ? inner.code : undefined;
       const message = safeMessage(parsed.error.message, secrets, 'CMS-Agent returned an error.');
+      // Provider-error-details (Task B): CMS-Agent's own structured detail —
+      // sanitized the same way `message` is, since a provider's own text
+      // could in principle echo something sensitive. `fromJsonBody: true`
+      // marks EVERY error reached here (wire-recognized or not) as a real
+      // parsed JSON-RPC error body, never a network/timeout/HTML-5xx guess —
+      // that is the one signal `humanCopyForCmsAgentError` uses to decide
+      // whether raw code/message detail is safe to show instead of the
+      // generic "service unavailable" copy.
+      const operatorAction =
+        typeof inner?.operatorAction === 'string' ? safeMessage(inner.operatorAction, secrets, '') || undefined : undefined;
+      const providerStatus = typeof inner?.providerStatus === 'number' ? inner.providerStatus : undefined;
+      const providerMessage =
+        typeof inner?.providerMessage === 'string' ? safeMessage(inner.providerMessage, secrets, '') || undefined : undefined;
+      const detailOptions = { statusCode: response.status, operatorAction, providerStatus, providerMessage, fromJsonBody: true };
       return wire
-        ? fail(wire as CmsAgentWireErrorCode, message, { statusCode: response.status })
-        : fail('cms_agent_error', message, { statusCode: response.status });
+        ? fail(wire as CmsAgentWireErrorCode, message, detailOptions)
+        : fail('cms_agent_error', message, detailOptions);
     }
 
     const result = isRecord(parsed.result) ? parsed.result : undefined;

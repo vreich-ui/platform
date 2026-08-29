@@ -240,6 +240,8 @@ export interface ActivityNodeView {
   skip_reason?: string;
   warnings: Array<{ severity: ActivitySeverity; label: string; raw: string }>;
   errors: string[];
+  /** Task B (provider-error-details): CMS-Agent's own structured failure detail, when this node failed with one. Mirrors `server/lib/requests/activity.ts`'s `ActivityNode.failure`. */
+  failure?: { code: string; message: string; operatorAction?: string; providerStatus?: number; providerMessage?: string };
   tools: ActivityToolCallView[];
   cost?: { tokens: number; usd: number };
 }
@@ -255,7 +257,8 @@ export interface ActivityView {
   progress: { done: number; total: number; failed: number; running: number; skipped: number };
   eta?: { p50_ms: number; p95_ms: number; based_on_runs: number };
   cost?: { input_tokens: number; output_tokens: number; usd: number; most_expensive_node?: string };
-  recovery?: { strategy: string; node_id?: string; sentence: string; reusable_stages: number };
+  /** `operator_action` (Task B): set only when the retry target failed with a classified provider error or CMS-Agent's own budget guard — see the "Retry this step" gating in `RequestActivity.tsx`. */
+  recovery?: { strategy: string; node_id?: string; sentence: string; reusable_stages: number; operator_action?: string };
   approvals: Array<{ node_id: string; reason: string; requested_at?: string }>;
   nodes: ActivityNodeView[];
 }

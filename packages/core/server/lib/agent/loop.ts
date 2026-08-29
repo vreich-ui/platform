@@ -33,7 +33,7 @@ import {
 } from './chat-store.js';
 import type { ToolContext, ToolResult } from './tools.js';
 import { autonomyForCall, registryTools, runRegistryKind, toolByName } from './registry.js';
-import { CmsAgentEngineError, humanCopyForCmsAgentError, type TurnEngine } from './engine.js';
+import { CmsAgentEngineError, type TurnEngine } from './engine.js';
 import type { WireTool } from './provider.js';
 import {
   candidateSetView,
@@ -590,14 +590,28 @@ export const runAgentLoop = async (
       await persist();
     }
   } catch (error) {
-    // PF3: a CMS-Agent engine failure carries a stable machine code plus
-    // editor-safe human copy; anything else keeps the raw message as before.
+    // PF3 / Task B: a CMS-Agent engine failure carries a stable machine code
+    // plus CMS-Agent's own raw detail; anything else keeps the raw message as
+    // before. The FINAL display text (crafted copy, or "<code>: <message> —
+    // <operatorAction>" plus an Owner-only provider line) is computed at
+    // RENDER time (`cmsAgentErrorCopy`, chat.tsx) — not baked in here — since
+    // whether the viewer is an Owner can only be known then, and a chat can
+    // be reopened later by someone with a different role than whoever sent
+    // the message that triggered this failure.
     appendChatEvent(
       doc,
       now(deps),
       'run_error',
       error instanceof CmsAgentEngineError
-        ? { run_id: run.run_id, code: error.code, message: humanCopyForCmsAgentError(error.code) }
+        ? {
+            run_id: run.run_id,
+            code: error.code,
+            message: error.detailMessage,
+            ...(error.operatorAction ? { operatorAction: error.operatorAction } : {}),
+            ...(error.providerStatus !== undefined ? { providerStatus: error.providerStatus } : {}),
+            ...(error.providerMessage ? { providerMessage: error.providerMessage } : {}),
+            ...(error.fromJsonBody ? { fromJsonBody: true } : {}),
+          }
         : { run_id: run.run_id, message: error instanceof Error ? error.message : String(error) }
     );
     finishRun(doc, now(deps), 'error', runChips(doc, run));
