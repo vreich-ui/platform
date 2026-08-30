@@ -125,15 +125,6 @@
           }
         },
         {
-          "description": "Browse everything by human name — pages, articles, sections, and more.",
-          "id": "i_admin_library",
-          "label": "Content library",
-          "target": {
-            "href": "/admin/content",
-            "kind": "route"
-          }
-        },
-        {
           "description": "Chat with CMS Agents across any object.",
           "id": "i_admin_ai",
           "label": "Agents",
@@ -148,15 +139,6 @@
           "label": "Maintenance",
           "target": {
             "href": "/admin/maintenance",
-            "kind": "route"
-          }
-        },
-        {
-          "description": "Every section type populated for QA.",
-          "id": "i_admin_showcase",
-          "label": "Object Showcase",
-          "target": {
-            "href": "/object-showcase",
             "kind": "route"
           }
         }
