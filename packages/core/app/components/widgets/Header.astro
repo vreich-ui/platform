@@ -61,6 +61,13 @@ const isNewsletterAction = (action: CallToAction) => action.href === '/newslette
 
 const currentPath = `/${trimSlash(new URL(Astro.url).pathname)}`;
 
+// The admin-only group no longer renders as its own main-nav dropdown — its
+// items continue the signed-in account menu (HeaderAuthButton) instead, so
+// admin actions live under the visitor's own name rather than a second public
+// menu. `mainLinks` is everything else, unchanged.
+const mainLinks = links.filter((link) => !link.adminOnly);
+const adminLinks = links.filter((link) => link.adminOnly).flatMap((group) => group.links ?? []);
+
 // W14 T14.1: the search dialog's heading used to hardcode the client's name.
 // This component is fleet law now, so the brand comes from the site object
 // (its `name`, the prose form; `logo.text` is the all-caps wordmark); with no
@@ -109,11 +116,8 @@ const searchTitle = searchBrand ? `Search ${searchBrand}` : 'Search';
         class="flex flex-col md:flex-row md:self-center w-full md:w-auto text-xl md:text-[0.9375rem] tracking-[0.01rem] font-medium md:justify-center"
       >
         {
-          links.map(({ text, href, links, adminOnly }) => (
-            <li
-              class={links?.length ? 'dropdown' : ''}
-              {...(adminOnly ? { 'data-admin-only': true, hidden: true } : {})}
-            >
+          mainLinks.map(({ text, href, links }) => (
+            <li class={links?.length ? 'dropdown' : ''}>
               {links?.length ? (
                 <>
                   <button
@@ -202,7 +206,7 @@ const searchTitle = searchBrand ? `Search ${searchBrand}` : 'Search';
             </li>
           ))
         }
-        <HeaderAuthButton variant="mobile-menu" />
+        <HeaderAuthButton variant="mobile-menu" adminLinks={adminLinks} />
       </ul>
       <div
         class="mx-auto mt-6 flex w-full max-w-md flex-col gap-4 border-t border-gray-200/80 px-4 py-5 dark:border-slate-800 md:hidden"
@@ -290,7 +294,7 @@ const searchTitle = searchBrand ? `Search ${searchBrand}` : 'Search';
           )
         }
         <span class="flex shrink-0 flex-wrap items-center justify-end gap-2 whitespace-nowrap">
-          <HeaderAuthButton />
+          <HeaderAuthButton adminLinks={adminLinks} />
         </span>
       </div>
     </div>
@@ -298,15 +302,6 @@ const searchTitle = searchBrand ? `Search ${searchBrand}` : 'Search';
 </header>
 
 <LoginModal />
-
-<style>
-  /* M-9: admin-only nav items ship hidden and are revealed client-side only for
-     signed-in admins (header-auth script toggles [hidden]). Explicit rule so the
-     flex `<li>` stays collapsed until then. */
-  [data-admin-only][hidden] {
-    display: none;
-  }
-</style>
 
 <div
   id="header-search-overlay"

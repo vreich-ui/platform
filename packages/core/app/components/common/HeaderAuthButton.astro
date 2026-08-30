@@ -1,11 +1,17 @@
 ---
 import { getPermalink } from '~/utils/permalinks';
 
-export interface Props {
-  variant?: 'desktop' | 'mobile-menu';
+export interface AdminLink {
+  text?: string;
+  href?: string;
 }
 
-const { variant = 'desktop' } = Astro.props;
+export interface Props {
+  variant?: 'desktop' | 'mobile-menu';
+  adminLinks?: AdminLink[];
+}
+
+const { variant = 'desktop', adminLinks = [] } = Astro.props;
 ---
 
 {
@@ -60,6 +66,11 @@ const { variant = 'desktop' } = Astro.props;
           <a href={getPermalink('/member-updates')} role="menuitem">
             Member updates
           </a>
+          {adminLinks.map((link) => (
+            <a href={link.href} data-admin-only hidden role="menuitem">
+              {link.text}
+            </a>
+          ))}
           <button type="button" data-auth-sign-out role="menuitem">
             Sign out
           </button>
@@ -130,6 +141,17 @@ const { variant = 'desktop' } = Astro.props;
           >
             Member updates
           </a>
+          {adminLinks.map((link) => (
+            <a
+              class="block rounded-lg px-2.5 py-1.5 font-medium leading-5 text-slate-800 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:text-slate-100 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-900"
+              href={link.href}
+              data-admin-only
+              hidden
+              role="menuitem"
+            >
+              {link.text}
+            </a>
+          ))}
           <div class="my-1 border-t border-gray-200/70 dark:border-slate-700/70" />
           <button
             type="button"
@@ -144,6 +166,14 @@ const { variant = 'desktop' } = Astro.props;
     </div>
   )
 }
+
+<style>
+  /* Admin-only items ship hidden and are revealed client-side only for
+     signed-in admins (the script below toggles [hidden]). */
+  [data-admin-only][hidden] {
+    display: none;
+  }
+</style>
 
 <script>
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment

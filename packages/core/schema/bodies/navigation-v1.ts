@@ -87,9 +87,11 @@ export const navItemSchema: z.ZodType<NavItem> = z.lazy(() =>
       icon: z.string().optional(), // M-7: icon-set name (e.g. 'tabler:rss')
       ariaLabel: z.string().optional(), // M-7: social links carry both today (navigation.ts:104)
       // M-9 (2026-07-14): item is revealed client-side only when the visitor is
-      // a signed-in admin (Header renders it with `data-admin-only hidden`; the
-      // header-auth script toggles it on the admin-auth-state check). Data only —
-      // NOT a security boundary; admin routes enforce auth server-side.
+      // a signed-in admin (rendered with `data-admin-only hidden` — inside the
+      // account menu, HeaderAuthButton.astro, since the admin-menu-reorganize
+      // change moved it out of the main nav; the header-auth script toggles it
+      // on the admin-auth-state check). Data only — NOT a security boundary;
+      // admin routes enforce auth server-side.
       adminOnly: z.boolean().optional(),
     })
     .strict()
