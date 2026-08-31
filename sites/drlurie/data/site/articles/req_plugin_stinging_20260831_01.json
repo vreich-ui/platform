@@ -1,0 +1,386 @@
+{
+  "__generated": {
+    "at": "2026-08-31T13:39:38.229Z",
+    "from": "objects/content_item/by-id/req_plugin_stinging_20260831_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260831-8189ae82",
+      "run_id": "plugin_claude_req_plugin_stinging_20260831_01"
+    },
+    "record_version": 12
+  },
+  "author": "Dr. Lurie",
+  "deck": "A sting on application is one of the most common reasons people abandon a product, and one of the most misread signals in skincare.",
+  "description": "Stinging from a new skincare product is common, and on its own it is not evidence of damage. What the sting-test research actually shows, and the signs that do mean stop.",
+  "editorial": {
+    "framework": "fw_concern",
+    "writer_notes": "TOP-of-funnel concern explainer. Dials held well under the site ceiling: no urgency device, no scarcity, one low-commitment ask. Sources selected from indexed abstracts; full texts not read, so claims are pitched at abstract level and correlation language is deliberately non-directional. No claims array by design."
+  },
+  "image": {
+    "alt": "A small unlabelled glass serum bottle on a pale bathroom shelf beside a folded cotton towel",
+    "src": "/img/req_plugin_stinging_20260831_01/004f5820e9ed5c13929e5aa7ea3f333b897db9b0b4eae7ff37773125593f428d.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_01",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "You put on something new and your face stings. Not pain exactly — a hot, prickling tightness across the cheeks and around the nose that arrives within a minute and often fades before you have finished deciding what to do about it.\n\nIt is one of the most common reasons people abandon a product. It is also one of the most misread signals in skincare, in both directions: some people push through something they should stop, and many more throw out something that was never harming them."
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_02",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Stinging is a nerve signal, not a wound. The outer layer of skin sits above a dense supply of sensory nerve endings, and when that layer is more permeable than usual — because it is dry, recently exfoliated, wind-chapped, or simply built that way — an applied substance reaches those endings sooner and in higher concentration.\n\nThat is why the same serum can sting on a Tuesday and not on a Friday, and why it tends to sting more on freshly washed or still-damp skin. The sensation is real. What it reliably tells you is that something reached a nerve ending quickly. On its own, it does not tell you that damage occurred.",
+        "title": "What is happening underneath"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_03",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "Researchers who study this do not ask people whether their skin is sensitive and leave it there. They provoke the response deliberately. The standard method is the lactic acid sting test: a lactic acid solution is applied to the fold beside the nose, and the person scores the stinging at intervals over the following minutes.\n\nIt exists because self-report alone turned out to be an unreliable way to sort people into groups. That is worth sitting with for a moment, because it is the same problem you have standing at your bathroom mirror.",
+        "title": "The test dermatology actually uses"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_04",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "proof"
+      },
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Two findings from this literature are useful to a person holding a bottle."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The first is that how people "
+                },
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "italic"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "describe"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " their own sensitivity and how they "
+                },
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "italic"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "score"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " on a sting test do not identify the same people. A cross-sectional study comparing the two concluded that a questionnaire and the sting test play different roles in assessing sensitive skin rather than measuring one underlying thing."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The second is that when researchers have set sting scores beside instrument measurements of the skin barrier — water loss across it, hydration, redness — they have been looking for a clean relationship and reporting a complicated one. Studies suggest the association exists but is not a simple one-to-one, which means a strong sting is not a readout of barrier damage, and a barrier under strain does not always announce itself with a sting."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "In most people, then, stinging is better treated as a prompt to pay attention over the next hour than as a verdict delivered in the first minute."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What the evidence supports"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_05",
+      "kind": "content",
+      "private": {
+        "intent": "reassure",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "These are general patterns rather than diagnostic criteria, and individual variation here is wide.\n\nUsually unremarkable: a sting that begins quickly, stays mild, fades within a few minutes, leaves no visible change behind, and gets less noticeable each time you use the product.\n\nWorth stopping for: burning that persists well past the first half hour, redness that is still there hours later, swelling, blistering, weeping, or a reaction that gets worse with each application rather than better.",
+        "title": "Stinging that settles, and stinging that does not"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_06",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Test a small area first, somewhere unglamorous, for several days before you put a new active on your whole face.\n\nIntroduce one new product at a time. Two at once and you learn nothing about either.\n\nApply to skin that is fully dry. Damp skin absorbs faster, and faster absorption is exactly the condition that produces stinging.\n\nPut moisturiser on first, then the active on top of it, if a product stings but you want to keep using it. This slows delivery rather than blocking it.\n\nReduce frequency before you abandon a product. Twice a week is a real option, and for several actives it is where most people should start anyway.",
+        "title": "What the evidence supports doing"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_07",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "A sting is not, by itself, a reason to buy a barrier repair system.\n\nThe products sold for this are usually a bland moisturiser with a longer ingredient list and a higher price. What restores a permeable outer layer in most people is time, gentle cleansing, and something plain and occlusive applied consistently — while whatever irritated it is paused.\n\nIf a sting sends you shopping, the most useful thing in the basket is usually the least interesting one.",
+        "title": "What is not worth your money"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_08",
+      "kind": "content",
+      "private": {
+        "intent": "reassure",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "Speak to your dermatologist or another clinician if burning persists for hours, if a rash spreads beyond where you applied the product, or if there is swelling, blistering, or weeping. Those are not the pattern described above and are not something to work around at home.\n\nThe same applies sooner rather than later if you are pregnant or breastfeeding, if the product is a prescription active, if you are treating a child's skin, or if you have recently had a procedure. In those situations the calculation is not the same as it is for an over-the-counter serum on adult skin, and it is worth a conversation rather than an experiment.",
+        "title": "When to see someone"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_09",
+      "kind": "content",
+      "private": {
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "Questionnaire and Lactic Acid Sting Test Play Different Role on the Assessment of Sensitive Skin: A Cross-sectional Study"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8449876/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " — Clinical, Cosmetic and Investigational Dermatology, 2021."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "Association between lactic acid sting test scores, self-assessed sensitive skin scores and biophysical properties in Chinese females"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pmc.ncbi.nlm.nih.gov/articles/PMC6851893/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " — Journal of Cosmetic Dermatology, 2019."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "Comparison and correlation between stinging responses to lactic acid and bioengineering parameters"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pubmed.ncbi.nlm.nih.gov/17680863/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " — Contact Dermatitis, 2007."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Sources"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_10",
+      "kind": "action",
+      "private": {
+        "intent": "convert"
+      },
+      "public": {
+        "body": "If a product stings enough that you have stopped using it, that is worth saying out loud to your dermatologist — along with which product it was and how long the sting lasted. It is a more useful piece of information than most people realise, and it is free to bring up.",
+        "ctaText": "Bring it up at your next appointment",
+        "title": "Worth mentioning at your next appointment"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Stinging from a new product is common and is not, by itself, evidence of a damaged barrier. What the research shows, and the signs that mean stop.",
+    "meta_title": "Why new skincare stings — and what it does not tell you"
+  },
+  "slug": "why-new-skincare-stings",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-08-31",
+        "name": "Questionnaire and Lactic Acid Sting Test Play Different Role on the Assessment of Sensitive Skin: A Cross-sectional Study",
+        "publisher": "Clinical, Cosmetic and Investigational Dermatology",
+        "source_id": "s1",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8449876/"
+      },
+      {
+        "accessed_at": "2026-08-31",
+        "name": "Association between lactic acid sting test scores, self-assessed sensitive skin scores and biophysical properties in Chinese females",
+        "publisher": "Journal of Cosmetic Dermatology",
+        "source_id": "s2",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC6851893/"
+      },
+      {
+        "accessed_at": "2026-08-31",
+        "name": "Comparison and correlation between stinging responses to lactic acid and bioengineering parameters",
+        "publisher": "Contact Dermatitis",
+        "source_id": "s3",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/17680863/"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skin-health",
+    "tags": [
+      "sensitive-skin",
+      "skin-barrier",
+      "skincare-basics"
+    ]
+  },
+  "title": "Why a new product stings — and what that sting does not tell you"
+}
