@@ -1,0 +1,17 @@
+---
+// Publishing plugin (W5.1) — the per-tenant chat-app plugin bundle: render,
+// promote, and the per-platform install cards. Server-side admin gate lives in
+// admin-plugin-manifest.ts; this page wires the client to it.
+import '@site/config/policy-bindings'; // register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import PluginsPage from '~/admin/PluginsPage';
+
+// Resolve identity once, server-side, where process.env is real, and pass it
+// down explicitly — the island must not call getSiteIdentity() itself.
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Plugins">
+  <PluginsPage client:load identity={identity} />
+</AdminLayout>

@@ -34,6 +34,7 @@ import { toolSurfaceDigest, buildPluginTools } from '../lib/plugin/build-tools.j
 import { pluginPlatforms, type PluginPlatform } from '../lib/plugin/manifest-types.js';
 import { buildSkillZip, buildCoworkPlugin } from '../lib/plugin/export-claude.js';
 import { buildGptConfigZip, GptInstructionsTooLongError } from '../lib/plugin/export-openai.js';
+import { buildGemInstructions } from '../lib/plugin/export-gemini.js';
 import { readVoiceRecord } from '../lib/plugin/read-voice.js';
 
 type LambdaEvent = {
@@ -95,13 +96,29 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   if (method === 'GET') {
     const exportKind = event.queryStringParameters?.export;
     if (exportKind) {
-      if (exportKind !== 'skill' && exportKind !== 'plugin' && exportKind !== 'gpt') {
-        return jsonResponse(400, { error: 'export must be "skill", "plugin" or "gpt".' });
+      if (!['skill', 'plugin', 'gpt', 'gemini'].includes(exportKind)) {
+        return jsonResponse(400, { error: 'export must be "skill", "plugin", "gpt" or "gemini".' });
       }
       if (!doc.active) {
         return jsonResponse(409, {
           error: 'There is no active bundle to export. Render a draft and promote it first.',
         });
+      }
+
+      // Gemini is markdown, not a zip: a Gem has one instructions field and
+      // nothing to connect (plan D6), so there is no bundle to build.
+      if (exportKind === 'gemini') {
+        const gem = buildGemInstructions(doc.active);
+        return {
+          statusCode: 200,
+          headers: {
+            'Content-Type': 'text/markdown; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${gem.filename}"`,
+            'Cache-Control': 'no-store',
+            'X-Plugin-Manifest-Version': doc.active.manifest_version,
+          },
+          body: gem.content,
+        };
       }
       let artifact;
       try {
@@ -154,6 +171,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             skill_zip: '/.netlify/functions/admin-plugin-manifest?export=skill',
             cowork_plugin: '/.netlify/functions/admin-plugin-manifest?export=plugin',
             gpt_config: '/.netlify/functions/admin-plugin-manifest?export=gpt',
+            gem_instructions: '/.netlify/functions/admin-plugin-manifest?export=gemini',
             actions_openapi: '/api/plugin/openapi.json',
           }
         : null,
