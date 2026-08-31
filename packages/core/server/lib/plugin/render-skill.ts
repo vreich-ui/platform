@@ -189,17 +189,23 @@ Pass \`agent_name: "plugin:${input.platform}"\` on every verb that accepts it, a
 That is how this publish is attributed in the ledger.
 
 1. \`object_inventory {object_type:"content_item"}\` — confirm the id and slug are unused.
-2. **Media first, and fail closed.** \`create_agent_artifact_job\` for the hero image (\`prompt\` =
+2. \`object_validate {object_type:"content_item", body, requested_id}\` — dry run the candidate body.
+   Fix every blocker before you write anything.
+3. \`object_create {object_type:"content_item", site:"${input.siteId}", requested_id, body, agent_name}\`.
+   **The article object must exist before you can ask for media** — the artifact job is scoped to
+   this request id and is refused outright if the content_item does not exist yet. Keep the body
+   small on this call: create the article with its text, then attach media by patch.
+4. \`object_checkout\` → keep \`lockToken\` and \`record_version\`.
+5. **Media now, and fail closed.** \`create_agent_artifact_job\` for the hero image (\`prompt\` =
    subject only), poll \`get_agent_artifact_job_status\`, and use the returned \`public_path\`
    (\`/img/…\`). Never a raw storage key, never an external URL. A PDF is the same call with
    \`artifact_kind:"pdf"\` + \`template_id\` + \`data\`, referenced as \`/pdf/…\`; a PDF is never the
-   hero. **If media fails, stop and report — do not publish a degraded article.**
-3. \`object_validate {object_type:"content_item", body, requested_id}\` — dry run. Fix every blocker.
-4. \`object_create {object_type:"content_item", site:"${input.siteId}", requested_id, body, agent_name}\`.
-5. \`object_checkout\` → keep \`lockToken\` and \`record_version\`.
-6. \`object_patch\` with \`lock_token\` + \`expected_record_version\`. Take the new \`record_version\`
-   from every response. If more than ~10 minutes pass before you publish, call
-   \`object_refresh_lock\` — the lease is 900 s and expires mid-session otherwise.
+   hero. **If media fails, stop and report — do not publish a degraded article.** Fail-closed means
+   no publish without the media you promised, not that media is produced first.
+6. \`object_patch\` with \`lock_token\` + \`expected_record_version\` — the remaining nodes and the
+   hero via \`set_article_meta\`. Take the new \`record_version\` from every response. Split a long
+   article across two or three patches rather than one huge one. If more than ~10 minutes pass
+   before you publish, call \`object_refresh_lock\` — the lease is 900 s and expires mid-session.
 7. \`object_validate {object_type:"content_item", object_id}\` — must come back clean.
 8. \`object_publish\` → a dark commit (\`[skip netlify]\`). **This is not live.** Keep \`commit_sha\`
    and \`production.article_path\`.
@@ -233,7 +239,13 @@ That is how this publish is attributed in the ledger.
 - Never edit an article you did not create this session unless the human names it.
 - \`423\` → check out again. \`409\` → re-read and retry once. \`creation_restricted\` /
   \`approval_required\` → stop and name the gate.
-- On a timeout or 502 of a write, retry **once** with the same \`idempotency_key\`. Never re-issue blind.
+- On a timeout or 502 of a write, retry **once** with the same \`idempotency_key\`. Never re-issue
+  blind. The retry is safe by design: a write that landed before the error comes back as the
+  ORIGINAL receipt with \`replayed_from_idempotency_key: true\`, not as a second publish. If you
+  did not set an idempotency key, check state with \`object_inventory\` before doing anything else.
+- Large payloads can fail in transport before they reach the CMS. Keep any single call modest —
+  split a long article across several patches — and treat a transport error as "unknown", never
+  as "failed".
 - Report honestly: published ≠ released ≠ verified. Always say which state you reached.
 
 ## 7. Tools you may call

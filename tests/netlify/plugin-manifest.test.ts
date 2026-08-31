@@ -160,6 +160,33 @@ test('the skill names the real voice object id the tenant actually stores', () =
   );
 });
 
+test('the skill orders object_create BEFORE the media call', () => {
+  // Found by the 2026-08-31 live acceptance run: create_agent_artifact_job is
+  // scoped to an EXISTING content_item and refuses outright with
+  // "content_item <id> does not exist on <site>" when the object has not been
+  // created yet. The first rendered skill put media first (following
+  // publishing-policy.md §4, which is wrong on this point), so a plugin
+  // following it verbatim died at its first tool call.
+  const { skill_md: skill } = render();
+  const createAt = skill.indexOf('`object_create {object_type:"content_item"');
+  const mediaAt = skill.indexOf('`create_agent_artifact_job`');
+  assert.ok(createAt > 0 && mediaAt > 0, 'both steps must be present in the publish procedure');
+  assert.ok(createAt < mediaAt, 'object_create must come before create_agent_artifact_job');
+  assert.match(skill, /must exist before you can ask for media/);
+  // Fail-closed must survive the reorder — it is about not publishing a
+  // degraded article, not about ordering.
+  assert.match(skill, /do not publish a degraded article/);
+});
+
+test('the skill explains why an idempotent retry is safe', () => {
+  // The live run hit a real 502 on object_publish; the retry replayed the
+  // original receipt rather than double-publishing. The skill must say so, or
+  // a cautious model will refuse to retry and leave the article half-published.
+  const { skill_md: skill } = render();
+  assert.match(skill, /replayed_from_idempotency_key/);
+  assert.match(skill, /treat a transport error as "unknown", never/);
+});
+
 test('a missing voice degrades to a warning and a placeholder skill, never a throw', () => {
   const bundle = render({ voice: null });
   assert.equal(bundle.sources.voice_object_id, null);
