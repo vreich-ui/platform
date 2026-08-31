@@ -146,9 +146,15 @@ Three options:
 as W1.0 in the same patch — the plugin then reads one field and the ledger stops lying about who
 patched.
 
-### 4.2 There is no per-client, per-tool auto/manual/block policy
+### 4.2 A per-tool policy taxonomy exists; per-*client* enforcement on the MCP path does not
 
-Memory records the belief that one exists. It does not — not at tool granularity.
+> **Amended 2026-08-31 (W0.3).** Every tool definition carries
+> `governance: { toolClass, autonomyFloor?, preview? }` with
+> `toolClass ∈ read | draft | creation | publication | privileged | membership`
+> (`mcp.ts:276–289`). It is consumed by the admin-chat registry (`agent/registry.ts`,
+> `agent/generated-tools.ts`); `mcp.ts` declares the type but does not enforce it on the MCP path.
+> **W1.3 should derive `tools.json` from `governance.toolClass` instead of hand-maintaining an
+> allowlist** — see `legacy-gpt.md` §A.5. The rest of this section stands.
 
 What exists:
 - `visibleToolDefinitions(event)` (`mcp.ts:1338–1348`) filters on exactly three things: internal-only
