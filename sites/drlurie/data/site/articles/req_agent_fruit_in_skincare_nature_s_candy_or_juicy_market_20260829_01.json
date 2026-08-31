@@ -1,10 +1,10 @@
 {
   "__generated": {
-    "at": "2026-08-29T21:13:13.644Z",
+    "at": "2026-08-31T07:20:47.001Z",
     "from": "objects/content_item/by-id/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01.json",
-    "record_version": 15
+    "record_version": 86
   },
-  "author": "Dr. Lurié Science Editorial",
+  "author": "Dr. Lurie",
   "claims": {
     "claim_list": [
       {
@@ -45,14 +45,14 @@
       }
     ]
   },
-  "deck": "Fruit extracts make skincare feel fresh, natural, and edible. The better question is not whether fruit sounds healthy, but whether the formula earns its place on your face.",
-  "description": "A calm guide to fruit-based skincare claims, botanical extracts, fragrance, sensitive skin, and how to judge a formula beyond the label story.",
+  "deck": "Nature’s candy or juicy marketing? Fruit-based skincare can mean exfoliating acids, enzymes, antioxidants, oils, fragrance, or just a good story. Here is how to tell what the ingredient is actually doing.",
+  "description": "A calm guide to reading fruit-themed skincare labels, from fruit acids and enzymes to vitamin C, oils, butters, fragrance, and irritation risk.",
   "editorial": {
-    "framework": "Marketing-claim literacy: separate the fruit story from formula performance, irritation risk, and label discipline.",
-    "writer_notes": "Recovered from an empty artifact-planning shell using the three already-created trusted image artifacts for this request. Kept claims conservative and sourced to FDA/AAD guidance."
+    "framework": "Hybrid ingredient review and myth check",
+    "writer_notes": "Built from the approved draft with review revisions applied: earlier quick-answer framing, earlier story-versus-function anchor, softened irritation language, generalized fragrance terms, added two simple label examples, and retained conservative clinician-boundary language. No commercial CTA or product recommendation is included."
   },
   "image": {
-    "alt": "Fruit-inspired skincare formula arranged as a clean editorial texture",
+    "alt": "Fruit-themed skincare products beside simple lab-style packaging, showing fruit cues without implying fresh fruit should be applied directly to skin.",
     "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/a1b9a25c07c9f6985d2dfb07cd9634abc1ea71de7b3a033ac4c9ea87766fd795.webp"
   },
   "nodes": [
@@ -231,13 +231,881 @@
         "title": "The bottom line"
       },
       "visibility": "public"
+    },
+    {
+      "id": "n_001",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Opens with familiar product examples to invite readers into the label-reading question without implying any product benefit.",
+        "intent": "educate",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "A citrus glow serum. A papaya enzyme mask. A berry antioxidant cream. A mango butter moisturizer."
+      }
+    },
+    {
+      "id": "n_002",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Acknowledges why fruit claims are appealing so the piece feels balanced rather than dismissive.",
+        "intent": "reassure",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "Fruit language can make skincare feel fresh, familiar, and easy to trust. It sounds like something your skin should understand."
+      }
+    },
+    {
+      "id": "n_003",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Moves the practical label-reading framework to the top for skimmers, as requested by editorial review.",
+        "intent": "navigate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "Fruit on a skincare label can point to an active ingredient, a moisturizer, a fragrance, or a marketing story. The useful habit is separating the story from the function: what is the ingredient doing in the full formula, and does that role fit your skin?",
+        "title": "Quick answer"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "inline",
+        "presentation": "callout"
+      }
+    },
+    {
+      "id": "n_004",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Reframes the article away from a binary good-or-bad claim and toward ingredient role and formula context.",
+        "intent": "educate",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "But the better question is not whether fruit is good for skin. The better question is what the fruit-related ingredient is doing in that specific formula."
+      }
+    },
+    {
+      "id": "n_005",
+      "kind": "content",
+      "private": {
+        "agentNotes": "States the central tension between useful fruit-derived ingredients and fruit-themed storytelling.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "Sometimes fruit points to a useful ingredient category. Sometimes it is mostly scent, texture, color, or marketing. The ingredient list is where the difference starts to show."
+      }
+    },
+    {
+      "id": "n_006",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Introduces the first major section defining why the phrase is too broad to predict benefit.",
+        "intent": "navigate",
+        "strategy": "context"
+      },
+      "public": {
+        "title": "“Fruit-based” is not one skincare category"
+      }
+    },
+    {
+      "id": "n_007",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Sets up the category list that helps readers decode front-label fruit language.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Fruit-based skincare can mean several different things, and they do not work the same way."
+      }
+    },
+    {
+      "id": "n_008",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Lists the major possible meanings of fruit-based skincare so readers can sort products by function.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "items": [
+          "A fruit extract added in a small amount",
+          "An exfoliating acid associated with fruit, such as an alpha hydroxy acid",
+          "An enzyme ingredient, often described with papaya or pineapple language",
+          "A vitamin C or antioxidant story connected to citrus, berries, or other fruits",
+          "A fruit oil, seed oil, or butter used for softness and texture",
+          "A fragrance, essential oil, or aromatic peel oil",
+          "A front-label theme that says little about the working parts of the formula"
+        ]
+      }
+    },
+    {
+      "id": "n_009",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Contrasts common product roles to make the label-reading distinction concrete.",
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "That is why two products with fruit on the front can be completely different on the skin. One may exfoliate. One may moisturize. One may mostly smell like fruit."
+      }
+    },
+    {
+      "id": "n_010",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Gives the first practical action: compare the claim with the ingredient list and formula context.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "The ingredient list tells you which one you are buying. The formula around that ingredient tells you how relevant it may be."
+      }
+    },
+    {
+      "id": "n_img001",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Places the verified diagram after the opening category explanation to reinforce the early decision framework.",
+        "intent": "navigate",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Diagram showing how to compare a fruit claim on the front label with the ingredient list, likely ingredient role, formula context, and skin tolerance.",
+          "caption": "A fruit claim is more useful when you can connect it to an ingredient role, formula context, and your own skin tolerance.",
+          "contentType": "image/webp",
+          "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/729b78f4f66c0d69c13469eb05ab25f78307e36f314cbd89dd03d17450ce2ad8.webp",
+          "title": "Fruit skincare label-reading guide",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "emphasis": "low",
+        "placement": "afterParagraph",
+        "presentation": "inline"
+      }
+    },
+    {
+      "id": "n_011",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Begins the section that explains legitimate cosmetic roles without overstating fruit origin.",
+        "intent": "navigate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "title": "When fruit-derived ingredients can matter"
+      }
+    },
+    {
+      "id": "n_012",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Balances skepticism with the possibility that fruit-derived ingredients can be useful.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Some fruit-related ingredients can have a real role in a skincare product. The role depends on the ingredient category, not the fruit story alone."
+      }
+    },
+    {
+      "id": "n_013",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Explains exfoliating acid role while using softened, non-diagnostic language about tolerance.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Fruit acids and related exfoliating acids are usually included to help loosen surface buildup and smooth the feel of skin. That does not make them automatically gentle. How skin responds depends on the acid, the whole formula, how often it is used, and the condition of your skin."
+      }
+    },
+    {
+      "id": "n_014",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Keeps enzyme guidance conservative while softening barrier language as requested by review.",
+        "intent": "reassure",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Enzyme products are often marketed with papaya or pineapple language. Some people find enzyme-style exfoliating products easier to tolerate than stronger-feeling exfoliants, but they can still be irritating for some people. Sensitive, reactive, over-exfoliated, or already uncomfortable skin may need a simpler routine."
+      }
+    },
+    {
+      "id": "n_015",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Uses the available cited vitamin C source to support the formulation caveat.",
+        "intent": "educate",
+        "strategy": "proof"
+      },
+      "public": {
+        "body": "Vitamin C and antioxidant products are another category. A dermatology review has described topical vitamin C as a studied skincare ingredient, especially when formulation and delivery are considered. The important caveat is that vitamin C can be unstable and difficult to deliver well, so the formula matters."
+      }
+    },
+    {
+      "id": "n_016",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Prevents readers from equating fruit association with a dedicated antioxidant formula.",
+        "intent": "educate",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "That means a citrus, berry, or tropical fruit extract should not be treated as the same thing as a well-formulated vitamin C product. Some fruit-derived ingredients are included for antioxidant potential, but benefit depends on the specific compound, formulation, stability, and how much is present."
+      }
+    },
+    {
+      "id": "n_017",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Separates moisturizing texture ingredients from actives and keeps skin-fit nuance.",
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "Fruit oils, seed oils, and butters belong in a different mental category. Ingredients such as avocado oil, olive oil, coconut oil, mango butter, or similar oils and butters are usually better understood as texture-supporting, softening, or moisture-sealing ingredients. They may suit dryness in some people, while feeling too rich for others, especially if a routine already feels heavy or breakout-prone."
+      }
+    },
+    {
+      "id": "n_018",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Addresses a common label trap named in the narrative movement and angle strategy.",
+        "intent": "navigate",
+        "strategy": "myth"
+      },
+      "public": {
+        "title": "Fruit acid does not always mean gentle"
+      }
+    },
+    {
+      "id": "n_019",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Creates gentle tension around natural-sounding language without using alarmist wording.",
+        "intent": "educate",
+        "strategy": "agitation"
+      },
+      "public": {
+        "body": "This is one of the most common label traps. “Fruit acid” sounds softer than “acid,” but the skin does not judge an exfoliant by how natural the name sounds."
+      }
+    },
+    {
+      "id": "n_020",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Returns the reader to formula context rather than broad ingredient assumptions.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Exfoliation is about the finished product. The same broad ingredient family can feel very different depending on the formula, the strength of the product, the skin it is used on, and what else is already in the routine."
+      }
+    },
+    {
+      "id": "n_021",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Softens medical-sounding language while giving a clear safety-oriented response to irritation.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "If your skin is already irritated, a fruit-acid product may be the wrong next step, even if it is marketed as gentle. Burning, peeling, tightness, or a rash-like reaction is not a sign that a product is “working.” It can be a reason to pause, simplify, and stop using the product that seems to be causing the problem."
+      }
+    },
+    {
+      "id": "n_022",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Connects exfoliation risk to routine duplication without creating urgency or treatment advice.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "This is especially relevant if you already use retinoids, acne prescriptions, exfoliating acids, or several active products. The issue is not that fruit-based skincare is bad. It is that stacking too many stimulating products can make skin harder to read."
+      }
+    },
+    {
+      "id": "n_023",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Introduces enzyme products as approachable but not irritation-proof.",
+        "intent": "navigate",
+        "strategy": "context"
+      },
+      "public": {
+        "title": "Papaya and pineapple enzyme products still need a skin-fit check"
+      }
+    },
+    {
+      "id": "n_024",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Uses generic label examples to help readers recognize enzyme marketing language.",
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "body": "Papaya and pineapple are often used to make an exfoliating product feel approachable. You may see papain, bromelain, or fruit enzyme language on masks, cleansers, and polishing products."
+      }
+    },
+    {
+      "id": "n_025",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Validates the reader’s attraction to enzyme wording before adding caution.",
+        "intent": "reassure",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "The appeal is understandable. Enzyme language can sound precise and less harsh than scrub or peel language."
+      }
+    },
+    {
+      "id": "n_026",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Corrects a gentle-sounding claim while avoiding diagnostic barrier terminology.",
+        "intent": "educate",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "Still, “enzyme” does not mean irritation-proof. If your skin is sensitive, reactive, recently over-exfoliated, or already stinging with simple products, an enzyme product can still be too much."
+      }
+    },
+    {
+      "id": "n_027",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Turns the enzyme section back into a reader decision question.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "For most people, the practical question is simple: does this product add something your routine actually needs, and does your skin tolerate it without stinging, redness, tightness, or lingering discomfort?"
+      }
+    },
+    {
+      "id": "n_028",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Introduces the antioxidant section with the formulation caveat as the main interpretive frame.",
+        "intent": "navigate",
+        "strategy": "context"
+      },
+      "public": {
+        "title": "Vitamin C, berries, and antioxidant claims need context"
+      }
+    },
+    {
+      "id": "n_029",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Identifies a common marketing pattern without claiming all such products are ineffective.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "Fruit-themed products often lean on antioxidant language. Citrus and berry ingredients are especially common in this kind of marketing."
+      }
+    },
+    {
+      "id": "n_030",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Links the antioxidant discussion to the cited dermatology review while maintaining the distinction from fruit extracts.",
+        "intent": "educate",
+        "strategy": "proof"
+      },
+      "public": {
+        "body": "There is evidence behind topical vitamin C as a dermatology ingredient, but the evidence does not make every fruit extract equivalent. A review in the Indian Dermatology Online Journal notes that topical vitamin C is difficult to formulate because stability and skin delivery matter."
+      }
+    },
+    {
+      "id": "n_031",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Provides a precise question readers can use on labels.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "So the label question is not, “Does this contain a fruit associated with vitamin C?” The better question is, “What form of antioxidant ingredient is actually listed, and is the product built around it in a credible way?”"
+      }
+    },
+    {
+      "id": "n_032",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Adds nuance by allowing pleasant formulas while limiting unsupported performance assumptions.",
+        "intent": "educate",
+        "strategy": "myth"
+      },
+      "public": {
+        "body": "A fruit extract near the end of the ingredient list may still be part of a pleasant formula. It just should not be assumed to perform like a dedicated vitamin C serum."
+      }
+    },
+    {
+      "id": "n_033",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Preserves an important safety boundary without overstating antioxidant claims.",
+        "intent": "educate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "It also should not replace sunscreen. Antioxidant skincare and sunscreen have different jobs, and fruit language on a cosmetic label does not change that."
+      }
+    },
+    {
+      "id": "n_034",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Introduces a section that distinguishes comfort ingredients from corrective or treatment claims.",
+        "intent": "navigate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "title": "Fruit oils and butters are usually about comfort, not correction"
+      }
+    },
+    {
+      "id": "n_035",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Explains oils and butters as texture and comfort ingredients rather than treatments.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Avocado, olive, coconut, mango, and other fruit-derived oils or butters can be useful in moisturizers, balms, and richer creams. In most formulas, their job is to help the product feel softer, richer, or more protective on the surface of the skin."
+      }
+    },
+    {
+      "id": "n_036",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Frames oils and butters around individual skin fit instead of good-or-bad judgment.",
+        "intent": "educate",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "That can be helpful if your skin feels dry or tight. It can be less helpful if you already dislike rich textures or find that heavier products contribute to clogged-feeling skin."
+      }
+    },
+    {
+      "id": "n_037",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Condenses the section’s practical takeaway in a low-alarm way.",
+        "intent": "reassure",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "This does not make the ingredient good or bad. It makes skin fit important."
+      }
+    },
+    {
+      "id": "n_038",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Adds a simple comparison example requested by review to make category differences memorable.",
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "body": "A mango butter moisturizer and a papaya enzyme mask may both look “fruit-based,” but they are solving different problems. One is mainly about comfort and texture. The other may exfoliate."
+      }
+    },
+    {
+      "id": "n_039",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Introduces the fragrance section while avoiding unsupported specificity.",
+        "intent": "navigate",
+        "strategy": "myth"
+      },
+      "public": {
+        "title": "Sometimes the fruit is mostly fragrance"
+      }
+    },
+    {
+      "id": "n_040",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Generalizes fragrance-related terms to avoid unsupported named allergen claims.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "Fruit language can also signal scent. A product may smell like citrus, berries, or tropical fruit because it contains fragrance, essential oils, citrus peel oils, or other aromatic ingredients."
+      }
+    },
+    {
+      "id": "n_041",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Keeps the useful fragrance label habit while removing unsupported named fragrance allergen examples.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "If your skin is sensitive or reactive, it is worth checking for broad label terms such as fragrance, parfum, essential oil, or citrus peel oil. These ingredients are not automatically a problem for everyone. They are simply more relevant when your skin tends to sting, flush, itch, or develop rash-like reactions from products."
+      }
+    },
+    {
+      "id": "n_042",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Provides a reader-friendly example contrasting front-label imagery with functional ingredients.",
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "body": "This is where front-label fruit imagery can be misleading. A bright orange or berry picture may make the product feel nourishing, but the ingredient list may show that the fruit experience is mainly aromatic."
+      }
+    },
+    {
+      "id": "n_043",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Maintains balanced, non-alarmist advice based on skin history.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "For a reader with calm, resilient skin, that may be fine. For a reader with a history of irritation, it may be the reason to choose something plainer."
+      }
+    },
+    {
+      "id": "n_044",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Transitions from category education into a practical reader checklist.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "How to read a fruit-based skincare label"
+      }
+    },
+    {
+      "id": "n_045",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Reduces intimidation for low-INCI readers while keeping the advice actionable.",
+        "intent": "navigate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "You do not need to become a cosmetic chemist to make a better decision. Start with five practical questions."
+      }
+    },
+    {
+      "id": "n_046",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Preserves the core five-question label framework from the draft.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "items": [
+          "What is the fruit claim on the front label? Is it citrus glow, papaya enzyme, berry antioxidant, mango butter, or something else?",
+          "Can you find the related ingredient in the ingredient list? Look for the named extract, oil, butter, acid, enzyme, vitamin C derivative, fragrance, or essential oil.",
+          "What role does that ingredient probably have? Is it exfoliating, moisturizing, antioxidant-focused, aromatic, or mostly a small botanical addition?",
+          "Does the whole formula match your skin goal? A fruit extract does not make a harsh routine gentle, and a fruit oil does not make every product right for acne-prone skin.",
+          "Does your skin tolerate this category? Your own pattern with acids, enzymes, fragrance, rich oils, and active products matters."
+        ]
+      }
+    },
+    {
+      "id": "n_047",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Repeats the central anchor line after the checklist as requested by review.",
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "The most useful label habit is separating the story from the function. Fruit can be the source of an ingredient, the scent of a product, the texture cue, or the marketing theme. Those are not the same thing."
+      }
+    },
+    {
+      "id": "n_048",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Adds practical mini-examples to help readers apply the framework without relying on product-specific claims.",
+        "intent": "navigate",
+        "strategy": "example"
+      },
+      "public": {
+        "title": "Two simple label examples"
+      }
+    },
+    {
+      "id": "n_049",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Shows how a fruit-fronted product can represent an active exfoliating role and why routine fit matters.",
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "body": "Example one: a papaya-themed mask may be using fruit language to point toward exfoliation. If you already use retinoids, acids, or acne prescriptions, the question is whether you need another exfoliating step at all."
+      }
+    },
+    {
+      "id": "n_050",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Contrasts a mostly aromatic fruit experience with ingredient function while keeping the claim general.",
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "body": "Example two: a citrus-scented cream may feel energizing because of its fragrance rather than because the fruit claim is doing the main skincare work. If fragrance has bothered your skin before, the simpler choice may be the better fit."
+      }
+    },
+    {
+      "id": "n_051",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Introduces the safety and tolerance section before the final decision checklist.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "title": "When to be more cautious"
+      }
+    },
+    {
+      "id": "n_052",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Softens barrier language while preserving practical irritation guidance.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Use more caution with fruit-based skincare if your skin already feels disrupted or uncomfortable. Signs can include stinging with bland products, tightness, peeling, burning, or a new rash-like reaction."
+      }
+    },
+    {
+      "id": "n_053",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Explains why duplicated actives can complicate routine interpretation.",
+        "intent": "educate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Also be careful if you are using prescription acne treatments, retinoids, exfoliating acids, or multiple active products. Adding a fruit acid or enzyme product may make irritation harder to trace."
+      }
+    },
+    {
+      "id": "n_054",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Maintains the clinician boundary and avoids diagnostic or treatment protocol claims.",
+        "intent": "reassure",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "If you have a diagnosed skin condition, persistent pigmentation, ongoing acne flares, a rash, pregnancy-related concerns, or symptoms that do not settle after stopping a product, it is safer to raise it with your dermatologist. A label guide can help you ask better questions, but it cannot diagnose your skin."
+      }
+    },
+    {
+      "id": "n_img002",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Places the verified texture visual near the keep/use cautiously/skip framework as specified by artifact planning.",
+        "intent": "navigate",
+        "strategy": "example"
+      },
+      "public": {
+        "media": {
+          "alt": "Neutral skincare textures and containers arranged to support a keep, use cautiously, or skip decision checklist.",
+          "caption": "The right decision depends on the ingredient role, the rest of your routine, and how your skin responds.",
+          "contentType": "image/webp",
+          "src": "/img/req_agent_fruit_in_skincare_nature_s_candy_or_juicy_market_20260829_01/38881916410359e803effeb8fdbc5dfb0ebe30f4c15945ab2797e76905ba834c.webp",
+          "title": "Skincare routine decision checklist",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "emphasis": "low",
+        "placement": "section",
+        "presentation": "inline"
+      }
+    },
+    {
+      "id": "n_055",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Begins the final actionable framework that reviewers identified as a strength.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "Keep, use cautiously, or skip: a simple checklist"
+      }
+    },
+    {
+      "id": "n_056",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Labels the first decision branch for products that have a clear role and good tolerance.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "Keep it if"
+      }
+    },
+    {
+      "id": "n_057",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Gives criteria for continuing use without product promotion.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "items": [
+          "The fruit-related ingredient has a clear role in the formula.",
+          "The product matches a real skin goal, such as dryness, dull-feeling texture, or a preference for a certain moisturizer feel.",
+          "Your skin tolerates it without stinging, burning, peeling, itching, or lingering redness.",
+          "It does not duplicate several other active products already in your routine."
+        ]
+      }
+    },
+    {
+      "id": "n_058",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Labels the second decision branch for products that may fit but deserve closer monitoring.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "Use it cautiously if"
+      }
+    },
+    {
+      "id": "n_059",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Keeps caution concise and based on routine fit, irritation history, and duplicated actives.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "items": [
+          "It exfoliates, especially if you already use acids, retinoids, or acne treatments.",
+          "It contains fragrance, essential oils, or citrus peel oils and your skin is reactive.",
+          "It is a rich oil or butter formula and you are prone to clogged-feeling skin.",
+          "Your skin is already irritated or your routine has recently become more complicated."
+        ]
+      }
+    },
+    {
+      "id": "n_060",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Labels the third decision branch for vague, unnecessary, or poorly tolerated products.",
+        "intent": "navigate",
+        "strategy": "step"
+      },
+      "public": {
+        "title": "Skip it if"
+      }
+    },
+    {
+      "id": "n_061",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Preserves the skip framework while avoiding commercial or diagnosis-oriented language.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "items": [
+          "The fruit claim is vague and you cannot tell what the ingredient is supposed to do.",
+          "The product relies mostly on scent, color, or a natural-sounding story.",
+          "It promises treatment-level results for acne, rashes, rosacea, eczema, melasma, or other medical concerns.",
+          "It adds another exfoliant or active step you do not need.",
+          "It irritates your skin and the irritation returns when you try it again."
+        ]
+      }
+    },
+    {
+      "id": "n_062",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Signals the article’s resolution and returns to the balanced final takeaway.",
+        "intent": "navigate",
+        "strategy": "resolution"
+      },
+      "public": {
+        "title": "The bottom line"
+      }
+    },
+    {
+      "id": "n_063",
+      "kind": "content",
+      "private": {
+        "agentNotes": "States the balanced conclusion that avoids both hype and blanket debunking.",
+        "intent": "educate",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "Fruit-based skincare is not automatically better, cleaner, safer, or more effective. It is also not automatically useless."
+      }
+    },
+    {
+      "id": "n_064",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Summarizes the full category-by-category argument in one comparison.",
+        "intent": "educate",
+        "strategy": "summary"
+      },
+      "public": {
+        "body": "The value is in the specific ingredient, the finished formula, and your skin’s tolerance. A papaya enzyme mask, citrus vitamin C serum, berry extract cream, and mango butter moisturizer may all use fruit language, but they are not doing the same job."
+      }
+    },
+    {
+      "id": "n_065",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Ends with practical confidence: use what fits, question what is only story, and avoid overreading fruit language.",
+        "intent": "reassure",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "When the label gives you a clear ingredient role and your skin responds comfortably, a fruit-derived ingredient can fit into a routine. When the label gives you mostly a scent or a story, you do not need to treat it as skincare evidence."
+      }
     }
   ],
-  "seo": {
-    "meta_description": "Fruit extracts can make skincare sound fresh and natural, but sensitive skin still needs careful label reading. Learn how to judge fruit-based skincare claims calmly.",
-    "meta_title": "Fruit in Skincare: Natural Ingredient or Marketing Story?"
+  "publication_context": {
+    "publication_name": "Dr. Lurie",
+    "topic_scope": "Consumer dermatology education and skincare label reading"
   },
-  "slug": "fruit-in-skincare-natures-candy-or-juicy-market",
+  "seo": {
+    "meta_description": "A calm guide to fruit extracts, fruit acids, enzymes, vitamin C, fragrance, oils, and irritation risk in fruit-based skincare.",
+    "meta_title": "Is Fruit-Based Skincare Good for Your Skin? Label Guide"
+  },
+  "slug": "fruit-based-skincare-label-guide",
   "sources": {
     "source_list": [
       {
@@ -272,5 +1140,5 @@
       "sensitive-skin"
     ]
   },
-  "title": "Fruit in Skincare: Nature’s Candy or Just a Juicy Market?"
+  "title": "Is Fruit-Based Skincare Actually Good for Your Skin? How to Read the Label"
 }
