@@ -559,6 +559,21 @@ const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
             '(merged_into aliases followed); unknown terms are blockers.',
         },
         {
+          id: 'article_media',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'Node media (public.media, public.images[]) carries a `type` that is NEVER defaulted: an op that omits it ' +
+            'gets it inferred from the src (.pdf / contentType application/pdf → "document"; png/jpg/jpeg/webp/gif/avif/svg ' +
+            '→ "image"; anything else is refused — pass type explicitly), and an explicit type that contradicts the src ' +
+            '(image ⇄ document) is refused. IMAGE srcs take the artifact bridge public path /img/{id}/{sha256}.{ext}; ' +
+            'DOCUMENT srcs (PDF attachments) take /pdf/{id}/{sha256}.pdf — the public_path create_agent_artifact_job / ' +
+            'get_agent_artifact_by_slot return for a pdf artifact, verbatim (optional sizeBytes/title/contentType ride ' +
+            'along). A document renders as a download/embed block (<a href> + <object data>), never an <img>; a PDF in ' +
+            'the hero body.image is refused. Both are existence-checked against the artifact index (absent/deleted → ' +
+            'publish blocker, draft warning); remote https URLs warn; data:/src/assets paths block.',
+        },
+        {
           id: 'article_annotation_privacy',
           severity: 'blocks_write',
           enforced_live: true,
@@ -1019,7 +1034,7 @@ const auxiliaryInputs = (objectType: ObjectType): AuxiliaryInput[] => {
       {
         input: 'PDF artifacts',
         when: 'node public.media {type:"document"} or a /pdf/ ctaLink',
-        how: "Use this Platform connector's create_agent_artifact_job + get_agent_artifact_job_status bridge; Platform resolves the project and grant server-side. Use the verified /pdf/{id}/{sha256}.pdf public_path as the document media src or action-node ctaLink. Missing/deleted artifacts block publish.",
+        how: "Use this Platform connector's create_agent_artifact_job (artifact_kind:'pdf') + get_agent_artifact_job_status / get_agent_artifact_by_slot bridge; Platform resolves the project and grant server-side. Use the verified /pdf/{id}/{sha256}.pdf public_path as the document media src (type:\"document\" — inferred from the .pdf src when omitted, refused if you say \"image\") or as an action-node ctaLink; add sizeBytes from the artifactReference so the download block can show it. Missing/deleted artifacts block publish. After release, verify_article_images {expectedDocuments:['/pdf/…']} asserts the attachment is live.",
       }
     );
   }

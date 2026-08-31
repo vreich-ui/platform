@@ -56,6 +56,11 @@ import {
   type TermPayload,
 } from '../schema/object-patch-ops.js';
 import type { HistoryEntry, ObjectRecord, ObjectType, Principal } from '../schema/object-record-v1.js';
+import {
+  MediaTypeError,
+  normalizeArticleNodeMedia,
+  normalizeArticleNodeMediaFields,
+} from './article-content/media-type.js';
 
 // ——— errors ———
 
@@ -382,6 +387,22 @@ interface TemplateSlotLike extends UnknownRecord {
 interface ArticleNodeLike extends UnknownRecord {
   id: string;
 }
+
+/**
+ * A media object whose type cannot be inferred from its src, or whose explicit
+ * type contradicts the src, refuses the WHOLE op as an unprocessable body —
+ * never silently defaulted to 'image' (the broken-<img>-for-a-PDF defect).
+ */
+const withMediaTypeRefusal = (run: () => void): void => {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof MediaTypeError) {
+      throw new PatchApplyError('invalid_body', error.message, { path: error.path, reason: error.reason });
+    }
+    throw error;
+  }
+};
 
 const expectPlainObject = (value: unknown, what: string): UnknownRecord => {
   if (!isPlainObject(value)) {
@@ -736,14 +757,25 @@ const applyOp = (objectType: ObjectType, body: UnknownRecord, op: PatchOp): Patc
       assertNoNullValues(op.node, 'upsert_node payload');
       const nodes = getNodes(body);
       const index = nodes.findIndex((node) => node.id === op.node.id);
-      return applyUpsertIntoList(op, nodes, index, op.node as ArticleNodeLike, op.position, (node) => node.id);
+      // Media type discipline (media-type.ts): the payload's public.media /
+      // images[] get their `type` inferred from the src when absent, and an
+      // explicit type must agree with the src — normalized BEFORE the element
+      // capture so history (and the derived inverse) carry the resolved node.
+      const payload = deepCloneJson(op.node) as ArticleNodeLike;
+      withMediaTypeRefusal(() => normalizeArticleNodeMedia(payload, 'upsert_node node'));
+      return applyUpsertIntoList(op, nodes, index, payload, op.position, (node) => node.id);
     }
 
     case 'update_node': {
       const nodes = getNodes(body);
       const node = nodes.find((candidate) => candidate.id === op.node_id);
       if (!node) throw targetMissing(op, `node '${op.node_id}'`);
-      return applyFieldsOp(op, node, op.fields as UnknownRecord);
+      // Same discipline against the node the fields merge INTO: a src change
+      // without a type re-derives it (a stale 'image' must not survive a PDF
+      // landing here); an explicit type is checked against the effective src.
+      const fields = deepCloneJson(op.fields) as UnknownRecord;
+      withMediaTypeRefusal(() => normalizeArticleNodeMediaFields(node, fields, 'update_node fields'));
+      return applyFieldsOp(op, node, fields);
     }
 
     case 'move_node': {

@@ -75,8 +75,9 @@ next.
     read `errorMessage`, fix content, republish, re-release.
 11. **Verify the page**: `verify_article_images {url: <site-origin> +
     production.article_path, expectedImages: [each node media /img/… path],
-    commit}` — require `verified:true, deployReady:true`; for a PDF, fetch its
-    `/pdf/…` URL and expect 200 `application/pdf` starting `%PDF-`.
+    expectedDocuments: [each document media /pdf/… path], commit}` — require
+    `verified:true, deployReady:true`; each PDF must appear as an `<a href>` /
+    `<object data>` on the page and fetch as 200 `application/pdf`.
 12. **Rollback (honest)**: the build hook always builds branch HEAD —
     `release_to_production {commit: <older sha>}` can only VERIFY an old
     commit, never rebuild it. Content rollback = revert via object history /

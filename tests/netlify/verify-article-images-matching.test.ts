@@ -24,11 +24,23 @@ type VerifyResponseBody = {
     matchedBy?: string;
     error?: string;
   }>;
+  expectedDocuments?: string[];
+  documents?: Array<{
+    expected: string;
+    present: boolean;
+    ok: boolean;
+    status?: number;
+    contentType?: string;
+    matchedUrl?: string;
+    matchedBy?: string;
+    error?: string;
+  }>;
 };
 
 const callVerify = async (
   expectedImages: string[],
-  routes: Record<string, () => Response>
+  routes: Record<string, () => Response>,
+  extra: Record<string, unknown> = {}
 ): Promise<VerifyResponseBody> => {
   process.env.NETLIFY_PUBLISH_SECRET = publishSecret;
   process.env.PUBLISH_SECRET = publishSecret;
@@ -46,7 +58,7 @@ const callVerify = async (
     const response = await verifyHandler({
       httpMethod: 'POST',
       headers: { 'x-publish-key': publishSecret, 'content-type': 'application/json' },
-      body: JSON.stringify({ url: 'https://example.com/learn/my-article', expectedImages }),
+      body: JSON.stringify({ url: 'https://example.com/learn/my-article', expectedImages, ...extra }),
     });
     return JSON.parse(response.body) as VerifyResponseBody;
   } finally {
@@ -121,6 +133,102 @@ test('verify marks a non-200 page as inconclusive with deploy-timing guidance', 
   assert.equal(body.pageStatus, 404);
   assert.match(String(body.errors?.[0]), /deploy may not be live yet/);
   assert.match(String(body.errors?.[0]), /deploy_status/);
+});
+
+// ---------------------------------------------------------------------------
+// expectedDocuments — the PDF-attachment sibling of expectedImages. A
+// document media node renders as <a href> + <object data> (render-nodes.ts);
+// the assertion is "the public path is on the page in one of those, and it
+// fetches as application/pdf". Never an <img>.
+// ---------------------------------------------------------------------------
+
+const PDF_SHA = 'c'.repeat(64);
+const PDF_PATH = `/pdf/req_agent_pdf_attach_20260831_01/${PDF_SHA}.pdf`;
+const PDF_URL = `https://example.com${PDF_PATH}`;
+const pdfResponse = () =>
+  new Response('%PDF-1.7 bytes', { status: 200, headers: { 'content-type': 'application/pdf' } });
+
+// The fixture page: exactly what render-nodes.ts emits for one image node and
+// one document node (download block + <object> preview).
+const documentFixturePage = () =>
+  pageHtml(
+    '<img src="/images/direct.png">' +
+      `<figure class="article-node-document not-prose my-6" data-media-type="document">` +
+      `<a class="article-document-link" href="${PDF_PATH}" type="application/pdf" download="${PDF_SHA}.pdf">Guide</a>` +
+      `<object class="article-document-preview" data="${PDF_PATH}" type="application/pdf"><p>fallback</p></object>` +
+      `</figure>`
+  );
+
+test('expectedDocuments: a document public path present as <a href>/<object data> and served as application/pdf verifies', async () => {
+  const body = await callVerify(
+    ['/images/direct.png'],
+    {
+      'https://example.com/learn/my-article': () =>
+        new Response(documentFixturePage(), { status: 200, headers: { 'content-type': 'text/html' } }),
+      'https://example.com/images/direct.png': pngResponse,
+      [PDF_URL]: pdfResponse,
+    },
+    { expectedDocuments: [PDF_PATH] }
+  );
+
+  assert.equal(body.verified, true, JSON.stringify(body));
+  assert.deepEqual(body.expectedDocuments, [PDF_PATH]);
+  assert.equal(body.documents?.length, 1);
+  assert.equal(body.documents?.[0].present, true);
+  assert.equal(body.documents?.[0].matchedBy, 'exact');
+  assert.equal(body.documents?.[0].matchedUrl, PDF_URL);
+  assert.equal(body.documents?.[0].status, 200);
+  assert.equal(body.documents?.[0].contentType, 'application/pdf');
+  assert.equal(body.documents?.[0].ok, true);
+});
+
+test('expectedDocuments: a PDF that only appears inside an <img> does not count (that is the broken-image defect)', async () => {
+  const body = await callVerify(
+    [],
+    {
+      'https://example.com/learn/my-article': () =>
+        new Response(pageHtml(`<img src="${PDF_PATH}" alt="guide">`), {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+      [PDF_URL]: pdfResponse,
+    },
+    { expectedDocuments: [PDF_PATH] }
+  );
+
+  assert.equal(body.verified, false);
+  assert.equal(body.inconclusive, false, 'a live page with the PDF in an <img> is a proven defect');
+  assert.equal(body.documents?.[0].present, false);
+  assert.match(String(body.documents?.[0].error), /not found on the page as an <a href>, <object data>/);
+  assert.match(String(body.errors?.[0]), new RegExp(PDF_PATH.replace(/\//g, '\\/')));
+});
+
+test('expectedDocuments: a linked path that does not serve application/pdf fails with the content-type it got', async () => {
+  const body = await callVerify(
+    [],
+    {
+      'https://example.com/learn/my-article': () =>
+        new Response(documentFixturePage(), { status: 200, headers: { 'content-type': 'text/html' } }),
+      [PDF_URL]: () => new Response('<html>404</html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    },
+    { expectedDocuments: [PDF_PATH] }
+  );
+
+  assert.equal(body.verified, false);
+  assert.equal(body.documents?.[0].present, true);
+  assert.equal(body.documents?.[0].ok, false);
+  assert.match(String(body.documents?.[0].error), /did not return content-type application\/pdf \(got text\/html\)/);
+});
+
+test('expectedDocuments: omitted keeps the image-only contract byte-for-byte (no documents key)', async () => {
+  const body = await callVerify(['/images/direct.png'], {
+    'https://example.com/learn/my-article': () =>
+      new Response(pageHtml('<img src="/images/direct.png">'), { status: 200, headers: { 'content-type': 'text/html' } }),
+    'https://example.com/images/direct.png': pngResponse,
+  });
+  assert.equal(body.verified, true);
+  assert.equal('documents' in body, false);
+  assert.equal('expectedDocuments' in body, false);
 });
 
 // ---------------------------------------------------------------------------

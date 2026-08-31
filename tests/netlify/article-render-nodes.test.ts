@@ -346,5 +346,73 @@ test('media render matrix: image media renders <img>, document media renders an 
   });
   const { html } = renderArticleNodes('req_render_20260719_01', body);
   assert.match(html, new RegExp(`<img src="/img/req_render_20260719_01/${sha}\\.webp" alt="A calm flatlay"`));
-  assert.match(html, new RegExp(`<a href="/pdf/req_render_20260719_01/${sha}\\.pdf"[^>]*>Flare tracker</a>`));
+  assert.match(
+    html,
+    new RegExp(`<a class="article-document-link[^"]*" href="/pdf/req_render_20260719_01/${sha}\\.pdf"`)
+  );
+  assert.match(html, /<span class="font-semibold">Flare tracker<\/span>/);
+});
+
+test('document media SNAPSHOT: a PDF attachment renders a download block + <object> preview, never an <img>', () => {
+  const sha = 'e'.repeat(64);
+  const src = `/pdf/req_render_pdf_20260831_01/${sha}.pdf`;
+  const body = article({
+    nodes: [
+      {
+        id: 'n_a1',
+        kind: 'content',
+        public: {
+          title: 'Download the tracker',
+          media: {
+            type: 'document',
+            src,
+            title: 'Flare tracker',
+            contentType: 'application/pdf',
+            sizeBytes: 245760,
+            caption: 'PDF, 4 pages',
+          },
+        },
+        commercial: { rel: 'sponsored' },
+      },
+    ],
+  });
+  const { html } = renderArticleNodes('req_render_pdf_20260831_01', body);
+  const start = html.indexOf('<figure class="article-node-document');
+  const end = html.indexOf('</figure>', start) + '</figure>'.length;
+  assert.ok(start >= 0, html);
+  const block = html.slice(start, end);
+  assert.equal(
+    block,
+    `<figure class="article-node-document not-prose my-6" data-media-type="document">` +
+      `<a class="article-document-link flex items-center gap-3 rounded-lg border border-gray-200 dark:border-slate-700 bg-surface px-4 py-3 font-sans no-underline hover:border-primary" href="${src}" type="application/pdf" rel="sponsored" download="${sha}.pdf">` +
+      `<span class="article-document-icon text-2xl" aria-hidden="true">📄</span>` +
+      `<span class="flex flex-col"><span class="font-semibold">Flare tracker</span>` +
+      `<span class="text-sm text-muted">${sha}.pdf · PDF · 240 KB</span></span>` +
+      `</a>` +
+      `<object class="article-document-preview w-full aspect-[3/4] max-h-[80vh] rounded-lg border border-gray-200 dark:border-slate-700" data="${src}" type="application/pdf" aria-label="Flare tracker">` +
+      `<p class="text-sm text-muted">Your browser cannot preview this PDF — <a href="${src}" rel="sponsored" download="${sha}.pdf">download ${sha}.pdf</a>.</p>` +
+      `</object>` +
+      `<figcaption>PDF, 4 pages</figcaption>` +
+      `</figure>`
+  );
+  // The whole point: a PDF is never an <img>.
+  assert.equal(/<img[^>]*\.pdf/.test(html), false);
+});
+
+test('document media: size is omitted when unknown; title falls back to the node title, then the filename', () => {
+  const sha = 'd'.repeat(64);
+  const src = `/pdf/req_render_pdf_20260831_02/${sha}.pdf`;
+  const { html } = renderArticleNodes(
+    'req_render_pdf_20260831_02',
+    article({
+      nodes: [
+        { id: 'n_a1', kind: 'content', public: { title: 'Node title', media: { type: 'document', src } } },
+        { id: 'n_a2', kind: 'content', public: { media: { type: 'document', src } } },
+      ],
+    })
+  );
+  assert.match(html, /<span class="font-semibold">Node title<\/span>/);
+  assert.match(html, new RegExp(`<span class="font-semibold">${sha}\\.pdf</span>`));
+  assert.match(html, new RegExp(`<span class="text-sm text-muted">${sha}\\.pdf · PDF</span>`));
+  assert.equal(html.includes(' KB'), false);
 });
