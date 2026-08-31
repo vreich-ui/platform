@@ -5,6 +5,7 @@
  * component does the fetch/skeleton/empty-state/render cycle.
  */
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
@@ -14,6 +15,13 @@ import { TrendChart, BarList } from './TrafficCharts';
 import { IconChartBar } from './icons';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { fetchTrafficOverview, type TrafficOverview } from '@core/lib/admin/traffic-client';
+import { fetchOwnTrafficOverview, type OwnTrafficOverview } from '@core/lib/admin/own-traffic-client';
+import {
+  ownTrackerChartSeries,
+  ownTrackerStatRow,
+  captureRate,
+  type OwnTrackerDays,
+} from '@core/lib/admin/own-traffic-logic';
 import {
   TRAFFIC_RANGE_OPTIONS,
   DEFAULT_TRAFFIC_RANGE,
@@ -103,6 +111,150 @@ function RangePicker({
   );
 }
 
+// ─── own-tracker section (T21.2b — a second, first-party data source) ──────
+
+function SubsectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="mb-2 px-1 text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
+      {children}
+    </p>
+  );
+}
+
+function OwnTrackerSection({
+  days,
+  netlifyPageviews,
+  netlifyRangeDays,
+}: {
+  days: OwnTrackerDays;
+  /** Netlify's window total, when that feed is loaded/enabled — `null` while unknown or unavailable. */
+  netlifyPageviews: number | null;
+  /** The day-count Netlify's CURRENT range actually covers (7/30), or `null` for 90d/custom — no matching own-tracker window to compare. */
+  netlifyRangeDays: number | null;
+}) {
+  const [overview, setOverview] = useState<OwnTrafficOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    fetchOwnTrafficOverview(getToken, { days })
+      .then((result) => {
+        if (alive) setOverview(result);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof Error ? err.message : 'Could not load own-tracker data.');
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [days]);
+
+  let body: ReactNode;
+
+  if (loading) {
+    body = (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Skeleton variant="rect" height={84} />
+        <Skeleton variant="rect" height={84} />
+        <Skeleton variant="rect" height={84} />
+      </div>
+    );
+  } else if (error) {
+    body = <EmptyState severity="error" title="Couldn't load own-tracker data" message={error} />;
+  } else if (!overview) {
+    body = null;
+  } else if (!overview.configured || !overview.stats) {
+    body = (
+      <EmptyState
+        icon={<IconChartBar size={26} />}
+        title="Own tracker isn't connected"
+        message={
+          overview.message ??
+          'The own-tracker sink is not configured for this site. Set TRACKING_SINK_URL and TRACKING_PROJECT_ID to see first-party traffic here.'
+        }
+      />
+    );
+  } else {
+    const stats = overview.stats;
+    const series = ownTrackerChartSeries(stats);
+    const stat = ownTrackerStatRow(stats);
+    const rate =
+      netlifyPageviews === null ? null : captureRate(series.totals.visits, netlifyPageviews, days, netlifyRangeDays);
+
+    body = (
+      <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <StatCard label="Sessions" value={formatTrafficCount(stat.sessions)} />
+          <StatCard label="Visitors" value={formatTrafficCount(stat.visitors)} />
+          <StatCard
+            label="Consented"
+            value={stat.consentedPct === null ? '—' : `${stat.consentedPct}%`}
+            hint="Share of sessions with tracking consent"
+          />
+          <StatCard label="Purchases" value={formatTrafficCount(stat.purchases)} />
+          <StatCard
+            label="Last event"
+            value={stat.lastEventAt ? new Date(stat.lastEventAt).toLocaleString() : 'None yet'}
+          />
+          {rate !== null ? (
+            <StatCard
+              label="Capture rate"
+              value={`${rate}%`}
+              hint="Own-tracker pageviews ÷ Netlify pageviews (server-side, not blockable) over the same range — a lower bound on client-side visibility, not a completeness score."
+            />
+          ) : null}
+        </div>
+
+        <div>
+          <SubsectionLabel>Pageviews and sessions</SubsectionLabel>
+          {series.trend.length > 0 ? (
+            <TrendChart points={series.trend} seriesALabel="Pageviews" seriesBLabel="Sessions" />
+          ) : (
+            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              No events recorded in this range.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div>
+            <SubsectionLabel>Top objects</SubsectionLabel>
+            <BarList
+              rows={series.topPaths}
+              caption="Most-visited objects"
+              emptyMessage="No object views recorded in this range."
+            />
+          </div>
+          <div>
+            <SubsectionLabel>Top sources</SubsectionLabel>
+            <BarList
+              rows={series.topSources}
+              caption="Traffic sources"
+              emptyMessage="No referrer/UTM data recorded in this range."
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Card kicker="First-party" title="Own tracker (first-party)">
+      <p className="mb-4 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+        Events from this site&rsquo;s own tracking sink — client-side, so ad blockers and tracking protection can
+        suppress it. Netlify Analytics below runs server-side and cannot be blocked.
+      </p>
+      {body}
+    </Card>
+  );
+}
+
 // ─── body ─────────────────────────────────────────────────────────────────────
 
 const isoDate = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
@@ -180,21 +332,30 @@ function TrafficBody({ identity }: { identity: SiteIdentity }) {
     </div>
   );
 
-  if (rangeKey === 'custom' && !windowResult.ok) {
-    return (
-      <div className="flex flex-col gap-6">
-        {header}
-        <Card>
-          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-danger)]">{windowResult.error}</p>
-        </Card>
-      </div>
-    );
-  }
+  // Own-tracker only ever asks the sink for a 7- or 30-day window; it rides
+  // the same range picker rather than adding a second control, clamping the
+  // longer/unbounded Netlify ranges down to the closest supported one.
+  // `netlifyRangeDays` (below) is what actually gates the capture-rate stat —
+  // this is just which window OwnTrackerSection itself fetches and shows.
+  const ownDays: OwnTrackerDays = rangeKey === '7d' ? 7 : 30;
+  // Only 7d/30d have an exact own-tracker counterpart; 90d/custom means the
+  // two feeds are not looking at the same range, so captureRate() gets told
+  // there is nothing to compare against.
+  const netlifyRangeDays = rangeKey === '7d' ? 7 : rangeKey === '30d' ? 30 : null;
+  const netlifyPageviews =
+    overview && overview.configured && overview.enabled && overview.series ? overview.series.totals.visits : null;
 
-  if (!hydrated || loading) {
-    return (
-      <div className="flex flex-col gap-6">
-        {header}
+  let netlifyContent: ReactNode;
+
+  if (rangeKey === 'custom' && !windowResult.ok) {
+    netlifyContent = (
+      <Card>
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-danger)]">{windowResult.error}</p>
+      </Card>
+    );
+  } else if (!hydrated || loading) {
+    netlifyContent = (
+      <>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Skeleton variant="rect" height={84} />
           <Skeleton variant="rect" height={84} />
@@ -205,102 +366,93 @@ function TrafficBody({ identity }: { identity: SiteIdentity }) {
           <Skeleton variant="rect" height={200} />
           <Skeleton variant="rect" height={200} />
         </div>
-      </div>
+      </>
     );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col gap-6">
-        {header}
-        <Card>
-          <EmptyState severity="error" title="Couldn't load traffic data" message={error} />
-        </Card>
-      </div>
+  } else if (error) {
+    netlifyContent = (
+      <Card>
+        <EmptyState severity="error" title="Couldn't load traffic data" message={error} />
+      </Card>
     );
-  }
-
-  if (!overview) return null;
-
-  if (!overview.configured) {
-    return (
-      <div className="flex flex-col gap-6">
-        {header}
-        <Card>
-          <EmptyState
-            icon={<IconChartBar size={26} />}
-            title="Netlify Analytics isn't connected"
-            message={
-              overview.message ??
-              'Netlify Analytics credentials are not configured for this site. Set the Netlify site id and access token this deployment already uses for deploy lookups.'
-            }
+  } else if (!overview) {
+    netlifyContent = null;
+  } else if (!overview.configured) {
+    netlifyContent = (
+      <Card>
+        <EmptyState
+          icon={<IconChartBar size={26} />}
+          title="Netlify Analytics isn't connected"
+          message={
+            overview.message ??
+            'Netlify Analytics credentials are not configured for this site. Set the Netlify site id and access token this deployment already uses for deploy lookups.'
+          }
+        />
+      </Card>
+    );
+  } else if (!overview.enabled) {
+    netlifyContent = (
+      <Card>
+        <EmptyState
+          icon={<IconChartBar size={26} />}
+          title="Analytics is not enabled for this site"
+          message={
+            overview.message ??
+            'Turn on the Netlify Analytics add-on for this site in Netlify to see traffic data here.'
+          }
+        />
+      </Card>
+    );
+  } else if (!overview.series) {
+    netlifyContent = null;
+  } else {
+    const series = overview.series;
+    netlifyContent = (
+      <>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Visits" value={formatTrafficCount(series.totals.visits)} />
+          <StatCard label="Unique visitors" value={formatTrafficCount(series.totals.uniques)} />
+          <StatCard
+            label="Average per period"
+            value={formatTrafficCount(series.totals.avgPerBucket)}
+            hint={overview.window?.resolution === 'hour' ? 'per hour' : 'per day'}
           />
+        </div>
+
+        <Card kicker="Trend" title="Visits over time">
+          {series.trend.length > 0 ? (
+            <TrendChart points={series.trend} />
+          ) : (
+            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+              No visits recorded in this range.
+            </p>
+          )}
         </Card>
-      </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card kicker="Top content" title="Most-visited pages" actions={<Badge>{series.topPaths.length}</Badge>}>
+            <BarList
+              rows={series.topPaths}
+              caption="Most-visited pages"
+              emptyMessage="No page views recorded in this range."
+            />
+          </Card>
+          <Card kicker="Sources" title="Where visits came from" actions={<Badge>{series.topSources.length}</Badge>}>
+            <BarList
+              rows={series.topSources}
+              caption="Traffic sources"
+              emptyMessage="No referrer data recorded in this range."
+            />
+          </Card>
+        </div>
+      </>
     );
   }
-
-  if (!overview.enabled) {
-    return (
-      <div className="flex flex-col gap-6">
-        {header}
-        <Card>
-          <EmptyState
-            icon={<IconChartBar size={26} />}
-            title="Analytics is not enabled for this site"
-            message={
-              overview.message ??
-              'Turn on the Netlify Analytics add-on for this site in Netlify to see traffic data here.'
-            }
-          />
-        </Card>
-      </div>
-    );
-  }
-
-  const series = overview.series;
-  if (!series) return null;
 
   return (
     <div className="flex flex-col gap-6">
       {header}
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Visits" value={formatTrafficCount(series.totals.visits)} />
-        <StatCard label="Unique visitors" value={formatTrafficCount(series.totals.uniques)} />
-        <StatCard
-          label="Average per period"
-          value={formatTrafficCount(series.totals.avgPerBucket)}
-          hint={overview.window?.resolution === 'hour' ? 'per hour' : 'per day'}
-        />
-      </div>
-
-      <Card kicker="Trend" title="Visits over time">
-        {series.trend.length > 0 ? (
-          <TrendChart points={series.trend} />
-        ) : (
-          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-            No visits recorded in this range.
-          </p>
-        )}
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card kicker="Top content" title="Most-visited pages" actions={<Badge>{series.topPaths.length}</Badge>}>
-          <BarList
-            rows={series.topPaths}
-            caption="Most-visited pages"
-            emptyMessage="No page views recorded in this range."
-          />
-        </Card>
-        <Card kicker="Sources" title="Where visits came from" actions={<Badge>{series.topSources.length}</Badge>}>
-          <BarList
-            rows={series.topSources}
-            caption="Traffic sources"
-            emptyMessage="No referrer data recorded in this range."
-          />
-        </Card>
-      </div>
+      <OwnTrackerSection days={ownDays} netlifyPageviews={netlifyPageviews} netlifyRangeDays={netlifyRangeDays} />
+      {netlifyContent}
     </div>
   );
 }

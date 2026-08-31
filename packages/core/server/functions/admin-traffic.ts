@@ -28,6 +28,8 @@ import {
   DEFAULT_TRAFFIC_RANGE,
   type TrafficRangeKey,
 } from '../../lib/admin/traffic-logic.js';
+import { isOwnTrackerDays, type OwnTrackerDays } from '../../lib/admin/own-traffic-logic.js';
+import { fetchOwnTrackerStats, ownTrackerMissingEnvVars } from '../lib/own-tracker-stats.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -67,6 +69,51 @@ const cachedResponse = (entry: MemoEntry, ifNoneMatch: string | undefined) => {
   };
 };
 
+const DEFAULT_OWN_TRACKER_DAYS: OwnTrackerDays = 7;
+
+/**
+ * `?source=own` — the T21.2b own-tracker feed. Same admin auth wall (checked
+ * by the caller before this runs), same memo-Map TTL-cache pattern as the
+ * Netlify branch above, keyed separately (`own:` prefix) so the two sources
+ * never collide. Missing TRACKING_SINK_URL/TRACKING_PROJECT_ID degrades to
+ * the SAME {configured:false, enabled:false, error_code, message} shape the
+ * Netlify branch already returns for "not connected" — never a 500 for an
+ * honest not-configured state.
+ */
+const ownTrafficResponse = async (binding: SiteBinding, rawDays: number, ifNoneMatch: string | undefined) => {
+  const days: OwnTrackerDays = isOwnTrackerDays(rawDays) ? rawDays : DEFAULT_OWN_TRACKER_DAYS;
+
+  const missing = ownTrackerMissingEnvVars();
+  if (missing.length > 0) {
+    return jsonResponse(
+      200,
+      {
+        configured: false,
+        enabled: false,
+        error_code: 'own_tracker_unconfigured',
+        message: 'The own-tracker sink is not configured for this site.',
+        days,
+      },
+      { 'Cache-Control': CACHE_CONTROL }
+    );
+  }
+
+  const cacheKey = `own:${binding.siteId}:${days}`;
+  const cached = memo.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
+
+  try {
+    const stats = await fetchOwnTrackerStats(days);
+    const body = { configured: true, enabled: true, days, stats };
+    const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
+    memo.set(cacheKey, entry);
+    return cachedResponse(entry, ifNoneMatch);
+  } catch (error) {
+    console.error('Failed to load own-tracker stats.', error);
+    return jsonResponse(500, { error: 'Own-tracker stats could not be loaded.' });
+  }
+};
+
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
   const access = await resolveAdminAccessFromEvent(event, context);
@@ -74,6 +121,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 
   const params = event.queryStringParameters ?? {};
+
+  if (params.source === 'own') {
+    const ifNoneMatchOwn = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+    return ownTrafficResponse(binding, Number(params.days), ifNoneMatchOwn);
+  }
+
   const range = isRangeKey(params.range) ? params.range : DEFAULT_TRAFFIC_RANGE;
   const custom = range === 'custom' && params.from && params.to ? { from: params.from, to: params.to } : undefined;
 

@@ -17,6 +17,20 @@
  */
 import { effectiveApprovalMode, type ApprovalConfig, type ApprovalMode } from './governance-client.js';
 
+/** consent.analytics_id_mode (tracking-config-v1 schema). */
+export type AnalyticsIdMode = 'granted-only' | 'unrestricted-auto';
+
+/**
+ * Read-only display value for the Tracking card's identity-mode line
+ * (T21.2 — the OQ-W13-2 card gains it, next to the posture display). Once a
+ * tracking_config export exists its schema default fills the field, so the
+ * only real "absent" case is no export at all (nothing to show yet) — that
+ * gets the SAME "not set" treatment the admin already uses for a missing
+ * value elsewhere (MaintenancePage's site-id diagnostic), not an invented
+ * new convention.
+ */
+export const formatAnalyticsIdMode = (mode: AnalyticsIdMode | null | undefined): string => mode ?? 'not set';
+
 export type CreationRuleLike = 'open' | { agents: string[] };
 export type CreationPolicyLike = {
   master: CreationRuleLike;

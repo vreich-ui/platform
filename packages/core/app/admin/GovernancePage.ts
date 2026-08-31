@@ -18,7 +18,10 @@ const trackingExports = import.meta.glob('@site/data/site/tracking.json', {
 
 const loadAnalyticsIdMode = (): GovernancePageProps['analyticsIdMode'] => {
   const [exported] = Object.values(trackingExports);
-  if (!exported) return 'granted-only';
+  // No tracking_config export yet ⇒ genuinely absent — the card shows
+  // 'not set' (formatAnalyticsIdMode), never a fabricated default. Once an
+  // export exists, the schema's own default fills the field.
+  if (!exported) return undefined;
   const body = { ...(exported as Record<string, unknown>) };
   delete body.__generated;
   return parseTrackingExport(body).consent.analytics_id_mode;
