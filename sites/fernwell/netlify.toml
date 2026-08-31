@@ -122,6 +122,17 @@
   status = 200
   force = true
 
+# W3.1 — the ChatGPT Actions facade over this tenant's MCP tools. One splat: the
+# tool name is the last path segment and the function routes on it, so adding a
+# tool to the plugin charter never needs a routing change here. The facade
+# forwards to the same handler and the same OAuth as /mcp; it holds no
+# credential and adds no business logic of its own.
+[[redirects]]
+  from = "/api/plugin/*"
+  to = "/.netlify/functions/plugin-actions"
+  status = 200
+  force = true
+
 # W14 F10 — the site's own OAuth 2.1 authorization server, beside the MCP
 # resource server it protects. One function serves every endpoint; each rule
 # names its endpoint explicitly rather than relying on a splat, so the routing
