@@ -1,5 +1,8 @@
 import { classifyToolResult } from './activity-severity.js';
 import type { ChatEventView } from './chat-client.js';
+import { cmsAgentErrorCopy, type CmsAgentErrorCopy } from './cms-agent-error-copy.js';
+import { requestSeverityLevel, requestStatusLabel, type RequestStatusName } from './request-logic.js';
+import type { AdminSeverity } from './severity.js';
 
 export type ChatTimelineItem = { kind: 'event'; event: ChatEventView } | { kind: 'activity'; events: ChatEventView[] };
 
@@ -102,4 +105,74 @@ export const toolLabelForName = (tool: string): string => TOOL_LABELS[tool] ?? '
 export function toolLabel(event: ChatEventView): string {
   const tool = String(event.detail?.tool ?? 'tool');
   return String(event.detail?.summary ?? toolLabelForName(tool));
+}
+
+// ─── request_progress (W19) ────────────────────────────────────────────────
+
+/**
+ * Editor-facing copy for one `request_progress` event (`sweep.ts`'s
+ * `progressDetail`, appended by the sweeper on every status transition).
+ *
+ * Before this existed, `chat.tsx` had no dedicated renderer for the type and
+ * fell through to the generic `<ToolCallCard>`, which reads `event.detail.
+ * tool`/`is_error` — fields this event never carries — so it always rendered
+ * `severity: 'ok'` (a green check) no matter what the sweeper had just
+ * written, including `failed`. Severity here instead goes through
+ * `requestSeverityLevel`, the SAME map `/admin/requests` colours its rows
+ * with, so the inline line and the request list can never disagree about
+ * what red means.
+ *
+ * Task B: when the transition is `failed`, the first blocker carries
+ * CMS-Agent's own structured detail where CMS-Agent supplied one (a
+ * classified provider error or its own `budget_exceeded` guard) —
+ * `derive-status.ts`'s `failedNodeBlockers` reads it off `node.output.error`.
+ * Routed through the SAME `cmsAgentErrorCopy` function `run_error` and
+ * `RequestActivity`'s node detail already use, so the code/message/
+ * operatorAction sentence reads identically wherever a failure shows up.
+ */
+export interface RequestProgressCopy {
+  status: RequestStatusName;
+  level: AdminSeverity;
+  label: string;
+  /** "done/total", when the sweeper's snapshot carries both. */
+  progress?: string;
+  /** The sweeper's own status_reason, verbatim — shown when there is no structured failure to prefer instead. */
+  summary?: string;
+  /** Only for a `failed` transition whose first blocker parses as CMS-Agent's structured detail. */
+  failure?: CmsAgentErrorCopy;
+}
+
+export function requestProgressCopy(detail: Record<string, unknown> | undefined, isOwner: boolean): RequestProgressCopy {
+  const status = (typeof detail?.status === 'string' ? detail.status : 'running') as RequestStatusName;
+  const summary = typeof detail?.summary === 'string' ? detail.summary : undefined;
+  const done = typeof detail?.done === 'number' ? detail.done : undefined;
+  const total = typeof detail?.total === 'number' ? detail.total : undefined;
+  const blockers = Array.isArray(detail?.blockers) ? detail.blockers : [];
+  const firstBlocker = blockers.find((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null);
+  const blockerCode = typeof firstBlocker?.code === 'string' ? firstBlocker.code : undefined;
+  const blockerMessage = typeof firstBlocker?.message === 'string' ? firstBlocker.message : undefined;
+  const operatorAction = typeof firstBlocker?.operator_action === 'string' ? firstBlocker.operator_action : undefined;
+  const failure =
+    status === 'failed' && blockerCode && blockerMessage
+      ? cmsAgentErrorCopy(
+          {
+            code: blockerCode,
+            message: blockerMessage,
+            ...(operatorAction ? { operatorAction } : {}),
+            // This blocker is already CMS-Agent's own parsed detail (never a
+            // network/timeout ambiguity — that layer is CMS-Agent's problem),
+            // so the "no JSON body" fallback text must never show here.
+            fromJsonBody: true,
+          },
+          { isOwner }
+        )
+      : undefined;
+  return {
+    status,
+    level: requestSeverityLevel(status),
+    label: requestStatusLabel(status),
+    ...(done !== undefined && total !== undefined ? { progress: `${done}/${total}` } : {}),
+    ...(summary ? { summary } : {}),
+    ...(failure ? { failure } : {}),
+  };
 }

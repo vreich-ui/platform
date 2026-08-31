@@ -99,6 +99,16 @@ export interface RunNodeSnapshot {
   warnings?: unknown;
   skip?: { reason?: string | null } | null;
   lastDispatch?: RunNodeDispatchSnapshot | null;
+  /**
+   * `executor.ts`'s structured failure detail (Task B / `activity.ts`'s own
+   * `node.output.error`, read the same tolerant way here) — code/message
+   * plus, for a classified provider error or CMS-Agent's own budget guard
+   * (`budget_exceeded`), the `operatorAction` sentence naming the next step.
+   * Optional: a node with no `output.error` (every prior fixture, every
+   * non-failed node) simply carries none of this, and `failedNodeBlockers`
+   * falls back to the legacy `errors` string pair below.
+   */
+  output?: { error?: { code?: string | null; message?: string | null; operatorAction?: string | null } | null } | null;
 }
 
 export interface RunApprovalSnapshot {
@@ -171,6 +181,13 @@ export interface RequestBlocker {
   code: string;
   message: string;
   at?: string;
+  /**
+   * Task B's next-step sentence ("Raise the budget or stop.", "Wait and
+   * retry."), verbatim from CMS-Agent's `output.error.operatorAction` —
+   * present only for a classified provider error or `budget_exceeded`, same
+   * as `activity.ts`'s `ActivityNode.failure.operatorAction`.
+   */
+  operator_action?: string;
 }
 
 export interface DerivedRequestState {
@@ -295,12 +312,31 @@ const failedNodeBlockers = (run: RunSnapshot, nodes: RunNodeSnapshot[]): Request
   const blockers: RequestBlocker[] = [];
   for (const node of nodes) {
     if (asString(node.status) !== 'failed') continue;
-    const errors = Array.isArray(node.errors) ? node.errors.filter((e): e is string => typeof e === 'string') : [];
     const nodeId = nodeIdOf(node);
     const at = asString(node.completedAt);
+    // Task B's structured detail, when CMS-Agent provides it — read the same
+    // tolerant way `activity.ts` already does, so a `budget_exceeded` (or
+    // classified provider) failure carries its `operatorAction` here too,
+    // not just on the live activity poll.
+    const output = isRecord(node.output) ? node.output : undefined;
+    const structuredError = output && isRecord(output.error) ? output.error : undefined;
+    const structuredCode = structuredError ? asString(structuredError.code) : undefined;
+    const structuredMessage = structuredError ? asString(structuredError.message) : undefined;
+    if (structuredCode && structuredMessage) {
+      const operatorAction = structuredError ? asString(structuredError.operatorAction) : undefined;
+      blockers.push({
+        ...(nodeId ? { node_id: nodeId } : {}),
+        code: structuredCode,
+        message: structuredMessage,
+        ...(operatorAction ? { operator_action: operatorAction } : {}),
+        ...(at ? { at } : {}),
+      });
+      continue;
+    }
+    // Legacy shape: the plain `errors` string pair — code first, copy after.
+    const errors = Array.isArray(node.errors) ? node.errors.filter((e): e is string => typeof e === 'string') : [];
     blockers.push({
       ...(nodeId ? { node_id: nodeId } : {}),
-      // CMS-Agent's convention: the machine code first, human copy after.
       code: errors[0] ?? 'node_failed',
       message: errors.slice(1).join('; ') || errors[0] || 'The step failed without an error message.',
       ...(at ? { at } : {}),

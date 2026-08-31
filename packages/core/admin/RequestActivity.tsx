@@ -37,6 +37,7 @@ import {
   formatShortDuration,
   formatUsd,
   getRequestActivityIfChanged,
+  raiseNodeBudget,
   type ActivityNodeView,
   type ActivitySeverity,
   type ActivityView,
@@ -44,6 +45,7 @@ import {
 import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
 import { relativeAge } from '@core/lib/admin/request-logic';
 import { cmsAgentErrorCopy, hasOperatorAction } from '@core/lib/admin/cms-agent-error-copy';
+import { budgetRaiseButtons } from '@core/lib/admin/budget-raise';
 import { liveArticleUrl, policyRecordLine, publicationCopy } from '@core/lib/admin/publication-card';
 
 async function getToken(): Promise<string> {
@@ -450,6 +452,9 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   const [canApprove, setCanApprove] = useState(false);
   const [deciding, setDeciding] = useState<DecisionAction | undefined>(undefined);
   const [decideError, setDecideError] = useState<string | undefined>(undefined);
+  /** Bug B (budget-raise-card): which of the two raise-and-retry buttons is in flight, if either. */
+  const [raisingBudget, setRaisingBudget] = useState<'for_run' | 'default' | undefined>(undefined);
+  const [raiseBudgetError, setRaiseBudgetError] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -632,6 +637,49 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
     [canApprove, deciding, load, requestId, runId]
   );
 
+  /**
+   * Bug B (budget-raise-card): the two Owner-only buttons on a
+   * `budget_exceeded` recovery card. `scope` picks the CMS-Agent tool the
+   * server calls before retrying — `'for_run'` a per-run override,
+   * `'default'` the node's standing default (`raiseNodeBudget`,
+   * `requests-client.ts`) — everything else (the endpoint, the retry, the
+   * refreshed activity) is identical, so one handler covers both.
+   */
+  const raiseBudget = useCallback(
+    async (scope: 'for_run' | 'default', nodeId: string, budgetUsd: number) => {
+      if (raisingBudget) return;
+      setRaisingBudget(scope);
+      setRaiseBudgetError(undefined);
+      try {
+        const result = await raiseNodeBudget(
+          getToken,
+          { ...(requestId ? { request_id: requestId } : {}), ...(runId ? { run_id: runId } : {}) },
+          scope,
+          nodeId,
+          budgetUsd
+        );
+        if (result.activity) {
+          setActivity(result.activity);
+          setReason(result.reason);
+          setCanApprove(result.can_approve === true);
+          setNowMs(Date.now());
+          setLoaded(true);
+        }
+        if (result.error) setRaiseBudgetError(result.error);
+        generationRef.current += 1;
+        stoppedRef.current = false;
+        settledRef.current = false;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        void load(generationRef.current);
+      } catch (actionError) {
+        setRaiseBudgetError(actionError instanceof Error ? actionError.message : 'The budget could not be raised.');
+      } finally {
+        setRaisingBudget(undefined);
+      }
+    },
+    [raisingBudget, load, requestId, runId]
+  );
+
   useEffect(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
@@ -732,6 +780,11 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
       ? 'bg-[var(--adm-accent)]'
       : BAR_FILL[severityFromActivity(activity.severity, { canRetry: Boolean(effectiveRetryNodeId) })];
   const labelFor = (nodeId: string) => activity.nodes.find((node) => node.id === nodeId)?.label;
+  // Bug B: the recovery node's own structured failure — `code`/`message`
+  // decide whether this is a `budget_exceeded` card at all, `details`
+  // (or, failing that, `message`'s own dollar figures) decide the number.
+  const recoveryNodeFailure = recovery?.node_id ? activity.nodes.find((node) => node.id === recovery.node_id)?.failure : undefined;
+  const raiseButtons = budgetRaiseButtons(recoveryNodeFailure, isOwner);
   const spend = activity.cost;
   const spendLabel = spend?.most_expensive_node ? labelFor(spend.most_expensive_node) : undefined;
   const placeholder = placeholderNotice(activity);
@@ -961,6 +1014,34 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
             <Button size="sm" variant="secondary" className="mt-2" onClick={() => onRetry(retryNodeId)}>
               Retry this step
             </Button>
+          ) : null}
+          {/*
+           * Bug B (budget-raise-card): `budget_exceeded` specifically gets two
+           * more buttons alongside its operatorAction text above, instead of
+           * leaving the editor to go raise the ceiling somewhere else and come
+           * back. Owner-only (raising a spend ceiling is a money decision, not
+           * a content one — same posture as the server's own gate on this
+           * action) and only when a number was actually computable
+           * (`suggestedBudgetRaise`); a non-Owner, or a run with nothing to
+           * compute a number from, sees the operatorAction sentence alone.
+           */}
+          {raiseButtons.length > 0 && recovery.node_id ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {raiseButtons.map((button) => (
+                <Button
+                  key={button.scope}
+                  size="sm"
+                  variant="secondary"
+                  disabled={Boolean(raisingBudget)}
+                  onClick={() => raiseBudget(button.scope, recovery.node_id!, button.budgetUsd)}
+                >
+                  {button.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          {raiseBudgetError ? (
+            <p className="mt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{raiseBudgetError}</p>
           ) : null}
         </section>
       ) : null}
