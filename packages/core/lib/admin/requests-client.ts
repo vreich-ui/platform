@@ -241,7 +241,15 @@ export interface ActivityNodeView {
   warnings: Array<{ severity: ActivitySeverity; label: string; raw: string }>;
   errors: string[];
   /** Task B (provider-error-details): CMS-Agent's own structured failure detail, when this node failed with one. Mirrors `server/lib/requests/activity.ts`'s `ActivityNode.failure`. */
-  failure?: { code: string; message: string; operatorAction?: string; providerStatus?: number; providerMessage?: string };
+  failure?: {
+    code: string;
+    message: string;
+    operatorAction?: string;
+    providerStatus?: number;
+    providerMessage?: string;
+    /** Bug B (budget-raise-card): CMS-Agent's own numbers for a `budget_exceeded` failure — see `lib/admin/budget-raise.ts`. */
+    details?: { nodeId?: string; budgetUsd?: number; spentUsd?: number; nextTurnEstimateUsd?: number; suggestedBudgetUsd?: number };
+  };
   tools: ActivityToolCallView[];
   cost?: { tokens: number; usd: number };
 }
@@ -392,6 +400,40 @@ export const decideRunPublish = async (
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...target, action }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  return json as unknown as ActivityResponse;
+};
+
+/**
+ * Bug B (budget-raise-card) — the two Owner-only budget actions, through the
+ * SAME endpoint and action-dispatch pattern as `decideRunPublish` above (W19:
+ * only the sweeper writes a running request's status; this endpoint's writes
+ * stay confined to publish-risk decisions and, now, a node's spend ceiling).
+ * `'for_run'` calls `workflow.set_node_budget_override` (this run only)
+ * before retrying; `'default'` calls `workspace.update_node_model_config`
+ * (every future run of this node) before retrying. Returns the refreshed
+ * activity, same as `decideRunPublish` — the card redraws on the click
+ * rather than waiting for the next poll.
+ */
+export const raiseNodeBudget = async (
+  getToken: GetToken,
+  target: { request_id?: string; run_id?: string },
+  scope: 'for_run' | 'default',
+  nodeId: string,
+  budgetUsd: number
+): Promise<ActivityResponse> => {
+  const token = await getToken();
+  const res = await fetch(ACTIVITY_ENDPOINT, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...target,
+      action: scope === 'for_run' ? 'raise_node_budget_for_run' : 'raise_node_budget_default',
+      node_id: nodeId,
+      budget_usd: budgetUsd,
+    }),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);

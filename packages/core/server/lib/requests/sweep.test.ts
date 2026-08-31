@@ -203,6 +203,88 @@ describe('rule 1 — the sweeper writes the status, and progress reaches the cha
     assert.equal(log.length, 0);
   });
 
+  /**
+   * W19 bug fix (observed 2026-08-31): "the chat's run progress card kept
+   * showing running after a run failed." This is that exact production run,
+   * read live from CMS-Agent (`workflow_get_run`, compact view,
+   * `run_1788165644777_zuu2o1` / `req_concern_skin_diary_20240608_01`) — a
+   * request already recorded `running` by an earlier sweep, then failing at
+   * `artifact_plan` on CMS-Agent's own `budget_exceeded` guard. Proves the
+   * whole pipeline end to end: the next sweep flips the STORED status to
+   * `failed` (never left at `running`), and the appended `request_progress`
+   * chat event — the only thing standing between the sweeper and what the
+   * editor sees — carries the structured code/message/operator_action Task
+   * B's rendering needs, not just the bare status word.
+   */
+  it('a real budget_exceeded failure (2026-08-31) flips running → failed on the next sweep, with the chat card getting code/message/operator_action', async () => {
+    const budgetExceededRun = {
+      runId: 'run_1788165644777_zuu2o1',
+      status: 'failed',
+      currentNodeId: 'artifact_plan',
+      updatedAt: '2026-08-31T09:51:06.419Z',
+      errors: ['artifact_plan:budget_exceeded', 'artifact_plan:budget_exceeded'],
+      approvalsRequired: [],
+      nodes: [
+        { nodeId: 'input_triage', status: 'completed' },
+        { nodeId: 'research', status: 'completed' },
+        {
+          nodeId: 'artifact_plan',
+          status: 'failed',
+          durationMs: 169_245,
+          errors: ['budget_exceeded', 'legacy fallback text, unused when output.error parses'],
+          output: {
+            error: {
+              code: 'budget_exceeded',
+              message:
+                'Node "artifact_plan" stopped before the model turn that would cross the node budget: estimated spend $2.70755 plus ~$0.32781 for the upcoming turn exceeds the $3 ceiling. Caught inside the agent loop before the turn ran, not after.',
+              operatorAction: 'Run budget 3 USD reached (spent 2.70755). Raise the budget or stop.',
+            },
+          },
+        },
+        { nodeId: 'article_body', status: 'queued' },
+      ],
+    };
+    const store = memoryStore();
+    await seed(store);
+    // A prior sweep already recorded this request as genuinely running — the
+    // realistic starting point (see W19's rule 1: only the sweeper writes
+    // this, so it never starts at `failed` by hand).
+    const midRunIso = '2026-08-31T08:45:00.000Z';
+    await sweepRequest(
+      { store, ...bridgeFor(liveRun(midRunIso)), chats: chatSink([]), now: () => Date.parse(midRunIso), nowIso: () => midRunIso },
+      REQUEST_ID
+    );
+    assert.equal((await loadRequest(store, REQUEST_ID))?.status, 'running');
+
+    const nowIso = '2026-08-31T10:00:00.000Z';
+    const { bridge } = bridgeFor(budgetExceededRun);
+    const log: Array<{ chatId: string; detail: Record<string, unknown> }> = [];
+    const outcome = await sweepRequest(
+      { store, bridge, chats: chatSink(log), now: () => Date.parse(nowIso), nowIso: () => nowIso },
+      REQUEST_ID
+    );
+
+    assert.equal(outcome?.from, 'running');
+    assert.equal(outcome?.to, 'failed');
+    assert.equal(outcome?.changed, true);
+
+    const doc = await loadRequest(store, REQUEST_ID);
+    assert.equal(doc?.status, 'failed');
+    assert.match(doc?.status_reason ?? '', /artifact plan/);
+
+    // The chat event is what `RequestProgressLine` (chat.tsx) actually
+    // renders — proving the transition alone is not enough; the detail the
+    // UI needs must travel with it.
+    assert.equal(log.length, 1);
+    assert.equal(log[0]?.detail.status, 'failed');
+    const blockers = log[0]?.detail.blockers as Array<Record<string, unknown>> | undefined;
+    const blocker = blockers?.find((b) => b.node_id === 'artifact_plan');
+    assert.ok(blocker);
+    assert.equal(blocker?.code, 'budget_exceeded');
+    assert.match(String(blocker?.message ?? ''), /exceeds the \$3 ceiling/);
+    assert.equal(blocker?.operator_action, 'Run budget 3 USD reached (spent 2.70755). Raise the budget or stop.');
+  });
+
   it('a chat awaiting approval outranks a running run', async () => {
     const nowIso = '2026-08-22T10:05:00.000Z';
     const store = memoryStore();

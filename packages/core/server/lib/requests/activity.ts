@@ -73,7 +73,22 @@ export interface ActivityNode {
    * failure code, exactly like `errors` above already is for a node that
    * never failed.
    */
-  failure?: { code: string; message: string; operatorAction?: string; providerStatus?: number; providerMessage?: string };
+  failure?: {
+    code: string;
+    message: string;
+    operatorAction?: string;
+    providerStatus?: number;
+    providerMessage?: string;
+    /**
+     * Bug B (budget-raise-card) — CMS-Agent's own numbers for a
+     * `budget_exceeded` failure (post `budget-override-and-ui-save`),
+     * verbatim from `output.error.details`. Absent for every other failure
+     * code, and for an older CMS-Agent that has not yet started sending it —
+     * `suggestedBudgetRaise` (`lib/admin/budget-raise.ts`) falls back to
+     * parsing the two dollar figures out of `message` when this is missing.
+     */
+    details?: { nodeId?: string; budgetUsd?: number; spentUsd?: number; nextTurnEstimateUsd?: number; suggestedBudgetUsd?: number };
+  };
   tools: ActivityToolCall[];
   cost?: { tokens: number; usd: number };
 }
@@ -302,6 +317,24 @@ export const projectActivity = (
       const rawFailure = output && isRecord(output.error) ? output.error : undefined;
       const failureCode = rawFailure ? str(rawFailure.code) : undefined;
       const failureMessage = rawFailure ? str(rawFailure.message) : undefined;
+      // Bug B: `details` rides alongside `operatorAction` on the same
+      // `output.error` for a `budget_exceeded` failure — CMS-Agent's own
+      // numbers, read the same tolerant way as everything else here. Any
+      // other failure code simply has no `details` object at all.
+      const rawDetails = rawFailure && isRecord(rawFailure.details) ? rawFailure.details : undefined;
+      const failureDetails = rawDetails
+        ? {
+            ...(str(rawDetails.nodeId) ? { nodeId: str(rawDetails.nodeId)! } : {}),
+            ...(num(rawDetails.budgetUsd) !== undefined ? { budgetUsd: num(rawDetails.budgetUsd)! } : {}),
+            ...(num(rawDetails.spentUsd) !== undefined ? { spentUsd: num(rawDetails.spentUsd)! } : {}),
+            ...(num(rawDetails.nextTurnEstimateUsd) !== undefined
+              ? { nextTurnEstimateUsd: num(rawDetails.nextTurnEstimateUsd)! }
+              : {}),
+            ...(num(rawDetails.suggestedBudgetUsd) !== undefined
+              ? { suggestedBudgetUsd: num(rawDetails.suggestedBudgetUsd)! }
+              : {}),
+          }
+        : undefined;
       const failure =
         failureCode && failureMessage
           ? {
@@ -310,6 +343,7 @@ export const projectActivity = (
               ...(str(rawFailure!.operatorAction) ? { operatorAction: str(rawFailure!.operatorAction)! } : {}),
               ...(num(rawFailure!.providerStatus) !== undefined ? { providerStatus: num(rawFailure!.providerStatus)! } : {}),
               ...(str(rawFailure!.providerMessage) ? { providerMessage: str(rawFailure!.providerMessage)! } : {}),
+              ...(failureDetails && Object.keys(failureDetails).length > 0 ? { details: failureDetails } : {}),
             }
           : undefined;
       return {

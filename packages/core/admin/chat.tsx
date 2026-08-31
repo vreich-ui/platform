@@ -33,7 +33,7 @@ import {
 } from '@core/lib/admin/chat-client';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
-import { createdObjectsFromEvents, groupChatEvents, toolLabel } from '@core/lib/admin/chat-logic';
+import { createdObjectsFromEvents, groupChatEvents, requestProgressCopy, toolLabel } from '@core/lib/admin/chat-logic';
 import { DENIED_SEVERITY, classifyToolResult, type Severity } from '@core/lib/admin/activity-severity';
 import { severityFromActivity } from '@core/lib/admin/severity';
 import {
@@ -609,6 +609,46 @@ function RunFinishedLine({ event }: { event: ChatEventView }) {
     ? "I paused this turn — anything already running keeps going without me, and I'll pick it up from here."
     : 'Done for now.';
   return <p className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{text}</p>;
+}
+
+/**
+ * W19 — the sweeper's `request_progress` line (`sweep.ts`'s `progressDetail`),
+ * appended on every meaningful transition. Before this it fell through
+ * `chat.tsx`'s catch-all `<ToolCallCard>`, which reads `event.detail.tool` /
+ * `is_error` — fields this event never carries — so a `failed` transition
+ * rendered with `ToolCallCard`'s default `severity: 'ok'`: a green check next
+ * to the failure sentence, and the job LOOKED unchanged from the "still
+ * working" line above it even though the sweeper had already flipped the
+ * request. Severity now comes from the same `requestSeverityLevel` map the
+ * `/admin/requests` list renders its rows through, so this line and that list
+ * can never disagree about what red means.
+ *
+ * Task B: for a `failed` transition, the first blocker carries CMS-Agent's
+ * own structured detail (code/message/operatorAction — `derive-status.ts`'s
+ * `failedNodeBlockers`) exactly where CMS-Agent supplies one (a classified
+ * provider error or its own `budget_exceeded` guard). Same `cmsAgentErrorCopy`
+ * function as `run_error` and `RequestActivity`'s node detail — "same text",
+ * not a third hand-copied rendering.
+ */
+function RequestProgressLine({ event, isOwner }: { event: ChatEventView; isOwner: boolean }) {
+  const copy = requestProgressCopy(event.detail, isOwner);
+  return (
+    <div className="flex flex-col gap-1 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)]">
+      <div className="flex items-center gap-2 text-[var(--adm-text-muted)]">
+        <SeverityIcon level={copy.level} size={14} title="" />
+        <span className="font-medium text-[var(--adm-text)]">{copy.label}</span>
+        {copy.progress ? <span className="tabular-nums">{copy.progress}</span> : null}
+      </div>
+      {copy.failure ? (
+        <p className="whitespace-pre-wrap pl-6 text-[var(--adm-danger-text)]">{copy.failure.text}</p>
+      ) : copy.summary ? (
+        <p className="pl-6 text-[var(--adm-text-muted)]">{copy.summary}</p>
+      ) : null}
+      {copy.failure?.providerDetail ? (
+        <p className="whitespace-pre-wrap pl-6 text-[var(--adm-danger-text)]">{copy.failure.providerDetail}</p>
+      ) : null}
+    </div>
+  );
 }
 
 // ─── RunReceipt (D5 tier 4) ───────────────────────────────
@@ -1338,6 +1378,12 @@ export function ChatThread({
               All versions declined — trying a new direction.
             </p>
           );
+        }
+        // W19: the sweeper's own status line — never the generic
+        // `ToolCallCard` (see `RequestProgressLine`'s own comment for why
+        // that silently misrendered a `failed` transition as `ok`).
+        if (event.type === 'request_progress') {
+          return <RequestProgressLine key={event.seq} event={event} isOwner={isOwner} />;
         }
         return <ToolCallCard key={event.seq} event={event} />;
       })}

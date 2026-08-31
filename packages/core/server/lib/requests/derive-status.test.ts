@@ -196,6 +196,77 @@ describe('plan §5.1 mapping table', () => {
     assert.strictEqual(derived.nudgeable, false);
   });
 
+  /**
+   * W19 bug fix (observed 2026-08-31): the chat's run progress card kept
+   * reading `running` after a run failed at `artifact_plan` on
+   * `budget_exceeded`. This fixture is that exact production run, read live
+   * from CMS-Agent (`workflow_get_run`, `run_1788165644777_zuu2o1`,
+   * `req_concern_skin_diary_20240608_01`) — compact `run.status === 'failed'`,
+   * `run.errors` non-empty, and the failed node's own `output.error` carrying
+   * CMS-Agent's structured budget_exceeded detail (Task B / the pending
+   * `budget-override-and-ui-save` patch's shape, `details` omitted here since
+   * `derive-status.ts` only reads `code`/`message`/`operatorAction`).
+   */
+  it('a real budget_exceeded run (2026-08-31, run_1788165644777_zuu2o1) derives failed, not running', () => {
+    const run: RunSnapshot = {
+      runId: 'run_1788165644777_zuu2o1',
+      workflowId: 'publishing_conductor',
+      projectId: 'dr-lurie',
+      status: 'failed',
+      currentNodeId: 'artifact_plan',
+      startedAt: '2026-08-31T08:40:44.777Z',
+      updatedAt: '2026-08-31T09:51:06.419Z',
+      errors: ['artifact_plan:budget_exceeded', 'artifact_plan:budget_exceeded'],
+      approvalsRequired: [],
+      nodes: [
+        node('input_triage', 'completed'),
+        node('research', 'completed'),
+        node('contract_intelligence', 'completed'),
+        node('artifact_plan', 'failed', {
+          durationMs: 169_245,
+          errors: ['budget_exceeded', 'legacy fallback text, unused when output.error parses'],
+          output: {
+            error: {
+              code: 'budget_exceeded',
+              message:
+                'Node "artifact_plan" stopped before the model turn that would cross the node budget: estimated spend $2.70755 plus ~$0.32781 for the upcoming turn exceeds the $3 ceiling. Caught inside the agent loop before the turn ran, not after.',
+              operatorAction: 'Run budget 3 USD reached (spent 2.70755). Raise the budget or stop.',
+            },
+          },
+        }),
+        node('article_body', 'queued'),
+        node('publish_payload', 'queued'),
+      ],
+    };
+    const derived = deriveRequestStatus({ run, now: Date.parse('2026-08-31T10:00:00.000Z') });
+    assert.strictEqual(derived.status, 'failed');
+    assert.match(derived.status_reason ?? '', /artifact plan/);
+    assert.strictEqual(derived.nudgeable, false);
+
+    const blocker = derived.blockers.find((b) => b.node_id === 'artifact_plan');
+    assert.ok(blocker);
+    // Task B: structured `output.error` wins over the legacy `errors` pair —
+    // code/message read straight off it, never the fallback text above.
+    assert.strictEqual(blocker.code, 'budget_exceeded');
+    assert.match(blocker.message, /exceeds the \$3 ceiling/);
+    assert.ok(!blocker.message.includes('legacy fallback text'));
+    assert.strictEqual(blocker.operator_action, 'Run budget 3 USD reached (spent 2.70755). Raise the budget or stop.');
+  });
+
+  it('a failed node with only the legacy errors[] pair (no output.error) still blocks, with no operator_action', () => {
+    const run = withNodeStatus(runningRun(), 'reader_simulation', 'failed');
+    run.status = 'failed';
+    run.nodes = (run.nodes ?? []).map((n) =>
+      n.nodeId === 'reader_simulation' ? { ...n, errors: ['model_error', 'Invalid output type'] } : n
+    );
+    const derived = deriveRequestStatus({ run, now: NOW });
+    assert.strictEqual(derived.status, 'failed');
+    const blocker = derived.blockers.find((b) => b.node_id === 'reader_simulation');
+    assert.ok(blocker);
+    assert.strictEqual(blocker.code, 'model_error');
+    assert.strictEqual(blocker.operator_action, undefined);
+  });
+
   it('run completed, publish decision still outstanding → needs_you', () => {
     // An approvalsRequired entry still present outranks the completed status.
     const withApproval = deriveRequestStatus({ run: withRun({ status: 'completed' }), now: NOW });

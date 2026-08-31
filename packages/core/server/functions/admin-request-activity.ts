@@ -24,6 +24,7 @@ import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-cli
 import { loadRequest } from '../lib/requests/store.js';
 import { projectActivity } from '../lib/requests/activity.js';
 import { fetchPublicationOutputs } from '../lib/requests/publication-outputs.js';
+import { raiseNodeBudgetAndRetry } from '../lib/requests/budget-override.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -57,7 +58,20 @@ export const requestSchema = z.object({
    * (`workflow.run_all` with `approved`). `withhold` records the operator VETO,
    * which is what makes this decision reversible rather than a one-way door.
    */
-  action: z.enum(['approve', 'withhold']).optional(),
+  /**
+   * Bug B (budget-raise-card): two Owner-only actions alongside approve/
+   * withhold, both landing on the SAME publish-risk gate this endpoint
+   * already owns writes to. `raise_node_budget_for_run` calls
+   * `workflow.set_node_budget_override` (a per-run override) before
+   * retrying; `raise_node_budget_default` calls
+   * `workspace.update_node_model_config` (the node's standing default,
+   * applied to every future run) before retrying. `node_id`/`budget_usd` are
+   * required exactly for these two — validated below, not in the schema,
+   * so the error names which field is missing rather than a generic 400.
+   */
+  action: z.enum(['approve', 'withhold', 'raise_node_budget_for_run', 'raise_node_budget_default']).optional(),
+  node_id: z.string().min(1).optional(),
+  budget_usd: z.number().positive().optional(),
 });
 
 /**
@@ -139,10 +153,57 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
       });
     }
 
+    // Bug B (budget-raise-card): both budget actions land before the same
+    // "state AFTER the action" read below, same posture as approve/withhold —
+    // but gated Owner-only (never `admin`), since raising a spend ceiling is
+    // a money decision, not a content one. Checked here rather than folded
+    // into the generic `admin` wall above so a non-Owner admin still gets
+    // the read-only view and the approve/withhold actions this file already
+    // grants them; only these two are refused.
+    const isBudgetAction =
+      request.data.action === 'raise_node_budget_for_run' || request.data.action === 'raise_node_budget_default';
+    if (isBudgetAction) {
+      if (!callerRoles.includes('owner')) {
+        return jsonResponse(403, { error: 'Owner access required to change a node budget.' });
+      }
+      if (!runId) return jsonResponse(400, { error: 'That request has no run to act on yet.' });
+      if (!request.data.node_id) {
+        return jsonResponse(400, { error: 'node_id is required to raise a node budget.' });
+      }
+      if (!request.data.budget_usd) {
+        return jsonResponse(400, { error: 'budget_usd is required to raise a node budget.' });
+      }
+      const nodeId = request.data.node_id;
+      const budgetUsd = request.data.budget_usd;
+      const scope = request.data.action === 'raise_node_budget_for_run' ? 'for_run' : 'default';
+
+      const outcome = await raiseNodeBudgetAndRetry(cmsAgentClient, scope, runId, nodeId, budgetUsd);
+      if (!outcome.ok) {
+        return jsonResponse(200, {
+          activity: null,
+          ...(requestTitle ? { title: requestTitle } : {}),
+          reason: outcome.code || 'budget_raise_failed',
+          error: scopeAwareMessage(outcome.code, outcome.message ?? 'The budget could not be raised.', [
+            ...outcome.calls,
+          ]),
+          // The write succeeded and the retry alone failed — same posture as
+          // approve's own advance step: retryable, not a reason to undo it.
+          ...(outcome.failedTool === 'workflow_retry_node' ? { retry_ms: 10_000 } : {}),
+        });
+      }
+      console.info('Admin_Request_Activity node budget raised', {
+        runId,
+        nodeId,
+        budgetUsd,
+        kind: request.data.action,
+        by: callerPrincipal.email,
+      });
+    }
+
     // The decision, before the read — so the activity returned below is the
     // state AFTER the approval, and the editor sees the run move rather than
     // the same "waiting for you" card until the next poll.
-    if (request.data.action) {
+    if (request.data.action === 'approve' || request.data.action === 'withhold') {
       if (!runId) return jsonResponse(400, { error: 'That request has no run to act on yet.' });
       const decision = request.data.action === 'approve' ? 'approved' : 'withheld';
       const decided = await cmsAgentClient.callTool<Record<string, unknown>>(
@@ -216,6 +277,10 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
       // it — one source of truth for the permission, so a surface can never
       // show an approve control that the server then refuses.
       can_approve: callerRoles.includes('admin'),
+      // Bug B: one source of truth for the budget-raise buttons, same
+      // posture as `can_approve` — a surface never offers a control the
+      // server would then refuse.
+      can_raise_budget: callerRoles.includes('owner'),
     });
   } catch (error) {
     console.error('Admin_Request_Activity request failed.', error);
