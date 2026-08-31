@@ -1,13 +1,13 @@
 {
   "__generated": {
-    "at": "2026-08-05T16:34:29.470Z",
+    "at": "2026-08-31T10:37:06.483Z",
     "from": "objects/editorial_voice/by-id/voice_drlurie.json",
-    "record_version": 4
+    "record_version": 14
   },
   "audience": "Adults making decisions about their own skin, most arriving from a search with a specific worry and no clinical training. They are capable of nuance and are tired of being sold to.",
   "cadence": "Conversational but disciplined. Short sentences carry the medical content; longer ones carry the reassurance. Second person for the reader, third person for the science. Paragraphs stay under four sentences so a worried reader can scan without losing the thread.",
   "claim_policy": "Efficacy statements are hedged to the strength of the evidence behind them and attributed in-line. No claim to treat, cure, prevent, or diagnose any condition. Individual variation is stated wherever an outcome is described. A claim without a citable source is cut rather than softened into vagueness.",
-  "cta_policy": "At most one ask per article, and it is always the low-commitment one — read the next piece, or raise it with a clinician. Never urgency, never scarcity, never a purchase framed as a health necessity.",
+  "cta_policy": "At most one ask per article, and it is always the low-commitment one — read the next piece, or raise it with a clinician. Urgency is implied, never literal; stage-dependent, never a purchase framed as a health necessity.",
   "default_framework": "fw_concern",
   "frameworks": [
     {
