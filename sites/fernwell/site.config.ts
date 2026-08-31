@@ -43,6 +43,11 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/pdf/*', to: '/.netlify/functions/get-public-pdf?blobKey=pdf/:splat', status: 200 },
     { from: '/img/*', to: '/.netlify/functions/get-public-image?blobKey=image/:splat', status: 200 },
     { from: '/mcp', to: '/.netlify/functions/mcp', status: 200 },
+    // W3.1: the ChatGPT Actions facade over this tenant's MCP tools. One splat —
+    // the tool name is the last path segment and the function routes on it, so
+    // adding a tool to the plugin charter never needs a routing change. The
+    // facade forwards to the same handler and the same OAuth as /mcp.
+    { from: '/api/plugin/*', to: '/.netlify/functions/plugin-actions', status: 200 },
     {
       from: '/.well-known/oauth-protected-resource',
       to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata',

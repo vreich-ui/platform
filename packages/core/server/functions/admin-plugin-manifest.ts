@@ -33,6 +33,7 @@ import { buildManifestBundle, manifestStaleReasons } from '../lib/plugin/build-m
 import { toolSurfaceDigest, buildPluginTools } from '../lib/plugin/build-tools.js';
 import { pluginPlatforms, type PluginPlatform } from '../lib/plugin/manifest-types.js';
 import { buildSkillZip, buildCoworkPlugin } from '../lib/plugin/export-claude.js';
+import { buildGptConfigZip, GptInstructionsTooLongError } from '../lib/plugin/export-openai.js';
 import { readVoiceRecord } from '../lib/plugin/read-voice.js';
 
 type LambdaEvent = {
@@ -94,15 +95,31 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   if (method === 'GET') {
     const exportKind = event.queryStringParameters?.export;
     if (exportKind) {
-      if (exportKind !== 'skill' && exportKind !== 'plugin') {
-        return jsonResponse(400, { error: 'export must be "skill" or "plugin".' });
+      if (exportKind !== 'skill' && exportKind !== 'plugin' && exportKind !== 'gpt') {
+        return jsonResponse(400, { error: 'export must be "skill", "plugin" or "gpt".' });
       }
       if (!doc.active) {
         return jsonResponse(409, {
           error: 'There is no active bundle to export. Render a draft and promote it first.',
         });
       }
-      const artifact = exportKind === 'skill' ? buildSkillZip(doc.active) : buildCoworkPlugin(doc.active);
+      let artifact;
+      try {
+        artifact =
+          exportKind === 'skill'
+            ? buildSkillZip(doc.active)
+            : exportKind === 'plugin'
+              ? buildCoworkPlugin(doc.active)
+              : buildGptConfigZip(doc.active);
+      } catch (error) {
+        // The GPT instructions cap is ChatGPT's, not ours: a bundle that would
+        // not fit is a render defect to fix, never something to truncate
+        // silently into a half-instruction.
+        if (error instanceof GptInstructionsTooLongError) {
+          return jsonResponse(500, { error: error.message, error_code: 'gpt_instructions_too_long' });
+        }
+        throw error;
+      }
       return {
         statusCode: 200,
         headers: {
@@ -136,6 +153,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         ? {
             skill_zip: '/.netlify/functions/admin-plugin-manifest?export=skill',
             cowork_plugin: '/.netlify/functions/admin-plugin-manifest?export=plugin',
+            gpt_config: '/.netlify/functions/admin-plugin-manifest?export=gpt',
+            actions_openapi: '/api/plugin/openapi.json',
           }
         : null,
     });
