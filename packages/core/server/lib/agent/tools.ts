@@ -29,6 +29,7 @@ import { z } from 'zod';
 
 import type { Role } from '../roles.js';
 import { projectActivityForChat } from '../requests/activity-for-chat.js';
+import { fetchPublicationOutputs } from '../requests/publication-outputs.js';
 import { nodeLabel } from '../../../lib/admin/request-logic.js';
 import { objectTypeSchema, type ObjectType } from '../../../schema/object-record-v1.js';
 
@@ -1710,7 +1711,10 @@ const getRequestActivityTool: ChatTool = {
     ]);
     if (!run.ok) return { content: json({ error: run.message, code: run.code }), is_error: true };
 
-    const activity = projectActivityForChat(run.data, cost.ok ? cost.data : undefined);
+    // The executors' own outputs, once the run has published — the compact
+    // view can say a publish was committed, not that the article is live.
+    const nodeOutputs = await fetchPublicationOutputs(ctx.cmsAgent, run.data);
+    const activity = projectActivityForChat(run.data, cost.ok ? cost.data : undefined, Date.now(), { nodeOutputs });
     if (!activity) {
       return {
         content: json({ activity: null, reason: 'run_not_readable', run_id: runId }),

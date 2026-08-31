@@ -72,6 +72,20 @@ const WARNING_RULES: ReadonlyArray<{ prefix: string; severity: Severity; label: 
   { prefix: 'resolved_vector_engine_owned', severity: 'notice', label: 'Tone vector chosen by the engine' },
   { prefix: 'capture_crawl_pending', severity: 'notice', label: 'Waiting on the crawler' },
   { prefix: 'no_publication_performed', severity: 'notice', label: 'Nothing was published' },
+  // The publish/release tail (2026-08-31). A committed publish that has not
+  // yet been released is the normal shape of every autonomous run — quiet.
+  // A release that could not confirm go-live is something a human should
+  // check on — amber, exactly like a held gate, and never red: the article is
+  // on `main` and nothing died.
+  { prefix: 'publish_committed_pending_release', severity: 'notice', label: 'Published — awaiting release' },
+  {
+    prefix: 'release_execution_idempotent_replay',
+    severity: 'notice',
+    label: 'Release already recorded — not repeated',
+  },
+  { prefix: 'release_not_confirmed', severity: 'attention', label: 'Release not confirmed — check the deploy' },
+  { prefix: 'deploy_not_confirmed', severity: 'attention', label: 'Deploy not confirmed — check the deploy' },
+  { prefix: 'deploy_status_not_ready', severity: 'notice', label: 'Deploy not ready yet' },
   // Skipping by design is not a warning at all.
   { prefix: 'node_skipped', severity: 'ok', label: 'Skipped — not needed for this article' },
 ];

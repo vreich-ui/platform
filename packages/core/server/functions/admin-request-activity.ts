@@ -23,6 +23,7 @@ import type { Principal } from '../../schema/object-record-v1.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { loadRequest } from '../lib/requests/store.js';
 import { projectActivity } from '../lib/requests/activity.js';
+import { fetchPublicationOutputs } from '../lib/requests/publication-outputs.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -203,7 +204,11 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
       });
     }
 
-    const activity = projectActivity(run.data, cost.ok ? cost.data : undefined);
+    // Once the run has published, the executors' own outputs say whether the
+    // article is LIVE and where — the compact run view cannot. Best-effort
+    // (see `publication-outputs.ts`); a failed read costs the link, not the view.
+    const nodeOutputs = await fetchPublicationOutputs(cmsAgentClient, run.data);
+    const activity = projectActivity(run.data, cost.ok ? cost.data : undefined, Date.now(), { nodeOutputs });
     return jsonResponse(200, {
       activity: activity ?? null,
       ...(requestTitle ? { title: requestTitle } : {}),

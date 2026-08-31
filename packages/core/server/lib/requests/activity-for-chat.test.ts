@@ -12,6 +12,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { CHAT_ACTIVITY_NODE_MAX, projectActivityForChat } from './activity-for-chat.js';
+import {
+  COMPACT_TAIL,
+  PUBLISH_OUTPUT_PENDING,
+  RELEASE_OUTPUT_EXECUTED,
+  RELEASE_OUTPUT_UNCONFIRMED,
+  RETINOL_POLICY_RECORDS,
+} from './publication-evidence.fixtures.js';
 
 const NOW = Date.parse('2026-08-22T12:00:00.000Z');
 
@@ -133,6 +140,56 @@ describe('what the client manager can now say', () => {
     )!;
     assert.match(view.headline, /approval/i);
     assert.equal(view.approvals?.length, 1);
+  });
+
+  it('(b) a genuine hold is still an approval — and carries no policy_records', () => {
+    const view = projectActivityForChat(
+      run({ approvalsRequired: [{ nodeId: 'publication_controller', reason: 'approval_required' }] }),
+      cost,
+      NOW
+    )!;
+    assert.equal(view.approvals?.length, 1);
+    assert.equal(view.policy_records, undefined);
+  });
+
+  it('(a) three policy_autonomous records + committed publish + confirmed release → "Live", no approvals', () => {
+    const view = projectActivityForChat(
+      run({
+        status: 'completed',
+        approvalsRequired: RETINOL_POLICY_RECORDS,
+        nodes: [
+          { nodeId: 'article_body', status: 'completed' },
+          ...COMPACT_TAIL.map((node) =>
+            node.nodeId === 'release_executor' ? { nodeId: node.nodeId, status: 'completed' } : node
+          ),
+        ],
+      }),
+      cost,
+      NOW,
+      { nodeOutputs: { publish_executor: PUBLISH_OUTPUT_PENDING, release_executor: RELEASE_OUTPUT_EXECUTED } }
+    )!;
+    assert.equal(view.headline, 'Live');
+    assert.equal(view.approvals, undefined, 'the model must never be told the editor has to approve these');
+    assert.equal(view.policy_records?.length, 3);
+    assert.equal(view.publication?.state, 'live');
+    assert.equal(view.publication?.article_path, '/retinol-vs-bakuchiol-sensitive-skin');
+    assert.equal(view.publication?.deploy_id, '6a92f3c558169f0008f28e47');
+    assert.match(view.how_to_answer, /policy_records/);
+    assert.match(view.how_to_answer, /never ask the editor to approve/i);
+  });
+
+  it('(c) publish committed, release unconfirmed → "awaiting release confirmation"', () => {
+    const view = projectActivityForChat(
+      run({ status: 'completed', approvalsRequired: RETINOL_POLICY_RECORDS, nodes: COMPACT_TAIL }),
+      cost,
+      NOW,
+      { nodeOutputs: { publish_executor: PUBLISH_OUTPUT_PENDING, release_executor: RELEASE_OUTPUT_UNCONFIRMED } }
+    )!;
+    assert.equal(view.headline, 'Published — awaiting release confirmation');
+    assert.equal(view.approvals, undefined);
+    assert.equal(view.publication?.state, 'published_pending_release');
+    assert.equal(view.publication?.release_reason, 'release_not_confirmed');
+    assert.match(view.how_to_answer, /check again rather than rerunning/i);
   });
 
   it('flags a MOCK run, so a rehearsal is never described as a draft', () => {

@@ -213,6 +213,47 @@ describe('plan §5.1 mapping table', () => {
     assert.strictEqual(withOpenNode.blockers[0].node_id, 'publication_controller');
   });
 
+  it('run completed with only policy_autonomous audit records → done, never needs_you (2026-08-31)', () => {
+    // The retinol run: 24/24 complete, article published, three advisory
+    // entries in approvalsRequired[] — the request sat "waiting" for ever.
+    const advisory = (node: string) => ({
+      nodeId: node,
+      type: 'approval_required',
+      gateId: `gate.publishing.${node}`,
+      reason: `Publish-risk node ${node} proceeded under this project's autonomous publishing policy (autonomyMode: "autonomous"); no operator acted. Advisory only — nothing is held.`,
+      requestedAt: '2026-08-31T07:37:19.739Z',
+      source: 'policy_autonomous',
+    });
+    const settled = withRun({
+      status: 'completed',
+      errors: [],
+      approvalsRequired: [
+        advisory('publication_controller'),
+        advisory('publish_executor'),
+        advisory('release_executor'),
+      ],
+    });
+    settled.nodes = (settled.nodes ?? []).map((n) =>
+      n.status === 'completed' || n.status === 'skipped' ? n : { ...n, status: 'completed' }
+    );
+    const derived = deriveRequestStatus({ run: settled, now: NOW });
+    assert.strictEqual(derived.status, 'done');
+    assert.deepStrictEqual(derived.blockers, []);
+
+    // And a genuine hold next to them still holds — it carries no `source`.
+    const held = deriveRequestStatus({
+      run: {
+        ...settled,
+        status: 'blocked',
+        approvalsRequired: [...settled.approvalsRequired!, ...realRun().approvalsRequired!],
+      },
+      now: NOW,
+    });
+    assert.strictEqual(held.status, 'needs_you');
+    assert.strictEqual(held.status_reason, APPROVAL_REASON);
+    assert.strictEqual(held.blockers.length, 1, 'the advisory records are not blockers');
+  });
+
   it('run completed, nothing outstanding → done', () => {
     const settled = withRun({ status: 'completed', approvalsRequired: [], errors: [] });
     settled.nodes = (settled.nodes ?? []).map((n) =>

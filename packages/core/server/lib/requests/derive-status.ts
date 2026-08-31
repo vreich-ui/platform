@@ -18,6 +18,8 @@
  *   anything else may call it for display.
  */
 
+import { isAdvisoryApproval } from './publication-evidence.js';
+
 // ─── the derived status union ────────────────────────────────────────────────
 
 /**
@@ -105,6 +107,12 @@ export interface RunApprovalSnapshot {
   /** Editor copy from CMS-Agent — used VERBATIM when present. */
   reason?: string | null;
   requestedAt?: string | null;
+  /**
+   * `"policy_autonomous"` marks an AUDIT record of a publish-risk node that
+   * proceeded under the project's autonomous policy — nothing is held. A
+   * genuine hold carries no `source` on the wire. See `publication-evidence.ts`.
+   */
+  source?: string | null;
 }
 
 export interface RunSnapshot {
@@ -197,9 +205,17 @@ const nodeIdOf = (node: RunNodeSnapshot): string | undefined => asString(node.no
 /** 'reader_simulation' → 'reader simulation' — the node named in words for editor sentences. */
 const nodeWords = (id: string): string => id.replace(/[_-]+/g, ' ').trim();
 
+/**
+ * GENUINE holds only. CMS-Agent's advisory `policy_autonomous` records share
+ * the array with real approvals; counting them here derived `needs_you` for a
+ * run that had already published, and the request sat "waiting" for ever
+ * (found live 2026-08-31).
+ */
 const runApprovals = (run: RunSnapshot): RunApprovalSnapshot[] =>
   Array.isArray(run.approvalsRequired)
-    ? run.approvalsRequired.filter((entry): entry is RunApprovalSnapshot => isRecord(entry))
+    ? run.approvalsRequired.filter(
+        (entry): entry is RunApprovalSnapshot => isRecord(entry) && !isAdvisoryApproval(entry)
+      )
     : [];
 
 /** All three wire forms of `stall`, plus the projection's top-level `stalled`. */
