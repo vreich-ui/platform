@@ -91,6 +91,15 @@ describe('warnings that fire on every production run', () => {
 
   it('reserves amber for the two that really need a human', () => {
     assert.equal(classifyWarning('approval_required').severity, 'attention');
+    // The publish/release tail (2026-08-31): a committed publish awaiting its
+    // release is the normal shape of every autonomous run — quiet; a release
+    // that could not confirm go-live is amber (check the deploy), never red.
+    assert.equal(classifyWarning('publish_committed_pending_release').severity, 'notice');
+    assert.match(classifyWarning('publish_committed_pending_release').label, /awaiting release/i);
+    assert.equal(classifyWarning('release_not_confirmed').severity, 'attention');
+    assert.equal(classifyWarning('deploy_not_confirmed').severity, 'attention');
+    assert.equal(classifyWarning('deploy_status_not_ready:unknown').severity, 'notice');
+    assert.equal(classifyWarning('release_execution_idempotent_replay').severity, 'notice');
     assert.equal(classifyWarning('content_item_shell_failed:create_failed').severity, 'attention');
   });
 

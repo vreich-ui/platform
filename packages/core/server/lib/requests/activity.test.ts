@@ -9,6 +9,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { activityHeadline, estimateRemaining, projectActivity } from './activity.js';
+import {
+  COMPACT_TAIL,
+  PUBLISH_OUTPUT_PENDING,
+  RELEASE_OUTPUT_EXECUTED,
+  RELEASE_OUTPUT_UNCONFIRMED,
+  RETINOL_POLICY_RECORDS,
+} from './publication-evidence.fixtures.js';
 
 const TIMINGS = {
   research: { p50DurationMs: 31_742, p95DurationMs: 68_946, count: 12 },
@@ -213,6 +220,108 @@ describe('a run blocked on a human', () => {
     assert.equal(view.headline, 'Waiting for your approval');
     assert.equal(view.approvals[0]?.node_id, 'publication_controller');
     assert.match(String(view.approvals[0]?.reason), /requires explicit approval/);
+    // (b) a genuine hold is unchanged by the advisory split: it is an approval, not a policy record.
+    assert.equal(view.approvals.length, 1);
+    assert.deepEqual(view.policy_records, []);
+    assert.equal(view.publication, undefined);
+  });
+});
+
+/**
+ * 2026-08-31, dr-lurie, "Retinol vs. bakuchiol": 24/24 nodes complete, the
+ * article published, and the card said "Waiting for your approval" with three
+ * entries and Approve/Reject buttons — because CMS-Agent's three
+ * `policy_autonomous` audit records sat in `approvalsRequired[]`.
+ */
+describe('a run that published under the autonomous policy', () => {
+  const retinolRun = (overrides: Record<string, unknown> = {}) => ({
+    runId: 'run_1788161192916_2sguif',
+    requestId: 'req_agent_retinol_vs_bakuchiol_sensitive_skin_20260831_01',
+    status: 'completed',
+    executionMode: 'openai',
+    mode: { live: true },
+    operatorPublishDecision: 'approved',
+    operatorDecisionSource: 'explicit',
+    errors: [],
+    approvalsRequired: RETINOL_POLICY_RECORDS,
+    nodeCount: 6,
+    nodes: [
+      { nodeId: 'article_body', status: 'completed', durationMs: 49_636 },
+      { nodeId: 'publish_payload', status: 'completed', durationMs: 2 },
+      ...COMPACT_TAIL,
+    ],
+    ...overrides,
+  });
+
+  /** The tail as a confirmed release leaves it: no "not confirmed" warning on the release row. */
+  const confirmedTail = COMPACT_TAIL.map((node) =>
+    node.nodeId === 'release_executor' ? { nodeId: node.nodeId, status: 'completed', durationMs: 30_747 } : node
+  );
+
+  it('(a) three policy_autonomous entries + committed publish + confirmed release → "Live", no approvals, no amber', () => {
+    const view = projectActivity(
+      { run: retinolRun({ nodes: [{ nodeId: 'article_body', status: 'completed' }, ...confirmedTail] }), mode: { live: true }, stall: null },
+      undefined,
+      Date.now(),
+      { nodeOutputs: { publish_executor: PUBLISH_OUTPUT_PENDING, release_executor: RELEASE_OUTPUT_EXECUTED } }
+    )!;
+    assert.equal(view.headline, 'Live');
+    // `publish_committed_pending_release` on the publish row is a quiet notice
+    // (muted grey) — nothing amber, nothing red, on a run that went live.
+    assert.equal(view.severity, 'notice');
+    assert.deepEqual(view.approvals, [], 'nothing waits on a human — the buttons must not exist');
+    assert.equal(view.policy_records.length, 3);
+    assert.deepEqual(
+      view.policy_records.map((record) => record.node_id),
+      ['publication_controller', 'publish_executor', 'release_executor']
+    );
+    assert.equal(view.policy_records[0]?.source, 'policy_autonomous');
+    assert.match(view.policy_records[0]?.reason ?? '', /Advisory only — nothing is held/);
+    assert.equal(view.publication?.state, 'live');
+    assert.equal(view.publication?.article_path, '/retinol-vs-bakuchiol-sensitive-skin');
+    assert.equal(view.publication?.deploy_id, '6a92f3c558169f0008f28e47');
+    assert.equal(view.publication?.commit, '61f1b1827f38766b85beaa0bdd58ccdc82539f9c');
+  });
+
+  it('(c) publish committed, release unconfirmed → "awaiting release confirmation", still no buttons', () => {
+    const view = projectActivity(retinolRun(), undefined, Date.now(), {
+      nodeOutputs: { publish_executor: PUBLISH_OUTPUT_PENDING, release_executor: RELEASE_OUTPUT_UNCONFIRMED },
+    })!;
+    assert.equal(view.headline, 'Published — awaiting release confirmation');
+    assert.deepEqual(view.approvals, []);
+    assert.equal(view.policy_records.length, 3);
+    assert.equal(view.publication?.state, 'published_pending_release');
+    assert.equal(view.publication?.article_path, '/retinol-vs-bakuchiol-sensitive-skin');
+    assert.equal(view.publication?.release_reason, 'release_not_confirmed');
+    assert.equal(view.severity, 'attention', 'amber — a human should check the deploy; nothing died');
+  });
+
+  it('(c′) with only the compact view (no outputs readable) it still says pending, never "Live"', () => {
+    const view = projectActivity(retinolRun(), undefined)!;
+    assert.equal(view.headline, 'Published — awaiting release confirmation');
+    assert.equal(view.publication?.state, 'published_pending_release');
+    assert.equal(view.publication?.article_path, undefined);
+    assert.deepEqual(view.approvals, []);
+  });
+
+  it('a genuine hold alongside advisory records still wins the headline', () => {
+    const view = projectActivity(
+      retinolRun({
+        status: 'blocked',
+        approvalsRequired: [
+          ...RETINOL_POLICY_RECORDS,
+          {
+            nodeId: 'publication_controller',
+            type: 'approval_required',
+            reason: 'Publish-risk node publication_controller requires explicit approval; dry-run blocked before publishing.',
+          },
+        ],
+      }),
+      undefined
+    )!;
+    assert.equal(view.headline, 'Waiting for your approval');
+    assert.equal(view.approvals.length, 1);
+    assert.equal(view.policy_records.length, 3);
   });
 });
 

@@ -259,7 +259,25 @@ export interface ActivityView {
   cost?: { input_tokens: number; output_tokens: number; usd: number; most_expensive_node?: string };
   /** `operator_action` (Task B): set only when the retry target failed with a classified provider error or CMS-Agent's own budget guard — see the "Retry this step" gating in `RequestActivity.tsx`. */
   recovery?: { strategy: string; node_id?: string; sentence: string; reusable_stages: number; operator_action?: string };
+  /** GENUINE holds only — what the approve/reject card is built from. Mirrors `server/lib/requests/activity.ts`. */
   approvals: Array<{ node_id: string; reason: string; requested_at?: string }>;
+  /**
+   * CMS-Agent's audit records of publish-risk nodes that proceeded under the
+   * project's autonomous policy (`source: "policy_autonomous"`). Nothing waits;
+   * rendered as a quiet "Policy record", never as a card with buttons.
+   * Optional on the wire so a view from an older server still renders.
+   */
+  policy_records?: Array<{ node_id: string; reason: string; requested_at?: string; source?: string }>;
+  /** What the publish/release tail did, from the executors' own evidence. Mirrors `PublicationEvidence`. */
+  publication?: {
+    state: 'live' | 'published_pending_release';
+    article_path?: string;
+    commit?: string;
+    deploy_id?: string;
+    published_at?: string;
+    release_reason?: string;
+    release_blockers?: string[];
+  };
   nodes: ActivityNodeView[];
 }
 

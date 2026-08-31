@@ -16,7 +16,7 @@
  * Severity is `activity-severity.ts` throughout — Wolf's rule holds in chat as
  * it does in the UI: a warning is a warning, and red means a step died.
  */
-import { projectActivity, type ActivityNode, type ActivityView } from './activity.js';
+import { projectActivity, type ActivityNode, type ActivityView, type ProjectActivityOptions } from './activity.js';
 
 /** Bound on the node list in a persisted tool result. */
 export const CHAT_ACTIVITY_NODE_MAX = 40;
@@ -58,8 +58,16 @@ export interface ChatActivityView {
   /** Only ever present when this workflow has real timing history behind it. */
   remaining?: { p50_ms: number; p95_ms: number; based_on_runs: number };
   cost?: { input_tokens: number; output_tokens: number; usd: number; most_expensive_node?: string };
-  /** What is waiting on a human, and why. */
+  /** What is waiting on a human, and why. GENUINE holds only. */
   approvals?: ActivityView['approvals'];
+  /**
+   * Publish-risk nodes that proceeded under the project's autonomous policy —
+   * CMS-Agent's audit records, NOT approvals. Nothing waits on anyone here,
+   * and the model must not ask the editor to approve them.
+   */
+  policy_records?: ActivityView['policy_records'];
+  /** What the publish/release tail did, from the executors' own evidence. */
+  publication?: ActivityView['publication'];
   /** CMS-Agent's own recovery advice for a stopped run, verbatim. */
   recovery?: ActivityView['recovery'];
   /** Mock output — the agent must say so rather than describe a draft nobody wrote. */
@@ -75,7 +83,7 @@ export interface ChatActivityView {
 }
 
 const HOW_TO_ANSWER =
-  'Answer with the specific step, not a summary of the status. Name what finished, what is running now and how long it usually takes, and what is left. Only describe something as failed when its severity is "failure"; a warning or a tool_errors entry means the run met something and carried on — report it as a warning, never as a break. If mock_run is set, say the output is a rehearsal, not a real draft.';
+  'Answer with the specific step, not a summary of the status. Name what finished, what is running now and how long it usually takes, and what is left. Only describe something as failed when its severity is "failure"; a warning or a tool_errors entry means the run met something and carried on — report it as a warning, never as a break. Only "approvals" wait on the editor; "policy_records" are audit lines for steps that already proceeded autonomously — never ask the editor to approve those. If "publication" is present it is the truth about the article: state "live" means it is on the site at article_path; "published_pending_release" means it is published but go-live is not yet confirmed — offer to check again rather than rerunning anything. If mock_run is set, say the output is a rehearsal, not a real draft.';
 
 const narrowNode = (node: ActivityNode): ChatActivityNode => {
   // Keyed off the call's own outcome, not its severity: `classifyToolCall`
@@ -124,9 +132,10 @@ const boundSteps = (nodes: readonly ActivityNode[]): { steps: ChatActivityNode[]
 export const projectActivityForChat = (
   run: unknown,
   cost: unknown,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  options: ProjectActivityOptions = {}
 ): ChatActivityView | undefined => {
-  const view = projectActivity(run, cost, nowMs);
+  const view = projectActivity(run, cost, nowMs, options);
   if (!view) return undefined;
   const { steps, omitted } = boundSteps(view.nodes);
   return {
@@ -138,6 +147,8 @@ export const projectActivityForChat = (
     ...(view.eta ? { remaining: view.eta } : {}),
     ...(view.cost ? { cost: view.cost } : {}),
     ...(view.approvals.length > 0 ? { approvals: view.approvals } : {}),
+    ...(view.policy_records.length > 0 ? { policy_records: view.policy_records } : {}),
+    ...(view.publication ? { publication: view.publication } : {}),
     ...(view.recovery ? { recovery: view.recovery } : {}),
     ...(view.execution_mode === 'mock' ? { mock_run: true as const } : {}),
     steps,

@@ -28,6 +28,12 @@ import {
   type Severity,
 } from '../../../lib/admin/activity-severity.js';
 import { nodeLabel } from '../../../lib/admin/request-logic.js';
+import {
+  derivePublication,
+  isAdvisoryApproval,
+  type PublicationEvidence,
+  type PublicationState,
+} from './publication-evidence.js';
 
 /** Hard caps: this payload is polled every few seconds and rides a JSON response. */
 export const ACTIVITY_NODE_MAX = 64;
@@ -102,8 +108,31 @@ export interface ActivityView {
      */
     operator_action?: string;
   };
+  /**
+   * GENUINE holds only — entries a human must act on. An `approvalsRequired`
+   * entry CMS-Agent wrote as an audit record of a node that proceeded under
+   * the project's autonomous policy (`source: "policy_autonomous"`, "Advisory
+   * only — nothing is held") is NOT here; it is in `policy_records`. This is
+   * the list the approve/reject card, the headline and the severity are built
+   * from, so an advisory record can never grow buttons.
+   */
   approvals: Array<{ node_id: string; reason: string; requested_at?: string }>;
+  /** Advisory records: publish-risk nodes that proceeded autonomously. Informational; nothing waits. */
+  policy_records: Array<{ node_id: string; reason: string; requested_at?: string; source?: string }>;
+  /** What the publish/release tail did, from the executors' own evidence. Absent until a publish is committed. */
+  publication?: PublicationEvidence;
   nodes: ActivityNode[];
+}
+
+/**
+ * Executor outputs the caller fetched separately (`node_get_latest_output`
+ * for `publish_executor` / `release_executor`), keyed by node id. The compact
+ * `workflow_get_run` view carries no node output, and the full view is ~1MB
+ * — too much for a poll. Optional: without them the projection still reads
+ * the compact warnings and never claims more than they prove.
+ */
+export interface ProjectActivityOptions {
+  nodeOutputs?: Readonly<Record<string, unknown>>;
 }
 
 // ─── tolerant readers (this is live wire data; it must never throw) ──────────
@@ -145,11 +174,16 @@ export const activityHeadline = (input: {
   severity: Severity;
   runningLabel?: string;
   failedLabel?: string;
+  /** Genuine holds only — never the advisory policy records. */
   approvals: number;
+  /** From the executors' own evidence; outranks a bare "Finished". */
+  publication?: PublicationState;
 }): string => {
   if (input.approvals > 0) return 'Waiting for your approval';
   if (input.status === 'blocked' || input.status === 'paused') return 'Paused — needs a decision from you';
   if (input.severity === 'failure') return input.failedLabel ? `Stopped at ${input.failedLabel}` : 'Stopped';
+  if (input.publication === 'live') return 'Live';
+  if (input.publication === 'published_pending_release') return 'Published — awaiting release confirmation';
   if (input.status === 'completed') return 'Finished';
   if (input.status === 'cancelled') return 'Cancelled';
   if (input.runningLabel) return input.runningLabel.charAt(0).toUpperCase() + input.runningLabel.slice(1);
@@ -191,7 +225,12 @@ export const estimateRemaining = (
 };
 
 /** `run` is workflow_get_run's data; `cost` is workflow_get_run_cost's (optional — the view degrades without it). */
-export const projectActivity = (payload: unknown, cost: unknown, nowMs: number = Date.now()): ActivityView | undefined => {
+export const projectActivity = (
+  payload: unknown,
+  cost: unknown,
+  nowMs: number = Date.now(),
+  options: ProjectActivityOptions = {}
+): ActivityView | undefined => {
   if (!isRecord(payload)) return undefined;
   // CMS-Agent answers `workflow_get_run` with `ok({ run, mode, stall })`, and the
   // client unwraps only the `{ok,data}` envelope — so what arrives here is that
@@ -221,13 +260,21 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
     });
   }
 
-  const approvals = arr(run.approvalsRequired)
-    .filter(isRecord)
-    .map((approval) => ({
-      node_id: str(approval.nodeId) ?? '',
-      reason: str(approval.reason) ?? 'Approval required.',
-      ...(str(approval.requestedAt) ? { requested_at: str(approval.requestedAt)! } : {}),
-    }));
+  // The split that matters most on this card: a hold a human must answer
+  // versus CMS-Agent's audit record of a node that already went ahead under
+  // the project's autonomous policy. Same wire array, two very different
+  // meanings — see `publication-evidence.ts` for the wire facts.
+  const approvalEntries = arr(run.approvalsRequired).filter(isRecord);
+  const projectApproval = (approval: Record<string, unknown>) => ({
+    node_id: str(approval.nodeId) ?? '',
+    reason: str(approval.reason) ?? 'Approval required.',
+    ...(str(approval.requestedAt) ? { requested_at: str(approval.requestedAt)! } : {}),
+  });
+  const approvals = approvalEntries.filter((approval) => !isAdvisoryApproval(approval)).map(projectApproval);
+  const policyRecords = approvalEntries.filter(isAdvisoryApproval).map((approval) => ({
+    ...projectApproval(approval),
+    ...(str(approval.source) ? { source: str(approval.source)! } : {}),
+  }));
 
   const timings = isRecord(plan.nodeTimingAggregates)
     ? (plan.nodeTimingAggregates as Record<string, { p50DurationMs?: number; p95DurationMs?: number; count?: number }>)
@@ -294,6 +341,17 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
 
   const running = nodes.find((node) => node.status === 'running');
   const failed = nodes.find((node) => node.status === 'failed');
+  const publication = derivePublication(
+    arr(run.nodes)
+      .filter(isRecord)
+      .map((node) => ({
+        nodeId: str(node.nodeId) ?? str(node.id),
+        status: str(node.status),
+        warnings: node.warnings,
+        output: node.output,
+      })),
+    options.nodeOutputs ?? {}
+  );
   const severity = worstSeverity([
     ...nodes.map((node) => node.severity),
     status === 'failed' ? ('failure' as Severity) : ('ok' as Severity),
@@ -317,6 +375,7 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
       ...(running ? { runningLabel: running.label } : {}),
       ...(failed ? { failedLabel: failed.label } : {}),
       approvals: approvals.length,
+      ...(publication ? { publication: publication.state } : {}),
     }),
     progress: {
       done: nodes.filter((node) => SETTLED.has(node.status)).length,
@@ -365,6 +424,8 @@ export const projectActivity = (payload: unknown, cost: unknown, nowMs: number =
         }
       : {}),
     approvals,
+    policy_records: policyRecords,
+    ...(publication ? { publication } : {}),
     nodes,
   };
 };

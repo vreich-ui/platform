@@ -44,6 +44,7 @@ import {
 import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
 import { relativeAge } from '@core/lib/admin/request-logic';
 import { cmsAgentErrorCopy, hasOperatorAction } from '@core/lib/admin/cms-agent-error-copy';
+import { liveArticleUrl, policyRecordLine, publicationCopy } from '@core/lib/admin/publication-card';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -734,6 +735,21 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   const spend = activity.cost;
   const spendLabel = spend?.most_expensive_node ? labelFor(spend.most_expensive_node) : undefined;
   const placeholder = placeholderNotice(activity);
+  // 2026-08-31: the publish/release tail, from the executors' own evidence —
+  // "Live" with the article's URL, or "awaiting release confirmation" with a
+  // way to ask again. Absent until a publish is committed.
+  const publication = activity.publication ? publicationCopy(activity.publication) : undefined;
+  const liveUrl = liveArticleUrl(
+    activity.publication?.article_path,
+    typeof window !== 'undefined' ? window.location.origin : undefined
+  );
+  const policyRecords = activity.policy_records ?? [];
+  /** The poll affordance for an unconfirmed release: one fresh read, now. */
+  const recheck = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    stoppedRef.current = false;
+    void load(generationRef.current);
+  };
 
   return (
     <div className={shell}>
@@ -793,7 +809,58 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
        * Approvals and recovery sit OUTSIDE the disclosure. A run waiting on a
        * person, and the sentence telling an editor what survived a failure,
        * are the two things that must not be one click away in a transcript.
+       *
+       * `approvals` is GENUINE holds only (the server splits CMS-Agent's
+       * advisory `policy_autonomous` records into `policy_records`, rendered
+       * quietly below) — so this yellow card, and its buttons, appear only when
+       * a human decision is actually what the run is waiting for.
        */}
+      {publication ? (
+        <section
+          aria-label={publication.title}
+          className={cn(
+            'mx-3 mb-2 rounded-[var(--adm-radius-sm)] border px-3 py-2',
+            publication.severity === 'success'
+              ? 'border-[var(--adm-success)] bg-[var(--adm-success-soft)]'
+              : 'border-[var(--adm-warning)] bg-[var(--adm-warning-soft)]'
+          )}
+        >
+          <p
+            className={cn(
+              'flex items-center gap-1.5 text-[length:var(--adm-text-xs)] font-semibold',
+              publication.severity === 'success' ? 'text-[var(--adm-success-text)]' : 'text-[var(--adm-warning-text)]'
+            )}
+          >
+            <SeverityIcon level={publication.severity} size={14} title="" /> {publication.title}
+          </p>
+          {liveUrl ? (
+            <p className="mt-1 text-[length:var(--adm-text-sm)]">
+              <a
+                href={liveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="adm-focusable break-all text-[var(--adm-text)] underline decoration-[var(--adm-border-strong)] underline-offset-2 hover:decoration-[var(--adm-text)]"
+              >
+                {liveUrl}
+              </a>
+            </p>
+          ) : null}
+          {publication.detail ? (
+            <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text)]">{publication.detail}</p>
+          ) : null}
+          {publication.facts.length > 0 ? (
+            <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+              {publication.facts.join(' · ')}
+            </p>
+          ) : null}
+          {publication.offerRecheck ? (
+            <Button size="sm" variant="secondary" className="mt-2" onClick={recheck}>
+              Check again
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
+
       {activity.approvals.length > 0 ? (
         <section
           aria-label="Waiting for you"
@@ -851,6 +918,27 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
             <p className="mt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{decideError}</p>
           ) : null}
         </section>
+      ) : null}
+
+      {policyRecords.length > 0 ? (
+        <details className="mx-3 mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)]">
+          <summary className="adm-focusable w-fit cursor-pointer select-none rounded text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]">
+            Policy record · {policyRecords.length}
+          </summary>
+          {/* Audit lines, not approvals: these steps already went ahead under
+              the project's autonomous publishing policy. No buttons, no
+              amber, not counted anywhere as "needs you". */}
+          <ul className="mt-1 flex flex-col gap-0.5 text-[var(--adm-text-muted)]">
+            {policyRecords.map((record, index) => (
+              <li key={`${record.node_id}-${index}`} className="flex items-start gap-1.5">
+                <span className="mt-px flex w-3.5 shrink-0 items-center justify-center">
+                  <IconInfo size={13} className="text-[var(--adm-text-muted)]" title="" />
+                </span>
+                <span title={record.reason}>{policyRecordLine(record, labelFor(record.node_id))}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
 
       {recovery ? (
