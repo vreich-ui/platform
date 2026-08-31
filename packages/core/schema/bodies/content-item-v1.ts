@@ -63,6 +63,13 @@ export const articleNodeIdSchema = z
 // rich_text.v1 document alongside the flat string. String bodies are PLAIN
 // TEXT (escaped at render; blank lines split paragraphs) — rich formatting is
 // what the document is for. Everything else is carried verbatim.
+//
+// `type` is the render discriminant and is never defaulted: the patch engine
+// infers it from the src when an op omits it (.pdf → document, image
+// extension → image, anything else refused) and rejects a type the src
+// contradicts (lib/article-content/media-type.ts). `document` media renders
+// as a download/embed block, never an <img>; `sizeBytes` (the artifact
+// bridge's sizeBytes) lets that block show the download size.
 export const contentItemNodeMediaSchema = z
   .object({
     type: z.enum(['image', 'video', 'audio', 'embed', 'document']),
@@ -71,6 +78,7 @@ export const contentItemNodeMediaSchema = z
     src: z.string(),
     alt: z.string().optional(),
     caption: z.string().optional(),
+    sizeBytes: z.number().int().positive().optional(),
   })
   .strict();
 

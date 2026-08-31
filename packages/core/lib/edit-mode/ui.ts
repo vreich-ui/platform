@@ -68,6 +68,7 @@ import type { InlineToolbarHandle, RichTextEditorHandle } from './richtext-edito
 import { applyNavChangesToBody, navChangesToOps, navEditFieldsFor, type NavEditField } from './nav-editor.js';
 import type { NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { activeMediaPolicy } from '../../lib/media-policy.js';
+import { inferMediaType } from '../article-content/media-type.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import {
   findBlockElements,
@@ -4794,15 +4795,23 @@ export const mountEditMode = (options: MountOptions): void => {
         } else {
           // A brand-new node media entry must carry its discriminant: the
           // content_item media schema requires `type` (sections' image
-          // objects are {src,alt}-strict — never add type there).
+          // objects are {src,alt}-strict — never add type there). The type
+          // is INFERRED from the src (.pdf → document, image ext → image),
+          // never defaulted to 'image'; an opaque src is left to the patch
+          // engine, which refuses it with the explicit-type instruction.
           const existing = state.currentData[imageKey] as Record<string, unknown> | undefined;
+          const inferredType = property === 'src' ? inferMediaType(raw) : undefined;
           const seed = existing
             ? ({ ...existing } as Record<string, unknown>)
-            : state.target.objectType === 'content_item'
-              ? ({ type: 'image' } as Record<string, unknown>)
+            : state.target.objectType === 'content_item' && inferredType
+              ? ({ type: inferredType } as Record<string, unknown>)
               : ({} as Record<string, unknown>);
           const merged = (changed[imageKey] as Record<string, unknown>) ?? seed;
           merged[property] = raw;
+          // A src change re-derives the type on an existing entry too — a
+          // stale 'image' must not ride along with a PDF src (the engine
+          // would refuse the mismatch; do the honest thing up front).
+          if (state.target.objectType === 'content_item' && inferredType) merged.type = inferredType;
           changed[imageKey] = merged;
         }
         if (field.kind === 'image-src') previews.push({ kind: 'image', before, after: raw });

@@ -70,7 +70,7 @@ Call the right tool once instead of probing the write path. This table is the to
 | How hard may copy push on this site? (W6 §2 aggression ceiling) | `object_contract {object_type:"content_item"}` → `aggression_ceiling` (mirrored at `publish_policy.aggression_ceiling`) — see the note below this table |
 | May an agent create this type? | `object_contract` → `creation_policy`; denial at write is 403 `creation_restricted` listing `allowed_agents` |
 | Deploy state of a commit | `deploy_status {commit}` |
-| Did my images actually render on the live page? | `verify_article_images {url, expectedImages, commit}` |
+| Did my images / PDF attachments actually render on the live page? | `verify_article_images {url, expectedImages, expectedDocuments?, commit}` — documents (`type:"document"` media) are checked as `<a href>`/`<object data>` fetching `application/pdf`, never as `<img>` |
 | Is the server cold? Am I paying a cold start? | `ping` → `{instance_age_ms, instance_invocations}`; unauthenticated probe `GET /mcp?health=1` |
 
 **`aggression_ceiling` (content_item only; W6 §2, Wolf's standing ruling in CMS-Agent WORK-ORDER-2026-08-12).** The client contract DECLARES the site's aggression ceiling — a componentwise UPPER BOUND on four dials, each a finite number in `[0, 1]`: `claim_strength` (how absolute claims may read), `urgency` (time pressure / scarcity), `emotional_agitation` (fear / shame / FOMO stirring), `cta_density` (how many and how prominent the calls to action). It is a ceiling, not a target: copy may always be calmer. CMS-Agent's `contractReduction` reads it off the contract record and resolves the brief's intensity vector as `resolved = min(placement_target, ceiling)` per dial. Source of truth is the committed `sites/<client>/config/site-identity.ts` (`aggressionCeiling`), validated at resolve time — a malformed value fails the boot/build loudly. An ABSENT ceiling is a blocker upstream by design (CMS-Agent warns `aggression_ceiling_missing` and leaves the intensity vector unresolved), so `object_contract(content_item)` throws rather than ship a contract without it. JSON paths: `contract.aggression_ceiling` and `contract.publish_policy.aggression_ceiling` (identical).
@@ -95,7 +95,7 @@ Everything below is the **only** sanctioned publish path. The `save_json_blob_*`
 8. (repeat 3–7 per article)   batch as many articles as the run intends
 9. release_to_production      ONCE for the whole batch — the only paid step (interim policy, §7)
 10. deploy_status {commit}    poll 10–15 s up to ~5 min until deployStatus:"ready" AND productionConfirmed:true
-11. verify_article_images     with {url, expectedImages:['/img/…'], commit}; PDFs: fetch /pdf/… expect 200 %PDF-
+11. verify_article_images     with {url, expectedImages:['/img/…'], expectedDocuments:['/pdf/…'], commit} — PDFs are asserted as <a href>/<object data> + content-type application/pdf
 12. object_checkin            release the lock
 ```
 

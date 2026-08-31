@@ -36,10 +36,27 @@ type VerifiedImage = {
   error?: string;
 };
 
+type VerifiedDocument = {
+  expected: string;
+  resolvedUrl: string;
+  matchedUrl?: string;
+  matchedBy?: 'exact' | 'filename';
+  present: boolean;
+  status?: number;
+  contentType?: string;
+  ok: boolean;
+  error?: string;
+};
+
 const requestSchema = z
   .object({
     url: z.string().min(1),
     expectedImages: z.array(z.string().min(1)),
+    // Sibling assertion for `type:'document'` node media (PDF attachments):
+    // each expected public path (/pdf/{id}/{sha256}.pdf) must appear on the
+    // page as an <a href> / <object data> / <iframe|embed src> and fetch as
+    // application/pdf. Optional so the image contract is untouched.
+    expectedDocuments: z.array(z.string().min(1)).optional(),
     // Deploy-aware verification (opt-in). When `commit` is supplied, image
     // assertions run ONLY once that commit's Netlify deploy is confirmed ready —
     // a page served by a stale/previous deploy is reported as INCONCLUSIVE
@@ -252,6 +269,35 @@ const extractImageSources = (html: string, pageUrl: URL) => {
   return sources;
 };
 
+/**
+ * Where a document (PDF) attachment shows up in rendered HTML: the download
+ * link's href, an <object data> / <embed src> inline preview, or an <iframe
+ * src>. Never <img> — a PDF in an <img> is exactly the defect this guards.
+ */
+const extractDocumentSources = (html: string, pageUrl: URL) => {
+  const sources = new Set<string>();
+  const tagPatterns: Array<{ tag: RegExp; attr: RegExp }> = [
+    { tag: /<a\b[^>]*>/gi, attr: /\bhref\s*=\s*(["'])(.*?)\1/i },
+    { tag: /<object\b[^>]*>/gi, attr: /\bdata\s*=\s*(["'])(.*?)\1/i },
+    { tag: /<embed\b[^>]*>/gi, attr: /\bsrc\s*=\s*(["'])(.*?)\1/i },
+    { tag: /<iframe\b[^>]*>/gi, attr: /\bsrc\s*=\s*(["'])(.*?)\1/i },
+  ];
+
+  for (const { tag, attr } of tagPatterns) {
+    for (const match of html.matchAll(tag)) {
+      const candidate = match[0].match(attr)?.[2]?.trim();
+      if (!candidate) continue;
+      try {
+        sources.add(resolveUrl(candidate, pageUrl));
+      } catch {
+        // Ignore malformed hrefs in the page being verified.
+      }
+    }
+  }
+
+  return sources;
+};
+
 const getUrlBasename = (value: string) => {
   try {
     return new URL(value).pathname.split('/').pop() ?? '';
@@ -355,6 +401,89 @@ const verifyImage = async (expected: string, pageUrl: URL, extractedSources: Set
   }
 };
 
+/**
+ * Match an expected document against the page's link/embed sources. Public
+ * artifact paths (/pdf/{id}/{sha256}.pdf) render verbatim, so exact wins;
+ * a same-filename match (the sha256 basename is unique) covers an absolute
+ * vs page-relative spelling of the same path.
+ */
+const matchExpectedDocument = (
+  resolvedUrl: string,
+  expected: string,
+  extractedSources: Set<string>
+): { matchedUrl: string; matchedBy: 'exact' | 'filename' } | undefined => {
+  if (extractedSources.has(resolvedUrl)) return { matchedUrl: resolvedUrl, matchedBy: 'exact' };
+  const expectedFilename = getUrlBasename(expected);
+  if (!expectedFilename) return undefined;
+  for (const source of extractedSources) {
+    if (getUrlBasename(source) === expectedFilename) return { matchedUrl: source, matchedBy: 'filename' };
+  }
+  return undefined;
+};
+
+const verifyDocument = async (
+  expected: string,
+  pageUrl: URL,
+  extractedSources: Set<string>
+): Promise<VerifiedDocument> => {
+  let resolvedUrl: string;
+
+  try {
+    resolvedUrl = resolveUrl(expected, pageUrl);
+  } catch (error) {
+    return {
+      expected,
+      resolvedUrl: '',
+      present: false,
+      ok: false,
+      error: error instanceof Error ? error.message : 'Invalid expected document URL.',
+    };
+  }
+
+  const match = matchExpectedDocument(resolvedUrl, expected, extractedSources);
+  const present = Boolean(match);
+  const fetchUrl = match?.matchedUrl ?? resolvedUrl;
+
+  try {
+    const response = await fetch(fetchUrl, {
+      cache: 'no-store',
+      headers: noStoreFetchHeaders,
+    });
+    const contentType = response.headers.get('content-type') ?? undefined;
+    const isPdf = (contentType?.toLowerCase().split(';')[0]?.trim() ?? '') === 'application/pdf';
+    const ok = present && response.status === 200 && isPdf;
+
+    return {
+      expected,
+      resolvedUrl,
+      ...(match ? { matchedUrl: match.matchedUrl, matchedBy: match.matchedBy } : {}),
+      present,
+      status: response.status,
+      contentType,
+      ok,
+      ...(!present
+        ? {
+            error:
+              'Expected document was not found on the page as an <a href>, <object data>, <embed src> or <iframe src> (a PDF inside <img> does not count).',
+          }
+        : {}),
+      ...(response.status !== 200 ? { error: `Expected document returned status ${response.status}.` } : {}),
+      ...(response.status === 200 && !isPdf
+        ? { error: `Expected document did not return content-type application/pdf (got ${contentType ?? 'none'}).` }
+        : {}),
+    };
+  } catch (error) {
+    return {
+      expected,
+      resolvedUrl,
+      ...(match ? { matchedUrl: match.matchedUrl, matchedBy: match.matchedBy } : {}),
+      present,
+      ok: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch expected document.',
+    };
+  }
+};
+
 export const handler = async (event: LambdaEvent) => {
   if (event.httpMethod !== 'POST') {
     return jsonResponse(405, { verified: false, error: 'Method not allowed. Use POST.' });
@@ -380,7 +509,9 @@ export const handler = async (event: LambdaEvent) => {
     return jsonResponse(400, { verified: false, error: 'Invalid request body.', issues: validation.error.issues });
   }
 
-  const { url, expectedImages, commit, deployTimeoutSeconds, deployPollIntervalSeconds } = validation.data;
+  const { url, expectedImages, expectedDocuments, commit, deployTimeoutSeconds, deployPollIntervalSeconds } =
+    validation.data;
+  const documentFields = expectedDocuments !== undefined ? { expectedDocuments } : {};
   let pageUrl: URL;
 
   try {
@@ -409,7 +540,9 @@ export const handler = async (event: LambdaEvent) => {
         ...(deployEval.deploy ? { deploy: deployEval.deploy } : {}),
         url: pageUrl.toString(),
         expectedImages,
+        ...documentFields,
         images: [],
+        ...(expectedDocuments !== undefined ? { documents: [] } : {}),
         errors: [deployEval.reason ?? `The deploy for commit ${commit} is not live yet; retry after it is ready.`],
       });
     }
@@ -439,10 +572,23 @@ export const handler = async (event: LambdaEvent) => {
     const images = await Promise.all(
       expectedImages.map((expected) => verifyImage(expected, pageUrl, extractedSources))
     );
-    const errors = images
-      .filter((image) => !image.ok)
-      .map((image) => `${image.expected}: ${image.error ?? 'Verification failed.'}`);
-    const verified = pageResponse.status === 200 && images.every((image) => image.ok);
+    const documentSources = expectedDocuments !== undefined ? extractDocumentSources(html, pageUrl) : undefined;
+    const documents =
+      expectedDocuments !== undefined && documentSources !== undefined
+        ? await Promise.all(expectedDocuments.map((expected) => verifyDocument(expected, pageUrl, documentSources)))
+        : undefined;
+    const errors = [
+      ...images
+        .filter((image) => !image.ok)
+        .map((image) => `${image.expected}: ${image.error ?? 'Verification failed.'}`),
+      ...(documents ?? [])
+        .filter((document) => !document.ok)
+        .map((document) => `${document.expected}: ${document.error ?? 'Verification failed.'}`),
+    ];
+    const verified =
+      pageResponse.status === 200 &&
+      images.every((image) => image.ok) &&
+      (documents ?? []).every((document) => document.ok);
     // With the target deploy confirmed live, nothing is inconclusive — a non-200
     // page is a real defect. Only when we could NOT confirm the deploy does a
     // non-200 page stay inconclusive (the deploy is probably not live yet).
@@ -457,8 +603,10 @@ export const handler = async (event: LambdaEvent) => {
       pageStatus: pageResponse.status,
       url: pageUrl.toString(),
       expectedImages,
+      ...documentFields,
       ...deployFields,
       images,
+      ...(documents !== undefined ? { documents } : {}),
       ...(pageResponse.status !== 200 ? { errors: [nonLivePageError, ...errors] } : {}),
       ...(pageResponse.status === 200 && errors.length > 0 ? { errors } : {}),
     });
@@ -468,8 +616,10 @@ export const handler = async (event: LambdaEvent) => {
       inconclusive: true,
       url: pageUrl.toString(),
       expectedImages,
+      ...documentFields,
       ...deployFields,
       images: [],
+      ...(expectedDocuments !== undefined ? { documents: [] } : {}),
       errors: [error instanceof Error ? error.message : 'Failed to fetch page HTML.'],
     });
   }

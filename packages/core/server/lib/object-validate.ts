@@ -92,6 +92,7 @@ import {
   rawArtifactRefForPublicPath,
 } from './artifact-trust.js';
 import { activeMediaPolicy, type MediaPolicy } from '../../lib/media-policy.js';
+import { inferMediaType } from '../../lib/article-content/media-type.js';
 
 export type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
 
@@ -1954,6 +1955,17 @@ const classifyArticleImageSrc = (
         `(a PDF here reaches Astro's getImage and fails the whole build). Link the PDF from a document media node or a /pdf/ ctaLink instead.`,
     };
   }
+  // Type ⇄ src agreement (media-type.ts): an image-typed media whose src is a
+  // PDF renders as a broken <img> live — the defect the patch engine now
+  // refuses at write; this is the same rule for create/validate/publish.
+  if (inferMediaType(value) === 'document') {
+    return {
+      kind: 'block',
+      message:
+        `${path} "${value}" is a PDF but the media type is "image" — it would render as a broken <img>. ` +
+        `Set {type:"document"} (rendered as a download/embed block) with the /pdf/{id}/{sha256}.pdf public path.`,
+    };
+  }
   if (IMG_PUBLIC_PATH_RE.test(value)) return resolvePublicPathExistence(path, value, context);
   if (REMOTE_URL_RE.test(value)) {
     return {
@@ -1985,6 +1997,14 @@ const classifyArticleDocumentSrc = (
       message: `${path} is a legacy repo path (src/assets/…) — not servable from an article object.`,
     };
   if (MAJOR_KEY_ARTIFACT_REF_RE.test(value)) return undefined; // check 5b reports raw keys
+  if (inferMediaType(value) === 'image') {
+    return {
+      kind: 'block',
+      message:
+        `${path} "${value}" is an image but the media type is "document" — set {type:"image"} ` +
+        `(or point the document node at a /pdf/{id}/{sha256}.pdf artifact).`,
+    };
+  }
   if (PDF_PUBLIC_PATH_RE.test(value)) return resolvePublicPathExistence(path, value, context);
   if (REMOTE_URL_RE.test(value)) {
     return {

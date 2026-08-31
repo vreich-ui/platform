@@ -81,6 +81,56 @@ const ctaHtml = (node: ContentItemNode, prominent: boolean): string => {
   return `<p class="article-node-cta not-prose"><a class="${cls}" href="${escapeHtml(href)}"${relAttr(node)}>${escapeHtml(ctaText)}</a></p>`;
 };
 
+/** Human-readable byte size for the document block ("1.2 MB"). */
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const mediaFilename = (src: string): string => (src.split(/[?#]/)[0] ?? '').split('/').pop() ?? '';
+
+/**
+ * `type:'document'` — a PDF attached to the article. Renders a download
+ * block (filename + size when known) plus an inline <object> preview whose
+ * fallback is the same link, so a browser without a PDF viewer still gets
+ * the file. NEVER an <img>: that is the broken-image defect this exists to
+ * close. The href is the artifact bridge's /pdf/{id}/{sha256}.pdf public path
+ * verbatim, which is what verify_article_images' expectedDocuments asserts.
+ */
+const documentMediaHtml = (
+  node: ContentItemNode,
+  media: NonNullable<ContentItemNode['public']['media']>,
+  src: string
+): string => {
+  const filename = mediaFilename(media.src) || 'document.pdf';
+  const title = media.title ?? node.public.title ?? filename;
+  const isPdf = media.contentType === 'application/pdf' || /\.pdf$/i.test(filename);
+  const kind = isPdf ? 'PDF' : 'Document';
+  const meta = [kind, media.sizeBytes !== undefined ? formatBytes(media.sizeBytes) : undefined]
+    .filter(Boolean)
+    .join(' · ');
+  const href = escapeHtml(src);
+  const typeAttr = isPdf ? ' type="application/pdf"' : '';
+  const caption = media.caption ? `<figcaption>${escapeHtml(media.caption)}</figcaption>` : '';
+  const preview = isPdf
+    ? `<object class="article-document-preview w-full aspect-[3/4] max-h-[80vh] rounded-lg border border-gray-200 dark:border-slate-700" data="${href}" type="application/pdf" aria-label="${escapeHtml(title)}">` +
+      `<p class="text-sm text-muted">Your browser cannot preview this PDF — <a href="${href}"${relAttr(node)} download="${escapeHtml(filename)}">download ${escapeHtml(filename)}</a>.</p>` +
+      `</object>`
+    : '';
+  return (
+    `<figure class="article-node-document not-prose my-6" data-media-type="document">` +
+    `<a class="article-document-link flex items-center gap-3 rounded-lg border border-gray-200 dark:border-slate-700 bg-surface px-4 py-3 font-sans no-underline hover:border-primary" href="${href}"${typeAttr}${relAttr(node)} download="${escapeHtml(filename)}">` +
+    `<span class="article-document-icon text-2xl" aria-hidden="true">📄</span>` +
+    `<span class="flex flex-col"><span class="font-semibold">${escapeHtml(title)}</span>` +
+    `<span class="text-sm text-muted">${escapeHtml(filename)}${meta ? ` · ${escapeHtml(meta)}` : ''}</span></span>` +
+    `</a>` +
+    preview +
+    caption +
+    `</figure>`
+  );
+};
+
 const oneMediaHtml = (node: ContentItemNode, media: NonNullable<ContentItemNode['public']['media']>): string => {
   const src = safeHref(media.src);
   if (!src) return '';
@@ -88,9 +138,10 @@ const oneMediaHtml = (node: ContentItemNode, media: NonNullable<ContentItemNode[
   if (media.type === 'image') {
     return `<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(media.alt ?? '')}" loading="lazy" decoding="async" />${caption}</figure>`;
   }
-  // Non-image media has no inline player yet — render an honest link, never
-  // a silent drop.
-  const label = media.title ?? media.src.split('/').pop() ?? media.type;
+  if (media.type === 'document') return documentMediaHtml(node, media, src);
+  // video/audio/embed have no inline player yet — render an honest link,
+  // never a silent drop.
+  const label = media.title ?? (mediaFilename(media.src) || media.type);
   return `<p><a href="${escapeHtml(src)}"${relAttr(node)}>${escapeHtml(label)}</a></p>${caption}`;
 };
 

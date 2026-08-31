@@ -69,3 +69,20 @@ test('artifact metadata tool descriptions document soft-delete visibility', asyn
   assert.match(getTool(tools, 'list_artifacts_for_request').description, /soft-deleted artifacts are excluded/i);
   assert.match(getTool(tools, 'get_artifact_metadata').description, /deletedAtISO/);
 });
+
+test('verify_article_images advertises the expectedDocuments sibling without widening its name or required set', async () => {
+  const tools = await listTools();
+  const tool = getTool(tools, 'verify_article_images');
+  assert.deepEqual(tool.inputSchema.required, ['url', 'expectedImages']);
+  const documents = tool.inputSchema.properties?.expectedDocuments as { type: string; description: string } | undefined;
+  assert.ok(documents, 'expectedDocuments must be in the input schema');
+  assert.equal(documents.type, 'array');
+  assert.match(documents.description, /application\/pdf/);
+  assert.match(tool.description, /expectedDocuments/);
+  assert.match(tool.description, /\/pdf\/\{id\}\/\{sha256\}\.pdf/);
+  assert.equal(
+    tools.some((candidate) => candidate.name === 'verify_article_media'),
+    false,
+    'no sibling tool name'
+  );
+});

@@ -164,6 +164,7 @@ export const callVerifyArticleImages = async (event: LambdaEvent, input: Record<
     body: JSON.stringify({
       url: input.url,
       expectedImages: input.expectedImages,
+      ...(input.expectedDocuments !== undefined ? { expectedDocuments: input.expectedDocuments } : {}),
       ...(input.commit !== undefined ? { commit: input.commit } : {}),
       ...(input.deployTimeoutSeconds !== undefined ? { deployTimeoutSeconds: input.deployTimeoutSeconds } : {}),
       ...(input.deployPollIntervalSeconds !== undefined
