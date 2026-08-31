@@ -1,11 +1,16 @@
 /**
- * admin-plugin-manifest — the W1 acceptance surface for the publishing-plugin
- * bundle.
+ * admin-plugin-manifest — the surface for the publishing-plugin bundle.
  *
  *   GET                      → the stored doc: active, draft, and why an
  *                              installed export is stale (W4.2).
+ *   GET ?export=skill        → the Claude skill zip for the ACTIVE bundle (W2.1).
+ *   GET ?export=plugin       → the Cowork `.plugin` bundle (W2.2).
  *   POST {action:"render"}   → render a fresh draft from live state.
  *   POST {action:"promote"}  → make the current draft the active bundle.
+ *
+ * Exports serve the ACTIVE bundle only. A draft is a proposal — shipping one to
+ * a human's Claude org would put an unreviewed skill in front of the team, and
+ * "promote, then download" is one extra click that makes the review real.
  *
  * Owner/admin only. The bundle carries no secrets — the OAuth URLs and the MCP
  * endpoint are public facts, and the token never transits here — but rendering
@@ -27,6 +32,7 @@ import {
 import { buildManifestBundle, manifestStaleReasons } from '../lib/plugin/build-manifest.js';
 import { toolSurfaceDigest, buildPluginTools } from '../lib/plugin/build-tools.js';
 import { pluginPlatforms, type PluginPlatform } from '../lib/plugin/manifest-types.js';
+import { buildSkillZip, buildCoworkPlugin } from '../lib/plugin/export-claude.js';
 import { readVoiceRecord } from '../lib/plugin/read-voice.js';
 
 type LambdaEvent = {
@@ -86,6 +92,33 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const liveDigest = toolSurfaceDigest(liveTools);
 
   if (method === 'GET') {
+    const exportKind = event.queryStringParameters?.export;
+    if (exportKind) {
+      if (exportKind !== 'skill' && exportKind !== 'plugin') {
+        return jsonResponse(400, { error: 'export must be "skill" or "plugin".' });
+      }
+      if (!doc.active) {
+        return jsonResponse(409, {
+          error: 'There is no active bundle to export. Render a draft and promote it first.',
+        });
+      }
+      const artifact = exportKind === 'skill' ? buildSkillZip(doc.active) : buildCoworkPlugin(doc.active);
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${artifact.filename}"`,
+          'Cache-Control': 'no-store',
+          // The version the human is installing, readable without unzipping —
+          // this is what an operator compares against the live manifest when
+          // an install looks stale.
+          'X-Plugin-Manifest-Version': doc.active.manifest_version,
+        },
+        body: artifact.bytes.toString('base64'),
+        isBase64Encoded: true,
+      };
+    }
+
     const voice = await readVoiceRecord(event, binding, getSiteObjectsBlobStore).catch(() => null);
     const live = {
       voiceRecordVersion: voice?.record_version ?? null,
@@ -99,6 +132,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       updated_by: doc.updated_by,
       updated_at: doc.updated_at,
       history: doc.history.slice(0, 10),
+      exports: doc.active
+        ? {
+            skill_zip: '/.netlify/functions/admin-plugin-manifest?export=skill',
+            cowork_plugin: '/.netlify/functions/admin-plugin-manifest?export=plugin',
+          }
+        : null,
     });
   }
 
