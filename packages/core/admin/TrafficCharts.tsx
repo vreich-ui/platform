@@ -15,7 +15,7 @@ import { cn } from './utils';
 import { buildLinePoints, pointsToPolyline, pointsToAreaPath, formatTrafficCount } from '@core/lib/admin/traffic-logic';
 import type { TrafficRankingRowWithShare, TrafficTrendPoint } from '@core/lib/admin/traffic-logic';
 
-// ─── shared: sr-only data table fallback ───────────────────────────────
+// ─── shared: sr-only data table fallback ───────────────────────────────────
 
 function ScreenReaderTable({ caption, rows }: { caption: string; rows: Array<[string, string]> }) {
   return (
@@ -126,7 +126,7 @@ export function TrendChart({
   );
 }
 
-// ─── BarList: horizontal bar list (top content / top sources) ───────────
+// ─── BarList: horizontal bar list (top content / top sources) ──────────────
 
 export interface BarListProps {
   rows: TrafficRankingRowWithShare[];

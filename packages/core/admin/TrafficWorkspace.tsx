@@ -39,7 +39,7 @@ async function getToken(): Promise<string> {
   return (await m.getAccessToken()) ?? '';
 }
 
-// ─── range persistence (localStorage, per site + per viewer) ───────────
+// ─── range persistence (localStorage, per site + per viewer) ───────────────
 
 function readStoredRange(storageKey: string): { key: TrafficRangeKey; custom?: CustomRangeInput } | null {
   try {
@@ -57,7 +57,7 @@ function writeStoredRange(storageKey: string, value: { key: TrafficRangeKey; cus
   }
 }
 
-// ─── range picker ──────────────────────────────────────
+// ─── range picker ────────────────────────────────────────────────────────────
 
 function RangePicker({
   rangeKey,
@@ -111,7 +111,7 @@ function RangePicker({
   );
 }
 
-// ─── own-tracker section (T21.2b — a second, first-party data source) ─────
+// ─── own-tracker section (T21.2b — a second, first-party data source) ──────
 
 function SubsectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -255,7 +255,7 @@ function OwnTrackerSection({
   );
 }
 
-// ─── body ────────────────────────────────────────────────
+// ─── body ─────────────────────────────────────────────────────────────────────
 
 const isoDate = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 

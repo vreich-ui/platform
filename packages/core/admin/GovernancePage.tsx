@@ -399,7 +399,7 @@ function LearningModeCard({
   );
 }
 
-// ─── tracking governance card (W13 T13.12 — the OQ-W13-2 surface) ──────────────────
+// ─── tracking governance card (W13 T13.12 — the OQ-W13-2 surface) ──────────
 
 function TrackingGovernanceCard({
   gov,

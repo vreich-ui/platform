@@ -57,7 +57,7 @@ const FIXTURE: OwnTrackerStatsPayload = {
   dims: { object_version: 'v1', producer: 'own-tracker', node_strategy: 'default' },
 };
 
-// ─── isOwnTrackerDays ──────────────────────────────────────
+// ─── isOwnTrackerDays ───────────────────────────────────────────────────────
 
 test('isOwnTrackerDays: only 7 and 30 are valid — the sink accepts nothing else', () => {
   assert.equal(isOwnTrackerDays(7), true);
@@ -68,7 +68,7 @@ test('isOwnTrackerDays: only 7 and 30 are valid — the sink accepts nothing els
   assert.equal(isOwnTrackerDays(undefined), false);
 });
 
-// ─── ownTrackerChartSeries — renders correctly from a fixture payload ────
+// ─── ownTrackerChartSeries — renders correctly from a fixture payload ──────
 
 test('ownTrackerChartSeries: daily pageviews/sessions become trend, top_objects/top_sources become ranked bar rows', () => {
   const series = ownTrackerChartSeries(FIXTURE);
@@ -109,7 +109,7 @@ test('ownTrackerChartSeries: a missing/malformed row degrades to a safe default,
   assert.equal(series.topSources[0]!.label, 'Direct');
 });
 
-// ─── ownTrackerStatRow ─────────────────────────────────
+// ─── ownTrackerStatRow ──────────────────────────────────────────────────────
 
 test('ownTrackerStatRow: sessions/visitors/consented %/purchases/last event, from a fixture payload', () => {
   const row = ownTrackerStatRow(FIXTURE);
@@ -146,7 +146,7 @@ test('captureRate: zero Netlify pageviews ⇒ null, never a divide-by-zero Infin
   assert.equal(captureRate(900, 0, 7, 7), null);
 });
 
-// ─── own-tracker-stats: env presence + request shape (I/O module) ─────
+// ─── own-tracker-stats: env presence + request shape (I/O module) ─────────
 
 test('ownTrackerMissingEnvVars / isOwnTrackerConfigured: TRACKING_SINK_URL + TRACKING_PROJECT_ID only', () => {
   assert.deepEqual(ownTrackerMissingEnvVars({}).sort(), ['TRACKING_PROJECT_ID', 'TRACKING_SINK_URL']);
