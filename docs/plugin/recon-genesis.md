@@ -90,3 +90,32 @@ follow-on.
   through `project.call_tool`, a pure pass-through (`src/agent/projects/projectMcpAdapter.ts`).
   Argument shapes are therefore identical whether called directly or through the adapter.
 - Cloud sessions can `git clone --depth 1` these repos but **cannot push**.
+
+---
+
+## Addendum — what W1 actually built (2026-08-31)
+
+Option (c) from §4 was taken. The manifest renderer is **standalone and idempotent**, invoked from
+the admin surface, with no dependency on a genesis workflow:
+
+- `packages/core/server/lib/plugin/` — `manifest-types.ts`, `build-tools.ts`, `render-skill.ts`,
+  `build-manifest.ts`, `manifest-store.ts`, `read-voice.ts`.
+- `admin-plugin-manifest` (all four tenants) — `GET` reads the doc plus staleness; `POST render`
+  renders a draft; `POST promote` makes it active.
+
+`emit_plugin_manifest` therefore becomes **one more caller** of `buildManifestBundle` when
+`genesis_conductor` lands, not a wave of its own. W4's acceptance test changes accordingly:
+*"invoke the renderer against drlurie → a bundle exists; edit the voice → `GET` reports it stale"*.
+
+Two deviations from the plan, both deliberate and both reversible:
+
+1. **`plugin_manifest` is not a 13th governed object type** (plan D1). It is a derived document in
+   its own blob store, following `governance-store.ts`. A governed type would bring locks, review, a
+   publish gate and git export materialization — every render committing a file under
+   `sites/<slug>/data/site/` and entering the release batch — for a document that is a pure function
+   of its inputs. The reasoning is recorded at the top of `manifest-types.ts`.
+2. **The endpoint is `/.netlify/functions/admin-plugin-manifest`, not `/api/plugin/manifest`**
+   (plan W1 acceptance). Every admin endpoint in this repo is called at
+   `/.netlify/functions/admin-*` with no redirect (`packages/core/lib/admin/*-client.ts`); inventing
+   a second convention for one endpoint would be the odd one out. The `/api/plugin/*` prefix is still
+   the right shape for the **W3.1 public façade**, which is a different surface with different auth.

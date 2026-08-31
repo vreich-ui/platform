@@ -427,6 +427,13 @@ export const CORE_BLOB_STORES = [
   // single writer of a running request's status and must never read its own
   // stale write.
   'editorial-requests',
+  // W1.1 (publishing plugin, 2026-08-31): the per-tenant plugin bundle
+  // (skill.md + tools + connection) with its draft/active pair. Derived from
+  // editorial_voice, the aggression ceiling and the live tool surface, so it
+  // is a rendered document rather than a governed object — see
+  // server/lib/plugin/manifest-types.ts for why. Strongly consistent: the
+  // admin renders and then immediately reads back to promote.
+  'plugin-manifest',
 ];
 
 // T16.0: derived from the genesis manifest, the one staged source of truth

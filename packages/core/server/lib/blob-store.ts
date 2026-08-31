@@ -255,6 +255,17 @@ export const getSiteObjectsBlobStore = async (event: unknown, binding?: SiteBind
   return getNetlifyBlobStore({ name: 'site-objects', consistency: 'strong' }, event, binding);
 };
 
+/**
+ * W1.1 (publishing plugin): the per-tenant plugin bundle — rendered skill.md,
+ * derived tool list and connection card — with its draft/active pair. Strongly
+ * consistent because the admin renders and then immediately reads back to
+ * promote. See server/lib/plugin/manifest-types.ts for why this is a rendered
+ * document rather than a governed object type.
+ */
+export const getPluginManifestBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
+  return getNetlifyBlobStore({ name: 'plugin-manifest', consistency: 'strong' }, event, binding);
+};
+
 export const getArtifactBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
   return getNetlifyBlobStore({ name: 'artifacts', consistency: 'strong' }, event, binding);
 };

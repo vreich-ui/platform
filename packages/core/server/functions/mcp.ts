@@ -809,6 +809,14 @@ const CMS_AGENT_NAME_ATTRIBUTION_TOOLS = new Set([
   'object_checkout',
   'object_refresh_lock',
   'object_checkin',
+  // W1.0 (publishing plugin, 2026-08-31): the two verbs that carried NO
+  // attribution at all. Every article a chat-app plugin writes landed its
+  // patch and its publish as 'unattributed-agent', so the ledger could not
+  // answer "who published this" for the one actor class that is not the
+  // autonomous engine. Same object-store.ts agentPrincipal() derivation as
+  // the tools above, so a verified per-agent token must override here too.
+  'object_patch',
+  'object_publish',
 ]);
 
 const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
@@ -1107,6 +1115,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         lock_token: input.lock_token,
         expected_record_version: input.expected_record_version,
         ops: input.ops,
+        agent_name: input.agent_name,
       });
     case 'object_validate':
       return callObjectAction(event, {
@@ -1220,6 +1229,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
           artifact_set: input.artifact_set,
           release_build: input.release_build,
           producer: input.producer,
+          agent_name: input.agent_name,
         })
       );
     case 'product_set_price':
