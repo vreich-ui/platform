@@ -75,6 +75,10 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   { pattern: '/admin/release', entry: 'admin/release.astro' },
   { pattern: '/admin/kit', entry: 'admin/kit.astro' },
   { pattern: '/admin/maintenance', entry: 'admin/maintenance.astro' },
+  // W5.1: the publishing-plugin bundle page (render / promote / per-platform
+  // install cards). Core-owned — every tenant gets the same one, because the
+  // bundle it renders is tenant-generic.
+  { pattern: '/admin/plugins', entry: 'admin/plugins.astro' },
   { pattern: '/admin/profile', entry: 'admin/profile.astro' },
   { pattern: '/admin/settings/admins', entry: 'admin/settings/admins.astro' },
   { pattern: '/admin/settings/guardrails', entry: 'admin/settings/guardrails.astro' },

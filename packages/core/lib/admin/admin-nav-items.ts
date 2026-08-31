@@ -83,6 +83,10 @@ export const NAV_ITEMS: NavGroupData[] = [
       { label: 'Maintenance', href: '/admin/maintenance', icon: 'wrench', ownerOnly: true },
       { label: 'Component kit', href: '/admin/kit', icon: 'library', ownerOnly: true },
       { label: 'Agents', href: '/admin/agents', icon: 'sparkles', ownerOnly: true },
+      // W5.1: the per-tenant publishing-plugin bundle (skill + connector +
+      // Actions schema) for Claude / ChatGPT / Gemini. Owner-only: promoting a
+      // bundle is what puts a skill in front of a whole team.
+      { label: 'Plugins', href: '/admin/plugins', icon: 'rocket', ownerOnly: true },
       // G2 (email list administration, deferred): the nav entry exists so the
       // destination is discoverable, but it is deliberately inert — no
       // route, no page, no email API client. Visible to any admin (not
