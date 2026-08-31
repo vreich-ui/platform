@@ -86,6 +86,7 @@
 import type { ObjectType } from '../../schema/object-record-v1.js';
 import type { LibraryRow } from './library-logic.js';
 import type { VerbCaller, VerbResult } from './bulk-object-ops.js';
+import type { UserRole } from './users-client.js';
 
 // ─── shape ──────────────────────────────────────────────────────────────────
 
@@ -100,9 +101,11 @@ export type QuickActionVerb =
   | 'object_create_variant'
   | 'agent_chat';
 
-/** Roles as `users-client.ts` reports them (server `roles.ts`); `viewer` is
- *  read-only and therefore never appears in any chip's `rights`. */
-export type QuickActionRight = 'owner' | 'admin' | 'publisher' | 'editor';
+/** Roles as `users-client.ts` reports them (server `roles.ts`), minus
+ *  `viewer` — read-only, so it never appears in any chip's `rights`. Derived
+ *  from that ONE source rather than re-typed, so a renamed tier breaks the
+ *  build here instead of drifting quietly (B1). */
+export type QuickActionRight = Exclude<UserRole, 'viewer'>;
 
 /**
  * The popover's single field. Only `choice` exists because only one verb in

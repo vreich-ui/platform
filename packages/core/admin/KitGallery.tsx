@@ -33,6 +33,7 @@ import {
   Dialog,
   ConfirmDialog,
   Drawer,
+  Popover,
   useToast,
   DataTable,
   DiffView,
@@ -568,6 +569,49 @@ function GalleryBody({ identity }: { identity: SiteIdentity }) {
           <Button variant="secondary" onClick={() => setDrawerOpen(true)}>
             Open drawer
           </Button>
+        </Row>
+        <Row>
+          {/* T0: one Popover component, two modes. Hover mode on an enabled
+              trigger is the ordinary case; hover mode on a `disabled`
+              trigger is the Convention D3 case ActionRow's DecisionButton
+              uses — tab to it or tap it, the reason still opens. */}
+          <Popover
+            mode="hover"
+            content="Tab to me, or hover — opens after 200ms."
+            trigger={(a11y) => (
+              <Button variant="secondary" size="sm" {...a11y}>
+                Hover tooltip
+              </Button>
+            )}
+          />
+          <Popover
+            mode="hover"
+            content="Approving requires publisher rights on this object."
+            disabled
+            trigger={(a11y) => (
+              <Button variant="secondary" size="sm" disabled {...a11y}>
+                Disabled trigger, tab-reachable tooltip
+              </Button>
+            )}
+          />
+          <Popover
+            mode="click"
+            trigger={(a11y) => (
+              <Button variant="secondary" size="sm" {...a11y}>
+                Click popover
+              </Button>
+            )}
+            content={
+              <div className="flex w-56 flex-col gap-2">
+                <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+                  Arbitrary content, not just text. Esc or an outside click closes it.
+                </p>
+                <Button size="sm" onClick={() => toast({ title: 'Popover action ran' })}>
+                  Do a thing
+                </Button>
+              </div>
+            }
+          />
         </Row>
         <Row>
           <Button variant="secondary" size="sm" onClick={() => toast({ title: 'Saved', tone: 'success' })}>

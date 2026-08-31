@@ -21,11 +21,21 @@
  * task deliberately left open; this component's answer is no, for exactly
  * the reason the original comment (below, kept) gives. This component never
  * re-classifies beyond that one named exception.
+ *
+ * A1 (one-run-card): the header row IS the card by default — collapsed to a
+ * single line for the common `running`/`done` run, opening itself only far
+ * enough to show the approval/recovery block (never the node list) when the
+ * run genuinely needs a human (`failed`/`needs_you`). The decision itself —
+ * what's open, and which single button earns the primary-action slot next to
+ * the chevron — lives in `@core/lib/admin/run-card-view`'s `runCardView`;
+ * this component only consumes it. The failure explanation that used to sit
+ * in the body permanently now lives in a hover `Popover` on that button.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { Button, Skeleton } from './primitives';
 import { ActionRow } from './approval';
+import { Popover, useToast } from './overlays';
 import { decide, type DecisionAction } from '@core/lib/admin/decisions';
 import { SeverityIcon } from './severity';
 import { IconChevronDown, IconChevronRight, IconInfo } from './icons';
@@ -38,19 +48,59 @@ import {
   formatUsd,
   getRequestActivityIfChanged,
   raiseNodeBudget,
+  retryRequest,
   type ActivityNodeView,
   type ActivitySeverity,
   type ActivityView,
 } from '@core/lib/admin/requests-client';
 import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
-import { relativeAge } from '@core/lib/admin/request-logic';
+import { relativeAge, retryReceipt } from '@core/lib/admin/request-logic';
 import { cmsAgentErrorCopy, hasOperatorAction } from '@core/lib/admin/cms-agent-error-copy';
 import { budgetRaiseButtons } from '@core/lib/admin/budget-raise';
 import { liveArticleUrl, policyRecordLine, publicationCopy } from '@core/lib/admin/publication-card';
+import { activityTargetKey, runCardStatus, runCardView, type RunCardStatus } from '@core/lib/admin/run-card-view';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
   return (await m.getAccessToken()) ?? '';
+}
+
+/**
+ * B2 — the ONE Retry effect, shared by every host that renders a run card
+ * (`AgentsHub`, `AgentRail`, and `RequestsWorkspace`'s inbox row, Drawer and
+ * detail page). The card's own `onRetry` prop stays a plain callback — the
+ * component still decides nothing about the network — but all four hosts wire
+ * it to this, so the endpoint call, the receipt (`retryReceipt`) and the
+ * failure toast cannot drift between them.
+ *
+ * The server refuses a retry it cannot help — most sharply a `needs_you`
+ * request, which comes back `409` with the store's own sentence — and
+ * `retryRequest` throws that sentence, so the editor reads words rather than
+ * a status code.
+ *
+ * `onRetried` is the host's own refresh (the inbox re-reads its list); the run
+ * card itself needs none, since it is already polling.
+ */
+export function useRetryRequest(onRetried?: () => void): (requestId: string) => Promise<void> {
+  const { toast } = useToast();
+  return useCallback(
+    async (requestId: string) => {
+      try {
+        await retryRequest(getToken, requestId);
+        // FIX 9: no node is passed, and none is named. `requeueRequest` takes
+        // a request id and nothing else — the receipt says what it wrote.
+        toast({ title: retryReceipt(), tone: 'success' });
+        onRetried?.();
+      } catch (retryError) {
+        toast({
+          title: 'Retry failed',
+          description: retryError instanceof Error ? retryError.message : undefined,
+          tone: 'danger',
+        });
+      }
+    },
+    [toast, onRetried]
+  );
 }
 
 /**
@@ -433,8 +483,15 @@ export interface RequestActivityProps {
   defaultExpanded?: boolean;
   /** Called when the run reaches a terminal state, so the host can refresh its own data. */
   onSettled?: (activity: ActivityView) => void;
-  /** Offered on the recovery block. Absent means no button at all. */
-  onRetry?: (nodeId: string) => void;
+  /**
+   * Offered on the recovery block. Absent means no button at all.
+   *
+   * FIX 9: takes no node. The card still requires a named recovery node to
+   * OFFER the button — that is how it knows there is a stopped step to
+   * recover — but `requeueRequest` has no resume point to send it to, so
+   * handing one to the host only invited a receipt that overclaimed.
+   */
+  onRetry?: () => void;
   /**
    * Task B (provider-error-details): whether the CURRENT viewer is an Owner —
    * this component does not resolve roles itself, the same convention
@@ -442,9 +499,36 @@ export interface RequestActivityProps {
    * "provider <status>: <message>" line on a failed node's detail.
    */
   isOwner?: boolean;
+  /**
+   * The bound chat's status, when the host has one in hand
+   * (`AgentsHub`/`AgentRail`). A chat waiting on a human is the NEAREST gate
+   * and outranks the run's own state — `derive-status.ts` §5.1 rule 1 — so
+   * the card must open itself for it too (FIX 4). The request detail page
+   * has no chat and omits this.
+   */
+  chatStatus?: string;
+  /**
+   * FIX 5 — reports whether this card is CURRENTLY stating a run status, so
+   * a host that suppresses its own status on the card's behalf
+   * (`ChatThread`'s `hasRunCard`) suppresses only while there is something
+   * to defer to. False while the first poll is still a Skeleton, and false
+   * when the poll came back degraded (`cms_agent_unavailable`,
+   * `no_workflow_run`) — in both the card shows no run status at all, and a
+   * thread silenced on its behalf would leave the editor with nothing.
+   */
+  onStatesStatusChange?: (statesStatus: boolean) => void;
 }
 
-export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, onRetry, isOwner = false }: RequestActivityProps) {
+export function RequestActivity({
+  requestId,
+  runId,
+  defaultExpanded,
+  onSettled,
+  onRetry,
+  isOwner = false,
+  chatStatus,
+  onStatesStatusChange,
+}: RequestActivityProps) {
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
   const [activity, setActivity] = useState<ActivityView | null>(null);
   const [reason, setReason] = useState<string | undefined>(undefined);
@@ -492,15 +576,38 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   const etagRef = useRef<string | undefined>(undefined);
   const nextCadenceRef = useRef<number | undefined>(undefined);
 
-  // A new target (a different request/run) must never see the OLD target's
-  // cached run_id or etag — reset in lockstep with the generation bump below,
-  // which already tears down and restarts the chain on this same dependency
-  // change.
+  /**
+   * A new target (a different request/run) must never see the OLD target's
+   * cached run_id or etag — reset in lockstep with the generation bump
+   * below, which already tears down and restarts the chain on this same
+   * dependency change.
+   *
+   * FIX 10 — `loaded` and `activity` reset here too. They did not, so for
+   * the one poll between the switch and the new response landing, the card
+   * rendered the PREVIOUS run's status and `onStatesStatusChange` (FIX 5)
+   * reported `true` for it — silencing the thread on the strength of a
+   * status that belonged to a different run. Now the card honestly falls
+   * back to its Skeleton, states nothing, and the thread speaks for itself
+   * until the new target has actually loaded.
+   *
+   * `error`/`reason` go with them: a degraded notice from the old target
+   * must not be read as this one's.
+   */
+  const targetKey = activityTargetKey({
+    ...(requestId ? { requestId } : {}),
+    ...(runId ? { runId } : {}),
+  });
   useEffect(() => {
     resolvedRunIdRef.current = runId;
     etagRef.current = undefined;
     nextCadenceRef.current = undefined;
-  }, [requestId, runId]);
+    setLoaded(false);
+    setActivity(null);
+    setReason(undefined);
+    setError(undefined);
+    // `runId` is read above but is part of `targetKey` by construction —
+    // keyed on the identity so the reset cannot miss a change the key sees.
+  }, [targetKey]);
 
   const load = useCallback(
     async (generation: number) => {
@@ -710,6 +817,31 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
   }, [load, hasTarget]);
 
   /**
+   * FIX 5 — tell the host whether this card is stating a run status right
+   * now. Mirrors the three render branches below exactly: no target → null,
+   * `!loaded` → Skeleton, `!activity` → degraded notice; only past all three
+   * does the card actually state the run.
+   *
+   * Held in a ref so a host that passes an inline arrow (all of them do)
+   * cannot re-fire this on every render, and reported through an effect
+   * rather than during render so it never sets state in another component's
+   * render pass. Reports `false` on unmount for the same reason it reports
+   * it for a Skeleton: a card that is gone is not stating anything.
+   */
+  const statesStatus = hasTarget && loaded && activity !== null;
+  const statesStatusCallbackRef = useRef(onStatesStatusChange);
+  statesStatusCallbackRef.current = onStatesStatusChange;
+  useEffect(() => {
+    statesStatusCallbackRef.current?.(statesStatus);
+  }, [statesStatus]);
+  useEffect(
+    () => () => {
+      statesStatusCallbackRef.current?.(false);
+    },
+    []
+  );
+
+  /**
    * The running node's elapsed time is a LOCAL clock. Watching a number move
    * is the whole point of this view, and it is not worth a network round trip
    * per second to get it.
@@ -804,38 +936,116 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
     void load(generationRef.current);
   };
 
+  /**
+   * A1: the one categorical fact `runCardView` needs about this run. The
+   * derivation is `run-card-view.ts`'s `runCardStatus` and no longer an
+   * inline ternary here — as a ternary it recognised only ONE of the four
+   * things the server calls `needs_you`, so a `blocked` or `paused` run, or
+   * one gated on its chat, badged amber in the list while this card sat
+   * collapsed and quiet (FIX 4).
+   */
+  const viewStatus: RunCardStatus = runCardStatus({
+    status: activity.status,
+    approvalCount: activity.approvals.length,
+    ...(chatStatus ? { chatStatus } : {}),
+  });
+  const view = runCardView({
+    status: viewStatus,
+    expanded,
+    hasRetryTarget: Boolean(retryNodeId),
+    hasOperatorAction: hasOperatorAction({ operatorAction: recovery?.operator_action }),
+    isBudgetExceeded: recoveryNodeFailure?.code === 'budget_exceeded',
+    hasRetryHandler: Boolean(onRetry),
+    isOwner,
+    offerRecheck: publication?.offerRecheck ?? false,
+  });
+  /** The recovery prose (Popover content, hover mode — text only): what failed, and what a retry keeps. */
+  const recoveryHoverText = recovery ? `${recovery.sentence} ${recoveryReassurance(recovery.reusable_stages)}` : '';
+
   return (
     <div className={shell}>
       <div className="px-3 py-2">
-        <button
-          type="button"
-          id={headerId}
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          onClick={() => setExpanded((value) => !value)}
-          className="adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-sm)] text-left text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
-        >
-          <span className="flex w-3.5 shrink-0 items-center justify-center">
-            {live ? (
-              <Spinner size={14} className="text-[var(--adm-info-text)]" />
-            ) : (
-              <SeverityGlyph severity={activity.severity} canRetry={Boolean(effectiveRetryNodeId)} />
-            )}
-          </span>
-          <span className="min-w-0 flex-1 truncate font-medium text-[var(--adm-text)]">{activity.headline}</span>
-          {/* Quiet by the severity rule — a mock run is working correctly. Never
-              absent, though: this is the one thing here that can be mistaken
-              for a finished article. */}
-          {placeholder ? (
-            <span className="shrink-0 rounded-[var(--adm-radius-pill)] border border-[var(--adm-border-strong)] px-1.5 py-px font-medium text-[var(--adm-text-muted)]">
-              Placeholder content
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            id={headerId}
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            onClick={() => setExpanded((value) => !value)}
+            className="adm-focusable flex min-w-0 flex-1 items-center gap-2 rounded-[var(--adm-radius-sm)] text-left text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
+          >
+            <span className="flex w-3.5 shrink-0 items-center justify-center">
+              {live ? (
+                <Spinner size={14} className="text-[var(--adm-info-text)]" />
+              ) : (
+                <SeverityGlyph severity={activity.severity} canRetry={Boolean(effectiveRetryNodeId)} />
+              )}
             </span>
+            <span className="min-w-0 flex-1 truncate font-medium text-[var(--adm-text)]">{activity.headline}</span>
+            {/* Quiet by the severity rule — a mock run is working correctly. Never
+                absent, though: this is the one thing here that can be mistaken
+                for a finished article. */}
+            {placeholder ? (
+              <span className="shrink-0 rounded-[var(--adm-radius-pill)] border border-[var(--adm-border-strong)] px-1.5 py-px font-medium text-[var(--adm-text-muted)]">
+                Placeholder content
+              </span>
+            ) : null}
+            <span className="shrink-0 tabular-nums">{activityProgressPhrase(activity.progress)}</span>
+            {eta ? <span className="hidden shrink-0 sm:inline">· {eta}</span> : null}
+            {spend ? <span className="shrink-0">· {formatUsd(spend.usd)}</span> : null}
+            {/* The visual cue only — `aria-expanded` above stays true to what
+                `aria-controls` actually names (the node list): a run that has
+                opened itself for `failed`/`needs_you` shows the chevron open
+                too, even before the node list itself is one click away. */}
+            <IconChevronDown
+              size={14}
+              className={cn('shrink-0 transition-transform', view.expandedByDefault && 'rotate-180')}
+            />
+          </button>
+
+          {/*
+           * A1: the primary action — the card's one recovery button, chosen by
+           * `runCardView`'s precedence (Owner + budget_exceeded beats Retry
+           * beats nothing). A SIBLING of the toggle button, never nested
+           * inside it. The recovery prose that used to sit permanently in the
+           * body ("Run failed at … nothing completed is recomputed") now
+           * lives here, as a hover `Popover` on whichever button renders —
+           * there is nothing to hover when there is no button, so a run with
+           * no primary action shows no prose at all (see `recoveryHoverText`
+           * above); the headline already says what stopped.
+           */}
+          {view.primaryAction.kind === 'budget-raise' && raiseButtons.length > 0 && recovery?.node_id ? (
+            <Popover
+              mode="hover"
+              content={recoveryHoverText}
+              trigger={(a11y) => (
+                <div {...a11y} className="flex shrink-0 flex-wrap gap-2">
+                  {raiseButtons.map((button) => (
+                    <Button
+                      key={button.scope}
+                      size="sm"
+                      variant="secondary"
+                      disabled={Boolean(raisingBudget)}
+                      onClick={() => raiseBudget(button.scope, recovery.node_id!, button.budgetUsd)}
+                    >
+                      {button.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            />
+          ) : view.primaryAction.kind === 'retry' && onRetry && retryNodeId ? (
+            <Popover
+              mode="hover"
+              content={recoveryHoverText}
+              trigger={(a11y) => (
+                <Button size="sm" variant="secondary" className="shrink-0" onClick={() => onRetry()} {...a11y}>
+                  Retry this step
+                </Button>
+              )}
+            />
           ) : null}
-          <span className="shrink-0 tabular-nums">{activityProgressPhrase(activity.progress)}</span>
-          {eta ? <span className="hidden shrink-0 sm:inline">· {eta}</span> : null}
-          {spend ? <span className="shrink-0">· {formatUsd(spend.usd)}</span> : null}
-          <IconChevronDown size={14} className={cn('shrink-0 transition-transform', expanded && 'rotate-180')} />
-        </button>
+        </div>
 
         <span
           className="mt-1.5 block h-1 w-full overflow-hidden rounded-[var(--adm-radius-pill)] bg-[var(--adm-border)]"
@@ -856,19 +1066,20 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
             Live updates paused — {error} Showing the last thing we saw.
           </p>
         ) : null}
+        {raiseBudgetError ? (
+          <p className="mt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{raiseBudgetError}</p>
+        ) : null}
       </div>
 
       {/*
-       * Approvals and recovery sit OUTSIDE the disclosure. A run waiting on a
-       * person, and the sentence telling an editor what survived a failure,
-       * are the two things that must not be one click away in a transcript.
-       *
-       * `approvals` is GENUINE holds only (the server splits CMS-Agent's
-       * advisory `policy_autonomous` records into `policy_records`, rendered
-       * quietly below) — so this yellow card, and its buttons, appear only when
-       * a human decision is actually what the run is waiting for.
+       * A1: everything below is the card's BODY — publication tail,
+       * approvals, recovery instruction, node list — hidden until the user
+       * opens the card (`view.showRecovery`/`view.showNodeList`), UNLESS the
+       * run genuinely needs a human (`failed`/`needs_you`), which opens the
+       * approval/recovery block on its own — never the node list; that still
+       * costs a real click (`run-card-view.ts`).
        */}
-      {publication ? (
+      {view.showRecovery && publication ? (
         <section
           aria-label={publication.title}
           className={cn(
@@ -884,37 +1095,47 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
               publication.severity === 'success' ? 'text-[var(--adm-success-text)]' : 'text-[var(--adm-warning-text)]'
             )}
           >
-            <SeverityIcon level={publication.severity} size={14} title="" /> {publication.title}
+            <SeverityIcon level={publication.severity} size={14} title="" />
+            <span className="min-w-0 truncate">
+              {publication.title}
+              {view.publicationLines === 'one' && liveUrl ? (
+                <span className="font-normal text-[var(--adm-text)]"> · {liveUrl}</span>
+              ) : null}
+            </span>
           </p>
-          {liveUrl ? (
-            <p className="mt-1 text-[length:var(--adm-text-sm)]">
-              <a
-                href={liveUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="adm-focusable break-all text-[var(--adm-text)] underline decoration-[var(--adm-border-strong)] underline-offset-2 hover:decoration-[var(--adm-text)]"
-              >
-                {liveUrl}
-              </a>
-            </p>
-          ) : null}
-          {publication.detail ? (
-            <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text)]">{publication.detail}</p>
-          ) : null}
-          {publication.facts.length > 0 ? (
-            <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              {publication.facts.join(' · ')}
-            </p>
-          ) : null}
-          {publication.offerRecheck ? (
-            <Button size="sm" variant="secondary" className="mt-2" onClick={recheck}>
-              Check again
-            </Button>
+          {view.publicationLines === 'full' ? (
+            <>
+              {liveUrl ? (
+                <p className="mt-1 text-[length:var(--adm-text-sm)]">
+                  <a
+                    href={liveUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="adm-focusable break-all text-[var(--adm-text)] underline decoration-[var(--adm-border-strong)] underline-offset-2 hover:decoration-[var(--adm-text)]"
+                  >
+                    {liveUrl}
+                  </a>
+                </p>
+              ) : null}
+              {publication.detail ? (
+                <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text)]">{publication.detail}</p>
+              ) : null}
+              {publication.facts.length > 0 ? (
+                <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                  {publication.facts.join(' · ')}
+                </p>
+              ) : null}
+              {publication.offerRecheck ? (
+                <Button size="sm" variant="secondary" className="mt-2" onClick={recheck}>
+                  Check again
+                </Button>
+              ) : null}
+            </>
           ) : null}
         </section>
       ) : null}
 
-      {activity.approvals.length > 0 ? (
+      {view.showRecovery && activity.approvals.length > 0 ? (
         <section
           aria-label="Waiting for you"
           className="mx-3 mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-warning)] bg-[var(--adm-warning-soft)] px-3 py-2"
@@ -973,76 +1194,19 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
         </section>
       ) : null}
 
-      {policyRecords.length > 0 ? (
-        <details className="mx-3 mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)]">
-          <summary className="adm-focusable w-fit cursor-pointer select-none rounded text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]">
-            Policy record · {policyRecords.length}
-          </summary>
-          {/* Audit lines, not approvals: these steps already went ahead under
-              the project's autonomous publishing policy. No buttons, no
-              amber, not counted anywhere as "needs you". */}
-          <ul className="mt-1 flex flex-col gap-0.5 text-[var(--adm-text-muted)]">
-            {policyRecords.map((record, index) => (
-              <li key={`${record.node_id}-${index}`} className="flex items-start gap-1.5">
-                <span className="mt-px flex w-3.5 shrink-0 items-center justify-center">
-                  <IconInfo size={13} className="text-[var(--adm-text-muted)]" title="" />
-                </span>
-                <span title={record.reason}>{policyRecordLine(record, labelFor(record.node_id))}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-
-      {recovery ? (
+      {/*
+       * A1: the operator's directive, not the recovery prose — kept separate
+       * from the popover on purpose. "Top up your OpenAI credit and retry" is
+       * an instruction the editor must act on outside this UI; the "what
+       * failed / what survived" explanation the prose gives is exactly what
+       * moved to the primary action's hover `Popover` above.
+       */}
+      {view.showRecovery && recovery && hasOperatorAction({ operatorAction: recovery.operator_action }) ? (
         <section
-          aria-label="What survived"
+          aria-label="What to do next"
           className="mx-3 mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2"
         >
-          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{recovery.sentence}</p>
-          <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-            {recoveryReassurance(recovery.reusable_stages)}
-          </p>
-          {hasOperatorAction({ operatorAction: recovery.operator_action }) ? (
-            // Task B, item 4: the operator action REPLACES the retry button,
-            // it does not sit next to it — retrying would only reach the
-            // same failure again until this is done.
-            <p className="mt-2 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">
-              {recovery.operator_action}
-            </p>
-          ) : onRetry && retryNodeId ? (
-            <Button size="sm" variant="secondary" className="mt-2" onClick={() => onRetry(retryNodeId)}>
-              Retry this step
-            </Button>
-          ) : null}
-          {/*
-           * Bug B (budget-raise-card): `budget_exceeded` specifically gets two
-           * more buttons alongside its operatorAction text above, instead of
-           * leaving the editor to go raise the ceiling somewhere else and come
-           * back. Owner-only (raising a spend ceiling is a money decision, not
-           * a content one — same posture as the server's own gate on this
-           * action) and only when a number was actually computable
-           * (`suggestedBudgetRaise`); a non-Owner, or a run with nothing to
-           * compute a number from, sees the operatorAction sentence alone.
-           */}
-          {raiseButtons.length > 0 && recovery.node_id ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {raiseButtons.map((button) => (
-                <Button
-                  key={button.scope}
-                  size="sm"
-                  variant="secondary"
-                  disabled={Boolean(raisingBudget)}
-                  onClick={() => raiseBudget(button.scope, recovery.node_id!, button.budgetUsd)}
-                >
-                  {button.label}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-          {raiseBudgetError ? (
-            <p className="mt-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{raiseBudgetError}</p>
-          ) : null}
+          <p className="text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">{recovery.operator_action}</p>
         </section>
       ) : null}
 
@@ -1050,13 +1214,34 @@ export function RequestActivity({ requestId, runId, defaultExpanded, onSettled, 
         id={panelId}
         role="region"
         aria-labelledby={headerId}
-        hidden={!expanded}
+        hidden={!view.showNodeList}
         className="border-t border-[var(--adm-border)] px-3 py-2"
       >
-        {expanded ? (
+        {view.showNodeList ? (
           <>
             {placeholder ? (
               <p className="mb-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{placeholder}</p>
+            ) : null}
+            {/* Audit trail, not approvals: these steps already went ahead
+                under the project's autonomous publishing policy. No buttons,
+                no amber — worth a full expand's click, not the collapsed
+                headline. */}
+            {policyRecords.length > 0 ? (
+              <details className="mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)]">
+                <summary className="adm-focusable w-fit cursor-pointer select-none rounded text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]">
+                  Policy record · {policyRecords.length}
+                </summary>
+                <ul className="mt-1 flex flex-col gap-0.5 text-[var(--adm-text-muted)]">
+                  {policyRecords.map((record, index) => (
+                    <li key={`${record.node_id}-${index}`} className="flex items-start gap-1.5">
+                      <span className="mt-px flex w-3.5 shrink-0 items-center justify-center">
+                        <IconInfo size={13} className="text-[var(--adm-text-muted)]" title="" />
+                      </span>
+                      <span title={record.reason}>{policyRecordLine(record, labelFor(record.node_id))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ) : null}
             <ol className="flex flex-col">
               {activity.nodes.map((node, nodeIndex) => (

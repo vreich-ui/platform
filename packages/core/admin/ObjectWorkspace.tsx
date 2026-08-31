@@ -58,7 +58,7 @@ import type { SiteIdentity } from '@core/lib/site-identity';
 import { Badge, Breadcrumbs, Button, Card, EmptyState, StatusPill, Skeleton } from './primitives';
 import { DropdownMenu, Tabs } from './menus';
 import { Input, Select } from './forms';
-import { ConfirmDialog, Drawer, useToast } from './overlays';
+import { ConfirmDialog, Drawer, Popover, useToast, type PopoverTriggerA11yProps } from './overlays';
 import { HistoryTimeline, ReadinessList } from './data';
 import { ActionRow, ApprovalCard } from './approval';
 import { SeverityIcon } from './severity';
@@ -237,19 +237,26 @@ function GatedButton({
   leftIcon?: React.ReactNode;
   loading?: boolean;
 }) {
-  return (
+  const button = (a11y?: PopoverTriggerA11yProps) => (
     <Button
       size="sm"
       variant={variant}
       leftIcon={leftIcon}
       disabled={!control.enabled}
-      title={control.reason}
       loading={loading}
       onClick={onClick}
+      {...a11y}
     >
       {children}
     </Button>
   );
+  // Convention D3: disabled with a reason needs a reachable tooltip, not a
+  // native `title` (no keyboard/touch affordance) — only wrap when there IS
+  // a reason; an enabled control needs no Popover.
+  if (!control.enabled && control.reason) {
+    return <Popover mode="hover" content={control.reason} disabled trigger={(a11y) => button(a11y)} />;
+  }
+  return button();
 }
 
 // ─── generated inspector VIEW
@@ -409,19 +416,44 @@ function InlineFieldEdit({
     );
   }
 
+  const pencilClassName =
+    'adm-focusable shrink-0 rounded p-1 text-[var(--adm-text-muted)] opacity-0 transition-opacity hover:text-[var(--adm-text)] focus-visible:opacity-100 group-hover/inline:opacity-100 disabled:cursor-not-allowed';
+
+  // Convention D3: disabled with a reason needs a reachable tooltip, not a
+  // native `title` (no keyboard/touch affordance) — the enabled case keeps
+  // its plain `title` hint since there's no `disabled` on that element.
   return (
     <span className="group/inline inline-flex min-w-0 items-center gap-1.5">
       {children}
-      <button
-        type="button"
-        onClick={begin}
-        disabled={Boolean(disabledReason)}
-        title={disabledReason ?? `Edit ${label.toLowerCase()}`}
-        aria-label={`Edit ${label.toLowerCase()}`}
-        className="adm-focusable shrink-0 rounded p-1 text-[var(--adm-text-muted)] opacity-0 transition-opacity hover:text-[var(--adm-text)] focus-visible:opacity-100 group-hover/inline:opacity-100 disabled:cursor-not-allowed"
-      >
-        <IconPencil size={14} />
-      </button>
+      {disabledReason ? (
+        <Popover
+          mode="hover"
+          content={disabledReason}
+          disabled
+          trigger={(a11y) => (
+            <button
+              type="button"
+              onClick={begin}
+              disabled
+              aria-label={`Edit ${label.toLowerCase()}`}
+              className={pencilClassName}
+              {...a11y}
+            >
+              <IconPencil size={14} />
+            </button>
+          )}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={begin}
+          title={`Edit ${label.toLowerCase()}`}
+          aria-label={`Edit ${label.toLowerCase()}`}
+          className={pencilClassName}
+        >
+          <IconPencil size={14} />
+        </button>
+      )}
     </span>
   );
 }
@@ -608,16 +640,22 @@ function ArticleTaxonomyCard({
             : 'Comma-separated; registry terms resolve at publish.'
         }
       />
-      <Button
-        size="sm"
-        className="self-start"
-        onClick={() => void save()}
-        loading={busy}
-        disabled={Boolean(disabledReason) || !changed}
-        title={disabledReason}
-      >
-        Save draft
-      </Button>
+      {(() => {
+        const saveDisabled = Boolean(disabledReason) || !changed;
+        const saveButton = (a11y?: PopoverTriggerA11yProps) => (
+          <Button size="sm" className="self-start" onClick={() => void save()} loading={busy} disabled={saveDisabled} {...a11y}>
+            Save draft
+          </Button>
+        );
+        // Convention D3: disabled with a reason needs a reachable tooltip, not
+        // a native `title` — only wrap when there IS a reason (an unchanged
+        // form needs no tooltip, it's just inert).
+        return saveDisabled && disabledReason ? (
+          <Popover mode="hover" content={disabledReason} disabled trigger={(a11y) => saveButton(a11y)} />
+        ) : (
+          saveButton()
+        );
+      })()}
     </div>
   );
 }

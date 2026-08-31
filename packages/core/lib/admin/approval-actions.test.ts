@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 
 import {
   canConfirmReason,
+  DECISION_KEYS,
   DECISION_LABEL,
   DECISION_PENDING_LABEL,
   decisionFailedTitle,
@@ -123,6 +124,80 @@ describe('decision copy tables', () => {
       assert.match(DECISION_PENDING_LABEL[key], /…$/);
       assert.equal(decisionFailedTitle(key), `${DECISION_LABEL[key]} failed`);
     }
+  });
+});
+
+/**
+ * A7's acceptance criterion, and the reason `DECISION_KEYS` exists. The chat's
+ * own approval card is gone; every approval surface now renders THIS action
+ * set with THESE words, so the invariant is asserted once, here, against the
+ * module that owns the list — not restated per surface where it would drift
+ * back into the "Decline"/"Deny"/"Request changes"/"Hold" spread
+ * `docs/plan/ux-inventory.md` Table C catalogued.
+ */
+describe('the decision action set (A7 vocabulary invariant)', () => {
+  it('is exactly approve | reject | modify, in row order', () => {
+    assert.deepEqual([...DECISION_KEYS], ['approve', 'reject', 'modify']);
+  });
+
+  it('has a label, a pending label and a failure title for each key and nothing else', () => {
+    assert.deepEqual(Object.keys(DECISION_LABEL).sort(), [...DECISION_KEYS].sort());
+    assert.deepEqual(Object.keys(DECISION_PENDING_LABEL).sort(), [...DECISION_KEYS].sort());
+  });
+
+  it('calls the non-approve decision "Reject" — never Decline, Deny or Request changes', () => {
+    assert.equal(DECISION_LABEL.reject, 'Reject');
+    const copy = [
+      ...DECISION_KEYS.map((key) => DECISION_LABEL[key]),
+      ...DECISION_KEYS.map((key) => DECISION_PENDING_LABEL[key]),
+      ...DECISION_KEYS.map((key) => decisionFailedTitle(key)),
+    ].join(' | ');
+    assert.doesNotMatch(copy, /declin|deny|denied|request changes|hold/i);
+  });
+
+  it('derives the Confirm copy from the same table the buttons use', () => {
+    // `<ActionRow>` renders `Confirm ${label.toLowerCase()}` — asserted here
+    // because the .tsx it lives in cannot be tested (BRIEF.md).
+    assert.equal(`Confirm ${DECISION_LABEL.reject.toLowerCase()}`, 'Confirm reject');
+    assert.equal(`Confirm ${DECISION_LABEL.modify.toLowerCase()}`, 'Confirm modify');
+  });
+});
+
+describe('reduceActionRow — capture prefill and refusal (A7)', () => {
+  it('opens the capture on a prefilled draft when one is given', () => {
+    const opened = reduceActionRow(INITIAL_ACTION_ROW_STATE, {
+      type: 'request_reason',
+      action: 'modify',
+      draft: '{\n  "path": "/x"\n}',
+    });
+    assert.equal(opened.reasonFor, 'modify');
+    assert.equal(opened.reasonDraft, '{\n  "path": "/x"\n}');
+    assert.equal(opened.draftError, undefined);
+  });
+
+  it('refuse_draft keeps the typed text and explains — it never settles the row', () => {
+    const opened = reduceActionRow(INITIAL_ACTION_ROW_STATE, { type: 'request_reason', action: 'modify' });
+    const typed = reduceActionRow(opened, { type: 'edit_reason', text: '{ bad json' });
+    const refused = reduceActionRow(typed, { type: 'refuse_draft', message: 'Not valid JSON.' });
+    assert.equal(refused.draftError, 'Not valid JSON.');
+    // The whole point: the edit survives the refusal.
+    assert.equal(refused.reasonDraft, '{ bad json');
+    assert.equal(refused.reasonFor, 'modify');
+    assert.equal(isActionRowBusy(refused), false);
+  });
+
+  it('the next keystroke clears the refusal, and beginning the decision does too', () => {
+    const refused: ActionRowState = { reasonFor: 'modify', reasonDraft: '{ bad', draftError: 'Not valid JSON.' };
+    assert.equal(reduceActionRow(refused, { type: 'edit_reason', text: '{}' }).draftError, undefined);
+    assert.equal(reduceActionRow(refused, { type: 'begin', action: 'modify' }).draftError, undefined);
+  });
+
+  it('a fresh capture never inherits a previous one\'s refusal', () => {
+    const refused: ActionRowState = { reasonFor: 'modify', reasonDraft: '{ bad', draftError: 'Not valid JSON.' };
+    const cancelled = reduceActionRow(refused, { type: 'cancel_reason' });
+    assert.deepEqual(cancelled, { reasonDraft: '' });
+    const reopened = reduceActionRow(refused, { type: 'request_reason', action: 'reject' });
+    assert.deepEqual(reopened, { reasonFor: 'reject', reasonDraft: '' });
   });
 });
 

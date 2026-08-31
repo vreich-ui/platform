@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { UseChatState } from './chat';
+import { DropdownMenu, type MenuItem } from './menus';
+import { Popover } from './overlays';
 import {
   readPersistedRunApprovalMode,
   readPersistedTestMode,
+  runModeControl,
   shouldAutoApproveRunTool,
   writePersistedRunApprovalMode,
   writePersistedTestMode,
   type RunApprovalMode,
 } from '@core/lib/admin/approval-mode';
 
+/**
+ * A5 — a small segmented pill, sized to sit in the composer's bottom-left
+ * (`ChatComposer`'s `runMode` prop) rather than a full-width row above it.
+ * The ask/safe-run choice is the kit `DropdownMenu`, labelled with the
+ * CURRENT selection (e.g. "Ask each time ▾") so the trigger itself always
+ * shows the live mode. Test mode is a second, separate pill next to it —
+ * ORTHOGONAL to the dropdown (see `useTestMode`'s doc comment) — and per
+ * Convention D3 it is now ALWAYS rendered, never hidden for a non-owner:
+ * `runModeControl` (pure, unit-tested in `approval-mode.test.ts`) decides
+ * whether it's enabled, and a disabled one explains why via
+ * `Popover mode="hover"`, reachable by keyboard/touch as well as a mouse.
+ */
 export function RunApprovalControls({
   mode,
   onChange,
@@ -22,45 +37,70 @@ export function RunApprovalControls({
   /** Orthogonal to `mode` — a run can be asking OR continuing while in test mode. */
   testMode?: boolean;
   onTestModeChange?: (on: boolean) => void;
-  /** Owner-only. Absent or false renders the row exactly as it was before test mode existed. */
+  /**
+   * Owner-only (`AgentsHub.tsx`'s `owner` check, `AgentRail.tsx`'s prop of
+   * the same name). Fed straight into `runModeControl` as the caller's
+   * already-resolved role — the server re-derives roles independently
+   * before ever honouring the flag either way.
+   */
   canUseTestMode?: boolean;
 }) {
+  const testGate = runModeControl(canUseTestMode ? ['owner'] : []);
+  const currentLabel = testGate.options.find((option) => option.value === mode)?.label ?? testGate.options[0].label;
+
+  const items: MenuItem[] = testGate.options.map((option) => ({
+    id: option.value,
+    label: option.label,
+    title: option.value === 'safe-run' ? 'Continue through every action this run proposes without asking. You can still deny or switch back.' : undefined,
+    onSelect: () => onChange(option.value),
+  }));
+
   return (
-    <div
-      className="flex flex-wrap items-center gap-1.5 text-[length:var(--adm-text-xs)]"
-      aria-label="Run approval preference"
-    >
-      <span className="mr-0.5 font-medium text-[var(--adm-text-muted)]">This run:</span>
-      <button
-        type="button"
-        aria-pressed={mode === 'ask'}
-        onClick={() => onChange('ask')}
-        className={`adm-focusable rounded-[var(--adm-radius-pill)] px-2.5 py-1 font-medium ${mode === 'ask' ? 'bg-[var(--adm-surface-raised)] text-[var(--adm-text-heading)] shadow-[var(--adm-shadow-sm)]' : 'text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]'}`}
-      >
-        Ask each time
-      </button>
-      <button
-        type="button"
-        aria-pressed={mode === 'safe-run'}
-        onClick={() => onChange('safe-run')}
-        title="Continue through every action this run proposes without asking. You can still deny or switch back."
-        className={`adm-focusable rounded-[var(--adm-radius-pill)] px-2.5 py-1 font-medium ${mode === 'safe-run' ? 'bg-[var(--adm-accent-soft)] text-[var(--adm-accent)]' : 'text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]'}`}
-      >
-        Approve safe actions
-      </button>
-      {canUseTestMode && onTestModeChange ? (
-        <>
-          <span aria-hidden="true" className="mx-0.5 h-3.5 w-px bg-[var(--adm-border)]" />
+    <div className="flex items-center gap-1" aria-label="Run approval preference">
+      <DropdownMenu
+        align="start"
+        items={items}
+        trigger={({ ref, open, onToggle }) => (
+          <button
+            ref={ref}
+            type="button"
+            onClick={onToggle}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            className="adm-focusable inline-flex items-center gap-1 whitespace-nowrap rounded-[var(--adm-radius-pill)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:bg-[var(--adm-surface-sunken)] hover:text-[var(--adm-text)]"
+          >
+            {currentLabel} ▾
+          </button>
+        )}
+      />
+      {onTestModeChange ? (
+        testGate.enabled ? (
           <button
             type="button"
             aria-pressed={testMode}
             onClick={() => onTestModeChange(!testMode)}
-            title="Exercise publishing mechanics with the committed test fixture instead of writing client copy. Owner only; the server re-checks your roles before honouring it."
-            className={`adm-focusable rounded-[var(--adm-radius-pill)] px-2.5 py-1 font-medium ${testMode ? 'bg-[var(--adm-accent-soft)] text-[var(--adm-accent)]' : 'text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]'}`}
+            title="Exercise publishing mechanics with the committed test fixture instead of writing client copy."
+            className={`adm-focusable whitespace-nowrap rounded-[var(--adm-radius-pill)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium ${testMode ? 'bg-[var(--adm-accent-soft)] text-[var(--adm-accent)]' : 'text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]'}`}
           >
             Test mode
           </button>
-        </>
+        ) : (
+          <Popover
+            mode="hover"
+            content={testGate.reason ?? 'Owner only.'}
+            disabled
+            trigger={(a11y) => (
+              <button
+                type="button"
+                disabled
+                {...a11y}
+                className="whitespace-nowrap rounded-[var(--adm-radius-pill)] px-2.5 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] opacity-50"
+              >
+                Test mode
+              </button>
+            )}
+          />
+        )
       ) : null}
     </div>
   );

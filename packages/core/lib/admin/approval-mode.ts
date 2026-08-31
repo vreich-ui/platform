@@ -1,5 +1,49 @@
 export type RunApprovalMode = 'ask' | 'safe-run';
 
+export interface RunModeOption {
+  value: RunApprovalMode;
+  label: string;
+}
+
+/**
+ * The two mutually exclusive run-mode choices, in display order. Shared
+ * between the trigger label and the menu items (A5's segmented pill) so they
+ * can never drift apart.
+ */
+export const RUN_MODE_OPTIONS: readonly RunModeOption[] = [
+  { value: 'ask', label: 'Ask each time' },
+  { value: 'safe-run', label: 'Approve safe actions' },
+];
+
+export interface RunModeControlState {
+  options: readonly RunModeOption[];
+  /** Whether Test mode is available to THIS caller. */
+  enabled: boolean;
+  /** Present exactly when `enabled` is false — the D3 Popover's hover text. */
+  reason?: string;
+}
+
+/**
+ * A5 — the pure decision behind the run-mode control's owner-only Test-mode
+ * gate (`AgentsHub.tsx`'s `owner` check at ~:301), extracted so it is
+ * unit-testable without rendering React (BRIEF.md's test convention). `roles`
+ * is the CALLER's own already-resolved role list — this function resolves
+ * nothing itself, exactly like `useTestMode`'s `allowed` above: the server
+ * independently re-derives roles before honouring the flag regardless, so a
+ * stale or spoofed client-side role list can never grant more than a
+ * disabled-with-a-reason control.
+ *
+ * Per Convention D3, a caller renders the control disabled-with-`reason`
+ * (via `Popover mode="hover"`) rather than hiding it outright whenever
+ * `enabled` is false.
+ */
+export function runModeControl(roles: readonly string[]): RunModeControlState {
+  const owner = roles.includes('owner');
+  return owner
+    ? { options: RUN_MODE_OPTIONS, enabled: true }
+    : { options: RUN_MODE_OPTIONS, enabled: false, reason: 'Test mode is owner-only.' };
+}
+
 /**
  * Wolf's ruling, 2026-08-12 (this session): "Approve safe actions" means
  * *continue the run without asking* — every pending approval in the run is

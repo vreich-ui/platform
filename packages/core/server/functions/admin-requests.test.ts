@@ -16,8 +16,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { REQUEST_PAGE_SIZE, canArchive, requestSchema } from './admin-requests.js';
+import { REQUEST_PAGE_SIZE, canArchive, requestSchema, retryRefusal } from './admin-requests.js';
 import { REQUEST_LIST_MAX_LIMIT } from '../../lib/admin/request-list-limits.js';
+import {
+  createRequest,
+  loadRequest,
+  recordProgress,
+  requeueRequest,
+  setStatus,
+  type EditorialRequestStore,
+} from '../lib/requests/store.js';
 
 /** The compiled test runs from `.tmp/ci-test`, so walk up to the repo root (the admin-governance.test.ts precedent). */
 const repoRoot = (): string => {
@@ -65,7 +73,7 @@ describe('admin-requests requestSchema', () => {
   });
 
   it('requires a request_id on every per-request action', () => {
-    for (const action of ['get', 'archive', 'unarchive', 'cancel', 'mute', 'unmute']) {
+    for (const action of ['get', 'archive', 'unarchive', 'cancel', 'mute', 'unmute', 'retry']) {
       assert.equal(requestSchema.safeParse({ action }).success, false, `${action} without an id`);
       assert.equal(
         requestSchema.safeParse({ action, request_id: 'req_agent_x_20260822_01' }).success,
@@ -103,5 +111,104 @@ describe('the two rules this endpoint must not regress', () => {
       /TEAM-WIDE/.test(source),
       'the departure from chat-visibility must stay commented, so nobody "fixes" it back'
     );
+  });
+});
+
+
+// ─── B2: Retry ───────────────────────────────────────────────────────────────
+
+/**
+ * The handler still has no auth-injection seam (see the header), so the retry
+ * action is proven at the two levels that exist: the STATE transition through
+ * `requeueRequest` — the writer this endpoint calls and never duplicates
+ * (guardrail 1) — and the HTTP mapping through `retryRefusal`, the pure
+ * function the `retry` case is written in terms of.
+ */
+class RetryFakeStore implements EditorialRequestStore {
+  readonly map = new Map<string, string>();
+
+  async get(key: string): Promise<string | null> {
+    return this.map.get(key) ?? null;
+  }
+
+  async setJSON(key: string, value: unknown): Promise<void> {
+    this.map.set(key, JSON.stringify(value));
+  }
+
+  async list({ prefix }: { prefix: string; directories?: boolean; paginate?: boolean }) {
+    return { blobs: [...this.map.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })) };
+  }
+}
+
+const RETRY_ID = 'req_agent_retinol_20260822_01';
+const at = (n: number) => new Date(Date.UTC(2026, 7, 22, 12, 0, n)).toISOString();
+
+/** A run that died at `artifact_plan` — the node the Retry receipt names. */
+const seedStoppedRun = async (store: RetryFakeStore, status: 'failed' | 'needs_you') => {
+  await createRequest(
+    store,
+    {
+      request_id: RETRY_ID,
+      kind: 'article',
+      title: 'Retinol after 40',
+      created_by: 'editor@example.com',
+      workflow: { run_id: 'run_123', workflow_id: 'wf_publishing_conductor', project_id: 'proj_drlurie', node_total: 23 },
+    },
+    at(0)
+  );
+  await setStatus(store, RETRY_ID, { status: 'running' }, at(1));
+  await recordProgress(
+    store,
+    RETRY_ID,
+    { node_total: 23, node_done: 19, node_failed: 1, stalled: false, nudges: 3, current_node: 'artifact_plan' },
+    at(2)
+  );
+  await setStatus(store, RETRY_ID, { status, status_reason: 'the artifact plan step failed' }, at(3));
+};
+
+describe('B2 — the retry action', () => {
+  it('accepts `retry` with a request_id and rejects it bare', () => {
+    assert.equal(requestSchema.safeParse({ action: 'retry', request_id: RETRY_ID }).success, true);
+    assert.equal(requestSchema.safeParse({ action: 'retry' }).success, false);
+  });
+
+  it('a failed request comes back queued, with the node it stopped at intact', async () => {
+    const store = new RetryFakeStore();
+    await seedStoppedRun(store, 'failed');
+
+    const result = await requeueRequest(store, RETRY_ID, at(4));
+    assert.equal(result.ok, true);
+
+    const doc = await loadRequest(store, RETRY_ID);
+    assert.equal(doc?.status, 'queued', 'a retry that leaves the row failed is a button that lies');
+    // `recovery.node_id` is derived per-read from the RUN (activity.ts), not
+    // stored on the request — what a retry must not clobber on this side is
+    // the workflow's own node pointer, which is both the fallback that
+    // recovery resolves to and the name the Retry receipt reads.
+    assert.equal(doc?.workflow?.current_node, 'artifact_plan');
+    assert.equal(doc?.workflow?.nudges, 0);
+    assert.equal(doc?.workflow?.run_id, 'run_123');
+  });
+
+  it('refuses a needs_you request with 409 and the reason, and does not move it', async () => {
+    const store = new RetryFakeStore();
+    await seedStoppedRun(store, 'needs_you');
+
+    const result = await requeueRequest(store, RETRY_ID, at(4));
+    if (result.ok) throw new Error('a needs_you request must not be requeued');
+    const refusal = retryRefusal(result);
+    assert.equal(refusal.code, 409, 'retrying a request waiting on a human is a conflict, not a bad request');
+    assert.match(refusal.error, /human decision/i, 'the editor must be told WHY, in the store\u2019s own words');
+    assert.equal((await loadRequest(store, RETRY_ID))?.status, 'needs_you');
+  });
+
+  it('separates "no such request" (404) from "not in a state to retry" (409)', () => {
+    assert.deepEqual(retryRefusal({ reason: 'No request req_nope.' }), { code: 404, error: 'Request not found.' });
+    assert.equal(retryRefusal({ reason: 'This request is done; there is nothing left to retry.', status: 'done' }).code, 409);
+  });
+
+  it('routes the retry through requeueRequest rather than writing the status itself (guardrail 1)', () => {
+    assert.ok(source.includes('requeueRequest(store'), 'the store owns every retry state rule');
+    assert.ok(!/status\s*=\s*'queued'/.test(source), 'admin-requests must never set a request status by hand');
   });
 });

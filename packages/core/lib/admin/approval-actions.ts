@@ -33,23 +33,43 @@ export type DecisionKey = 'approve' | 'reject' | 'modify';
 export type ReasonRequirement = 'required' | 'optional' | 'none';
 
 export interface ActionRowState {
-  /** Set while the row has swapped to the in-place reason textarea (mirrors
-   * chat.tsx's `denying`/`editing` local state, unified into one field since
+  /** Set while the row has swapped to the in-place capture textarea (this
+   * unified chat.tsx's `denying`/`editing` local state into one field —
    * Reject and Modify use the identical swap). */
   reasonFor?: 'reject' | 'modify';
   reasonDraft: string;
   /** The action whose promise is currently in flight, if any. */
   pending?: DecisionKey;
+  /**
+   * A7: set when the capture's own `validate` refused the draft. The row
+   * STAYS in capture with the typed text intact and shows this on the
+   * textarea — the chat's Modify capture is the tool's arguments as JSON,
+   * and a stray comma must not throw away what the human just edited (the
+   * legacy chat.tsx card kept a `draftError` in component state for exactly
+   * this; the state machine owns it now so it is testable).
+   */
+  draftError?: string;
 }
 
 export const INITIAL_ACTION_ROW_STATE: ActionRowState = { reasonDraft: '' };
 
 export type ActionRowEvent =
-  | { type: 'request_reason'; action: 'reject' | 'modify' }
+  /** `draft` prefills the capture — A7's Modify opens on the current arguments, not on an empty box. */
+  | { type: 'request_reason'; action: 'reject' | 'modify'; draft?: string }
   | { type: 'edit_reason'; text: string }
   | { type: 'cancel_reason' }
+  /** The capture's `validate` refused the draft: keep it, explain why. */
+  | { type: 'refuse_draft'; message: string }
   | { type: 'begin'; action: DecisionKey }
   | { type: 'settle' };
+
+/** Drops a stale refusal without leaving an `undefined`-valued key behind. */
+const withoutDraftError = (state: ActionRowState): ActionRowState => {
+  if (state.draftError === undefined) return state;
+  const next = { ...state };
+  delete next.draftError;
+  return next;
+};
 
 /**
  * `settle` is the only event that can change anything once a decision is
@@ -62,13 +82,18 @@ export function reduceActionRow(state: ActionRowState, event: ActionRowEvent): A
   if (state.pending !== undefined && event.type !== 'settle') return state;
   switch (event.type) {
     case 'request_reason':
-      return { ...state, reasonFor: event.action, reasonDraft: '' };
+      // Built fresh rather than spread: `pending` is undefined here (the
+      // guard above), so a rebuild cannot lose anything and cannot carry a
+      // previous refusal's message into a newly opened capture.
+      return { reasonFor: event.action, reasonDraft: event.draft ?? '' };
     case 'edit_reason':
-      return { ...state, reasonDraft: event.text };
+      return withoutDraftError({ ...state, reasonDraft: event.text });
     case 'cancel_reason':
-      return { ...state, reasonFor: undefined, reasonDraft: '' };
+      return { reasonDraft: '' };
+    case 'refuse_draft':
+      return { ...state, draftError: event.message };
     case 'begin':
-      return { ...state, pending: event.action };
+      return withoutDraftError({ ...state, pending: event.action });
     case 'settle':
       // A settle (success or a caught rejection) always returns to full rest —
       // there is no state a stuck spinner or a stale reason draft can survive in.
@@ -88,6 +113,17 @@ export const canConfirmReason = (state: ActionRowState, requirement: ReasonRequi
  * mechanism cannot carry.
  */
 export const needsReasonCapture = (requirement: ReasonRequirement): boolean => requirement !== 'none';
+
+/**
+ * The decision action set, in row order. A7 made this an exported list
+ * rather than three keys implied by `DECISION_LABEL`'s shape, so the
+ * vocabulary invariant ("exactly approve | reject | modify, and the middle
+ * one is called **Reject**") can be asserted against one source of truth
+ * instead of restated per surface. `decision-overlay.ts`'s `DecisionAction`
+ * is the same three words for the wire/optimistic layer; this is the button
+ * row's own ordering.
+ */
+export const DECISION_KEYS: readonly DecisionKey[] = ['approve', 'reject', 'modify'];
 
 export const DECISION_LABEL: Record<DecisionKey, string> = {
   approve: 'Approve',

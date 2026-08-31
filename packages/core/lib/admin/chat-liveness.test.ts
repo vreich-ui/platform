@@ -9,7 +9,10 @@ import {
   hasKnownInverse,
   isStreamingNow,
   lastUndoableWriteTool,
+  receiptLine,
+  runCardStatesStatus,
   terminalReceiptInfo,
+  threadStatusVisibility,
   undoPrompt,
 } from './chat-liveness.js';
 import type { ChatEventView, RunSummaryView } from './chat-client.js';
@@ -70,6 +73,29 @@ describe('deriveLivenessChip — tier 1, the ambient chip', () => {
     assert.equal(deriveLivenessChip(undefined, null), undefined);
   });
 
+  /**
+   * REGRESSION (FIX 1). `ChatStateChip` renders `null` when this returns
+   * `undefined`, so this function is what decides whether that component
+   * takes its early return — and every hook in it must therefore sit ABOVE
+   * that bail-out. A chat's very first turn walks exactly this transition:
+   * `idle` with no outcome (no chip) → `queued` (a chip). When a hook lived
+   * below the `if (!chip) return null`, that one transition changed the
+   * component's hook count from 2 to 3 and React threw "Rendered more hooks
+   * than during the previous render", unmounting `/admin/agents`.
+   *
+   * This is the pure, named cause. If the `undefined` branch below ever goes
+   * away, the hazard goes with it — and if it stays, the ordering comment in
+   * `chat.tsx`'s `ChatStateChip` is what keeps the component honest.
+   */
+  it('a never-run chat has NO chip, and its first turn gives it one (the hook-order trigger)', () => {
+    assert.equal(deriveLivenessChip('idle', null), undefined, 'a chat that has never run shows nothing');
+    assert.equal(deriveLivenessChip('idle', undefined), undefined);
+    assert.equal(deriveLivenessChip(undefined, undefined), undefined, 'no status at all shows nothing');
+    // …and the very next poll, once the turn starts, does return a chip.
+    assert.notEqual(deriveLivenessChip('queued', null), undefined, 'the first turn flips it to a chip');
+    assert.notEqual(deriveLivenessChip('running', null), undefined);
+  });
+
   it('idle + a completed last run reads as a plain success receipt', () => {
     const chip = deriveLivenessChip('idle', outcome({ outcome: 'completed' }));
     assert.equal(chip?.tier, 'done');
@@ -81,6 +107,89 @@ describe('deriveLivenessChip — tier 1, the ambient chip', () => {
     assert.equal(chip?.tier, 'done');
     assert.equal(chip?.severity, 'info');
     assert.match(chip!.label, /continues/);
+  });
+});
+
+describe('threadStatusVisibility — A2: the chip is the single live indicator', () => {
+  it('never renders the retired trailing line, regardless of inputs', () => {
+    assert.equal(threadStatusVisibility({ running: true, hasRunCard: false }).trailingLine, false);
+    assert.equal(threadStatusVisibility({ running: true, hasRunCard: true }).trailingLine, false);
+    assert.equal(threadStatusVisibility({ running: false, hasRunCard: false }).trailingLine, false);
+  });
+
+  it('shows the trailing activity group’s live RunProgress only while running and with no RequestActivity card mounted', () => {
+    assert.equal(threadStatusVisibility({ running: true, hasRunCard: false }).activityProgress, true);
+    assert.equal(threadStatusVisibility({ running: true, hasRunCard: true }).activityProgress, false, 'the run card already live-renders this run’s progress');
+    assert.equal(threadStatusVisibility({ running: false, hasRunCard: false }).activityProgress, false, 'nothing live to show');
+    assert.equal(threadStatusVisibility({ running: false, hasRunCard: true }).activityProgress, false);
+  });
+});
+
+/**
+ * FIX 5 — the invariant, over every combination there is.
+ *
+ * `hasRunCard` used to be `Boolean(chat.request)` at the call site: "a
+ * request is bound". A `RequestActivity` is a Skeleton until its first poll
+ * resolves and a degraded notice ("we could not reach the workspace") when
+ * that poll comes back `cms_agent_unavailable` / `no_workflow_run` — in both
+ * it states no run status, while `Boolean(chat.request)` stayed true and the
+ * thread stayed silenced on its behalf. A chat bound to such a request,
+ * whose last run ended in `run_error`, showed the failure NOWHERE.
+ */
+describe('runCardStatesStatus — the thread is never silenced by a silent card', () => {
+  const ALL = [true, false];
+
+  it('only a mounted, loaded card with an activity view counts as stating the status', () => {
+    assert.equal(runCardStatesStatus({ mounted: true, loaded: true, hasActivity: true }), true);
+    // The three silent states, one per field.
+    assert.equal(runCardStatesStatus({ mounted: false, loaded: true, hasActivity: true }), false, 'no card at all');
+    assert.equal(runCardStatesStatus({ mounted: true, loaded: false, hasActivity: true }), false, 'still a Skeleton');
+    assert.equal(
+      runCardStatesStatus({ mounted: true, loaded: true, hasActivity: false }),
+      false,
+      'a degraded notice states no run status'
+    );
+  });
+
+  it('INVARIANT: the card is never silent while the thread has been silenced', () => {
+    for (const mounted of ALL) {
+      for (const loaded of ALL) {
+        for (const hasActivity of ALL) {
+          for (const running of ALL) {
+            for (const outcome of ['error', 'completed'] as const) {
+              const hasRunCard = runCardStatesStatus({ mounted, loaded, hasActivity });
+              const where = `mounted=${mounted} loaded=${loaded} hasActivity=${hasActivity} running=${running}`;
+              if (hasRunCard) continue;
+              // A silent card must leave every one of the thread's own
+              // status channels open.
+              assert.equal(
+                threadStatusVisibility({ running, hasRunCard }).activityProgress,
+                running,
+                `${where}: a silent card must not suppress the thread's progress`
+              );
+              assert.equal(
+                receiptLine({ outcome, chips: [], message: 'it broke', hasRunCard }).showFailureText,
+                true,
+                `${where}: a silent card must not suppress the run's failure text`
+              );
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('and when the card IS stating the status, the thread does defer to it', () => {
+    const hasRunCard = runCardStatesStatus({ mounted: true, loaded: true, hasActivity: true });
+    assert.equal(hasRunCard, true);
+    assert.equal(threadStatusVisibility({ running: true, hasRunCard }).activityProgress, false);
+    assert.equal(receiptLine({ outcome: 'error', chips: [], message: 'it broke', hasRunCard }).showFailureText, false);
+    // …but only for the failure the card would restate. A completed run's
+    // own text was never the card's to state.
+    assert.equal(
+      receiptLine({ outcome: 'completed', chips: [], message: 'note', hasRunCard }).showFailureText,
+      true
+    );
   });
 });
 
@@ -129,6 +238,38 @@ describe('terminalReceiptInfo — tier 4, the receipt headline', () => {
     assert.equal(terminalReceiptInfo('error').severity, 'blocked');
     assert.equal(terminalReceiptInfo('caps').severity, 'info');
     assert.match(terminalReceiptInfo('caps').label, /keeps going/);
+  });
+});
+
+describe('receiptLine — A3: one muted line, the failure stated exactly once', () => {
+  it('drops a lone "no changes" chip — it carries no information the headline doesn’t already', () => {
+    assert.deepEqual(receiptLine({ outcome: 'completed', chips: ['no changes'], hasRunCard: false }).visibleChips, []);
+  });
+
+  it('keeps chips that actually say something', () => {
+    assert.deepEqual(
+      receiptLine({ outcome: 'completed', chips: ['created 1 object', 'published 1'], hasRunCard: false }).visibleChips,
+      ['created 1 object', 'published 1']
+    );
+  });
+
+  it('shows the run’s own failure text when no RequestActivity card is mounted for it', () => {
+    const decision = receiptLine({ outcome: 'error', chips: [], message: 'boom', hasRunCard: false });
+    assert.equal(decision.showFailureText, true);
+  });
+
+  it('suppresses the failure text once a RequestActivity card is mounted — that card already states this failure', () => {
+    const decision = receiptLine({ outcome: 'error', chips: [], message: 'boom', hasRunCard: true });
+    assert.equal(decision.showFailureText, false);
+  });
+
+  it('a mounted run card only suppresses the ERROR outcome’s text — a non-failed outcome has nothing duplicated to hide', () => {
+    const decision = receiptLine({ outcome: 'completed', chips: [], message: 'irrelevant here', hasRunCard: true });
+    assert.equal(decision.showFailureText, true);
+  });
+
+  it('there is nothing to show when there is no message at all', () => {
+    assert.equal(receiptLine({ outcome: 'completed', chips: [], hasRunCard: false }).showFailureText, false);
   });
 });
 

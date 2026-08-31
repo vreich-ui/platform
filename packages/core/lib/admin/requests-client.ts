@@ -176,6 +176,18 @@ export const unmuteRequest = (getToken: GetToken, requestId: string) =>
   post<{ muted: string[] }>(getToken, { action: 'unmute', request_id: requestId });
 
 /**
+ * B2 — put a stopped run back in front of the sweeper (`requeueRequest`, via
+ * `admin-requests` `retry`). Same auth/error/return contract as
+ * `raiseNodeBudget`, the other write a run card can make: the server's own
+ * refusal sentence is what gets thrown, so a `409` — most often "this request
+ * is waiting for a human decision" — reaches the editor as words rather than
+ * a status code. Lives here with the other `admin-requests` wrappers because
+ * that is the endpoint it posts to.
+ */
+export const retryRequest = (getToken: GetToken, requestId: string) =>
+  post<{ request: RequestDetailView }>(getToken, { action: 'retry', request_id: requestId });
+
+/**
  * T2.3 — visibility backoff for a poll chain. Nobody is reading a hidden tab
  * and the sweeper (W19) keeps every record true regardless, so the strongest
  * available form of "back off" is to schedule nothing at all while hidden —

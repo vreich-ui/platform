@@ -39,11 +39,22 @@ export function groupChatEvents(events: readonly ChatEventView[]): ChatTimelineI
     activity = [];
   };
   for (const event of events) {
-    if (QUIET_TOOL_EVENTS.has(event.type) && !isProminentToolResult(event)) activity.push(event);
-    else {
-      flush();
-      grouped.push({ kind: 'event', event });
+    if (QUIET_TOOL_EVENTS.has(event.type) && !isProminentToolResult(event)) {
+      activity.push(event);
+      continue;
     }
+    flush();
+    // A4: the sweeper appends a `request_progress` event on every status
+    // transition (`sweep.ts`), so a job that moves through several steps
+    // leaves a run of them back to back. Consecutive ones (nothing else
+    // landed between them) fold into the latest — the thread shows where the
+    // job stands NOW, not a scrollback of every intermediate step.
+    const prior = grouped.at(-1);
+    if (event.type === 'request_progress' && prior?.kind === 'event' && prior.event.type === 'request_progress') {
+      grouped[grouped.length - 1] = { kind: 'event', event };
+      continue;
+    }
+    grouped.push({ kind: 'event', event });
   }
   flush();
   return grouped;
