@@ -16,3 +16,9 @@ test('admin-traffic requires an authenticated admin', async () => {
   assert.ok(response.statusCode === 401 || response.statusCode === 403);
   assert.equal(parseBody(response).ok, false);
 });
+
+test('T21.2b: admin-traffic?source=own sits behind the SAME admin auth wall', async () => {
+  const response = await handler({ httpMethod: 'GET', queryStringParameters: { source: 'own' } });
+  assert.ok(response.statusCode === 401 || response.statusCode === 403);
+  assert.equal(parseBody(response).ok, false);
+});

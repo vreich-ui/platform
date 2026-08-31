@@ -15,7 +15,7 @@ import { cn } from './utils';
 import { buildLinePoints, pointsToPolyline, pointsToAreaPath, formatTrafficCount } from '@core/lib/admin/traffic-logic';
 import type { TrafficRankingRowWithShare, TrafficTrendPoint } from '@core/lib/admin/traffic-logic';
 
-// ─── shared: sr-only data table fallback ───────────────────────────────────
+// ─── shared: sr-only data table fallback ───────────────────────────────
 
 function ScreenReaderTable({ caption, rows }: { caption: string; rows: Array<[string, string]> }) {
   return (
@@ -42,9 +42,20 @@ const TREND_PADDING = 12;
 export interface TrendChartProps {
   points: TrafficTrendPoint[];
   className?: string;
+  /** T21.2b: the own-tracker feed plots pageviews/sessions through this same
+   *  chart — mislabeling those as "Visits"/"Unique visitors" would misdescribe
+   *  the numbers, so the legend/aria-label text is parameterized rather than
+   *  duplicating the chart. Defaults preserve the Netlify card unchanged. */
+  seriesALabel?: string;
+  seriesBLabel?: string;
 }
 
-export function TrendChart({ points, className }: TrendChartProps) {
+export function TrendChart({
+  points,
+  className,
+  seriesALabel = 'Visits',
+  seriesBLabel = 'Unique visitors',
+}: TrendChartProps) {
   if (points.length === 0) return null;
 
   const visitsPoints = buildLinePoints(
@@ -60,7 +71,7 @@ export function TrendChart({ points, className }: TrendChartProps) {
     TREND_PADDING
   );
   const baselineY = TREND_HEIGHT - TREND_PADDING;
-  const label = `Visits and unique visitors over ${points.length} ${points.length === 1 ? 'period' : 'periods'}, from ${points[0].t.slice(0, 10)} to ${points[points.length - 1].t.slice(0, 10)}.`;
+  const label = `${seriesALabel} and ${seriesBLabel.toLowerCase()} over ${points.length} ${points.length === 1 ? 'period' : 'periods'}, from ${points[0].t.slice(0, 10)} to ${points[points.length - 1].t.slice(0, 10)}.`;
 
   return (
     <div className={className}>
@@ -94,25 +105,28 @@ export function TrendChart({ points, className }: TrendChartProps) {
       <div className="mt-2 flex items-center gap-4 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-3 rounded-full bg-[var(--adm-accent)]" aria-hidden="true" />
-          Visits
+          {seriesALabel}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span
             className="h-0.5 w-3 rounded-full border-t-2 border-dashed border-[var(--adm-info)]"
             aria-hidden="true"
           />
-          Unique visitors
+          {seriesBLabel}
         </span>
       </div>
       <ScreenReaderTable
-        caption="Visits and unique visitors by period"
-        rows={points.map((p) => [p.t, `${p.visits} visits, ${p.uniques} unique visitors`])}
+        caption={`${seriesALabel} and ${seriesBLabel.toLowerCase()} by period`}
+        rows={points.map((p) => [
+          p.t,
+          `${p.visits} ${seriesALabel.toLowerCase()}, ${p.uniques} ${seriesBLabel.toLowerCase()}`,
+        ])}
       />
     </div>
   );
 }
 
-// ─── BarList: horizontal bar list (top content / top sources) ──────────────
+// ─── BarList: horizontal bar list (top content / top sources) ───────────
 
 export interface BarListProps {
   rows: TrafficRankingRowWithShare[];
