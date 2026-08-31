@@ -149,6 +149,17 @@ test('the rendered skill carries the voice and names the approval-gated types', 
   assert.match(skill, /`editorial_voice`/);
 });
 
+test('the skill names the real voice object id the tenant actually stores', () => {
+  // The plugin's very first tool call is object_get on this id. If the rendered
+  // id is wrong the session dies at step 0, so it is pinned against the id
+  // convention the site export itself uses (sites/<slug>/data/site/voice/).
+  const { skill_md: skill } = render();
+  assert.ok(
+    skill.includes('object_id:"voice_drlurie"'),
+    'the session-start call must name voice_drlurie, the id committed in the site export'
+  );
+});
+
 test('a missing voice degrades to a warning and a placeholder skill, never a throw', () => {
   const bundle = render({ voice: null });
   assert.equal(bundle.sources.voice_object_id, null);
