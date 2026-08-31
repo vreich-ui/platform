@@ -16,6 +16,7 @@ import test from 'node:test';
 import {
   describeTrackingGovernance,
   withTrackingPublishMode,
+  formatAnalyticsIdMode,
   type CreationPolicyLike,
 } from '../../packages/core/lib/admin/tracking-governance.js';
 import { activeCreationPolicy } from '../../packages/core/lib/creation-policy.js';
@@ -90,6 +91,13 @@ test('the quick flip is an explicit per-type pin — the master and other pins a
   // must survive later master flips; the matrix's "Master default" unpins.
   const rePinned = withTrackingPublishMode(before, 'autonomous');
   assert.equal(rePinned.overrides.tracking_config, 'autonomous');
+});
+
+test('T21.2: analytics_id_mode — present renders the raw value, absent renders "not set"', () => {
+  assert.equal(formatAnalyticsIdMode('granted-only'), 'granted-only', 'value present ⇒ shown as-is');
+  assert.equal(formatAnalyticsIdMode('unrestricted-auto'), 'unrestricted-auto', 'value present ⇒ shown as-is');
+  assert.equal(formatAnalyticsIdMode(undefined), 'not set', 'no export yet ⇒ the existing "not set" treatment');
+  assert.equal(formatAnalyticsIdMode(null), 'not set', 'null degrades the same as undefined');
 });
 
 test('the write path is the Owner-only governance endpoint (the T9.15 boundary — no new machinery)', async () => {

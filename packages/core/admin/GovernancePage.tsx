@@ -36,7 +36,9 @@ import {
 import {
   describeTrackingGovernance,
   withTrackingPublishMode,
+  formatAnalyticsIdMode,
   type CreationPolicyLike,
+  type AnalyticsIdMode,
 } from '@core/lib/admin/tracking-governance';
 import {
   AUTONOMY_LABELS,
@@ -61,9 +63,13 @@ function TechnicalDetails({ children }: { children: ReactNode }) {
   );
 }
 
-type AnalyticsIdMode = 'granted-only' | 'unrestricted-auto';
-
-function GovernanceBody({ identity, analyticsIdMode }: { identity: SiteIdentity; analyticsIdMode: AnalyticsIdMode }) {
+function GovernanceBody({
+  identity,
+  analyticsIdMode,
+}: {
+  identity: SiteIdentity;
+  analyticsIdMode: AnalyticsIdMode | undefined;
+}) {
   const { toast } = useToast();
   const [gov, setGov] = useState<GovernanceState | null>(null);
   const [owner, setOwner] = useState(false);
@@ -155,7 +161,7 @@ function GovernanceBody({ identity, analyticsIdMode }: { identity: SiteIdentity;
         owner={owner}
         onSaved={refresh}
         identity={identity}
-        analyticsIdMode={analyticsIdMode}
+        analyticsIdMode={formatAnalyticsIdMode(analyticsIdMode)}
       />
 
       <Card kicker="Effective policy" title="How these settings work together">
@@ -393,7 +399,7 @@ function LearningModeCard({
   );
 }
 
-// ─── tracking governance card (W13 T13.12 — the OQ-W13-2 surface) ──────────
+// ─── tracking governance card (W13 T13.12 — the OQ-W13-2 surface) ──────────────────
 
 function TrackingGovernanceCard({
   gov,
@@ -406,7 +412,8 @@ function TrackingGovernanceCard({
   owner: boolean;
   onSaved: () => Promise<void>;
   identity: SiteIdentity;
-  analyticsIdMode: AnalyticsIdMode;
+  /** Already formatted for display (formatAnalyticsIdMode) — 'not set' when absent. */
+  analyticsIdMode: string;
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -731,7 +738,9 @@ function ChatToolAutonomyCard({
 
 export interface GovernancePageProps {
   identity: SiteIdentity;
-  analyticsIdMode: AnalyticsIdMode;
+  /** Undefined when no tracking_config export exists yet — the Tracking
+   *  card renders that as 'not set', never an invented default. */
+  analyticsIdMode: AnalyticsIdMode | undefined;
 }
 
 export default function GovernancePage({ identity, analyticsIdMode }: GovernancePageProps) {
