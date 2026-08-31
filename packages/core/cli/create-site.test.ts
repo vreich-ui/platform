@@ -169,6 +169,7 @@ test('CORE_BLOB_STORES matches the store-name literals in blob-store.ts/governan
       'idempotency', // QA-W16-1: idempotency-key bridge (idempotency-store.ts / getIdempotencyBlobStore)
       'marginalia', // W15 S4 (MVP): comment threads, independent of the object substrate's lock/version lifecycle
       'opt-ins',
+      'plugin-manifest', // W1.1: the per-tenant publishing-plugin bundle (draft/active), a rendered document not a governed object
       'site-objects',
       'tracking-events',
       'users',

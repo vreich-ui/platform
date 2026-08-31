@@ -1,0 +1,200 @@
+import '../../sites/drlurie/config/policy-bindings.js'; // register the drlurie site providers
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  buildManifestBundle,
+  buildConnection,
+  manifestStaleReasons,
+} from '../../packages/core/server/lib/plugin/build-manifest.js';
+import {
+  buildPluginTools,
+  toolSurfaceDigest,
+  PLUGIN_TOOL_DENYLIST,
+} from '../../packages/core/server/lib/plugin/build-tools.js';
+import { manifestBundleSchema } from '../../packages/core/server/lib/plugin/manifest-types.js';
+import { visibleToolDefinitions } from '../../netlify/functions/mcp.js';
+
+const ORIGIN = 'https://drluriescience.netlify.app';
+const FIXED_NOW = () => new Date('2026-08-31T12:00:00.000Z');
+
+const VOICE_FIXTURE = {
+  object_id: 'voice_drlurie',
+  record_version: 14,
+  body: {
+    name: 'Dr. Lurie — evidence-led skin health',
+    audience: 'Adults making decisions about their own skin.',
+    tone: ['warm', 'calm', 'evidence-led', 'non-alarmist'],
+    cadence: 'Conversational but disciplined.',
+    claim_policy: 'Efficacy statements are hedged to the strength of the evidence.',
+    cta_policy: 'At most one ask per article.',
+    reader_safety_notes: 'Consumer health audience with no clinical training.',
+    default_framework: 'fw_concern',
+    frameworks: [
+      {
+        framework_id: 'fw_concern',
+        label: 'Concern',
+        when_to_use: 'Reader arrives worried.',
+        beats: ['hook', 'proof'],
+      },
+    ],
+    lexicon: { prefer: ['barrier', 'evidence'], avoid: ['miracle', 'cure'] },
+  },
+};
+
+const render = (overrides: Partial<Parameters<typeof buildManifestBundle>[0]> = {}) =>
+  buildManifestBundle({
+    origin: ORIGIN,
+    definitions: visibleToolDefinitions(),
+    voice: VOICE_FIXTURE,
+    platform: 'claude',
+    now: FIXED_NOW,
+    approval: {
+      master: 'all-autonomous',
+      overrides: { product: 'require-approval', editorial_voice: 'require-approval' },
+    },
+    ...overrides,
+  });
+
+// ─── W1.3 — tools.json is DERIVED from governance.toolClass ────────────────
+
+test('plugin tools are derived from tool governance, never a hand-kept list', () => {
+  const tools = buildPluginTools(visibleToolDefinitions());
+  assert.ok(tools.length > 10, 'expected a real tool surface');
+
+  // Only one privileged tool is allowed through, by name, and no membership tool ever.
+  for (const tool of tools) {
+    const allowed =
+      ['read', 'draft', 'creation', 'publication'].includes(tool.tool_class) || tool.name === 'release_to_production';
+    assert.ok(allowed, `${tool.name} carries class ${tool.tool_class}, which a plugin must never receive`);
+    assert.notEqual(tool.tool_class, 'membership', `${tool.name} is a membership tool`);
+  }
+
+  // consequential is computed, not hand-set — that is what W3.2 exports as
+  // x-openai-isConsequential.
+  for (const tool of tools) {
+    assert.equal(tool.consequential, tool.tool_class !== 'read', `${tool.name} consequential flag is wrong`);
+  }
+
+  const names = new Set(tools.map((t) => t.name));
+  // The publish path must be complete...
+  for (const required of [
+    'object_create',
+    'object_checkout',
+    'object_patch',
+    'object_publish',
+    'object_checkin',
+    'object_refresh_lock',
+    'release_to_production',
+    'deploy_status',
+    'verify_article_images',
+    'object_contract',
+  ]) {
+    assert.ok(names.has(required), `${required} is missing from the plugin tool list`);
+  }
+  // ...and every named exclusion must actually be excluded.
+  for (const denied of Object.keys(PLUGIN_TOOL_DENYLIST)) {
+    assert.ok(!names.has(denied), `${denied} is on the denylist but still reached the bundle`);
+  }
+  for (const never of [
+    'member_list',
+    'wipe_blob_stores',
+    'membership_policy_set',
+    'site_apply_theme',
+    'product_set_price',
+  ]) {
+    assert.ok(!names.has(never), `${never} must never be in a plugin bundle`);
+  }
+});
+
+test('the tool-surface digest is stable for the same surface and moves when it changes', () => {
+  const tools = buildPluginTools(visibleToolDefinitions());
+  assert.equal(toolSurfaceDigest(tools), toolSurfaceDigest([...tools]));
+  assert.notEqual(toolSurfaceDigest(tools), toolSurfaceDigest(tools.slice(1)));
+});
+
+// ─── W1.2 — the rendered skill carries the rules the code actually enforces ──
+
+test('the rendered skill states the two rules that block or bind a hand-authored publish', () => {
+  const { skill_md: skill } = render();
+
+  // ART-2 article_claim_verification is blocks_publish and bites hand-authored
+  // bodies only — the plugin IS that path (docs/plugin/legacy-gpt.md §A.3.1).
+  assert.match(skill, /Write `sources`\. Never write `claims`\./);
+  assert.ok(
+    skill.includes('blocks the') && skill.includes('publish**'),
+    'the skill must say a claims array blocks the publish'
+  );
+
+  // The ceiling is enforced only on the workflow path, so the skill must say
+  // that the plugin is its own enforcement.
+  assert.match(skill, /Nothing on the server enforces this ceiling for you/);
+});
+
+test('the rendered skill writes the live aggression ceiling in as a hard bound', () => {
+  const { skill_md: skill } = render();
+  for (const label of ['claim_strength', 'urgency', 'emotional_agitation', 'cta_density']) {
+    assert.ok(skill.includes(label), `${label} missing from the rendered ceiling table`);
+  }
+  assert.match(skill, /ceiling, not a target/);
+  assert.ok(!skill.includes('UNSET'), 'drlurie declares a ceiling, so no dial should render as UNSET');
+});
+
+test('the rendered skill carries the voice and names the approval-gated types', () => {
+  const { skill_md: skill } = render();
+  assert.ok(skill.includes('Dr. Lurie — evidence-led skin health'));
+  assert.ok(skill.includes('fw_concern'));
+  assert.ok(skill.includes('miracle'), 'the avoid-lexicon must survive into the skill');
+  assert.match(skill, /`product`/);
+  assert.match(skill, /`editorial_voice`/);
+});
+
+test('a missing voice degrades to a warning and a placeholder skill, never a throw', () => {
+  const bundle = render({ voice: null });
+  assert.equal(bundle.sources.voice_object_id, null);
+  assert.ok(bundle.warnings.some((w) => w.includes('editorial_voice')));
+  assert.match(bundle.skill_md, /read the live object at session start/);
+});
+
+test('the render is deterministic for identical inputs', () => {
+  assert.equal(render().skill_md, render().skill_md);
+  assert.equal(render().manifest_version, render().manifest_version);
+});
+
+// ─── W1.1 — the bundle validates and the connection is the real one ──────────
+
+test('a rendered bundle satisfies its own schema', () => {
+  const parsed = manifestBundleSchema.safeParse(render());
+  assert.ok(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues.slice(0, 3)));
+});
+
+test('the connection card carries the verified OAuth paths and the auth-health probe', () => {
+  const connection = buildConnection(ORIGIN, 'drlurie', 'site_drlurie');
+  assert.equal(connection.mcp_url, `${ORIGIN}/mcp`);
+  // W0.1: audience pinning is the top connector failure mode and is invisible
+  // client-side, so the probe URL ships on the card.
+  assert.equal(connection.mcp_auth_health_url, `${ORIGIN}/mcp?health=auth`);
+  assert.equal(connection.oauth.authorization_url, `${ORIGIN}/oauth/authorize`);
+  assert.equal(connection.oauth.token_url, `${ORIGIN}/oauth/token`);
+  assert.equal(connection.oauth.registration_url, `${ORIGIN}/oauth/register`);
+});
+
+// ─── W4.2 — staleness ───────────────────────────────────────────────────────
+
+test('staleness reports a moved voice, a changed tool surface and a changed posture', () => {
+  const bundle = render();
+  const fresh = {
+    voiceRecordVersion: bundle.sources.voice_record_version,
+    toolSurfaceDigest: bundle.sources.tool_surface_digest,
+    approvalPosture: bundle.sources.approval_posture,
+  };
+  assert.deepEqual(manifestStaleReasons(bundle, fresh), []);
+
+  assert.equal(manifestStaleReasons(bundle, { ...fresh, voiceRecordVersion: 15 }).length, 1);
+  assert.equal(manifestStaleReasons(bundle, { ...fresh, toolSurfaceDigest: 'sha_deadbeef_9' }).length, 1);
+  assert.equal(manifestStaleReasons(bundle, { ...fresh, approvalPosture: 'all-require-approval' }).length, 1);
+  assert.equal(
+    manifestStaleReasons(bundle, { voiceRecordVersion: 99, toolSurfaceDigest: 'x', approvalPosture: 'y' }).length,
+    3
+  );
+});

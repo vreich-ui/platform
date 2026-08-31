@@ -214,6 +214,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
         lock_token: stringSchema(),
         expected_record_version: intSchema('The record version you last read (optimistic concurrency check).'),
         ops: patchOpsSchema('Array of typed patch ops (the C§2.0 grammar).'),
+        agent_name: stringSchema('Optional self-declared agent name recorded on history (attribution only).'),
       },
       ['object_type', 'object_id', 'lock_token', 'expected_record_version', 'ops']
     ),
@@ -472,6 +473,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
           ['run_id', 'node_id', 'prompt_version', 'model']
         ),
         idempotency_key: idempotencyKeyJsonSchema,
+        agent_name: stringSchema('Optional self-declared agent name recorded on history (attribution only).'),
       },
       ['object_type', 'object_id', 'lock_token']
     ),

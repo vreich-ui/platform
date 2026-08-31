@@ -16,7 +16,7 @@ create-site plan for 'acme' (Acme)
   theme id:       thm_acme_default
   canonical host: https://acme.netlify.app
 
-Files to create under sites/acme/ (90):
+Files to create under sites/acme/ (91):
   + sites/acme/config/site-identity.ts
   + sites/acme/config/site-binding.ts
   + sites/acme/config/approval-policy.ts
@@ -71,6 +71,7 @@ Files to create under sites/acme/ (90):
   + sites/acme/netlify/functions/admin-governance.ts
   + sites/acme/netlify/functions/admin-list-blob-images.ts
   + sites/acme/netlify/functions/admin-object.ts
+  + sites/acme/netlify/functions/admin-plugin-manifest.ts
   + sites/acme/netlify/functions/admin-release.ts
   + sites/acme/netlify/functions/admin-release-state.ts
   + sites/acme/netlify/functions/admin-request-activity.ts
@@ -218,6 +219,6 @@ ADMIN WORKSPACE BOOTSTRAP (human gate â€” runbook site-provisioning-runbook.md Â
   4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in
      config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).
      Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only
-  Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency, editorial-requests.
+  Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency, editorial-requests, plugin-manifest.
   Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>
 `;
