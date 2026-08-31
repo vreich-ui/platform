@@ -1,10 +1,11 @@
 {
   "__generated": {
-    "at": "2026-08-28T18:48:10.894Z",
+    "at": "2026-08-31T15:20:42.944Z",
     "from": "objects/tracking_config/by-id/trk_drlurie.json",
-    "record_version": 4
+    "record_version": 8
   },
   "consent": {
+    "analytics_id_mode": "unrestricted-auto",
     "banner": {
       "accept_label": "Accept all",
       "body": "We measure how this site is used with a cookieless, first-party counter that stores nothing on your device. With your permission we would also use advertising measurement and a persistent analytics identifier. You can change your choice any time via the privacy choices link in the footer.",
