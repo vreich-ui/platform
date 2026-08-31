@@ -1,21 +1,23 @@
 /**
  * Chat primitives (T9.14, plan §3/§4): ChatThread, ChatMessage, ToolCallCard,
- * ApprovalCard, AgentChip, ChatComposer, and the useChat polling hook over the
- * T9.13 protocol. The thread header always shows WHICH agent is speaking
- * (§4a); every write shows an ApprovalCard with the tool's human summary, the
- * args, the server-computed dry-run, and Approve / Edit-and-approve / Deny.
+ * PendingApprovalCard, AgentChip, ChatComposer, and the useChat polling hook
+ * over the T9.13 protocol. The thread header always shows WHICH agent is
+ * speaking (§4a); every write shows the kit `<ApprovalCard>` (`./approval`)
+ * with the tool's human summary, the args, the server-computed dry-run, and
+ * one row of Approve / Reject / Modify (A7 — this file no longer has an
+ * approval card of its own).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Avatar, Button, Card } from './primitives';
 import { Markdown } from './Markdown';
 import { Textarea } from './forms';
-import { useToast } from './overlays';
+import { Popover, useToast } from './overlays';
 import { ControlsCard } from './ControlsCard';
 import { MicButton } from './MicButton';
-import { RunProgress } from './approval';
+import { ApprovalCard, RunProgress, type ApprovalCardProps } from './approval';
 import { SeverityIcon } from './severity';
-import { IconAlertTriangle, IconRobot, IconSend } from './icons';
+import { IconRobot, IconSend } from './icons';
 import {
   cancelChatRun,
   chooseCandidate as chooseCandidateRequest,
@@ -42,13 +44,20 @@ import {
   elapsedMsSince,
   isStreamingNow,
   lastUndoableWriteTool,
+  receiptLine,
   terminalReceiptInfo,
+  threadStatusVisibility,
   undoPrompt,
 } from '@core/lib/admin/chat-liveness';
 import { formatDuration } from '@core/lib/admin/requests-client';
 import { createApprovalClaim } from '@core/lib/admin/object-context-actions';
 import { assertDecided, decide } from '@core/lib/admin/decisions';
-import { DECISION_LABEL } from '@core/lib/admin/approval-actions';
+import {
+  editedArgsDraft,
+  editedArgsError,
+  parseEditedArgs,
+  presentPendingApproval,
+} from '@core/lib/admin/pending-approval';
 import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/chat-quote';
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
 import { useDictation } from '@core/lib/admin/use-dictation';
@@ -328,7 +337,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
         setPreviewCandidateId(undefined);
       }),
     approve,
-    // Decline shares `pending.call_id` with Approve — claiming through the
+    // Reject shares `pending.call_id` with Approve — claiming through the
     // same guard means a click on one disables the other immediately, not
     // just after the next poll.
     deny: (callId, reason) => {
@@ -632,8 +641,13 @@ function RunFinishedLine({ event }: { event: ChatEventView }) {
  */
 function RequestProgressLine({ event, isOwner }: { event: ChatEventView; isOwner: boolean }) {
   const copy = requestProgressCopy(event.detail, isOwner);
+  // A4: a plain line, no border/box — the sweeper's own status line no
+  // longer competes visually with the boxed cards around it. Callers (see
+  // `ChatThread`) render this at all only when no `RequestActivity` card is
+  // already mounted for the same request (`hasRunCard`); this component
+  // itself stays a dumb consumer of the event.
   return (
-    <div className="flex flex-col gap-1 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-1.5 text-[length:var(--adm-text-xs)]">
+    <div className="flex flex-col gap-1 text-[length:var(--adm-text-xs)]">
       <div className="flex items-center gap-2 text-[var(--adm-text-muted)]">
         <SeverityIcon level={copy.level} size={14} title="" />
         <span className="font-medium text-[var(--adm-text)]">{copy.label}</span>
@@ -672,6 +686,18 @@ function RequestProgressLine({ event, isOwner }: { event: ChatEventView; isOwner
  * checkout/lock context performs it, through the same governed, interrupt-
  * capable path (tier 3) as any other write. No inverse, no button — never a
  * dead link.
+ *
+ * A3: this used to be its own bordered card restating severity, elapsed
+ * time, the run's message, EVERY chip (including a lone "no changes" that
+ * says nothing), created-object links, and Undo all at once — one more
+ * voice repeating "Working / Failed" alongside the header chip and the
+ * request card. It is now a single 12px muted line, right-aligned under the
+ * assistant message: `✓ Done · 5s`. Everything else that used to sit in the
+ * open — the run's own chips, its failure text, created-object links, Undo —
+ * moves behind a `Popover mode="click"` ("details"), shown only when there
+ * is something in it worth opening (`receiptLine`, `chat-liveness.ts`, also
+ * decides whether the failure text renders there at all: a `RequestActivity`
+ * card mounted for the same request already states a failed run once).
  */
 function RunReceipt({
   outcome,
@@ -680,6 +706,7 @@ function RunReceipt({
   events,
   onUndo,
   busy,
+  hasRunCard = false,
 }: {
   outcome: RunSummaryView;
   /** The `run_error` event's human message, when this receipt is for a failed run. */
@@ -689,47 +716,81 @@ function RunReceipt({
   events: ChatEventView[];
   onUndo?: (prompt: string) => void;
   busy?: boolean;
+  /** A `RequestActivity` card is mounted for this chat's request — see `receiptLine`. */
+  hasRunCard?: boolean;
 }) {
   const info = terminalReceiptInfo(outcome.outcome);
   const elapsed = elapsedMsSince(outcome.started_at, Date.parse(outcome.finished_at));
   const undoTool = lastUndoableWriteTool(events, outcome.run_id);
   const prompt = undoTool ? undoPrompt(undoTool) : undefined;
   const created = createdObjectsFromEvents(events, outcome.run_id);
+  const decision = receiptLine({ outcome: outcome.outcome, chips: outcome.chips, message, hasRunCard });
+  const hasDetails =
+    decision.visibleChips.length > 0 ||
+    (decision.showFailureText && Boolean(message || providerDetail)) ||
+    created.length > 0 ||
+    Boolean(prompt && onUndo);
+
   return (
-    <div className="mx-auto flex w-full max-w-[85%] flex-col gap-1.5 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2 text-[length:var(--adm-text-xs)]">
-      <div className="flex flex-wrap items-center gap-2">
-        <SeverityIcon level={info.severity} size={13} title="" />
-        <span className="font-medium text-[var(--adm-text)]">{info.label}</span>
-        {elapsed !== undefined ? (
-          <span className="tabular-nums text-[var(--adm-text-muted)]">{formatDuration(elapsed)}</span>
+    <div className="flex justify-end">
+      <div className="flex max-w-[85%] items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+        {info.severity === 'success' ? (
+          <span aria-hidden="true">✓</span>
+        ) : (
+          <SeverityIcon level={info.severity} size={12} title="" />
+        )}
+        <span>{info.label}</span>
+        {elapsed !== undefined ? <span className="tabular-nums">· {formatDuration(elapsed)}</span> : null}
+        {hasDetails ? (
+          <Popover
+            mode="click"
+            placement="top"
+            trigger={(a11y) => (
+              <button
+                type="button"
+                {...a11y}
+                className="adm-focusable rounded text-[var(--adm-text-muted)] underline decoration-dotted underline-offset-2 hover:text-[var(--adm-text)]"
+              >
+                details
+              </button>
+            )}
+            content={
+              <div className="flex w-64 flex-col gap-2 text-[length:var(--adm-text-xs)]">
+                {decision.showFailureText && message ? <p className="text-[var(--adm-text-muted)]">{message}</p> : null}
+                {decision.showFailureText && providerDetail ? (
+                  <p className="text-[var(--adm-text-muted)]">{providerDetail}</p>
+                ) : null}
+                {decision.visibleChips.length > 0 ? (
+                  <p className="text-[var(--adm-text-muted)]">{decision.visibleChips.join(' · ')}</p>
+                ) : null}
+                {created.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {created.map((object) => (
+                      <a
+                        key={object.id}
+                        href={`/admin/content/${encodeURIComponent(object.id)}${object.type ? `?type=${encodeURIComponent(object.type)}` : ''}`}
+                        className="adm-focusable rounded-full border border-[var(--adm-border)] px-2 py-0.5 text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+                      >
+                        Open {object.id}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                {prompt && onUndo ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onUndo(prompt)}
+                    className="adm-focusable w-fit rounded text-[var(--adm-accent)] hover:underline disabled:opacity-50"
+                  >
+                    Undo
+                  </button>
+                ) : null}
+              </div>
+            }
+          />
         ) : null}
       </div>
-      {message ? <p className="text-[var(--adm-text-muted)]">{message}</p> : null}
-      {providerDetail ? <p className="text-[var(--adm-text-muted)]">{providerDetail}</p> : null}
-      {outcome.chips.length > 0 ? <p className="text-[var(--adm-text-muted)]">{outcome.chips.join(' · ')}</p> : null}
-      {created.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {created.map((object) => (
-            <a
-              key={object.id}
-              href={`/admin/content/${encodeURIComponent(object.id)}${object.type ? `?type=${encodeURIComponent(object.type)}` : ''}`}
-              className="adm-focusable rounded-full border border-[var(--adm-border)] px-2 py-0.5 text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
-            >
-              Open {object.id}
-            </a>
-          ))}
-        </div>
-      ) : null}
-      {prompt && onUndo ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onUndo(prompt)}
-          className="adm-focusable w-fit rounded text-[var(--adm-accent)] hover:underline disabled:opacity-50"
-        >
-          Undo
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -765,11 +826,29 @@ export function ChatStateChip({
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [ticking]);
+  // A2: this is the ONE place `isStreamingNow` is computed (was also
+  // computed a second time in `ChatThread`, for the trailing line that's now
+  // retired — see `threadStatusVisibility`). Memoized since `events` is a
+  // stable reference between the once-a-second `nowMs` ticks that don't
+  // actually change the streaming read.
+  //
+  // ORDER IS LOAD-BEARING: every hook in this component must run BEFORE the
+  // `if (!chip)` bail-out below. `deriveLivenessChip` returns `undefined` for
+  // a chat that has never run (`status: 'idle'`, no `lastOutcome`) and a chip
+  // once the first turn starts, so a memo placed after the early return would
+  // change this component's hook COUNT between two renders of the same
+  // instance — React throws "Rendered more hooks than during the previous
+  // render" and unmounts the whole surface. `chat-liveness.test.ts` pins the
+  // `undefined` case that triggers it.
+  const streaming = useMemo(() => isStreamingNow(status, lastEventAtMs, nowMs), [status, lastEventAtMs, nowMs]);
   if (!chip) return null;
   const elapsed = elapsedMsForChip(chip.tier, events, lastOutcome, nowMs);
-  const streaming = isStreamingNow(status, lastEventAtMs, nowMs);
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-[var(--adm-radius-pill)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">
+    <span
+      role="status"
+      aria-live="polite"
+      className="inline-flex items-center gap-1.5 rounded-[var(--adm-radius-pill)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]"
+    >
       {chip.severity ? (
         <SeverityIcon level={chip.severity} size={12} title="" />
       ) : (
@@ -811,7 +890,7 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
           output: event.detail?.output,
         })
       : undefined;
-  // Declining a proposed write is a normal outcome of the approval protocol,
+  // Rejecting a proposed write is a normal outcome of the approval protocol,
   // not an error — it has always rendered as a red ✗ too.
   const severity: Severity = classified?.severity ?? (denied ? DENIED_SEVERITY : 'ok');
   // B2 (T0.3 Table B): this was its own severity→icon/colour switch, hand-
@@ -827,7 +906,7 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
       : event.type === 'tool_result'
         ? (classified?.label ?? summary)
         : denied
-          ? `Declined by ${String(event.detail?.by ?? 'the human')}`
+          ? `Rejected by ${String(event.detail?.by ?? 'the human')}`
           : approved
             ? `Approved by ${String(event.detail?.by ?? 'the human')}${event.detail?.edited ? ' (edited)' : ''}`
             : summary;
@@ -865,7 +944,12 @@ export function ToolCallCard({ event }: { event: ChatEventView }) {
  * `live` is true only for the trailing group of the currently-running turn —
  * there, the trigger row swaps its plain "N steps" text for T1.2's
  * `<RunProgress>` (step count + elapsed), so the collapsed dock itself reads
- * as active rather than as a static label. `totalSteps` is deliberately set
+ * as active rather than as a static label. A2: the caller (`ChatThread`,
+ * via `threadStatusVisibility`) also holds `live` false once a
+ * `RequestActivity` card is mounted for this chat's request — that card
+ * already live-renders the SAME run's step count, so this component falls
+ * back to the plain static label rather than stating it a second time.
+ * `totalSteps` is deliberately set
  * equal to `step`: the agent loop decides its own tool calls turn by turn, so
  * there is no fixed target to show a fraction of — this reports "N steps so
  * far", not a guessed percentage toward an unknown total. Cost is left
@@ -940,169 +1024,92 @@ function ActivityLine({
   );
 }
 
-// ─── ApprovalCard ───────────────────────────────────
+// ─── PendingApprovalCard ───────────────────────────────────
 
-export function ApprovalCard({
+/**
+ * A7 — the chat's pending tool-call approval, on the KIT card.
+ *
+ * This file used to carry its own `ApprovalCard`: a sunken panel, an
+ * "Approval needed" eyebrow, a `<details>` wrapper around the payload, and
+ * Approve / Reject on the left with Modify pushed to the far right as a bare
+ * text button. Two unrelated components named `ApprovalCard` then existed in
+ * one package (see `index.ts`'s header, now corrected). This is the migration
+ * the T1.2 header always pointed at: ONE flat card, ONE row, Approve / Reject
+ * / Modify side by side, from `./approval`.
+ *
+ * It stays an adapter and nothing more — every string and every branch below
+ * comes from `pending-approval.ts`, because `.tsx` under `packages/core/admin`
+ * is excluded from `tsconfig.test.json` and cannot be asserted on (BRIEF.md).
+ *
+ * The two chat-specific shapes the kit card had to learn (rather than be
+ * forked for):
+ *  - **Modify is an edited-args capture**, not a "why" — `modifyCapture`
+ *    opens the textarea on the call's current JSON and refuses a draft that
+ *    does not parse, keeping the edit. Confirming re-approves with the parsed
+ *    arguments (`approve_tool` + `edited_args`), which is what Modify has
+ *    always meant on this mechanism.
+ *  - **No callbacks at all** when the decision belongs elsewhere (A9's
+ *    Object Stage hand-off) or has already been submitted.
+ */
+function PendingApprovalCard({
   pending,
-  busy,
   onApprove,
-  onDeny,
+  onReject,
   showActions = true,
   consumed = false,
 }: {
   pending: PendingView;
-  busy: boolean;
   onApprove: (editedArgs?: Record<string, unknown>) => void;
-  onDeny: (reason?: string) => void;
+  onReject: (reason?: string) => void;
   showActions?: boolean;
-  /** This call_id has already been submitted (approve/deny) — hide actions until the poll confirms it's gone. */
+  /** This call_id has already been submitted (approve/reject) — no actions until the poll confirms it's gone. */
   consumed?: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [draftError, setDraftError] = useState<string | undefined>(undefined);
-  const [denying, setDenying] = useState(false);
-  const [reason, setReason] = useState('');
-  const { toast } = useToast();
+  const summary = (pending as unknown as { summary?: string }).summary;
+  const view = presentPendingApproval({
+    tool: pending.tool,
+    ...(summary !== undefined ? { summary } : {}),
+    ...(pending.dry_run ? { dryRun: pending.dry_run } : {}),
+    consumed,
+    decidedElsewhere: !showActions,
+  });
 
-  const dryRunSummary = useMemo(() => {
-    const dryRun = pending.dry_run;
-    if (!dryRun) return undefined;
-    if (dryRun.error) return { tone: 'danger' as const, text: `Preview failed: ${String(dryRun.error)}` };
-    if (dryRun.eligible === false || (dryRun.summary as { eligible?: boolean } | undefined)?.eligible === false) {
-      return { tone: 'warning' as const, text: 'Preview ran — validation reports blockers (see details).' };
-    }
-    return { tone: 'success' as const, text: 'Preview ran clean — the change validates.' };
-  }, [pending.dry_run]);
-
-  const startEdit = () => {
-    setDraft(JSON.stringify(pending.args, null, 2));
-    setDraftError(undefined);
-    setEditing(true);
-  };
-  const approveEdited = () => {
-    try {
-      const parsed = JSON.parse(draft) as Record<string, unknown>;
-      onApprove(parsed);
-    } catch {
-      setDraftError('Not valid JSON.');
-      toast({ title: 'Edited args are not valid JSON', tone: 'danger' });
-    }
-  };
-
-  const title = String((pending as unknown as { summary?: string }).summary ?? `Run ${pending.tool}`);
+  // The chat's decision callbacks are fire-and-forget (`useChat` owns the
+  // in-flight state and flips `pendingConsumed` on the claim, which swaps
+  // this whole card to its receipt line). `<ActionRow>` wants promises, so
+  // they are adapted here rather than changing `ChatThread`'s prop surface,
+  // which three call sites outside this task's file list depend on.
+  const decisions: ApprovalCardProps['actions'] = view.showActions
+    ? {
+        onApprove: async () => onApprove(),
+        onReject: async (reason) => onReject(reason),
+        onModify: async (draft) => {
+          const parsed = parseEditedArgs(draft ?? '');
+          // `modifyCapture.validate` already refused anything unparseable
+          // before this ran; this is the type narrowing, not a second gate.
+          if ('args' in parsed) onApprove(parsed.args);
+        },
+        modifyReason: 'required',
+        modifyCapture: {
+          initial: editedArgsDraft(pending.args),
+          rows: 8,
+          label: 'Edited arguments (JSON)',
+          placeholder: 'The tool call’s arguments, as JSON',
+          validate: editedArgsError,
+        },
+      }
+    : {};
 
   return (
-    <div className="rounded-[var(--adm-radius-lg)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-sunken)] p-3 shadow-[var(--adm-shadow-sm)]">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-start gap-2">
-          <span className="mt-0.5 text-[var(--adm-accent)]">
-            <IconAlertTriangle size={15} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
-              Approval needed
-            </p>
-            <p className="mt-0.5 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-heading)]">
-              {title}
-            </p>
-          </div>
-        </div>
-        {dryRunSummary ? (
-          <p
-            className={
-              dryRunSummary.tone === 'success'
-                ? 'text-[length:var(--adm-text-sm)] text-[var(--adm-success)]'
-                : dryRunSummary.tone === 'warning'
-                  ? 'text-[length:var(--adm-text-sm)] text-[var(--adm-warning)]'
-                  : 'text-[length:var(--adm-text-sm)] text-[var(--adm-danger)]'
-            }
-          >
-            {dryRunSummary.text}
-          </p>
-        ) : null}
-        <details>
-          <summary className="adm-focusable cursor-pointer rounded text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)]">
-            Review details
-          </summary>
-          <div className="mt-2 flex flex-col gap-2 border-l border-[var(--adm-border)] pl-3">
-            <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              Action: <code>{pending.tool}</code>
-            </p>
-            <JsonDisclosure label="Proposed arguments" value={pending.args} />
-            {pending.dry_run ? <JsonDisclosure label="Dry-run details" value={pending.dry_run} /> : null}
-          </div>
-        </details>
-
-        {consumed ? (
-          <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]">
-            Approved — waiting for the agent…
-          </p>
-        ) : !showActions ? (
-          <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-muted)]">
-            Review the proposal here, then save it from the Object Stage.
-          </p>
-        ) : editing ? (
-          <div className="flex flex-col gap-2">
-            <Textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              rows={8}
-              aria-label="Edited arguments (JSON)"
-              error={draftError}
-            />
-            <div className="flex gap-2">
-              <Button size="sm" onClick={approveEdited} loading={busy}>
-                {`Confirm ${DECISION_LABEL.modify.toLowerCase()}`}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-                Back
-              </Button>
-            </div>
-          </div>
-        ) : denying ? (
-          <div className="flex flex-col gap-2">
-            <Textarea
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              rows={2}
-              placeholder="Why not? (optional — the agent sees this)"
-              aria-label={`${DECISION_LABEL.reject} reason`}
-            />
-            <div className="flex gap-2">
-              <Button size="sm" variant="danger" onClick={() => onDeny(reason || undefined)} loading={busy}>
-                {`Confirm ${DECISION_LABEL.reject.toLowerCase()}`}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setDenying(false)} disabled={busy}>
-                Back
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            {/* T3.2 vocabulary ruling (ux-inventory.md Table C): the same
-                two non-approve actions were called "Decline"/"Deny"/"Edit
-                request" here, "Hold" on the request activity card and "Ask for
-                changes" on the object workspace. One word each, everywhere —
-                Approve / Reject / Modify, from the shared DECISION_LABEL. */}
-            <Button size="sm" onClick={() => onApprove()} loading={busy}>
-              {DECISION_LABEL.approve}
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setDenying(true)} disabled={busy}>
-              {DECISION_LABEL.reject}
-            </Button>
-            <button
-              type="button"
-              onClick={startEdit}
-              disabled={busy}
-              className="adm-focusable ml-auto rounded px-1.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:text-[var(--adm-text)] disabled:opacity-50"
-            >
-              {DECISION_LABEL.modify}
-            </button>
-          </div>
-        )}
+    <ApprovalCard severity={view.severity} title={view.title} cause={view.cause} actions={decisions}>
+      <div className="flex flex-col gap-2">
+        <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          Action: <code>{pending.tool}</code>
+        </p>
+        <JsonDisclosure label="Proposed arguments" value={pending.args} />
+        {pending.dry_run ? <JsonDisclosure label="Dry-run details" value={pending.dry_run} /> : null}
       </div>
-    </div>
+    </ApprovalCard>
   );
 }
 
@@ -1124,7 +1131,7 @@ export function ChatThread({
   previewCandidateId,
   busy,
   onApprove,
-  onDeny,
+  onReject,
   onPreviewCandidate,
   onChooseCandidate,
   onRejectCandidates,
@@ -1135,9 +1142,9 @@ export function ChatThread({
   approvalInStage = false,
   pendingConsumed = false,
   lastOutcome,
-  lastEventAtMs,
   onUndo,
   isOwner = false,
+  hasRunCard = false,
 }: {
   events: ChatEventView[];
   status: ChatStatus | undefined;
@@ -1146,7 +1153,7 @@ export function ChatThread({
   previewCandidateId?: string;
   busy: boolean;
   onApprove: (editedArgs?: Record<string, unknown>) => void;
-  onDeny: (reason?: string) => void;
+  onReject: (reason?: string) => void;
   onPreviewCandidate?: (candidateId: string) => void;
   onChooseCandidate?: (candidateId: string) => void;
   onRejectCandidates?: (reason: string) => void;
@@ -1161,7 +1168,13 @@ export function ChatThread({
   pendingConsumed?: boolean;
   /** T3.1 (D5): `chat.lastOutcome` — powers the tier-4 receipt for the latest run. */
   lastOutcome?: RunSummaryView | null;
-  /** T3.1 (D5): `chat.lastEventAtMs` — powers the streaming-vs-silent indicator. */
+  /**
+   * T3.1 (D5): `chat.lastEventAtMs` — kept on the prop surface for callers,
+   * but no longer read by this component. A2 retired the trailing
+   * "Working…/Writing…" line, this value's only consumer here; the
+   * streaming-vs-silent read now lives solely in `ChatStateChip` (the
+   * thread's single live indicator), which takes it directly.
+   */
   lastEventAtMs?: number;
   /** T3.1 (D5): the receipt's Undo button sends this prompt back into the chat. */
   onUndo?: (prompt: string) => void;
@@ -1174,6 +1187,14 @@ export function ChatThread({
    * it did before this line existed.
    */
   isOwner?: boolean;
+  /**
+   * A2/A3/A4: a `RequestActivity` card is mounted (in `AgentsHub`) for this
+   * chat's bound request — the ONE prop this whole wave threads down to
+   * suppress everything in the thread that would otherwise restate what
+   * that card already shows (trailing activity progress, the run
+   * receipt's own failure text, the sweeper's progress line).
+   */
+  hasRunCard?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1185,10 +1206,9 @@ export function ChatThread({
   const settledAtBottom = useRef(false);
   const [showLatest, setShowLatest] = useState(false);
   const [quoteSelection, setQuoteSelection] = useState<QuoteSelectionState | undefined>(undefined);
-  // T3.1 (D5): a local clock for the live activity group's elapsed time and
-  // the streaming-vs-silent read below — ticking only while there is
-  // something worth ticking for, same pattern as `RequestActivity`'s own
-  // node clock.
+  // T3.1 (D5): a local clock for the live activity group's elapsed time —
+  // ticking only while there is something worth ticking for, same pattern as
+  // `RequestActivity`'s own node clock.
   const [nowMs, setNowMs] = useState(() => Date.now());
   const running = status === 'running';
   useEffect(() => {
@@ -1267,7 +1287,9 @@ export function ChatThread({
   // turn gets the live `<RunProgress>` treatment — a historical group (from a
   // finished run, further up the transcript) keeps the plain static summary.
   const liveActivityElapsedMs = running ? elapsedMsForChip('working', events, lastOutcome, nowMs) : undefined;
-  const streaming = isStreamingNow(status, lastEventAtMs, nowMs);
+  // A2: `ChatStateChip` (the header) is the thread's single live indicator —
+  // this decides what, if anything, else may still say "still going".
+  const visibility = threadStatusVisibility({ running, hasRunCard });
 
   return (
     <div
@@ -1304,8 +1326,8 @@ export function ChatThread({
               key={`activity-${item.events[0]?.seq}`}
               events={item.events}
               preferenceScope={preferenceScope}
-              live={isLast && running}
-              elapsedMs={isLast && running ? liveActivityElapsedMs : undefined}
+              live={isLast && visibility.activityProgress}
+              elapsedMs={isLast && visibility.activityProgress ? liveActivityElapsedMs : undefined}
             />
           );
         const event = item.event;
@@ -1327,7 +1349,16 @@ export function ChatThread({
         const isLatestRun = lastOutcome != null && event.detail?.run_id === lastOutcome.run_id;
         if (event.type === 'run_finished') {
           if (isLatestRun) {
-            return <RunReceipt key={event.seq} outcome={lastOutcome} events={events} onUndo={onUndo} busy={busy} />;
+            return (
+              <RunReceipt
+                key={event.seq}
+                outcome={lastOutcome}
+                events={events}
+                onUndo={onUndo}
+                busy={busy}
+                hasRunCard={hasRunCard}
+              />
+            );
           }
           return <RunFinishedLine key={event.seq} event={event} />;
         }
@@ -1343,6 +1374,7 @@ export function ChatThread({
                 events={events}
                 onUndo={onUndo}
                 busy={busy}
+                hasRunCard={hasRunCard}
               />
             );
           }
@@ -1355,7 +1387,16 @@ export function ChatThread({
         }
         if (event.type === 'run_cancelled') {
           if (isLatestRun) {
-            return <RunReceipt key={event.seq} outcome={lastOutcome} events={events} onUndo={onUndo} busy={busy} />;
+            return (
+              <RunReceipt
+                key={event.seq}
+                outcome={lastOutcome}
+                events={events}
+                onUndo={onUndo}
+                busy={busy}
+                hasRunCard={hasRunCard}
+              />
+            );
           }
           return (
             <p key={event.seq} className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
@@ -1375,7 +1416,7 @@ export function ChatThread({
         if (event.type === 'candidate_rejected') {
           return (
             <p key={event.seq} className="text-center text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              All versions declined — trying a new direction.
+              All versions rejected — trying a new direction.
             </p>
           );
         }
@@ -1383,6 +1424,10 @@ export function ChatThread({
         // `ToolCallCard` (see `RequestProgressLine`'s own comment for why
         // that silently misrendered a `failed` transition as `ok`).
         if (event.type === 'request_progress') {
+          // A4: a `RequestActivity` card mounted for this same request
+          // already shows this progress live — defer to it entirely rather
+          // than restating the sweeper's line a second time in the thread.
+          if (hasRunCard) return null;
           return <RequestProgressLine key={event.seq} event={event} isOwner={isOwner} />;
         }
         return <ToolCallCard key={event.seq} event={event} />;
@@ -1398,20 +1443,13 @@ export function ChatThread({
         />
       ) : null}
       {pending ? (
-        <ApprovalCard
+        <PendingApprovalCard
           pending={pending}
-          busy={busy}
           onApprove={onApprove}
-          onDeny={onDeny}
+          onReject={onReject}
           showActions={!approvalInStage}
           consumed={pendingConsumed}
         />
-      ) : null}
-      {status === 'queued' || status === 'running' ? (
-        <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-          <span className={`mr-1 inline-block ${streaming ? 'animate-bounce' : 'animate-pulse'}`}>●</span>
-          {status === 'queued' ? 'Waking the agent…' : streaming ? 'Writing…' : 'Working…'}
-        </p>
       ) : null}
       {showLatest ? (
         <Button
@@ -1444,6 +1482,7 @@ export function ChatComposer({
   draftSeed,
   quote,
   above,
+  runMode,
 }: {
   status: ChatStatus | undefined;
   busy: boolean;
@@ -1456,6 +1495,14 @@ export function ChatComposer({
   quote?: { token: number; text: string };
   /** The readiness strip mounts directly above the composer (plan §4). */
   above?: React.ReactNode;
+  /**
+   * A5: the run-mode segmented pill (`RunApprovalControls`), anchored to the
+   * bottom-left of the input row — same corner Claude's own UI puts its
+   * model/mode control — instead of a full-width row above the composer.
+   * Optional so a composer with no run-mode concept (none exists today, but
+   * `ChatComposer` shouldn't assume one) renders exactly as before.
+   */
+  runMode?: React.ReactNode;
 }) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1554,7 +1601,7 @@ export function ChatComposer({
             status === 'awaiting_candidate'
               ? 'Preview and pick a version above…'
               : live
-                ? 'The agent is working — approve, deny, or wait…'
+                ? 'The agent is working — approve, reject, or wait…'
                 : 'Ask for a change or describe what you need…'
           }
           aria-label="Message the agent"
@@ -1578,6 +1625,9 @@ export function ChatComposer({
           </Button>
         )}
       </div>
+      {/* A5: bottom-left of the composer, the same corner Claude's own UI
+          puts its model/mode control — never a full-width row above it. */}
+      {runMode ? <div className="flex items-center justify-start">{runMode}</div> : null}
     </div>
   );
 }

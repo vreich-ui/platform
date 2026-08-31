@@ -125,22 +125,51 @@ export const sortRequestRows = <T extends RequestRowLike>(rows: readonly T[]): T
   });
 
 /**
- * Counts for the shell's pills (plan §6.1). Archived rows never count.
- * `needsYou` and `blocked` both read `STALLED_VS_FAILED_SPLIT`: split on
- * (the default), `stalled` joins the amber `needsYou` count and `blocked` is
- * `failed` alone; split off, `stalled` reverts to joining `blocked` and
- * `needsYou` is `needs_you` alone — the original merged behaviour, verbatim.
+ * B5: the ONE bucket a row falls into — the shell's pill counts, the
+ * "Needs you"/"Blocked" quick-filter tabs and (structurally) `requestSeverityLevel`
+ * all used to reimplement this same decision separately, which is exactly how a
+ * header count and a tab's contents can drift apart (a real bug this closes:
+ * the header and the "Needs you" tab must always agree on which rows are
+ * which). `archived` rows classify as `'archived'` regardless of status — a
+ * caller that has already excluded archived rows (most have) never sees it.
+ * `needs_you`/`blocked` still read `STALLED_VS_FAILED_SPLIT` via
+ * `requestSeverityLevel`, so flipping that flag moves `stalled` for every
+ * consumer of `classifyRow` at once, same as it always has.
  */
+export type RequestRowClass = 'needs_you' | 'blocked' | 'active' | 'done' | 'archived';
+
+export const classifyRow = (row: RequestRowLike): RequestRowClass => {
+  if (row.archived) return 'archived';
+  if (row.status === 'running' || row.status === 'queued') return 'active';
+  if (row.status === 'done' || row.status === 'cancelled') return 'done';
+  const level = requestSeverityLevel(row.status);
+  if (level === 'needs_you') return 'needs_you';
+  if (level === 'blocked') return 'blocked';
+  // Unreachable given today's RequestStatusName (every status is handled by
+  // one of the branches above), but a status the type doesn't yet name must
+  // still land somewhere quiet rather than in an attention bucket.
+  return 'done';
+};
+
+/** Counts for the shell's pills (plan §6.1). Archived rows never count — see `classifyRow`. */
 export const summarizeRequestRows = (rows: readonly RequestRowLike[]) => {
   let working = 0;
   let needsYou = 0;
   let blocked = 0;
   for (const row of rows) {
-    if (row.archived) continue;
-    const level = requestSeverityLevel(row.status);
-    if (row.status === 'running' || row.status === 'queued') working += 1;
-    else if (level === 'needs_you') needsYou += 1;
-    else if (level === 'blocked') blocked += 1;
+    switch (classifyRow(row)) {
+      case 'active':
+        working += 1;
+        break;
+      case 'needs_you':
+        needsYou += 1;
+        break;
+      case 'blocked':
+        blocked += 1;
+        break;
+      default:
+        break;
+    }
   }
   return { working, needsYou, blocked };
 };
@@ -224,13 +253,15 @@ export const matchesQuickFilter = (
   if (row.archived) return false;
   switch (filter) {
     case 'needsYou':
-      return requestSeverityLevel(row.status) === 'needs_you';
+      // Same bucket the header pill counts (`classifyRow`) — this is the
+      // fix for B5's bug: a row can never count in one and list in the other.
+      return classifyRow(row) === 'needs_you';
     case 'all':
       return true;
     case 'running':
       return row.status === 'running' || row.status === 'queued';
     case 'blocked':
-      return requestSeverityLevel(row.status) === 'blocked';
+      return classifyRow(row) === 'blocked';
     case 'done':
       return row.status === 'done' || row.status === 'cancelled';
     case 'muted':
@@ -305,6 +336,27 @@ export const NODE_LABELS: Record<string, string> = {
 export const nodeLabel = (nodeId: string | undefined): string | undefined =>
   nodeId ? (NODE_LABELS[nodeId] ?? nodeId) : undefined;
 
+/**
+ * B2: the Retry receipt.
+ *
+ * FIX 9 — this used to read "Retrying from planning media", naming the node
+ * the run had stopped at as the point it would resume from. The server does
+ * not promise that. `requeueRequest` takes a request id and nothing else: it
+ * sets the status back to `queued`, clears the nudge count, and leaves the
+ * run to the next sweep. It has no resume-point parameter, so the node in
+ * that sentence was the UI's own inference dressed up as a server fact —
+ * and a recovery button that overstates what it just did is exactly the
+ * thing that stops being trusted the first time it is caught.
+ *
+ * So the receipt now says only what `requeueRequest` actually wrote — the
+ * store's own `status_reason`, verbatim, the same way the 409 refusal quotes
+ * the store's own refusal sentence.
+ *
+ * Takes no node. The node-precise wording is a one-line change here if and
+ * when `requeueRequest` grows a resume point to make it true.
+ */
+export const retryReceipt = (): string => 'Re-queued — waiting for the next sweep to push the run';
+
 /** "14 / 23 · drafting" — the one progress phrase the list, the pills and the chat card share. */
 export const progressPhrase = (
   progress: { done: number; total: number } | undefined,
@@ -325,6 +377,390 @@ export const relativeAge = (iso: string, nowMs: number): string => {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
+};
+
+/**
+ * B4 — the row's one meta line, deliberately excluding `status_reason`.
+ *
+ * `status_reason` (e.g. "The artifact plan step failed, so the job has
+ * stopped.") restates the `StatusBadge` sitting right above this line — it
+ * still lives in the Drawer, and later in B1's Retry tooltip, but a list row
+ * has no business repeating it. `primary` is the progress phrase; a live row
+ * (`running`/`queued`) has none because `RunProgress` renders in its place
+ * (kept as-is — see `RequestRow`), so callers never have to remember to
+ * suppress it themselves. `secondary` is the two facts a row always carries:
+ * owner, then age.
+ */
+export interface RowMetaLine {
+  primary?: string;
+  secondary: string[];
+}
+
+export const rowMetaLine = (
+  row: {
+    status: RequestStatusName;
+    progress?: { done: number; total: number };
+    current_node?: string;
+    created_by: string;
+    updated_at: string;
+  },
+  nowMs: number
+): RowMetaLine => {
+  const live = row.status === 'running' || row.status === 'queued';
+  return {
+    primary: live ? undefined : progressPhrase(row.progress, row.current_node),
+    secondary: [row.created_by, relativeAge(row.updated_at, nowMs)],
+  };
+};
+
+// ─── B1: the row's actions, as data ─────────────────────────────────────────
+
+/**
+ * The rights vocabulary a row action is gated on.
+ *
+ * Four coarse capabilities rather than the five role names
+ * (`server/lib/roles.ts`): a surface should ask "may this person publish",
+ * never "is this person a publisher" — `owner` already expands to
+ * admin+publisher server-side and the tiers are additive, so the LADDER is
+ * the only part the UI cares about. `read` is unconditional: every admin
+ * principal, `viewer` included, may open a chat or an object.
+ */
+export type RowActionRight = 'read' | 'edit' | 'publish' | 'registry' | 'owner';
+
+export type RowActionId =
+  | 'approve'
+  | 'reject'
+  | 'retry'
+  | 'raise_budget'
+  | 'publish'
+  | 'open_chat'
+  | 'open_object'
+  | 'mute'
+  | 'cancel'
+  | 'archive'
+  | 'restore';
+
+/**
+ * One thing a person can do to a row. `kind` is the LAYOUT decision (at most
+ * two `primary` actions sit in the row itself; every `menu` action lives in
+ * the one overflow `DropdownMenu`), taken here rather than in the component
+ * so the inbox row and the request Drawer cannot drift apart — they render
+ * the same list.
+ *
+ * D3: a disabled action is still RETURNED, carrying the `reason` the surface
+ * shows on hover/focus. Nothing rights-gated is ever dropped from the list —
+ * a control that silently vanishes teaches an editor the feature does not
+ * exist, where a disabled one with "Ask a publisher" teaches them who to ask.
+ */
+export interface RowAction {
+  id: RowActionId;
+  label: string;
+  kind: 'primary' | 'menu';
+  enabled: boolean;
+  /** Why it is unavailable. Present exactly when `enabled` is false. */
+  reason?: string;
+  rightRequired: RowActionRight;
+}
+
+/**
+ * What `rowActions` needs to know about a row. Structural, like
+ * `RequestRowLike` above, and every field beyond `status`/`archived` is
+ * optional: the shared index (`RequestRowView`) carries neither a failure
+ * classification nor the object's publication state today, so a caller that
+ * only has an index row still gets a correct — if coarser — list.
+ */
+export interface RowActionRowLike {
+  status: RequestStatusName;
+  archived: boolean;
+  chat_id?: string;
+  object_id?: string;
+  /**
+   * The run's classified failure code (CMS-Agent's `failure.code`, as
+   * `ActivityView` carries it). Only `budget_exceeded` changes the answer:
+   * retrying a run that hit its spend ceiling just hits it again, so the
+   * primary becomes "Raise budget" instead of a Retry that cannot work.
+   */
+  failure_code?: string;
+  /** Whether the attached object is already live. Unknown → treated as not published, which is what offers Publish. */
+  object_published?: boolean;
+  /** This person's own mute state for the row — the label, not a right. */
+  muted?: boolean;
+  /** Whether the caller started this run. An `editor` may cancel their own runs; a publisher may cancel anyone's. */
+  mine?: boolean;
+}
+
+interface RowActionRights {
+  read: boolean;
+  edit: boolean;
+  publish: boolean;
+  /**
+   * May call the request-registry endpoint AT ALL
+   * (`server/functions/admin-requests.ts`) — see `registry` in
+   * `rowActionRights` below for why this is not simply `edit`.
+   */
+  registry: boolean;
+  owner: boolean;
+}
+
+/**
+ * Roles (as `users-client.ts` reports them, i.e. `server/lib/roles.ts`
+ * already expanded) → the capabilities. Additive on purpose: whatever a
+ * publisher may do, an admin and an owner may do too.
+ *
+ * ## `registry`, and why the ladder is narrowed here (FIX 3)
+ *
+ * The `read`/`edit`/`publish`/`owner` ladder is the INTENDED model, and it
+ * is the right vocabulary for a surface: "may this person publish", never
+ * "is this person a publisher". But it describes rights the fleet has not
+ * finished granting. Every action this row dispatches into the request
+ * registry goes through ONE endpoint, and that endpoint's first gate is
+ * `callerRoles.includes('admin')` for EVERY action it serves, `list`
+ * included (`server/functions/admin-requests.ts`) — so `/admin/requests`
+ * is an admin-only surface today, and the tiers below admin cannot reach
+ * Retry, Mute, Cancel, Archive or Restore no matter what the ladder says.
+ *
+ * `registry` is that seam, named. Widening the SERVER gate to match the
+ * ladder is a fleet-law decision (Wolf's), not a UI one; until it is taken,
+ * the honest thing for the surface to do is render those actions disabled
+ * with a reason (convention D3) rather than as live buttons that 403 on the
+ * click. When the server gate moves, this one predicate moves with it and
+ * every action re-widens at once.
+ */
+export const rowActionRights = (roles: readonly string[]): RowActionRights => {
+  const has = (role: string) => roles.includes(role);
+  const owner = has('owner');
+  const publish = owner || has('admin') || has('publisher');
+  const edit = publish || has('editor');
+  // `owner` expands to admin+publisher server-side (`server/lib/roles.ts`),
+  // so the `has('owner')` term is belt-and-braces for a caller that reports
+  // an unexpanded tier.
+  const registry = owner || has('admin');
+  return { read: true, edit, publish, registry, owner };
+};
+
+/**
+ * Who to ask, phrased from where the CALLER stands rather than from which
+ * right is missing: a `viewer` denied Publish is told "Ask an editor",
+ * because the next rung up is the one they can actually reach for — telling
+ * them "Ask a publisher" answers a question they did not ask.
+ */
+const askReason = (rights: RowActionRights, required: RowActionRight): string => {
+  // The registry seam does not sit on the ladder (see `rowActionRights`):
+  // an editor denied Retry is not missing the `edit` right, they are on the
+  // wrong side of an endpoint that admits admins only. Telling them "Ask an
+  // editor" — which they ARE — would be the ladder answering a question the
+  // server did not ask.
+  if (required === 'registry') return 'Ask an admin';
+  return !rights.edit ? 'Ask an editor' : !rights.publish ? 'Ask a publisher' : 'Ask an owner';
+};
+
+const NO_CHAT = 'No chat is attached to this request yet.';
+const NO_OBJECT = 'No object is attached to this request yet.';
+
+/**
+ * B3 — how this client publishes, in the vocabulary a row needs.
+ *
+ * `auto` and `manual` are the two states the fleet's approval policy actually
+ * resolves to (`lib/approval-policy.ts`): an `autonomous` type publishes on
+ * the click, a `require-approval` one needs a current approved review on the
+ * record first — which the server's `checkPublishGate` checks, not this row,
+ * since an index row carries no review state. Both therefore still OFFER
+ * Publish; the difference is what the confirmation says.
+ *
+ * `block` is the third posture the row must be able to draw — a client whose
+ * publishing is switched off outright. NOTHING emits it today: no site config
+ * carries the value (`approval-policy.ts` has two states, not three). It is
+ * accepted here rather than assumed away so that the day a policy source does
+ * emit it, the row already refuses instead of offering a button the server
+ * will reject.
+ */
+export type PublishPolicy = 'auto' | 'manual' | 'block';
+
+/** D3 hover text on the disabled Publish action when this client may not publish at all. */
+export const PUBLISH_BLOCKED_REASON = 'Publishing is blocked for this client';
+
+/** The approval policy's one boolean, in this surface's three-state vocabulary. */
+export const publishPolicyFromApproval = (requiresApproval: boolean): PublishPolicy =>
+  requiresApproval ? 'manual' : 'auto';
+
+/**
+ * B3 — the object-publish call's target, built from an inbox row.
+ *
+ * The inbox knows an `object_id`, a title and a timestamp, and nothing else:
+ * `RequestRowView` comes from the requests index, which carries no object
+ * type, review state or publication stamp. `object_publish`
+ * (`quick-actions.ts`) reads exactly three of a row's fields — the type, the
+ * id, and the display name it puts in the receipt — so those three are the
+ * only ones stated from real data. The remaining fields exist to satisfy the
+ * shared `LibraryRow` shape that path takes and are NEVER consulted on the
+ * publish branch; the server's `checkPublishGate` is what actually decides
+ * whether this publish may happen, over the record's own state.
+ *
+ * `content_item` is the same assumption the row's Open object link already
+ * makes: an editorial request's object is an article.
+ */
+export interface PublishTargetRow {
+  object_id: string;
+  object_type: 'content_item';
+  display_name: string;
+  updated_at: string;
+  status: 'active';
+  review_state: 'none';
+  published_time: null;
+  unpublished_changes: true;
+}
+
+export const publishTargetFor = (row: {
+  object_id?: string;
+  title: string;
+  updated_at: string;
+}): PublishTargetRow | undefined =>
+  row.object_id
+    ? {
+        object_id: row.object_id,
+        object_type: 'content_item',
+        display_name: row.title,
+        updated_at: row.updated_at,
+        status: 'active',
+        review_state: 'none',
+        published_time: null,
+        unpublished_changes: true,
+      }
+    : undefined;
+
+export interface RowActionOptions {
+  /**
+   * This client's publish posture. Defaults to `auto`: a caller that has not
+   * resolved a policy must not silently take a publisher's only action away —
+   * the server gate is the authority either way.
+   */
+  publishPolicy?: PublishPolicy;
+}
+
+/**
+ * Every action a row offers, in render order: `primary` ones first (at most
+ * two), then the overflow. Pure — the surface supplies the roles it already
+ * resolved and gets back a list it only has to draw.
+ *
+ * The status → actions table is the authority (B1); this function is that
+ * table, executable.
+ */
+export const rowActions = (
+  row: RowActionRowLike,
+  roles: readonly string[],
+  options: RowActionOptions = {}
+): RowAction[] => {
+  const rights = rowActionRights(roles);
+
+  const make = (
+    id: RowActionId,
+    label: string,
+    kind: RowAction['kind'],
+    rightRequired: RowActionRight,
+    /** A reason unrelated to rights (missing chat, not your run) — applied only once the right is held. */
+    blocked?: string
+  ): RowAction => {
+    const reason = rights[rightRequired] ? blocked : askReason(rights, rightRequired);
+    return {
+      id,
+      label,
+      kind,
+      enabled: !reason,
+      rightRequired,
+      ...(reason ? { reason } : {}),
+    };
+  };
+
+  /**
+   * Cancel's SECOND gate, on top of `registry`. The endpoint's own line is
+   * "the creator of this request, or an Owner"
+   * (`admin-requests.ts`'s `cancel` case) — not the publish tier, which is
+   * what this used to mirror. An admin who did not start the run and is not
+   * an Owner is refused, so the button must say so.
+   *
+   * `mine` unknown fails closed — the surface knows the caller's e-mail and
+   * this module does not, so guessing "yours" here would show someone a
+   * button the server refuses.
+   */
+  const cancelBlocked = !rights.owner && row.mine !== true ? 'Only the editor who asked for this, or an Owner' : undefined;
+
+  const openChat = (kind: RowAction['kind']) =>
+    make('open_chat', 'Open chat', kind, 'read', row.chat_id ? undefined : NO_CHAT);
+  const openObject = (kind: RowAction['kind']) =>
+    make('open_object', 'Open object', kind, 'read', row.object_id ? undefined : NO_OBJECT);
+  const mute = (kind: RowAction['kind']) => make('mute', row.muted ? 'Unmute' : 'Mute', kind, 'registry');
+  const cancel = (kind: RowAction['kind']) => make('cancel', 'Cancel', kind, 'registry', cancelBlocked);
+  /**
+   * Archive/Restore answer to TWO server gates that intersect: the module's
+   * `admin` gate and `canArchive` (`isOwner || publisher`). A membership
+   * `publisher` never clears the first; a plain `admin` never clears the
+   * second; only an Owner — who expands to owner+admin+publisher — clears
+   * both. So the honest right here is `owner`, not `publish`.
+   */
+  const archive = (kind: RowAction['kind']) => make('archive', 'Archive', kind, 'owner');
+
+  // B3: a client that may not publish at all beats the row's own reason — no
+  // object attached is the smaller problem when nothing here publishes. The
+  // rights check still comes first (`make`): an editor is told to ask a
+  // publisher, which is the nearer truth for them than the site's posture.
+  const publishBlocked =
+    options.publishPolicy === 'block' ? PUBLISH_BLOCKED_REASON : row.object_id ? undefined : NO_OBJECT;
+
+  // Settled: cancelled or filed away. Nothing is running, so there is nothing
+  // to cancel, mute or archive — only to put back and to look at.
+  if (row.archived || row.status === 'archived' || row.status === 'cancelled') {
+    // Restore is `unarchive` on the same endpoint as Archive — same two
+    // intersecting gates, same Owner-only answer.
+    return [make('restore', 'Restore', 'primary', 'owner'), openChat('menu'), openObject('menu')];
+  }
+
+  switch (row.status) {
+    case 'needs_you':
+      // The one row where the decision IS the row: Approve/Reject sit in it,
+      // everything else moves out of their way.
+      return [
+        make('approve', 'Approve', 'primary', 'publish'),
+        make('reject', 'Reject', 'primary', 'publish'),
+        openChat('menu'),
+        openObject('menu'),
+        mute('menu'),
+        cancel('menu'),
+        archive('menu'),
+      ];
+    case 'failed':
+    case 'stalled':
+      return [
+        // A run that died on its spend ceiling cannot be retried into
+        // success — raising the ceiling is the only move, and it is the
+        // Owner's. (`stalled` shares this branch: if a stall reports a
+        // budget failure it is the same problem, not a different one.)
+        row.failure_code === 'budget_exceeded'
+          ? make('raise_budget', 'Raise budget', 'primary', 'owner')
+          : // B2's Retry posts `action: 'retry'` to the request registry, which
+            // admits admins only — see `registry` in `rowActionRights`.
+            make('retry', 'Retry', 'primary', 'registry'),
+        openChat('primary'),
+        openObject('menu'),
+        cancel('menu'),
+        archive('menu'),
+      ];
+    case 'queued':
+    case 'running':
+      // Live: nothing to decide and nothing to fix. Watching it (the chat) is
+      // the only primary; archiving a run still in flight is not offered.
+      return [openChat('primary'), openObject('menu'), mute('menu'), cancel('menu')];
+    case 'done':
+      // The last mile. An unpublished object is the ONE thing still owed, so
+      // it takes the primary slot; once it is live, Open object is all that's left.
+      return row.object_published
+        ? [openObject('primary'), openChat('menu'), archive('menu')]
+        : [
+            make('publish', 'Publish', 'primary', 'publish', publishBlocked),
+            openObject('primary'),
+            openChat('menu'),
+            archive('menu'),
+          ];
+  }
 };
 
 // ─── W19 T19.6: which transitions are worth telling a person about ───────────

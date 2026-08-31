@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminShell } from './AdminShell';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { Select } from './forms';
-import { ConfirmDialog, useToast } from './overlays';
+import { ConfirmDialog, Popover, useToast, type PopoverTriggerA11yProps } from './overlays';
 import { StatusBadge, SeverityIcon } from './severity';
 import { IconArchive, IconInfo, IconLayoutGrid, IconRocket } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
@@ -82,16 +82,34 @@ function MemberRow({
   const { member } = view;
   return (
     <li className="flex flex-wrap items-center gap-3 border-t border-[var(--adm-border)] px-4 py-3 first:border-t-0">
-      <input
-        type="radio"
-        name={groupName}
-        checked={selected}
-        onChange={onSelect}
-        disabled={Boolean(disabledReason)}
-        title={disabledReason}
-        aria-label={`Choose ${member.display_name} as the winner`}
-        className="adm-focusable h-4 w-4 accent-[var(--adm-accent)]"
-      />
+      {disabledReason ? (
+        <Popover
+          mode="hover"
+          content={disabledReason}
+          disabled
+          trigger={(a11y) => (
+            <input
+              type="radio"
+              name={groupName}
+              checked={selected}
+              onChange={onSelect}
+              disabled
+              aria-label={`Choose ${member.display_name} as the winner`}
+              className="adm-focusable h-4 w-4 accent-[var(--adm-accent)]"
+              {...a11y}
+            />
+          )}
+        />
+      ) : (
+        <input
+          type="radio"
+          name={groupName}
+          checked={selected}
+          onChange={onSelect}
+          aria-label={`Choose ${member.display_name} as the winner`}
+          className="adm-focusable h-4 w-4 accent-[var(--adm-accent)]"
+        />
+      )}
       <div className="min-w-0 flex-1">
         <a
           href={objectHref(member.object_id)}
@@ -266,14 +284,23 @@ function FamilyCard({
             </p>
           ) : null}
           <div>
-            <Button
-              variant="primary"
-              disabled={!plan.runnable || busy}
-              title={plan.runnable ? undefined : plan.blockers[0]?.message}
-              onClick={() => onSelectWinner(plan)}
-            >
-              <IconRocket size={16} /> Select winner
-            </Button>
+            {(() => {
+              const winnerDisabled = !plan.runnable || busy;
+              const blockedReason = plan.runnable ? undefined : plan.blockers[0]?.message;
+              const winnerButton = (a11y?: PopoverTriggerA11yProps) => (
+                <Button variant="primary" disabled={winnerDisabled} onClick={() => onSelectWinner(plan)} {...a11y}>
+                  <IconRocket size={16} /> Select winner
+                </Button>
+              );
+              // Convention D3: disabled with a reason needs a reachable
+              // tooltip, not a native `title` — a transiently busy-disabled
+              // button needs no tooltip of its own.
+              return winnerDisabled && blockedReason ? (
+                <Popover mode="hover" content={blockedReason} disabled trigger={(a11y) => winnerButton(a11y)} />
+              ) : (
+                winnerButton()
+              );
+            })()}
           </div>
         </div>
       ) : null}

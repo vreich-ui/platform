@@ -72,6 +72,66 @@ export function deriveLivenessChip(
   }
 }
 
+// ─── thread-wide liveness visibility (A2) ──────────────────────────────────
+
+/**
+ * A2: `ChatStateChip` (the header) is the thread's SINGLE live indicator —
+ * this decides what else, if anything, is still allowed to say "still
+ * going" alongside it. `trailingLine` is always `false`: the standalone
+ * "Working…/Writing…" paragraph that used to sit under the transcript is
+ * retired for good (W19/A2 — "Working / Failed" stated up to five times at
+ * once), never conditionally reintroduced. `activityProgress` gates the
+ * trailing activity group's `RunProgress` (step count + elapsed) treatment:
+ * suppressed once a `RequestActivity` card is mounted for this chat's bound
+ * request, since that card already live-renders the SAME run's progress —
+ * showing `RunProgress` here too would state the same step count twice.
+ */
+export interface ThreadStatusVisibility {
+  activityProgress: boolean;
+  trailingLine: boolean;
+}
+
+/**
+ * FIX 5 — what `hasRunCard` is allowed to mean.
+ *
+ * The suppressions keyed on `hasRunCard` (this function, and `receiptLine`'s
+ * `showFailureText` below, and the thread's `request_progress` line) all say
+ * the same thing: "the run card already states this, so the thread will not
+ * restate it." That is only true while the card IS stating something. A
+ * `RequestActivity` renders a Skeleton until its first poll resolves, and a
+ * degraded notice — "we could not reach the workspace" — when the poll comes
+ * back with `cms_agent_unavailable` or `no_workflow_run`. In both of those
+ * the card states no run status at all.
+ *
+ * The host used to pass `Boolean(chat.request)`, i.e. "a request is bound",
+ * which is true in every one of those states. A chat bound to a request
+ * whose CMS-Agent read failed, whose last run ended in `run_error`, showed
+ * the failure NOWHERE: the card said it could not reach the workspace and
+ * the thread had been silenced on its behalf.
+ *
+ * This is the predicate the hosts must pass instead. The invariant it
+ * exists to hold — the card is never silent while the thread is silenced —
+ * is asserted over every combination in `chat-liveness.test.ts`.
+ */
+export interface RunCardPresence {
+  /** A `RequestActivity` is mounted for this chat's bound request at all. */
+  mounted: boolean;
+  /** Its first poll has resolved — before that it is a Skeleton. */
+  loaded: boolean;
+  /** That poll returned an activity view, rather than a degraded notice. */
+  hasActivity: boolean;
+}
+
+export const runCardStatesStatus = (presence: RunCardPresence): boolean =>
+  presence.mounted && presence.loaded && presence.hasActivity;
+
+export function threadStatusVisibility(params: { running: boolean; hasRunCard: boolean }): ThreadStatusVisibility {
+  return {
+    activityProgress: params.running && !params.hasRunCard,
+    trailingLine: false,
+  };
+}
+
 // ─── elapsed time ───────────────────────────────────────────────────────────
 
 export function elapsedMsSince(startedAt: string | undefined, nowMs: number): number | undefined {
@@ -152,6 +212,41 @@ export function terminalReceiptInfo(outcome: RunSummaryView['outcome']): Termina
     case 'completed':
       return { label: 'Done', severity: 'success' };
   }
+}
+
+export interface ReceiptLineInput {
+  outcome: RunSummaryView['outcome'];
+  /** `RunSummaryView.chips`, verbatim — the loop's own `runChips()` (`agent/loop.ts`). */
+  chips: readonly string[];
+  /** The run's own failure text (`run_error`'s `runErrorCopy`), when this receipt is for a failed run. */
+  message?: string;
+  /**
+   * A `RequestActivity` card is mounted for this chat's bound request — it
+   * already states a failed run via the derive-status sentence
+   * (`status_reason`, `sweep.ts` / `derive-status.ts`), so this run's own
+   * failure text here would say the same failure a second time (A3:
+   * "a failed-run thread states the failure exactly once").
+   */
+  hasRunCard: boolean;
+}
+
+export interface ReceiptLineDecision {
+  /** Chips worth showing — a lone "no changes" chip (`runChips`'s empty-run
+   *  fallback) carries no information the headline doesn't already; drop it. */
+  visibleChips: string[];
+  /** Whether `message`/`providerDetail` render at all. */
+  showFailureText: boolean;
+}
+
+const NO_CHANGES_CHIP = 'no changes';
+
+/** A3: what the single-line receipt shows beyond its headline + elapsed time. */
+export function receiptLine({ outcome, chips, message, hasRunCard }: ReceiptLineInput): ReceiptLineDecision {
+  const visibleChips = chips.length === 1 && chips[0] === NO_CHANGES_CHIP ? [] : [...chips];
+  return {
+    visibleChips,
+    showFailureText: Boolean(message) && !(outcome === 'error' && hasRunCard),
+  };
 }
 
 /**

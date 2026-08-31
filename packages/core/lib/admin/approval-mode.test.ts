@@ -7,6 +7,8 @@ import {
   isRunSafeApproval,
   readPersistedRunApprovalMode,
   readPersistedTestMode,
+  RUN_MODE_OPTIONS,
+  runModeControl,
   shouldAutoApproveRunTool,
   writePersistedRunApprovalMode,
   writePersistedTestMode,
@@ -200,6 +202,48 @@ describe('run-approval-mode persistence', () => {
     assert.equal(readPersistedRunApprovalMode('chat-1'), 'ask');
     assert.equal(readPersistedRunApprovalMode('chat-2'), 'ask');
     assert.equal(readPersistedRunApprovalMode(undefined), 'ask');
+  });
+});
+
+describe('runModeControl (A5 — the owner-only Test-mode gate, pure)', () => {
+  it('always carries both mutually exclusive run modes, in order', () => {
+    assert.deepEqual(
+      RUN_MODE_OPTIONS.map((option) => option.value),
+      ['ask', 'safe-run']
+    );
+    assert.deepEqual(runModeControl(['owner']).options, RUN_MODE_OPTIONS);
+  });
+
+  it('owner: Test mode is enabled, with no reason to show', () => {
+    const control = runModeControl(['owner']);
+    assert.equal(control.enabled, true);
+    assert.equal(control.reason, undefined);
+  });
+
+  it('an owner among other roles still enables it', () => {
+    assert.equal(runModeControl(['admin', 'owner']).enabled, true);
+  });
+
+  for (const role of ['admin', 'publisher', 'editor', 'viewer']) {
+    it(`${role} alone: Test mode is disabled with a reason (D3 — never hidden)`, () => {
+      const control = runModeControl([role]);
+      assert.equal(control.enabled, false);
+      assert.equal(typeof control.reason, 'string');
+      assert.ok(control.reason && control.reason.length > 0);
+    });
+  }
+
+  it('no roles at all: disabled with a reason too, same as any non-owner', () => {
+    const control = runModeControl([]);
+    assert.equal(control.enabled, false);
+    assert.ok(control.reason);
+  });
+
+  it('the moved control still round-trips its selection through approval-mode persistence', () => {
+    for (const option of RUN_MODE_OPTIONS) {
+      writePersistedRunApprovalMode('chat-a5-move', option.value);
+      assert.equal(readPersistedRunApprovalMode('chat-a5-move'), option.value);
+    }
   });
 });
 

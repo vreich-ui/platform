@@ -23,9 +23,20 @@ import {
   type ApprovalPolicy,
   type GovernedObjectType,
 } from '../../lib/approval-policy.js';
+import type { UserRole } from './users-client.js';
 
 export type PrincipalKind = 'human' | 'agent';
-export type Role = 'admin' | 'publisher' | 'editor';
+/**
+ * The three tiers with review standing on THIS surface, narrowed from the one
+ * role source (`users-client.ts`'s `UserRole`, itself `server/lib/roles.ts`'s
+ * five tiers) rather than re-typed here. B1: a second hand-written copy of
+ * the role names is how a tier gets renamed in one place and silently missed
+ * in another — `Extract` makes that a compile error instead.
+ * `owner` is absent on purpose (it expands to admin+publisher server-side,
+ * so it never reaches this module as a bare role) and so is `viewer`, which
+ * is read-only and has no reviewer standing at all.
+ */
+export type Role = Extract<UserRole, 'admin' | 'publisher' | 'editor'>;
 
 export type ReviewSummary = {
   state: 'open' | 'changes_requested' | 'approved';

@@ -36,9 +36,9 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { Avatar, Badge, Button, Card, EmptyState, IconButton, Skeleton, StatusPill } from './primitives';
+import { Avatar, Badge, Button, type ButtonProps, Card, EmptyState, IconButton, Skeleton, StatusPill } from './primitives';
 import { Input, Select, Switch, Textarea } from './forms';
-import { Dialog, ConfirmDialog, Drawer, useToast } from './overlays';
+import { Dialog, ConfirmDialog, Drawer, Popover, useToast } from './overlays';
 import { DataTable, type Column } from './data';
 import { DropdownMenu, Tabs } from './menus';
 import {
@@ -1082,6 +1082,24 @@ function CreatedLinkDialog({
 
 // ─── invitations tab (T18.3b) ────────────────────────────────────────────────
 
+/** Owner rights-gated invite action, gated per Convention D3 (disabled with a
+ * reason, never hidden). A native `title=` never reached a keyboard or touch
+ * user — `Popover` (`mode="hover"`, `overlays.tsx`) moves the reason onto a
+ * focusable wrapper so it does. Only wraps in a `Popover` when there IS a
+ * reason: a transiently busy-disabled button needs no tooltip, its spinner
+ * already says why. */
+function InviteActionButton({ blockedReason, disabled, ...buttonProps }: { blockedReason?: string } & ButtonProps) {
+  if (!blockedReason) return <Button disabled={disabled} {...buttonProps} />;
+  return (
+    <Popover
+      mode="hover"
+      content={blockedReason}
+      disabled
+      trigger={(a11y) => <Button {...buttonProps} disabled {...a11y} />}
+    />
+  );
+}
+
 function InvitationsPanel({
   now,
   policy,
@@ -1233,25 +1251,25 @@ function InvitationsPanel({
         );
         return (
           <div className="flex items-center justify-end gap-2">
-            <Button
+            <InviteActionButton
               size="sm"
               variant="secondary"
               disabled={!a.resend.enabled || busyId === i.invite_id}
-              title={a.resend.reason}
+              blockedReason={a.resend.reason}
               onClick={() => void doResend(i)}
               loading={busyId === i.invite_id}
             >
               Resend
-            </Button>
-            <Button
+            </InviteActionButton>
+            <InviteActionButton
               size="sm"
               variant="ghost"
               disabled={!a.revoke.enabled || busyId === i.invite_id}
-              title={a.revoke.reason}
+              blockedReason={a.revoke.reason}
               onClick={() => setRevoke(i)}
             >
               Revoke
-            </Button>
+            </InviteActionButton>
           </div>
         );
       },

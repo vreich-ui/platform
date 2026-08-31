@@ -18,6 +18,7 @@ import { createPortal } from 'react-dom';
 
 import { cn } from './utils';
 import { filterCommands, type CommandLike } from './logic';
+import { Popover, type PopoverTriggerA11yProps } from './overlays';
 import { IconSearch } from './icons';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
@@ -121,6 +122,13 @@ export interface MenuItem {
   icon?: ReactNode;
   onSelect?: () => void;
   disabled?: boolean;
+  /**
+   * Why this item is unavailable (B1/D3). Rendered as a `Popover`
+   * (`mode="hover"`) rather than a native `title=` — a `title` on a disabled
+   * `<button>` reaches a mouse and nothing else, which is the whole reason
+   * `Popover` exists (see `overlays.tsx`). The prop keeps its name so every
+   * existing caller reads the same; only what it renders as changed.
+   */
   title?: string;
   tone?: 'default' | 'danger';
   separatorBefore?: boolean;
@@ -152,10 +160,24 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const itemRefs = useRef<Array<HTMLElement | null>>([]);
   const baseId = useId();
 
+  /** Where the menu PARKS on open, and what Home/End mean: an actionable item. */
   const enabledIndexes = items.map((it, i) => (it.disabled ? -1 : i)).filter((i) => i >= 0);
+  /**
+   * What Up/Down traverse. FIX 7 — this now includes DISABLED items, because
+   * they render as `aria-disabled` menuitems (focusable, and refused by
+   * `select`) rather than as unfocusable `disabled` buttons.
+   *
+   * That is what makes convention D3 true here rather than merely intended:
+   * a disabled item's reason opens on FOCUS (`Popover mode="hover"` arms on
+   * `trigger-focus`, not only on pointer enter), so arrowing onto "Archive"
+   * announces "Ask an owner". Skipping them, as this did, left the reason
+   * reachable by a mouse and nothing else — the exact failure the Popover
+   * was built to end.
+   */
+  const navigableIndexes = items.map((_, i) => i);
 
   const close = useCallback((focusTrigger = true) => {
     setOpen(false);
@@ -222,9 +244,10 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
   }, [open, align, items.length]);
 
   const move = (dir: 1 | -1) => {
-    const pos = enabledIndexes.indexOf(activeIndex);
-    const nextPos = (pos + dir + enabledIndexes.length) % enabledIndexes.length;
-    setActiveIndex(enabledIndexes[nextPos]);
+    if (navigableIndexes.length === 0) return;
+    const pos = navigableIndexes.indexOf(activeIndex);
+    const nextPos = (pos + dir + navigableIndexes.length) % navigableIndexes.length;
+    setActiveIndex(navigableIndexes[nextPos]);
   };
 
   const onMenuKeyDown = (event: React.KeyboardEvent) => {
@@ -236,10 +259,13 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
       move(-1);
     } else if (event.key === 'Home') {
       event.preventDefault();
-      setActiveIndex(enabledIndexes[0]);
+      // Home/End go to an ACTIONABLE item — arrowing is how you inspect a
+      // disabled one's reason. A menu with nothing actionable in it keeps
+      // whatever is focused rather than jumping to `undefined`.
+      if (enabledIndexes.length > 0) setActiveIndex(enabledIndexes[0]);
     } else if (event.key === 'End') {
       event.preventDefault();
-      setActiveIndex(enabledIndexes[enabledIndexes.length - 1]);
+      if (enabledIndexes.length > 0) setActiveIndex(enabledIndexes[enabledIndexes.length - 1]);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       close();
@@ -252,6 +278,85 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
     if (item.disabled) return;
     item.onSelect?.();
     close();
+  };
+
+  /**
+   * One menu item. `a11y` is `Popover`'s render-prop payload, and it lands on
+   * the element that actually TAKES FOCUS, so the tooltip is that element's
+   * own `aria-describedby`.
+   *
+   * FIX 7 — a disabled item renders as an `aria-disabled` span, not a
+   * `disabled` <button>.
+   *
+   * A `disabled` <button> is not focusable, so this menu's roving-tabindex
+   * model (`itemRefs.current[activeIndex].focus()`) could never reach one,
+   * and it fires no pointer or focus events, so its reason was unreachable
+   * too. `Popover`'s `disabled` mode papered over the second half by adding
+   * a `tabIndex={0}` wrapper span — but that span is not a `menuitem` and is
+   * not in `itemRefs`, so inside `role="menu"` it became a stray Tab stop
+   * that arrow keys could not reach and screen readers could not name.
+   *
+   * `aria-disabled` is the ARIA-recommended spelling inside a menu for
+   * exactly this reason: the item stays focusable and stays in the roving
+   * model, while still announcing as unavailable. `select()` already
+   * refuses a disabled item, and `enabledIndexes` already excludes it from
+   * arrow-key traversal, so nothing here can be actioned by accident.
+   *
+   * That also lets `Popover` stay in its ordinary enabled-trigger mode here
+   * — no wrapper tab stop at all — which keeps the component honest for its
+   * other callers rather than growing a menu-shaped exception.
+   */
+  const renderItem = (item: MenuItem, index: number, a11y: PopoverTriggerA11yProps = {}) => {
+    const className = cn(
+      'adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-sm)] px-2.5 py-1.5 text-left text-[length:var(--adm-text-sm)]',
+      item.disabled ? 'cursor-not-allowed opacity-40' : '',
+      item.tone === 'danger' ? 'text-[var(--adm-danger)]' : 'text-[var(--adm-text)]',
+      index === activeIndex && !item.disabled
+        ? item.tone === 'danger'
+          ? 'bg-[var(--adm-danger-soft)]'
+          : 'bg-[var(--adm-accent-soft)]'
+        : ''
+    );
+    const body = (
+      <>
+        {item.icon ? <span className="shrink-0">{item.icon}</span> : null}
+        {item.label}
+      </>
+    );
+    if (item.disabled) {
+      return (
+        <span
+          ref={(el) => {
+            itemRefs.current[index] = el;
+          }}
+          role="menuitem"
+          aria-disabled="true"
+          // Focusable, so the reason is reachable — but never the menu's
+          // default stop, which `enabledIndexes` keeps on an actionable item.
+          tabIndex={-1}
+          {...a11y}
+          className={className}
+        >
+          {body}
+        </span>
+      );
+    }
+    return (
+      <button
+        ref={(el) => {
+          itemRefs.current[index] = el;
+        }}
+        role="menuitem"
+        type="button"
+        tabIndex={index === activeIndex ? 0 : -1}
+        onClick={() => select(item)}
+        onMouseEnter={() => setActiveIndex(index)}
+        {...a11y}
+        className={className}
+      >
+        {body}
+      </button>
+    );
   };
 
   const panel = (
@@ -275,30 +380,23 @@ export function DropdownMenu({ trigger, items, align = 'start', className }: Dro
     >
       {items.map((item, index) => (
         <div key={item.id} className={item.separatorBefore ? 'mt-1 border-t border-[var(--adm-border)] pt-1' : ''}>
-          <button
-            ref={(el) => {
-              itemRefs.current[index] = el;
-            }}
-            role="menuitem"
-            type="button"
-            tabIndex={index === activeIndex ? 0 : -1}
-            disabled={item.disabled}
-            title={item.title}
-            onClick={() => select(item)}
-            onMouseEnter={() => !item.disabled && setActiveIndex(index)}
-            className={cn(
-              'adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-sm)] px-2.5 py-1.5 text-left text-[length:var(--adm-text-sm)] disabled:cursor-not-allowed disabled:opacity-40',
-              item.tone === 'danger' ? 'text-[var(--adm-danger)]' : 'text-[var(--adm-text)]',
-              index === activeIndex && !item.disabled
-                ? item.tone === 'danger'
-                  ? 'bg-[var(--adm-danger-soft)]'
-                  : 'bg-[var(--adm-accent-soft)]'
-                : ''
-            )}
-          >
-            {item.icon ? <span className="shrink-0">{item.icon}</span> : null}
-            {item.label}
-          </button>
+          {item.title ? (
+            /* D3: the reason an item is unavailable must be reachable by
+               keyboard and touch, not only by a mouse resting on a native
+               `title`. No `disabled` prop here — `renderItem` gives a
+               disabled item an `aria-disabled` span, which fires its own
+               pointer and focus events, so Popover needs no wrapper tab stop
+               inside this menu (FIX 7). */
+            <Popover
+              mode="hover"
+              placement="top"
+              className="w-full"
+              content={item.title}
+              trigger={(a11y) => renderItem(item, index, a11y)}
+            />
+          ) : (
+            renderItem(item, index)
+          )}
         </div>
       ))}
     </div>

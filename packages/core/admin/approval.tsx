@@ -18,11 +18,13 @@
  *
  * Vocabulary ruling (T1.2 brief): the three decision actions are **Approve**,
  * **Reject**, **Modify** — see `docs/plan/ux-inventory.md` Table C
- * ("Decision-reject/decision-modify button") for the four different words
- * the rest of the codebase currently uses for these same two non-Approve
- * actions. This file's prop names and default labels use the new vocabulary
- * so later migration (T3.2/T6.1) converges on it; existing call sites
- * (`chat.tsx`'s `ApprovalCard`, `RequestActivity.tsx`) are untouched here.
+ * ("Decision-reject/decision-modify button") for the four different words the
+ * codebase used for these same two non-Approve actions. The convergence is
+ * finished: A7 deleted `chat.tsx`'s own older `ApprovalCard` and moved the
+ * chat's pending tool-call onto this one, so every approval surface now
+ * renders these buttons, with these words, from `DECISION_LABEL`
+ * (`@core/lib/admin/approval-actions`, where `DECISION_KEYS` and its test
+ * hold the invariant).
  *
  * These are primitives + a kit demo only — nothing here calls a decision
  * endpoint. T0.1 found three separate decision mechanisms (object
@@ -51,9 +53,9 @@ import {
   type DecisionKey,
   type ReasonRequirement,
 } from '@core/lib/admin/approval-actions';
-import { Button } from './primitives';
+import { Button, type ButtonProps } from './primitives';
 import { Textarea } from './forms';
-import { useToast } from './overlays';
+import { Popover, useToast } from './overlays';
 import { SeverityIcon } from './severity';
 import { cn } from './utils';
 
@@ -75,7 +77,45 @@ const BAR_FILL: Record<SeverityTokenFamily, string> = {
   danger: 'bg-[var(--adm-danger)]',
 };
 
+/**
+ * One decision button, gated per Convention D3 (disabled with a reason,
+ * never hidden). A plain `title=` on a disabled `<button>` only ever reached
+ * a mouse — this is exactly what T0's `Popover` (hover mode) exists to fix:
+ * `disabled` on `Popover` moves the listeners onto a focusable wrapper span
+ * so the reason opens on keyboard focus and stays tappable on touch, not
+ * just a mouse hover. Only wraps in a `Popover` when there IS a reason —
+ * a transiently `busy`-disabled button (no `blockedReason`) needs no tooltip,
+ * its spinner already says why.
+ */
+function DecisionButton({ blockedReason, disabled, ...buttonProps }: { blockedReason?: string } & ButtonProps) {
+  if (!blockedReason) return <Button disabled={disabled} {...buttonProps} />;
+  return (
+    <Popover
+      mode="hover"
+      content={blockedReason}
+      disabled
+      trigger={(a11y) => <Button {...buttonProps} disabled {...a11y} />}
+    />
+  );
+}
+
 // ─── ActionRow ──────────────────────────────────────────────────────────────
+
+/**
+ * A capture that is richer than a one-line reason. `validate` is the load-
+ * bearing part: returning a message keeps the row in capture WITH the typed
+ * text (a `refuse_draft` in `reduceActionRow`), where a handler that simply
+ * threw would settle the row and drop the draft on the floor.
+ */
+export interface DraftCapture {
+  /** Prefill — the chat's Modify opens on the call's current arguments. */
+  initial?: string;
+  rows?: number;
+  /** Overrides the `"<Action> reason"` aria-label and the placeholder. */
+  label?: string;
+  placeholder?: string;
+  validate?: (draft: string) => string | undefined;
+}
 
 export interface ActionRowProps {
   /** Omit to not offer that action at all — each of the three is independently optional. */
@@ -86,10 +126,19 @@ export interface ActionRowProps {
   rejectLabel?: string;
   modifyLabel?: string;
   /** Whether Reject's/Modify's in-place textarea must have text before Confirm enables.
-   * Default 'optional', mirroring the existing chat.tsx Decline→reason→Deny flow this
-   * mirrors (its reason is optional — "Why not? (optional — the agent sees this)"). */
+   * Default 'optional', mirroring the chat reject→reason→confirm flow this
+   * mirrors (its reason is optional — "Why? (optional — the agent sees this)"). */
   rejectReason?: ReasonRequirement;
   modifyReason?: ReasonRequirement;
+  /**
+   * A7 — Modify does not always capture a free-text "why". On a chat tool
+   * call it captures the tool's ARGUMENTS, re-approved: the box opens on the
+   * current JSON, needs more than two rows, and must refuse a draft that
+   * does not parse instead of settling and losing the edit. One prop
+   * describes that capture rather than four parallel ones; omitting it
+   * leaves every existing caller on the plain reason textarea.
+   */
+  modifyCapture?: DraftCapture;
   /** Non-decision actions — Open chat, Mute, Archive. Rendered flush right of the
    * decision buttons. A destructive one (e.g. Archive) should confirm itself through
    * the existing `ConfirmDialog` overlay — ActionRow does not add a second confirmation
@@ -130,6 +179,7 @@ export function ActionRow({
   modifyLabel = DECISION_LABEL.modify,
   rejectReason = 'optional',
   modifyReason = 'optional',
+  modifyCapture,
   secondary,
   disabledReason,
   approveDisabledReason,
@@ -171,6 +221,7 @@ export function ActionRow({
     const requirement = key === 'reject' ? rejectReason : modifyReason;
     const handler = key === 'reject' ? onReject : onModify;
     const label = key === 'reject' ? rejectLabel : modifyLabel;
+    const capture = key === 'modify' ? modifyCapture : undefined;
     const confirmEnabled = canConfirmReason(state, requirement) && !busy;
     return (
       <div className={cn('flex flex-col gap-2', className)}>
@@ -186,14 +237,16 @@ export function ActionRow({
               dispatch({ type: 'cancel_reason' });
             }
           }}
-          rows={2}
+          rows={capture?.rows ?? 2}
           placeholder={
-            requirement === 'required'
+            capture?.placeholder ??
+            (requirement === 'required'
               ? 'Why? (required — the agent sees this)'
-              : 'Why? (optional — the agent sees this)'
+              : 'Why? (optional — the agent sees this)')
           }
-          aria-label={`${label} reason`}
+          aria-label={capture?.label ?? `${label} reason`}
           disabled={busy}
+          {...(state.draftError ? { error: state.draftError } : {})}
         />
         <div className="flex gap-2">
           <Button
@@ -202,6 +255,14 @@ export function ActionRow({
             loading={state.pending === key}
             disabled={!confirmEnabled}
             onClick={() => {
+              // Validation first, and only on the way OUT of the capture —
+              // typing invalid JSON is a normal intermediate state, being
+              // told about it on every keystroke is not.
+              const problem = capture?.validate?.(state.reasonDraft);
+              if (problem) {
+                dispatch({ type: 'refuse_draft', message: problem });
+                return;
+              }
               if (handler) void runDecision(key, handler, state.reasonDraft.trim() || undefined);
             }}
           >
@@ -218,23 +279,23 @@ export function ActionRow({
   return (
     <div className={cn('flex flex-wrap items-center gap-2', className)}>
       {onApprove ? (
-        <Button
+        <DecisionButton
           size="sm"
           loading={state.pending === 'approve'}
-          disabled={busy || Boolean(approveBlocked)}
-          title={approveBlocked}
+          disabled={busy}
+          blockedReason={approveBlocked}
           onClick={() => void runDecision('approve', () => onApprove())}
         >
           {state.pending === 'approve' ? DECISION_PENDING_LABEL.approve : approveLabel}
-        </Button>
+        </DecisionButton>
       ) : null}
       {onReject ? (
-        <Button
+        <DecisionButton
           size="sm"
           variant="secondary"
           loading={state.pending === 'reject'}
-          disabled={busy || Boolean(rejectBlocked)}
-          title={rejectBlocked}
+          disabled={busy}
+          blockedReason={rejectBlocked}
           onClick={() =>
             // T3.2: a mechanism with nowhere to put the reviewer's words
             // (`rejectReason='none'`) decides on the click rather than opening
@@ -248,23 +309,27 @@ export function ActionRow({
           }
         >
           {state.pending === 'reject' ? DECISION_PENDING_LABEL.reject : rejectLabel}
-        </Button>
+        </DecisionButton>
       ) : null}
       {onModify ? (
-        <Button
+        <DecisionButton
           size="sm"
           variant="secondary"
           loading={state.pending === 'modify'}
-          disabled={busy || Boolean(modifyBlocked)}
-          title={modifyBlocked}
+          disabled={busy}
+          blockedReason={modifyBlocked}
           onClick={() =>
             needsReasonCapture(modifyReason)
-              ? dispatch({ type: 'request_reason', action: 'modify' })
+              ? dispatch({
+                  type: 'request_reason',
+                  action: 'modify',
+                  ...(modifyCapture?.initial !== undefined ? { draft: modifyCapture.initial } : {}),
+                })
               : void runDecision('modify', onModify)
           }
         >
           {state.pending === 'modify' ? DECISION_PENDING_LABEL.modify : modifyLabel}
-        </Button>
+        </DecisionButton>
       ) : null}
       {secondary ? <div className="ml-auto flex shrink-0 items-center gap-1">{secondary}</div> : null}
     </div>
@@ -309,9 +374,9 @@ export interface ApprovalCardProps {
  *   card surface (`--adm-surface-raised`) and the severity icon chip's soft
  *   tint (`CHIP_SOFT`). No third background is introduced here — status is
  *   never painted as a full tinted panel behind the card (contrast the
- *   existing `chat.tsx` `ApprovalCard`'s `bg-[var(--adm-surface-sunken)]`
- *   panel and `RequestActivity.tsx`'s full `bg-[var(--adm-warning-soft)]`
- *   "Waiting for you" section, both pre-D9). `Button`/`Textarea` bring their
+ *   sunken `bg-[var(--adm-surface-sunken)]` panel the chat's own pre-D9
+ *   approval card used, deleted in A7, and `RequestActivity.tsx`'s full
+ *   `bg-[var(--adm-warning-soft)]` "Waiting for you" section). `Button`/`Textarea` bring their
  *   own control chrome from the shared primitives — that is unavoidable
  *   interactive-control styling, not a second status panel, and is not
  *   counted against this card's own two.
@@ -331,6 +396,7 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   const def = SEVERITY[severity];
   const metaLine = meta ? [meta.requester, meta.age, meta.cost].filter(Boolean) : [];
+  const hasDecision = Boolean(actions.onApprove || actions.onReject || actions.onModify || actions.secondary);
 
   return (
     <div
@@ -363,7 +429,13 @@ export function ApprovalCard({
           ) : null}
         </div>
       </div>
-      <ActionRow {...actions} disabledReason={disabledReason} />
+      {/* A card whose decision belongs to ANOTHER surface passes no
+          callbacks (ux-inventory A9: a sequential proposal is decided on the
+          Object Stage, and this card names it in `cause`). That is the one
+          case with no row to render — it is not a D3 exception, since there
+          is no action here to hide; every card that CAN decide still renders
+          its buttons unconditionally. */}
+      {hasDecision ? <ActionRow {...actions} disabledReason={disabledReason} /> : null}
       {children ? <div className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{children}</div> : null}
     </div>
   );

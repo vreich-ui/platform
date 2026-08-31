@@ -72,6 +72,32 @@ describe('quiet chat activity', () => {
     );
   });
 
+  it('A4: folds 5 consecutive request_progress events into the latest one', () => {
+    const items = groupChatEvents([
+      event(1, 'request_progress', { status: 'running', done: 1, total: 5 }),
+      event(2, 'request_progress', { status: 'running', done: 2, total: 5 }),
+      event(3, 'request_progress', { status: 'running', done: 3, total: 5 }),
+      event(4, 'request_progress', { status: 'running', done: 4, total: 5 }),
+      event(5, 'request_progress', { status: 'failed', done: 5, total: 5 }),
+    ]);
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.kind, 'event');
+    if (items[0]?.kind === 'event') assert.equal(items[0].event.seq, 5, 'keeps the LATEST event, not the first');
+  });
+
+  it('A4: does not fold request_progress events separated by other activity', () => {
+    const items = groupChatEvents([
+      event(1, 'request_progress', { status: 'running' }),
+      event(2, 'tool_call', { tool: 'patch' }),
+      event(3, 'request_progress', { status: 'running' }),
+    ]);
+    assert.equal(items.length, 3);
+    assert.deepEqual(
+      items.map((item) => item.kind),
+      ['event', 'activity', 'event']
+    );
+  });
+
   it('has a shared human label for every guardrails tool', () => {
     for (const tool of [
       'get_object',

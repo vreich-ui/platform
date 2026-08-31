@@ -31,7 +31,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Button } from './primitives';
 import { Input, Textarea } from './forms';
-import { useToast } from './overlays';
+import { Popover, useToast, type PopoverTriggerA11yProps } from './overlays';
 import { cn } from './utils';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import type { ObjectRecord } from '@core/schema/object-record-v1';
@@ -209,15 +209,23 @@ export function ObjectDetailForm({ record, getToken, disabledReason, onSaved }: 
       {note ? <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{note}</p> : null}
 
       <div className={cn('flex flex-wrap items-center gap-2')}>
-        <Button
-          size="sm"
-          onClick={() => void save()}
-          loading={busy}
-          disabled={readOnly || changed.length === 0}
-          title={disabledReason ?? (changed.length === 0 ? 'Nothing has changed yet.' : undefined)}
-        >
-          Save draft
-        </Button>
+        {(() => {
+          const saveDisabled = readOnly || changed.length === 0;
+          const saveReason = disabledReason ?? (changed.length === 0 ? 'Nothing has changed yet.' : undefined);
+          const saveButton = (a11y?: PopoverTriggerA11yProps) => (
+            <Button size="sm" onClick={() => void save()} loading={busy} disabled={saveDisabled} {...a11y}>
+              Save draft
+            </Button>
+          );
+          // Convention D3: disabled with a reason needs a reachable tooltip, not a
+          // native `title` (no keyboard/touch affordance) — only wrap when there IS
+          // a reason to show; an enabled button needs no Popover at all.
+          return saveDisabled && saveReason ? (
+            <Popover mode="hover" content={saveReason} disabled trigger={(a11y) => saveButton(a11y)} />
+          ) : (
+            saveButton()
+          );
+        })()}
         <Button size="sm" variant="secondary" onClick={revert} disabled={readOnly || changed.length === 0}>
           Revert
         </Button>

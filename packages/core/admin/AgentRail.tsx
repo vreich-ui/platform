@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { EmptyState, IconButton } from './primitives';
 import { ChatComposer, ChatStateChip, ChatThread, type UseChatState } from './chat';
 import { IconChevronLeft, IconChevronRight, IconSparkles } from './icons';
-import { RequestActivity } from './RequestActivity';
+import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { cn } from './utils';
 
@@ -60,9 +60,19 @@ export function AgentRail({
   onToggleCollapsed?: () => void;
 }) {
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope, approvalInStage });
+  /** B2: the run card's Retry, wired the same way on all four surfaces. */
+  const retryRun = useRetryRequest();
   const [testMode, setTestMode] = useTestMode({ preferenceScope, allowed: canUseTestMode });
   // Highlight-to-reference: a quoted selection from the transcript, relayed into the composer.
   const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
+  /**
+   * FIX 6 — the rail mounts a run card too, and never told its thread. A2's
+   * `RunProgress` suppression and A4's `request_progress` suppression had
+   * been applied on the hub only, so this surface still stated the same run
+   * twice. Same semantics as the hub: this is "the card is stating the
+   * status right now", not "a request is bound" (FIX 5).
+   */
+  const [runCardStatesStatus, setRunCardStatesStatus] = useState(false);
 
   const collapsedTone =
     chat.status === 'awaiting_approval' || chat.status === 'awaiting_candidate'
@@ -148,7 +158,13 @@ export function AgentRail({
           live line until the editor asks for the detail. */}
       {chat.request ? (
         <div className="shrink-0 pt-3">
-          <RequestActivity requestId={chat.request.request_id} isOwner={isOwner} />
+          <RequestActivity
+            requestId={chat.request.request_id}
+            isOwner={isOwner}
+            {...(chat.status ? { chatStatus: chat.status } : {})}
+            onStatesStatusChange={setRunCardStatesStatus}
+            onRetry={() => void retryRun(chat.request!.request_id)}
+          />
         </div>
       ) : null}
       <ChatThread
@@ -159,7 +175,7 @@ export function AgentRail({
         previewCandidateId={chat.previewCandidate?.candidate_id}
         busy={chat.busy}
         onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
-        onDeny={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
+        onReject={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
         onPreviewCandidate={(candidateId) => chat.preview(candidateId)}
         onChooseCandidate={(candidateId) => void chat.chooseCandidate(candidateId)}
         onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
@@ -172,6 +188,7 @@ export function AgentRail({
         lastEventAtMs={chat.lastEventAtMs}
         onUndo={(prompt) => void chat.send(prompt)}
         isOwner={isOwner}
+        hasRunCard={runCardStatesStatus}
         emptyHint={
           <EmptyState
             title="Ready when you are"

@@ -15,9 +15,9 @@ import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Avatar, Badge, Button, Card, EmptyState, Skeleton, StatusPill } from './primitives';
 import { Input, Select, Textarea } from './forms';
-import { Dialog, useToast } from './overlays';
+import { Dialog, Popover, useToast } from './overlays';
 import { AgentChip, ChatComposer, ChatStateChip, ChatThread, useChat } from './chat';
-import { RequestActivity } from './RequestActivity';
+import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
@@ -302,6 +302,8 @@ function HubBody() {
   const [pendingStarter, setPendingStarter] = useState<string | undefined>(undefined);
   const requestedStarterHandled = useRef(false);
   const chat = useChat(getToken, activeId);
+  /** B2: the run card's Retry, wired the same way on all four surfaces. */
+  const retryRun = useRetryRequest();
 
   const reloadList = async (includeAll = owner) => {
     try {
@@ -370,41 +372,64 @@ function HubBody() {
   const [testMode, setTestMode] = useTestMode({ preferenceScope: activeId, allowed: owner });
   // Highlight-to-reference: a quoted selection from the transcript, relayed into the composer.
   const [quote, setQuote] = useState<{ token: number; text: string } | undefined>(undefined);
+  /**
+   * FIX 5 — whether the run card below is CURRENTLY stating this run's
+   * status. Reported by the card itself, because only it knows whether its
+   * poll resolved and came back with an activity view rather than a degraded
+   * notice. `Boolean(chat.request)` is true in both of those silent states,
+   * which is how a failed run could end up stated nowhere at all.
+   */
+  const [runCardStatesStatus, setRunCardStatesStatus] = useState(false);
 
   return (
-    <div className="grid min-h-0 gap-5 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+    // A6: the rail is a FIXED 260px (`AGENTS_HUB_LAYOUT.railPx` in
+    // `lib/admin/agents-hub-layout.ts` — keep both edits in lockstep), not a
+    // viewport fraction, so the chat column keeps ≥60% of the content width
+    // at any size instead of being squeezed by a `1fr` rail.
+    <div className="grid min-h-0 gap-5 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[260px_minmax(0,1fr)]">
       {/* Left: starters + session list */}
       <div className="flex min-h-0 flex-col gap-4">
         <Card kicker="Start something" title="New conversation">
-          <div className="grid gap-2">
+          <div className="grid gap-1">
             {AGENT_STARTERS.filter((starter) => !starter.ownerOnly || owner).map((starter) => (
-              <button
+              <Popover
                 key={starter.key}
-                type="button"
-                onClick={() => void startConversation(starter)}
-                disabled={pendingStarter !== undefined}
-                className="adm-focusable flex items-start gap-3 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2.5 text-left hover:border-[var(--adm-accent)]"
-              >
-                <span className="mt-0.5 text-[var(--adm-accent)]">{STARTER_ICONS[starter.key]}</span>
-                <span className="min-w-0">
-                  <span className="block text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                    {starter.label}
-                    {pendingStarter === starter.key ? '…' : ''}
-                  </span>
-                  <span className="block text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-                    {starter.description}
-                  </span>
-                </span>
-              </button>
+                mode="hover"
+                content={starter.description}
+                trigger={(a11y) => (
+                  <button
+                    type="button"
+                    onClick={() => void startConversation(starter)}
+                    disabled={pendingStarter !== undefined}
+                    className="adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-2 text-left hover:border-[var(--adm-accent)]"
+                    {...a11y}
+                  >
+                    <span className="shrink-0 text-[var(--adm-accent)]">{STARTER_ICONS[starter.key]}</span>
+                    <span className="min-w-0 flex-1 truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                      {starter.label}
+                      {pendingStarter === starter.key ? '…' : ''}
+                    </span>
+                  </button>
+                )}
+              />
             ))}
           </div>
         </Card>
 
         <Card kicker="Reasoning agent" title="Client Manager">
-          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-            Every admin conversation runs through CMS-Agent. If Client Manager is unavailable, the chat stops safely
-            instead of switching to another model.
-          </p>
+          <Popover
+            mode="hover"
+            content="If Client Manager is unavailable, the chat stops safely instead of switching to another model."
+            trigger={(a11y) => (
+              <p
+                tabIndex={0}
+                {...a11y}
+                className="adm-focusable cursor-default truncate text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]"
+              >
+                Every admin conversation runs through CMS-Agent.
+              </p>
+            )}
+          />
         </Card>
 
         <Card
@@ -505,7 +530,13 @@ function HubBody() {
                 23-node article being written instead of asking for an update. */}
             {chat.request ? (
               <div className="mb-3">
-                <RequestActivity requestId={chat.request.request_id} isOwner={owner} />
+                <RequestActivity
+                  requestId={chat.request.request_id}
+                  isOwner={owner}
+                  {...(chat.status ? { chatStatus: chat.status } : {})}
+                  onStatesStatusChange={setRunCardStatesStatus}
+                  onRetry={() => void retryRun(chat.request!.request_id)}
+                />
               </div>
             ) : null}
             {createdObjects.length > 0 ? (
@@ -534,7 +565,7 @@ function HubBody() {
               pending={chat.pending}
               busy={chat.busy}
               onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
-              onDeny={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
+              onReject={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
               onQuote={(text) => setQuote({ token: Date.now(), text })}
               onSendControls={(text) => void chat.send(text, undefined, testMode)}
               pendingConsumed={chat.pendingConsumed}
@@ -542,26 +573,35 @@ function HubBody() {
               lastEventAtMs={chat.lastEventAtMs}
               onUndo={(prompt) => void chat.send(prompt, undefined, testMode)}
               isOwner={owner}
+              /* FIX 5: "the run card is stating this run's status right now",
+                 NOT "a request is bound". A card that is still a Skeleton, or
+                 that came back `cms_agent_unavailable`, states nothing — and
+                 a thread silenced on its behalf would leave the editor with
+                 no status anywhere (`runCardStatesStatus`). */
+              hasRunCard={runCardStatesStatus}
             />
             {chat.error ? (
               <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
             ) : null}
             <div className="mt-3 border-t border-[var(--adm-border)] pt-3">
-              <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
-                <RunApprovalControls
-                  mode={approvalMode}
-                  onChange={setApprovalMode}
-                  testMode={testMode}
-                  onTestModeChange={setTestMode}
-                  canUseTestMode={owner}
-                />
-              </div>
+              {/* A5: the run-mode pill moved INTO the composer's bottom-left
+                  (no more full-width "This run:" row above it — one row
+                  reclaimed for every composer on this surface). */}
               <ChatComposer
                 status={chat.status}
                 busy={chat.busy}
                 onSend={(text) => void chat.send(text, undefined, testMode)}
                 onCancel={() => void chat.cancel()}
                 quote={quote}
+                runMode={
+                  <RunApprovalControls
+                    mode={approvalMode}
+                    onChange={setApprovalMode}
+                    testMode={testMode}
+                    onTestModeChange={setTestMode}
+                    canUseTestMode={owner}
+                  />
+                }
               />
             </div>
           </>

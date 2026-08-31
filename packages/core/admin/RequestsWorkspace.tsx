@@ -17,19 +17,21 @@
  * backed-off chain while active — see `RequestsBody`'s own comment.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
-import { RequestActivity } from './RequestActivity';
+import { Badge, Button, Card, EmptyState, IconButton, Skeleton } from './primitives';
+import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { ActionRow, RunProgress } from './approval';
 import { StatusBadge } from './severity';
-import { Drawer } from './overlays';
+import { ConfirmDialog, Drawer, Popover } from './overlays';
 import { browserPermission, requestBrowserPermission, type BrowserPermission } from './useRequestNotifications';
 import { Input, Select } from './forms';
 import { useToast } from './overlays';
-import { IconExternalLink, IconRobot } from './icons';
+import { DropdownMenu } from './menus';
+import { IconDots, IconExternalLink, IconRobot, IconSettings } from './icons';
 import {
   archiveRequest,
   cancelRequest,
@@ -50,14 +52,22 @@ import {
   DEFAULT_REQUEST_QUICK_FILTER,
   matchesQuickFilter,
   nodeLabel,
-  progressPhrase,
   QUICK_FILTERS,
   quickFilterToStatuses,
-  relativeAge,
+  publishPolicyFromApproval,
+  publishTargetFor,
   requestSeverityLevel,
+  rowActions,
+  rowMetaLine,
   sortRequestRows,
+  type PublishPolicy,
   type RequestQuickFilter,
+  type RowAction,
+  type RowActionId,
 } from '@core/lib/admin/request-logic';
+import { activeApprovalPolicy, publishRequiresApproval } from '@core/lib/approval-policy';
+import { runQuickAction } from '@core/lib/admin/quick-actions';
+import { callObjectVerb } from '@core/lib/edit-mode/verbs-client';
 import { refreshRequestsIndexNow, useDecisionOverlay, useRequestsIndex } from '@core/lib/admin/requests-store';
 import {
   assertDecided,
@@ -71,6 +81,27 @@ import { useCurrentUser } from '@core/lib/admin/use-current-user';
 
 /** D3: a viewer without publish-decision authority sees the buttons disabled with the reason, never absent. */
 const ROW_DECISION_DENIED_REASON = 'You do not have publish-decision authority for this run.';
+
+/**
+ * B3 — this client's publish posture, read once from the committed approval
+ * policy (`lib/approval-policy.ts`, the same client-safe read
+ * `object-review-ui.ts` makes; the admin entry point already imports the
+ * site's policy bindings). `content_item` is the type asked about, the same
+ * assumption the row's Open object link already makes: an editorial request's
+ * object is an article.
+ *
+ * A bundle that reached this without registered bindings would THROW, and a
+ * config read must not blank a publisher's only action, so that degrades to
+ * `manual` — Publish still renders and the server's own gate stays the
+ * authority. Never to `block`: this surface must not invent a refusal.
+ */
+const resolvePublishPolicy = (): PublishPolicy => {
+  try {
+    return publishPolicyFromApproval(publishRequiresApproval('content_item', activeApprovalPolicy()));
+  } catch {
+    return 'manual';
+  }
+};
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -106,55 +137,282 @@ function LiveDot({ status }: { status: RequestStatus }) {
 }
 
 /**
+ * B1 — a `RowAction` made visible.
+ *
+ * Icons and variants live here rather than in `request-logic.ts`: which
+ * action is worth an accent button is a LOOK, and the model must stay
+ * renderer-free (it is tested in node, with no React).
+ */
+const ROW_ACTION_ICON: Partial<Record<RowActionId, ReactNode>> = {
+  open_chat: <IconRobot size={14} />,
+  open_object: <IconExternalLink size={14} />,
+};
+
+const ROW_ACTION_VARIANT: Partial<Record<RowActionId, 'primary' | 'secondary' | 'ghost'>> = {
+  publish: 'primary',
+  retry: 'secondary',
+  raise_budget: 'secondary',
+  restore: 'secondary',
+  open_chat: 'secondary',
+};
+
+/**
+ * One primary action. D3: a disabled one keeps its place in the row and
+ * carries its reason on a `Popover` (`mode="hover"`) — reachable by keyboard
+ * focus and by touch, which a native `title=` on a disabled button is not.
+ * A merely `busy`-disabled button gets no popover: the toast that follows
+ * says what happened, and a tooltip repeating "busy" is noise.
+ */
+function RowActionButton({
+  action,
+  busy,
+  onInvoke,
+}: {
+  action: RowAction;
+  busy: boolean;
+  onInvoke: (action: RowAction) => void;
+}) {
+  const icon = ROW_ACTION_ICON[action.id];
+  const variant = ROW_ACTION_VARIANT[action.id] ?? 'ghost';
+  if (!action.enabled) {
+    return (
+      <Popover
+        mode="hover"
+        disabled
+        content={action.reason ?? ''}
+        trigger={(a11y) => (
+          <Button size="sm" variant={variant} disabled {...(icon ? { leftIcon: icon } : {})} {...a11y}>
+            {action.label}
+          </Button>
+        )}
+      />
+    );
+  }
+  return (
+    <Button
+      size="sm"
+      variant={variant}
+      disabled={busy}
+      {...(icon ? { leftIcon: icon } : {})}
+      onClick={() => onInvoke(action)}
+    >
+      {action.label}
+    </Button>
+  );
+}
+
+/**
+ * The row's action cluster: at most two primaries (the model decides which —
+ * `rowActions`), then everything else behind ONE overflow menu. The list is
+ * the same object the Drawer renders from, which is the point of B1: the two
+ * surfaces cannot offer different actions for the same row any more.
+ */
+function RowActionCluster({
+  actions,
+  busy,
+  onInvoke,
+  menuLabel,
+}: {
+  actions: readonly RowAction[];
+  busy: boolean;
+  onInvoke: (action: RowAction) => void;
+  menuLabel: string;
+}) {
+  const primaries = actions.filter((action) => action.kind === 'primary');
+  const overflow = actions.filter((action) => action.kind === 'menu');
+  return (
+    <>
+      {primaries.map((action) => (
+        <RowActionButton key={action.id} action={action} busy={busy} onInvoke={onInvoke} />
+      ))}
+      {overflow.length > 0 ? (
+        <DropdownMenu
+          align="end"
+          trigger={({ ref, onToggle }) => (
+            <IconButton ref={ref} label={menuLabel} icon={<IconDots size={16} />} size="sm" onClick={onToggle} />
+          )}
+          items={overflow.map((action) => ({
+            id: action.id,
+            label: action.label,
+            disabled: !action.enabled || busy,
+            // `MenuItem.title` is now rendered as a hover Popover, not a
+            // native title= (see `menus.tsx`) — same D3 guarantee as above.
+            ...(action.reason ? { title: action.reason } : {}),
+            onSelect: () => onInvoke(action),
+          }))}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Every effect a row action can have. All required since B2/B3 landed the last
+ * two: the "Not wired yet" placeholder reason is gone, and an action's
+ * availability is now decided by `rowActions` and the server's own gates
+ * alone — never by whether this file happened to pass a prop.
+ */
+export interface RowActionHandlers {
+  onArchive: (row: RequestRowView) => void;
+  onCancel: (row: RequestRowView) => void;
+  onMute: (row: RequestRowView, muted: boolean) => void;
+  /** B2: `retryRequest()` — puts a stopped run back in front of the sweeper. */
+  onRetry: (row: RequestRowView) => void;
+  /** B3: the object publish path, behind a confirmation. */
+  onPublish: (row: RequestRowView) => void;
+  /** Opens the run's detail, where the Owner-only budget-raise card (`budgetRaiseButtons` → `raiseNodeBudget`) already lives. */
+  onRaiseBudget: (row: RequestRowView) => void;
+}
+
+/**
+ * The one place a row's actions are computed AND dispatched — the inbox row
+ * and the Drawer both call it, so a change to either is a change to both.
+ *
+ * Two component-level overrides sit on top of the pure model, both narrowing
+ * never widening: an action whose handler has not landed yet and the
+ * publish-DECISION mirror (`canDecideRunPublish` — the endpoint's own line is
+ * `roles.includes('admin')`, narrower than the publish tier `rowActions`
+ * gates on, and showing a publisher a live Approve the server then refuses
+ * would be worse than showing it disabled with the real reason).
+ *
+ * B3 resolves the mismatch B1 flagged by SCOPING that mirror, not widening
+ * it: `canDecideRunPublish` mirrors ONE server line — the run gate's
+ * `can_approve` on `admin-request-activity` — so it narrows Approve/Reject
+ * and nothing else. The row's Publish is a different server gate entirely
+ * (`checkPublishGate`'s `canExecutePublish`: admin OR publisher), which is
+ * exactly the `publish` tier `rowActions` already applies, so a publisher
+ * gets a live Publish and a disabled Approve, both truthfully.
+ */
+function useRowActions(
+  row: RequestRowView,
+  {
+    roles,
+    mine,
+    muted,
+    canDecide,
+    publishPolicy,
+    handlers,
+  }: {
+    roles: readonly string[];
+    mine: boolean;
+    muted: boolean;
+    canDecide: boolean;
+    publishPolicy: PublishPolicy;
+    handlers: RowActionHandlers;
+  }
+) {
+  const actions = useMemo(() => {
+    return rowActions(
+      {
+        status: row.status,
+        archived: row.archived,
+        ...(row.chat_id ? { chat_id: row.chat_id } : {}),
+        ...(row.object_id ? { object_id: row.object_id } : {}),
+        muted,
+        mine,
+      },
+      roles,
+      { publishPolicy }
+    ).map((action) => {
+      if (!action.enabled) return action;
+      if ((action.id === 'approve' || action.id === 'reject') && !canDecide)
+        return { ...action, enabled: false, reason: ROW_DECISION_DENIED_REASON };
+      return action;
+    });
+  }, [row, roles, mine, muted, canDecide, publishPolicy]);
+
+  const invoke = (action: RowAction) => {
+    switch (action.id) {
+      case 'open_chat':
+        if (row.chat_id) void navigate(`/admin/agents?chat=${encodeURIComponent(row.chat_id)}`);
+        return;
+      case 'open_object':
+        if (row.object_id) void navigate(`/admin/content/${encodeURIComponent(row.object_id)}?type=content_item`);
+        return;
+      case 'mute':
+        handlers.onMute(row, muted);
+        return;
+      case 'cancel':
+        handlers.onCancel(row);
+        return;
+      case 'archive':
+      case 'restore':
+        handlers.onArchive(row);
+        return;
+      case 'retry':
+        handlers.onRetry(row);
+        return;
+      case 'publish':
+        handlers.onPublish(row);
+        return;
+      case 'raise_budget':
+        handlers.onRaiseBudget(row);
+        return;
+      default:
+        // approve/reject are the one pair that does NOT dispatch from here —
+        // `ActionRow` owns their pending state and their reason flow.
+        return;
+    }
+  };
+
+  return { actions, invoke };
+}
+
+/**
  * T3.2 (T0.3 row A3): the row decides. A `needs_you` row is a run held at its
  * publish-risk gate, which the decision façade addresses by request id — the
  * same target the request detail page and the header pill use, so a decision
  * from any of the three moves the other two through the shared store.
  *
- * `canDecide` is the display-only mirror of the endpoint's own permission
- * line (`decisions.ts`'s `canDecideRunPublish`); the server re-checks, and a
- * viewer without the role gets the buttons DISABLED with the reason, never
- * hidden (D3).
+ * B1: WHICH actions a row offers is no longer written here — `rowActions`
+ * (`lib/admin/request-logic.ts`) answers that from the status and the
+ * caller's roles, and this component only draws the answer: at most two
+ * primaries plus one overflow menu. The Drawer draws the same list.
  */
 function RequestRow({
   row,
   nowMs,
-  canArchive,
+  roles,
+  mine,
   busy,
   muted,
   canDecide,
+  publishPolicy,
   decided,
   onDecide,
-  onArchive,
-  onCancel,
-  onMute,
+  handlers,
   onOpen,
   selected,
 }: {
   row: RequestRowView;
   nowMs: number;
-  canArchive: boolean;
+  roles: readonly string[];
+  mine: boolean;
   busy: boolean;
   muted: boolean;
   canDecide: boolean;
+  publishPolicy: PublishPolicy;
   decided?: DecisionOverlayEntry;
   onDecide: (row: RequestRowView, decision: DecisionAction, reason?: string) => Promise<void>;
-  onArchive: (row: RequestRowView) => void;
-  onCancel: (row: RequestRowView) => void;
-  onMute: (row: RequestRowView, muted: boolean) => void;
+  handlers: RowActionHandlers;
   onOpen: (row: RequestRowView, event: React.MouseEvent<HTMLAnchorElement>) => void;
   selected: boolean;
 }) {
-  const phrase = progressPhrase(row.progress, row.current_node);
+  // B4: one meta line — progressPhrase · owner · age. `status_reason`
+  // ("The artifact plan step failed, so the job has stopped.") used to render
+  // as its own line here, restating the StatusBadge right above it; it now
+  // shows only in the Drawer. `rowMetaLine` already omits the phrase for a
+  // live row, since `RunProgress` (below) takes its place.
+  const meta = rowMetaLine(row, nowMs);
+  const metaLine = [meta.primary, ...meta.secondary].filter(Boolean).join(' · ');
   const level = requestSeverityLevel(row.status);
-  const showReason = level === 'needs_you' || level === 'blocked';
-  // Approve/Reject only makes sense where a DECISION is pending — the genuine
-  // `needs_you` status, not `stalled` riding the same amber colour under the
-  // split (STALLED_VS_FAILED_SPLIT): "taking longer than expected" is not a
-  // decision waiting on anyone, just a job that hasn't moved. A `blocked`
-  // (failed) row has already resolved, badly; nothing here to approve either.
-  const showDecisionRow = row.status === 'needs_you';
   const live = row.status === 'running' || row.status === 'queued';
+  const { actions, invoke } = useRowActions(row, { roles, mine, muted, canDecide, publishPolicy, handlers });
+  // Approve/Reject render through `ActionRow`, which owns the pending state
+  // and the reason flow; every other action is a plain button or a menu item.
+  const approve = actions.find((action) => action.id === 'approve');
+  const reject = actions.find((action) => action.id === 'reject');
+  const rest = actions.filter((action) => action.id !== 'approve' && action.id !== 'reject');
   return (
     <li
       className={`border-b border-[var(--adm-border)] last:border-0 ${selected ? 'bg-[var(--adm-surface-sunken)]' : ''}`}
@@ -175,15 +433,9 @@ function RequestRow({
             <StatusBadge level={level}>{requestStatusLabel(row.status)}</StatusBadge>
             <Badge tone="neutral">{KIND_LABELS[row.kind] ?? row.kind}</Badge>
           </span>
-          <span className="mt-0.5 block text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-            {phrase && !live ? <span>{phrase} · </span> : null}
-            {row.created_by} · {relativeAge(row.updated_at, nowMs)}
+          <span className="mt-0.5 block truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            {metaLine}
           </span>
-          {showReason && row.status_reason ? (
-            <span className="mt-1 flex items-start gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              {row.status_reason}
-            </span>
-          ) : null}
           {live && row.progress && row.progress.total > 0 ? (
             <RunProgress
               className="mt-1.5 max-w-sm"
@@ -205,7 +457,7 @@ function RequestRow({
                person did, never what the run now is; the next snapshot
                reconciles it away. */
             <Badge tone="info">{DECIDED_WAITING_LABEL[decided.decision]}</Badge>
-          ) : showDecisionRow ? (
+          ) : approve && reject ? (
             <ActionRow
               className="mr-1"
               onApprove={() => onDecide(row, 'approve')}
@@ -214,62 +466,58 @@ function RequestRow({
                  `decisions.ts`'s `reasonDroppedNote`), so Reject decides on
                  the click instead of prompting for words nobody would read. */
               rejectReason="none"
-              disabledReason={canDecide ? undefined : ROW_DECISION_DENIED_REASON}
-              approveLabel="Approve"
-              rejectLabel="Reject"
+              approveLabel={approve.label}
+              rejectLabel={reject.label}
+              {...(approve.reason ? { approveDisabledReason: approve.reason } : {})}
+              {...(reject.reason ? { rejectDisabledReason: reject.reason } : {})}
             />
           ) : null}
-          {/* D3/A3: both affordances always render — disabled with a tooltip
-              when the data isn't there, never silently absent. */}
-          <Button
-            size="sm"
-            variant="secondary"
-            leftIcon={<IconRobot size={14} />}
-            disabled={!row.chat_id}
-            title={row.chat_id ? undefined : 'No chat is attached to this request yet.'}
-            onClick={() => row.chat_id && void navigate(`/admin/agents?chat=${encodeURIComponent(row.chat_id)}`)}
-          >
-            Open chat
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            leftIcon={<IconExternalLink size={14} />}
-            disabled={!row.object_id}
-            title={row.object_id ? undefined : 'No object is attached to this request yet.'}
-            onClick={() =>
-              row.object_id && void navigate(`/admin/content/${encodeURIComponent(row.object_id)}?type=content_item`)
-            }
-          >
-            Open object
-          </Button>
-          {/* W19 T19.6: muting is personal and silences ALL THREE channels —
-              the toast, the desktop alert and the e-mail. Every notification
-              e-mail points back here, so the control has to exist here. */}
-          {!row.archived ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => onMute(row, muted)}
-              title={muted ? 'You are not being told about this one' : 'Stop telling me about this one'}
-            >
-              {muted ? 'Unmute' : 'Mute'}
-            </Button>
-          ) : null}
-          {row.status !== 'done' && row.status !== 'cancelled' && !row.archived ? (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onCancel(row)}>
-              Cancel
-            </Button>
-          ) : null}
-          {canArchive ? (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onArchive(row)}>
-              {row.archived ? 'Restore' : 'Archive'}
-            </Button>
-          ) : null}
+          <RowActionCluster
+            actions={rest}
+            busy={busy}
+            onInvoke={invoke}
+            menuLabel={`More actions for ${row.title}`}
+          />
         </span>
       </div>
     </li>
+  );
+}
+
+/**
+ * The Drawer's action cluster — the SAME list the row renders (B1: the
+ * duplicated Open chat / Open object JSX that used to live in the Drawer is
+ * gone). Approve/Reject are dropped here only because `RequestActivity`
+ * below already renders the run's own approval card; offering a second pair
+ * of decision buttons six inches above it is how two surfaces disagree.
+ */
+function RequestDrawerActions({
+  row,
+  roles,
+  mine,
+  muted,
+  canDecide,
+  publishPolicy,
+  busy,
+  handlers,
+}: {
+  row: RequestRowView;
+  roles: readonly string[];
+  mine: boolean;
+  muted: boolean;
+  canDecide: boolean;
+  publishPolicy: PublishPolicy;
+  busy: boolean;
+  handlers: RowActionHandlers;
+}) {
+  const { actions, invoke } = useRowActions(row, { roles, mine, muted, canDecide, publishPolicy, handlers });
+  return (
+    <RowActionCluster
+      actions={actions.filter((action) => action.id !== 'approve' && action.id !== 'reject')}
+      busy={busy}
+      onInvoke={invoke}
+      menuLabel={`More actions for ${row.title}`}
+    />
   );
 }
 
@@ -408,15 +656,22 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     return () => clearTimeout(timer);
   }, [queryInput]);
 
-  const canArchive = user.roles.includes('owner') || user.roles.includes('publisher');
   // Task B (provider-error-details): gates the Owner-only provider detail
   // line on a failed run's error text — the surface already resolves roles,
   // so `RequestActivity` reads it from here rather than resolving its own.
   const isOwner = user.roles.includes('owner');
+  // B1: `rowActions` needs the caller's own address to answer "may this
+  // editor cancel THIS run" — an editor may cancel their own, a publisher
+  // anyone's. Unknown fails closed (see `rowActions`).
+  const myEmail = user.user?.email?.trim().toLowerCase();
   // T3.2: the same overlay the shell's pill reads, so a decision taken here
   // and a decision taken from the header are the same fact to both surfaces.
   const decisionOverlay = useDecisionOverlay();
   const canDecide = canDecideRunPublish(user.roles);
+  // B3: one read of the committed posture per mount — it cannot change under us.
+  const publishPolicy = useMemo(resolvePublishPolicy, []);
+  /** B3: the row awaiting its publish confirmation, if any (`ConfirmDialog`). */
+  const [publishTarget, setPublishTarget] = useState<RequestRowView | undefined>(undefined);
 
   // Filter state lives in the query string, so a filtered view is linkable.
   useEffect(() => {
@@ -500,6 +755,50 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     if (custom) void loadCustom(customGenerationRef.current);
     else refreshRequestsIndexNow(getToken);
   }, [custom, loadCustom]);
+
+  /**
+   * B2 — Retry, for all three places this page shows a run: the inbox row's
+   * action, the Drawer's copy of it, and the run card on the detail route.
+   * One handler, so a retry taken from any of them makes the same call, says
+   * the same thing and refreshes the same list.
+   */
+  const retryRun = useRetryRequest(refresh);
+
+  /**
+   * B3 — Publish, through the object publish path that already exists
+   * (`runQuickAction`'s `object_publish`: checkout → publish_by_time →
+   * checkin, giving the lock back on both paths). Nothing new is written
+   * here; the server's `checkPublishGate` remains the only authority on
+   * whether this publish may happen.
+   *
+   * What the inbox can truthfully say about the object it is publishing —
+   * and what it deliberately does not invent — is `publishTargetFor`'s own
+   * documented job (`request-logic.ts`), so the shape this passes and the
+   * shape the test drives cannot drift.
+   */
+  const publishRow = useCallback(
+    async (target: RequestRowView) => {
+      const object = publishTargetFor(target);
+      if (!object) return;
+      setBusy(true);
+      try {
+        const result = await runQuickAction(
+          (body) => callObjectVerb(getToken, body),
+          { id: 'publish', verb: 'object_publish', label: 'Publish' },
+          object
+        );
+        toast({
+          title: result.ok ? 'Published' : 'Publish failed',
+          description: result.receipt,
+          tone: result.ok ? 'success' : 'danger',
+        });
+        if (result.ok) refresh();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh, toast]
+  );
 
   /**
    * T3.2 (T0.3 row A3) — the inbox row's decision, through the one façade.
@@ -603,6 +902,46 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     window.history.pushState({}, '', '/admin/requests');
   };
 
+  /**
+   * B1 — every row action's effect, in ONE place, for both the row and the
+   * Drawer. B2 landed `onRetry` (`retryRequest()`) and B3 `onPublish` (the
+   * object publish path, behind a confirmation), so nothing here is a button
+   * that says "not wired yet" any more.
+   *
+   * `onRaiseBudget` opens the run's detail rather than raising anything here:
+   * the Owner-only raise card (`budgetRaiseButtons` → `raiseNodeBudget`)
+   * already exists in `RequestActivity`, and it needs the failed node's own
+   * budget numbers — which an index row does not carry. Routing to it beats
+   * a second, number-less copy of the same two buttons.
+   */
+  const openDetail = useCallback(
+    (target: RequestRowView) => {
+      if (selectedId) return;
+      setOpenId(target.request_id);
+      window.history.pushState({}, '', `/admin/requests/${encodeURIComponent(target.request_id)}`);
+    },
+    [selectedId]
+  );
+
+  const rowHandlers: RowActionHandlers = {
+    onArchive: (target) =>
+      void act(target.archived ? 'Restored' : 'Archived', () =>
+        target.archived ? unarchiveRequest(getToken, target.request_id) : archiveRequest(getToken, target.request_id)
+      ),
+    onCancel: (target) => void act('Cancelled', () => cancelRequest(getToken, target.request_id)),
+    onMute: (target, isMuted) =>
+      void act(isMuted ? 'Unmuted' : 'Muted', () =>
+        isMuted ? unmuteRequest(getToken, target.request_id) : muteRequest(getToken, target.request_id)
+      ),
+    // B2: the index row carries `current_node`, which is the best name a list
+    // row has for where the run stopped — the run card passes the sharper
+    // `recovery.node_id` instead.
+    onRetry: (target) => void retryRun(target.request_id),
+    // B3: publishing is not undoable from here, so it asks first.
+    onPublish: (target) => setPublishTarget(target),
+    onRaiseBudget: openDetail,
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <Card
@@ -623,35 +962,57 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
         {selectedId ? null : (
           <>
             <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
-            <div className="my-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <Select
-                label="Kind"
-                value={kindFilter}
-                onChange={(event) => setKindFilter(event.target.value)}
-                options={[
-                  { value: '', label: 'Every kind' },
-                  ...Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label })),
-                ]}
-              />
-              <Input
-                label="Search"
-                value={queryInput}
-                placeholder="Title or request id"
-                onChange={(event) => setQueryInput(event.target.value)}
-              />
-              <EmailModeControl
-                mode={emailMode}
-                onChange={(next) => {
-                  setEmailModeState(next);
-                  void act('Saved', () => setEmailMode(getToken, next));
-                }}
-              />
-              <div className="flex items-end gap-3 pb-1">
-                <BrowserNotifyControl />
-                <label className="flex items-center gap-1.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-                  <input type="checkbox" checked={mine} onChange={(event) => setMine(event.target.checked)} /> Mine
-                </label>
+            {/* B5: Search + Kind + Mine on one line — the notification settings
+                (e-mail cadence, desktop alerts) are per-person preferences, not
+                filters over the list, so they move behind a gear rather than
+                competing with the filters for row space. */}
+            <div className="my-3 flex flex-wrap items-end gap-2">
+              <div className="min-w-[9rem]">
+                <Select
+                  label="Kind"
+                  value={kindFilter}
+                  onChange={(event) => setKindFilter(event.target.value)}
+                  options={[
+                    { value: '', label: 'Every kind' },
+                    ...Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label })),
+                  ]}
+                />
               </div>
+              <div className="min-w-[12rem] flex-1">
+                <Input
+                  label="Search"
+                  value={queryInput}
+                  placeholder="Title or request id"
+                  onChange={(event) => setQueryInput(event.target.value)}
+                />
+              </div>
+              <label className="flex items-center gap-1.5 pb-2.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+                <input type="checkbox" checked={mine} onChange={(event) => setMine(event.target.checked)} /> Mine
+              </label>
+              <Popover
+                mode="click"
+                placement="bottom"
+                trigger={(a11y) => (
+                  <IconButton
+                    {...a11y}
+                    label="Notification settings"
+                    icon={<IconSettings size={16} />}
+                    variant="secondary"
+                  />
+                )}
+                content={
+                  <div className="flex w-64 flex-col gap-3">
+                    <EmailModeControl
+                      mode={emailMode}
+                      onChange={(next) => {
+                        setEmailModeState(next);
+                        void act('Saved', () => setEmailMode(getToken, next));
+                      }}
+                    />
+                    <BrowserNotifyControl />
+                  </div>
+                }
+              />
             </div>
           </>
         )}
@@ -662,7 +1023,13 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
             editor who opened THIS request wants the detail, not a summary. */}
         {selectedId ? (
           <div className="mb-3">
-            <RequestActivity requestId={selectedId} defaultExpanded onSettled={refresh} isOwner={isOwner} />
+            <RequestActivity
+              requestId={selectedId}
+              defaultExpanded
+              onSettled={refresh}
+              isOwner={isOwner}
+              onRetry={() => void retryRun(selectedId)}
+            />
           </div>
         ) : null}
         {loading ? (
@@ -685,27 +1052,17 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                 key={row.request_id}
                 row={row}
                 nowMs={nowMs}
-                canArchive={canArchive}
+                roles={user.roles}
+                mine={Boolean(myEmail) && row.created_by.trim().toLowerCase() === myEmail}
                 busy={busy}
                 muted={muted.includes(row.request_id)}
                 canDecide={canDecide}
+                publishPolicy={publishPolicy}
                 decided={pendingDecisionForRequest(decisionOverlay, row.request_id)}
                 onDecide={decideRow}
                 selected={row.request_id === (selectedId ?? openId)}
                 onOpen={onOpenRow}
-                onArchive={(target) =>
-                  void act(target.archived ? 'Restored' : 'Archived', () =>
-                    target.archived
-                      ? unarchiveRequest(getToken, target.request_id)
-                      : archiveRequest(getToken, target.request_id)
-                  )
-                }
-                onCancel={(target) => void act('Cancelled', () => cancelRequest(getToken, target.request_id))}
-                onMute={(target, isMuted) =>
-                  void act(isMuted ? 'Unmuted' : 'Muted', () =>
-                    isMuted ? unmuteRequest(getToken, target.request_id) : muteRequest(getToken, target.request_id)
-                  )
-                }
+                handlers={rowHandlers}
               />
             ))}
           </ul>
@@ -726,38 +1083,53 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                     {requestStatusLabel(openRow.status)}
                   </StatusBadge>
                   <Badge tone="neutral">{KIND_LABELS[openRow.kind] ?? openRow.kind}</Badge>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    leftIcon={<IconRobot size={14} />}
-                    disabled={!openRow.chat_id}
-                    title={openRow.chat_id ? undefined : 'No chat is attached to this request yet.'}
-                    onClick={() =>
-                      openRow.chat_id && void navigate(`/admin/agents?chat=${encodeURIComponent(openRow.chat_id)}`)
-                    }
-                  >
-                    Open chat
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    leftIcon={<IconExternalLink size={14} />}
-                    disabled={!openRow.object_id}
-                    title={openRow.object_id ? undefined : 'No object is attached to this request yet.'}
-                    onClick={() =>
-                      openRow.object_id &&
-                      void navigate(`/admin/content/${encodeURIComponent(openRow.object_id)}?type=content_item`)
-                    }
-                  >
-                    Open object
-                  </Button>
+                  {/* B1: the same action list the row renders — the two
+                      hand-written buttons that used to live here are gone. */}
+                  <RequestDrawerActions
+                    row={openRow}
+                    roles={user.roles}
+                    mine={Boolean(myEmail) && openRow.created_by.trim().toLowerCase() === myEmail}
+                    muted={muted.includes(openRow.request_id)}
+                    canDecide={canDecide}
+                    publishPolicy={publishPolicy}
+                    busy={busy}
+                    handlers={rowHandlers}
+                  />
                 </div>
               ) : null}
-              <RequestActivity requestId={openId} defaultExpanded onSettled={refresh} isOwner={isOwner} />
+              <RequestActivity
+                requestId={openId}
+                defaultExpanded
+                onSettled={refresh}
+                isOwner={isOwner}
+                onRetry={() => void retryRun(openId)}
+              />
             </div>
           ) : null}
         </Drawer>
       )}
+
+      {/* B3: publishing commits the draft to the export — not undoable from
+          this row — so it asks first, and says what the client's posture
+          means for the click. A `manual` client still gets the button: the
+          record's approval state lives on the object, not on this row, so
+          the server's publish gate is what actually decides. */}
+      <ConfirmDialog
+        open={Boolean(publishTarget)}
+        onClose={() => setPublishTarget(undefined)}
+        onConfirm={() => {
+          const target = publishTarget;
+          setPublishTarget(undefined);
+          if (target) void publishRow(target);
+        }}
+        title={`Publish “${publishTarget?.title ?? 'this article'}”?`}
+        message={
+          publishPolicy === 'manual'
+            ? 'This client requires an approved review before a publish is accepted. If the article has one, this commits it to the export; it goes live on the next release.'
+            : 'This commits the article to the export. It goes live on the next release.'
+        }
+        confirmLabel="Publish"
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import astroEslintParser from 'astro-eslint-parser';
+import reactHooks from 'eslint-plugin-react-hooks';
 import eslintPluginAstro from 'eslint-plugin-astro';
 import globals from 'globals';
 import js from '@eslint/js';
@@ -52,6 +53,24 @@ export default [
         },
       ],
       '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+  {
+    // The admin UI is React. `rules-of-hooks` is an ERROR because a hook placed
+    // after an early return is not a style question — it throws "Rendered more
+    // hooks than during the previous render" and unmounts the surface, and
+    // nothing else in this repo can see it: `tsconfig.test.json` excludes
+    // `packages/core/admin/**/*.tsx`, so the Node test suite never loads these
+    // files, and `astro check` type-checks them without knowing what a hook is.
+    // Added after exactly that bug reached a review in the admin-ux-8020 wave.
+    //
+    // `exhaustive-deps` is deliberately NOT enabled: it reports 25 pre-existing
+    // warnings across the admin, several of them intentional. Turning it on is
+    // a separate cleanup, not a gate.
+    files: ['**/*.tsx'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
     },
   },
   {

@@ -31,7 +31,7 @@ import { createPortal } from 'react-dom';
 import { navigate } from 'astro:transitions/client';
 
 import { Button } from './primitives';
-import { useToast } from './overlays';
+import { Popover, useToast } from './overlays';
 import { cn } from './utils';
 import {
   DEFAULT_QUICK_ACTION_REGISTRY,
@@ -226,29 +226,43 @@ function QuickActionChipButton({
   return (
     <span ref={triggerRef} className="inline-flex">
       {variant === 'button' ? (
-        <Button
-          ref={buttonRef}
-          size="sm"
-          variant="secondary"
-          title={chip.title}
+        <Popover
+          mode="hover"
+          content={chip.title}
           disabled={busy}
-          aria-expanded={chip.execution === 'popover' ? open : undefined}
-          onClick={onClick}
-        >
-          {busy ? 'Working…' : label}
-        </Button>
+          trigger={(a11y) => (
+            <Button
+              ref={buttonRef}
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              aria-expanded={chip.execution === 'popover' ? open : undefined}
+              onClick={onClick}
+              {...a11y}
+            >
+              {busy ? 'Working…' : label}
+            </Button>
+          )}
+        />
       ) : (
-        <button
-          ref={buttonRef}
-          type="button"
-          title={chip.title}
+        <Popover
+          mode="hover"
+          content={chip.title}
           disabled={busy}
-          aria-expanded={chip.execution === 'popover' ? open : undefined}
-          onClick={onClick}
-          className="adm-focusable rounded-[var(--adm-radius-pill)] border border-[var(--adm-border-strong)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)] disabled:opacity-50"
-        >
-          {busy ? 'Working…' : label}
-        </button>
+          trigger={(a11y) => (
+            <button
+              ref={buttonRef}
+              type="button"
+              disabled={busy}
+              aria-expanded={chip.execution === 'popover' ? open : undefined}
+              onClick={onClick}
+              className="adm-focusable rounded-[var(--adm-radius-pill)] border border-[var(--adm-border-strong)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)] disabled:opacity-50"
+              {...a11y}
+            >
+              {busy ? 'Working…' : label}
+            </button>
+          )}
+        />
       )}
       {open ? (
         <QuickActionPopover

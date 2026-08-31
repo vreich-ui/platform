@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  classifyRow,
   DEFAULT_REQUEST_QUICK_FILTER,
   filterRequestRows,
   matchesQuickFilter,
@@ -13,9 +14,12 @@ import {
   quickFilterToStatuses,
   requestSeverityLevel,
   requestStatusLabel,
+  retryReceipt,
+  rowMetaLine,
   scanNotifications,
   STALLED_VS_FAILED_SPLIT,
   titlePrefix,
+  NODE_LABELS,
   nodeLabel,
   progressPhrase,
   relativeAge,
@@ -149,6 +153,43 @@ describe('shell pill counts', () => {
   });
 });
 
+describe('classifyRow (B5 — one predicate, not two)', () => {
+  it('is the single bucket both the header count and the quick-filter tabs read', () => {
+    // The acceptance fixture: 2 `needs_you` + 4 `failed` rows. Before this
+    // fix, `summarizeRequestRows` and `matchesQuickFilter` reimplemented this
+    // decision separately — the real bug was a header pill and a tab that
+    // could name different counts for the identical row set.
+    const rows: RequestRowLike[] = [
+      row('req_ny1_x_20260822_01', 'needs_you'),
+      row('req_ny2_x_20260822_01', 'needs_you'),
+      row('req_fa1_x_20260822_01', 'failed'),
+      row('req_fa2_x_20260822_01', 'failed'),
+      row('req_fa3_x_20260822_01', 'failed'),
+      row('req_fa4_x_20260822_01', 'failed'),
+    ];
+
+    const counts = summarizeRequestRows(rows);
+    assert.deepEqual(counts, { working: 0, needsYou: 2, blocked: 4 });
+
+    const needsYouTab = rows.filter((r) => matchesQuickFilter(r, 'needsYou')).map((r) => r.request_id);
+    const blockedTab = rows.filter((r) => matchesQuickFilter(r, 'blocked')).map((r) => r.request_id);
+    assert.equal(needsYouTab.length, counts.needsYou);
+    assert.equal(blockedTab.length, counts.blocked);
+    assert.deepEqual(needsYouTab, ['req_ny1_x_20260822_01', 'req_ny2_x_20260822_01']);
+    assert.deepEqual(blockedTab, ['req_fa1_x_20260822_01', 'req_fa2_x_20260822_01', 'req_fa3_x_20260822_01', 'req_fa4_x_20260822_01']);
+  });
+
+  it('classifies every status into exactly one bucket, archived overriding all of them', () => {
+    assert.equal(classifyRow(row('r', 'needs_you')), 'needs_you');
+    assert.equal(classifyRow(row('r', 'failed')), 'blocked');
+    assert.equal(classifyRow(row('r', 'running')), 'active');
+    assert.equal(classifyRow(row('r', 'queued')), 'active');
+    assert.equal(classifyRow(row('r', 'done')), 'done');
+    assert.equal(classifyRow(row('r', 'cancelled')), 'done');
+    assert.equal(classifyRow(row('r', 'needs_you', { archived: true })), 'archived');
+  });
+});
+
 describe('STALLED_VS_FAILED_SPLIT (T2.3, open question — see request-logic.ts)', () => {
   it('gives stalled its own amber needs_you level, and failed alone is blocked/red', () => {
     assert.equal(requestSeverityLevel('stalled'), 'needs_you');
@@ -263,6 +304,25 @@ describe('editor vocabulary', () => {
     assert.equal(nodeLabel(undefined), undefined);
   });
 
+  /**
+   * FIX 9 — the receipt claims only what `requeueRequest` actually did.
+   *
+   * It used to name the node the run stopped at as the point it would resume
+   * from ("Retrying from planning media"). `requeueRequest` takes a request
+   * id and nothing else — no resume point — so that was the UI inventing a
+   * server fact. The sentence is now the store's own `status_reason`,
+   * verbatim.
+   */
+  it('B2: the retry receipt states the requeue, and never names a resume point', () => {
+    assert.equal(retryReceipt(), 'Re-queued — waiting for the next sweep to push the run');
+    // The guard, not the wording: no node label may appear in this sentence,
+    // whatever it is reworded to, until the server can honour one.
+    for (const label of Object.values(NODE_LABELS)) {
+      assert.ok(!retryReceipt().includes(label), `the receipt must not name "${label}" as a resume point`);
+    }
+    assert.ok(!/\bfrom\b/.test(retryReceipt()), 'no "from <step>" until requeueRequest has a resume point');
+  });
+
   it('builds the shared progress phrase', () => {
     assert.equal(progressPhrase({ done: 14, total: 23 }, 'draft_writer'), '14 / 23 · drafting');
     assert.equal(progressPhrase({ done: 14, total: 23 }, undefined), '14 / 23');
@@ -286,6 +346,59 @@ describe('editor vocabulary', () => {
     assert.equal(relativeAge('2026-08-22T09:00:00.000Z', now), '3h');
     assert.equal(relativeAge('2026-08-20T12:00:00.000Z', now), '2d');
     assert.equal(relativeAge('not a date', now), '');
+  });
+});
+
+describe('rowMetaLine (B4 — one meta line, no status_reason)', () => {
+  const now = Date.parse('2026-08-22T12:00:00.000Z');
+
+  it('never surfaces status_reason — that lives in the Drawer, not the list row', () => {
+    // A failed row carrying the exact restated sentence B4 calls out.
+    const failedRow = {
+      status: 'failed' as const,
+      created_by: 'editor@example.com',
+      updated_at: '2026-08-22T11:00:00.000Z',
+      status_reason: 'The artifact plan step failed, so the job has stopped.',
+    };
+    const meta = rowMetaLine(failedRow, now);
+    assert.ok(!meta.primary?.includes('artifact plan'), 'primary must not restate status_reason');
+    assert.ok(
+      !meta.secondary.some((part) => part.includes('artifact plan')),
+      'secondary must not restate status_reason either'
+    );
+    // `status_reason` was never read into the shape at all — not merely
+    // absent by coincidence of these particular field values.
+    assert.deepEqual(Object.keys(meta), ['primary', 'secondary']);
+  });
+
+  it('joins progressPhrase · owner · age for a non-live row', () => {
+    const meta = rowMetaLine(
+      {
+        status: 'needs_you',
+        current_node: 'publication_controller',
+        progress: { done: 14, total: 23 },
+        created_by: 'editor@example.com',
+        updated_at: '2026-08-22T11:48:00.000Z',
+      },
+      now
+    );
+    assert.equal(meta.primary, '14 / 23 · awaiting your approval');
+    assert.deepEqual(meta.secondary, ['editor@example.com', '12m']);
+  });
+
+  it('drops the phrase for a live row — RunProgress takes its place instead', () => {
+    const meta = rowMetaLine(
+      {
+        status: 'running',
+        current_node: 'draft_writer',
+        progress: { done: 3, total: 10 },
+        created_by: 'editor@example.com',
+        updated_at: '2026-08-22T11:48:00.000Z',
+      },
+      now
+    );
+    assert.equal(meta.primary, undefined);
+    assert.deepEqual(meta.secondary, ['editor@example.com', '12m']);
   });
 });
 

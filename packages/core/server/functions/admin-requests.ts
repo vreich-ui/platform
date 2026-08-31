@@ -31,10 +31,12 @@ import {
   loadIndex,
   loadRequest,
   rebuildIndex,
+  requeueRequest,
   unarchiveRequest,
   requestStatusSchema,
   type EditorialRequestStore,
   type RequestIndexRow,
+  type RequestStatus,
 } from '../lib/requests/store.js';
 import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../lib/admin/request-logic.js';
 import {
@@ -122,6 +124,8 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('unarchive'), request_id: z.string().min(1) }),
   z.object({ action: z.literal('cancel'), request_id: z.string().min(1), reason: z.string().max(2000).optional() }),
   z.object({ action: z.literal('mute'), request_id: z.string().min(1) }),
+  /** B2: the surface's Retry button — `requeueRequest` is the writer, this is only its door. */
+  z.object({ action: z.literal('retry'), request_id: z.string().min(1) }),
   z.object({ action: z.literal('unmute'), request_id: z.string().min(1) }),
   /**
    * T19.6: the client says what it has now shown this person. Stored
@@ -134,6 +138,21 @@ export const requestSchema = z.discriminatedUnion('action', [
 
 /** Archive/unarchive: Owner, or the W18 publisher tier (plan §8). Exported for the gating test. */
 export const canArchive = (roles: readonly Role[]): boolean => isOwner(roles) || roles.includes('publisher');
+
+/**
+ * B2 — how a refused retry reaches the browser, kept out of the handler so it
+ * is testable without an Identity-authenticated event (the module's own
+ * `canArchive` precedent).
+ *
+ * `requeueRequest` reports the reason AND the status it refused on; the one
+ * refusal that carries no status is "there is no such request" (404).
+ * Everything else is a CONFLICT with the row's current state, so 409 —
+ * sharpest for `needs_you`, where the request is waiting on a human and
+ * retrying it is a category error, not a transient failure: pushing a gate
+ * does not open it. The reason is the store's own sentence, verbatim.
+ */
+export const retryRefusal = (failure: { reason: string; status?: RequestStatus }): { code: number; error: string } =>
+  failure.status ? { code: 409, error: failure.reason } : { code: 404, error: 'Request not found.' };
 
 /**
  * The index, rebuilding ONCE when it is absent or unreadable. Never scans on
@@ -261,6 +280,18 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
           request: doc,
           ...(runCancelFailure ? { run_cancel_failed: runCancelFailure } : {}),
         });
+      }
+
+      case 'retry': {
+        // The registry endpoint is already admin-gated above, which is at or
+        // above the `edit` tier `rowActions` asks for; `requeueRequest` owns
+        // every state rule (terminal, needs_you, still-moving, no run).
+        const result = await requeueRequest(store, request.data.request_id);
+        if (!result.ok) {
+          const refusal = retryRefusal(result);
+          return jsonResponse(refusal.code, { error: refusal.error });
+        }
+        return jsonResponse(200, { request: result.doc });
       }
 
       case 'set_email_mode': {
