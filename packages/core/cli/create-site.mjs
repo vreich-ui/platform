@@ -1171,7 +1171,6 @@ export const CONVERSION_SEEDS = [
 // invented for the client. Every free-text field carries the literal marker
 // string `onboarding: fill with the client` so a skeleton left un-edited is
 // unmistakable from a real one.
-
 const ONBOARDING_FILL_MARKER = 'onboarding: fill with the client';
 
 const voiceSeedTemplate = (ids, brandName) => `/**
