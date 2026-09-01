@@ -174,11 +174,24 @@ export function DiffView({ entries, className }: { entries: DiffEntry[]; classNa
 
 // ─── ReadinessList ────────────────────────────────────────────────────────────
 
+/**
+ * Exhaustive over CriterionStatus — a new tier without an icon here is a
+ * compile error, which is the point. `info` (W6 D4) shares `optional`'s icon
+ * and neutral tone deliberately: both say "nothing to do", and giving `info`
+ * its own glyph would make a statement of fact look like a distinct thing to
+ * act on. See `readiness-criteria.ts` for what separates the tiers.
+ *
+ * This file is OUTSIDE the node test stack (tsconfig.test.json excludes
+ * packages/core/admin/**\/*.tsx), so `npm test` cannot see a gap here — only
+ * `astro check` can. tests/scripts/readiness-status-coverage.test.mjs is the
+ * cheap guard that fails in the normal suite instead.
+ */
 const STATUS_ICON: Record<CriterionStatus, ReactNode> = {
   complete: <IconCheck size={16} />,
   warning: <IconAlertTriangle size={16} />,
   missing: <IconX size={16} />,
   optional: <IconInfo size={16} />,
+  info: <IconInfo size={16} />,
 };
 
 const TONE_TEXT: Record<Tone, string> = {

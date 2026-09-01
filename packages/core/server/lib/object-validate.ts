@@ -2211,22 +2211,53 @@ const checkContentItemClaimSubstrate = (
     isRecord(article.claims) && Array.isArray(article.claims.claim_list) ? article.claims.claim_list : [];
   const criteria: ReadinessCriterion[] = [];
 
-  const missing: string[] = [];
-  if (sourceList.length === 0) missing.push('no sources recorded');
-  if (claimList.length === 0) missing.push('no claims recorded');
-
-  if (missing.length === 0) {
+  /**
+   * W6 D4. This used to warn unless BOTH lists were present, which made the
+   * warning permanent and unclearable on the plugin path: the plugin skill
+   * forbids writing `claims` (a high-risk claim that is unverified, disputed
+   * or unsourced BLOCKS the publish via article_claim_verification below, and
+   * the plugin has no readiness report to clear it with), so a plugin that
+   * does everything right — three real peer-reviewed sources in
+   * `sources.source_list` — still read "no claims recorded" and still landed
+   * in the operator's action items. The 2026-08-31 acceptance run hit exactly
+   * that.
+   *
+   * A warning nobody can clear is not a warning, it is noise, and the text was
+   * false besides: it announced an absence while the sources sat right there.
+   * So the three states are now distinguished honestly:
+   *
+   *   both              -> complete
+   *   sources, no claims -> info. TRUE, and not an ask. This is the plugin
+   *                         path working as designed.
+   *   no sources        -> warning, and the text says the thing that is
+   *                         actually missing.
+   *
+   * Still never a blocker at either stage (D7): the governed path is designed
+   * not to carry these fields on the client object.
+   */
+  if (sourceList.length > 0 && claimList.length > 0) {
     criteria.push(crit('article_claim_substrate', 'Sourcing and claim record', 'complete', ''));
+  } else if (sourceList.length > 0) {
+    criteria.push(
+      crit(
+        'article_claim_substrate',
+        'Sourcing and claim record',
+        'info',
+        `${sourceList.length} source${sourceList.length === 1 ? '' : 's'} listed, no claim ledger — plugin path. ` +
+          `The sourcing record is on the article; a per-claim ledger is not, and is not expected here. Under D7 ` +
+          `the publishing workflow keeps a claim record workspace-side, so a governed run's readiness report ` +
+          `carries the per-claim evidence. Nothing to do.`
+      )
+    );
   } else {
     criteria.push(
-      // Warns at BOTH stages (D7): never a blocker, because the governed path
-      // is designed not to carry these fields on the client object.
       crit(
         'article_claim_substrate',
         'Sourcing and claim record',
         'warning',
-        `${missing.join(' and ')} on the article body — under D7 the publishing workflow keeps the sourcing and ` +
-          `claim record workspace-side, so check the run's readiness report for the evidence behind this article.`
+        `No sources listed on the article body. Every article carries sources for its claims — the editor owns ` +
+          `that. Add them under \`sources.source_list\`, or, for a governed run, check the run's readiness ` +
+          `report for the evidence behind this article.`
       )
     );
   }

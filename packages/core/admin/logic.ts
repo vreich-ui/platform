@@ -20,7 +20,11 @@ export function statusTone(status: CriterionStatus | string): Tone {
       return 'warning';
     case 'missing':
       return 'danger';
+    // W6 D4: an `info` criterion states a fact, not a shortfall — it must not
+    // render as something the operator has to act on, so it tones as neutral
+    // alongside `optional`.
     case 'optional':
+    case 'info':
       return 'neutral';
     // common object lifecycle words reused across surfaces
     case 'active':
