@@ -16,7 +16,7 @@ It is **infrastructure genesis**, not editorial genesis. It does:
 1. repo scaffold via `create-site.mjs --json`
 2. Netlify site create + blob-store probe + auto-mintable secrets
 3. build hook + `NETLIFY_BUILD_HOOK_URL`
-4. deterministic env defaults (`TRACKING_PROJECT_ID=trk_<slug>`)
+4. deterministic env defaults (`TRACKING_PROJECT_ID=<slug>` (the bare slug — `trk_<slug>` is the tracking_config object id))
 5. CMS-Agent registration (`project.create`, `<SLUG>_MCP_TOKEN` env **name** only)
 6. derives and persists the tenant MCP endpoint `https://<site>/mcp`
 7. mints + installs the Platform→CMS-Agent `CMS_AGENT_MCP_TOKEN` bearer, then discards the raw value
