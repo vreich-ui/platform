@@ -178,8 +178,11 @@ T12.14	auto	claude-opus-5	xhigh	docs/cms-architecture/cms-pipeline/T12.14-asset-
 #   T13.12 packages/core/admin/GovernancePage.tsx at app/routes/admin/settings/guardrails.astro;
 #          tests/netlify/tracking-governance.test.ts (commit 5414d701).
 #   T13.13 doc 12 §15 "Scores-feedback design" (commit a9fe2740).
-# T13.11 (below) is the ONLY W13 row still open — the credentialed production drive never ran:
-# there is no sites/drlurie/data/site/tracking.json export and no drive entry in state-of-play.
+# T13.11 RESOLVED 2026-09-01 (T13.11/T20.3 credentialed production drive, drlurie) — left commented
+# for audit trail, do not re-run. trk_drlurie minted/published/released to production; the C3
+# verification table (8 checks) and the five-criteria proof are recorded in the 2026-09-01
+# state-of-play entry. Checks 4/4b/7 came back PARTIAL and check 6 NOT EXERCISABLE — recorded
+# honestly there, not rounded up. CSP promotion (T21.4) is a deliberate separate non-goal, not done here.
 #T13.1	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.1-tracking-attribute.md
 #T13.2	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.2-tracking-config-type.md
 #T13.3	auto	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.3-tracking-event-ingest.md
@@ -190,7 +193,7 @@ T12.14	auto	claude-opus-5	xhigh	docs/cms-architecture/cms-pipeline/T12.14-asset-
 #T13.8	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.8-native-adapters-csp.md
 #T13.9	auto	claude-sonnet-5	medium	docs/cms-architecture/cms-pipeline/T13.9-owner-db-reference-kit.md
 #T13.10	auto	claude-opus-4-8	high	docs/cms-architecture/cms-pipeline/T13.10-tracking-seeds-roundtrip.md
-T13.11	human_gate	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.11-tracking-production-drive.md
+#T13.11	human_gate	claude-fable-5	high	docs/cms-architecture/cms-pipeline/T13.11-tracking-production-drive.md	# RESOLVED 2026-09-01; see the T13.11 RESOLVED note above and the 2026-09-01 state-of-play entry
 # W13 post-ruling additions (OQ-W13-1…6 all answered 2026-07-19 — T13.6/T13.7 flipped to auto above; reorder freely).
 #T13.12	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.12-admin-governance-toggle.md
 #T13.13	auto	claude-opus-4-8	medium	docs/cms-architecture/cms-pipeline/T13.13-scores-feedback-design.md

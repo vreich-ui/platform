@@ -9,6 +9,60 @@ store before building on anything below.**
 
 ---
 
+## 2026-09-01 — T13.11/T20.3 production drive — proven
+
+The wave's human gate finally ran. `trk_drlurie` was minted, published, and
+released to production, and the T13.11 drive checklist (12-plan §14) was
+executed live — sink health, baseline `/stats`, a real drive of production
+traffic, the stats delta, `dims` coverage, the aggregation invariant,
+identity/consent, the money join, the ten-type `set_tracking` round-trip, and
+the dual-feed `/admin/traffic` view. Recorded here honestly, including the
+items that did not come back clean: **item 4 (stats delta) and item 4b (`dims`
+coverage) are PARTIAL, item 7 (`set_tracking` round-trip) is PARTIAL (9/11),
+and item 6 (money join) was NOT EXERCISABLE** — none of the four are rounded
+up to a pass.
+
+### C3 verification table (2026-09-01, drlurie / production)
+
+| #   | Check                        | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | sink `/health`                | PASS — 200, `{"ok":true,"db":"reachable"}`                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 2   | baseline `/stats`             | PASS — pageview 221, engagement 231, scroll_depth 172, nav_click 83, cta_click 1; sessions 146, visitors 113, consented 30                                                                                                                                                                                                                                                                                                                                       |
+| 3   | drive traffic                 | PASS — 4 article/page loads + `/shop/` + one CTA click, real browser, production site, GB egress                                                                                                                                                                                                                                                                                                                                                                 |
+| 4   | stats delta                   | PARTIAL — pageview +2, engagement +2, sessions +2, visitors +2, consented_sessions +2, `last_event_at` fresh (2026-09-01T14:09:28Z). scroll_depth / nav_click / cta_click did not increment on this run, and `section_impression` has never been recorded at all. The under-count is consistent with the measured 25.8% capture rate (client-side tracker vs server-side Netlify Analytics)                                                                  |
+| 4b  | `dims` coverage               | PARTIAL — `object_version` 629 (was 0 until the tracking env vars gained the `builds` scope, which the postbuild dims push needs); `producer` 0 and `node_strategy` 0, expected until content publishes carrying producer metadata                                                                                                                                                                                                                             |
+| 4c  | aggregation invariant         | PASS — `sum(daily[].pageviews)` equals `totals.events_by_kind.pageview` (223)                                                                                                                                                                                                                                                                                                                                                                                     |
+| 5   | identity / consent            | PASS — `_dlid` absent for a GB (restricted-region) session with no grant, which is correct; GPC suppression, the id-upgrade block and the `_dlid` lifecycle are pinned by `tests/netlify/consent-runtime.test.ts`, 24/24 green                                                                                                                                                                                                                                  |
+| 6   | money join                    | NOT EXERCISABLE — no product object or `buy_click` element on `/shop/` or `/shop/support-the-work`; `commerce_events` and `member_links` remain 0                                                                                                                                                                                                                                                                                                                |
+| 7   | `set_tracking` round-trip     | PASS 9/11 — page, section, navigation, taxonomy, site, template, theme, product, content_item each patched → validated ready/eligible → inverse-restored → verified. `section_template` could not be enumerated (object_list 502 ×3) and `editorial_voice`'s patch never applied (502 ×3, object left untouched). No object was left locked or modified                                                                                                       |
+| 8   | `/admin/traffic` both feeds   | PASS — own-tracker and Netlify Analytics both render; the capture-rate stat appears, which only happens when both feeds return data                                                                                                                                                                                                                                                                                                                             |
+
+**Records flipped in this change:** `object-inventory.md` §7 (Object tracking &
+analytics) now reads CONVERTED; `conversion-map.md` W13 row now reads
+CONVERTED; `queue.tsv` T13.11 row commented out, resolved (matching the
+existing `# CLOSED …` / `# RESOLVED …` convention used for every other closed
+wave row in that file). The five playbook criteria (renders / store-backed /
+round-trips / contract-complete / recorded) all hold for `tracking_config`
+itself — checks 4, 4b, 6 and 7 above are about the surrounding pipeline's
+live behavior (capture rate, dims backfill, commerce join, two unrelated
+objects' 502s), not about whether `trk_drlurie` converted, and are carried
+here uncorrected rather than folded into the conversion claim.
+
+**Deferred — CSP promotion (was T21.4) is deliberately NOT part of this
+task and was NOT done.** Reason: the `Content-Security-Policy-Report-Only`
+header carries no `report-uri`/`report-to` directive on any site, so no
+violation reports were ever collected — "no known violations" means no data,
+not a clean soak. Additionally the codebase references the external script
+`https://identity.netlify.com/v1/netlify-identity-widget.js` while the policy
+is `script-src 'self' 'unsafe-inline'`, so enforcing as-is risks breaking
+admin sign-in. Promotion should follow: add a report collector, soak, and
+allowlist any origin the reports reveal. This is recorded as a residual, not
+actioned here — it is a separate task.
+
+**Verification:** `npm run check` (astro check + eslint + prettier) and
+`npm test` — docs-only change, no behavioral change expected; both run green
+(see commit for exact output).
+
 ## 2026-08-28 — T20.4: commerce_event_id joins checkout buy_click to purchase goal
 
 T20.4 adds the behaviour ↔ money join key on the Platform side only:

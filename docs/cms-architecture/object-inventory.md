@@ -553,25 +553,47 @@ storage grant, `verify_agent_artifact` 5/5, published (commit `3cea365`),
 released, and verified live (`verify_article_images` verified:true
 deployReady:true; the PDF URL serves 200 from production).
 
-### 7. Object tracking & analytics (W13) — 🟡 BUILT, NOT CONVERTED (2026-07-20; T13.11 drive pending)
+### 7. Object tracking & analytics (W13) — 🟢 CONVERTED (T13.11/T20.3 credentialed production drive, 2026-09-01)
 
-The 2026-07-19 directive, now code-complete through T13.10: tracking as an
-attribute of every object + the `tracking_config` singleton (`trk_drlurie`)
+The 2026-07-19 directive, code-complete through T13.10 and driven to
+production 2026-09-01: tracking as an attribute of every object + the
+`tracking_config` singleton (`trk_drlurie`).
 
-- the own first-party event pipeline (the loader riding the `data-cms-*`
-  identity attributes → `/api/t` relay → `tracking_event.v1` → owner sink per
-  the `tracking-sink-reference/` kit; Blobs mirror + replay script) + the
-  consent runtime/banner (geo-adaptive per OQ-W13-1; GPC absolute) + all six
-  ad adapters behind config flags (disabled in-repo; GTM permanently OUT) +
-  the goal→conversion bridge + CSP Report-Only with the hosts-drift gate.
-  **SEED READY (T13.10):** `scripts/lib/tracking-config-seed-data.mjs` carries
-  the ratified `trk_drlurie` body; the roundtrip driver drills the singleton
-  (`set_tracking_config_fields`) and the ten-type `set_tracking`
-  set→mutate→unset — local rehearsal all-green, publish blocked at the
-  expected sandbox boundary. NO STORE RECORD YET — this row flips only when
-  the five criteria hold (the human-gated T13.11 drive: env vars per
-  OQ-W13-6, `--production --release`, live beacons verified). Plan:
-  [`12-object-tracking-and-analytics.md`](12-object-tracking-and-analytics.md).
+🟢 **`tracking_config` is CONVERTED (T13.11/T20.3, credentialed production
+drive 2026-09-01, drlurie)** — all five criteria: renders (loader + own
+adapter present in live production HTML, all pixels absent per the
+all-disabled baseline), store-backed (`object_inventory` returns
+`trk_drlurie` in production), round-trips (`set_tracking_config_fields`
+set → verify → inverse-restore proven against production, plus the
+`set_tracking` op proven set→verify→inverse on 9 of the ten other governed
+types via MCP — `section_template` and `editorial_voice` hit transient
+`object_list`/patch 502s and were left untouched, not converted-and-broken;
+re-verify those two separately), contract-complete
+(`object_contract('tracking_config')` advertised ≡ exercised), recorded
+(this row + the conversion-map mark + the state-of-play drive entry, same
+change). The own first-party event pipeline (the loader riding the
+`data-cms-*` identity attributes → `/api/t` relay → `tracking_event.v1` →
+owner sink per the `tracking-sink-reference/` kit; Blobs mirror + replay
+script) + the consent runtime/banner (geo-adaptive per OQ-W13-1; GPC
+absolute, id-upgrade block and `_dlid` lifecycle pinned by
+`tests/netlify/consent-runtime.test.ts`, 24/24 green) + all six ad adapters
+behind config flags (disabled in-repo; GTM permanently OUT) + the
+goal→conversion bridge + CSP Report-Only with the hosts-drift gate are all
+live in production. Seed `scripts/lib/tracking-config-seed-data.mjs` (T13.10).
+**Honest caveats, not rounded up:** the live stats delta under-counted
+(scroll_depth/nav_click/cta_click did not increment on the drive run,
+`section_impression` has never fired at all — consistent with the measured
+25.8% capture rate vs. server-side Netlify Analytics); `dims` `producer` and
+`node_strategy` are still 0 pending content that carries producer metadata;
+the money join (commerce_event ↔ tracking) is NOT YET EXERCISABLE — no
+product object or `buy_click` element exists on `/shop/` today. None of
+these block the five conversion criteria, but none are silently claimed
+clean either — full table in the 2026-09-01 state-of-play entry. **CSP
+promotion (was T21.4) is a deliberate non-goal of this drive** — see that
+same state-of-play entry for why (no `report-uri`/`report-to`, so the
+Report-Only soak collected no data; the Netlify Identity widget script also
+needs an allowlist entry before enforcing). Plan:
+[`12-object-tracking-and-analytics.md`](12-object-tracking-and-analytics.md).
 
 ### Not on the MVP path (noted so they aren't mistaken for gaps)
 
