@@ -159,7 +159,7 @@ Env checklist:
     PDF_TOOL_STORAGE_TOKEN           [per-site]  ☐ human-supplied — see the provisioning runbook
       Auth paired with PDF_TOOL_STORAGE_SITE_ID above — same rule: a dedicated PAT for THIS site, never another tenant's token. Same provisioning steps: docs/agents/pdf-tool-storage-grant.md.
     TRACKING_PROJECT_ID              [per-site]  ☐ human-supplied — see the provisioning runbook
-      This client's partition in the tracking owner-DB (trk_<shortId> convention).
+      This client's partition in the tracking owner-DB — the bare <shortId> slug (not trk_<shortId>, which is the tracking_config object id).
     TRACKING_SALT                    [per-site]  ☐ human-supplied — see the provisioning runbook
       Hashing salt — MUST differ per site for cross-client privacy isolation.
     TRACKING_SINK_URL                [fleet-shared]  reuse the fleet value — do not create a new one

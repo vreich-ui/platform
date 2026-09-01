@@ -244,7 +244,7 @@ export const ENV_CHECKLIST = [
       {
         name: 'TRACKING_PROJECT_ID',
         cls: 'per-site',
-        note: "This client's partition in the tracking owner-DB — the BARE <shortId> slug. Not trk_<shortId>: that is the tracking_config OBJECT id (site-identity.trackingProjectId), a different value.",
+        note: "This client's partition in the tracking owner-DB — the bare <shortId> slug (not trk_<shortId>, which is the tracking_config object id).",
       },
       {
         name: 'TRACKING_SALT',
@@ -1171,6 +1171,7 @@ export const CONVERSION_SEEDS = [
 // invented for the client. Every free-text field carries the literal marker
 // string `onboarding: fill with the client` so a skeleton left un-edited is
 // unmistakable from a real one.
+
 const ONBOARDING_FILL_MARKER = 'onboarding: fill with the client';
 
 const voiceSeedTemplate = (ids, brandName) => `/**
