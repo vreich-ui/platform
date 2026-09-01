@@ -21,15 +21,20 @@ import {
   REQUEST_PAGE_SIZE,
   backfillPageObjects,
   canArchive,
+  OBJECT_MISSING_TTL_MS,
+  OBJECT_PROBE_MEMO_MAX,
   OBJECT_UNPUBLISHED_TTL_MS,
   objectBackfillCandidates,
   publicationFromObjectRecord,
   requestSchema,
   resetObjectBackfillMemoForTesting,
   retryRefusal,
+  withLibraryFacts,
+  type ObjectProbeVerdict,
+  type RequestListRow,
 } from './admin-requests.js';
 import { REQUEST_LIST_MAX_LIMIT } from '../../lib/admin/request-list-limits.js';
-import { NO_LIVE_PATH, rowActions } from '../../lib/admin/request-logic.js';
+import { NOT_IN_LIBRARY, NO_LIVE_PATH, rowActions } from '../../lib/admin/request-logic.js';
 import {
   createRequest,
   loadIndex,
@@ -264,8 +269,52 @@ const seedFinishedRun = async (store: RetryFakeStore, requestId: string, withObj
 
 const rowsOf = async (store: RetryFakeStore): Promise<RequestIndexRow[]> => (await loadIndex(store))!.rows;
 
+/** A memo entry, in the two shapes the code writes. */
+const seen = (until = Number.POSITIVE_INFINITY) => ({ in_library: true, until });
+const absent = { in_library: false, until: Number.POSITIVE_INFINITY };
+
+describe('FIX 8 — the probe memo is trimmed, not wiped', () => {
+  const T0 = Date.parse('2025-03-02T09:00:00.000Z');
+  /**
+   * W21.1 made the memo a source of what the row SAYS, so `memo.clear()` at
+   * the cap dropped every verdict at once and a whole page reverted to "not in
+   * the library" until it re-converged five rows a poll. Oldest-out keeps the
+   * bound and keeps the answers.
+   */
+  it('stays bounded, and keeps the most recent answers instead of losing all of them', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    const memo = new Map<string, ObjectProbeVerdict>();
+    // Fill well past the cap, one verdict at a time, through the real path.
+    for (let i = 0; i < OBJECT_PROBE_MEMO_MAX + 25; i += 1) {
+      await backfillPageObjects(
+        store,
+        [
+          {
+            request_id: `r${i}`,
+            kind: 'article',
+            title: `t${i}`,
+            status: 'done',
+            created_by: 'e@x',
+            updated_at: at(1),
+            object_published: false,
+            archived: false,
+          },
+        ],
+        async () => undefined,
+        memo,
+        T0 + i
+      );
+    }
+    assert.ok(memo.size <= OBJECT_PROBE_MEMO_MAX, `bounded (${memo.size})`);
+    assert.ok(memo.size >= OBJECT_PROBE_MEMO_MAX - 1, 'and full, rather than emptied by the last write');
+    assert.ok(memo.has(`r${OBJECT_PROBE_MEMO_MAX + 24}`), 'the newest answer is kept');
+    assert.equal(memo.has('r0'), false, 'the oldest is the one that goes');
+  });
+});
+
 describe('C2 — which rows earn an object read', () => {
-  it('only finished rows, only ones missing the field, and never one already looked for', () => {
+  it('only finished rows, only ones missing an answer, and never one already looked for', () => {
     const rows = [
       { request_id: 'a', status: 'done' as const },
       { request_id: 'b', status: 'done' as const, object_id: 'b', object_published: true },
@@ -273,14 +322,17 @@ describe('C2 — which rows earn an object read', () => {
       { request_id: 'd', status: 'failed' as const },
       { request_id: 'e', status: 'done' as const },
     ];
+    // FIX 1: `b` is complete and is NOT a candidate — publication entails the
+    // platform record, so there is nothing left to ask the library about it.
+    // W21.1 probed it anyway, which is what starved the rest of the page.
     assert.deepEqual(objectBackfillCandidates(rows, new Map()), ['a', 'e']);
-    assert.deepEqual(objectBackfillCandidates(rows, new Map([['a', Number.POSITIVE_INFINITY]])), ['e']);
+    assert.deepEqual(objectBackfillCandidates(rows, new Map([['a', absent]])), ['e']);
   });
 
   it('C2b: a row with an object but no publication answer is still worth one read', () => {
     const rows = [{ request_id: 'a', status: 'done' as const, object_id: 'a', object_published: false }];
     assert.deepEqual(objectBackfillCandidates(rows, new Map()), ['a']);
-    assert.deepEqual(objectBackfillCandidates(rows, new Map([['a', Number.POSITIVE_INFINITY]])), [], 'and asked only once');
+    assert.deepEqual(objectBackfillCandidates(rows, new Map([['a', absent]])), [], 'and asked only once');
   });
 
   it('is bounded, so a polled list can never become an N-read scan', () => {
@@ -315,8 +367,11 @@ describe('C2 — reconciling the object onto a finished row', () => {
     // the inbox and the timeline must not gain a "produced X" dated today.
     assert.equal(doc?.updated_at, before?.updated_at);
     assert.deepEqual(doc?.history, before?.history);
-    // …and the index row the endpoint returns is the one the index now holds.
-    assert.deepEqual(result.rows[0], projectIndexRow(doc!));
+    // …and the index row the endpoint returns is the one the index now holds,
+    // plus W21.1's one response-only fact: the probe read the record, so the
+    // row may say the library holds it (the stored row cannot — see
+    // `RequestListRow`).
+    assert.deepEqual(result.rows[0], { ...projectIndexRow(doc!), object_in_library: true });
   });
 
   it('a done row whose object is NOT there keeps the honest reason, and is never probed twice', async () => {
@@ -488,9 +543,11 @@ describe('C2b — a legacy done row, reconciled from its object record', () => {
     // View live visible but disabled, saying why (D3), instead of a link that
     // 404s until someone runs the release.
     const actions = rowActions({ ...result.rows[0]!, status: 'done', archived: false }, ['owner', 'admin', 'publisher']);
+    // W21.3 adds the way out of exactly this state — a site release, which is
+    // what would give the row the live URL the record cannot prove.
     assert.deepEqual(
       actions.filter((action) => action.enabled).map((action) => action.id).sort(),
-      ['archive', 'open_object']
+      ['archive', 'open_object', 'release']
     );
     const viewLive = actions.find((action) => action.id === 'view_live');
     assert.equal(viewLive?.enabled, false);
@@ -530,11 +587,15 @@ describe('C2b — a legacy done row, reconciled from its object record', () => {
       probeReturning(PUBLISHED_RECORD, reads)
     );
 
+    // FIX 1: not read at all. The sweeper's publish receipt already entails
+    // the platform record, so the library question is answered without a read
+    // — which is why `object_in_library` below is true on zero probes.
     assert.deepEqual(reads, [], 'a row the sweeper answered is not a candidate at all');
     assert.equal(result.wrote, false);
     assert.equal(store.writes.length, writesBefore);
     assert.equal(result.rows[0]?.object_published, true);
     assert.equal(result.rows[0]?.live_path, undefined, 'the record must not talk the sweeper into a live URL');
+    assert.equal(result.rows[0]?.object_in_library, true);
   });
 
   it('and a doc the sweeper answered is closed to this path even called directly', async () => {
@@ -586,37 +647,53 @@ describe('C2c — a missing object is permanent, an unpublished one is not', () 
   const T0 = Date.UTC(2026, 7, 31, 9, 0, 0);
   const later = (ms: number) => T0 + ms;
 
-  it('object missing: memoised permanently, and never probed a second time', async () => {
+  it('object missing: held for a window, and never re-read inside it', async () => {
     const store = new RetryFakeStore();
     await seedFinishedRun(store, DONE_ID);
-    const skip = new Map<string, number>();
+    const memo = new Map<string, ObjectProbeVerdict>();
     const reads: string[] = [];
 
-    await backfillPageObjects(store, await rowsOf(store), probeFor(null, reads), skip, T0);
+    const first = await backfillPageObjects(store, await rowsOf(store), probeFor(null, reads), memo, T0);
     assert.deepEqual(reads, [DONE_ID]);
-    assert.equal(skip.get(DONE_ID), Number.POSITIVE_INFINITY, 'a run that made nothing will not start');
+    // FIX 2: a window, not `Infinity`. The miss is the state whose reason asks
+    // the operator to publish, and publishing is what ends it — so the answer
+    // has to be able to expire. See `OBJECT_MISSING_TTL_MS` for the value.
+    assert.deepEqual(
+      memo.get(DONE_ID),
+      { in_library: false, until: T0 + OBJECT_MISSING_TTL_MS },
+      'held, so a publish can be noticed'
+    );
+    // W21.1: and the row SAYS so, which is what disables its Open object.
+    assert.equal(first.rows[0]?.object_in_library, false);
 
-    // Not after the TTL, not after a day — there is nothing to re-read.
-    await backfillPageObjects(store, await rowsOf(store), probeFor(null, reads), skip, later(86_400_000));
+    // Inside the window there is nothing to re-read.
+    await backfillPageObjects(store, await rowsOf(store), probeFor(null, reads), memo, later(OBJECT_MISSING_TTL_MS - 1));
     assert.deepEqual(reads, [DONE_ID], 'still one read');
   });
 
   it('object exists but unpublished: held briefly, then re-read, and it flips once the record says so', async () => {
     const store = new RetryFakeStore();
     await seedFinishedRun(store, DONE_ID);
-    const skip = new Map<string, number>();
+    const memo = new Map<string, ObjectProbeVerdict>();
     const reads: string[] = [];
 
-    const first = await backfillPageObjects(store, await rowsOf(store), probeFor(objectRecord(), reads), skip, T0);
+    const first = await backfillPageObjects(store, await rowsOf(store), probeFor(objectRecord(), reads), memo, T0);
     assert.equal(first.rows[0]?.object_published, false);
-    assert.equal(skip.get(DONE_ID), T0 + OBJECT_UNPUBLISHED_TTL_MS, 'held, not cached forever');
+    assert.deepEqual(
+      memo.get(DONE_ID),
+      { in_library: true, until: T0 + OBJECT_UNPUBLISHED_TTL_MS },
+      'held, not cached forever'
+    );
+    // W21.1: the object IS in the library even though it is not published —
+    // the two facts are separate, and only this one opens the record.
+    assert.equal(first.rows[0]?.object_in_library, true);
 
     // Inside the window the read rate stays bounded…
     await backfillPageObjects(
       store,
       await rowsOf(store),
       probeFor(objectRecord(), reads),
-      skip,
+      memo,
       later(OBJECT_UNPUBLISHED_TTL_MS - 1)
     );
     assert.deepEqual(reads, [DONE_ID], 'one read, not one per poll');
@@ -627,24 +704,208 @@ describe('C2c — a missing object is permanent, an unpublished one is not', () 
       store,
       await rowsOf(store),
       probeFor(PUBLISHED_RECORD, reads),
-      skip,
+      memo,
       later(OBJECT_UNPUBLISHED_TTL_MS)
     );
     assert.deepEqual(reads, [DONE_ID, DONE_ID]);
     assert.equal(after.wrote, true);
     assert.equal(after.rows[0]?.object_published, true);
     assert.equal(after.rows[0]?.live_path, undefined, 'FIX 1: published, never live, from a record');
-    assert.equal(skip.get(DONE_ID), undefined, 'nothing left to ask');
+    assert.deepEqual(
+      memo.get(DONE_ID),
+      { in_library: true, until: Number.POSITIVE_INFINITY },
+      'nothing left to ask — and W21.1 keeps the entry rather than dropping it, or the row would be probed forever'
+    );
   });
 
   it('the TTL is the read-rate bound: never more than the cap per window', () => {
     const rows = Array.from({ length: 40 }, (_, i) => ({ request_id: `r${i}`, status: 'done' as const }));
-    const skip = new Map(rows.map((row) => [row.request_id, T0 + OBJECT_UNPUBLISHED_TTL_MS] as const));
-    assert.deepEqual(objectBackfillCandidates(rows, skip, T0), [], 'a fast poll inside the window reads nothing');
+    const memo = new Map(rows.map((row) => [row.request_id, seen(T0 + OBJECT_UNPUBLISHED_TTL_MS)] as const));
+    assert.deepEqual(objectBackfillCandidates(rows, memo, T0), [], 'a fast poll inside the window reads nothing');
     assert.equal(
-      objectBackfillCandidates(rows, skip, later(OBJECT_UNPUBLISHED_TTL_MS)).length,
+      objectBackfillCandidates(rows, memo, later(OBJECT_UNPUBLISHED_TTL_MS)).length,
       OBJECT_BACKFILL_MAX,
       'and the cap still applies when it lapses'
     );
+  });
+});
+
+
+// ─── W21.1: `object_in_library` — the only fact Open object may believe ──────
+
+/**
+ * The bug: two `done` rows offered an ENABLED Open object that landed on
+ * "Couldn't open this object — not found". `sweep.ts` writes `object_id` when
+ * `article_body` completes, but that draft is a CMS-Agent stage output — the
+ * platform record only exists after a publish — so the field the row was gated
+ * on proves the run named an object, never that the library holds one.
+ *
+ * The probe already reads the object store. These prove it now REPORTS what it
+ * saw, in a form the row can read, and that "nobody looked" stays telling
+ * apart from "looked and found none".
+ */
+describe('W21.1 — the probe reports library presence, and only the probe', () => {
+  const probeReturning = (raw: string | null, reads: string[] = []) => async (id: string) => {
+    reads.push(id);
+    return raw === null ? undefined : publicationFromObjectRecord(raw);
+  };
+  const OWNER = ['owner', 'admin', 'publisher'];
+  const T0 = Date.parse('2025-03-02T09:00:00.000Z');
+  const later = (ms: number) => T0 + ms;
+  const openObjectOf = (row: RequestListRow) =>
+    rowActions({ ...row, status: 'done', archived: false }, OWNER).find((action) => action.id === 'open_object');
+
+  it('a record the probe read makes the row say so, and Open object opens', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    await seedFinishedRun(store, DONE_ID);
+    const result = await backfillPageObjects(store, await rowsOf(store), probeReturning(objectRecord()));
+
+    assert.equal(result.rows[0]?.object_in_library, true);
+    assert.equal(result.rows[0]?.object_published, false, 'in the library and not published are different facts');
+    assert.equal(openObjectOf(result.rows[0]!)?.enabled, true);
+  });
+
+  it('a probe that found nothing says FALSE, and the row refuses the link', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    // The live shape of the bug: the sweeper recorded an object id, the
+    // library has no record for it.
+    await seedFinishedRun(store, DONE_ID, true);
+    const result = await backfillPageObjects(store, await rowsOf(store), probeReturning(null));
+
+    assert.equal(result.rows[0]?.object_id, DONE_ID, 'the run still names its draft');
+    assert.equal(result.rows[0]?.object_in_library, false);
+    const openObject = openObjectOf(result.rows[0]!);
+    assert.equal(openObject?.enabled, false, 'the enabled link that 404s is the bug');
+    assert.equal(openObject?.reason, NOT_IN_LIBRARY);
+  });
+
+  it('never probed: the field is absent, and absent is not a confirmation', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    await seedFinishedRun(store, DONE_ID, true);
+    // No probe at all — the page went out before this row got one of the
+    // OBJECT_BACKFILL_MAX slots.
+    const [row] = withLibraryFacts(await rowsOf(store), new Map());
+
+    assert.equal(row?.object_in_library, undefined, 'unknown is reported as unknown, never as false or true');
+    assert.equal(openObjectOf(row!)?.enabled, false, 'and unknown renders like unproven, because it is');
+    assert.equal(openObjectOf(row!)?.reason, NOT_IN_LIBRARY);
+  });
+
+  /**
+   * FIX 1 — the finding this suite shipped with. `OBJECT_BACKFILL_MAX` is 5
+   * and `REQUEST_PAGE_SIZE` is 100, so W21.1's "probe every published row"
+   * rule meant up to 95 rows a page rendering `object_in_library` absent —
+   * Open object disabled, on a branch that offers no Publish, telling the
+   * operator to publish something already published. Publication entails the
+   * record, so the answer is derived and the false negative cannot occur.
+   */
+  it('a published row is confirmed with NO read at all, however big the page', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    await seedFinishedRun(store, DONE_ID, true);
+    await recordPublication(store, DONE_ID, {}, at(3));
+    const rows = await rowsOf(store);
+    assert.equal(rows[0]?.object_published, true, 'the run proved the publish');
+
+    const reads: string[] = [];
+    const memo = new Map<string, ObjectProbeVerdict>();
+    const first = await backfillPageObjects(store, rows, probeReturning(PUBLISHED_RECORD, reads), memo);
+    assert.deepEqual(reads, [], 'the publish receipt already entails the record — nothing to look up');
+    assert.equal(first.rows[0]?.object_in_library, true);
+    assert.equal(openObjectOf(first.rows[0]!)?.enabled, true);
+  });
+
+  it('holds for a whole page at once — no row waits its turn for one of the five slots', () => {
+    // The shape of the live regression: a page far larger than the probe cap.
+    const page = Array.from({ length: 100 }, (_, i) => ({
+      request_id: `r${i}`,
+      kind: 'article' as const,
+      title: `t${i}`,
+      status: 'done' as const,
+      created_by: 'e@x',
+      updated_at: at(1),
+      object_id: `r${i}`,
+      object_published: true,
+      archived: false,
+    }));
+    assert.deepEqual(objectBackfillCandidates(page, new Map()), [], 'not one of them earns a read');
+    const decorated = withLibraryFacts(page, new Map());
+    assert.equal(
+      decorated.filter((row) => row.object_in_library === true).length,
+      100,
+      'and every one of them is confirmed'
+    );
+    for (const row of decorated) assert.equal(openObjectOf(row)?.enabled, true);
+  });
+
+  /**
+   * FIX 2 — the recovery this suite used to assert by calling
+   * `reconcileOneObject` directly, which is not a path the browser can take.
+   * Driven through `backfillPageObjects` here — the LIST poll, which is what
+   * the row is actually sitting in when the operator publishes.
+   */
+  it('recovers through the LIST poll: publish, and the row stops saying it is missing', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    await seedFinishedRun(store, DONE_ID, true);
+    const memo = new Map<string, ObjectProbeVerdict>();
+    const reads: string[] = [];
+
+    // The live shape: the sweeper named an object, the library has no record.
+    const missed = await backfillPageObjects(store, await rowsOf(store), probeReturning(null, reads), memo, T0);
+    assert.equal(missed.rows[0]?.object_in_library, false);
+    assert.equal(openObjectOf(missed.rows[0]!)?.reason, NOT_IN_LIBRARY);
+
+    // Inside the window the list does not pay for the miss twice.
+    await backfillPageObjects(
+      store,
+      await rowsOf(store),
+      probeReturning(null, reads),
+      memo,
+      later(OBJECT_MISSING_TTL_MS - 1)
+    );
+    assert.deepEqual(reads, [DONE_ID], 'one read, not one per poll');
+    assert.deepEqual(
+      objectBackfillCandidates(await rowsOf(store), memo, later(OBJECT_MISSING_TTL_MS - 1)),
+      [],
+      'held, as the read-rate bound requires'
+    );
+
+    // The operator does exactly what the reason asked and publishes. Nothing
+    // writes the request doc — `object_publish` writes the OBJECT store — so
+    // recovery has to come from the row being asked again.
+    const recovered = await backfillPageObjects(
+      store,
+      await rowsOf(store),
+      probeReturning(PUBLISHED_RECORD, reads),
+      memo,
+      later(OBJECT_MISSING_TTL_MS)
+    );
+    assert.deepEqual(reads, [DONE_ID, DONE_ID], 'asked again once the window lapsed');
+    assert.equal(recovered.rows[0]?.object_in_library, true);
+    assert.equal(recovered.rows[0]?.object_published, true);
+    assert.equal(openObjectOf(recovered.rows[0]!)?.enabled, true, 'the row recovers, in the list, on its own');
+
+    // …and having recovered it leaves the candidate set for good (FIX 1).
+    assert.deepEqual(
+      objectBackfillCandidates(await rowsOf(store), memo, later(86_400_000)),
+      [],
+      'nothing left to ask about a published row'
+    );
+  });
+
+  it('a miss the operator never acts on costs one read per window, not one per poll', async () => {
+    resetObjectBackfillMemoForTesting();
+    const store = new RetryFakeStore();
+    await seedFinishedRun(store, DONE_ID, true);
+    const memo = new Map<string, ObjectProbeVerdict>();
+    const reads: string[] = [];
+    for (const step of [0, 1, OBJECT_MISSING_TTL_MS - 1, OBJECT_MISSING_TTL_MS, OBJECT_MISSING_TTL_MS + 1]) {
+      await backfillPageObjects(store, await rowsOf(store), probeReturning(null, reads), memo, later(step));
+    }
+    assert.equal(reads.length, 2, 'five polls across two windows read twice');
   });
 });

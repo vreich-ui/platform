@@ -425,7 +425,7 @@ export const rowMetaLine = (
  * the only part the UI cares about. `read` is unconditional: every admin
  * principal, `viewer` included, may open a chat or an object.
  */
-export type RowActionRight = 'read' | 'edit' | 'publish' | 'registry' | 'owner';
+export type RowActionRight = 'read' | 'edit' | 'publish' | 'registry' | 'admin' | 'owner';
 
 export type RowActionId =
   | 'approve'
@@ -437,6 +437,8 @@ export type RowActionId =
   | 'open_object'
   /** C1: the published article on the live site, once the release confirmed it. */
   | 'view_live'
+  /** W21.3: the SITE release that would put this published article (and everything else pending) live. */
+  | 'release'
   | 'mute'
   | 'cancel'
   | 'archive'
@@ -494,6 +496,27 @@ export interface RowActionRowLike {
    */
   object_published?: boolean;
   /**
+   * W21.1 — whether a PLATFORM object record has actually been seen for this
+   * request, as answered by the endpoint's object probe
+   * (`objectBackfillCandidates` → `object_in_library` in
+   * `server/functions/admin-requests.ts`).
+   *
+   * Deliberately NOT derivable from `object_id` or `object_published`, which
+   * is the whole bug: `sweep.ts` writes `object_id` the moment `article_body`
+   * completes, but that draft lives in CMS-Agent's stage outputs — the
+   * platform record the object workspace opens only exists after a publish.
+   * So `object_id` proves the run named an object, never that the library
+   * holds one, and `object_published` is the run's own publish receipt, not a
+   * library lookup either.
+   *
+   * Three states, and only `true` is an answer: `true` = a probe saw the
+   * record; `false` = a probe looked and there was none; absent = nobody has
+   * looked yet. Unknown is not confirmed-absent, but neither is it proof —
+   * both render the same way (disabled with `NOT_IN_LIBRARY`), because the
+   * only thing this surface may claim is what it can show.
+   */
+  object_in_library?: boolean;
+  /**
    * Where the article is live. Present only for a CONFIRMED go-live, so its
    * absence on a published row is a real fact (the release did not confirm),
    * not a missing lookup.
@@ -515,6 +538,15 @@ interface RowActionRights {
    * `rowActionRights` below for why this is not simply `edit`.
    */
   registry: boolean;
+  /**
+   * W21.3 — may call an admin-gated endpoint that is NOT the request registry.
+   *
+   * The same ANSWER as `registry` today, from an independent predicate (FIX 3,
+   * `ROW_ACTION_SEAMS`): the registry seam is expected to widen when the fleet
+   * grants the tiers below admin access to the request endpoint, and
+   * `admin-release` does not widen with it.
+   */
+  admin: boolean;
   owner: boolean;
 }
 
@@ -542,16 +574,54 @@ interface RowActionRights {
  * click. When the server gate moves, this one predicate moves with it and
  * every action re-widens at once.
  */
-export const rowActionRights = (roles: readonly string[]): RowActionRights => {
+/**
+ * FIX 3 — the two admin-gated doors, as DATA, so they can move apart.
+ *
+ * W21.3 wrote `admin: registry` and documented it as a separate seam. It was
+ * separate in name only: the field was an alias, so the day the registry gate
+ * widens — the change the comment exists to anticipate — Release widens with
+ * it and a publisher gets a button that 403s. That is the very defect this
+ * wave removes.
+ *
+ * Each door now carries its OWN role list. `owner` is in both because it
+ * expands to admin+publisher server-side (`server/lib/roles.ts`); listing it
+ * is belt-and-braces for a caller that reports an unexpanded tier.
+ */
+export interface RowActionSeams {
+  /**
+   * Roles `admin-requests` admits. Expected to WIDEN (fleet law): every row
+   * action that posts to the request registry rides this.
+   */
+  registry: readonly string[];
+  /**
+   * Roles `admin-release` admits — its gate is `roles.includes('admin')` on
+   * its own terms, and it does not move when the registry seam does.
+   */
+  admin: readonly string[];
+}
+
+export const ROW_ACTION_SEAMS: RowActionSeams = {
+  registry: ['owner', 'admin'],
+  admin: ['owner', 'admin'],
+};
+
+export const rowActionRights = (
+  roles: readonly string[],
+  /** Overridable so a test can widen ONE seam and prove the other stays put. */
+  seams: RowActionSeams = ROW_ACTION_SEAMS
+): RowActionRights => {
   const has = (role: string) => roles.includes(role);
   const owner = has('owner');
   const publish = owner || has('admin') || has('publisher');
   const edit = publish || has('editor');
-  // `owner` expands to admin+publisher server-side (`server/lib/roles.ts`),
-  // so the `has('owner')` term is belt-and-braces for a caller that reports
-  // an unexpanded tier.
-  const registry = owner || has('admin');
-  return { read: true, edit, publish, registry, owner };
+  return {
+    read: true,
+    edit,
+    publish,
+    registry: seams.registry.some(has),
+    admin: seams.admin.some(has),
+    owner,
+  };
 };
 
 /**
@@ -566,7 +636,9 @@ const askReason = (rights: RowActionRights, required: RowActionRight): string =>
   // wrong side of an endpoint that admits admins only. Telling them "Ask an
   // editor" — which they ARE — would be the ladder answering a question the
   // server did not ask.
-  if (required === 'registry') return 'Ask an admin';
+  // W21.3: the release door is the same shape of answer — an admin gate that
+  // the publish ladder does not reach, so the ladder must not answer for it.
+  if (required === 'registry' || required === 'admin') return 'Ask an admin';
   return !rights.edit ? 'Ask an editor' : !rights.publish ? 'Ask a publisher' : 'Ask an owner';
 };
 
@@ -578,6 +650,20 @@ const NO_OBJECT = 'No object is attached to this request yet.';
  * address to send anyone to. Disabled with this beats a link into a 404.
  */
 export const NO_LIVE_PATH = 'Published, but the release has not confirmed a live URL yet.';
+
+/**
+ * W21.1 — the honest reason on a finished row whose object the library has not
+ * been shown to hold. Two `done` rows in the live admin offered an enabled
+ * Open object that landed on "Couldn't open this object — not found", because
+ * the action was gated on `object_id` being SET and `sweep.ts` sets it from a
+ * stage output, not from the library.
+ *
+ * It says "yet" and names the next step because that is the true state of a
+ * finished-but-unpublished article: the record appears when it is published.
+ * The row keeps offering Publish, which is what makes the sentence actionable
+ * rather than a dead end.
+ */
+export const NOT_IN_LIBRARY = 'Not in the library yet — publish first';
 
 /**
  * D2/D3 (FIX 7) — the object workspace's route. THE one implementation: the
@@ -717,6 +803,12 @@ export interface RowActionOptions {
    * whoever is looking.
    */
   signedOut?: boolean;
+  /**
+   * FIX 3 — which roles each admin-gated endpoint admits. Defaults to
+   * `ROW_ACTION_SEAMS`; a test overrides ONE seam to prove the other does not
+   * move with it.
+   */
+  seams?: RowActionSeams;
 }
 
 /**
@@ -732,7 +824,7 @@ export const rowActions = (
   roles: readonly string[],
   options: RowActionOptions = {}
 ): RowAction[] => {
-  const rights = rowActionRights(roles);
+  const rights = rowActionRights(roles, options.seams ?? ROW_ACTION_SEAMS);
 
   const make = (
     id: RowActionId,
@@ -774,8 +866,29 @@ export const rowActions = (
 
   const openChat = (kind: RowAction['kind']) =>
     make('open_chat', 'Open chat', kind, 'read', row.chat_id ? undefined : NO_CHAT);
-  const openObject = (kind: RowAction['kind']) =>
-    make('open_object', 'Open object', kind, 'read', row.object_id ? undefined : NO_OBJECT);
+  /**
+   * W21.1 — Open object, in the two strengths of proof available to it.
+   *
+   * `requireLibrary` is passed on the `done` branch and only there, because
+   * `done` is the only status the endpoint's object probe answers for: it
+   * probes terminal rows, so a finished row either has a verdict or has not
+   * been looked at yet, and both of those are honest to render as "not
+   * confirmed". Every other status has no probe at all, so there is no fact to
+   * carry and claiming "not in the library" there would be its own unproven
+   * assertion — those rows keep the presence gate they had.
+   *
+   * "No object attached" still wins where it applies: a row that never named
+   * an object is a smaller, earlier truth than one whose object the library
+   * does not hold.
+   */
+  const openObject = (kind: RowAction['kind'], requireLibrary = false) =>
+    make(
+      'open_object',
+      'Open object',
+      kind,
+      'read',
+      !row.object_id ? NO_OBJECT : requireLibrary && row.object_in_library !== true ? NOT_IN_LIBRARY : undefined
+    );
   const viewLive = (kind: RowAction['kind']) =>
     make('view_live', 'View live', kind, 'read', row.live_path ? undefined : NO_LIVE_PATH);
   const mute = (kind: RowAction['kind']) => make('mute', row.muted ? 'Unmute' : 'Mute', kind, 'registry');
@@ -788,6 +901,23 @@ export const rowActions = (
    * both. So the honest right here is `owner`, not `publish`.
    */
   const archive = (kind: RowAction['kind']) => make('archive', 'Archive', kind, 'owner');
+  /**
+   * W21.3 — the way OUT of "published, but no live URL yet".
+   *
+   * Two things this label and its confirmation must not imply, both verified
+   * against `server/functions/admin-release.ts`:
+   *
+   *  - It is not per-object. `parseOptions` there accepts `commit`,
+   *    `force_build` and `timeout_seconds` and no object id at all, so a
+   *    release sends EVERYTHING published-and-pending live, this row included.
+   *    "Release site" says what actually happens; "Release this article" would
+   *    be the row claiming a scope the endpoint does not have.
+   *  - It is not publisher+. That endpoint gates on `roles.includes('admin')`
+   *    (the agent tool is stricter still — owner-only). A publisher gets it
+   *    disabled with "Ask an admin" (D3) rather than a live button that 403s,
+   *    which is the same defect as the Open object bug this wave is fixing.
+   */
+  const release = (kind: RowAction['kind']) => make('release', 'Release site', kind, 'admin');
 
   // B3: a client that may not publish at all beats the row's own reason — no
   // object attached is the smaller problem when nothing here publishes. The
@@ -845,11 +975,35 @@ export const rowActions = (
       // doing are opening the record and looking at the page — and "View live"
       // stays visible, disabled with its reason, when the release never
       // confirmed a URL (D3: the absence is a fact worth showing).
+      //
+      // W21.1: on BOTH halves, Open object answers to the probe rather than to
+      // `object_id` — a link the library cannot serve is the same lie whether
+      // the run published or not. When it is not confirmed the row still shows
+      // the control, disabled, with `NOT_IN_LIBRARY`, which leaves Publish as
+      // the only live primary on the unpublished half (exactly the one step
+      // that would make the record exist).
+      //
+      // W21.3: on a published row with no confirmed live URL the two controls
+      // TRADE PLACES. Wave 1's rule is that the action button sits in the same
+      // row as the problem, and here the problem is "published, not live" and
+      // the fix is a release — so leaving View live in the slot would park a
+      // control that is dead until someone releases in front of the only thing
+      // that can revive it. View live keeps its place in the overflow, still
+      // carrying `NO_LIVE_PATH` (D3). Once the release confirms a URL the row
+      // reverts: View live is a primary again and there is nothing to release.
       return row.object_published
-        ? [openObject('primary'), viewLive('primary'), openChat('menu'), archive('menu')]
+        ? row.live_path
+          ? [openObject('primary', true), viewLive('primary'), openChat('menu'), archive('menu')]
+          : [
+              openObject('primary', true),
+              release('primary'),
+              viewLive('menu'),
+              openChat('menu'),
+              archive('menu'),
+            ]
         : [
             make('publish', 'Publish', 'primary', 'publish', publishBlocked),
-            openObject('primary'),
+            openObject('primary', true),
             openChat('menu'),
             archive('menu'),
           ];
