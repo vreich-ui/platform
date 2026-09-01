@@ -87,10 +87,55 @@ const generatedMarker = (objectType: ObjectType, objectId: string, meta: Materia
   };
 };
 
-/** Wraps a validated body with its `__generated` marker and serializes it deterministically. */
+/**
+ * W6 Q — the annotation layer never reaches git.
+ *
+ * `node.private` (strategy / intent / agentNotes) is the persuasion
+ * architecture of an article: which block is the hook, which is the agitation,
+ * what each one is for. The RENDERER has always stripped it, so it never
+ * reaches reader HTML — but the derived export is committed to the repository,
+ * and it carried `private` verbatim for every node. Reader HTML was clean; git
+ * was not. Found in the 2026-08-31 acceptance run, where all ten nodes of the
+ * published article shipped their strategy annotations into
+ * `sites/drlurie/data/site/articles/`.
+ *
+ * Ruled: strip regardless of repository visibility. A private repo is an
+ * access-control accident away from a public one, and nothing downstream of
+ * the export reads these fields — the build renders from `public`, and the
+ * admin surfaces that DO read the annotation layer
+ * (`lib/edit-mode/ui.ts`, `lib/admin/preview-logic.ts`) read the OBJECT STORE,
+ * which is unchanged. The store remains the full record; the export is a
+ * derived, reader-facing mirror and now says so.
+ *
+ * Applied here rather than in `content-item.ts` because the same annotation
+ * layer rides on section and page nodes: one seam, every type, and any future
+ * body that adds a `private` block inherits the guarantee instead of having to
+ * remember it.
+ */
+const stripPrivate = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripPrivate);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => key !== 'private')
+        .map(([key, nested]) => [key, stripPrivate(nested)])
+    );
+  }
+  return value;
+};
+
+/**
+ * Wraps a validated body with its `__generated` marker and serializes it
+ * deterministically. The annotation layer (`private`, at any depth) is dropped
+ * on the way out — see `stripPrivate`.
+ */
 export const renderExport = <TBody extends object>(
   objectType: ObjectType,
   objectId: string,
   body: TBody,
   meta: MaterializeMeta
-): string => canonicalJsonStringify({ __generated: generatedMarker(objectType, objectId, meta), ...body });
+): string =>
+  canonicalJsonStringify({
+    __generated: generatedMarker(objectType, objectId, meta),
+    ...(stripPrivate(body) as TBody),
+  });

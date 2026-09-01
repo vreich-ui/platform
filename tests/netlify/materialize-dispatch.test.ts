@@ -123,8 +123,12 @@ test('materialize routes content_item to the article export path (W7.3)', () => 
     meta
   );
   assert.equal(result.path, 'sites/drlurie/data/site/articles/req_agent_probe_20260713_01.json');
-  // The annotation layer is exported verbatim (the leak rule lives at the renderer).
-  assert.match(result.content, /"strategy": "summary"/);
+  // W6 Q: the annotation layer is NOT exported. It used to be — the renderer's
+  // leak rule kept it out of reader HTML but the export is committed to git, so
+  // the persuasion architecture of every article was publicly readable there.
+  // renderExport now drops `private` at any depth; the object store keeps it.
+  assert.ok(!result.content.includes('strategy'), 'no strategy annotation may reach the committed export');
+  assert.match(result.content, /"body": "One paragraph."/, 'public content still exports verbatim');
 });
 
 test('materialize rejects an unregistered object type at runtime', () => {
