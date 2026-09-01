@@ -16,7 +16,7 @@
  * than that shared cache, so those three run their own light, visibility-
  * backed-off chain while active — see `RequestsBody`'s own comment.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { navigate } from 'astro:transitions/client';
 
@@ -56,6 +56,7 @@ import {
   quickFilterToStatuses,
   publishPolicyFromApproval,
   publishTargetFor,
+  requestObjectHref,
   requestSeverityLevel,
   rowActions,
   rowMetaLine,
@@ -77,7 +78,15 @@ import {
   type DecisionOverlayEntry,
 } from '@core/lib/admin/decisions';
 import { DECIDED_WAITING_LABEL, pendingDecisionForRequest } from '@core/lib/admin/decision-overlay';
+import { liveArticleUrl } from '@core/lib/admin/publication-card';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import {
+  isAuthExpired,
+  SESSION_EXPIRED_MESSAGE,
+  SESSION_EXPIRED_TITLE,
+  SIGN_IN_LABEL,
+  subscribeAuthExpiry,
+} from '@core/lib/admin/auth-expiry';
 
 /** D3: a viewer without publish-decision authority sees the buttons disabled with the reason, never absent. */
 const ROW_DECISION_DENIED_REASON = 'You do not have publish-decision authority for this run.';
@@ -106,6 +115,56 @@ const resolvePublishPolicy = (): PublishPolicy => {
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
   return (await m.getAccessToken()) ?? '';
+}
+
+/**
+ * C3 — the one fact every part of this page needs: is the session still ours?
+ *
+ * Read from the module-scope store (`lib/admin/auth-expiry.ts`) rather than
+ * from `useCurrentUser`, because an empty role list is the SYMPTOM shared by
+ * two different states and cannot distinguish them.
+ */
+const useAuthExpired = (): boolean => useSyncExternalStore(subscribeAuthExpiry, isAuthExpired, () => false);
+
+/**
+ * C3 — a persistent banner, deliberately not a toast.
+ *
+ * A toast is for something that has happened and is over; this is a state
+ * that does not resolve itself, and dismissing it would leave the rows below
+ * reading as if they were live. It stays until someone signs in.
+ */
+function SessionExpiredBanner() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-wrap items-center gap-3 rounded-[var(--adm-radius-md)] border border-[var(--adm-warning)] bg-[var(--adm-warning-soft)] px-4 py-3"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-warning-text)]">
+          {SESSION_EXPIRED_TITLE}
+        </p>
+        <p className="mt-0.5 text-[length:var(--adm-text-xs)] text-[var(--adm-warning-text)]">
+          {SESSION_EXPIRED_MESSAGE}
+        </p>
+      </div>
+      <Button size="sm" onClick={openSignIn}>
+        {SIGN_IN_LABEL}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The sign-in CTA. `LoginModal.astro` publishes `window.__cmsLoginModal` on
+ * every admin page (`AdminLayout.astro` mounts it), so the modal opens in
+ * place. If a page somehow has no modal, a reload lands on the layout's own
+ * signed-out gate, which offers the same sign-in — never a dead button.
+ */
+function openSignIn(): void {
+  const modal = (globalThis as unknown as { __cmsLoginModal?: { open: () => void } }).__cmsLoginModal;
+  if (modal) modal.open();
+  else window.location.reload();
 }
 
 const KIND_LABELS: Record<RequestKind, string> = {
@@ -301,6 +360,9 @@ function useRowActions(
     handlers: RowActionHandlers;
   }
 ) {
+  // C3: read here rather than threaded as a prop, so the row and the Drawer
+  // can never disagree about whether the session is alive.
+  const signedOut = useAuthExpired();
   const actions = useMemo(() => {
     return rowActions(
       {
@@ -308,18 +370,23 @@ function useRowActions(
         archived: row.archived,
         ...(row.chat_id ? { chat_id: row.chat_id } : {}),
         ...(row.object_id ? { object_id: row.object_id } : {}),
+        // C1: the index row carries the object's publication truth now, so a
+        // finished article stops being offered a Publish it does not need.
+        // Absent (a server deployed before C1) reads as not published.
+        ...(row.object_published !== undefined ? { object_published: row.object_published } : {}),
+        ...(row.live_path ? { live_path: row.live_path } : {}),
         muted,
         mine,
       },
       roles,
-      { publishPolicy }
+      { publishPolicy, signedOut }
     ).map((action) => {
       if (!action.enabled) return action;
       if ((action.id === 'approve' || action.id === 'reject') && !canDecide)
         return { ...action, enabled: false, reason: ROW_DECISION_DENIED_REASON };
       return action;
     });
-  }, [row, roles, mine, muted, canDecide, publishPolicy]);
+  }, [row, roles, mine, muted, canDecide, publishPolicy, signedOut]);
 
   const invoke = (action: RowAction) => {
     switch (action.id) {
@@ -327,8 +394,15 @@ function useRowActions(
         if (row.chat_id) void navigate(`/admin/agents?chat=${encodeURIComponent(row.chat_id)}`);
         return;
       case 'open_object':
-        if (row.object_id) void navigate(`/admin/content/${encodeURIComponent(row.object_id)}?type=content_item`);
+        if (row.object_id) void navigate(requestObjectHref(row.object_id));
         return;
+      case 'view_live': {
+        // The admin is served BY the site, so its own origin is the site's —
+        // the same join `RequestActivity`'s live link makes.
+        const href = liveArticleUrl(row.live_path, window.location.origin);
+        if (href) window.open(href, '_blank', 'noopener,noreferrer');
+        return;
+      }
       case 'mute':
         handlers.onMute(row, muted);
         return;
@@ -637,6 +711,9 @@ const requestIdFromPath = (): string | undefined => {
 export function RequestsBody({ selectedId }: { selectedId?: string }) {
   const { toast } = useToast();
   const user = useCurrentUser();
+  // C3: whether this browser still has a session. Held with the other
+  // top-level hooks — never below an early return (`rules-of-hooks`).
+  const authExpired = useAuthExpired();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [quickFilter, setQuickFilter] = useState<RequestQuickFilter>(() =>
     isQuickFilter(readParams().get('filter'))
@@ -701,6 +778,11 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   const loadCustom = useCallback(
     async (generation: number) => {
       const current = () => customGenerationRef.current === generation;
+      // C3: `mine`/search/archived run their own chain, and it must stop for
+      // the same reason the shared one does — polling a dead session burns
+      // requests and keeps rewriting rows nobody can trust. No timer is armed
+      // either; the recovery effect below restarts it.
+      if (isAuthExpired()) return;
       try {
         const result = await listRequests(getToken, {
           ...(quickFilterToStatuses(quickFilter) ? { status: quickFilterToStatuses(quickFilter) } : {}),
@@ -722,6 +804,9 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
       } catch (loadError) {
         if (!current()) return;
         setCustomRows((rowsNow) => rowsNow ?? []);
+        // C3: an expired session is not a load error — the banner says it once,
+        // in words, and no retry is armed because retrying cannot help.
+        if (isAuthExpired()) return;
         setCustomError(loadError instanceof Error ? loadError.message : 'Could not load requests.');
         if (customTimerRef.current) clearTimeout(customTimerRef.current);
         customTimerRef.current = setTimeout(() => void loadCustom(generation), 20_000);
@@ -750,6 +835,18 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [custom, selectedId, loadCustom]);
+
+  // C3: the custom chain's half of the recovery. The shared chain restarts
+  // itself (`watchAuthRecovery` in `requests-store.ts`); this one is owned
+  // here, so it re-fetches here — the moment the session comes back, not on a
+  // timer that was never armed.
+  const wasAuthExpired = useRef(false);
+  useEffect(() => {
+    const recovered = wasAuthExpired.current && !authExpired;
+    wasAuthExpired.current = authExpired;
+    if (!recovered || !custom || selectedId) return;
+    void loadCustom(customGenerationRef.current);
+  }, [authExpired, custom, selectedId, loadCustom]);
 
   const refresh = useCallback(() => {
     if (custom) void loadCustom(customGenerationRef.current);
@@ -856,6 +953,15 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   const error = custom ? customError : sharedIndex.error;
   const muted = custom ? [] : sharedIndex.muted;
 
+  // E3b: the standalone `/admin/requests/<id>` route's own object id, read
+  // from the shared cache directly rather than the quick-filter-narrowed
+  // `rows` below — a `running` selected request would otherwise vanish from
+  // `rows` under the default `needsYou` filter and the open-draft link would
+  // never appear for the one status it matters most on.
+  const selectedRowObjectId = selectedId
+    ? sharedIndex.rows?.find((row) => row.request_id === selectedId)?.object_id
+    : undefined;
+
   const rows = useMemo(() => {
     if (custom) return sortRequestRows(customRows ?? []);
     const base = sharedIndex.rows ?? [];
@@ -944,6 +1050,9 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* C3: above everything, because it changes how everything below must
+          be read — and it stays until someone signs in. */}
+      {authExpired ? <SessionExpiredBanner /> : null}
       <Card
         kicker="Requests"
         title={selectedId ? 'This request' : 'Runs inbox'}
@@ -1017,18 +1126,30 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
           </>
         )}
 
-        {error ? <p className="mb-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{error}</p> : null}
+        {/* C3: while the session is gone the banner above IS the explanation;
+            a second, vaguer sentence in red only competes with it. */}
+        {error && !authExpired ? (
+          <p className="mb-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{error}</p>
+        ) : null}
 
         {/* W19: on a single request, the full node timeline is the page — an
             editor who opened THIS request wants the detail, not a summary. */}
         {selectedId ? (
-          <div className="mb-3">
+          /* C3: the single-request route has no rows to dim — the run's own
+             timeline is what is stale here, so it dims instead. */
+          <div className={`mb-3${authExpired ? ' opacity-50' : ''}`}>
             <RequestActivity
               requestId={selectedId}
               defaultExpanded
               onSettled={refresh}
               isOwner={isOwner}
               onRetry={() => void retryRun(selectedId)}
+              // E3b: `sharedIndex.rows` (the shared cache's own, un-filtered-
+              // by-quick-filter set — the doubly-filtered `rows` below can
+              // exclude a `running` selected row entirely) rather than a
+              // second fetch this route has never needed. Absent when the
+              // id is outside that cache's cap: honest, not a guess.
+              {...(selectedRowObjectId ? { objectId: selectedRowObjectId } : {})}
             />
           </div>
         ) : null}
@@ -1046,7 +1167,13 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
             }
           />
         ) : (
-          <ul className="flex flex-col">
+          /* C3: dimmed, so it is visible at a glance that these rows are a
+             snapshot of a session that ended rather than current truth. The
+             principle applied literally — the UI must not present stale rows
+             as if they were live. `aria-hidden` is deliberately NOT set: the
+             rows are still readable, just no longer trustworthy, and the
+             banner above already says so. */
+          <ul className={`flex flex-col${authExpired ? ' opacity-50' : ''}`}>
             {rows.map((row) => (
               <RequestRow
                 key={row.request_id}
@@ -1083,6 +1210,20 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                     {requestStatusLabel(openRow.status)}
                   </StatusBadge>
                   <Badge tone="neutral">{KIND_LABELS[openRow.kind] ?? openRow.kind}</Badge>
+                  {/* D3: the object this request produced, one click from
+                      open — every object id or title rendered in this admin
+                      must carry an href (`tests/scripts/admin-object-links.test.mjs`),
+                      and the request detail pane was the one place that
+                      named the object with nothing to click. */}
+                  {openRow.object_id ? (
+                    <a
+                      href={requestObjectHref(openRow.object_id)}
+                      className="adm-focusable inline-flex items-center gap-1 rounded-[var(--adm-radius-pill)] bg-[var(--adm-surface-sunken)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+                    >
+                      <IconExternalLink size={12} />
+                      Object
+                    </a>
+                  ) : null}
                   {/* B1: the same action list the row renders — the two
                       hand-written buttons that used to live here are gone. */}
                   <RequestDrawerActions
@@ -1103,6 +1244,10 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                 onSettled={refresh}
                 isOwner={isOwner}
                 onRetry={() => void retryRun(openId)}
+                // E3b: `openRow` is this same drawer's own row (C1's
+                // `object_id`) — the mid-run "open draft" link the run card
+                // offers, not a second guess at where the object lives.
+                {...(openRow?.object_id ? { objectId: openRow.object_id } : {})}
               />
             </div>
           ) : null}

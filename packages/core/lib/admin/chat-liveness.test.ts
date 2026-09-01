@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 
 import {
   activeRunStartedAt,
+  currentNodeFromEvents,
+  objectIdFromEvents,
   deriveLivenessChip,
   elapsedMsForChip,
   elapsedMsSince,
@@ -94,6 +96,66 @@ describe('deriveLivenessChip — tier 1, the ambient chip', () => {
     // …and the very next poll, once the turn starts, does return a chip.
     assert.notEqual(deriveLivenessChip('queued', null), undefined, 'the first turn flips it to a chip');
     assert.notEqual(deriveLivenessChip('running', null), undefined);
+  });
+
+  describe('E1: the chip narrates the current step, not just "Working"', () => {
+    it('a running status with a node NODE_LABELS knows uses that gerund as the label', () => {
+      const chip = deriveLivenessChip('running', null, 'draft_writer');
+      assert.equal(chip?.label, 'Drafting');
+      assert.equal(chip?.tier, 'working');
+      assert.equal(chip?.severity, undefined, 'working is still not a severity');
+    });
+
+    it('an unrecognised node falls back to "Working" — never a raw node id (guardrail 5)', () => {
+      assert.equal(deriveLivenessChip('running', null, 'some_future_node')?.label, 'Working');
+    });
+
+    it('no node at all (progress hasn’t landed yet) falls back to "Working" too', () => {
+      assert.equal(deriveLivenessChip('running', null)?.label, 'Working');
+      assert.equal(deriveLivenessChip('running', null, undefined)?.label, 'Working');
+    });
+
+    it('currentNodeFromEvents reads the latest request_progress event’s node, ignoring older/missing ones', () => {
+      const events = [
+        event(1, 'request_progress', { status: 'running', node: 'input_triage' }),
+        event(2, 'tool_call', { tool: 'patch' }),
+        event(3, 'request_progress', { status: 'running', node: 'draft_writer' }),
+      ];
+      assert.equal(currentNodeFromEvents(events), 'draft_writer');
+      assert.equal(currentNodeFromEvents([]), undefined);
+      assert.equal(currentNodeFromEvents([event(1, 'request_progress', { status: 'running' })]), undefined);
+    });
+
+    /**
+     * FIX 2 — `AgentRail`/`AgentsHub` mount the run card from a chat, and the
+     * chat's request binding is sent on the FIRST poll only and latched by the
+     * client, while `object_id` is recorded much later. So the binding never
+     * has one for a run in progress and "Open draft" never appeared. The
+     * sweeper now stamps the id on the `request_progress` events that are
+     * already arriving; this is where the card reads it.
+     */
+    it('objectIdFromEvents reads the newest request_progress event that names an object', () => {
+      const events = [
+        event(1, 'request_progress', { status: 'running', node: 'input_triage' }),
+        event(2, 'request_progress', { status: 'running', node: 'draft_writer', object_id: 'req_a' }),
+        event(3, 'request_progress', { status: 'running', node: 'publication_controller', object_id: 'req_a' }),
+      ];
+      assert.equal(objectIdFromEvents(events), 'req_a');
+    });
+
+    it('skips PAST a later progress line written before the object existed, rather than erasing the link', () => {
+      const events = [
+        event(1, 'request_progress', { status: 'running', object_id: 'req_a' }),
+        event(2, 'request_progress', { status: 'running' }),
+      ];
+      assert.equal(objectIdFromEvents(events), 'req_a', 'a real object does not stop being real');
+    });
+
+    it('is undefined while nothing has been recorded — never a guess', () => {
+      assert.equal(objectIdFromEvents([]), undefined);
+      assert.equal(objectIdFromEvents([event(1, 'request_progress', { status: 'running' })]), undefined);
+      assert.equal(objectIdFromEvents([event(1, 'tool_result', { object_id: 'obj_1' })]), undefined);
+    });
   });
 
   it('idle + a completed last run reads as a plain success receipt', () => {
@@ -270,6 +332,176 @@ describe('receiptLine — A3: one muted line, the failure stated exactly once', 
 
   it('there is nothing to show when there is no message at all', () => {
     assert.equal(receiptLine({ outcome: 'completed', chips: [], hasRunCard: false }).showFailureText, false);
+  });
+});
+
+describe('receiptLine — E2: action receipts say what changed', () => {
+  it('FIX 3: a created object says WHAT it was — a page is not a draft', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [{ id: 'obj_1', type: 'page' }],
+    });
+    assert.deepEqual(decision.actions, [
+      { key: 'created:0:obj_1', label: 'Created page → open', href: '/admin/content/obj_1?type=page' },
+    ]);
+  });
+
+  it('and `content_item` is the one type an editor calls a draft', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [{ id: 'obj_1', type: 'content_item' }],
+    });
+    assert.deepEqual(decision.actions, [
+      { key: 'created:0:obj_1', label: 'Created draft → open', href: '/admin/content/obj_1?type=content_item' },
+    ]);
+  });
+
+  it('a created object with a PROVEN title names it, rather than linking blind', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [{ id: 'obj_1', type: 'content_item', title: 'Retinol for beginners' }],
+    });
+    assert.deepEqual(decision.actions, [
+      {
+        key: 'created:0:obj_1',
+        label: "Created draft 'Retinol for beginners' → open",
+        href: '/admin/content/obj_1?type=content_item',
+      },
+    ]);
+  });
+
+  it('FIX 3: a stamp with no proven type claims nothing — it was a page edit, not a creation', () => {
+    // `instantiate_section_template` into an existing page stamped the PAGE's
+    // id with no type. The receipt used to call that "Created draft" and link
+    // it as a content_item, which dead-ends on "not found". Now it says
+    // nothing, which is the only honest reading of an untyped stamp.
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: ['edited 1 time'],
+      hasRunCard: false,
+      created: [{ id: 'page_home' }],
+    });
+    assert.deepEqual(decision.actions, []);
+  });
+
+  it('created + published → two anchors', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [{ id: 'obj_1', type: 'content_item' }],
+      published: { id: 'obj_1', liveUrl: 'https://example.com/retinol' },
+    });
+    assert.deepEqual(decision.actions, [
+      { key: 'created:0:obj_1', label: 'Created draft → open', href: '/admin/content/obj_1?type=content_item' },
+      { key: 'published:obj_1', label: 'Published → view live', href: 'https://example.com/retinol' },
+    ]);
+  });
+
+  it('neither created nor published → today’s plain line (no actions)', () => {
+    assert.deepEqual(receiptLine({ outcome: 'completed', chips: [], hasRunCard: false }).actions, []);
+  });
+
+  it('no object id at all → no "Created" clause, even with other facts present', () => {
+    const decision = receiptLine({ outcome: 'completed', chips: ['edited 1 time'], hasRunCard: false, created: [] });
+    assert.deepEqual(decision.actions, []);
+  });
+
+  it('not published (no liveUrl proven) → no "Published" clause and no live link', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [{ id: 'obj_1', type: 'content_item' }],
+    });
+    assert.equal(decision.actions.some((action) => action.label.includes('Published')), false);
+  });
+});
+
+/**
+ * E2b — the Published half of E2 stops being dead code. `receiptLine` can now
+ * be handed a publish this run PROVED (the `published_object_id` stamp
+ * `loop.ts` writes on a successful publish's own `tool_result`), and the two
+ * shapes of that fact word themselves differently: a caller holding deploy
+ * evidence gets "view live", a caller holding only the publish gets
+ * "Published → open" and a link to the object. Neither invents a URL.
+ */
+describe('receiptLine — E2b: a proven publish, worded to what it proves', () => {
+  it('published with no confirmed live URL → "Published → open", linking the object itself', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: ['published 1'],
+      hasRunCard: false,
+      published: { id: 'obj_1', type: 'content_item' },
+    });
+    assert.deepEqual(decision.actions, [
+      { key: 'published:obj_1', label: 'Published → open', href: '/admin/content/obj_1?type=content_item' },
+    ]);
+  });
+
+  it('FIX 3: an unknown object type still links, with NO `?type=` — the workspace resolves it', () => {
+    // Defaulting to content_item was worse than omitting: `ObjectWorkspace`
+    // trusts `?type=` over its own id-prefix/inventory resolution, so a wrong
+    // guess turns a link that would have worked into "<id> was not found".
+    const decision = receiptLine({ outcome: 'completed', chips: [], hasRunCard: false, published: { id: 'obj_9' } });
+    assert.deepEqual(decision.actions, [
+      { key: 'published:obj_9', label: 'Published → open', href: '/admin/content/obj_9' },
+    ]);
+  });
+
+  it('a CONFIRMED live URL is what upgrades the clause to "view live" — nothing else does', () => {
+    const withUrl = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      published: { id: 'obj_1', liveUrl: 'https://example.com/retinol' },
+    });
+    const withoutUrl = receiptLine({ outcome: 'completed', chips: [], hasRunCard: false, published: { id: 'obj_1' } });
+    assert.equal(withUrl.actions[0]!.label, 'Published → view live');
+    assert.equal(withUrl.actions[0]!.href, 'https://example.com/retinol');
+    assert.equal(withoutUrl.actions[0]!.label, 'Published → open');
+  });
+
+  it('created + published in the same run → both clauses, in that order', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [{ id: 'obj_1', type: 'content_item' }],
+      published: { id: 'obj_1', type: 'content_item' },
+    });
+    assert.deepEqual(
+      decision.actions.map((action) => action.label),
+      ['Created draft → open', 'Published → open']
+    );
+  });
+
+  /**
+   * FIX 4 — the draft-then-publish run is the common shape, and both of its
+   * clauses point at the same object, so the href is not list identity.
+   * `chat.tsx` renders these with `key={action.key}`.
+   */
+  it('FIX 4: every clause carries a unique key, even when two share an href', () => {
+    const decision = receiptLine({
+      outcome: 'completed',
+      chips: [],
+      hasRunCard: false,
+      created: [
+        { id: 'obj_1', type: 'content_item' },
+        { id: 'obj_2', type: 'page' },
+      ],
+      published: { id: 'obj_1', type: 'content_item' },
+    });
+    const hrefs = decision.actions.map((action) => action.href);
+    const keys = decision.actions.map((action) => action.key);
+    assert.equal(new Set(hrefs).size, 2, 'two clauses genuinely do share an href');
+    assert.equal(new Set(keys).size, decision.actions.length, 'and every key is still distinct');
   });
 });
 

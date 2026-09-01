@@ -21,7 +21,8 @@ import { z } from 'zod';
 import type { SiteBinding } from '../lib/site-binding.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
-import { getEditorialRequestsBlobStore } from '../lib/blob-store.js';
+import { getEditorialRequestsBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import { objectRecordKey } from '../lib/object-store-keys.js';
 import { isOwner, resolveRolesForPrincipalAsync, type Role } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import type { Principal } from '../../schema/object-record-v1.js';
@@ -30,10 +31,13 @@ import {
   cancelRequest,
   loadIndex,
   loadRequest,
+  projectIndexRow,
   rebuildIndex,
+  reconcileObject,
   requeueRequest,
   unarchiveRequest,
   requestStatusSchema,
+  type EditorialRequest,
   type EditorialRequestStore,
   type RequestIndexRow,
   type RequestStatus,
@@ -167,6 +171,220 @@ const readIndex = async (
   return { rows: rebuilt.rows, seq: rebuilt.seq, rebuilt: true };
 };
 
+// ─── C2: the object a finished run produced, reconciled onto its row ─────────
+
+/**
+ * The bug: a `done` row for a published article rendered BOTH Open object and
+ * Publish disabled with "No object attached". `object_id` is written in
+ * exactly one place — the sweeper, on the pass that sees `article_body`
+ * complete — and only while the request is still sweepable, so a run that
+ * reached a terminal status without passing through that moment never got one,
+ * and never would: a terminal request is never polled again.
+ *
+ * This is the repair, on the read path, under three rules:
+ *
+ *  1. It NEVER guesses. `object_id === request_id` by construction (that is
+ *     what `sweep.ts` writes), but the id is only recorded once the object
+ *     record is proven to be in the store. A guess would put a permanent link
+ *     to a 404 in the inbox, and "No object attached" is the honest answer
+ *     when there is genuinely no object.
+ *  2. It is bounded. `list` is polled roughly four times a minute per open
+ *     tab; turning that into one object read per row would be a new N-read
+ *     path in the endpoint whose whole point is one blob GET. Only `done`
+ *     rows, only ones missing the field, at most `OBJECT_BACKFILL_MAX` per
+ *     call, and never one this process has already looked for and not found.
+ *  3. It is one-shot. A found object is recorded on the doc, so the row
+ *     carries it from then on and no probe is made again.
+ */
+export const OBJECT_BACKFILL_MAX = 5;
+
+/**
+ * Request ids not worth probing again yet, and until when. Per-process and
+ * lossy on a cold start, which is the right trade — this is a cost control,
+ * never a fact anyone reads.
+ *
+ * C2c: the two outcomes are NOT the same, and conflating them was a bug.
+ *
+ *   a TRUE MISS — no object record at all — is permanent (`Infinity`). A
+ *   terminal run that produced nothing will not start producing one.
+ *
+ *   EXISTS BUT UNPUBLISHED is a live fact that changes the moment someone
+ *   clicks Publish, so it expires. Caching it made the inbox show the article
+ *   as unpublished after a publish from that very row, and invited a second
+ *   click on an article that was already live — hiding exactly the transition
+ *   this wave exists to make visible.
+ */
+const objectProbeSkipUntil = new Map<string, number>();
+const OBJECT_PROBE_MEMO_MAX = 500;
+
+/**
+ * How long an "exists but unpublished" answer stands. Matched to
+ * `requestPollIntervalFor`'s idle floor (30 s, the cadence a Done-only tab
+ * polls at), so the tab Wolf is looking at re-reads on essentially every poll,
+ * while a page that also holds a running run — polling every 5 s — still
+ * cannot spend more than OBJECT_BACKFILL_MAX object reads per 30 s window,
+ * however many tabs are open on the same warm process.
+ */
+export const OBJECT_UNPUBLISHED_TTL_MS = 30_000;
+
+/** The suite clears this between cases; nothing else may touch it. */
+export const resetObjectBackfillMemoForTesting = (): void => objectProbeSkipUntil.clear();
+
+const rememberSkip = (skipUntil: Map<string, number>, requestId: string, until: number): void => {
+  if (skipUntil.size >= OBJECT_PROBE_MEMO_MAX) skipUntil.clear();
+  skipUntil.set(requestId, until);
+};
+
+/** Which rows on this page are worth one object read. Exported for the bound test. */
+export const objectBackfillCandidates = (
+  rows: readonly { request_id: string; status: RequestStatus; object_id?: string; object_published?: boolean }[],
+  skipUntil: ReadonlyMap<string, number> = objectProbeSkipUntil,
+  nowMs: number = Date.now(),
+  max: number = OBJECT_BACKFILL_MAX
+): string[] =>
+  rows
+    // C2b: a finished row is worth a read while EITHER answer is still
+    // missing — the object it names, or whether that object was published.
+    .filter(
+      (row) =>
+        row.status === 'done' &&
+        (!row.object_id || !row.object_published) &&
+        (skipUntil.get(row.request_id) ?? 0) <= nowMs
+    )
+    .slice(0, max)
+    .map((row) => row.request_id);
+
+/**
+ * C2b — what the object record PROVES about publication, read from the record
+ * this call already fetches to check the object exists.
+ *
+ * `object_publish` (`server/lib/object-publish.ts`) is the only writer of these
+ * fields, and it stamps `published_time` ONLY after the export commit
+ * succeeded — so a stamped record is proof, not a guess. `publish_receipt` is
+ * that commit's own receipt; without it the record under-claims and so does
+ * this. Nothing here reads status, age or the mere existence of the object.
+ *
+ * FIX 1: it answers PUBLISHED and nothing else. It used to also mint a
+ * `live_path` from `publish_receipt`, on the reasoning that a committed export
+ * is eventually served — but `object-publish.ts` commits with
+ * `[skip netlify]` (`withDeferredDeployMarker`) and stamps the receipt at
+ * commit time, so the receipt proves the export, never the deploy. `live_path`
+ * is defined on the request doc as release-CONFIRMED (`store.ts`), and
+ * `NO_LIVE_PATH` (`lib/admin/request-logic.ts`) is the sentence for a
+ * published row with no confirmed URL. A record cannot clear that bar, so it
+ * does not try: a legacy row gets Open object enabled and View live disabled
+ * with the honest reason, rather than a link that 404s until someone releases.
+ */
+export const publicationFromObjectRecord = (raw: string): { published: boolean } => {
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    // The object is there (the blob answered) but says nothing readable about
+    // publication, so it proves nothing.
+    return { published: false };
+  }
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (!isRecord(record)) return { published: false };
+  const publication = isRecord(record.publication) ? record.publication : undefined;
+  const published = typeof publication?.published_time === 'string' && publication.published_time.length > 0;
+  return { published };
+};
+
+/** The object store's answer for one request: `undefined` when there is no record at all. */
+export type ObjectExistenceProbe = (objectId: string) => Promise<{ published: boolean } | undefined>;
+
+/**
+ * One request. `undefined` back means nothing changed — either the object is
+ * not there (recorded in the memo, so the next poll is free) or the probe
+ * could not answer, which is NOT a verdict and is deliberately not memoised.
+ */
+const reconcileOneObject = async (
+  store: EditorialRequestStore,
+  requestId: string,
+  exists: ObjectExistenceProbe,
+  skipUntil: Map<string, number>,
+  nowMs: number
+): Promise<EditorialRequest | undefined> => {
+  let found: { published: boolean } | undefined;
+  try {
+    found = await exists(requestId);
+  } catch {
+    // A store that could not answer says nothing about the article, so this is
+    // retried on the next poll rather than memoised as a verdict.
+    return undefined;
+  }
+  if (!found) {
+    // A true miss: there is no object, and a terminal run will not make one.
+    rememberSkip(skipUntil, requestId, Number.POSITIVE_INFINITY);
+    return undefined;
+  }
+  const doc = await reconcileObject(store, requestId, {
+    object_type: 'content_item',
+    object_id: requestId,
+    ...(found.published ? { published: true } : {}),
+  }).catch(() => undefined);
+  // C2c: the object is THERE and simply not published yet. That answer is only
+  // good for a moment — a click on this row's own Publish changes it — so it
+  // is held briefly to bound the read rate and then re-read, never cached
+  // until the process recycles.
+  if (doc?.object?.published !== true) {
+    rememberSkip(skipUntil, requestId, nowMs + OBJECT_UNPUBLISHED_TTL_MS);
+  } else {
+    // Answered for good — the row carries it now and is not a candidate again.
+    skipUntil.delete(requestId);
+  }
+  return doc?.object ? doc : undefined;
+};
+
+/**
+ * The page, with any object this call could prove filled in. `wrote` says
+ * whether the index moved, so the caller can re-read `seq` on the one call
+ * that changed it rather than on every poll.
+ */
+export const backfillPageObjects = async (
+  store: EditorialRequestStore,
+  page: readonly RequestIndexRow[],
+  exists: ObjectExistenceProbe,
+  skipUntil: Map<string, number> = objectProbeSkipUntil,
+  nowMs: number = Date.now()
+): Promise<{ rows: RequestIndexRow[]; wrote: boolean }> => {
+  const candidates = objectBackfillCandidates(page, skipUntil, nowMs);
+  if (candidates.length === 0) return { rows: [...page], wrote: false };
+
+  const repaired = new Map<string, RequestIndexRow>();
+  let wrote = false;
+  for (const requestId of candidates) {
+    const before = page.find((row) => row.request_id === requestId);
+    const doc = await reconcileOneObject(store, requestId, exists, skipUntil, nowMs);
+    if (!doc) continue;
+    // Project the row from the doc that was just written, so the response and
+    // the index cannot disagree about what was recorded.
+    const row = projectIndexRow(doc);
+    repaired.set(requestId, row);
+    if (JSON.stringify(before) !== JSON.stringify(row)) wrote = true;
+  }
+  return { rows: page.map((row) => repaired.get(row.request_id) ?? row), wrote };
+};
+
+/**
+ * The probe, over the site's object store. Created per call and connected
+ * LAZILY — a poll with nothing to reconcile (the steady state) never opens the
+ * store at all.
+ */
+const siteObjectProbe = (event: LambdaEvent): ObjectExistenceProbe => {
+  let store: Promise<{ get(key: string): Promise<string | null> }> | undefined;
+  return async (objectId) => {
+    store ??= getSiteObjectsBlobStore(event);
+    const raw = await (await store).get(objectRecordKey('content_item', objectId));
+    // C2b: the SAME read answers both questions — is the object there, and
+    // does its record prove a publish. No extra fetch, so the cost profile is
+    // exactly C2's.
+    return raw === null || raw === undefined ? undefined : publicationFromObjectRecord(raw);
+  };
+};
+
 const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
@@ -209,12 +427,18 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         const start = request.data.cursor ? Math.max(0, Number.parseInt(request.data.cursor, 10) || 0) : 0;
         const page = matched.slice(start, start + limit);
         const nextCursor = start + limit < matched.length ? String(start + limit) : undefined;
+        // C2: a finished row whose doc never recorded its object. Bounded and
+        // one-shot — see the block above the handler for the three rules.
+        const backfilled = await backfillPageObjects(store, page, siteObjectProbe(event));
+        // `seq` is the index's write counter, so it is re-read on the one call
+        // that actually wrote and left alone on every other.
+        const seqNow = backfilled.wrote ? ((await loadIndex(store))?.seq ?? seq) : seq;
         const notify = await loadNotifyState(store, callerEmail);
         const seen = await loadSeenLedger(store, callerEmail, notify);
         const listBody: Record<string, unknown> = {
-          requests: page,
+          requests: backfilled.rows,
           total: matched.length,
-          seq,
+          seq: seqNow,
           ...(nextCursor ? { next_cursor: nextCursor } : {}),
           ...(rebuilt ? { rebuilt: true } : {}),
           muted: notify?.muted ?? [],
@@ -241,7 +465,13 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
       case 'get': {
         const doc = await loadRequest(store, request.data.request_id);
         if (!doc) return jsonResponse(404, { error: 'Request not found.' });
-        return jsonResponse(200, { request: doc });
+        // C2: the same reconciliation the list makes, for the one request the
+        // drawer opened — the detail view draws the same row actions.
+        const reconciled =
+          doc.status === 'done' && doc.object?.published === undefined
+            ? await reconcileOneObject(store, doc.request_id, siteObjectProbe(event), objectProbeSkipUntil, Date.now())
+            : undefined;
+        return jsonResponse(200, { request: reconciled ?? doc });
       }
 
       case 'archive':

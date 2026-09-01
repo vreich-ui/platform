@@ -136,7 +136,26 @@ export const editorialRequestSchema = z.object({
   workflow: requestWorkflowSchema.optional(),
   chats: z.array(requestChatLinkSchema),
   /** Once the article object exists. */
-  object: z.object({ object_type: z.string(), object_id: z.string() }).optional(),
+  object: z
+    .object({
+      object_type: z.string(),
+      object_id: z.string(),
+      /**
+       * C1: the publish/release tail committed a publish for this object —
+       * read from the run's OWN receipts (`publication-evidence.ts`), never
+       * inferred from a `done` status. A run can finish without publishing,
+       * so absent means "no evidence", which the row reads as not published.
+       */
+      published: z.boolean().optional(),
+      /**
+       * `article_path` from the publish receipt, recorded ONLY once the
+       * release confirmed production serves it. A path for a publish whose
+       * go-live is unconfirmed is a link to a page the site may not have yet,
+       * so it is deliberately not stored.
+       */
+      live_path: z.string().optional(),
+    })
+    .optional(),
   artifact_count: z.number().int().nonnegative().optional(),
   archived_at: z.string().optional(),
   archived_by: z.string().optional(),
@@ -145,9 +164,17 @@ export const editorialRequestSchema = z.object({
 export type EditorialRequest = z.infer<typeof editorialRequestSchema>;
 
 // ─── the index (plan §3.2/§3.3) ──────────────────────────────────────────────
-// One doc the UI polls. A row carries ONLY the fields named in plan §3.3 —
-// nothing else may be added without a plan change, because every admin tab
-// polls this blob.
+// One doc the UI polls. A row carries ONLY the fields named in plan §3.3 plus
+// the two C1 added (`object_published`, `live_path`) — nothing else may be
+// added without a plan change, because every admin tab polls this blob. The
+// field set stays CLOSED: `projectIndexRow` below emits exactly these keys and
+// `store.test.ts` asserts the list, so a new doc field cannot widen the index
+// by accident.
+//
+// C1 widened it on purpose. `rowActions` (`lib/admin/request-logic.ts`) has
+// read `object_published` since B1 and nothing ever supplied it, so a finished,
+// published article offered Publish and a disabled Open object — the row model
+// was right and its inputs never arrived.
 
 export const requestIndexRowSchema = z.object({
   request_id: z.string(),
@@ -162,6 +189,24 @@ export const requestIndexRowSchema = z.object({
   /** Most recently attached chat. */
   chat_id: z.string().optional(),
   object_id: z.string().optional(),
+  /**
+   * C1 — whether the run's publish tail actually committed a publish for that
+   * object. `.default(false)` and NOT a `REQUEST_INDEX_SCHEMA_VERSION` bump:
+   * the field is required in the ROW (a boolean the surface can read without
+   * a tri-state dance) but optional on the WIRE, so an index blob written
+   * before this change still parses.
+   *
+   * That matters more than it looks. `loadIndex` answers `undefined` for an
+   * unparseable blob, and `commitRequest` treats `undefined` as "no index
+   * yet" and writes a fresh one holding only the row it just projected — so a
+   * hard schema break would truncate the index to one row on the first write
+   * after deploy, and nothing would ever rebuild it. Backward-compatible
+   * parsing is what keeps the migration a no-op; the row is re-projected with
+   * the real value by the next write or rebuild either way.
+   */
+  object_published: z.boolean().default(false),
+  /** Where the article is live, once the release confirmed it. Absent = no confirmed live URL. */
+  live_path: z.string().optional(),
   archived: z.boolean(),
 });
 export type RequestIndexRow = z.infer<typeof requestIndexRowSchema>;
@@ -194,6 +239,11 @@ export const projectIndexRow = (doc: EditorialRequest): RequestIndexRow => {
     ...(doc.workflow?.current_node !== undefined ? { current_node: doc.workflow.current_node } : {}),
     ...(lastChat ? { chat_id: lastChat.chat_id } : {}),
     ...(doc.object ? { object_id: doc.object.object_id } : {}),
+    // C1: publication is a fact about an OBJECT, so it can only be true where
+    // an object was recorded and the run's receipts proved a publish. No
+    // object, or no evidence, is `false` — never "probably" (guardrail 5).
+    object_published: doc.object?.published === true,
+    ...(doc.object?.live_path ? { live_path: doc.object.live_path } : {}),
     archived: doc.status === 'archived',
   };
 };
@@ -546,6 +596,16 @@ export const setStatus = async (
  * `object_id` was in the schema and the row projection from day one, and
  * nothing ever set it. Idempotent, and never overwrites an object already
  * recorded: the first one a run produced is the one the request is about.
+ *
+ * FIX 6 — refuses a TERMINAL doc, which is the exact mirror of
+ * `reconcileObject` below (which refuses everything that is NOT terminal).
+ * That pair of guards is what actually makes the "two doors, disjoint
+ * windows" claim true. It was only ever asserted in a comment: this function
+ * had no guard at all, and `sweepRequest` called it AFTER the write that made
+ * the doc `done` — so on that one pass both writers were live on the same doc,
+ * with no compare-and-set under them, and a stale read here could erase a
+ * publication the other had just recorded. The sweeper now records the object
+ * BEFORE the status transition, while the doc is still its own.
  */
 export const recordObject = async (
   store: EditorialRequestStore,
@@ -555,10 +615,95 @@ export const recordObject = async (
 ): Promise<EditorialRequest | undefined> => {
   const doc = await loadRequest(store, requestId);
   if (!doc) return undefined;
+  if ((TERMINAL_REQUEST_STATUSES as readonly RequestStatus[]).includes(doc.status)) return doc;
   if (doc.object) return doc;
   doc.object = object;
   doc.updated_at = at;
   appendHistory(doc, at, doc.status, `produced ${object.object_id}`);
+  return commitRequest(store, doc, at);
+};
+
+/**
+ * C2 — attach the object a TERMINAL run produced to a doc that never recorded
+ * it. WRITER: the request registry's read path (`admin-requests.ts`), and only
+ * for a request the sweeper has already finished with.
+ *
+ * Why a second writer for the same field as `recordObject`: that one refuses a
+ * TERMINAL doc and this one refuses everything else, so the two windows cannot
+ * overlap and §3.4's one-writer rule holds even though the field has two
+ * doors. FIX 6 made that mutual — `recordObject` carries the mirror guard now,
+ * and the sweeper does its object writes before the status transition rather
+ * than after it. Before, the claim was a comment the code did not hold.
+ *
+ * It is a RECONCILIATION, not a transition. `updated_at` does not move and no
+ * history line is appended: the object has existed since the run made it, so
+ * stamping "produced X" with today's date would be a lie about when, and
+ * bumping `updated_at` would jump a months-old row to the top of the inbox the
+ * first time a poll noticed. Idempotent — a doc that already has an object
+ * writes nothing.
+ */
+export const reconcileObject = async (
+  store: EditorialRequestStore,
+  requestId: string,
+  object: { object_type: string; object_id: string; published?: boolean },
+  at: string = nowIso()
+): Promise<EditorialRequest | undefined> => {
+  const doc = await loadRequest(store, requestId);
+  if (!doc) return undefined;
+  if (!(TERMINAL_REQUEST_STATUSES as readonly RequestStatus[]).includes(doc.status)) return doc;
+  const existing = doc.object;
+  // C2b: C1's sweeper-derived evidence is the PRIMARY source and always wins.
+  // A doc whose `published` the sweeper already answered is closed to this
+  // path — the object record is a fallback for docs that hold no evidence at
+  // all (every run that finished before C1 shipped), never a second opinion
+  // that can contradict the run's own receipts.
+  if (existing?.published !== undefined) return doc;
+  const next: NonNullable<EditorialRequest['object']> = {
+    object_type: existing?.object_type ?? object.object_type,
+    object_id: existing?.object_id ?? object.object_id,
+    ...(object.published ? { published: true } : {}),
+    // FIX 1: never a `live_path`. This path's evidence is an object record,
+    // which can prove a publish and NEVER a go-live (`object-publish.ts`
+    // commits the export with `[skip netlify]`), and `live_path` means
+    // release-confirmed — see the field's own comment on the schema above.
+    // The row reads published with View live disabled and `NO_LIVE_PATH`.
+  };
+  // Idempotent: a record that proves nothing new leaves the doc, and the
+  // index, exactly as they were.
+  if (existing && JSON.stringify(existing) === JSON.stringify(next)) return doc;
+  doc.object = next;
+  return commitRequest(store, doc, at);
+};
+
+/**
+ * C1 — record that the run PUBLISHED the object it produced, and where the
+ * article is live. WRITER: the sweeper, from `publication-evidence.ts`'s
+ * reading of the publish/release executors' own receipts.
+ *
+ * FIX 6: like `recordObject`, this is a SWEEPER write and runs before the
+ * status transition, so it never lands on a terminal doc that the read path's
+ * `reconcileObject` could be writing at the same moment.
+ *
+ * Publication is a fact about an object, so a doc with no `object` is a no-op:
+ * this never conjures the object the claim would be about. `live_path` is only
+ * ever handed in for a CONFIRMED go-live (see the field's comment on the
+ * schema), and a second pass with nothing new to say writes nothing — the
+ * sweeper calls this on every pass once a run's publish tail has settled.
+ */
+export const recordPublication = async (
+  store: EditorialRequestStore,
+  requestId: string,
+  publication: { live_path?: string },
+  at: string = nowIso()
+): Promise<EditorialRequest | undefined> => {
+  const doc = await loadRequest(store, requestId);
+  if (!doc) return undefined;
+  if (!doc.object) return doc;
+  const nextPath = publication.live_path ?? doc.object.live_path;
+  if (doc.object.published === true && nextPath === doc.object.live_path) return doc;
+  doc.object = { ...doc.object, published: true, ...(nextPath !== undefined ? { live_path: nextPath } : {}) };
+  doc.updated_at = at;
+  appendHistory(doc, at, doc.status, nextPath ? `published — live at ${nextPath}` : 'published');
   return commitRequest(store, doc, at);
 };
 

@@ -6,6 +6,7 @@ import { IconChevronLeft, IconChevronRight, IconSparkles } from './icons';
 import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { cn } from './utils';
+import { objectIdFromEvents } from '@core/lib/admin/chat-liveness';
 
 export function AgentRail({
   chat,
@@ -73,6 +74,12 @@ export function AgentRail({
    * status right now", not "a request is bound" (FIX 5).
    */
   const [runCardStatesStatus, setRunCardStatesStatus] = useState(false);
+  /**
+   * FIX 2 — the object this run has produced. Not a hook, so it is safe here;
+   * held above the collapsed-rail early return with everything else all the
+   * same. See the `objectId` prop below for why the events, not the binding.
+   */
+  const railObjectId = chat.request?.object_id ?? objectIdFromEvents(chat.events);
 
   const collapsedTone =
     chat.status === 'awaiting_approval' || chat.status === 'awaiting_candidate'
@@ -164,6 +171,12 @@ export function AgentRail({
             {...(chat.status ? { chatStatus: chat.status } : {})}
             onStatesStatusChange={setRunCardStatesStatus}
             onRetry={() => void retryRun(chat.request!.request_id)}
+            // E3b/FIX 2: the binding's `object_id` when the client happens to
+            // hold one, else the newest `request_progress` event that names it
+            // — the binding is sent on the first poll only and latched, and
+            // the object is recorded long after that, so mid-run the events
+            // are the only place this fact arrives. Absent = not recorded yet.
+            {...(railObjectId ? { objectId: railObjectId } : {})}
           />
         </div>
       ) : null}

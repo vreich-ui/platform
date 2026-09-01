@@ -1,7 +1,7 @@
 import { classifyToolResult } from './activity-severity.js';
 import type { ChatEventView } from './chat-client.js';
 import { cmsAgentErrorCopy, type CmsAgentErrorCopy } from './cms-agent-error-copy.js';
-import { requestSeverityLevel, requestStatusLabel, type RequestStatusName } from './request-logic.js';
+import { NODE_LABELS, nodeLabel, requestSeverityLevel, requestStatusLabel, type RequestStatusName } from './request-logic.js';
 import type { AdminSeverity } from './severity.js';
 
 export type ChatTimelineItem = { kind: 'event'; event: ChatEventView } | { kind: 'activity'; events: ChatEventView[] };
@@ -86,6 +86,41 @@ export function createdObjectsFromEvents(events: readonly ChatEventView[], runId
     }));
 }
 
+export interface PublishedObjectRef {
+  id: string;
+  type?: string;
+}
+
+/**
+ * E2b: the object THIS run published, read off the `published_object_id`/
+ * `published_object_type` stamp a successful publish leaves on its own
+ * `tool_result` event (`publishedObjectRef`, `server/lib/agent/loop.ts`).
+ *
+ * Separate keys from `createdObjectsFromEvents`' `object_id` on purpose —
+ * publishing is not creation and the receipt says different words for each,
+ * so neither reader can ever pick up the other's events.
+ *
+ * A run that published more than once keeps the LAST one: the receipt shows
+ * a single "Published" clause, and the newest publish is the state the
+ * object is actually in. Undefined means exactly what it says — nothing in
+ * this run proved a publish — never an optimistic "probably published".
+ */
+export function publishedObjectFromEvents(
+  events: readonly ChatEventView[],
+  runId?: string
+): PublishedObjectRef | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.type !== 'tool_result' || event.detail?.is_error) continue;
+    if (runId !== undefined && event.detail?.run_id !== runId) continue;
+    const id = event.detail?.published_object_id;
+    if (typeof id !== 'string' || !id) continue;
+    const type = event.detail?.published_object_type;
+    return { id, ...(typeof type === 'string' && type ? { type } : {}) };
+  }
+  return undefined;
+}
+
 export const TOOL_LABELS: Record<string, string> = {
   get_object: 'Read an object',
   get_contract: 'Check what an object allows',
@@ -117,6 +152,30 @@ export function toolLabel(event: ChatEventView): string {
   const tool = String(event.detail?.tool ?? 'tool');
   return String(event.detail?.summary ?? toolLabelForName(tool));
 }
+
+/**
+ * E1: whether `NODE_LABELS` (`request-logic.ts`, the ONE source of these
+ * gerunds) actually recognises a node id. `nodeLabel()` itself falls back to
+ * the raw node id for an unknown one — right for the request list, which
+ * would rather show something than nothing (its own doc comment says so) —
+ * but that fallback is exactly the "invented" state guardrail 5 rules out
+ * for a narrated sentence: a raw id like `capture_score` is not a step name
+ * we can prove. So this checks membership first and only calls through to
+ * `nodeLabel` once the label is real; an unknown/absent node gets
+ * `undefined`, and callers fall back to their own existing wording.
+ *
+ * `NODE_LABELS` stores these lower-case for mid-sentence embedding (e.g.
+ * `progressPhrase`'s "14 / 23 · drafting"); here the label OPENS a sentence
+ * ("Drafting — step 14 of 23", the chip's own standalone label), so it gets
+ * the same sentence-case lift `server/lib/requests/activity.ts`'s
+ * `runningLabel` already does for the identical reason — not a second
+ * gerund list, just capitalising the one that exists.
+ */
+export const knownNodeLabel = (node: string | undefined): string | undefined => {
+  if (node === undefined || !(node in NODE_LABELS)) return undefined;
+  const label = nodeLabel(node)!;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
 
 // ─── request_progress (W19) ────────────────────────────────────────────────
 
@@ -151,6 +210,17 @@ export interface RequestProgressCopy {
   summary?: string;
   /** Only for a `failed` transition whose first blocker parses as CMS-Agent's structured detail. */
   failure?: CmsAgentErrorCopy;
+  /**
+   * E1: "{NodeLabel} — step {done} of {total}", replacing the generic
+   * `label`/`progress` pair while the run is actively moving (`running`)
+   * and the sweeper named a node (`detail.node`, `sweep.ts`) that
+   * `NODE_LABELS` recognises. `undefined` whenever the node is absent or
+   * unrecognised, or the transition isn't `running` — a finished/failed
+   * transition keeps stating its status word, not the step it happened to
+   * be on — so the renderer falls back to today's `label`/`progress`
+   * ("Working 12/23") rather than ever showing a raw node id (guardrail 5).
+   */
+  stepLine?: string;
 }
 
 export function requestProgressCopy(detail: Record<string, unknown> | undefined, isOwner: boolean): RequestProgressCopy {
@@ -178,6 +248,15 @@ export function requestProgressCopy(detail: Record<string, unknown> | undefined,
           { isOwner }
         )
       : undefined;
+  // E1: narrate the CURRENT STEP, not just its position — but only while
+  // there is a current step to narrate. `sweep.ts` stamps `detail.node` on
+  // every transition, but "drafting — step 14 of 23" only makes sense for
+  // the live `running` line; a `failed`/`done` transition already states
+  // its own outcome word above (`label`) and restating the node it happened
+  // to stop on there would blur "what happened" with "where it was".
+  const node = typeof detail?.node === 'string' ? detail.node : undefined;
+  const stepLabel = status === 'running' ? knownNodeLabel(node) : undefined;
+  const stepLine = stepLabel && done !== undefined && total !== undefined ? `${stepLabel} — step ${done} of ${total}` : undefined;
   return {
     status,
     level: requestSeverityLevel(status),
@@ -185,5 +264,6 @@ export function requestProgressCopy(detail: Record<string, unknown> | undefined,
     ...(done !== undefined && total !== undefined ? { progress: `${done}/${total}` } : {}),
     ...(summary ? { summary } : {}),
     ...(failure ? { failure } : {}),
+    ...(stepLine ? { stepLine } : {}),
   };
 }

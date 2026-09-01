@@ -30,13 +30,20 @@
  * the chevron — lives in `@core/lib/admin/run-card-view`'s `runCardView`;
  * this component only consumes it. The failure explanation that used to sit
  * in the body permanently now lives in a hover `Popover` on that button.
+ *
+ * E3: the collapsed row also carries a right-aligned "Open draft" link as
+ * soon as an object id is known (`runCardView`'s `openDraftHref`) — a
+ * sibling of the primary-action slot, never displacing it, since `objectId`
+ * is host-supplied (this component's own polled `ActivityView` carries no
+ * object identity) exactly the way `chatStatus` already is.
  */
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { Button, Skeleton } from './primitives';
 import { ActionRow } from './approval';
 import { Popover, useToast } from './overlays';
 import { decide, type DecisionAction } from '@core/lib/admin/decisions';
+import { isAuthExpired, isAuthExpiredError, subscribeAuthExpiry } from '@core/lib/admin/auth-expiry';
 import { SeverityIcon } from './severity';
 import { IconChevronDown, IconChevronRight, IconInfo } from './icons';
 import { cn } from './utils';
@@ -54,11 +61,23 @@ import {
   type ActivityView,
 } from '@core/lib/admin/requests-client';
 import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
-import { relativeAge, retryReceipt } from '@core/lib/admin/request-logic';
+import { decisionDisabledReason, relativeAge, retryReceipt } from '@core/lib/admin/request-logic';
 import { cmsAgentErrorCopy, hasOperatorAction } from '@core/lib/admin/cms-agent-error-copy';
 import { budgetRaiseButtons } from '@core/lib/admin/budget-raise';
-import { liveArticleUrl, policyRecordLine, publicationCopy } from '@core/lib/admin/publication-card';
-import { activityTargetKey, runCardStatus, runCardView, type RunCardStatus } from '@core/lib/admin/run-card-view';
+import {
+  liveArticleUrl,
+  liveUrlIsLinkable,
+  policyRecordLine,
+  publicationCopy,
+  UNCONFIRMED_LIVE_URL_REASON,
+} from '@core/lib/admin/publication-card';
+import {
+  activityTargetKey,
+  resolveRecoveryNodeId,
+  runCardStatus,
+  runCardView,
+  type RunCardStatus,
+} from '@core/lib/admin/run-card-view';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -113,6 +132,15 @@ export function useRetryRequest(onRetried?: () => void): (requestId: string) => 
 const hidden = (): boolean => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 const UNREACHABLE_POLL_MS = 20_000;
+
+/**
+ * C3b — the one fact this card needs about the session: is it still ours?
+ * Same module-scope store `RequestsWorkspace.tsx` reads (`lib/admin/auth-expiry.ts`);
+ * a card mounted in the chat rail or the hub has no banner of its own, but it
+ * must still stop knocking on a dead session rather than retrying every
+ * `UNREACHABLE_POLL_MS` against a 401 it already knows is coming.
+ */
+const useAuthExpired = (): boolean => useSyncExternalStore(subscribeAuthExpiry, isAuthExpired, () => false);
 
 /**
  * T2.3/T3.1 (T0.3 Table B rows B1/B2/B10) — colour and glyph now come from D4
@@ -517,6 +545,14 @@ export interface RequestActivityProps {
    * thread silenced on its behalf would leave the editor with nothing.
    */
   onStatesStatusChange?: (statesStatus: boolean) => void;
+  /**
+   * E3: the object this run is (or was) working on, when the host already
+   * knows it (e.g. the request row's own `object_id`, C1). `ActivityView`
+   * itself carries none — CMS-Agent's run/cost reads never echo one back —
+   * so, like `chatStatus` above, this is host-supplied rather than derived
+   * from the poll. Absent means "not known", never "no object exists".
+   */
+  objectId?: string;
 }
 
 export function RequestActivity({
@@ -528,6 +564,7 @@ export function RequestActivity({
   isOwner = false,
   chatStatus,
   onStatesStatusChange,
+  objectId,
 }: RequestActivityProps) {
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
   const [activity, setActivity] = useState<ActivityView | null>(null);
@@ -542,6 +579,9 @@ export function RequestActivity({
   const [error, setError] = useState<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // C3b: read here rather than threaded as a prop — same reasoning as
+  // `RequestsWorkspace`'s own `useAuthExpired()` call, and the same store.
+  const signedOut = useAuthExpired();
   const panelId = useId();
   const headerId = useId();
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -683,7 +723,14 @@ export function RequestActivity({
         setError(loadError instanceof Error ? loadError.message : 'Could not read the run.');
         setLoaded(true);
         if (timerRef.current) clearTimeout(timerRef.current);
-        if (!hidden()) timerRef.current = setTimeout(() => void load(generation), UNREACHABLE_POLL_MS);
+        // C3b: a dead session is not an unreachable server — retrying every
+        // `UNREACHABLE_POLL_MS` against a 401 this card already knows is
+        // coming just repeats the same failure. The `cms:login` effect below
+        // is what restarts this chain; scheduling nothing here is what stops
+        // it from restarting itself in the meantime.
+        if (!hidden() && !isAuthExpiredError(loadError)) {
+          timerRef.current = setTimeout(() => void load(generation), UNREACHABLE_POLL_MS);
+        }
       }
     },
     [requestId, runId]
@@ -816,6 +863,22 @@ export function RequestActivity({
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [load, hasTarget]);
 
+  // C3b: the session came back — reusing C3's own `cms:login` signal
+  // (`auth-expiry.ts`) rather than a second mechanism. Only the TRUE→false
+  // edge is worth acting on: firing on every render where `signedOut` is
+  // already false would re-`load` a chain the mount effect above just
+  // started. A chain that settled normally (`stoppedRef`) stays retired,
+  // same as the visibility handler.
+  const wasSignedOutRef = useRef(signedOut);
+  useEffect(() => {
+    const wasSignedOut = wasSignedOutRef.current;
+    wasSignedOutRef.current = signedOut;
+    if (!wasSignedOut || signedOut) return;
+    if (stoppedRef.current || !hasTarget) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    void load(generationRef.current);
+  }, [signedOut, hasTarget, load]);
+
   /**
    * FIX 5 — tell the host whether this card is stating a run status right
    * now. Mirrors the three render branches below exactly: no target → null,
@@ -884,39 +947,7 @@ export function RequestActivity({
   const live = activity.status === 'running' || activity.status === 'queued';
   const recovery = activity.recovery;
   const retryNodeId = recovery?.node_id;
-  /**
-   * B1 (T0.3): a `failure` reads as D4 `error` (retry affordance exists)
-   * rather than `blocked` (none) only where BOTH halves of that affordance
-   * are actually present on this card — the node `recovery` names, AND a
-   * host that passed `onRetry` at all (an embed that never wires `onRetry`
-   * offers no "Retry this step" button no matter what `recovery` says, so
-   * every failure on it must read as the harder `blocked`). Gated once here,
-   * then threaded down as `retryNodeId` — per node, not as one card-wide
-   * boolean — so only the node the affordance actually targets gets the
-   * softer `error` icon; every other failed node on the same card, and every
-   * warning/tool-call under it, stays `blocked`.
-   */
-  // Task B, item 4: a classified provider error or CMS-Agent's own budget
-  // guard already NAMES the next step (top up credit, wait, raise the
-  // budget) — offering "Retry this step" next to it invites clicking the one
-  // action that will only fail the same way again. Read as no retry
-  // affordance at all: same B1/B2 split as the `onRetry`-absent case above.
-  const effectiveRetryNodeId = onRetry && !hasOperatorAction({ operatorAction: recovery?.operator_action }) ? retryNodeId : undefined;
-  // D4/T2.3: the whole-run level of the same B1/B2 split — a retry exists
-  // SOMEWHERE on this run iff `effectiveRetryNodeId` names a node for it.
-  // `notice` keeps its pre-existing neutral/accent bar rather than D4's
-  // `info` blue — the same named exception `SeverityGlyph` makes, kept in
-  // sync here so the header glyph and the bar underneath it never disagree.
-  const progressFill =
-    activity.severity === 'notice'
-      ? 'bg-[var(--adm-accent)]'
-      : BAR_FILL[severityFromActivity(activity.severity, { canRetry: Boolean(effectiveRetryNodeId) })];
   const labelFor = (nodeId: string) => activity.nodes.find((node) => node.id === nodeId)?.label;
-  // Bug B: the recovery node's own structured failure — `code`/`message`
-  // decide whether this is a `budget_exceeded` card at all, `details`
-  // (or, failing that, `message`'s own dollar figures) decide the number.
-  const recoveryNodeFailure = recovery?.node_id ? activity.nodes.find((node) => node.id === recovery.node_id)?.failure : undefined;
-  const raiseButtons = budgetRaiseButtons(recoveryNodeFailure, isOwner);
   const spend = activity.cost;
   const spendLabel = spend?.most_expensive_node ? labelFor(spend.most_expensive_node) : undefined;
   const placeholder = placeholderNotice(activity);
@@ -928,6 +959,8 @@ export function RequestActivity({
     activity.publication?.article_path,
     typeof window !== 'undefined' ? window.location.origin : undefined
   );
+  // FIX 5: shown either way; clickable only where the release confirmed it.
+  const liveUrlLinkable = activity.publication ? liveUrlIsLinkable(activity.publication) : false;
   const policyRecords = activity.policy_records ?? [];
   /** The poll affordance for an unconfirmed release: one fresh read, now. */
   const recheck = () => {
@@ -949,16 +982,56 @@ export function RequestActivity({
     approvalCount: activity.approvals.length,
     ...(chatStatus ? { chatStatus } : {}),
   });
+  // C4: the whole primary-action decision — including the node-id-match
+  // fallback and the operator-action check — now lives in `runCardView`;
+  // this component passes facts (recovery's own fields, the node list, the
+  // host's rights) rather than pre-deciding `isBudgetExceeded`/
+  // `hasOperatorAction` itself, which is exactly how the live bug got in:
+  // this component's OWN `nodes.find(n => n.id === recovery.node_id)` had no
+  // fallback for a `node_id` that named nothing in `activity.nodes`.
   const view = runCardView({
     status: viewStatus,
     expanded,
-    hasRetryTarget: Boolean(retryNodeId),
-    hasOperatorAction: hasOperatorAction({ operatorAction: recovery?.operator_action }),
-    isBudgetExceeded: recoveryNodeFailure?.code === 'budget_exceeded',
+    recoveryNodeId: recovery?.node_id,
+    recoveryOperatorAction: recovery?.operator_action,
+    nodes: activity.nodes,
     hasRetryHandler: Boolean(onRetry),
     isOwner,
     offerRecheck: publication?.offerRecheck ?? false,
+    ...(objectId ? { objectId } : {}),
   });
+  // C4: the SAME node-id resolution `runCardView` used internally (falling
+  // back to whichever node actually failed when `recovery.node_id` names
+  // none of `activity.nodes` — the live-confirmed bug) — reused here so the
+  // raise-buttons' amounts, and their click target, name the node the
+  // primary-action decision actually means, not the possibly-stale raw id.
+  const resolvedRecoveryNodeId = resolveRecoveryNodeId(recovery?.node_id, activity.nodes);
+  const recoveryNodeFailure = resolvedRecoveryNodeId
+    ? activity.nodes.find((node) => node.id === resolvedRecoveryNodeId)?.failure
+    : undefined;
+  const raiseButtons = budgetRaiseButtons(recoveryNodeFailure, isOwner);
+  // The run-level sentence's own instruction, or (C4 item 2) the resolved
+  // node's own, when the run-level one is silent — either is a reason to
+  // show the "what to do next" text instead of a retry affordance.
+  const operatorActionText = recovery?.operator_action ?? recoveryNodeFailure?.operatorAction;
+  /**
+   * B1 (T0.3): a `failure` reads as D4 `error` (retry affordance exists)
+   * rather than `blocked` (none) only where the primary action `runCardView`
+   * actually chose is Retry — not merely "wired and unsuppressed", which is
+   * what the old inline check computed and could disagree with `view`
+   * about (e.g. a `budget_exceeded` failure `runCardView` routes to
+   * `budget-raise`/`owner_required`, never `retry`, regardless of
+   * `operator_action`).
+   */
+  const canRetry = view.primaryAction.kind === 'retry';
+  const effectiveRetryNodeId = canRetry ? retryNodeId : undefined;
+  // D4/T2.3: the whole-run level of the same B1/B2 split — a retry exists
+  // SOMEWHERE on this run iff `effectiveRetryNodeId` names a node for it.
+  // `notice` keeps its pre-existing neutral/accent bar rather than D4's
+  // `info` blue — the same named exception `SeverityGlyph` makes, kept in
+  // sync here so the header glyph and the bar underneath it never disagree.
+  const progressFill =
+    activity.severity === 'notice' ? 'bg-[var(--adm-accent)]' : BAR_FILL[severityFromActivity(activity.severity, { canRetry })];
   /** The recovery prose (Popover content, hover mode — text only): what failed, and what a retry keeps. */
   const recoveryHoverText = recovery ? `${recovery.sentence} ${recoveryReassurance(recovery.reusable_stages)}` : '';
 
@@ -1013,8 +1086,14 @@ export function RequestActivity({
            * there is nothing to hover when there is no button, so a run with
            * no primary action shows no prose at all (see `recoveryHoverText`
            * above); the headline already says what stopped.
+           *
+           * C4/D3: a non-Owner facing `budget_exceeded` is the one case with
+           * no button that STILL renders something — a disabled "Raise the
+           * budget" with the reason, since Retry here is guaranteed to fail
+           * the same way and hiding the control entirely would say nothing
+           * happened rather than naming who could fix it.
            */}
-          {view.primaryAction.kind === 'budget-raise' && raiseButtons.length > 0 && recovery?.node_id ? (
+          {view.primaryAction.kind === 'budget-raise' && raiseButtons.length > 0 && resolvedRecoveryNodeId ? (
             <Popover
               mode="hover"
               content={recoveryHoverText}
@@ -1026,7 +1105,7 @@ export function RequestActivity({
                       size="sm"
                       variant="secondary"
                       disabled={Boolean(raisingBudget)}
-                      onClick={() => raiseBudget(button.scope, recovery.node_id!, button.budgetUsd)}
+                      onClick={() => raiseBudget(button.scope, resolvedRecoveryNodeId, button.budgetUsd)}
                     >
                       {button.label}
                     </Button>
@@ -1044,6 +1123,36 @@ export function RequestActivity({
                 </Button>
               )}
             />
+          ) : view.primaryAction.kind === 'none' && view.primaryAction.reason === 'owner_required' ? (
+            // C4/D3: this viewer hit a budget ceiling but cannot raise it —
+            // Retry would only fail the same way again, so the control stays
+            // visible and disabled with the honest reason rather than
+            // disappearing (D3) or offering the one button guaranteed to fail.
+            <Popover
+              mode="hover"
+              content="Only the owner can raise the run budget"
+              trigger={(a11y) => (
+                <Button size="sm" variant="secondary" className="shrink-0" disabled {...a11y}>
+                  Raise the budget
+                </Button>
+              )}
+            />
+          ) : null}
+
+          {/*
+           * E3: the pinned card's own jump-to-artifact link — a SIBLING of
+           * the primary action, not a replacement for it, so a run that is
+           * BOTH failed-with-a-recovery-button AND already has a draft shows
+           * both; the collapsed row stays one line regardless (`view` never
+           * grows a second row for this).
+           */}
+          {view.openDraftHref ? (
+            <a
+              href={view.openDraftHref}
+              className="adm-focusable shrink-0 whitespace-nowrap text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] underline decoration-dotted underline-offset-2 hover:text-[var(--adm-text)]"
+            >
+              Open draft
+            </a>
           ) : null}
         </div>
 
@@ -1098,23 +1207,58 @@ export function RequestActivity({
             <SeverityIcon level={publication.severity} size={14} title="" />
             <span className="min-w-0 truncate">
               {publication.title}
-              {view.publicationLines === 'one' && liveUrl ? (
-                <span className="font-normal text-[var(--adm-text)]"> · {liveUrl}</span>
+              {view.publicationLines === 'one' && liveUrl && liveUrlLinkable ? (
+                <>
+                  {' · '}
+                  {/* D1: was a plain `<span>` — unreadable as text, not a link. Same
+                      token usage and styling as the "full" branch's own anchor below.
+                      FIX 5: gated on `liveUrlLinkable` explicitly rather than on
+                      `publicationLines` happening to imply it. */}
+                  <a
+                    href={liveUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="adm-focusable font-normal text-[var(--adm-text)] underline decoration-[var(--adm-border-strong)] underline-offset-2 hover:decoration-[var(--adm-text)]"
+                  >
+                    {liveUrl}
+                  </a>
+                </>
               ) : null}
             </span>
           </p>
           {view.publicationLines === 'full' ? (
             <>
+              {/*
+               * FIX 5: this branch is reached only while the release has NOT
+               * confirmed go-live (`offerRecheck`), and `object-publish.ts`
+               * commits the export with `[skip netlify]` — so this URL 404s
+               * until someone releases. The address is still worth showing (it
+               * is where the article WILL be, and it is what "Check again" is
+               * about), but as text with the reason, never as a link. Same
+               * rule the inbox row states as `NO_LIVE_PATH`.
+               */}
               {liveUrl ? (
                 <p className="mt-1 text-[length:var(--adm-text-sm)]">
-                  <a
-                    href={liveUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="adm-focusable break-all text-[var(--adm-text)] underline decoration-[var(--adm-border-strong)] underline-offset-2 hover:decoration-[var(--adm-text)]"
-                  >
-                    {liveUrl}
-                  </a>
+                  {liveUrlLinkable ? (
+                    <a
+                      href={liveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="adm-focusable break-all text-[var(--adm-text)] underline decoration-[var(--adm-border-strong)] underline-offset-2 hover:decoration-[var(--adm-text)]"
+                    >
+                      {liveUrl}
+                    </a>
+                  ) : (
+                    <Popover
+                      mode="hover"
+                      content={UNCONFIRMED_LIVE_URL_REASON}
+                      trigger={(a11y) => (
+                        <span className="break-all text-[var(--adm-text-muted)]" {...a11y}>
+                          {liveUrl}
+                        </span>
+                      )}
+                    />
+                  )}
                 </p>
               ) : null}
               {publication.detail ? (
@@ -1182,7 +1326,13 @@ export function RequestActivity({
                reason — `decisions.ts`'s `reasonDroppedNote`. Reject decides on
                the click rather than prompting for words it would discard. */
             rejectReason="none"
-            disabledReason={canApprove ? undefined : 'You do not have publish-decision authority for this run.'}
+            // C3b: an expired session outranks the rights answer — see
+            // `decisionDisabledReason`'s own comment.
+            disabledReason={decisionDisabledReason(
+              signedOut,
+              canApprove,
+              'You do not have publish-decision authority for this run.'
+            )}
           />
           <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
             Rejecting records the operator veto and blocks every publish-risk node on this run until the decision is
@@ -1200,13 +1350,18 @@ export function RequestActivity({
        * an instruction the editor must act on outside this UI; the "what
        * failed / what survived" explanation the prose gives is exactly what
        * moved to the primary action's hover `Popover` above.
+       *
+       * C4 item 2: falls back to the resolved node's own `operator_action`
+       * when the run-level sentence carried none — the same OR this card's
+       * Retry-suppression check now makes, so a node-level-only directive is
+       * shown rather than silently dropped.
        */}
-      {view.showRecovery && recovery && hasOperatorAction({ operatorAction: recovery.operator_action }) ? (
+      {view.showRecovery && recovery && hasOperatorAction({ operatorAction: operatorActionText }) ? (
         <section
           aria-label="What to do next"
           className="mx-3 mb-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2"
         >
-          <p className="text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">{recovery.operator_action}</p>
+          <p className="text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text)]">{operatorActionText}</p>
         </section>
       ) : null}
 

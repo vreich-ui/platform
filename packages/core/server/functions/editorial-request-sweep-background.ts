@@ -72,6 +72,10 @@ const bridge = (): SweepBridge | undefined =>
         },
         advance: (runId, budgetMs) =>
           cmsAgentClient.callTool<Record<string, unknown>>('workflow_run_all', { runId, budgetMs }),
+        // C1: `node_get_latest_output`, for the publish/release receipts the
+        // compact run view does not carry — see `publication-outputs.ts` for
+        // why those two reads beat a `detail: "full"` run record.
+        callTool: (name, args) => cmsAgentClient.callTool(name, args),
       }
     : undefined;
 

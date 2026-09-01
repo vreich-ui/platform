@@ -435,6 +435,8 @@ export type RowActionId =
   | 'publish'
   | 'open_chat'
   | 'open_object'
+  /** C1: the published article on the live site, once the release confirmed it. */
+  | 'view_live'
   | 'mute'
   | 'cancel'
   | 'archive'
@@ -481,8 +483,22 @@ export interface RowActionRowLike {
    * primary becomes "Raise budget" instead of a Retry that cannot work.
    */
   failure_code?: string;
-  /** Whether the attached object is already live. Unknown → treated as not published, which is what offers Publish. */
+  /**
+   * Whether the attached object is already published. Unknown → treated as not
+   * published, which is what offers Publish.
+   *
+   * C1: the index row supplies this now (`object_published`, projected from
+   * the run's own publish receipts). It was a dead input from B1 until then —
+   * nothing in the codebase set it, so a published article always took the
+   * unpublished branch.
+   */
   object_published?: boolean;
+  /**
+   * Where the article is live. Present only for a CONFIRMED go-live, so its
+   * absence on a published row is a real fact (the release did not confirm),
+   * not a missing lookup.
+   */
+  live_path?: string;
   /** This person's own mute state for the row — the label, not a right. */
   muted?: boolean;
   /** Whether the caller started this run. An `editor` may cancel their own runs; a publisher may cancel anyone's. */
@@ -556,6 +572,37 @@ const askReason = (rights: RowActionRights, required: RowActionRight): string =>
 
 const NO_CHAT = 'No chat is attached to this request yet.';
 const NO_OBJECT = 'No object is attached to this request yet.';
+/**
+ * C1 — the honest reason on a published row with no live URL. The publish
+ * committed; the release never confirmed production serves it, so there is no
+ * address to send anyone to. Disabled with this beats a link into a 404.
+ */
+export const NO_LIVE_PATH = 'Published, but the release has not confirmed a live URL yet.';
+
+/**
+ * D2/D3 (FIX 7) — the object workspace's route. THE one implementation: the
+ * row's `open_object` handler, the request detail pane's object chip, the run
+ * card's `openDraftHref` (`run-card-view.ts`), the chat receipt's clauses
+ * (`chat-liveness.ts`) and `AgentsHub`'s quick-open bar all call this rather
+ * than each re-typing the query string. Four hand-typed copies is how the
+ * fifth one went wrong — see `createdObjectLabel`'s note in `chat-liveness.ts`.
+ *
+ * `objectType` is OMITTED when it is not known, on purpose.
+ * `ObjectWorkspace.tsx` trusts `?type=` and skips its own id-prefix/inventory
+ * resolution when one is supplied, so a guessed type turns a link that would
+ * have resolved into "<id> was not found". No type means "you work it out",
+ * which is the honest instruction and the one that succeeds.
+ */
+export const objectWorkspaceHref = (objectId: string, objectType?: string): string =>
+  `/admin/content/${encodeURIComponent(objectId)}${objectType ? `?type=${encodeURIComponent(objectType)}` : ''}`;
+
+/**
+ * The same route for a REQUEST's attached object, whose type is `content_item`
+ * by construction — `mintWorkspaceRequestId` mints the request id as a
+ * `content_item` id and `sweep.ts` records it as one, so this type is proven,
+ * not assumed.
+ */
+export const requestObjectHref = (objectId: string): string => objectWorkspaceHref(objectId, 'content_item');
 
 /**
  * B3 — how this client publishes, in the vocabulary a row needs.
@@ -578,6 +625,30 @@ export type PublishPolicy = 'auto' | 'manual' | 'block';
 
 /** D3 hover text on the disabled Publish action when this client may not publish at all. */
 export const PUBLISH_BLOCKED_REASON = 'Publishing is blocked for this client';
+
+/**
+ * C3 — what a disabled action says when the SESSION is what is missing, not a
+ * right. `askReason` below answers "who do I ask"; that answer is only true
+ * for someone the server has actually identified. An expired session collapses
+ * the role list to `[]` too, and "Ask an owner" is then a lie that sends the
+ * operator to a colleague instead of to a sign-in button.
+ */
+export const SIGN_IN_REQUIRED_REASON = 'Sign in required';
+
+/**
+ * C3b — the same precedence `rowActions`' own `make` applies to a row action,
+ * pulled out so the two other Approve/Reject decision controls that check
+ * rights by hand (`RequestActivity`'s run-level ActionRow, `NeedsYouMenu`'s
+ * header panel row) can apply it too, rather than each re-deriving "which
+ * reason wins" inline. An expired session is never a rights problem — see
+ * `SIGN_IN_REQUIRED_REASON` — so it outranks whatever rights-denied text the
+ * caller would otherwise show.
+ */
+export const decisionDisabledReason = (
+  signedOut: boolean,
+  canDecide: boolean,
+  deniedReason: string
+): string | undefined => (signedOut ? SIGN_IN_REQUIRED_REASON : canDecide ? undefined : deniedReason);
 
 /** The approval policy's one boolean, in this surface's three-state vocabulary. */
 export const publishPolicyFromApproval = (requiresApproval: boolean): PublishPolicy =>
@@ -635,6 +706,17 @@ export interface RowActionOptions {
    * the server gate is the authority either way.
    */
   publishPolicy?: PublishPolicy;
+  /**
+   * C3 — this browser's session has expired (`lib/admin/auth-expiry.ts`).
+   *
+   * Stated explicitly rather than inferred from `roles.length === 0`, because
+   * an empty list cannot say WHY it is empty: a signed-in viewer and a
+   * signed-out editor arrive here with the same list and must read
+   * differently. Only the rights branch changes — a reason that is a fact
+   * about the ROW ("No chat is attached to this request yet.") is still true
+   * whoever is looking.
+   */
+  signedOut?: boolean;
 }
 
 /**
@@ -660,7 +742,13 @@ export const rowActions = (
     /** A reason unrelated to rights (missing chat, not your run) — applied only once the right is held. */
     blocked?: string
   ): RowAction => {
-    const reason = rights[rightRequired] ? blocked : askReason(rights, rightRequired);
+    const reason = rights[rightRequired]
+      ? blocked
+      : // C3: with no session there is no rights answer to give — only the
+        // one thing that would produce one.
+        options.signedOut
+        ? SIGN_IN_REQUIRED_REASON
+        : askReason(rights, rightRequired);
     return {
       id,
       label,
@@ -688,6 +776,8 @@ export const rowActions = (
     make('open_chat', 'Open chat', kind, 'read', row.chat_id ? undefined : NO_CHAT);
   const openObject = (kind: RowAction['kind']) =>
     make('open_object', 'Open object', kind, 'read', row.object_id ? undefined : NO_OBJECT);
+  const viewLive = (kind: RowAction['kind']) =>
+    make('view_live', 'View live', kind, 'read', row.live_path ? undefined : NO_LIVE_PATH);
   const mute = (kind: RowAction['kind']) => make('mute', row.muted ? 'Unmute' : 'Mute', kind, 'registry');
   const cancel = (kind: RowAction['kind']) => make('cancel', 'Cancel', kind, 'registry', cancelBlocked);
   /**
@@ -751,9 +841,12 @@ export const rowActions = (
       return [openChat('primary'), openObject('menu'), mute('menu'), cancel('menu')];
     case 'done':
       // The last mile. An unpublished object is the ONE thing still owed, so
-      // it takes the primary slot; once it is live, Open object is all that's left.
+      // it takes the primary slot; once it is published, the two things worth
+      // doing are opening the record and looking at the page — and "View live"
+      // stays visible, disabled with its reason, when the release never
+      // confirmed a URL (D3: the absence is a fact worth showing).
       return row.object_published
-        ? [openObject('primary'), openChat('menu'), archive('menu')]
+        ? [openObject('primary'), viewLive('primary'), openChat('menu'), archive('menu')]
         : [
             make('publish', 'Publish', 'primary', 'publish', publishBlocked),
             openObject('primary'),

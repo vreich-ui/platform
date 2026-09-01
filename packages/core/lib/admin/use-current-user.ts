@@ -84,13 +84,24 @@ export function useCurrentUser(): CurrentUserState & { refresh: () => Promise<Cu
       void refreshCurrentUser();
     };
     const clear = () => invalidateCurrentUser();
-    window.addEventListener('cms:login', refresh);
-    window.addEventListener('cms:user-updated', refresh);
-    window.addEventListener('cms:logout', clear);
+    // C3: `LoginModal.astro` and `HeaderAuthButton.astro` dispatch these on
+    // `document`, and a `CustomEvent` built without `bubbles` never reaches
+    // `window` — so a `window`-only listener meant that signing back in never
+    // re-fetched the roles, and the surface kept showing an empty role list
+    // long after the session was healthy again. Both targets, both cleaned up;
+    // a double delivery would cost at most one extra profile fetch.
+    const targets: EventTarget[] = [window, document];
+    for (const target of targets) {
+      target.addEventListener('cms:login', refresh);
+      target.addEventListener('cms:user-updated', refresh);
+      target.addEventListener('cms:logout', clear);
+    }
     return () => {
-      window.removeEventListener('cms:login', refresh);
-      window.removeEventListener('cms:user-updated', refresh);
-      window.removeEventListener('cms:logout', clear);
+      for (const target of targets) {
+        target.removeEventListener('cms:login', refresh);
+        target.removeEventListener('cms:user-updated', refresh);
+        target.removeEventListener('cms:logout', clear);
+      }
     };
   }, []);
   return { ...state, refresh: useCallback(() => refreshCurrentUser(), []) };

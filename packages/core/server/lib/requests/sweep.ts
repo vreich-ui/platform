@@ -23,6 +23,12 @@ import {
   type RunSnapshot,
 } from './derive-status.js';
 import {
+  derivePublication,
+  publicationOutputsWorthReading,
+  type PublicationNodeSnapshot,
+} from './publication-evidence.js';
+import { fetchPublicationOutputs, type PublicationOutputReader } from './publication-outputs.js';
+import {
   ackMailed,
   alreadyMailed,
   emailModeFor,
@@ -40,6 +46,7 @@ import {
   rebuildIndex,
   recordObject,
   recordProgress,
+  recordPublication,
   repairIndexRow,
   setStatus,
   type EditorialRequest,
@@ -68,6 +75,15 @@ export interface SweepBridge {
     runId: string,
     budgetMs: number
   ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; code: string; message: string }>;
+  /**
+   * C1: the raw tool door, used for exactly one thing here —
+   * `node_get_latest_output` on the two publish/release executors, which is
+   * what turns "a publish was committed" into "production serves it, at this
+   * path" (`publication-outputs.ts`). Optional: a bridge without it degrades
+   * to the compact evidence, which can prove the publish and never the
+   * go-live, so the row gets `object_published` without a live path.
+   */
+  callTool?<T>(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: T }>;
 }
 
 export interface SweepChatSink {
@@ -134,6 +150,19 @@ export const selectSweepable = (
 export const progressDetail = (doc: EditorialRequest, derived: DerivedRequestState) => ({
   request_id: doc.request_id,
   status: derived.status,
+  /**
+   * FIX 2 — the object the run has produced so far, carried on a message that
+   * is ALREADY in flight.
+   *
+   * The chat's request binding (`admin-agent-chat.ts`) is sent once, on the
+   * first poll, and the client latches it — but `object_id` is written later,
+   * on the pass `article_body` completes, so the binding the client holds
+   * never has one and the run card's "Open draft" link was dead on both chat
+   * hosts for the whole run. This event already reaches the chat on every
+   * transition, so the fact rides it: no extra poll, no extra blob read.
+   * Absent until the object genuinely exists — never a guess at its id.
+   */
+  ...(doc.object ? { object_id: doc.object.object_id } : {}),
   ...(derived.status_reason ? { summary: derived.status_reason } : {}),
   ...(derived.progress
     ? {
@@ -192,6 +221,56 @@ const articleBodyCompleted = (run: RunSnapshot | undefined): boolean => {
       ((node as { nodeId?: string }).nodeId === 'article_body' || (node as { id?: string }).id === 'article_body') &&
       (node as { status?: string }).status === 'completed'
   );
+};
+
+/**
+ * C1 — publication truth onto the request doc, so `projectIndexRow` can put it
+ * on the row the Requests list polls.
+ *
+ * The evidence is the SAME evidence the run card reads
+ * (`publication-evidence.ts`): the publish/release executors' own receipts.
+ * Nothing here infers a publish from a `done` status or from an approval
+ * record — a run can finish without publishing, and that must stay visible.
+ *
+ * Two extra bridge reads at most, and only while there is something left to
+ * learn: nothing before `publish_executor` has settled, and nothing once the
+ * doc already records a confirmed live path. In practice this is the one pass
+ * in which the run finishes, because a `done` request is never swept again.
+ */
+const recordPublicationEvidence = async (
+  deps: SweepDeps,
+  doc: EditorialRequest,
+  run: RunSnapshot | undefined,
+  nowIso: () => string
+): Promise<EditorialRequest | undefined> => {
+  if (!doc.object || (doc.object.published === true && doc.object.live_path)) return undefined;
+  const nodes: readonly PublicationNodeSnapshot[] = Array.isArray(run?.nodes) ? run.nodes : [];
+  if (nodes.length === 0) return undefined;
+
+  const callTool = deps.bridge?.callTool;
+  const reader: PublicationOutputReader | undefined =
+    callTool && deps.bridge ? { callTool: callTool.bind(deps.bridge) } : undefined;
+  const outputs =
+    reader && publicationOutputsWorthReading(nodes)
+      ? await fetchPublicationOutputs(reader, run).catch(() => ({}))
+      : {};
+
+  const evidence = derivePublication(nodes, outputs);
+  // No receipt, no claim (guardrail 5). The row stays `object_published: false`
+  // and keeps offering Publish, which is the honest answer to "we cannot tell".
+  if (!evidence) return undefined;
+  // FIX 6: hands the written doc back, so `sweepRequest` can measure "did the
+  // TRANSITION change anything" against the state after its own object writes
+  // rather than against the pass's opening snapshot.
+  return recordPublication(
+    deps.store,
+    doc.request_id,
+    // A path is a LIVE path only once the release confirmed production serves
+    // it; `published_pending_release` means the article is on `main` and not
+    // necessarily on the site, so linking it would point the desk at a 404.
+    evidence.state === 'live' && evidence.article_path ? { live_path: evidence.article_path } : {},
+    nowIso()
+  ).catch(() => undefined);
 };
 
 /** The transitions that earn an interruption (plan §6). Everything else is visible on the surface. */
@@ -312,6 +391,36 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
       }
     : undefined;
 
+  // W19: the article the run produced. By construction the request id IS the
+  // `content_item` id — `mintWorkspaceRequestId` bumps until no content_item
+  // holds it, then hands it to CMS-Agent as the run's requestId, and the shell
+  // is created under exactly that id. Recorded only once `article_body` has
+  // actually completed, so a run whose shell creation failed does not claim an
+  // object that is not there.
+  //
+  // FIX 6 — BEFORE the status transition, not after. `reconcileObject` (the
+  // read path's writer) only touches a TERMINAL doc and `recordObject` only a
+  // non-terminal one, which is what makes them disjoint — but the old order
+  // ran this on the very pass that had just written `done`, putting both
+  // writers on the same doc with no compare-and-set under them. Recording
+  // first keeps every sweeper write to `doc.object` inside the window the
+  // sweeper owns.
+  let withObject = doc;
+  if (!doc.object && articleBodyCompleted(run)) {
+    withObject =
+      (await recordObject(deps.store, requestId, { object_type: 'content_item', object_id: requestId }, nowIso()).catch(
+        () => undefined
+      )) ?? doc;
+  }
+  // C1: and whether that object was published, from the same pass's run — also
+  // a sweeper write, so also before the transition (FIX 6).
+  const withPublication = (await recordPublicationEvidence(deps, withObject, run, nowIso)) ?? withObject;
+  // The state this pass's own object writes left behind. `changed` below means
+  // "the STATUS/progress transition moved something" — it must not be turned
+  // true by the two writes just made, which is what it measured against the
+  // opening snapshot before FIX 6 reordered them.
+  const beforeTransition = withPublication.updated_at;
+
   const statusChanged = derived.status !== doc.status;
   const updated = statusChanged
     ? derived.status === 'cancelled'
@@ -347,7 +456,7 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
   // `request_progress` line, carrying the DERIVED status, into the chat of a
   // request the human had just closed.
   const refused = updated !== undefined && updated.status !== derived.status && isTerminal(updated.status);
-  const changed = !refused && (to !== from || (updated?.updated_at ?? doc.updated_at) !== doc.updated_at);
+  const changed = !refused && (to !== from || (updated?.updated_at ?? beforeTransition) !== beforeTransition);
 
   if (refused && updated) {
     // The index row that made us poll a closed request is the thing to fix.
@@ -355,18 +464,8 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
     return { request_id: requestId, from, to, changed: false, nudged: false, repaired: true };
   }
 
-  // W19: the article the run produced. By construction the request id IS the
-  // `content_item` id — `mintWorkspaceRequestId` bumps until no content_item
-  // holds it, then hands it to CMS-Agent as the run's requestId, and the shell
-  // is created under exactly that id. Recorded only once `article_body` has
-  // actually completed, so a run whose shell creation failed does not claim an
-  // object that is not there.
-  if (updated && !updated.object && articleBodyCompleted(run)) {
-    await recordObject(deps.store, requestId, { object_type: 'content_item', object_id: requestId }, nowIso()).catch(
-      () => undefined
-    );
-  }
-
+  // FIX 2: `updated` is written by `setStatus`/`recordProgress`, both of which
+  // re-load the doc — so it already carries the object recorded above.
   if (changed && lastChat && deps.chats && updated) {
     await deps.chats.appendProgress(lastChat.chat_id, progressDetail(updated, derived)).catch(() => undefined);
   }

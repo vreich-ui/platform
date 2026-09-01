@@ -11,6 +11,8 @@
  * event stream) onto that existing vocabulary, plus the timing/format/undo
  * logic the D5 components need and this repo has no other home for.
  */
+import { knownNodeLabel } from './chat-logic.js';
+import { objectWorkspaceHref } from './request-logic.js';
 import type { AdminSeverity } from './severity.js';
 import type { ChatEventView, ChatStatus, RunSummaryView } from './chat-client.js';
 
@@ -41,16 +43,25 @@ export interface LivenessChip {
  * ("a `caps` ending in particular must tell the editor the job is still
  * alive") means this must read as a fact reported, not a finish line — D4's
  * `info` tone, not `success`.
+ *
+ * E1: `currentNode` — the sweeper's latest `detail.node` (`sweep.ts`,
+ * `currentNodeFromEvents` below) — narrates WHAT is running instead of the
+ * generic "Working", the same way `RequestProgressLine`'s `stepLine` does
+ * for the inline progress row (`chat-logic.ts`'s `knownNodeLabel`, the ONE
+ * lookup into `NODE_LABELS` both share). Only the `running` tier reads it:
+ * `queued` has no node yet (nothing has started), and every other tier
+ * already states its own outcome word.
  */
 export function deriveLivenessChip(
   status: ChatStatus | undefined,
-  lastOutcome: RunSummaryView | null | undefined
+  lastOutcome: RunSummaryView | null | undefined,
+  currentNode?: string
 ): LivenessChip | undefined {
   switch (status) {
     case 'queued':
       return { tier: 'working', label: 'Waking the agent…', severity: undefined };
     case 'running':
-      return { tier: 'working', label: 'Working', severity: undefined };
+      return { tier: 'working', label: knownNodeLabel(currentNode) ?? 'Working', severity: undefined };
     case 'awaiting_approval':
       return { tier: 'waiting', label: 'Needs you — approval', severity: 'needs_you' };
     case 'awaiting_candidate':
@@ -150,6 +161,48 @@ export function activeRunStartedAt(events: readonly ChatEventView[]): string | u
 }
 
 /**
+ * E1: the latest `request_progress` event's node id, verbatim
+ * (`detail.node` — `sweep.ts`'s `progressDetail`). Fed to `deriveLivenessChip`
+ * so the header chip can narrate the current step; a chat with no progress
+ * event yet (or a non-string/absent `node`) yields `undefined`, which
+ * `deriveLivenessChip` treats exactly like "no node named".
+ */
+export function currentNodeFromEvents(events: readonly ChatEventView[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.type !== 'request_progress') continue;
+    const node = event.detail?.node;
+    return typeof node === 'string' ? node : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * FIX 2: the object this run has produced, read off the latest
+ * `request_progress` event that names one (`detail.object_id`, stamped by
+ * `sweep.ts`'s `progressDetail`).
+ *
+ * The chat's own request binding carries `object_id` too, but it is sent on
+ * the FIRST poll only and the client latches it — and the sweeper records the
+ * object well after that, so the binding never has one for a run in progress.
+ * These events keep arriving, so this is where the fact actually shows up
+ * mid-run. Scans backwards for the newest event that HAS an id rather than
+ * reading only the last one: a later progress line written before the object
+ * existed would otherwise erase a link that is genuinely there.
+ *
+ * `undefined` means "no object recorded yet", never "there is no object".
+ */
+export function objectIdFromEvents(events: readonly ChatEventView[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.type !== 'request_progress') continue;
+    const objectId = event.detail?.object_id;
+    if (typeof objectId === 'string' && objectId) return objectId;
+  }
+  return undefined;
+}
+
+/**
  * Elapsed time for the chip: ticking (now minus the active run's start)
  * while `working`/`waiting`, fixed (the last run's own duration) once
  * `blocked`/`done`. Returns `undefined` when there is nothing to time —
@@ -228,6 +281,71 @@ export interface ReceiptLineInput {
    * "a failed-run thread states the failure exactly once").
    */
   hasRunCard: boolean;
+  /**
+   * E2: objects THIS run created, scoped exactly the way `chat.tsx` already
+   * scopes them for the "details" popover (`createdObjectsFromEvents(events,
+   * outcome.run_id)`, `chat-logic.ts`) — read, not recomputed here, the same
+   * "one classifier" discipline `chips` already follows. No `title`: nothing
+   * in this run's own event stream reliably carries one — `create_object`'s
+   * `describe()` is just "Create a new <type>", the body an agent submits
+   * varies per object type, and an auto-executed call doesn't even disclose
+   * its args (only a human-approved one does). A caller that has separately
+   * PROVEN a title for one of these ids may attach it; nothing here invents
+   * one when it's missing.
+   */
+  created?: readonly ReceiptCreatedObject[];
+  /**
+   * E2b: the object this run PUBLISHED — `publishedObjectFromEvents`
+   * (`chat-logic.ts`) reading the stamp a successful publish now leaves on
+   * its own `tool_result` event (`publishedObjectRef`, `loop.ts`). Present
+   * only when that publish returned `published: true` with an object id;
+   * a refused, failed or half-completed publish stamps nothing, so this
+   * stays absent and the receipt claims nothing.
+   *
+   * What it does NOT prove is LIVE. A publish commits the export with
+   * `[skip netlify]` and going live is a separate, explicit release
+   * (`server/lib/object-publish.ts`; the platform's own publish response
+   * says `live: false, deploy_deferred: true` in as many words). So the
+   * clause links what IS proven — see `liveUrl` below.
+   */
+  published?: ReceiptPublishedObject;
+}
+
+export interface ReceiptCreatedObject {
+  id: string;
+  type?: string;
+  /** Set only when the caller has PROVEN this object's title — never guessed. */
+  title?: string;
+}
+
+export interface ReceiptPublishedObject {
+  id: string;
+  type?: string;
+  /**
+   * A CONFIRMED live URL — set only by a caller that has separately PROVEN
+   * go-live (deploy evidence, `publication-evidence.ts`'s `state: 'live'`),
+   * never derived from the publish itself. With it the clause reads
+   * "Published → view live"; without it "Published → open", pointing at the
+   * object, which is the thing the publish result actually proves exists.
+   * `RunReceipt` supplies no URL today: a chat's own event stream carries no
+   * deploy evidence, and linking an article path that 404s until someone
+   * releases would be the invented state guardrail 5 rules out.
+   */
+  liveUrl?: string;
+}
+
+/** One truthful "what changed" clause, already carrying its own link — the Action Receipt pattern at its cheapest. */
+export interface ReceiptAction {
+  /**
+   * FIX 4 — React list identity. NOT the href: a run that creates an object
+   * and then publishes THAT object yields two clauses with byte-identical
+   * hrefs (the common draft-then-publish shape), and keying on the href
+   * collides. This is the clause's role plus the object it names, which is
+   * unique by construction.
+   */
+  key: string;
+  label: string;
+  href: string;
 }
 
 export interface ReceiptLineDecision {
@@ -236,16 +354,76 @@ export interface ReceiptLineDecision {
   visibleChips: string[];
   /** Whether `message`/`providerDetail` render at all. */
   showFailureText: boolean;
+  /**
+   * E2: what this run PROVABLY changed, each already paired with a link to
+   * the thing that changed — empty when neither `created` nor `published`
+   * proved anything, which is today's plain line unchanged.
+   */
+  actions: ReceiptAction[];
 }
 
 const NO_CHANGES_CHIP = 'no changes';
 
-/** A3: what the single-line receipt shows beyond its headline + elapsed time. */
-export function receiptLine({ outcome, chips, message, hasRunCard }: ReceiptLineInput): ReceiptLineDecision {
+/**
+ * The object's own workspace — reachable for any object id this receipt can
+ * prove. FIX 7: the shared helper (`request-logic.ts`), and FIX 3: NO default
+ * type. This copy defaulted to `content_item`, and `ObjectWorkspace` trusts
+ * `?type=` over its own id resolution, so an object of any other type got a
+ * link that dead-ended on "<id> was not found".
+ */
+const receiptObjectHref = (object: { id: string; type?: string }): string =>
+  objectWorkspaceHref(object.id, object.type);
+
+/**
+ * FIX 3 — say what was created, or say nothing.
+ *
+ * This read "Created draft" for every stamp, including a `page` and a
+ * `section`. The type is now always proven at the source (`resultObjectRef`,
+ * `server/lib/agent/loop.ts`, stamps nothing it cannot type), so the clause
+ * names it: `content_item` IS the draft article an editor means by "draft",
+ * and every other governed type says its own name.
+ */
+const createdObjectNoun = (type: string): string =>
+  type === 'content_item' ? 'draft' : type.replace(/_/g, ' ');
+
+const createdObjectLabel = (object: ReceiptCreatedObject & { type: string }): string => {
+  const noun = createdObjectNoun(object.type);
+  return object.title ? `Created ${noun} '${object.title}' → open` : `Created ${noun} → open`;
+};
+
+/**
+ * FIX 3 — a stamp with no proven type is not a creation this receipt can
+ * describe. The one tool that produced them, `instantiate_section_template`
+ * with a non-`standalone` target, patches an existing PAGE and creates
+ * nothing; its `object_id` is that page's. Persisted events from before the
+ * source-side fix still carry those stamps, so they are dropped here too.
+ */
+const provenCreations = (created: readonly ReceiptCreatedObject[] | undefined) =>
+  (created ?? []).filter((object): object is ReceiptCreatedObject & { type: string } => Boolean(object.type));
+
+/** A3/E2: what the single-line receipt shows beyond its headline + elapsed time. */
+export function receiptLine({ outcome, chips, message, hasRunCard, created, published }: ReceiptLineInput): ReceiptLineDecision {
   const visibleChips = chips.length === 1 && chips[0] === NO_CHANGES_CHIP ? [] : [...chips];
+  const actions: ReceiptAction[] = [
+    ...provenCreations(created).map((object, index) => ({
+      key: `created:${index}:${object.id}`,
+      label: createdObjectLabel(object),
+      href: receiptObjectHref(object),
+    })),
+    // E2b: "view live" only where live is proven; otherwise the honest half
+    // of the same fact — it IS published, and here is the object.
+    ...(published
+      ? [
+          published.liveUrl
+            ? { key: `published:${published.id}`, label: 'Published → view live', href: published.liveUrl }
+            : { key: `published:${published.id}`, label: 'Published → open', href: receiptObjectHref(published) },
+        ]
+      : []),
+  ];
   return {
     visibleChips,
     showFailureText: Boolean(message) && !(outcome === 'error' && hasRunCard),
+    actions,
   };
 }
 

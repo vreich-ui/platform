@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   classifyRow,
+  decisionDisabledReason,
   DEFAULT_REQUEST_QUICK_FILTER,
   filterRequestRows,
   matchesQuickFilter,
@@ -12,11 +13,13 @@ import {
   pendingNotifications,
   QUICK_FILTERS,
   quickFilterToStatuses,
+  requestObjectHref,
   requestSeverityLevel,
   requestStatusLabel,
   retryReceipt,
   rowMetaLine,
   scanNotifications,
+  SIGN_IN_REQUIRED_REASON,
   STALLED_VS_FAILED_SPLIT,
   titlePrefix,
   NODE_LABELS,
@@ -528,5 +531,48 @@ describe('notification transitions', () => {
   it('leaves a bare tab title bare', () => {
     assert.equal(titlePrefix(0), '');
     assert.equal(titlePrefix(3), '(3) ');
+  });
+});
+
+// ─── D2/D3: the object workspace route, one address for every renderer ─────
+
+describe('requestObjectHref', () => {
+  it('builds the same address `open_object` and the detail pane’s object chip both link to', () => {
+    assert.equal(requestObjectHref('art_retinol_after_40'), '/admin/content/art_retinol_after_40?type=content_item');
+  });
+
+  it('encodes an id that is not already URL-safe', () => {
+    assert.equal(requestObjectHref('obj a/b'), '/admin/content/obj%20a%2Fb?type=content_item');
+  });
+});
+
+// ─── C3b: the decision reason, session-first ────────────────────────────────
+
+/**
+ * `RequestActivity`'s run-level ActionRow and `NeedsYouMenu`'s header panel
+ * row both used to compute their disabled reason by hand — `canDecide ?
+ * undefined : deniedReason` — with no session check at all, so an expired
+ * session (which also collapses `canDecide` to false) surfaced the exact
+ * rights sentence `SIGN_IN_REQUIRED_REASON` exists to replace. This is that
+ * one decision, pulled out so both call sites apply the same precedence
+ * `rowActions`' own `make` already does.
+ */
+describe('decisionDisabledReason — C3b: session outranks rights', () => {
+  const DENIED = 'You do not have publish-decision authority for this run.';
+
+  it('signed out beats even a caller who does hold the right', () => {
+    assert.equal(decisionDisabledReason(true, true, DENIED), SIGN_IN_REQUIRED_REASON);
+  });
+
+  it('signed out and lacking the right still reads as signed out, never the rights sentence', () => {
+    assert.equal(decisionDisabledReason(true, false, DENIED), SIGN_IN_REQUIRED_REASON);
+  });
+
+  it('signed in, lacking the right: the caller’s own rights sentence, untouched', () => {
+    assert.equal(decisionDisabledReason(false, false, DENIED), DENIED);
+  });
+
+  it('signed in and holding the right: enabled — no reason at all', () => {
+    assert.equal(decisionDisabledReason(false, true, DENIED), undefined);
   });
 });

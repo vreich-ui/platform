@@ -9,6 +9,7 @@
  * drift between them is caught by the endpoint's own tests, not by tsc.
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
+import { AuthExpiredError, clearAuthExpired, isAuthExpiredStatus, markAuthExpired } from './auth-expiry.js';
 
 const ENDPOINT = '/.netlify/functions/admin-requests';
 
@@ -36,6 +37,16 @@ export interface RequestRowView {
   current_node?: string;
   chat_id?: string;
   object_id?: string;
+  /**
+   * C1: whether the run's publish tail actually published that object
+   * (`server/lib/requests/publication-evidence.ts`, projected onto the index
+   * row). Optional here and nowhere else: a server deployed before C1 sends no
+   * such field, and `undefined` must read as "not published" rather than
+   * throwing away the Publish action.
+   */
+  object_published?: boolean;
+  /** The live article path, present only once the release confirmed go-live. */
+  live_path?: string;
   archived: boolean;
 }
 
@@ -92,16 +103,63 @@ export interface RequestListView {
 
 export type EmailMode = 'immediate' | 'daily' | 'off';
 
-async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
+/**
+ * C3 — the ONE place this client decides whether the session is still alive.
+ *
+ * Two things happen here that used to happen nowhere:
+ *
+ * 1. The empty-bearer guard. `goTrueClient.getAccessToken()` answers `null` on
+ *    an expired session and every caller collapses that to `''`; the request
+ *    then went out as `Authorization: Bearer `, came back a generic failure,
+ *    and the surface explained it as a missing right. A request with no
+ *    credential is not sent at all now — the state is named instead.
+ * 2. The 401 path, which did not exist. `401` is "we do not know who you are";
+ *    a rights refusal is `403` and is deliberately NOT treated as an expiry
+ *    (see `isAuthExpiredStatus`) — a genuine viewer must keep reading "Ask an
+ *    editor".
+ *
+ * Every helper in this file goes through this function. Scattering the check
+ * over the call sites is exactly what let the hole open in the first place.
+ */
+async function authorizedFetch(
+  getToken: GetToken,
+  endpoint: string,
+  body: unknown,
+  extraHeaders: Record<string, string> = {}
+): Promise<Response> {
   const token = await getToken();
-  const res = await fetch(ENDPOINT, {
+  if (!token) {
+    markAuthExpired();
+    throw new AuthExpiredError();
+  }
+  const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify(body),
   });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (isAuthExpiredStatus(res.status)) {
+    markAuthExpired();
+    throw new AuthExpiredError();
+  }
+  // Anything else means the server knew who we are, so a banner left over
+  // from an earlier expiry is now stale and must go.
+  clearAuthExpired();
+  return res;
+}
+
+const readJson = async (res: Response): Promise<Record<string, unknown>> =>
+  (await res.json().catch(() => ({}))) as Record<string, unknown>;
+
+/** The server's own sentence when it has one, so a `403` reaches the editor as words. */
+const jsonOrThrow = async (res: Response): Promise<Record<string, unknown>> => {
+  const json = await readJson(res);
   if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
-  return json as T;
+  return json;
+};
+
+async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
+  const res = await authorizedFetch(getToken, ENDPOINT, body);
+  return (await jsonOrThrow(res)) as T;
 }
 
 export const listRequests = (getToken: GetToken, filters: RequestListFiltersInput = {}) =>
@@ -129,19 +187,14 @@ export async function listRequestsIfChanged(
   filters: RequestListFiltersInput,
   etag: string | undefined
 ): Promise<{ unchanged: true; etag: string | undefined } | { unchanged: false; view: RequestListView; etag?: string }> {
-  const token = await getToken();
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(etag ? { 'If-None-Match': etag } : {}),
-    },
-    body: JSON.stringify({ action: 'list', ...filters }),
-  });
+  const res = await authorizedFetch(
+    getToken,
+    ENDPOINT,
+    { action: 'list', ...filters },
+    etag ? { 'If-None-Match': etag } : {}
+  );
   if (res.status === 304) return { unchanged: true, etag: res.headers.get('etag') ?? etag };
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  const json = await jsonOrThrow(res);
   const nextEtag = res.headers.get('etag');
   return { unchanged: false, view: json as unknown as RequestListView, ...(nextEtag ? { etag: nextEtag } : {}) };
 }
@@ -326,15 +379,8 @@ export const getRequestActivity = async (
   getToken: GetToken,
   target: { request_id?: string; run_id?: string }
 ): Promise<ActivityResponse> => {
-  const token = await getToken();
-  const res = await fetch(ACTIVITY_ENDPOINT, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(target),
-  });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
-  return json as unknown as ActivityResponse;
+  const res = await authorizedFetch(getToken, ACTIVITY_ENDPOINT, target);
+  return (await jsonOrThrow(res)) as unknown as ActivityResponse;
 };
 
 const VIEW_ENDPOINT = '/.netlify/functions/admin-requests-view';
@@ -363,19 +409,9 @@ export async function getRequestActivityIfChanged(
 ): Promise<
   { unchanged: true; etag: string | undefined } | { unchanged: false; view: ActivityViewResponse; etag?: string }
 > {
-  const token = await getToken();
-  const res = await fetch(VIEW_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(etag ? { 'If-None-Match': etag } : {}),
-    },
-    body: JSON.stringify(target),
-  });
+  const res = await authorizedFetch(getToken, VIEW_ENDPOINT, target, etag ? { 'If-None-Match': etag } : {});
   if (res.status === 304) return { unchanged: true, etag: res.headers.get('etag') ?? etag };
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
+  const json = await jsonOrThrow(res);
   const nextEtag = res.headers.get('etag');
   return { unchanged: false, view: json as unknown as ActivityViewResponse, ...(nextEtag ? { etag: nextEtag } : {}) };
 }
@@ -407,15 +443,8 @@ export const decideRunPublish = async (
   target: { request_id?: string; run_id?: string },
   action: 'approve' | 'withhold'
 ): Promise<ActivityResponse> => {
-  const token = await getToken();
-  const res = await fetch(ACTIVITY_ENDPOINT, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...target, action }),
-  });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
-  return json as unknown as ActivityResponse;
+  const res = await authorizedFetch(getToken, ACTIVITY_ENDPOINT, { ...target, action });
+  return (await jsonOrThrow(res)) as unknown as ActivityResponse;
 };
 
 /**
@@ -436,20 +465,13 @@ export const raiseNodeBudget = async (
   nodeId: string,
   budgetUsd: number
 ): Promise<ActivityResponse> => {
-  const token = await getToken();
-  const res = await fetch(ACTIVITY_ENDPOINT, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...target,
-      action: scope === 'for_run' ? 'raise_node_budget_for_run' : 'raise_node_budget_default',
-      node_id: nodeId,
-      budget_usd: budgetUsd,
-    }),
+  const res = await authorizedFetch(getToken, ACTIVITY_ENDPOINT, {
+    ...target,
+    action: scope === 'for_run' ? 'raise_node_budget_for_run' : 'raise_node_budget_default',
+    node_id: nodeId,
+    budget_usd: budgetUsd,
   });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
-  return json as unknown as ActivityResponse;
+  return (await jsonOrThrow(res)) as unknown as ActivityResponse;
 };
 
 export const activityPollIntervalFor = (response: ActivityResponse | null): number | undefined => {
