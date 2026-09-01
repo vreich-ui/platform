@@ -244,7 +244,7 @@ export const ENV_CHECKLIST = [
       {
         name: 'TRACKING_PROJECT_ID',
         cls: 'per-site',
-        note: "This client's partition in the tracking owner-DB (trk_<shortId> convention).",
+        note: "This client's partition in the tracking owner-DB — the BARE <shortId> slug. Not trk_<shortId>: that is the tracking_config OBJECT id (site-identity.trackingProjectId), a different value.",
       },
       {
         name: 'TRACKING_SALT',
