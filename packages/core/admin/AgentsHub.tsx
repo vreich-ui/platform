@@ -22,6 +22,8 @@ import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunAppro
 import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
 import { createdObjectsFromEvents } from '@core/lib/admin/chat-logic';
+import { objectIdFromEvents } from '@core/lib/admin/chat-liveness';
+import { objectWorkspaceHref } from '@core/lib/admin/request-logic';
 import {
   assignProfile,
   createFreeChat,
@@ -363,6 +365,8 @@ function HubBody() {
 
   /** Creation results carry object_id/object_type — route to the workspace. */
   const createdObjects = useMemo(() => createdObjectsFromEvents(chat.events), [chat.events]);
+  /** FIX 2: the object this run has produced — binding first, then the progress events. */
+  const hubObjectId = chat.request?.object_id ?? objectIdFromEvents(chat.events);
 
   const active = chats?.find((item) => item.chat_id === activeId);
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope: activeId });
@@ -518,7 +522,10 @@ function HubBody() {
               </span>
               {active?.kind === 'object' && active.object_id ? (
                 <a
-                  href={`/admin/content/${encodeURIComponent(active.object_id)}?type=${encodeURIComponent(active.object_type ?? '')}`}
+                  // FIX 7: the shared helper. This copy emitted a bare `?type=`
+                  // for an unknown type; it only worked because `''` is falsy
+                  // where `ObjectWorkspace` decides whether to resolve the id.
+                  href={objectWorkspaceHref(active.object_id, active.object_type)}
                   className="adm-focusable inline-flex items-center gap-1.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
                 >
                   <IconExternalLink size={16} /> Open workspace
@@ -536,6 +543,12 @@ function HubBody() {
                   {...(chat.status ? { chatStatus: chat.status } : {})}
                   onStatesStatusChange={setRunCardStatesStatus}
                   onRetry={() => void retryRun(chat.request!.request_id)}
+                  // E3b/FIX 2: the binding when the client holds one, else the
+                  // newest `request_progress` event that names the object. The
+                  // binding is sent on the first poll only and latched, and the
+                  // sweeper records the object well after that — so mid-run,
+                  // the events are where this fact actually arrives.
+                  {...(hubObjectId ? { objectId: hubObjectId } : {})}
                 />
               </div>
             ) : null}
@@ -547,11 +560,10 @@ function HubBody() {
                     size="sm"
                     variant="secondary"
                     leftIcon={<IconExternalLink size={14} />}
-                    onClick={() =>
-                      void navigate(
-                        `/admin/content/${encodeURIComponent(created.id)}${created.type ? `?type=${encodeURIComponent(created.type)}` : ''}`
-                      )
-                    }
+                    // FIX 7: the shared route helper. This call site already had
+                    // the omit-when-unknown rule right; it is now the rule
+                    // itself rather than a copy of it.
+                    onClick={() => void navigate(objectWorkspaceHref(created.id, created.type))}
                   >
                     Open {created.id}
                   </Button>

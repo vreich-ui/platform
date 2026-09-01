@@ -14,6 +14,8 @@
  * (`failed`/`needs_you`) opens itself far enough to show the approval/recovery
  * block, but never the node list — that still costs a real click.
  */
+import { hasOperatorAction } from './cms-agent-error-copy.js';
+import { requestObjectHref } from './request-logic.js';
 
 /**
  * The one categorical fact this module needs about the run. `runCardStatus`
@@ -81,25 +83,102 @@ export function runCardStatus(input: RunCardStatusInput): RunCardStatus {
 export interface RunCardPrimaryAction {
   kind: 'budget-raise' | 'retry' | 'none';
   /** Why there is no button, when `kind` is `'none'` and there was something to explain. */
-  reason?: 'operator_action' | 'no_retry_handler' | 'no_recovery';
+  reason?: 'operator_action' | 'no_retry_handler' | 'no_recovery' | 'owner_required';
+}
+
+/**
+ * C4: the slice of `ActivityNodeView` this module needs to resolve which
+ * node `recovery.node_id` actually means. Structurally compatible with the
+ * real thing, so `RequestActivity.tsx` passes `activity.nodes` straight
+ * through.
+ */
+export interface RunCardRecoveryNode {
+  id: string;
+  status: string;
+  /** Mirrors `ActivityNodeView['failure']` — only the fields this decision reads. */
+  failure?: {
+    code: string;
+    operatorAction?: string;
+    /**
+     * FIX 8: CMS-Agent's own structured detail for the failure. `nodeId` is
+     * its NAME for the node the budget belongs to — the authoritative answer
+     * to "which node", and the one the raise buttons spend money against.
+     */
+    details?: { nodeId?: string };
+  };
+}
+
+/**
+ * C4 (live-confirmed) — `recovery.node_id` can name a node that is not in
+ * `nodes` at all: an Owner hit a $6.47 spend against a $2 budget and the
+ * server's own `node_id` didn't line up with anything in `activity.nodes`,
+ * so the card's old `nodes.find(n => n.id === recovery.node_id)` came back
+ * `undefined`, `isBudgetExceeded` read false, and the card offered a plain
+ * Retry — the one button guaranteed to fail the exact same way. The honest
+ * fallback is the node that actually failed, the same one the server itself
+ * falls back to when its own `retryNodeId` is missing
+ * (`failed?.id` in `server/lib/requests/activity.ts`).
+ *
+ * Exported so `RequestActivity.tsx` resolves the SAME node id for the
+ * raise-buttons' own numbers (and their click target) that this module uses
+ * to decide whether to offer them — one resolution, not two that can drift.
+ *
+ * FIX 8: three tiers, strongest proof first. The first-failed-node scan is a
+ * LAST resort, because on a run with more than one failure it is a guess —
+ * and the click it feeds ("Raise to $X as the default") writes a node's spend
+ * ceiling for every future run, so guessing spends money on the wrong node
+ * and leaves the real one still capped.
+ *
+ *   1. `recoveryNodeId` names a real node — the server got it right.
+ *   2. Some node's own `failure.details.nodeId` names a real node. That field
+ *      is CMS-Agent's own id for the budget it refused, carried on the failure
+ *      itself (`lib/admin/budget-raise.ts`'s `BudgetExceededDetails`), so it
+ *      is evidence rather than position.
+ *   3. Only then, the first node that failed.
+ */
+export function resolveRecoveryNodeId(
+  recoveryNodeId: string | undefined,
+  nodes: readonly RunCardRecoveryNode[]
+): string | undefined {
+  if (!recoveryNodeId) return undefined;
+  if (nodes.some((node) => node.id === recoveryNodeId)) return recoveryNodeId;
+  const named = nodes
+    .map((node) => node.failure?.details?.nodeId)
+    .find((id): id is string => Boolean(id) && nodes.some((node) => node.id === id));
+  if (named) return named;
+  return nodes.find((node) => node.status === 'failed')?.id;
 }
 
 export interface RunCardViewInput {
   status: RunCardStatus;
   /** The user's own chevron toggle — not folded with the auto-open rule; that fold is this module's job. */
   expanded: boolean;
-  /** Recovery names a node to retry at all (`recovery?.node_id`). */
-  hasRetryTarget: boolean;
-  /** The recovery's node failure carries an `operator_action` sentence — suppresses Retry regardless of anything else. */
-  hasOperatorAction: boolean;
-  /** The recovery's node failure is `budget_exceeded`. */
-  isBudgetExceeded: boolean;
+  /** `recovery?.node_id` — undefined when nothing failed / there is no recovery at all. */
+  recoveryNodeId?: string;
+  /** `recovery?.operator_action` — the RUN-level sentence's own instruction, when CMS-Agent sent one. */
+  recoveryOperatorAction?: string;
+  /**
+   * `activity.nodes` (or an equivalent `RunCardRecoveryNode[]`). C4:
+   * `recoveryNodeId` can name a node no longer in this list —
+   * `resolveRecoveryNodeId` is the fallback this module applies before
+   * reading a failure off of it.
+   */
+  nodes: readonly RunCardRecoveryNode[];
   /** The host wired `onRetry` at all — no call site does yet (B2 lands it); until then Retry never renders. */
   hasRetryHandler: boolean;
   /** Current viewer's resolved rights (`owner` expands to `admin`+`publisher` — `server/lib/roles.ts`). */
   isOwner: boolean;
   /** The publication tail's own `offerRecheck` (`lib/admin/publication-card.ts`). */
   offerRecheck: boolean;
+  /**
+   * E3: the object this run is (or was) working on, when the host knows it.
+   * `ActivityView` itself carries none — CMS-Agent's run/cost reads never
+   * echo one back (`server/lib/requests/activity.ts`) — so this is host-
+   * supplied, the same pattern `chatStatus` already is on
+   * `RequestActivityProps`. Absent means exactly "not known yet", never
+   * "there is no object".
+   */
+  objectId?: string;
 }
 
 export interface RunCardView {
@@ -117,6 +196,13 @@ export interface RunCardView {
   /** Whether the publication tail states its full detail (URL, facts, "Check again") or just its one-line headline. */
   publicationLines: 'one' | 'full';
   primaryAction: RunCardPrimaryAction;
+  /**
+   * E3: the pinned card's own jump-to-artifact link — present as soon as an
+   * object id is known, mid-run or not, INDEPENDENT of `primaryAction`
+   * (a card can show both a recovery button and this at once; neither
+   * displaces the other, they're separate slots on the row).
+   */
+  openDraftHref?: string;
 }
 
 /**
@@ -129,16 +215,30 @@ export interface RunCardView {
 const AUTO_OPEN_STATUSES: ReadonlySet<RunCardStatus> = new Set(['failed', 'needs_you', 'blocked', 'paused']);
 
 function decidePrimaryAction(input: RunCardViewInput): RunCardPrimaryAction {
+  const resolvedNodeId = resolveRecoveryNodeId(input.recoveryNodeId, input.nodes);
+  const recoveryNode = resolvedNodeId ? input.nodes.find((node) => node.id === resolvedNodeId) : undefined;
+  const isBudgetExceeded = recoveryNode?.failure?.code === 'budget_exceeded';
+
   // Precedence 1: an Owner facing a budget ceiling gets the raise-and-retry
   // buttons — this wins even when a retry handler is wired, since retrying
   // as-is would only fail the same way again.
-  if (input.isOwner && input.isBudgetExceeded) return { kind: 'budget-raise' };
+  if (isBudgetExceeded && input.isOwner) return { kind: 'budget-raise' };
+  // C4/D3: a non-Owner can't raise the ceiling, and Retry is the one button
+  // guaranteed to fail the same way it just did — a disabled control with
+  // the honest reason (D3), never a live button that cannot help this viewer.
+  if (isBudgetExceeded) return { kind: 'none', reason: 'owner_required' };
 
-  if (!input.hasRetryTarget) return { kind: 'none', reason: 'no_recovery' };
+  if (!input.recoveryNodeId) return { kind: 'none', reason: 'no_recovery' };
   // Existing rule (kept, not re-derived): a classified provider error or the
   // budget guard already names the next step — offering Retry next to it
   // invites clicking the one action that will only fail the same way again.
-  if (input.hasOperatorAction) return { kind: 'none', reason: 'operator_action' };
+  // C4 item 2: reads BOTH the run-level sentence's own `operator_action` AND
+  // the resolved node's own — either one suppresses Retry. Previously only
+  // the run-level one was checked, so a node that carried its own
+  // `operator_action` with no run-level echo of it still offered Retry.
+  if (hasOperatorAction({ operatorAction: input.recoveryOperatorAction }) || hasOperatorAction({ operatorAction: recoveryNode?.failure?.operatorAction })) {
+    return { kind: 'none', reason: 'operator_action' };
+  }
   // Precedence 2: Retry — but only once B2 actually wires a host's `onRetry`.
   if (!input.hasRetryHandler) return { kind: 'none', reason: 'no_retry_handler' };
   return { kind: 'retry' };
@@ -154,6 +254,9 @@ export function runCardView(input: RunCardViewInput): RunCardView {
     showRecovery: expandedByDefault,
     publicationLines: input.offerRecheck ? 'full' : 'one',
     primaryAction: decidePrimaryAction(input),
+    // E3 (FIX 7): the shared route helper, not a fourth hand-typed copy of it.
+    // A run card's object is a request's object, so its type is proven.
+    ...(input.objectId ? { openDraftHref: requestObjectHref(input.objectId) } : {}),
   };
 }
 

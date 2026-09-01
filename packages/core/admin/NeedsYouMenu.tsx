@@ -25,7 +25,7 @@
  * browser has already made. Both render with what IS available — the link to
  * the request — rather than an approve button that would do nothing.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { navigate } from 'astro:transitions/client';
 
 import { Badge, Button } from './primitives';
@@ -35,11 +35,28 @@ import { useToast } from './overlays';
 import { cn } from './utils';
 import { SEVERITY } from '@core/lib/admin/severity';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
-import { matchesQuickFilter, relativeAge, requestSeverityLevel, sortRequestRows } from '@core/lib/admin/request-logic';
+import {
+  decisionDisabledReason,
+  matchesQuickFilter,
+  relativeAge,
+  requestSeverityLevel,
+  sortRequestRows,
+} from '@core/lib/admin/request-logic';
 import { requestStatusLabel, type RequestRowView } from '@core/lib/admin/requests-client';
 import { useDecisionOverlay, useRequestsIndex } from '@core/lib/admin/requests-store';
 import { DECIDED_WAITING_LABEL, pendingDecisionForRequest } from '@core/lib/admin/decision-overlay';
 import { assertDecided, canDecideRunPublish, decide, type DecisionAction } from '@core/lib/admin/decisions';
+import { isAuthExpired, subscribeAuthExpiry } from '@core/lib/admin/auth-expiry';
+
+/**
+ * C3b — the same module-scope fact `RequestsWorkspace`/`RequestActivity` read.
+ * `useRequestsIndex` (`requests-store.ts`) already pauses and resumes the
+ * shared poll behind this panel's rows (C3); what this menu still owned on
+ * its own was the DECISION call — `decide()` is a write, not a poll, and
+ * nothing stopped it from firing into a dead session and answering with the
+ * rights sentence below rather than the true one.
+ */
+const useAuthExpired = (): boolean => useSyncExternalStore(subscribeAuthExpiry, isAuthExpired, () => false);
 
 /** How many rows the panel shows before it stops and points at the full inbox. */
 const PANEL_ROWS = 6;
@@ -50,11 +67,14 @@ function NeedsYouRow({
   row,
   nowMs,
   canDecide,
+  signedOut,
   onDecide,
 }: {
   row: RequestRowView;
   nowMs: number;
   canDecide: boolean;
+  /** C3b: the session, not the rights ladder, is what disables the row — see `NeedsYouMenu`'s own comment. */
+  signedOut: boolean;
   onDecide: (row: RequestRowView, decision: DecisionAction, reason?: string) => Promise<void>;
 }) {
   const overlay = useDecisionOverlay();
@@ -92,7 +112,11 @@ function NeedsYouRow({
             /* No reason field exists on this mechanism — `decisions.ts`'s
                `reasonDroppedNote`. One click, no dead-end prompt. */
             rejectReason="none"
-            disabledReason={canDecide ? undefined : DENIED_REASON}
+            // C3b: an expired session answers with the SESSION reason, never
+            // the rights one — `signedOut` collapses `roles` to `[]` the same
+            // way a genuine viewer's do, and "Ask a publisher" would send the
+            // editor to a colleague instead of to sign-in.
+            disabledReason={decisionDisabledReason(signedOut, canDecide, DENIED_REASON)}
             approveLabel="Approve"
             rejectLabel="Reject"
           />
@@ -127,6 +151,11 @@ export function NeedsYouMenu({
   const index = useRequestsIndex(getToken);
   const overlay = useDecisionOverlay();
   const canDecide = canDecideRunPublish(roles);
+  // C3b: `useRequestsIndex` already pauses/resumes its own poll on this same
+  // signal (`requests-store.ts`, C3) — read here only for what that store
+  // cannot decide for us: whether the rows on screen are trustworthy enough
+  // to act on.
+  const signedOut = useAuthExpired();
 
   useEffect(() => {
     if (!open) return;
@@ -194,16 +223,25 @@ export function NeedsYouMenu({
             <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
               Needs you
             </p>
-            {waiting > 0 ? <Badge tone="info">{waiting} applying</Badge> : null}
+            {/* C3b: the same fact `RequestsWorkspace`'s banner states, sized
+                for a popover — this list is a snapshot from before sign-out. */}
+            {signedOut ? <Badge tone="neutral">Signed out</Badge> : waiting > 0 ? <Badge tone="info">{waiting} applying</Badge> : null}
           </div>
           {shown.length === 0 ? (
             <p className="px-3 py-4 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
               Nothing is waiting on you right now.
             </p>
           ) : (
-            <ul className="max-h-[60vh] overflow-y-auto">
+            <ul className={cn('max-h-[60vh] overflow-y-auto', signedOut ? 'opacity-50' : '')}>
               {shown.map((row) => (
-                <NeedsYouRow key={row.request_id} row={row} nowMs={nowMs} canDecide={canDecide} onDecide={onDecide} />
+                <NeedsYouRow
+                  key={row.request_id}
+                  row={row}
+                  nowMs={nowMs}
+                  canDecide={canDecide}
+                  signedOut={signedOut}
+                  onDecide={onDecide}
+                />
               ))}
             </ul>
           )}

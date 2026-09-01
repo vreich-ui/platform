@@ -13,11 +13,17 @@ import {
   NON_TERMINAL_REQUEST_STATUSES,
   projectIndexRow,
   rebuildIndex,
+  reconcileObject,
+  recordObject,
   recordProgress,
+  recordPublication,
   requeueRequest,
   REQUEST_ID_PATTERN,
   REQUEST_INDEX_KEY,
+  REQUEST_INDEX_SCHEMA_VERSION,
   requestDocKey,
+  requestIndexRowSchema,
+  requestIndexSchema,
   requestStatusSchema,
   editorialRequestSchema,
   setStatus,
@@ -192,6 +198,7 @@ describe('projectIndexRow', () => {
       'current_node',
       'kind',
       'object_id',
+      'object_published',
       'progress',
       'request_id',
       'status',
@@ -203,6 +210,10 @@ describe('projectIndexRow', () => {
     assert.equal(row.current_node, 'Drafting the article body');
     assert.equal(row.object_id, ID);
     assert.equal(row.archived, false);
+    // C1: an object with no publication evidence on it is NOT published, and
+    // has no live path — the row says so rather than leaving it unknown.
+    assert.equal(row.object_published, false);
+    assert.equal('live_path' in row, false);
   });
 
   it('emits only the required fields for the minimum doc', () => {
@@ -211,11 +222,15 @@ describe('projectIndexRow', () => {
       'archived',
       'created_by',
       'kind',
+      // C1: `object_published` is REQUIRED on a row — a doc with no object at
+      // all still answers the question, with `false`.
+      'object_published',
       'request_id',
       'status',
       'title',
       'updated_at',
     ]);
+    assert.equal(row.object_published, false);
   });
 
   it('picks the most recently attached chat and derives archived from status', () => {
@@ -230,6 +245,219 @@ describe('projectIndexRow', () => {
     const row = projectIndexRow(doc);
     assert.equal(row.chat_id, 'chat_new');
     assert.equal(row.archived, true);
+  });
+});
+
+// ─── C1: the row carries the object's publication truth ─────────────────────
+
+/**
+ * The bug C1 fixes: `rowActions` has read `object_published` since B1 and
+ * NOTHING ever supplied it, so a finished, published article always took the
+ * unpublished branch. These three prove the field is real, that it is only
+ * ever true with evidence behind it, and that adding it did not break the
+ * index blobs already in the store.
+ */
+describe('C1 — object_published and live_path on the index row', () => {
+  const publishedDoc = (object: EditorialRequest['object']): EditorialRequest => ({
+    ...MINIMUM_LEGAL_DOC,
+    status: 'done',
+    ...(object ? { object } : {}),
+  });
+
+  it('projects a confirmed go-live as published, with its path', () => {
+    const row = projectIndexRow(
+      publishedDoc({ object_type: 'content_item', object_id: ID, published: true, live_path: '/retinol-after-40' })
+    );
+    assert.equal(row.object_published, true);
+    assert.equal(row.live_path, '/retinol-after-40');
+  });
+
+  it('a published object with no confirmed URL is published WITHOUT a live path', () => {
+    const row = projectIndexRow(publishedDoc({ object_type: 'content_item', object_id: ID, published: true }));
+    assert.equal(row.object_published, true);
+    assert.equal('live_path' in row, false, 'a path the release never confirmed is not a live URL');
+  });
+
+  it('an object with no publication evidence is not published — never "probably" (guardrail 5)', () => {
+    assert.equal(projectIndexRow(publishedDoc({ object_type: 'content_item', object_id: ID })).object_published, false);
+    assert.equal(projectIndexRow(publishedDoc(undefined)).object_published, false);
+  });
+
+  it('round-trips a projected row through the row schema unchanged', () => {
+    for (const doc of [
+      FULL_DOC as EditorialRequest,
+      MINIMUM_LEGAL_DOC as EditorialRequest,
+      publishedDoc({ object_type: 'content_item', object_id: ID, published: true, live_path: '/retinol-after-40' }),
+    ]) {
+      const row = projectIndexRow(doc);
+      assert.deepEqual(requestIndexRowSchema.parse(JSON.parse(JSON.stringify(row))), row);
+    }
+  });
+
+  /**
+   * The migration, stated as a test. An index blob written before C1 has no
+   * `object_published` key at all; it must still PARSE, because `loadIndex`
+   * answering `undefined` would make the next `commitRequest` write a fresh
+   * index holding one row and silently drop every other request.
+   */
+  it('an index blob written before C1 still parses, and reads as not published', async () => {
+    const store = new FakeStore();
+    const legacyRow = {
+      request_id: ID,
+      kind: 'article',
+      title: 'Retinol after 40',
+      status: 'done',
+      created_by: 'editor@example.com',
+      updated_at: iso(0),
+      object_id: ID,
+      archived: false,
+    };
+    await store.setJSON(REQUEST_INDEX_KEY, {
+      schema_version: REQUEST_INDEX_SCHEMA_VERSION,
+      seq: 7,
+      updated_at: iso(0),
+      rows: [legacyRow],
+    });
+
+    const index = await loadIndex(store);
+    assert.ok(index, 'a pre-C1 index must not be thrown away — see commitRequest');
+    assert.equal(index.rows[0]?.object_published, false);
+    assert.equal(index.seq, 7, 'no rebuild, so no seq churn');
+    // …and the schema version did NOT have to move for that to hold.
+    assert.equal(REQUEST_INDEX_SCHEMA_VERSION, 'editorial-request-index.v1');
+    assert.equal(requestIndexSchema.safeParse(JSON.parse(store.map.get(REQUEST_INDEX_KEY)!)).success, true);
+  });
+});
+
+// ─── FIX 6: two doors on `doc.object`, and they cannot both be open ─────────
+
+/**
+ * `reconcileObject` (the read path, `admin-requests.ts`) documented itself as
+ * safe because `recordObject` "runs only while a request is still sweepable".
+ * That was a comment, not code: `recordObject` had no guard, and `sweepRequest`
+ * called it AFTER the write that made the doc `done` — so on the finishing pass
+ * both writers were live on the same doc with no compare-and-set beneath them,
+ * and a stale read in one could erase what the other had just recorded. The
+ * guards are now mutual, and this pins the partition.
+ */
+describe('FIX 6 — recordObject and reconcileObject own disjoint halves of the status space', () => {
+  const object = { object_type: 'content_item', object_id: ID };
+  /**
+   * Straight onto the blob: `cancelled`/`archived` have their own writers and
+   * `setStatus` refuses them by design, and this test is about the guards, not
+   * about how a status is reached.
+   */
+  const forceStatus = async (store: FakeStore, status: RequestStatus) => {
+    const doc = JSON.parse(store.map.get(requestDocKey(ID))!) as EditorialRequest;
+    await store.setJSON(requestDocKey(ID), { ...doc, status });
+  };
+
+  it('recordObject writes on every NON-terminal status and refuses every terminal one', async () => {
+    for (const status of NON_TERMINAL_REQUEST_STATUSES) {
+      const store = new FakeStore();
+      await seedWorkflowRequest(store);
+      if (status !== 'queued') await setStatus(store, ID, { status }, iso(1));
+      const doc = await recordObject(store, ID, object, iso(2));
+      assert.equal(doc?.object?.object_id, ID, status);
+    }
+    for (const status of TERMINAL_REQUEST_STATUSES) {
+      const store = new FakeStore();
+      await seedWorkflowRequest(store);
+      await forceStatus(store, status);
+      const writesBefore = store.writes.length;
+      assert.equal((await recordObject(store, ID, object, iso(3)))?.object, undefined, status);
+      assert.equal(store.writes.length, writesBefore, `${status}: and nothing was written`);
+    }
+  });
+
+  it('reconcileObject is the exact mirror — terminal only', async () => {
+    for (const status of NON_TERMINAL_REQUEST_STATUSES) {
+      const store = new FakeStore();
+      await seedWorkflowRequest(store);
+      if (status !== 'queued') await setStatus(store, ID, { status }, iso(1));
+      assert.equal((await reconcileObject(store, ID, object, iso(2)))?.object, undefined, status);
+    }
+    for (const status of TERMINAL_REQUEST_STATUSES) {
+      const store = new FakeStore();
+      await seedWorkflowRequest(store);
+      await forceStatus(store, status);
+      assert.equal((await reconcileObject(store, ID, object, iso(3)))?.object?.object_id, ID, status);
+    }
+  });
+
+  it('so no status admits both writers — the invariant the comment used to only assert', async () => {
+    for (const status of [...NON_TERMINAL_REQUEST_STATUSES, ...TERMINAL_REQUEST_STATUSES]) {
+      const store = new FakeStore();
+      await seedWorkflowRequest(store);
+      if (status !== 'queued') await forceStatus(store, status);
+      const viaRecord = (await recordObject(store, ID, object, iso(2)))?.object !== undefined;
+      const store2 = new FakeStore();
+      await seedWorkflowRequest(store2);
+      if (status !== 'queued') await forceStatus(store2, status);
+      const viaReconcile = (await reconcileObject(store2, ID, object, iso(2)))?.object !== undefined;
+      assert.notEqual(viaRecord, viaReconcile, `${status}: exactly one door is open`);
+    }
+  });
+});
+
+describe('C1 — recordPublication', () => {
+  // `createRequest`'s `object` input is never persisted (it has been a dead
+  // field since T19.1 — `recordObject` is the only writer), so the object is
+  // recorded the way the sweeper records it.
+  const seedDone = async (store: FakeStore) => {
+    await seedWorkflowRequest(store);
+    await recordObject(store, ID, { object_type: 'content_item', object_id: ID }, iso(1));
+    await setStatus(store, ID, { status: 'done' }, iso(2));
+  };
+
+  it('records the publish and the confirmed path, and reaches the index row', async () => {
+    const store = new FakeStore();
+    await seedDone(store);
+    await recordPublication(store, ID, { live_path: '/retinol-after-40' }, iso(2));
+
+    const doc = await loadRequest(store, ID);
+    assert.equal(doc?.object?.published, true);
+    assert.equal(doc?.object?.live_path, '/retinol-after-40');
+    const row = (await loadIndex(store))!.rows.find((entry) => entry.request_id === ID);
+    assert.equal(row?.object_published, true);
+    assert.equal(row?.live_path, '/retinol-after-40');
+  });
+
+  it('is idempotent: a second pass with nothing new writes nothing', async () => {
+    const store = new FakeStore();
+    await seedDone(store);
+    await recordPublication(store, ID, { live_path: '/retinol-after-40' }, iso(2));
+    const before = store.writes.length;
+    await recordPublication(store, ID, { live_path: '/retinol-after-40' }, iso(3));
+    await recordPublication(store, ID, {}, iso(4));
+    assert.equal(store.writes.length, before, 'the sweeper calls this every pass — it must not churn the blob');
+  });
+
+  it('upgrades a publish that later confirms its go-live', async () => {
+    const store = new FakeStore();
+    await seedDone(store);
+    await recordPublication(store, ID, {}, iso(2));
+    assert.equal((await loadRequest(store, ID))?.object?.published, true);
+    assert.equal((await loadRequest(store, ID))?.object?.live_path, undefined);
+    await recordPublication(store, ID, { live_path: '/retinol-after-40' }, iso(3));
+    assert.equal((await loadRequest(store, ID))?.object?.live_path, '/retinol-after-40');
+  });
+
+  it('never claims publication for an object that was never recorded', async () => {
+    const store = new FakeStore();
+    await createRequest(
+      store,
+      { request_id: ID_B, kind: 'article', title: 'No object', created_by: 'editor@example.com' },
+      iso(0)
+    );
+    const before = store.writes.length;
+    const doc = await recordPublication(store, ID_B, { live_path: '/nope' }, iso(1));
+    assert.equal(doc?.object, undefined);
+    assert.equal(store.writes.length, before);
+    // …and once an object IS recorded, the same call lands.
+    await recordObject(store, ID_B, { object_type: 'content_item', object_id: ID_B }, iso(2));
+    await recordPublication(store, ID_B, { live_path: '/nope' }, iso(3));
+    assert.equal((await loadRequest(store, ID_B))?.object?.published, true);
   });
 });
 

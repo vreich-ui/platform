@@ -37,6 +37,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 import { REQUEST_LIST_MAX_LIMIT } from './request-list-limits.js';
+import { isAuthExpired, subscribeAuthExpiry } from './auth-expiry.js';
 
 import {
   listRequestsIfChanged,
@@ -108,6 +109,11 @@ const hidden = (): boolean => typeof document !== 'undefined' && document.visibi
 function schedule(getToken: GetToken, myGeneration: number, baseMs: number): void {
   if (timer) clearTimeout(timer);
   timer = undefined;
+  // C3: a dead session is the strongest reason of all not to arm a timer —
+  // every tick would spend a request to be told again that we are signed out,
+  // and every answer would rewrite a snapshot nobody can trust. The auth
+  // subscription (`watchAuthRecovery`) restarts the chain on `cms:login`.
+  if (isAuthExpired()) return;
   const delay = pollIntervalWithBackoff(baseMs, hidden());
   if (delay === undefined) return; // hidden — the visibility handler re-arms this on return
   timer = setTimeout(() => void tick(getToken, myGeneration), delay);
@@ -115,6 +121,7 @@ function schedule(getToken: GetToken, myGeneration: number, baseMs: number): voi
 
 async function tick(getToken: GetToken, myGeneration: number): Promise<void> {
   if (myGeneration !== generation) return; // this chain was retired while the timer was pending
+  if (isAuthExpired()) return; // C3: paused, not retired — see `schedule` and `watchAuthRecovery`
   try {
     // W19 T19.2: ONE blob GET (the request index), capped generously enough
     // that the quick-filter tabs (all subsets of this same active set) stay
@@ -169,6 +176,10 @@ async function tick(getToken: GetToken, myGeneration: number): Promise<void> {
     schedule(getToken, myGeneration, requestPollIntervalFor(result.requests));
   } catch (err) {
     if (myGeneration !== generation) return;
+    // C3: an expired session is not a load error. The rows already published
+    // stay exactly as they are — the surface dims them and says why — and no
+    // retry is armed, because retrying is precisely what cannot help.
+    if (isAuthExpired()) return;
     setSnapshot({
       ...snapshot,
       error: err instanceof Error ? err.message : 'Could not load requests.',
@@ -208,8 +219,22 @@ export function refreshRequestsIndexNow(getToken: GetToken): void {
 
 /** Called by a subscriber's own `visibilitychange` listener; a no-op if a chain is already armed or nobody is subscribed. */
 export function resumeRequestsIndexPoll(getToken: GetToken): void {
-  if (subscriberCount === 0 || timer) return;
+  if (subscriberCount === 0 || timer || isAuthExpired()) return;
   void tick(getToken, generation);
+}
+
+/**
+ * C3 — restart the chain the moment the session comes back.
+ *
+ * Exported as a plain function, and used by `useRequestsIndex` below, so the
+ * recovery path is pinned by a test: this repo has no renderer in its test
+ * stack, and a recovery that only exists inside a `useEffect` body could not
+ * be proven to work at all.
+ */
+export function watchAuthRecovery(getToken: GetToken): () => void {
+  return subscribeAuthExpiry(() => {
+    if (!isAuthExpired()) resumeRequestsIndexPoll(getToken);
+  });
 }
 
 function subscribe(listener: () => void): () => void {
@@ -289,12 +314,14 @@ export function useRequestsIndex(getToken: GetToken): RequestsIndexState {
   );
   useEffect(() => {
     const stop = startRequestsIndexPoll(getToken);
+    const stopWatchingAuth = watchAuthRecovery(getToken);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') resumeRequestsIndexPoll(getToken);
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      stopWatchingAuth();
       stop();
     };
   }, [getToken]);

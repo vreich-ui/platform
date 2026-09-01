@@ -29,6 +29,22 @@ const shortSha = (sha: string): string => sha.slice(0, 7);
  * surface is served BY the site (each tenant is its own Netlify project), so
  * the page's own origin is the site's — no configuration to read.
  */
+/**
+ * FIX 5 — whether that URL may be rendered as a LINK.
+ *
+ * Only `state: 'live'` means the release confirmed production serves the
+ * article. `published_pending_release` means the export is committed with
+ * `[skip netlify]` and the deploy has not run, so the same path is a 404 —
+ * the card still SHOWS it (it is where the article will be, and the operator
+ * needs to read it), but as text with the reason, never as something to
+ * click. Same rule the row's `NO_LIVE_PATH` states for the inbox.
+ */
+export const liveUrlIsLinkable = (publication: PublicationView): boolean => publication.state === 'live';
+
+/** Why the URL above is not a link yet. */
+export const UNCONFIRMED_LIVE_URL_REASON =
+  'Not linked yet — the release has not confirmed production is serving this URL.';
+
 export const liveArticleUrl = (articlePath: string | undefined, origin: string | undefined): string | undefined => {
   if (!articlePath) return undefined;
   const path = articlePath.startsWith('/') ? articlePath : `/${articlePath}`;

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { liveArticleUrl, policyRecordLine, publicationCopy } from './publication-card.js';
+import { liveArticleUrl, liveUrlIsLinkable, policyRecordLine, publicationCopy } from './publication-card.js';
 
 describe('liveArticleUrl', () => {
   it('joins the article path to the site origin', () => {
@@ -77,6 +77,36 @@ describe('policyRecordLine', () => {
     assert.equal(
       policyRecordLine({ node_id: 'release_executor' }, undefined),
       'Proceeded autonomously — release_executor'
+    );
+  });
+});
+
+// ─── FIX 5: the URL is shown either way; it is a LINK only when live ────────
+
+/**
+ * D1 made the confirmed case a link and left the unconfirmed case linking a
+ * URL the platform itself reports as not served yet — `object-publish.ts`
+ * commits the export with `[skip netlify]`, so a `published_pending_release`
+ * path 404s until the release runs. Same bug as FIX 1, one surface along.
+ */
+describe('liveUrlIsLinkable — FIX 5', () => {
+  it('a confirmed go-live is a link', () => {
+    assert.equal(liveUrlIsLinkable({ state: 'live', article_path: '/retinol-after-40' }), true);
+  });
+
+  it('a publish awaiting release is NOT — the path is shown, with the reason, never clickable', () => {
+    assert.equal(liveUrlIsLinkable({ state: 'published_pending_release', article_path: '/retinol-after-40' }), false);
+    assert.equal(
+      liveUrlIsLinkable({ state: 'published_pending_release', release_reason: 'deploy_not_confirmed_after_max_attempts' }),
+      false
+    );
+  });
+
+  it('the two states the card can be in disagree about linkability — that is the whole point', () => {
+    const path = '/retinol-after-40';
+    assert.notEqual(
+      liveUrlIsLinkable({ state: 'live', article_path: path }),
+      liveUrlIsLinkable({ state: 'published_pending_release', article_path: path })
     );
   });
 });

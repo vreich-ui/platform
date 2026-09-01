@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  NO_LIVE_PATH,
   publishPolicyFromApproval,
   publishTargetFor,
   PUBLISH_BLOCKED_REASON,
@@ -47,11 +48,14 @@ const row = (overrides: Partial<RowActionRowLike> & { status: RowActionRowLike['
   archived: false,
   chat_id: 'chat_1',
   object_id: 'obj_1',
+  live_path: '/retinol-after-40',
   mine: true,
   ...overrides,
 });
 
 const READ_ONLY: RowActionId[] = ['open_chat', 'open_object'];
+/** The read-only set on a published `done` row, which also offers the live page. */
+const READ_ONLY_LIVE: RowActionId[] = [...READ_ONLY, 'view_live'];
 
 interface Scenario {
   name: string;
@@ -197,19 +201,22 @@ const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // C1: the branch that never ran before — nothing supplied `object_published`,
+    // so a live article always took the unpublished branch above.
     name: 'done, published',
     row: row({ status: 'done', object_published: true }),
     shape: [
       ['open_object', 'primary'],
+      ['view_live', 'primary'],
       ['open_chat', 'menu'],
       ['archive', 'menu'],
     ],
     enabled: {
-      viewer: READ_ONLY,
-      editor: READ_ONLY,
-      publisher: READ_ONLY,
-      admin: READ_ONLY,
-      owner: [...READ_ONLY, 'archive'],
+      viewer: READ_ONLY_LIVE,
+      editor: READ_ONLY_LIVE,
+      publisher: READ_ONLY_LIVE,
+      admin: READ_ONLY_LIVE,
+      owner: [...READ_ONLY_LIVE, 'archive'],
     },
   },
   {
@@ -476,6 +483,74 @@ describe('rowActions — the data, not the rights, can also block an action', ()
     assert.equal(label(true), 'Unmute');
   });
 });
+
+// ─── C1: the row knows whether its object is published ───────────────────────
+
+/**
+ * The three shapes a finished row can have, and what each offers. The inputs
+ * come from the index row now (`object_published`, `live_path`, projected from
+ * the run's own publish receipts in `server/lib/requests/store.ts`); before C1
+ * nothing supplied them, so every `done` row — published or not — rendered the
+ * unpublished branch, and a live article's Open object sat disabled with "No
+ * object attached".
+ */
+describe('C1 — a finished row, in its three states', () => {
+  const actionsFor = (over: Partial<RowActionRowLike>) =>
+    rowActions({ status: 'done', archived: false, chat_id: 'chat_1', ...over }, ROLES.owner);
+  const find = (over: Partial<RowActionRowLike>, id: RowActionId) =>
+    actionsFor(over).find((action) => action.id === id);
+
+  it('published, live: Open object and View live, both enabled, and no Publish', () => {
+    const over = { object_id: 'obj_1', object_published: true, live_path: '/retinol-after-40' };
+    assert.deepEqual(ids(actionsFor(over)), ['open_object', 'view_live', 'open_chat', 'archive']);
+    assert.equal(find(over, 'open_object')?.enabled, true);
+    assert.equal(find(over, 'view_live')?.enabled, true);
+    assert.equal(find(over, 'publish'), undefined, 'a published article is not owed a Publish');
+  });
+
+  it('published, go-live unconfirmed: View live stays, disabled, and says why (D3)', () => {
+    const over = { object_id: 'obj_1', object_published: true };
+    assert.deepEqual(ids(actionsFor(over)), ['open_object', 'view_live', 'open_chat', 'archive']);
+    assert.equal(find(over, 'open_object')?.enabled, true);
+    assert.equal(find(over, 'view_live')?.enabled, false);
+    assert.equal(find(over, 'view_live')?.reason, NO_LIVE_PATH);
+  });
+
+  it('unpublished: Publish is the primary and Open object still opens the record', () => {
+    const over = { object_id: 'obj_1', object_published: false };
+    assert.deepEqual(ids(actionsFor(over)), ['publish', 'open_object', 'open_chat', 'archive']);
+    assert.equal(find(over, 'publish')?.enabled, true);
+    assert.equal(find(over, 'open_object')?.enabled, true);
+    assert.equal(find(over, 'view_live'), undefined, 'nothing is live, so there is nothing to view');
+  });
+
+  it('no object at all: both stay visible, disabled, with the honest reason', () => {
+    const over = {};
+    assert.deepEqual(ids(actionsFor(over)), ['publish', 'open_object', 'open_chat', 'archive']);
+    for (const id of ['publish', 'open_object'] as const) {
+      assert.equal(find(over, id)?.enabled, false, id);
+      assert.equal(find(over, id)?.reason, 'No object is attached to this request yet.', id);
+    }
+  });
+
+  it('an unknown publication state is treated as unpublished, never as live', () => {
+    // Guardrail 5 at the row: a server deployed before C1 sends no
+    // `object_published`, and the honest read of "we cannot tell" is the
+    // branch that offers the action, not the one that claims the state.
+    assert.deepEqual(ids(actionsFor({ object_id: 'obj_1' })), ['publish', 'open_object', 'open_chat', 'archive']);
+  });
+
+  it('the publish gate is untouched by any of this: an editor still cannot publish', () => {
+    const publish = rowActions(
+      { status: 'done', archived: false, chat_id: 'chat_1', object_id: 'obj_1', object_published: false },
+      ROLES.editor,
+      { publishPolicy: 'auto' }
+    ).find((action) => action.id === 'publish');
+    assert.equal(publish?.enabled, false);
+    assert.equal(publish?.reason, 'Ask a publisher');
+  });
+});
+
 
 describe('rowActionRights — the ladder', () => {
   it('is additive: publish implies edit, owner implies publish', () => {

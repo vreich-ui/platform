@@ -35,10 +35,18 @@ import {
 } from '@core/lib/admin/chat-client';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
-import { createdObjectsFromEvents, groupChatEvents, requestProgressCopy, toolLabel } from '@core/lib/admin/chat-logic';
+import {
+  createdObjectsFromEvents,
+  groupChatEvents,
+  publishedObjectFromEvents,
+  requestProgressCopy,
+  toolLabel,
+} from '@core/lib/admin/chat-logic';
 import { DENIED_SEVERITY, classifyToolResult, type Severity } from '@core/lib/admin/activity-severity';
+import { objectWorkspaceHref } from '@core/lib/admin/request-logic';
 import { severityFromActivity } from '@core/lib/admin/severity';
 import {
+  currentNodeFromEvents,
   deriveLivenessChip,
   elapsedMsForChip,
   elapsedMsSince,
@@ -650,8 +658,16 @@ function RequestProgressLine({ event, isOwner }: { event: ChatEventView; isOwner
     <div className="flex flex-col gap-1 text-[length:var(--adm-text-xs)]">
       <div className="flex items-center gap-2 text-[var(--adm-text-muted)]">
         <SeverityIcon level={copy.level} size={14} title="" />
-        <span className="font-medium text-[var(--adm-text)]">{copy.label}</span>
-        {copy.progress ? <span className="tabular-nums">{copy.progress}</span> : null}
+        {copy.stepLine ? (
+          // E1: the current step, narrated in words — "Drafting — step 14 of
+          // 23" — in place of the generic status word + bare count.
+          <span className="font-medium text-[var(--adm-text)]">{copy.stepLine}</span>
+        ) : (
+          <>
+            <span className="font-medium text-[var(--adm-text)]">{copy.label}</span>
+            {copy.progress ? <span className="tabular-nums">{copy.progress}</span> : null}
+          </>
+        )}
       </div>
       {copy.failure ? (
         <p className="whitespace-pre-wrap pl-6 text-[var(--adm-danger-text)]">{copy.failure.text}</p>
@@ -698,6 +714,21 @@ function RequestProgressLine({ event, isOwner }: { event: ChatEventView; isOwner
  * is something in it worth opening (`receiptLine`, `chat-liveness.ts`, also
  * decides whether the failure text renders there at all: a `RequestActivity`
  * card mounted for the same request already states a failed run once).
+ *
+ * E2: the line itself now says what the run DID, not just that it finished —
+ * `receiptLine`'s `actions`, each a truthful clause plus a link to the thing
+ * that changed ("Created draft → open", "Published → open"), appended after
+ * the outcome word so a failed run that created something before dying still
+ * reads as failed. `created` is `createdObjectsFromEvents` (already computed
+ * below for the popover) fed straight through — no title, since nothing this
+ * run's event stream reliably carries one, and never guessed.
+ *
+ * E2b: `published` now has a source — `publishedObjectFromEvents` reading
+ * the stamp a successful publish leaves on its own `tool_result` event
+ * (`publishedObjectRef`, `server/lib/agent/loop.ts`). It proves PUBLISHED,
+ * not live: the export commit carries `[skip netlify]` and go-live is a
+ * separate release, so no `liveUrl` is passed and the clause links the
+ * object rather than a URL nothing here can prove serves anything yet.
  */
 function RunReceipt({
   outcome,
@@ -724,7 +755,18 @@ function RunReceipt({
   const undoTool = lastUndoableWriteTool(events, outcome.run_id);
   const prompt = undoTool ? undoPrompt(undoTool) : undefined;
   const created = createdObjectsFromEvents(events, outcome.run_id);
-  const decision = receiptLine({ outcome: outcome.outcome, chips: outcome.chips, message, hasRunCard });
+  // E2b: the object this run published, when it provably did. No `liveUrl` —
+  // see this component's header comment: published is proven here, live is
+  // not, and `receiptLine` words the clause accordingly.
+  const published = publishedObjectFromEvents(events, outcome.run_id);
+  const decision = receiptLine({
+    outcome: outcome.outcome,
+    chips: outcome.chips,
+    message,
+    hasRunCard,
+    created,
+    ...(published ? { published } : {}),
+  });
   const hasDetails =
     decision.visibleChips.length > 0 ||
     (decision.showFailureText && Boolean(message || providerDetail)) ||
@@ -740,6 +782,23 @@ function RunReceipt({
           <SeverityIcon level={info.severity} size={12} title="" />
         )}
         <span>{info.label}</span>
+        {/* E2: what this run PROVABLY changed, each already linking to the
+         *  thing that changed — `receiptLine`'s `actions`. Empty for a run
+         *  that read/edited but never created or (confirmedly) published
+         *  anything, which is today's plain line, unchanged. */}
+        {decision.actions.map((action) => (
+          // FIX 4: `action.key`, not the href — a create-then-publish run
+          // produces two clauses pointing at the SAME object.
+          <span key={action.key} className="flex shrink-0 items-center gap-1.5">
+            <span aria-hidden="true">·</span>
+            <a
+              href={action.href}
+              className="adm-focusable rounded text-[var(--adm-text-muted)] underline decoration-dotted underline-offset-2 hover:text-[var(--adm-text)]"
+            >
+              {action.label}
+            </a>
+          </span>
+        ))}
         {elapsed !== undefined ? <span className="tabular-nums">· {formatDuration(elapsed)}</span> : null}
         {hasDetails ? (
           <Popover
@@ -768,7 +827,8 @@ function RunReceipt({
                     {created.map((object) => (
                       <a
                         key={object.id}
-                        href={`/admin/content/${encodeURIComponent(object.id)}${object.type ? `?type=${encodeURIComponent(object.type)}` : ''}`}
+                        // FIX 7: the shared route helper.
+                        href={objectWorkspaceHref(object.id, object.type)}
                         className="adm-focusable rounded-full border border-[var(--adm-border)] px-2 py-0.5 text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
                       >
                         Open {object.id}
@@ -819,7 +879,11 @@ export function ChatStateChip({
   lastEventAtMs: number | undefined;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const chip = deriveLivenessChip(status, lastOutcome);
+  // E1: narrate the current step ("Drafting") instead of the generic
+  // "Working" when the sweeper has named a node this session recognises —
+  // see `currentNodeFromEvents`/`deriveLivenessChip`. Not a hook — safe to
+  // compute alongside `chip` above the ordering-sensitive early return.
+  const chip = deriveLivenessChip(status, lastOutcome, currentNodeFromEvents(events));
   const ticking = chip?.tier === 'working' || chip?.tier === 'waiting';
   useEffect(() => {
     if (!ticking) return;

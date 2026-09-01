@@ -168,18 +168,38 @@ export const buildAgentSystemPrompt = (doc: ChatDoc, run: ChatRun): string => {
 
 /** For creation tools, surface the created object's id + type on the
  *  tool_result EVENT so the UI can route to the new object's workspace. */
+const createdTypeFromArgs = (args: Record<string, unknown>): string | undefined =>
+  typeof args.object_type === 'string' ? args.object_type : undefined;
+const createdSectionType = (args: Record<string, unknown>): string | undefined =>
+  (args.target as { kind?: string } | undefined)?.kind === 'standalone' ? 'section' : undefined;
+
+/**
+ * E2c: keyed by BOTH registries' names for the same four tools. This map was
+ * legacy-only (`create_object` …) while runs default to the GENERATED
+ * registry, which names them `object_create` … (`CHAT_TOOL_ALIASES`,
+ * `mcp-tool-definitions.ts`) — so no `object_id` was stamped on a real run's
+ * `tool_result` and E2's "Created draft → open" clause never fired in
+ * production, the same way the "Published" clause did not before E2b. The
+ * pairs share one function each: the generated schemas name these arguments
+ * identically (`object_type`, `target.kind`) and both registries execute the
+ * same verb returning the same body, so there is nothing to translate — only
+ * the name to accept.
+ */
 const CREATION_TOOL_TYPES: Record<string, (args: Record<string, unknown>) => string | undefined> = {
-  create_object: (args) => (typeof args.object_type === 'string' ? args.object_type : undefined),
+  create_object: createdTypeFromArgs,
+  object_create: createdTypeFromArgs,
   create_variant: () => 'content_item',
+  object_create_variant: () => 'content_item',
   instantiate_template: () => 'page',
-  instantiate_section_template: (args) =>
-    (args.target as { kind?: string } | undefined)?.kind === 'standalone' ? 'section' : undefined,
+  object_instantiate_template: () => 'page',
+  instantiate_section_template: createdSectionType,
+  object_instantiate_section_template: createdSectionType,
 };
-const resultObjectRef = (
+export const resultObjectRef = (
   toolName: string,
   args: Record<string, unknown>,
   content: string
-): { object_id: string; object_type?: string } | undefined => {
+): { object_id: string; object_type: string } | undefined => {
   const typeOf = CREATION_TOOL_TYPES[toolName];
   if (!typeOf) return undefined;
   try {
@@ -187,7 +207,71 @@ const resultObjectRef = (
     const objectId = parsed.record?.object_id ?? parsed.object_id;
     if (!objectId) return undefined;
     const objectType = typeOf(args);
-    return { object_id: objectId, ...(objectType ? { object_type: objectType } : {}) };
+    /**
+     * FIX 3: no proven type, no stamp.
+     *
+     * The one resolver that can answer `undefined` is
+     * `instantiate_section_template` with a non-`standalone` target — and that
+     * call CREATES NOTHING: it patches an existing page, and the `object_id`
+     * in its result body is that PAGE's id (`object-verbs.ts`'s
+     * `instantiate_section` → the patch result). Stamping it made the chat
+     * receipt claim "Created draft" for an edit, and link the page id as a
+     * content_item. Both halves of that are a state the run did not reach.
+     */
+    if (!objectType) return undefined;
+    return { object_id: objectId, object_type: objectType };
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * E2b — the one fact a SUCCESSFUL publish proves, stamped on its own
+ * `tool_result` event so the chat receipt can link the object that was
+ * published (`publishedObjectFromEvents`, `lib/admin/chat-logic.ts`).
+ *
+ * Deliberately NOT a `CREATION_TOOL_TYPES` entry: those keys (`object_id`/
+ * `object_type`) mean "this tool CREATED this object" and are read that way
+ * downstream (`createdObjectsFromEvents` → "Created draft → open"), so
+ * routing a publish through them would relabel a publish as a creation.
+ * Publishing is not creation; own keys, own meaning.
+ *
+ * Deliberately NOT `discloseResult` either. That flag attaches the WHOLE
+ * result body to the persisted event, and a publish body carries the export
+ * receipt — git branch, commit/tree sha, and the export's file path inside
+ * the site repo (`server/lib/object-publish.ts`'s `buildReceipt`) — none of
+ * which belongs on an editor-facing surface (the run's own system prompt
+ * forbids exposing exactly that class of internal detail). Two ids, nothing
+ * else.
+ *
+ * Proof, not inference: the body must itself say `published: true` and carry
+ * a string `object_id`. Both callers already gate on `!is_error`, so a
+ * refused or half-completed publish (`validation_failed`, `lock_required`,
+ * `content_changed_during_publish`, `stamp_failed_export_committed` — all
+ * non-200) stamps nothing at all.
+ *
+ * Both registries' names: `publish` (tools.ts) and `object_publish`
+ * (generated-tools.ts) run the identical `publish_by_time` verb and return
+ * the identical body, so the receipt must not depend on which registry the
+ * run was wired against.
+ */
+const PUBLISH_TOOL_NAMES = new Set(['publish', 'object_publish']);
+
+export const publishedObjectRef = (
+  toolName: string,
+  content: string
+): { published_object_id: string; published_object_type?: string } | undefined => {
+  if (!PUBLISH_TOOL_NAMES.has(toolName)) return undefined;
+  try {
+    const parsed = JSON.parse(content) as { published?: unknown; object_id?: unknown; object_type?: unknown };
+    if (parsed.published !== true) return undefined;
+    if (typeof parsed.object_id !== 'string' || !parsed.object_id) return undefined;
+    return {
+      published_object_id: parsed.object_id,
+      ...(typeof parsed.object_type === 'string' && parsed.object_type
+        ? { published_object_type: parsed.object_type }
+        : {}),
+    };
   } catch {
     return undefined;
   }
@@ -224,17 +308,21 @@ const runChips = (doc: ChatDoc, run: ChatRun): string[] => {
     (event) => event.detail?.run_id === run.run_id || Date.parse(event.at) >= Date.parse(run.started_at)
   );
   const executed = runEvents.filter((event) => event.type === 'tool_result' && !event.detail?.is_error);
-  const byTool = (name: string) =>
-    executed.filter((event) => (event.detail?.tool as string | undefined) === name).length;
+  // E2c: name aliasing only — each chip counts a tool under BOTH registries'
+  // names for it (legacy `patch` / generated `object_patch`, …). The counts
+  // were legacy-keyed while runs default to the generated registry, so every
+  // chip read "no changes" no matter what the run did.
+  const byTool = (...names: string[]) =>
+    executed.filter((event) => names.includes(event.detail?.tool as string)).length;
   const created =
-    byTool('create_object') +
-    byTool('create_variant') +
-    byTool('instantiate_template') +
-    byTool('instantiate_section_template');
+    byTool('create_object', 'object_create') +
+    byTool('create_variant', 'object_create_variant') +
+    byTool('instantiate_template', 'object_instantiate_template') +
+    byTool('instantiate_section_template', 'object_instantiate_section_template');
   if (created > 0) chips.push(`created ${created} object${created === 1 ? '' : 's'}`);
-  const published = byTool('publish');
+  const published = byTool('publish', 'object_publish');
   if (published > 0) chips.push(`published ${published}`);
-  const patched = byTool('patch');
+  const patched = byTool('patch', 'object_patch');
   if (patched > 0) chips.push(`edited ${patched} time${patched === 1 ? '' : 's'}`);
   if (chips.length === 0) chips.push('no changes');
   return chips;
@@ -349,12 +437,14 @@ export const runAgentLoop = async (
             ...(result.is_error ? { is_error: true } : {}),
           });
           const created = result.is_error ? undefined : resultObjectRef(call.name, effectiveArgs, result.content);
+          const published = result.is_error ? undefined : publishedObjectRef(call.name, result.content);
           appendChatEvent(doc, now(deps), 'tool_result', {
             run_id: run.run_id,
             call_id: call.id,
             tool: call.name,
             is_error: result.is_error,
             ...(created ?? {}),
+            ...(published ?? {}),
             ...(approvedTool.discloseResult && !result.is_error ? { output: result.content } : {}),
             // Always on error, whatever the tool's disclosure policy: the
             // client cannot tell a held gate from a dead step without it.
@@ -534,12 +624,14 @@ export const runAgentLoop = async (
           ...(result.is_error ? { is_error: true } : {}),
         });
         const created = result.is_error ? undefined : resultObjectRef(call.name, call.args, result.content);
+        const published = result.is_error ? undefined : publishedObjectRef(call.name, result.content);
         appendChatEvent(doc, now(deps), 'tool_result', {
           run_id: run.run_id,
           call_id: call.id,
           tool: call.name,
           is_error: result.is_error,
           ...(created ?? {}),
+          ...(published ?? {}),
           // PF4: bounded orchestration output rides the event so the UI can
           // offer a collapsed raw-output disclosure.
           ...(tool.discloseResult && !result.is_error ? { output: result.content } : {}),

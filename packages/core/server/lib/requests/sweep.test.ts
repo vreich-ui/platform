@@ -17,8 +17,15 @@ import {
   loadIndex,
   loadRequest,
   mintSweepToken,
+  recordObject,
   type EditorialRequestStore,
 } from './store.js';
+import {
+  COMPACT_TAIL,
+  PUBLISH_OUTPUT_PENDING,
+  RELEASE_OUTPUT_EXECUTED,
+  RELEASE_OUTPUT_UNCONFIRMED,
+} from './publication-evidence.fixtures.js';
 import {
   SWEEPABLE_STATUSES,
   SWEEP_BATCH_MAX,
@@ -419,6 +426,37 @@ describe('the progress line', () => {
       'total',
     ]);
   });
+
+  /**
+   * FIX 2 — the run card's "Open draft" link was dead on both chat hosts for
+   * the whole run: `admin-agent-chat.ts` sends the request binding on the
+   * FIRST poll only and the client latches it, while `object_id` is not
+   * written until `article_body` completes. This event is already in flight on
+   * every transition, so the id rides it — no extra poll, no extra read.
+   */
+  it('FIX 2: carries the object id once the run has produced one, and never before', async () => {
+    const store = memoryStore();
+    const doc = await seed(store);
+    const derived = {
+      status: 'running' as const,
+      progress: { done: 12, total: 23, failed: 0, current_node: 'draft_writer' },
+      blockers: [],
+      nudgeable: false,
+    };
+    assert.equal(
+      'object_id' in progressDetail(doc, derived),
+      false,
+      'no object recorded yet is silence, never a guess at the id'
+    );
+
+    const withObject = await recordObject(
+      store,
+      doc.request_id,
+      { object_type: 'content_item', object_id: doc.request_id },
+      '2026-08-22T10:00:00.000Z'
+    );
+    assert.equal(progressDetail(withObject!, derived).object_id, doc.request_id);
+  });
 });
 
 // ─── regressions found by the W19 adversarial review ─────────────────────────
@@ -445,6 +483,121 @@ describe('a run the workflow itself ended', () => {
     // …and the row leaves the swept set, so the run is never polled again.
     const index = await loadIndex(store);
     assert.deepEqual(selectSweepable(index?.rows ?? []), []);
+  });
+});
+
+// ─── C1: publication truth reaches the row ───────────────────────────────────
+
+/**
+ * The evidence the sweep now carries onto the index row. It is the SAME
+ * evidence the run card reads (`publication-evidence.ts`) and the same two
+ * output reads the activity surfaces make (`publication-outputs.ts`) — nothing
+ * here re-derives a publication state of its own, and nothing infers one from
+ * `done`.
+ */
+describe('C1 — the run\u2019s publish receipts land on the index row', () => {
+  const nowIso = '2026-08-22T10:05:00.000Z';
+
+  /** The finished retinol run: 24/24, publish committed, release as given. */
+  const finishedRun = () => ({
+    runId: 'run_1',
+    status: 'completed',
+    updatedAt: nowIso,
+    nodes: [
+      { nodeId: 'article_body', status: 'completed' },
+      ...COMPACT_TAIL,
+    ],
+  });
+
+  const outputBridge = (outputs: Record<string, unknown>, reads: string[] = []): SweepBridge => ({
+    getRun: async () => ({ ok: true, data: finishedRun() as unknown as Record<string, unknown> }),
+    advance: async () => ({ ok: true, data: {} }),
+    callTool: async (_name, args) => {
+      const nodeId = String((args as { nodeId?: unknown }).nodeId ?? '');
+      reads.push(nodeId);
+      const value = outputs[nodeId];
+      return value === undefined ? { ok: false } : { ok: true, data: { output: { value } } as never };
+    },
+  });
+
+  const sweepOnce = async (bridge: SweepBridge) => {
+    const store = memoryStore();
+    await seed(store);
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    return store;
+  };
+
+  it('a confirmed go-live is published, with the live path the receipt names', async () => {
+    const store = await sweepOnce(
+      outputBridge({ publish_executor: PUBLISH_OUTPUT_PENDING, release_executor: RELEASE_OUTPUT_EXECUTED })
+    );
+    const row = (await loadIndex(store))!.rows.find((entry) => entry.request_id === REQUEST_ID);
+    assert.equal(row?.object_id, REQUEST_ID, 'the object the run produced');
+    assert.equal(row?.object_published, true);
+    assert.equal(row?.live_path, '/retinol-vs-bakuchiol-sensitive-skin');
+  });
+
+  it('a publish whose release never confirmed is published WITHOUT a live path', async () => {
+    const store = await sweepOnce(
+      outputBridge({ publish_executor: PUBLISH_OUTPUT_PENDING, release_executor: RELEASE_OUTPUT_UNCONFIRMED })
+    );
+    const row = (await loadIndex(store))!.rows.find((entry) => entry.request_id === REQUEST_ID);
+    assert.equal(row?.object_published, true);
+    assert.equal(row?.live_path, undefined, 'a path production has not confirmed is a link to a 404');
+  });
+
+  it('a run that never published claims nothing (guardrail 5)', async () => {
+    const store = memoryStore();
+    await seed(store);
+    const bridge: SweepBridge = {
+      getRun: async () => ({
+        ok: true,
+        data: {
+          runId: 'run_1',
+          status: 'completed',
+          updatedAt: nowIso,
+          nodes: [
+            { nodeId: 'article_body', status: 'completed' },
+            { nodeId: 'publish_executor', status: 'skipped' },
+          ],
+        },
+      }),
+      advance: async () => ({ ok: true, data: {} }),
+    };
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    const row = (await loadIndex(store))!.rows.find((entry) => entry.request_id === REQUEST_ID);
+    assert.equal(row?.object_published, false);
+    assert.equal(row?.live_path, undefined);
+  });
+
+  it('a bridge with no output reader still proves the publish, and never invents the URL', async () => {
+    const store = memoryStore();
+    await seed(store);
+    // No `callTool`: the compact warnings prove the publish committed and
+    // cannot prove a deploy was served.
+    const { bridge } = bridgeFor(finishedRun());
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    const row = (await loadIndex(store))!.rows.find((entry) => entry.request_id === REQUEST_ID);
+    assert.equal(row?.object_published, true);
+    assert.equal(row?.live_path, undefined);
+  });
+
+  it('reads the two executor outputs and nothing else, and not at all before the publish settles', async () => {
+    const reads: string[] = [];
+    await sweepOnce(outputBridge({ publish_executor: PUBLISH_OUTPUT_PENDING }, reads));
+    assert.deepEqual(reads.sort(), ['publish_executor', 'release_executor']);
+
+    // A run still working has no receipts to read, so the poll stays at its
+    // one bridge read.
+    const early: string[] = [];
+    const store = memoryStore();
+    await seed(store);
+    const bridge: SweepBridge = {
+      ...outputBridge({}, early),
+      getRun: async () => ({ ok: true, data: liveRun(nowIso) as unknown as Record<string, unknown> }),
+    };
+    await sweepRequest({ store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso }, REQUEST_ID);
+    assert.deepEqual(early, []);
   });
 });
 
@@ -618,6 +771,36 @@ describe('the article a run produced', () => {
     assert.deepEqual(doc?.object, { object_type: 'content_item', object_id: REQUEST_ID });
     const index = await loadIndex(store);
     assert.equal(index?.rows[0]?.object_id, REQUEST_ID, 'and the list row can link to it');
+  });
+
+  /**
+   * FIX 6 moved the object write in FRONT of the status transition, so the two
+   * writers of `doc.object` (this one and the read path's `reconcileObject`)
+   * genuinely cannot be live on the same doc. The pass on which a run FINISHES
+   * is where that reorder could have broken: `recordObject` refuses a terminal
+   * doc now, and the old order called it after the doc had just become `done`.
+   */
+  it('FIX 6: is still recorded on the very pass that finishes the run', async () => {
+    const store = memoryStore();
+    await seed(store);
+    const { bridge } = bridgeFor({
+      runId: 'run_1',
+      status: 'completed',
+      updatedAt: nowIso,
+      nodes: [
+        { nodeId: 'draft_writer', status: 'completed' },
+        { nodeId: 'article_body', status: 'completed' },
+      ],
+    });
+    const outcome = await sweepRequest(
+      { store, bridge, now: () => Date.parse(nowIso), nowIso: () => nowIso },
+      REQUEST_ID
+    );
+    assert.equal(outcome?.to, 'done', 'this pass is the one that ends the run');
+    const doc = await loadRequest(store, REQUEST_ID);
+    assert.equal(doc?.status, 'done');
+    assert.deepEqual(doc?.object, { object_type: 'content_item', object_id: REQUEST_ID });
+    assert.equal((await loadIndex(store))?.rows[0]?.object_id, REQUEST_ID, 'and the row carries it');
   });
 
   it('claims no object when the run says the shell was never created', async () => {

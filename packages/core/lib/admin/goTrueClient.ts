@@ -1,4 +1,5 @@
 import { getSiteIdentity } from '../site-identity.js';
+import { clearAuthExpired } from './auth-expiry.js';
 
 // W11 T11.5: browser-persisted keys derived from the site slug at CALL time
 // (lazy — the admin islands register the site identity provider before any
@@ -135,6 +136,10 @@ export const logout = async (): Promise<void> => {
   const user = currentUser();
   clearStorage();
   setKeepSignedIn(false);
+  // C3: a deliberate sign-out is not an expired session. Leaving the flag set
+  // would greet the NEXT person on this machine with "Session expired — sign
+  // in again" over a surface they never had a session on.
+  clearAuthExpired();
   // W-perf: the cached inventory rows (in-memory + sessionStorage) are keyed
   // by site slug only, not by user — clear them on sign-out so a shared
   // machine's next sign-in never paints the previous user's cached library
