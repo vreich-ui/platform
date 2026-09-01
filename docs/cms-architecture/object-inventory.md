@@ -198,7 +198,7 @@ contract 6/6, inventory 6/6, `released:true`; store === seed === export
 byte-verified (marker-stripped, record_version 11 ×6).
 
 | Object              | Serves                                | Status       | Notes                                                                                                                                        |
-| ------------------- | ------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------- | -------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `page_library`      | `/learn/library` (+ pagination)       | 🟢 CONVERTED | `listing`. Header lede ("Library" + blurb); title base + " — Page N" furniture.                                                              |
 | `page_topics_index` | `/learn/topics`                       | 🟢 CONVERTED | `listing`. Header lede (kicker "Education library"); topic cards stay computed from category frontmatter (D§5.5), og image in seo.           |
 | `page_topic_detail` | `/learn/topics/<slug>` (every topic)  | 🟢 CONVERTED | `listing`, per-term: heading `%term%`, kicker "Topic"; description pattern in seo.                                                           |
@@ -209,7 +209,7 @@ byte-verified (marker-stripped, record_version 11 ×6).
 ### Shared sections
 
 | Object                   | Used by                         | Status       | Notes                                                                                                                                                                                                              |
-| ------------------------ | ------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ------------------------ | -------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sec_newsletter_signup`  | `page_home` (via `shared_ref`)  | 🟢 CONVERTED | **All five criteria met 2026-07-10:** store-backed, every permitted op round-tripped in production, published, released.                                                                                           |
 | `sec_home_audience_grid` | `page_home` (via `shared_ref`)  | 🟢 CONVERTED | **New + converted 2026-07-10.** "This is for you if…" — `content_grid`, sanctioned `cards` source (curated text cells; replaced the bespoke `checklist` usage). Store-backed, round-tripped, published, released.  |
 | `sec_home_start_grid`    | `page_home` (via `shared_ref`)  | 🟢 CONVERTED | **New + converted 2026-07-10.** "Start here" — the SAME `content_grid` type, `query` source (latest posts): one reusable type, two roles by configuration alone. Store-backed, round-tripped, published, released. |
@@ -218,7 +218,7 @@ byte-verified (marker-stripped, record_version 11 ×6).
 | `sec_about_products`     | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `prose` — "Why Most Products Fall Short".                                                                                                                                                      |
 | `sec_about_science`      | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `prose` — "The Science Behind Real Results" (with list).                                                                                                                                       |
 | `sec_about_research`     | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `prose` — "From Research to Real Life" (with list).                                                                                                                                            |
-| `sec_about_blog`         | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `prose` — "Why This Blog Exists" (with list).                                                                                                                                                  |
+| `sec_about_blog`         | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `prose` — "Why This Blog Exists" (with list).                                                                                                                                                   |
 | `sec_about_note`         | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `prose` — "A Personal Note".                                                                                                                                                                   |
 | `sec_about_cta`          | `page_about` (via `shared_ref`) | 🟢 CONVERTED | **New 2026-07-10.** `cta_banner` — "Start With the Science" + the two closing actions.                                                                                                                             |
 
@@ -227,7 +227,7 @@ byte-verified (marker-stripped, record_version 11 ×6).
 **The only truly CONVERTED objects today** — store-backed and agent-editable via MCP.
 
 | Object            | Role                    | Status       | Notes                                                                                                                                                                                    |
-| ----------------- | ----------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ----------------- | ------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `nav_header`      | Site header             | 🟢 CONVERTED | Store-backed (record_version ~54), agent-editable — proven by real edits this project. Still carries a field-test description that a store-side `object_patch` + publish should restore. |
 | `nav_footer`      | Default footer          | 🟢 CONVERTED | Store-backed, agent-editable; rendered on every page without a footer override. Store review_state is `changes_requested` from an old review never resolved.                             |
 | `nav_footer_home` | Homepage footer variant | 🟢 CONVERTED | Store-backed, agent-editable; applied via `page_home.navigationOverrides.footer`.                                                                                                        |
@@ -304,7 +304,7 @@ at instantiation; never live-bound). All five playbook criteria hold per
 object — the application-verb production proofs ran 2026-07-15:
 
 | Object                  | Type               | Status       | Notes                                                                                                                                                                                |
-| ----------------------- | ------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ------------------------ | ------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stpl_hero_landing`     | `section_template` | 🟢 CONVERTED | Landing/campaign hero opener (`hero` blueprint). All 3 ops round-tripped in production; published, released.                                                                         |
 | `stpl_audience_grid`    | `section_template` | 🟢 CONVERTED | Curated text-cell grid — hand-written "who this is for" / feature cells (`content_grid`, `source.kind: cards`).                                                                      |
 | `stpl_related_articles` | `section_template` | 🟢 CONVERTED | Automatic further-reading strip (`content_grid`, `source.kind: related`, tag similarity, 3 tiles).                                                                                   |
@@ -383,7 +383,7 @@ object.** (The three MOCK products the pricing tiers reference stay at
 product exports regardless.)
 
 | Object              | Route                     | Status / composition                                                                                                                                                                              |
-| ------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `page_pricing`      | `/pricing`                | 🟢 CONVERTED — lede + `pricing_table` (tiers REFERENCE the three products; price/availability/CTA resolve from commerce data at build) + `steps` + faq + cta_banner. MOCK copy (Wolf 2026-07-12). |
 | `page_services`     | `/services`               | 🟢 CONVERTED — lede + `content_split` + `content_grid` cards (icon grid) + cta_banner. MOCK copy (Wolf 2026-07-12).                                                                               |
 | `page_shop_preview` | `/solutions/shop-preview` | 🟢 CONVERTED — REAL copy verbatim as one `content_split` (the bespoke shop-hero + scoped styles generalized into the component). Nav route-kind links unchanged.                                  |
@@ -441,7 +441,7 @@ review-required — the driver stops at `approval_required` by design; Wolf
 approves each product in /admin/objects, then the publish re-runs.**
 
 | Object                      | Serves                       | Status    | Notes                                                                                         |
-| --------------------------- | ---------------------------- | --------- | --------------------------------------------------------------------------------------------- |
+| ---------------------------- | ------------------------------ | --------- | ----------------------------------------------------------------------------------------------- |
 | `prod_barrier_repair_guide` | `/shop/barrier-repair-guide` | 🟣 SEEDED | MOCK fixed $19 download; placeholder stripe_test linkage + artifact ref (replace pre-launch). |
 | `prod_starter_checklist`    | `/shop/starter-checklist`    | 🟣 SEEDED | MOCK free lead magnet; claim path lands with S3 (buy box shows Coming soon).                  |
 | `prod_support_the_work`     | `/shop/support-the-work`     | 🟣 SEEDED | MOCK PWYW tip, fulfillment `none`; session path lands with S3.                                |
@@ -553,25 +553,47 @@ storage grant, `verify_agent_artifact` 5/5, published (commit `3cea365`),
 released, and verified live (`verify_article_images` verified:true
 deployReady:true; the PDF URL serves 200 from production).
 
-### 7. Object tracking & analytics (W13) — 🟡 BUILT, NOT CONVERTED (2026-07-20; T13.11 drive pending)
+### 7. Object tracking & analytics (W13) — 🟢 CONVERTED (T13.11/T20.3 credentialed production drive, 2026-09-01)
 
-The 2026-07-19 directive, now code-complete through T13.10: tracking as an
-attribute of every object + the `tracking_config` singleton (`trk_drlurie`)
+The 2026-07-19 directive, code-complete through T13.10 and driven to
+production 2026-09-01: tracking as an attribute of every object + the
+`tracking_config` singleton (`trk_drlurie`).
 
-- the own first-party event pipeline (the loader riding the `data-cms-*`
-  identity attributes → `/api/t` relay → `tracking_event.v1` → owner sink per
-  the `tracking-sink-reference/` kit; Blobs mirror + replay script) + the
-  consent runtime/banner (geo-adaptive per OQ-W13-1; GPC absolute) + all six
-  ad adapters behind config flags (disabled in-repo; GTM permanently OUT) +
-  the goal→conversion bridge + CSP Report-Only with the hosts-drift gate.
-  **SEED READY (T13.10):** `scripts/lib/tracking-config-seed-data.mjs` carries
-  the ratified `trk_drlurie` body; the roundtrip driver drills the singleton
-  (`set_tracking_config_fields`) and the ten-type `set_tracking`
-  set→mutate→unset — local rehearsal all-green, publish blocked at the
-  expected sandbox boundary. NO STORE RECORD YET — this row flips only when
-  the five criteria hold (the human-gated T13.11 drive: env vars per
-  OQ-W13-6, `--production --release`, live beacons verified). Plan:
-  [`12-object-tracking-and-analytics.md`](12-object-tracking-and-analytics.md).
+🟢 **`tracking_config` is CONVERTED (T13.11/T20.3, credentialed production
+drive 2026-09-01, drlurie)** — all five criteria: renders (loader + own
+adapter present in live production HTML, all pixels absent per the
+all-disabled baseline), store-backed (`object_inventory` returns
+`trk_drlurie` in production), round-trips (`set_tracking_config_fields`
+set → verify → inverse-restore proven against production, plus the
+`set_tracking` op proven set→verify→inverse on 9 of the ten other governed
+types via MCP — `section_template` and `editorial_voice` hit transient
+`object_list`/patch 502s and were left untouched, not converted-and-broken;
+re-verify those two separately), contract-complete
+(`object_contract('tracking_config')` advertised ≡ exercised), recorded
+(this row + the conversion-map mark + the state-of-play drive entry, same
+change). The own first-party event pipeline (the loader riding the
+`data-cms-*` identity attributes → `/api/t` relay → `tracking_event.v1` →
+owner sink per the `tracking-sink-reference/` kit; Blobs mirror + replay
+script) + the consent runtime/banner (geo-adaptive per OQ-W13-1; GPC
+absolute, id-upgrade block and `_dlid` lifecycle pinned by
+`tests/netlify/consent-runtime.test.ts`, 24/24 green) + all six ad adapters
+behind config flags (disabled in-repo; GTM permanently OUT) + the
+goal→conversion bridge + CSP Report-Only with the hosts-drift gate are all
+live in production. Seed `scripts/lib/tracking-config-seed-data.mjs` (T13.10).
+**Honest caveats, not rounded up:** the live stats delta under-counted
+(scroll_depth/nav_click/cta_click did not increment on the drive run,
+`section_impression` has never fired at all — consistent with the measured
+25.8% capture rate vs. server-side Netlify Analytics); `dims` `producer` and
+`node_strategy` are still 0 pending content that carries producer metadata;
+the money join (commerce_event ↔ tracking) is NOT YET EXERCISABLE — no
+product object or `buy_click` element exists on `/shop/` today. None of
+these block the five conversion criteria, but none are silently claimed
+clean either — full table in the 2026-09-01 state-of-play entry. **CSP
+promotion (was T21.4) is a deliberate non-goal of this drive** — see that
+same state-of-play entry for why (no `report-uri`/`report-to`, so the
+Report-Only soak collected no data; the Netlify Identity widget script also
+needs an allowlist entry before enforcing). Plan:
+[`12-object-tracking-and-analytics.md`](12-object-tracking-and-analytics.md).
 
 ### Not on the MVP path (noted so they aren't mistaken for gaps)
 
