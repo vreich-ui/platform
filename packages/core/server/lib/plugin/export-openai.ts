@@ -14,10 +14,35 @@
  * numbers, and the two rules that block a publish are not.
  */
 import { createZip, type ZipEntry } from './zip.js';
-import type { ManifestBundle } from './manifest-types.js';
+import type { ManifestBundle, PluginActorId } from './manifest-types.js';
 
 /** ChatGPT's hard cap on the Custom GPT instructions field. */
 export const GPT_INSTRUCTIONS_LIMIT = 8000;
+
+/**
+ * The canonical skill declares `plugin:openai-gpt`. The Agent shape needs the
+ * same text declaring `plugin:openai-agent` instead.
+ *
+ * A substitution rather than a second render, because the bundle stores the
+ * rendered skill and not the voice body it was rendered from — re-rendering
+ * would mean storing the whole voice a second time. The substitution is safe
+ * because it is EXACT and ASSERTED: an unchanged result, or any surviving
+ * occurrence of the old actor, throws rather than shipping a bundle that
+ * misattributes its own publishes.
+ */
+export const retargetActor = (text: string, from: PluginActorId, to: PluginActorId): string => {
+  const out = text.split(from).join(to);
+  if (out === text) {
+    throw new Error(`Actor retarget produced no change: "${from}" does not appear in the rendered skill.`);
+  }
+  // `plugin:openai-gpt` is not a prefix of `plugin:openai-agent`, so a clean
+  // substitution leaves nothing behind. Assert it anyway — a future actor id
+  // that IS a prefix would corrupt silently.
+  if (out.includes(from)) {
+    throw new Error(`Actor retarget left "${from}" in the output; the ids overlap and the substitution is unsafe.`);
+  }
+  return out;
+};
 
 export class GptInstructionsTooLongError extends Error {
   constructor(readonly length: number) {
@@ -37,7 +62,7 @@ const dial = (bundle: ManifestBundle, key: string): string => {
 const voiceIdFor = (bundle: ManifestBundle): string =>
   bundle.sources.voice_object_id ?? `voice_${bundle.connection.site_id.replace(/^site_/, '')}`;
 
-export const renderGptInstructions = (bundle: ManifestBundle): string => {
+export const renderGptInstructions = (bundle: ManifestBundle, actor: PluginActorId = 'plugin:openai-gpt'): string => {
   const c = bundle.connection;
   const text = `# ${c.tenant} publishing desk
 
@@ -77,7 +102,7 @@ End with a Sources block: the evidence behind each claim, with links. If a claim
 Show the draft. Iterate until the human says "publish".
 
 ## Publishing — this exact order
-Pick \`request_id\` = \`req_gpt_<topic>_<yyyymmdd>_<nn>\`. Pass \`agent_name:"plugin:openai"\` wherever it
+Pick \`request_id\` = \`req_gpt_<topic>_<yyyymmdd>_<nn>\`. Pass \`agent_name:"${actor}"\` wherever it
 is accepted.
 
 1. \`object_inventory\` — confirm the id and slug are unused.
@@ -94,7 +119,7 @@ is accepted.
    response. Split a long article across two or three patches. Past ~10 minutes, \`object_refresh_lock\`.
 7. \`object_validate {object_type, object_id}\` — must be clean.
 8. \`object_publish\` with
-   \`producer:{run_id:"plugin_openai_<request_id>", node_id:"plugin:openai", prompt_version:"${bundle.manifest_version}", model:"<your model>"}\`.
+   \`producer:{run_id:"${actor.replace(/:/g, '_')}_<request_id>", node_id:"${actor}", prompt_version:"${bundle.manifest_version}", model:"<your model>"}\`.
    This is a dark commit. **It is not live.** Keep \`commit_sha\` and \`production.article_path\`.
 9. \`object_checkin\` — release the lock before anything else.
 10. Ask: "Release now, or batch more articles first?" A release costs a build. On "release":
@@ -118,6 +143,10 @@ is accepted.
 - \`build_not_confirmed_live\` on a first release, and \`inconclusive\` from verify, are both normal —
   poll, do not retry the action.
 - Report honestly: published ≠ released ≠ verified. Always say which state you reached.
+- **One article at a time, or a handful.** A publication-wide job — re-voicing every article, a batch
+  refresh — is twenty-plus lock/patch/publish cycles with a confirmation on each, and it is fragile in
+  a chat. If asked for one, say so and hand off to the CMS-Agent publishing workflow rather than
+  starting. Offer a single article as a sample instead.
 `;
   return text;
 };
@@ -219,17 +248,155 @@ Manifest \`${bundle.manifest_version}\`, rendered ${bundle.rendered_at}.
 `;
 };
 
-/** W3.2 — the downloadable GPT configuration bundle. */
+/**
+ * The Agent Studio shape's operational layer. An Agent attaches the tenant
+ * `/mcp` DIRECTLY as an App, so it needs no Actions schema and no OAuth card —
+ * it needs the tenant skill and the operating rules that differ from a GPT's.
+ */
+const agentOperationalInstructions = (bundle: ManifestBundle): string => {
+  const c = bundle.connection;
+  return `# ${c.tenant} publishing agent — operating instructions
+
+Your editorial layer is the attached **skill** (\`skill/SKILL.md\`). It is the same text the Claude
+desk uses, retargeted to this surface. Follow it. These instructions cover only what differs here.
+
+## Your connection
+
+The tenant CMS is attached as an MCP App at \`${c.mcp_url}\`, authenticated as **you** over OAuth.
+There is no Actions façade in this shape and no schema to import.
+
+⚠️ **The charter is advisory here.** A Custom GPT reaching this tenant through the Actions façade is
+refused any tool outside the plugin charter. This surface has the whole tool list, so the skill's
+tool section describes the job rather than a boundary the server enforces. Stay inside it.
+
+⚠️ **Do not attach the PDF-Tool MCP app directly.** The tenant \`/mcp\` already bridges pdf-tool with
+server-side storage grants. A direct attachment exposes \`set_storage_grant\` to you for no benefit.
+
+## Attribution
+
+Pass \`agent_name: "plugin:openai-agent"\` wherever it is accepted, and on \`object_publish\` pass
+\`producer: {run_id:"plugin_openai-agent_<request_id>", node_id:"plugin:openai-agent",
+prompt_version:"${bundle.manifest_version}", model:"<your model>"}\`.
+
+That id is what separates your publishes from the Custom GPT's in the ledger. They are different
+surfaces with different guarantees; a publish that cannot say which one wrote it cannot answer why an
+article reads the way it does.
+
+## Bridge mode
+
+Content drafted elsewhere — another chat, a consulting GPT, a Gem — arrives here as pasted text. Take
+it, hold it to this publication's voice and ceiling exactly as if you had written it, and say plainly
+what you changed. A draft from outside gets no exemption from the house rules.
+
+## Long runs
+
+This surface suits multi-step work better than a Custom GPT does. It still does not suit
+publication-wide batches: twenty-plus lock/patch/publish cycles in one conversation is fragile
+whatever the surface. A batch belongs to the CMS-Agent publishing workflow. Say so and hand off.
+
+---
+Manifest \`${bundle.manifest_version}\`, rendered ${bundle.rendered_at}.
+`;
+};
+
+const agentAppCard = (bundle: ManifestBundle): string => {
+  const c = bundle.connection;
+  return `# Agent setup (operator)
+
+ChatGPT → Agents → this agent → Apps.
+
+| field | value |
+|---|---|
+| MCP server URL | \`${c.mcp_url}\` |
+| Auth | OAuth, as the human who will run it |
+| Approval | "Allow low-risk actions" is safe once reads are annotated (see below) |
+
+## Attach
+
+Add the tenant \`/mcp\` as an App. **Remove any direct PDF-Tool MCP app** — the tenant already
+bridges pdf-tool server-side with minted grants, and a direct attachment only exposes
+\`set_storage_grant\` to the model.
+
+## Editorial layer
+
+Attach \`skill/SKILL.md\` as the agent's skill, and paste \`operational-instructions.md\` into its
+instructions. The skill is the same text the Claude desk uses; the operational file covers what
+differs on this surface.
+
+## Read actions
+
+This tenant now annotates its tools with the MCP \`readOnlyHint\`, so a client can tell reads from
+writes. If the agent still reports "Read actions: none", it is holding a cached tool list — detach
+and re-attach the App to re-read it.
+
+## When authorization fails
+
+    ${c.mcp_auth_health_url}
+
+No auth needed. Reports \`accepted_audiences\` — a token minted through a host not in that list is
+refused permanently and looks exactly like a bad credential — and \`token_store_reachable\`.
+
+---
+Manifest \`${bundle.manifest_version}\`.
+`;
+};
+
+const shapeChooser = (bundle: ManifestBundle): string =>
+  `# ${bundle.connection.tenant} — OpenAI publishing, two shapes
+
+Both are supported. They are not alternatives; they suit different jobs.
+
+| | \`gpt/\` — Custom GPT | \`agent/\` — Agent Studio |
+|---|---|---|
+| Connection | Actions façade \`/api/plugin/*\` | tenant \`/mcp\` attached directly as an App |
+| Charter | **enforced** — a tool outside it is refused 403 | advisory only |
+| Distribution | share link / workspace / store; runs on the installer's own plan and credits | invite-only in the workspace; runs on the invitee's seat |
+| Composability | @-mentionable beside other GPTs — a consulting GPT drafts, this one publishes | bridge mode: paste content in from another chat |
+| Best for | distributed tenant-owner installs | power use, long multi-step runs |
+| Ledger actor | \`plugin:openai-gpt\` | \`plugin:openai-agent\` |
+
+**Before either:** the installer needs an identity on this tenant. Invite them as \`publisher\` or
+\`editor\` first — both shapes authenticate the human over OAuth, and an installer with no account can
+attach the tools and then fail every write.
+
+Start with \`gpt/actions-setup.md\` or \`agent/app-setup.md\`.
+
+---
+Manifest \`${bundle.manifest_version}\`, rendered ${bundle.rendered_at}.
+`;
+
+/**
+ * W3.2 + the 2026-09-01 two-shape ruling — ONE download carrying BOTH OpenAI
+ * shapes, because they are not alternatives: a Custom GPT distributes to tenant
+ * owners on their own plan and is charter-enforced through the façade, while an
+ * Agent Studio agent is invite-only, attaches `/mcp` directly, and suits long
+ * runs. Both are supported; neither is optional.
+ *
+ * The tenant-specific content is authored ONCE in the skill renderer. `gpt/`
+ * gets a projection of it under the 8k cap; `agent/` gets the skill itself,
+ * retargeted to its own actor id. There is no hand-maintained duplicate.
+ */
 export const buildGptConfigZip = (bundle: ManifestBundle): { filename: string; bytes: Buffer } => {
-  const instructions = renderGptInstructions(bundle);
+  const instructions = renderGptInstructions(bundle, 'plugin:openai-gpt');
   if (instructions.length > GPT_INSTRUCTIONS_LIMIT) throw new GptInstructionsTooLongError(instructions.length);
 
   const entries: ZipEntry[] = [
-    { path: 'instructions.md', content: instructions },
-    { path: 'actions-setup.md', content: actionsSetup(bundle) },
-    { path: 'knowledge/voice.md', content: knowledgeVoice(bundle) },
-    { path: 'knowledge/method.md', content: knowledgeMethod(bundle) },
-    { path: 'knowledge/publishing.md', content: knowledgePublishing(bundle) },
+    { path: 'README.md', content: shapeChooser(bundle) },
+
+    // Shape A — Custom GPT, through the Actions façade.
+    { path: 'gpt/instructions.md', content: instructions },
+    { path: 'gpt/actions-setup.md', content: actionsSetup(bundle) },
+    { path: 'gpt/knowledge/voice.md', content: knowledgeVoice(bundle) },
+    { path: 'gpt/knowledge/method.md', content: knowledgeMethod(bundle) },
+    { path: 'gpt/knowledge/publishing.md', content: knowledgePublishing(bundle) },
+
+    // Shape B — Agent Studio, tenant /mcp attached directly as an App.
+    { path: 'agent/operational-instructions.md', content: agentOperationalInstructions(bundle) },
+    { path: 'agent/app-setup.md', content: agentAppCard(bundle) },
+    {
+      path: 'agent/skill/SKILL.md',
+      content: retargetActor(bundle.skill_md, 'plugin:openai-gpt', 'plugin:openai-agent'),
+    },
   ];
-  return { filename: `${bundle.connection.tenant}-gpt-config.zip`, bytes: createZip(entries) };
+  return { filename: `${bundle.connection.tenant}-openai-config.zip`, bytes: createZip(entries) };
 };

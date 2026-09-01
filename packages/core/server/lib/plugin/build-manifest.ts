@@ -14,6 +14,7 @@ import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { activeApprovalPolicy } from '../../../lib/approval-policy.js';
 import { buildPluginTools, toolSurfaceDigest } from './build-tools.js';
 import { renderSkillMarkdown, type VoiceForSkill } from './render-skill.js';
+import { primaryActorFor } from './manifest-types.js';
 import type { ManifestBundle, ManifestConnection, PluginPlatform } from './manifest-types.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 
@@ -96,6 +97,10 @@ export const buildManifestBundle = (input: BuildManifestInput): ManifestBundle =
     siteId: identity.siteId,
     origin: input.origin,
     platform: input.platform,
+    // The canonical copy declares the platform's PRIMARY actor. The OpenAI
+    // agent shape re-points it at export time (export-openai.ts) — see
+    // `retargetActor` for why that substitution is safe and asserted.
+    actorId: primaryActorFor(input.platform),
     voice: input.voice?.body ?? null,
     aggressionCeiling: identity.aggressionCeiling,
     approvalPosture: approval.master,

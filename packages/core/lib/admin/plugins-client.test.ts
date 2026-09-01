@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   platformCards,
+  installerIdentityStep,
   ceilingRows,
   manifestStatus,
   hasUnpromotedDraft,
@@ -120,4 +121,28 @@ test('an unpromoted draft is only flagged when it differs from what is active', 
   assert.equal(hasUnpromotedDraft(state({ active: bundle('v1'), draft: bundle('v2') })), true);
   assert.equal(hasUnpromotedDraft(state({ draft: bundle('v1') })), true);
   assert.equal(hasUnpromotedDraft(state()), false);
+});
+
+test('identity is step one, before any platform — the invite is not a footnote', () => {
+  // Both OpenAI shapes and the Claude connector authenticate the human over
+  // OAuth. An installer with no tenant account attaches the tools fine and then
+  // fails every write, which reads as a broken connector.
+  assert.match(installerIdentityStep.detail, /fail every write/);
+  assert.deepEqual([...installerIdentityStep.roles], ['publisher', 'editor']);
+  assert.ok(installerIdentityStep.action.href.startsWith('/admin/'));
+});
+
+test('each card names the ledger actors its shapes declare', () => {
+  const byId = Object.fromEntries(platformCards(bundle('v1')).map((c) => [c.id, c]));
+  assert.deepEqual(byId.claude.actors, ['plugin:claude']);
+  // OpenAI ships two shapes; both must be separable in the ledger.
+  assert.deepEqual(byId.openai.actors, ['plugin:openai-gpt', 'plugin:openai-agent']);
+  assert.deepEqual(byId.gemini.actors, [], 'Gemini cannot publish, so it declares no actor');
+});
+
+test('the ChatGPT card explains that two shapes ship together', () => {
+  const openai = platformCards(bundle('v1')).find((c) => c.id === 'openai');
+  assert.match(String(openai?.downloadLabel), /both shapes/i);
+  assert.ok(openai?.steps.some((s) => /Agent Studio/i.test(s)));
+  assert.ok(openai?.steps.some((s) => /Remove any direct PDF-Tool app/i.test(s)));
 });

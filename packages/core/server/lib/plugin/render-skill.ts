@@ -39,6 +39,12 @@ export type RenderSkillInput = {
   siteId: string;
   origin: string;
   platform: 'claude' | 'openai' | 'gemini';
+  /**
+   * The actor id this rendered copy declares. Distinct from `platform` because
+   * OpenAI ships two operationally different shapes that must be separable in
+   * the ledger. Null for a surface that cannot publish (Gemini).
+   */
+  actorId: string | null;
   voice: VoiceForSkill | null;
   /** Optional only because the identity type allows it; an absent ceiling is rendered as a loud blocker. */
   aggressionCeiling: AggressionCeiling | undefined;
@@ -183,10 +189,14 @@ Rules at every stage:
 Pick \`request_id\` = \`req_plugin_<topic>_<yyyymmdd>_<nn>\` (lowercase snake, today's date). It is the
 workflow id, the artifact scope, the object id and the committed filename — get it right first.
 
-Pass \`agent_name: "plugin:${input.platform}"\` on every verb that accepts it, and on
+${
+  input.actorId
+    ? `Pass \`agent_name: "${input.actorId}"\` on every verb that accepts it, and on
 \`object_publish\` pass
-\`producer: {run_id:"plugin_${input.platform}_<request_id>", node_id:"plugin:${input.platform}", prompt_version:"${input.manifestVersion}", model:"<your model>"}\`.
-That is how this publish is attributed in the ledger.
+\`producer: {run_id:"${input.actorId.replace(/:/g, '_')}_<request_id>", node_id:"${input.actorId}", prompt_version:"${input.manifestVersion}", model:"<your model>"}\`.
+That is how this publish is attributed in the ledger.`
+    : 'This surface cannot publish, so there is no actor to declare.'
+}
 
 1. \`object_inventory {object_type:"content_item"}\` — confirm the id and slug are unused.
 2. \`object_validate {object_type:"content_item", body, requested_id}\` — dry run the candidate body.
@@ -247,6 +257,10 @@ That is how this publish is attributed in the ledger.
   split a long article across several patches — and treat a transport error as "unknown", never
   as "failed".
 - Report honestly: published ≠ released ≠ verified. Always say which state you reached.
+- **One article at a time, or a handful.** A publication-wide job — re-voicing every article, a
+  batch refresh — is twenty-plus lock/patch/publish cycles in one conversation, and it is fragile
+  whatever the surface. That work belongs to the CMS-Agent publishing workflow. If you are asked for
+  one, say so and hand off rather than starting; offer a single article as a sample instead.
 
 ## 7. Tools you may call
 

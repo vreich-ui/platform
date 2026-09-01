@@ -11,6 +11,7 @@ import {
   renderGptInstructions,
   GPT_INSTRUCTIONS_LIMIT,
   GptInstructionsTooLongError,
+  retargetActor,
 } from '../../packages/core/server/lib/plugin/export-openai.js';
 import { buildManifestBundle } from '../../packages/core/server/lib/plugin/build-manifest.js';
 import { visibleToolDefinitions } from '../../netlify/functions/mcp.js';
@@ -80,26 +81,76 @@ test('what stays in instructions is what breaks the run if it is wrong', () => {
   assert.ok(i.includes(bundle.manifest_version));
 });
 
-test('the bundle carries instructions, the setup card and three knowledge files', () => {
+test('one download carries BOTH OpenAI shapes — they are not alternatives', () => {
   const { filename, bytes } = buildGptConfigZip(bundle);
-  assert.equal(filename, `${bundle.connection.tenant}-gpt-config.zip`);
+  assert.equal(filename, `${bundle.connection.tenant}-openai-config.zip`);
   const { names, read } = readZip(bytes);
   assert.deepEqual([...names].sort(), [
-    'actions-setup.md',
-    'instructions.md',
-    'knowledge/method.md',
-    'knowledge/publishing.md',
-    'knowledge/voice.md',
+    'README.md',
+    'agent/app-setup.md',
+    'agent/operational-instructions.md',
+    'agent/skill/SKILL.md',
+    'gpt/actions-setup.md',
+    'gpt/instructions.md',
+    'gpt/knowledge/method.md',
+    'gpt/knowledge/publishing.md',
+    'gpt/knowledge/voice.md',
   ]);
-  // The knowledge files must actually carry the detail the instructions dropped.
-  assert.ok(read('knowledge/voice.md').includes('Dr. Lurie — evidence-led skin health'));
-  assert.ok(read('knowledge/voice.md').includes('miracle'));
-  assert.ok(read('knowledge/method.md').includes('ceiling, not a target'));
-  assert.ok(read('knowledge/publishing.md').includes('object_publish'));
+  // The knowledge files still carry the detail the instructions dropped.
+  assert.ok(read('gpt/knowledge/voice.md').includes('Dr. Lurie — evidence-led skin health'));
+  assert.ok(read('gpt/knowledge/voice.md').includes('miracle'));
+  assert.ok(read('gpt/knowledge/method.md').includes('ceiling, not a target'));
+  assert.ok(read('gpt/knowledge/publishing.md').includes('object_publish'));
+});
+
+test('the two shapes declare DIFFERENT ledger actors', () => {
+  const { read } = readZip(buildGptConfigZip(bundle).bytes);
+  const gpt = read('gpt/instructions.md');
+  const agentSkill = read('agent/skill/SKILL.md');
+  const agentOps = read('agent/operational-instructions.md');
+
+  assert.ok(gpt.includes('plugin:openai-gpt'), 'the GPT shape must declare plugin:openai-gpt');
+  assert.ok(!gpt.includes('plugin:openai-agent'), 'the GPT shape must not claim the agent actor');
+
+  assert.ok(agentSkill.includes('plugin:openai-agent'), 'the agent skill must declare plugin:openai-agent');
+  assert.ok(!agentSkill.includes('plugin:openai-gpt'), 'the retarget left the GPT actor in the agent skill');
+  assert.ok(agentOps.includes('plugin:openai-agent'));
+});
+
+test('retargetActor refuses to ship a silently-unchanged or half-substituted skill', () => {
+  assert.throws(() => retargetActor('no actor here', 'plugin:openai-gpt', 'plugin:openai-agent'), /produced no change/);
+  // A prefix overlap would corrupt silently; the guard catches it. The current
+  // actor ids do not overlap, so this exercises the guard through a cast — the
+  // point is that a FUTURE id which does overlap fails loudly instead.
+  const overlapping = retargetActor as unknown as (t: string, f: string, to: string) => string;
+  assert.throws(() => overlapping('plugin:claude and plugin:claude-x', 'plugin:claude', 'plugin:claude-x'), /overlap/);
+});
+
+test('the agent layer says its charter is advisory, unlike the façade', () => {
+  const ops = readZip(buildGptConfigZip(bundle).bytes).read('agent/operational-instructions.md');
+  assert.match(ops, /charter is advisory here/i);
+  assert.match(ops, /Do not attach the PDF-Tool MCP app directly/);
+  assert.match(ops, /set_storage_grant/);
+});
+
+test('the README makes the choice between shapes, and puts identity first', () => {
+  const readme = readZip(buildGptConfigZip(bundle).bytes).read('README.md');
+  assert.match(readme, /Both are supported/);
+  assert.ok(readme.includes('plugin:openai-gpt') && readme.includes('plugin:openai-agent'));
+  // C5: an installer with no tenant account attaches the tools and then fails
+  // every write — the invite has to come first.
+  assert.match(readme, /invite them as `publisher` or\n`editor` first|Invite them as `publisher` or/i);
+});
+
+test('both shapes carry the batch-handoff rule', () => {
+  const { read } = readZip(buildGptConfigZip(bundle).bytes);
+  for (const path of ['gpt/instructions.md', 'agent/skill/SKILL.md', 'agent/operational-instructions.md']) {
+    assert.match(read(path), /hand off|handed off/i, `${path} does not say to hand off a batch`);
+  }
 });
 
 test('the setup card names the import URL, the real OAuth endpoints and the empty scope', () => {
-  const card = readZip(buildGptConfigZip(bundle).bytes).read('actions-setup.md');
+  const card = readZip(buildGptConfigZip(bundle).bytes).read('gpt/actions-setup.md');
   assert.ok(card.includes('https://drluriescience.netlify.app/api/plugin/openapi.json'));
   assert.ok(card.includes('/oauth/authorize'));
   assert.ok(card.includes('/oauth/token'));
