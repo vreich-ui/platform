@@ -462,6 +462,17 @@ export type CreateRequestInput = {
   chat?: { chat_id: string; kind: RequestChatLink['kind'] };
   /** Present for workflow-backed requests; counters start at zero. */
   workflow?: { run_id: string; workflow_id: string; project_id: string; node_total?: number };
+  /**
+   * Present when the caller already minted the object before starting the
+   * job — plan D7's non-workflow creators (template instantiation, retheme,
+   * media jobs), once their id minting is designed. Persisted verbatim, never
+   * `published`: an object known at creation is not one known to be live, and
+   * leaving `published` unset is what keeps `projectIndexRow`'s
+   * `object_published` honest AND keeps the row a valid `objectBackfillCandidates`
+   * target until real evidence arrives. No caller supplies this yet —
+   * `run_workspace_workflow` always omits it, so the sweeper's `recordObject`
+   * still records every workflow-backed request's object exactly as before.
+   */
   object?: { object_type: string; object_id: string };
 };
 
@@ -504,6 +515,13 @@ export const createRequest = async (
           },
         }
       : {}),
+    // F1: honor the object a caller already minted, instead of accepting and
+    // dropping it. No `published` here (see the field's doc comment above).
+    // `recordObject` (the sweeper) already refuses to touch a doc that already
+    // has an object — both its own guard and its `!doc.object` call-site check
+    // in sweep.ts — so a creation-time object can never be clobbered by the
+    // sweeper's `content_item`/request-id guess; it simply never fires.
+    ...(input.object ? { object: { object_type: input.object.object_type, object_id: input.object.object_id } } : {}),
     chats: input.chat ? [{ chat_id: input.chat.chat_id, kind: input.chat.kind, attached_at: at }] : [],
     history: [],
   };

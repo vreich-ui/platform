@@ -121,6 +121,11 @@ const FULL_DOC = {
   ],
 } satisfies EditorialRequest;
 
+// Models `run_workspace_workflow`'s call to `register` — the one production
+// caller today, which never supplies `object` (F1's doc comment on
+// `CreateRequestInput`). No `object` here on purpose: the FIX 6 / recordObject
+// tests below need a doc that starts with none, so the writers under test are
+// what puts one there.
 const seedWorkflowRequest = (store: FakeStore, requestId = ID, at = iso(0)) =>
   createRequest(
     store,
@@ -137,7 +142,6 @@ const seedWorkflowRequest = (store: FakeStore, requestId = ID, at = iso(0)) =>
         project_id: 'proj_drlurie',
         node_total: 23,
       },
-      object: { object_type: 'content_item', object_id: requestId },
     },
     at
   );
@@ -329,6 +333,76 @@ describe('C1 — object_published and live_path on the index row', () => {
   });
 });
 
+describe('F1 — createRequest persists the object it accepts', () => {
+  it('creating with an object persists it, and the row reports object_published: false', async () => {
+    const store = new FakeStore();
+    await createRequest(
+      store,
+      { request_id: ID, kind: 'article', title: 'Retinol after 40', created_by: 'editor@example.com', object: { object_type: 'content_item', object_id: ID } },
+      iso(0)
+    );
+    const doc = (await loadRequest(store, ID))!;
+    assert.deepEqual(doc.object, { object_type: 'content_item', object_id: ID });
+    const row = projectIndexRow(doc);
+    assert.equal(row.object_id, ID);
+    assert.equal(row.object_published, false, 'known-at-creation is not the same as published (guardrail 5)');
+  });
+
+  it('creating without one leaves doc.object absent', async () => {
+    const store = new FakeStore();
+    await createRequest(
+      store,
+      { request_id: ID, kind: 'article', title: 'Retinol after 40', created_by: 'editor@example.com' },
+      iso(0)
+    );
+    assert.equal((await loadRequest(store, ID))?.object, undefined);
+  });
+
+  it('a doc created with an object is still a valid C2 backfill candidate once it goes done', async () => {
+    const store = new FakeStore();
+    await createRequest(
+      store,
+      { request_id: ID, kind: 'article', title: 'Retinol after 40', created_by: 'editor@example.com', object: { object_type: 'content_item', object_id: ID } },
+      iso(0)
+    );
+    await setStatus(store, ID, { status: 'done' }, iso(1));
+    const row = projectIndexRow((await loadRequest(store, ID))!);
+    // The exact predicate `objectBackfillCandidates` (admin-requests.ts) filters
+    // on: a finished row is worth a read while EITHER the object or its
+    // publication answer is still missing. `object_id` is here, so only the
+    // unset `published` keeps this row a candidate — proving requirement 2's
+    // claim that leaving `published` unset does double duty.
+    assert.equal(row.status, 'done');
+    assert.equal(row.object_id, ID);
+    assert.equal(row.object_published, false);
+    assert.ok(row.status === 'done' && (!row.object_id || !row.object_published), 'still a backfill candidate');
+  });
+
+  it('idempotent re-create is unchanged: an existing doc keeps its object even if the retry names a different one', async () => {
+    const store = new FakeStore();
+    await createRequest(
+      store,
+      { request_id: ID, kind: 'article', title: 'Retinol after 40', created_by: 'editor@example.com', object: { object_type: 'content_item', object_id: ID } },
+      iso(0)
+    );
+    const before = (await loadRequest(store, ID))!;
+    const writesBefore = store.writes.length;
+    const result = await createRequest(
+      store,
+      {
+        request_id: ID,
+        kind: 'article',
+        title: 'A DIFFERENT title',
+        created_by: 'someone@else.com',
+        object: { object_type: 'content_item', object_id: 'something_else' },
+      },
+      iso(1)
+    );
+    assert.deepEqual(result, before, 'a retried tool call must never clobber a live record, object included');
+    assert.equal(store.writes.length, writesBefore);
+  });
+});
+
 // ─── FIX 6: two doors on `doc.object`, and they cannot both be open ─────────
 
 /**
@@ -401,9 +475,10 @@ describe('FIX 6 — recordObject and reconcileObject own disjoint halves of the 
 });
 
 describe('C1 — recordPublication', () => {
-  // `createRequest`'s `object` input is never persisted (it has been a dead
-  // field since T19.1 — `recordObject` is the only writer), so the object is
-  // recorded the way the sweeper records it.
+  // `seedWorkflowRequest` models `run_workspace_workflow`, which never
+  // supplies `object` (F1's doc comment on `CreateRequestInput`) — so this
+  // still records the object the way the sweeper does, via `recordObject`,
+  // even though `createRequest` itself persists the field since F1.
   const seedDone = async (store: FakeStore) => {
     await seedWorkflowRequest(store);
     await recordObject(store, ID, { object_type: 'content_item', object_id: ID }, iso(1));
