@@ -18,6 +18,10 @@
 
 ---
 
+**Status: v2 proposed — 2026-07-22; two corrections landed 2026-08-31 (§4 media ordering, §8.5 attribution set) — both verified against the live tenant, not inferred.**
+
+**Original v2 header:**
+
 **Status: v2 proposed — 2026-07-22. Derived from code and docs in the `Dr-Lurie-Blog` repo (at PR #463) and the `CMS-Agent` repo. Every rule cites the enforcing code or the authoritative doc. Where this policy disagrees with an older doc in either repo, this policy names that doc stale and wins. v2 adds the operational layer (discovery map, locks/versions, error catalog, dedup/variants, taxonomy authoring, attribution, limits) so agents look answers up instead of burning tokens probing for them.**
 
 This is the policy an agent needs *beyond* the MCP tool contract: which pipeline to use, where its JSON goes, what shape the content must have, what the gates are, how to recover from every error class, what costs money, and which mechanisms are stale and must never be used.
@@ -86,18 +90,33 @@ Everything below is the **only** sanctioned publish path. The `save_json_blob_*`
 ```
 0. Pick request id            req_<flow>_<topic>_<yyyymmdd>_<nn>   (§11; never auto-generated)
 1. Reuse-first check          object_inventory / object_list — does the id or slug already exist? (§10.1)
-2. Produce media FIRST        grant → PDF-Tool job → verify        (§6; fail-closed: media failure ⇒ no publish attempt)
+2. object_validate            dry-run the candidate BODY (no object_id) before any write
 3. object_create              content_item, object_id = request id, pass agent_name (403 creation_restricted if policy blocks)
 4. object_checkout            take the lock (lease 900 s default; §9.1)
-5. object_patch               node upserts, taxonomy, seo, hero — media as PUBLIC paths only (§5.7 ops)
-6. object_validate            dry-run the exact candidate patch; fix every blocker before continuing
-7. object_publish             dark commit: '[skip netlify]', production.live:false — NO deploy
-8. (repeat 3–7 per article)   batch as many articles as the run intends
-9. release_to_production      ONCE for the whole batch — the only paid step (interim policy, §7)
-10. deploy_status {commit}    poll 10–15 s up to ~5 min until deployStatus:"ready" AND productionConfirmed:true
-11. verify_article_images     with {url, expectedImages:['/img/…'], expectedDocuments:['/pdf/…'], commit} — PDFs are asserted as <a href>/<object data> + content-type application/pdf
-12. object_checkin            release the lock
+5. Produce media              PDF-Tool job → verify   (§6; the request id must already exist — see the note below)
+6. object_patch               node upserts, taxonomy, seo, hero — media as PUBLIC paths only (§5.7 ops)
+7. object_validate            dry-run the exact candidate patch; fix every blocker before continuing
+8. object_publish             dark commit: '[skip netlify]', production.live:false — NO deploy
+9. (repeat 3–8 per article)   batch as many articles as the run intends
+10. object_checkin            release the lock
+11. release_to_production     ONCE for the whole batch — the only paid step (interim policy, §7)
+12. deploy_status {commit}    poll 10–15 s up to ~5 min until deployStatus:"ready" AND productionConfirmed:true
+13. verify_article_images     with {url, expectedImages:['/img/…'], expectedDocuments:['/pdf/…'], commit} — PDFs are asserted as <a href>/<object data> + content-type application/pdf
 ```
+
+**Media cannot precede `object_create` — corrected 2026-08-31.** Until this date step 2 of this
+sequence read "Produce media FIRST", contradicting §6.1's own "existing content-item `request_id`".
+`create_agent_artifact_job` is scoped to an article that already exists and refuses outright:
+`Artifact request mapping is absent: content_item <id> does not exist on <site>. Create or select
+the owning content object before requesting artifacts.` Verified against the live drlurie tenant in
+the W2 plugin acceptance run (`docs/plugin/w2-acceptance-2026-08-31.md`), where an agent following
+the old order died on its first tool call. **Fail-closed is unchanged and is not an ordering rule:**
+it means no publish without the media the article promises (§6.1 step 5), not that media is produced
+first. Any doc or skill still ordering media before the create is stale against this line.
+
+`object_checkin` moved ahead of `release_to_production` for the same reason it appears late in the
+tool contract: publish deliberately KEEPS the lock, and holding it across a batch release locks the
+article to everyone else for the rest of the lease.
 
 Enforcement anchors: dark-commit marker `NETLIFY_SKIP_MARKER = '[skip netlify]'` (`object-publish.ts:81`); single build trigger (`production-release.ts:119,158`); batch-release discipline stated in the tool contract itself (`mcp.ts:1108–1137`) and `cms-agent-contract-alignment.md:117`.
 
@@ -189,6 +208,7 @@ One routing note that has wasted probes before: `object_patch` **does** edit con
 
 ### 6.1 Production (fail-closed, server-bridged)
 
+0. **The content_item must already exist.** The artifact job is scoped to the request id and is refused when no such article exists on the site (see the correction note in §4). Create the article first, then ask for its media.
 1. Call Platform `create_agent_artifact_job` with the owning `site_id` and existing content-item `request_id`; Platform resolves the canonical PDF-Tool project and injects the grant server-side. The raw grant RPC is removed, so grants and tokens never enter agent context (`docs/agents/pdf-tool-storage-grant.md`).
 2. Poll Platform `get_agent_artifact_job_status` without recreating the job. Request `requirements.image.outputFormat:'webp'` and `requirements.maxBytes` within budget (may lower the cap, never raise it).
 3. Image formats: **JPEG/PNG/WebP only** (server-decoded by sharp; GIF/AVIF/SVG rejected — `image-validation.ts:19`). Budget: committed defaults `maxImageBytes` 153,600 (~150 KB), `preferredImageFormat` webp, over-budget **warns** (`src/config/media-policy.ts`) — read the live values from `object_contract.media_policy`, and treat the warning as a defect to fix, not noise.
@@ -240,7 +260,20 @@ Strict schema; slug collisions block; raw blobKeys in renderable fields block; r
 Taxonomy: `body.taxonomy.category`/`tags[]` must resolve to **active** terms in `tax_drlurie` (by slug or `term_id`, `merged_into` aliases followed; unknown terms block — `object-validate.ts:394–418`; publish-side `taxonomy-enforcement.ts:70–119`). **When a term doesn't resolve, the sanctioned agent move is: prefer an existing term; otherwise extend the registry yourself** — `tax_drlurie` is a curated *agent-editable* vocabulary (`AGENTS.md:27`; creation policy `open`): `object_checkout` the taxonomy object and `object_patch` with `add_term {kind: 'category'|'tag', term {slug, label, description?}}` (`term_id` minted from the slug). Registry rules (`object-validate.ts:877–957`): term ids `t_[a-z0-9]+`, slugs kebab-case and unique per kind, `merged_into` must point at an existing active in-kind term with no cycles, deprecating a term in live use requires `merged_into`, slug renames auto-mint a deprecated alias. Do not remove terms to "clean up" — deprecate with a merge target.
 
 ### 8.5 Attribution — always pass `agent_name` where it exists
-The object store records a self-declared principal: `agent_name` trimmed; empty/absent → **`'unattributed-agent'`** (`object-store.ts:71–74`). The MCP forwards `agent_name` **only on the create-family verbs** (`object_create`, `object_create_variant`, `object_instantiate_template`, `object_instantiate_section_template`, `site_apply_theme`, `product_set_price`, `order_reissue` — `mcp.ts:1356,1438,4056–4097`); other verbs (patch/checkout/publish/…) do not carry it and their history lands unattributed by design today. Policy: **always pass a stable `agent_name` on every verb that accepts it.** It is attribution, not authentication (a coordination seam until per-agent credentials — OQ-3); never treat it as a security control.
+The object store records a self-declared principal: `agent_name` trimmed; empty/absent → **`'unattributed-agent'`** (`object-store.ts:79–80`).
+
+**Which verbs carry it (current as of 2026-08-31).** The forwarding set is `CMS_AGENT_NAME_ATTRIBUTION_TOOLS` in `mcp.ts` — the one place a verified per-agent token overrides a self-declared name:
+
+- **Carries `agent_name`:** `object_create`, `object_create_variant`, `object_instantiate_template`, `object_instantiate_section_template`, `site_apply_theme`, `product_set_price`, `order_reissue`, `object_checkout`, `object_refresh_lock`, `object_checkin`, `object_patch`, `object_publish`.
+- **Does not:** `object_validate` (a read), `object_submit_review`, `object_review_decide`, `object_discard`, `object_retire`, `release_to_production`.
+
+Two corrections to what this section said before. The lock verbs (`checkout`/`refresh_lock`/`checkin`) gained it in the 2026-08-28 lock-owner attribution fix — before that every agent checkout recorded `unattributed-agent` as the lock owner. `object_patch` and `object_publish` gained it in W1.0 (2026-08-31, publishing-plugin plan): they previously carried no attribution at all, so a chat-app plugin's patch and publish landed unattributed and the ledger could not answer "who published this" for the one actor class that is not the autonomous engine.
+
+**A deployed schema is not a reachable one.** A remote MCP client caches tool schemas; the W2 acceptance run found `object_patch` still advertised without `agent_name` (and `additionalProperties:false`, so the argument could not be sent) after the change was live. Refreshing a connector's tool *list* does not necessarily re-read changed schemas on existing tools. Before relying on attribution from a client, confirm the client can actually send the field.
+
+**`producer` is the publish-time seam that does not depend on any of this.** `object_publish {producer:{run_id,node_id,prompt_version,model}}` is recorded in publish history and the derived export, and it is the right place to stamp a prompt/skill version.
+
+Policy: **always pass a stable `agent_name` on every verb that accepts it.** It is attribution, not authentication (a coordination seam until per-agent credentials — OQ-3); never treat it as a security control.
 
 ### 8.6 Review verbs (dormant for content_item — documented for when policy flips)
 `object_submit_review {object_type, object_id, lock_token (required), note?, requested_publish_action?}` — needs a held lock; sets `review_state:'open'`. `object_review_decide {object_type, object_id, decision:'approve'|'request_changes', note?, publish_action?, approval_pin {request_id, artifact_set[], release_build}}` — no lock needed; an agent principal may decide over the publish key, while a human decider needs the review role (403 `review_role_required` otherwise — `review-state.ts:186–238`). Review writes bump `version`, never `content_revision`. States: `none | open | changes_requested | approved_stale | approved_current`.
