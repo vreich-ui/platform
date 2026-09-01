@@ -94,12 +94,59 @@ The mitigation today is that the plugin is human-driven: the editor is the gate.
 this ever loosens, is server-side ceiling enforcement in `object_validate` so every hand-authored
 path is clamped regardless of actor.
 
+## 4a. OpenAI ships in two shapes (ruling, 2026-09-01)
+
+W0.3 closed by capturing the live publisher: it is a **ChatGPT Agent (Agent Studio)**, not a classic
+Custom GPT, attaching the tenant `/mcp` directly as an App. Both shapes are now supported; neither is
+optional.
+
+| | Custom GPT | Agent Studio |
+|---|---|---|
+| Connection | Actions façade `/api/plugin/*` | tenant `/mcp` attached directly as an App |
+| Tenant layer | instructions (≤8k) + knowledge files | operational instructions + the skill zip |
+| Charter | **enforced** — 403 outside it | advisory only |
+| Distribution | share link / workspace / store; runs on the installer's own plan and credits | invite-only; runs on the invitee's seat |
+| Composability | @-mentionable beside other GPTs | bridge mode: paste content in |
+| Ledger actor | `plugin:openai-gpt` | `plugin:openai-agent` |
+
+One export (`?export=gpt`) carries both, as `gpt/` and `agent/`. The tenant-specific content is
+authored ONCE in the skill renderer: `gpt/` gets a projection under the 8k cap, `agent/` gets the
+skill itself retargeted to its own actor. There is no hand-maintained duplicate.
+
+**The actor ids are the point.** Two surfaces with different enforcement guarantees must be separable
+in publish history, or the ledger cannot answer why one article reads differently from another.
+
+**The installer is the install unit.** Both shapes authenticate the human over OAuth. Installing for
+a tenant owner means `member_invite` with `publisher` or `editor` FIRST — an installer with no
+account attaches the tools successfully and then fails every write, which reads as a broken
+connector. The admin page makes this step one.
+
+## 4b. What the chat plane is not for
+
+A publication-wide job — re-voicing every article, a batch refresh — is twenty-plus
+lock/patch/publish cycles with a per-tool confirmation on each, in one conversation. That is fragile
+on every surface, and it is not what this plane is for.
+
+- **Chat plane** (this plugin): one article, or a handful.
+- **CMS-Agent publishing workflow**: publication-wide batches.
+
+The skill and both OpenAI shapes carry this rule and are instructed to hand off rather than start,
+offering a single article as a sample instead.
+
 ## 5. Attribution
 
 `agent_name` reaches create, the lock verbs, and — since W1.0 — `object_patch` and `object_publish`.
 `object_publish` additionally carries `producer {run_id, node_id, prompt_version, model}`, recorded
 in publish history; `prompt_version` is the `manifest_version`, so a published article points at the
 exact skill revision that wrote it.
+
+**Tool annotations (2026-09-01).** `tools/list` now emits MCP `annotations` derived from
+`governance.toolClass` — `readOnlyHint` for reads, `destructiveHint` only for the tools that really
+remove or overwrite, `idempotentHint` only where an `idempotency_key` is actually implemented, and
+`openWorldHint` for the tools that reach outside the tenant. This was found by capture: the live
+Agent reported **"Read actions: none"** and confirmed every `object_get`. The same change stops
+`tools/list` leaking the internal `governance` field into a protocol response. A client holding a
+cached tool list needs re-attaching to see it.
 
 ⚠️ **A deployed schema is not a reachable one.** A remote MCP client caches tool schemas. The W2
 acceptance run found `object_patch` still advertised without `agent_name` after the change was live,

@@ -27,6 +27,29 @@ export const pluginPlatforms = ['claude', 'openai', 'gemini'] as const;
 export type PluginPlatform = (typeof pluginPlatforms)[number];
 
 /**
+ * The ACTOR id a running plugin declares — `agent_name` on the verbs that take
+ * it, and `producer.node_id` on publish. Finer-grained than the platform,
+ * because OpenAI ships in two shapes that are operationally different and must
+ * be distinguishable in the ledger (Wolf, 2026-09-01):
+ *
+ *   plugin:openai-gpt     a Custom GPT reaching the tenant through the W3
+ *                         Actions façade — charter-enforced, installs on the
+ *                         installer's own plan, @-mentionable beside other GPTs
+ *   plugin:openai-agent   an Agent Studio agent with the tenant `/mcp`
+ *                         attached directly as an App — advisory charter only,
+ *                         invite-only, better for long multi-step runs
+ *
+ * A publish that cannot say which of those wrote it cannot answer "why does
+ * this article read differently", which is the whole point of attribution.
+ */
+export const pluginActors = ['plugin:claude', 'plugin:openai-gpt', 'plugin:openai-agent'] as const;
+export type PluginActorId = (typeof pluginActors)[number];
+
+/** The actor a platform's primary shape declares. */
+export const primaryActorFor = (platform: PluginPlatform): PluginActorId | null =>
+  platform === 'claude' ? 'plugin:claude' : platform === 'openai' ? 'plugin:openai-gpt' : null;
+
+/**
  * The chat risk class a tool carries in its own definition
  * (`ToolGovernance.toolClass`). W1.3 derives the plugin's allowlist from this
  * rather than hand-maintaining one — see build-tools.ts.

@@ -85,6 +85,8 @@ export const promotePluginDraft = (getToken: GetToken) =>
 export interface PlatformCard {
   id: PluginPlatformId;
   title: string;
+  /** Ledger actor(s) this platform's shapes declare. Empty when it cannot publish. */
+  actors: string[];
   /** What the operator downloads, or null when this platform has no artifact. */
   downloadUrl: string | null;
   downloadLabel: string;
@@ -99,6 +101,23 @@ export interface PlatformCard {
 const exportUrl = (kind: string) => `${ENDPOINT}?export=${kind}`;
 
 /**
+ * The step that comes before every platform, on every install.
+ *
+ * Both OpenAI shapes and the Claude connector authenticate the HUMAN to this
+ * tenant over OAuth (Netlify Identity). An installer with no account on the
+ * tenant can attach the tools successfully and then fail every single write —
+ * a failure that looks like a broken connector and is actually a missing
+ * invitation. So the invite is step one of the card, not a footnote under it.
+ */
+export const installerIdentityStep = {
+  title: 'Invite the installer first',
+  detail:
+    'Every shape authenticates the person to this tenant over OAuth. Invite them as publisher or editor before sending the bundle — an installer with no account here can attach the tools and then fail every write.',
+  action: { label: 'Invite a member', href: '/admin/settings/admins' },
+  roles: ['publisher', 'editor'] as const,
+};
+
+/**
  * The three platform cards. Built from the ACTIVE bundle's connection so the
  * URLs an operator copies are the ones the tenant actually serves — never
  * typed by hand into the page (that is how the legacy GPT ended up with an
@@ -111,6 +130,7 @@ export const platformCards = (active: ManifestBundleView | null): PlatformCard[]
     {
       id: 'claude',
       title: 'Claude',
+      actors: ['plugin:claude'],
       downloadUrl: active ? exportUrl('plugin') : null,
       downloadLabel: 'Download .plugin',
       copyUrl: active ? mcpUrl : null,
@@ -126,21 +146,23 @@ export const platformCards = (active: ManifestBundleView | null): PlatformCard[]
     {
       id: 'openai',
       title: 'ChatGPT',
+      actors: ['plugin:openai-gpt', 'plugin:openai-agent'],
       downloadUrl: active ? exportUrl('gpt') : null,
-      downloadLabel: 'Download GPT config',
+      downloadLabel: 'Download OpenAI config (both shapes)',
       copyUrl: active ? `${origin}/api/plugin/openapi.json` : null,
       copyLabel: 'Actions schema URL',
       steps: [
-        'Paste instructions.md into GPT Builder → Instructions.',
-        'Upload the three knowledge/*.md files to Knowledge.',
-        'Actions → Import from URL, using the schema URL above.',
-        'OAuth: register a client once, then paste the id and secret. Leave the scope EMPTY.',
+        'Two shapes ship together — read the bundle README first. Custom GPT (charter-enforced through the Actions façade, installs on the installer own plan) or Agent Studio (tenant /mcp attached directly, invite-only, better for long runs).',
+        'Custom GPT: paste gpt/instructions.md, upload gpt/knowledge/*.md, then Actions → Import from URL using the schema URL above.',
+        'Custom GPT OAuth: register a client once, paste the id and secret, leave the scope EMPTY.',
+        'Agent: attach the tenant /mcp as an App, add agent/skill/SKILL.md as the skill, paste agent/operational-instructions.md. Remove any direct PDF-Tool app.',
       ],
       limitation: null,
     },
     {
       id: 'gemini',
       title: 'Gemini',
+      actors: [],
       downloadUrl: active ? exportUrl('gemini') : null,
       downloadLabel: 'Download Gem instructions',
       copyUrl: null,

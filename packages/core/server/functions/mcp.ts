@@ -125,6 +125,7 @@ export const verifyArticleImagesHandler: SiblingHandler = (event, context) =>
 import { getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { getGovernanceBlobStore } from '../lib/governance-store.js';
+import { toWireTool } from '../lib/mcp-tool-annotations.js';
 import { getCapabilityStatus } from '../lib/capability-status.js';
 import { getMembershipStatus } from '../lib/membership/status.js';
 import { getAgentKeysDoc, resolveVerifiedAgentName, type AgentKeysBlobStore } from '../lib/agent-keys.js';
@@ -1327,7 +1328,11 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
         serverInfo: { name: SERVER_NAME, version: '0.1.0' },
       });
     case 'tools/list':
-      return rpcResponse(request.id, { tools: visibleToolDefinitions(event) });
+      // Serialize to the MCP wire shape: adds `annotations` (so a client stops
+      // confirming reads — the live ChatGPT Agent showed "Read actions: none")
+      // and drops the internal `governance` field, which is this repo's chat
+      // autonomy classification and has no business in a protocol response.
+      return rpcResponse(request.id, { tools: visibleToolDefinitions(event).map(toWireTool) });
     case 'tools/call':
       event.log?.({ event: 'rpc_tool_call_started', rpcMethod, slug, toolName: request.params?.name });
       return rpcResponse(

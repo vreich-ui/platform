@@ -1,4 +1,12 @@
-# W0.3 — Legacy ChatGPT Custom GPT seed
+# W0.3 — Legacy ChatGPT publisher seed
+
+> **CLOSED 2026-09-01.** The open question at the bottom of this file — how the legacy publisher is
+> attached — is answered in `w0-3-legacy-bridge-answer.md`: it is a **ChatGPT Agent (Agent Studio)**,
+> not a classic Custom GPT, attaching the tenant `/mcp` directly as an App (plus a PDF-Tool MCP app
+> to be removed). No Actions façade, no third-party bridge. That capture also produced the two-shape
+> ruling now recorded in `docs/cms-architecture/20-publishing-plugin.md` §4a.
+>
+> Everything below is the original seed and its verification, kept as the record.
 
 Filed 2026-08-31 from the planning chat's runner paste. This is the seed for `skill.md` (W1.2) and
 the GPT export (W3.2). §A below verifies every technical claim in it against the code at HEAD —

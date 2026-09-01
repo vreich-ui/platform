@@ -25,6 +25,7 @@ import {
   renderPluginDraft,
   promotePluginDraft,
   platformCards,
+  installerIdentityStep,
   ceilingRows,
   manifestStatus,
   hasUnpromotedDraft,
@@ -182,8 +183,22 @@ function PluginsBody({ identity }: { identity: SiteIdentity }) {
         ) : null}
       </Card>
 
+      <Card title={installerIdentityStep.title} kicker="Step 1 — every platform">
+        <p className="mb-3 text-[length:var(--adm-text-sm)] text-[color:var(--adm-fg-muted)]">
+          {installerIdentityStep.detail}
+        </p>
+        <Button size="sm" variant="secondary" onClick={() => window.open(installerIdentityStep.action.href, '_self')}>
+          {installerIdentityStep.action.label}
+        </Button>
+      </Card>
+
       {cards.map((card) => (
         <Card key={card.id} title={card.title} kicker={card.limitation ? 'Drafting only' : undefined}>
+          {card.actors.length ? (
+            <p className="mb-2 text-[length:var(--adm-text-xs)] text-[color:var(--adm-fg-muted)]">
+              Ledger actor{card.actors.length > 1 ? 's' : ''}: {card.actors.map((a) => `\`${a}\``).join(' · ')}
+            </p>
+          ) : null}
           {card.limitation ? (
             <p className="mb-3 text-[length:var(--adm-text-sm)] text-[color:var(--adm-fg-muted)]">{card.limitation}</p>
           ) : null}
