@@ -198,7 +198,7 @@ contract 6/6, inventory 6/6, `released:true`; store === seed === export
 byte-verified (marker-stripped, record_version 11 ×6).
 
 | Object              | Serves                                | Status       | Notes                                                                                                                                        |
-| ------------------- | ------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------- | ------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `page_library`      | `/learn/library` (+ pagination)       | 🟢 CONVERTED | `listing`. Header lede ("Library" + blurb); title base + " — Page N" furniture.                                                              |
 | `page_topics_index` | `/learn/topics`                       | 🟢 CONVERTED | `listing`. Header lede (kicker "Education library"); topic cards stay computed from category frontmatter (D§5.5), og image in seo.           |
 | `page_topic_detail` | `/learn/topics/<slug>` (every topic)  | 🟢 CONVERTED | `listing`, per-term: heading `%term%`, kicker "Topic"; description pattern in seo.                                                           |
@@ -209,7 +209,7 @@ byte-verified (marker-stripped, record_version 11 ×6).
 ### Shared sections
 
 | Object                   | Used by                         | Status       | Notes                                                                                                                                                                                                              |
-| ------------------------ | ------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ------------------------ | -------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sec_newsletter_signup`  | `page_home` (via `shared_ref`)  | 🟢 CONVERTED | **All five criteria met 2026-07-10:** store-backed, every permitted op round-tripped in production, published, released.                                                                                           |
 | `sec_home_audience_grid` | `page_home` (via `shared_ref`)  | 🟢 CONVERTED | **New + converted 2026-07-10.** "This is for you if…" — `content_grid`, sanctioned `cards` source (curated text cells; replaced the bespoke `checklist` usage). Store-backed, round-tripped, published, released.  |
 | `sec_home_start_grid`    | `page_home` (via `shared_ref`)  | 🟢 CONVERTED | **New + converted 2026-07-10.** "Start here" — the SAME `content_grid` type, `query` source (latest posts): one reusable type, two roles by configuration alone. Store-backed, round-tripped, published, released. |
@@ -304,7 +304,7 @@ at instantiation; never live-bound). All five playbook criteria hold per
 object — the application-verb production proofs ran 2026-07-15:
 
 | Object                  | Type               | Status       | Notes                                                                                                                                                                                |
-| ----------------------- | ------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ------------------------ | ------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stpl_hero_landing`     | `section_template` | 🟢 CONVERTED | Landing/campaign hero opener (`hero` blueprint). All 3 ops round-tripped in production; published, released.                                                                         |
 | `stpl_audience_grid`    | `section_template` | 🟢 CONVERTED | Curated text-cell grid — hand-written "who this is for" / feature cells (`content_grid`, `source.kind: cards`).                                                                      |
 | `stpl_related_articles` | `section_template` | 🟢 CONVERTED | Automatic further-reading strip (`content_grid`, `source.kind: related`, tag similarity, 3 tiles).                                                                                   |
@@ -383,7 +383,7 @@ object.** (The three MOCK products the pricing tiers reference stay at
 product exports regardless.)
 
 | Object              | Route                     | Status / composition                                                                                                                                                                              |
-| ------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `page_pricing`      | `/pricing`                | 🟢 CONVERTED — lede + `pricing_table` (tiers REFERENCE the three products; price/availability/CTA resolve from commerce data at build) + `steps` + faq + cta_banner. MOCK copy (Wolf 2026-07-12). |
 | `page_services`     | `/services`               | 🟢 CONVERTED — lede + `content_split` + `content_grid` cards (icon grid) + cta_banner. MOCK copy (Wolf 2026-07-12).                                                                               |
 | `page_shop_preview` | `/solutions/shop-preview` | 🟢 CONVERTED — REAL copy verbatim as one `content_split` (the bespoke shop-hero + scoped styles generalized into the component). Nav route-kind links unchanged.                                  |
