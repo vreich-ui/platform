@@ -41,7 +41,24 @@ const SITE_URL = 'https://tenant.example';
 const HOST = 'tenant.example';
 const OWNER = 'boot@example.com';
 const AT = '2026-08-17T12:00:00.000Z';
-const LATER = '2026-10-01T12:00:00.000Z';
+/**
+ * The sweep instant, used once (step 9). It CANNOT be a fixed date.
+ *
+ * `member_remove` runs through the real handler, which stamps `at` from the
+ * real clock (`verbs.ts`: `input.deps.now ?? (() => new Date().toISOString())`)
+ * — the test has no seam to inject one. `removeMembership` then writes
+ * `purge_after = at + purge_grace_days`, so the purge deadline moves with the
+ * calendar while a hardcoded sweep date does not. A fixed `2026-10-01T12:00Z`
+ * worked until the wall clock reached 2026-09-01, at which point
+ * `purge_after` (real now + 30 d) landed AFTER the sweep and step 9 started
+ * failing every run, on every branch, for reasons no diff explains.
+ *
+ * Derived from the removal's own deadline instead: read `purge_after` off the
+ * membership record the handler just wrote and sweep one second past it. That
+ * asserts the real contract — the sweep purges once the grace period has
+ * elapsed, and not before — without depending on what day it is.
+ */
+const sweepInstantPast = (purgeAfter: string) => new Date(Date.parse(purgeAfter) + 1000).toISOString();
 const REDIRECT_URI = 'https://claude.ai/api/mcp/auth_callback';
 
 const handler = createHandler(drlurieSiteBinding);
@@ -338,7 +355,17 @@ test('E2E 1 — Owner bootstrap → invite editor → mail → /verify → accep
     );
 
     // 9. the daily sweep, after the grace period → PII scrubbed, membership + audit retained
-    const sweep = await runMembershipSweep({}, LATER);
+    const removedMembership = JSON.parse(users().map.get(KEYS.membership(personIdForEmail('ed@example.com')))!);
+    const purgeAfter = removedMembership.removed?.purge_after as string;
+    assert.ok(purgeAfter, 'the remove stamped a purge deadline to sweep past');
+
+    // A sweep BEFORE the deadline must purge nothing — the grace period is the
+    // point of the deadline, and a sweep date that happens to sit past it by
+    // accident would assert nothing.
+    const early = await runMembershipSweep({}, new Date(Date.parse(purgeAfter) - 1000).toISOString());
+    assert.deepEqual(early.purged_persons, [], 'nothing is purged while the grace period is still running');
+
+    const sweep = await runMembershipSweep({}, sweepInstantPast(purgeAfter));
     assert.deepEqual(sweep.purged_persons, [personIdForEmail('ed@example.com')], JSON.stringify(sweep));
     const person = JSON.parse(users().map.get(KEYS.person(personIdForEmail('ed@example.com')))!);
     assert.equal(person.deleted, true);
