@@ -45,6 +45,14 @@ export interface RequestRowView {
    * throwing away the Publish action.
    */
   object_published?: boolean;
+  /**
+   * W21.1: whether the endpoint's object probe has actually SEEN a platform
+   * record for this request (`admin-requests.ts`). Not part of the stored
+   * index row — the server decorates the response from the probe memo — so
+   * absent means "nobody has looked yet", which `rowActions` renders as
+   * unconfirmed rather than as present.
+   */
+  object_in_library?: boolean;
   /** The live article path, present only once the release confirmed go-live. */
   live_path?: string;
   archived: boolean;

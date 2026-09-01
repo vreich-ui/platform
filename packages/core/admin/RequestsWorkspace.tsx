@@ -26,7 +26,7 @@ import { Badge, Button, Card, EmptyState, IconButton, Skeleton } from './primiti
 import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { ActionRow, RunProgress } from './approval';
 import { StatusBadge } from './severity';
-import { ConfirmDialog, Drawer, Popover } from './overlays';
+import { ConfirmDialog, Dialog, Drawer, Popover } from './overlays';
 import { browserPermission, requestBrowserPermission, type BrowserPermission } from './useRequestNotifications';
 import { Input, Select } from './forms';
 import { useToast } from './overlays';
@@ -48,6 +48,12 @@ import {
   type RequestRowView,
   type RequestStatus,
 } from '@core/lib/admin/requests-client';
+import {
+  DEFAULT_REQUEST_URL_FILTERS,
+  requestsAddress,
+  urlFiltersToApply,
+  type RequestUrlFilterField,
+} from '@core/lib/admin/request-url-filters';
 import {
   DEFAULT_REQUEST_QUICK_FILTER,
   matchesQuickFilter,
@@ -79,6 +85,12 @@ import {
 } from '@core/lib/admin/decisions';
 import { DECIDED_WAITING_LABEL, pendingDecisionForRequest } from '@core/lib/admin/decision-overlay';
 import { liveArticleUrl } from '@core/lib/admin/publication-card';
+import { fetchReleaseOverview, triggerProductionRelease } from '@core/lib/admin/release-client';
+import {
+  releaseConfirmation,
+  releaseScopeFrom,
+  type ReleaseConfirmation,
+} from '@core/lib/admin/release-confirmation';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import {
   isAuthExpired,
@@ -319,6 +331,11 @@ export interface RowActionHandlers {
   onRetry: (row: RequestRowView) => void;
   /** B3: the object publish path, behind a confirmation. */
   onPublish: (row: RequestRowView) => void;
+  /**
+   * W21.3: the SITE release — the one thing that turns a published row's
+   * "no live URL yet" into a live URL. Not per-object; see `rowActions`.
+   */
+  onRelease: (row: RequestRowView) => void;
   /** Opens the run's detail, where the Owner-only budget-raise card (`budgetRaiseButtons` → `raiseNodeBudget`) already lives. */
   onRaiseBudget: (row: RequestRowView) => void;
 }
@@ -374,6 +391,9 @@ function useRowActions(
         // finished article stops being offered a Publish it does not need.
         // Absent (a server deployed before C1) reads as not published.
         ...(row.object_published !== undefined ? { object_published: row.object_published } : {}),
+        // W21.1: the probe's own answer about the LIBRARY, forwarded verbatim.
+        // Absent stays absent — an unprobed row must not read as confirmed.
+        ...(row.object_in_library !== undefined ? { object_in_library: row.object_in_library } : {}),
         ...(row.live_path ? { live_path: row.live_path } : {}),
         muted,
         mine,
@@ -418,6 +438,9 @@ function useRowActions(
         return;
       case 'publish':
         handlers.onPublish(row);
+        return;
+      case 'release':
+        handlers.onRelease(row);
         return;
       case 'raise_budget':
         handlers.onRaiseBudget(row);
@@ -690,12 +713,6 @@ function QuickFilterTabs({
   );
 }
 
-const readParams = () =>
-  typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
-
-const isQuickFilter = (value: string | null): value is RequestQuickFilter =>
-  Boolean(value) && QUICK_FILTERS.some((tab) => tab.key === value);
-
 /**
  * `/admin/requests/<id>` is served by the `__request` placeholder page through
  * the netlify.toml rewrite (the T9.9 object-workspace pattern), so the id is
@@ -715,17 +732,73 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   // top-level hooks — never below an early return (`rules-of-hooks`).
   const authExpired = useAuthExpired();
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [quickFilter, setQuickFilter] = useState<RequestQuickFilter>(() =>
-    isQuickFilter(readParams().get('filter'))
-      ? (readParams().get('filter') as RequestQuickFilter)
-      : DEFAULT_REQUEST_QUICK_FILTER
-  );
-  const [kindFilter, setKindFilter] = useState(() => readParams().get('kind') ?? '');
-  const [mine, setMine] = useState(() => readParams().get('mine') === '1');
-  const [queryInput, setQueryInput] = useState(() => readParams().get('q') ?? '');
+  /**
+   * W21.2 — every filter starts at its DEFAULT, on both sides.
+   *
+   * These used to read `window.location.search` in their initializers, which
+   * the server cannot do: `requests.astro` mounts this island `client:load`,
+   * so it is server-rendered first with an empty `URLSearchParams`, and
+   * `/admin/requests?filter=done` painted the Needs-you tab. Hydration did not
+   * repair it — React warns about a `className` mismatch and keeps the
+   * server's — so the tab stayed wrong while the list, fetched afterwards,
+   * looked right. The URL is applied below instead, after hydration, where a
+   * state change is a real re-render rather than a disagreement.
+   */
+  const [quickFilter, setQuickFilter] = useState<RequestQuickFilter>(DEFAULT_REQUEST_URL_FILTERS.quickFilter);
+  const [kindFilter, setKindFilter] = useState(DEFAULT_REQUEST_URL_FILTERS.kind);
+  const [mine, setMine] = useState(DEFAULT_REQUEST_URL_FILTERS.mine);
+  const [queryInput, setQueryInput] = useState(DEFAULT_REQUEST_URL_FILTERS.q);
   const [query, setQuery] = useState(queryInput);
+  const [urlFiltersApplied, setUrlFiltersApplied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [emailMode, setEmailModeState] = useState<EmailMode>('immediate');
+
+  /**
+   * FIX 4 — which filters the person has actually touched.
+   *
+   * W21.2 decided "untouched" by comparing the value to its default, which
+   * cannot tell "nobody has touched this" from "someone deliberately set it to
+   * the default". So on `/admin/requests?filter=done`, clicking **Needs you**
+   * (the default tab) before the mount effect flushed was silently undone —
+   * and the same for clearing the kind, unticking Mine, or emptying the search
+   * box. Interaction is recorded here instead, which is the thing actually
+   * being asked about. A ref, not state: it must be readable by the effect
+   * below in the same tick it was written, and it must never cause a render.
+   */
+  const touchedFilters = useRef(new Set<RequestUrlFilterField>());
+  const touch =
+    <T,>(field: RequestUrlFilterField, set: (value: T) => void) =>
+    (value: T) => {
+      touchedFilters.current.add(field);
+      set(value);
+    };
+  const onQuickFilterChange = touch<RequestQuickFilter>('quickFilter', setQuickFilter);
+  const onKindFilterChange = touch<string>('kind', setKindFilter);
+  const onMineChange = touch<boolean>('mine', setMine);
+  const onQueryInputChange = touch<string>('q', setQueryInput);
+
+  /**
+   * W21.2 — the URL, applied once the browser is the one rendering.
+   *
+   * Only fields the person has NOT touched are written, so a filter changed
+   * between hydration and this effect survives whatever the address said —
+   * including a filter changed TO its default value (FIX 4). `[]` on purpose:
+   * the URL is an ENTRY condition, and the writer below owns the address from
+   * here on — re-running this would fight that writer for the same state.
+   */
+  useEffect(() => {
+    const apply = urlFiltersToApply(window.location.search, touchedFilters.current);
+    if (apply.quickFilter !== undefined) setQuickFilter(apply.quickFilter);
+    if (apply.kind !== undefined) setKindFilter(apply.kind);
+    if (apply.mine !== undefined) setMine(apply.mine);
+    if (apply.q !== undefined) {
+      setQueryInput(apply.q);
+      // The debounce below would arrive here 300 ms later; a search that came
+      // in the address has already waited long enough.
+      setQuery(apply.q);
+    }
+    setUrlFiltersApplied(true);
+  }, []);
 
   // R6 (T0.2 F8): the search box no longer fires a request per keystroke.
   useEffect(() => {
@@ -749,18 +822,39 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   const publishPolicy = useMemo(resolvePublishPolicy, []);
   /** B3: the row awaiting its publish confirmation, if any (`ConfirmDialog`). */
   const [publishTarget, setPublishTarget] = useState<RequestRowView | undefined>(undefined);
+  /**
+   * W21.3: the row a pending release was asked for FROM — the release itself
+   * is site-wide. FIX 5: it is only ever set once the release overview has
+   * been read, so the dialog states the REAL pending scope instead of a
+   * sentence written from the row.
+   */
+  const [releaseTarget, setReleaseTarget] = useState<
+    { row: RequestRowView; confirmation: ReleaseConfirmation } | undefined
+  >(undefined);
+
+  // ─── the slide-over: an in-list row click opens the detail without losing
+  // the filtered list underneath. `/admin/requests/<id>` (this same
+  // component, `selectedId` mode) is the load-bearing route this enhances —
+  // a direct navigation, a shared link or Cmd/Ctrl-click still lands there. ─
+  // Declared above the URL writer because FIX 6 makes the writer own the whole
+  // address, drawer included, rather than only its query string.
+  const [openId, setOpenId] = useState<string | undefined>(() => (selectedId ? undefined : requestIdFromPath()));
+
+  /** The four filters as one value — what the address is written from. */
+  const urlFilters = useMemo(
+    () => ({ quickFilter, kind: kindFilter, mine, q: query }),
+    [quickFilter, kindFilter, mine, query]
+  );
 
   // Filter state lives in the query string, so a filtered view is linkable.
   useEffect(() => {
-    if (typeof window === 'undefined' || selectedId) return;
-    const params = new URLSearchParams();
-    if (quickFilter !== DEFAULT_REQUEST_QUICK_FILTER) params.set('filter', quickFilter);
-    if (kindFilter) params.set('kind', kindFilter);
-    if (mine) params.set('mine', '1');
-    if (query) params.set('q', query);
-    const search = params.toString();
-    window.history.replaceState({}, '', search ? `/admin/requests?${search}` : '/admin/requests');
-  }, [quickFilter, kindFilter, mine, query, selectedId]);
+    // W21.2: not before the address has been read, or this writer would erase
+    // the very filters it is about to start maintaining.
+    if (typeof window === 'undefined' || selectedId || !urlFiltersApplied) return;
+    // FIX 6: `openId` is part of the address, so opening or closing the drawer
+    // no longer means writing a path that has forgotten the filters.
+    window.history.replaceState({}, '', requestsAddress(urlFilters, openId));
+  }, [urlFilters, openId, selectedId, urlFiltersApplied]);
 
   // ─── the shared chain (T2.3): default view + the shell's pills, one poll ──
   const sharedIndex = useRequestsIndex(getToken);
@@ -898,6 +992,70 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   );
 
   /**
+   * W21.3 — the release, through the client that already owns it
+   * (`lib/admin/release-client.ts`, the same `triggerProductionRelease`
+   * `ReleaseWorkspace` calls). Nothing new is posted from here: there is ONE
+   * release call, and it invalidates the shared release overview so the
+   * Release surface cannot keep showing this build as still pending.
+   *
+   * `refresh()` afterwards because the request row's `live_path` is written by
+   * the sweeper from the release's own confirmation — the row learns the URL
+   * on a later poll, not from this response, and must not be made to claim it
+   * sooner (guardrail 5).
+   */
+  /**
+   * FIX 5 — the check that has to happen before a row may offer a deploy.
+   *
+   * The row knows nothing about what is pending, so it asks (the shared,
+   * deduped, 15 s-cached overview `ReleaseWorkspace` already reads) and lets
+   * `releaseConfirmation` decide what may be claimed. With nothing waiting
+   * there is no confirm step to reach: the dialog says so and offers no
+   * Release, which is the honest form of "unavailable" here — the button
+   * performs a check, and only a checked release can be started.
+   */
+  const askToRelease = useCallback(
+    async (target: RequestRowView) => {
+      setBusy(true);
+      try {
+        const overview = await fetchReleaseOverview(getToken);
+        setReleaseTarget({ row: target, confirmation: releaseConfirmation(releaseScopeFrom(overview, target)) });
+      } catch (reason) {
+        // Guardrail 5: unknown pending scope is not a reason to guess one, and
+        // certainly not a reason to deploy anyway.
+        toast({
+          title: 'Could not check what is waiting to be released',
+          description: reason instanceof Error ? reason.message : undefined,
+          tone: 'danger',
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [toast]
+  );
+
+  const releaseSite = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await triggerProductionRelease(getToken);
+      toast({
+        title: result.released ? 'Release is live' : 'Release started',
+        description: result.reason,
+        tone: result.released ? 'success' : 'info',
+      });
+      refresh();
+    } catch (reason) {
+      toast({
+        title: 'Release could not start',
+        description: reason instanceof Error ? reason.message : undefined,
+        tone: 'danger',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }, [refresh, toast]);
+
+  /**
    * T3.2 (T0.3 row A3) — the inbox row's decision, through the one façade.
    *
    * `decide` already invalidates the SHARED index (the header pill and this
@@ -972,12 +1130,6 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     );
   }, [custom, customRows, sharedIndex.rows, sharedIndex.muted, quickFilter, kindFilter]);
 
-  // ─── the slide-over: an in-list row click opens the detail without losing
-  // the filtered list underneath. `/admin/requests/<id>` (this same
-  // component, `selectedId` mode) is the load-bearing route this enhances —
-  // a direct navigation, a shared link or Cmd/Ctrl-click still lands there. ─
-  const [openId, setOpenId] = useState<string | undefined>(() => (selectedId ? undefined : requestIdFromPath()));
-
   useEffect(() => {
     if (selectedId) return;
     const onPop = () => setOpenId(requestIdFromPath());
@@ -1000,12 +1152,14 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
       return;
     event.preventDefault();
     setOpenId(row.request_id);
-    window.history.pushState({}, '', `/admin/requests/${encodeURIComponent(row.request_id)}`);
+    // FIX 6: the filters ride along, so Back and Close return to the list the
+    // person was actually looking at rather than to an unfiltered one.
+    window.history.pushState({}, '', requestsAddress(urlFilters, row.request_id));
   };
 
   const closeDrawer = () => {
     setOpenId(undefined);
-    window.history.pushState({}, '', '/admin/requests');
+    window.history.pushState({}, '', requestsAddress(urlFilters));
   };
 
   /**
@@ -1045,6 +1199,10 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     onRetry: (target) => void retryRun(target.request_id),
     // B3: publishing is not undoable from here, so it asks first.
     onPublish: (target) => setPublishTarget(target),
+    // W21.3: a release rebuilds and deploys the whole site, so it asks first
+    // too — and FIX 5: it reads what is actually waiting before it asks, so
+    // the question is about the real batch rather than about this row.
+    onRelease: (target) => void askToRelease(target),
     onRaiseBudget: openDetail,
   };
 
@@ -1070,7 +1228,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
       >
         {selectedId ? null : (
           <>
-            <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
+            <QuickFilterTabs value={quickFilter} onChange={onQuickFilterChange} />
             {/* B5: Search + Kind + Mine on one line — the notification settings
                 (e-mail cadence, desktop alerts) are per-person preferences, not
                 filters over the list, so they move behind a gear rather than
@@ -1080,7 +1238,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                 <Select
                   label="Kind"
                   value={kindFilter}
-                  onChange={(event) => setKindFilter(event.target.value)}
+                  onChange={(event) => onKindFilterChange(event.target.value)}
                   options={[
                     { value: '', label: 'Every kind' },
                     ...Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label })),
@@ -1092,11 +1250,11 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                   label="Search"
                   value={queryInput}
                   placeholder="Title or request id"
-                  onChange={(event) => setQueryInput(event.target.value)}
+                  onChange={(event) => onQueryInputChange(event.target.value)}
                 />
               </div>
               <label className="flex items-center gap-1.5 pb-2.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-                <input type="checkbox" checked={mine} onChange={(event) => setMine(event.target.checked)} /> Mine
+                <input type="checkbox" checked={mine} onChange={(event) => onMineChange(event.target.checked)} /> Mine
               </label>
               <Popover
                 mode="click"
@@ -1275,6 +1433,41 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
         }
         confirmLabel="Publish"
       />
+
+      {/* W21.3: the release is SITE-wide — `admin-release`'s options carry no
+          object id — so the dialog says so rather than letting the row it was
+          started from imply a scope the endpoint does not have. FIX 5: every
+          sentence in it is now derived from the release overview
+          (`releaseConfirmation`), and with nothing waiting there is no confirm
+          to press. */}
+      {releaseTarget?.confirmation.kind === 'confirm' ? (
+        <ConfirmDialog
+          open
+          onClose={() => setReleaseTarget(undefined)}
+          onConfirm={() => {
+            setReleaseTarget(undefined);
+            void releaseSite();
+          }}
+          title={releaseTarget.confirmation.title}
+          message={releaseTarget.confirmation.message}
+          confirmLabel={releaseTarget.confirmation.confirmLabel}
+        />
+      ) : null}
+      <Dialog
+        open={releaseTarget?.confirmation.kind === 'nothing_waiting'}
+        onClose={() => setReleaseTarget(undefined)}
+        title={releaseTarget?.confirmation.title ?? ''}
+        size="sm"
+        footer={
+          <Button variant="secondary" onClick={() => setReleaseTarget(undefined)}>
+            Close
+          </Button>
+        }
+      >
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+          {releaseTarget?.confirmation.message}
+        </p>
+      </Dialog>
     </div>
   );
 }

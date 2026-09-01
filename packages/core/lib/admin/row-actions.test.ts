@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  NOT_IN_LIBRARY,
   NO_LIVE_PATH,
   publishPolicyFromApproval,
   publishTargetFor,
@@ -43,11 +44,18 @@ const ROLES = {
 type RoleName = keyof typeof ROLES;
 const ROLE_NAMES = Object.keys(ROLES) as RoleName[];
 
-/** A row with everything attached, so a disabled action is never about missing data. */
+/**
+ * A row with everything attached, so a disabled action is never about missing
+ * data. W21.1: "everything" now includes the probe having CONFIRMED the
+ * platform record — `object_id` alone is what the Open object bug was built
+ * on, and a fixture that stopped at it would quietly re-file every `done`
+ * scenario below as a data problem.
+ */
 const row = (overrides: Partial<RowActionRowLike> & { status: RowActionRowLike['status'] }): RowActionRowLike => ({
   archived: false,
   chat_id: 'chat_1',
   object_id: 'obj_1',
+  object_in_library: true,
   live_path: '/retinol-after-40',
   mine: true,
   ...overrides,
@@ -220,6 +228,40 @@ const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // W21.3: the live symptom — published, and the release never confirmed a
+    // URL. View live stays disabled with its reason (C1), and the row now also
+    // offers the thing that would produce one.
+    name: 'done, published, go-live unconfirmed',
+    row: {
+      status: 'done',
+      archived: false,
+      chat_id: 'chat_1',
+      object_id: 'obj_1',
+      object_in_library: true,
+      object_published: true,
+      mine: true,
+    },
+    shape: [
+      ['open_object', 'primary'],
+      // W21.3: Release takes the slot, because View live is dead until it runs
+      // — the action belongs in the same row as the problem (Wave 1).
+      ['release', 'primary'],
+      ['view_live', 'menu'],
+      ['open_chat', 'menu'],
+      ['archive', 'menu'],
+    ],
+    enabled: {
+      viewer: READ_ONLY,
+      editor: READ_ONLY,
+      // The release endpoint's gate is `roles.includes('admin')`, which the
+      // publish tier does not reach — so a publisher gets it disabled, not a
+      // live button that 403s.
+      publisher: READ_ONLY,
+      admin: [...READ_ONLY, 'release'],
+      owner: [...READ_ONLY, 'release', 'archive'],
+    },
+  },
+  {
     name: 'cancelled',
     row: row({ status: 'cancelled' }),
     shape: [
@@ -322,12 +364,19 @@ describe('rowActions — D3: a disabled action stays visible, and says why', () 
    * admin" to EVERY tier below admin — including a viewer, for whom "Ask an
    * editor" would be a lie: an editor cannot do it either.
    */
-  it('a viewer is pointed one rung up, except at the registry seam', () => {
+  it('a viewer is pointed one rung up, except at the admin-gated seams', () => {
     for (const scenario of SCENARIOS) {
       for (const action of rowActions(scenario.row, ROLES.viewer)) {
         if (action.enabled) continue;
-        const expected = action.rightRequired === 'registry' ? 'Ask an admin' : 'Ask an editor';
-        assert.equal(action.reason, expected, `${scenario.name}/${action.id}`);
+        // `read` is unconditional, so anything blocked there is blocked by a
+        // FACT about the row (no live URL yet, not in the library) — true
+        // whoever is looking, and never a rung to climb.
+        if (action.rightRequired === 'read') continue;
+        // W21.3 adds a second seam of the same shape (`admin`, the release
+        // endpoint) — neither sits on the ladder, so neither may be answered
+        // with a rung.
+        const offLadder = action.rightRequired === 'registry' || action.rightRequired === 'admin';
+        assert.equal(action.reason, offLadder ? 'Ask an admin' : 'Ask an editor', `${scenario.name}/${action.id}`);
       }
     }
   });
@@ -496,7 +545,12 @@ describe('rowActions — the data, not the rights, can also block an action', ()
  */
 describe('C1 — a finished row, in its three states', () => {
   const actionsFor = (over: Partial<RowActionRowLike>) =>
-    rowActions({ status: 'done', archived: false, chat_id: 'chat_1', ...over }, ROLES.owner);
+    rowActions(
+      // W21.1: these cases are about PUBLICATION, so library presence is held
+      // confirmed throughout and varied on its own below.
+      { status: 'done', archived: false, chat_id: 'chat_1', object_in_library: true, ...over },
+      ROLES.owner
+    );
   const find = (over: Partial<RowActionRowLike>, id: RowActionId) =>
     actionsFor(over).find((action) => action.id === id);
 
@@ -510,7 +564,8 @@ describe('C1 — a finished row, in its three states', () => {
 
   it('published, go-live unconfirmed: View live stays, disabled, and says why (D3)', () => {
     const over = { object_id: 'obj_1', object_published: true };
-    assert.deepEqual(ids(actionsFor(over)), ['open_object', 'view_live', 'open_chat', 'archive']);
+    // W21.3 trades the two places: see that block below.
+    assert.deepEqual(ids(actionsFor(over)), ['open_object', 'release', 'view_live', 'open_chat', 'archive']);
     assert.equal(find(over, 'open_object')?.enabled, true);
     assert.equal(find(over, 'view_live')?.enabled, false);
     assert.equal(find(over, 'view_live')?.reason, NO_LIVE_PATH);
@@ -552,6 +607,247 @@ describe('C1 — a finished row, in its three states', () => {
 });
 
 
+// ─── W21.1: Open object may only believe the probe ──────────────────────────
+
+/**
+ * The bug: two `done` rows offered an ENABLED Open object that landed on
+ * "Couldn't open this object — not found". `sweep.ts` writes `object_id` when
+ * `article_body` completes — but that draft is a CMS-Agent stage output and
+ * the platform record only exists after a publish, so the field the action was
+ * gated on proves the run named an object, never that the library holds one.
+ *
+ * The matrix is the three answers the probe can give, crossed with the two
+ * halves of `done`. `publish` is in every case on purpose: it is the step that
+ * MAKES the record, so it must never be taken away by the same doubt that
+ * disables the link.
+ */
+describe('W21.1 — a finished row opens its object only when the library was checked', () => {
+  const done = (over: Partial<RowActionRowLike>) =>
+    rowActions({ status: 'done', archived: false, chat_id: 'chat_1', object_id: 'obj_1', ...over }, ROLES.owner);
+  const find = (over: Partial<RowActionRowLike>, id: RowActionId) => done(over).find((action) => action.id === id);
+
+  /** probe answer → what `open_object` must do, on each half of `done`. */
+  const PROBE = [
+    { name: 'confirmed', over: { object_in_library: true }, opens: true },
+    { name: 'says absent', over: { object_in_library: false }, opens: false },
+    { name: 'never probed', over: {}, opens: false },
+  ] as const;
+
+  for (const probe of PROBE) {
+    for (const published of [false, true]) {
+      const over = { ...probe.over, object_published: published };
+      const half = published ? 'published' : 'unpublished';
+
+      it(`${half}, probe ${probe.name}: Open object is ${probe.opens ? 'live' : 'disabled with the reason'}`, () => {
+        const openObject = find(over, 'open_object');
+        assert.equal(openObject?.enabled, probe.opens);
+        assert.equal(openObject?.reason, probe.opens ? undefined : NOT_IN_LIBRARY);
+        // D3: never dropped, whatever the answer — an operator must be able to
+        // see that opening it is a thing that exists, and why it cannot.
+        assert.equal(openObject?.kind, 'primary');
+      });
+    }
+
+    it(`unpublished, probe ${probe.name}: Publish is untouched — it is what creates the record`, () => {
+      const publish = find({ ...probe.over, object_published: false }, 'publish');
+      assert.equal(publish?.enabled, true);
+      assert.equal(publish?.kind, 'primary');
+    });
+  }
+
+  it('unconfirmed leaves Publish the only live primary, which is the next step the reason names', () => {
+    const live = done({ object_published: false })
+      .filter((action) => action.kind === 'primary' && action.enabled)
+      .map((action) => action.id);
+    assert.deepEqual(live, ['publish']);
+  });
+
+  it('"no object attached" still wins over it — that absence is the earlier, smaller truth', () => {
+    const openObject = rowActions({ status: 'done', archived: false, chat_id: 'chat_1' }, ROLES.owner).find(
+      (action) => action.id === 'open_object'
+    );
+    assert.equal(openObject?.reason, 'No object is attached to this request yet.');
+  });
+
+  it('is never inferred from `object_id` or `object_published` — the two fields that caused the bug', () => {
+    for (const over of [{}, { object_published: true }, { object_published: false }]) {
+      assert.equal(find(over, 'open_object')?.enabled, false, JSON.stringify(over));
+    }
+  });
+
+  /**
+   * The probe answers only for `done` rows (`objectBackfillCandidates`), so
+   * every other status keeps the presence gate: with no probe there is no
+   * fact, and "not in the library" would be its own unproven claim.
+   */
+  it('leaves the statuses the probe never covers exactly as they were', () => {
+    for (const status of ['queued', 'running', 'needs_you', 'failed', 'stalled'] as const) {
+      const openObject = rowActions(
+        { status, archived: false, chat_id: 'chat_1', object_id: 'obj_1' },
+        ROLES.owner
+      ).find((action) => action.id === 'open_object');
+      assert.equal(openObject?.enabled, true, status);
+    }
+  });
+});
+
+
+// ─── W21.3: published, unreleased, and now with a way out ───────────────────
+
+/**
+ * The bug: the retinol row showed View live disabled with the correct reason
+ * (`NO_LIVE_PATH` — the release never confirmed a URL) and then nothing an
+ * operator could do about it, even though the release exists.
+ *
+ * Two things the spec got wrong and this pins, both read off the endpoint:
+ *
+ *  1. The right is `admin`, not publisher+. `server/functions/admin-release.ts`
+ *     gates on `roles.includes('admin')`; the agent tool is stricter still
+ *     (owner-only, `generated-tools.ts`). A publisher-enabled button would 403
+ *     on the click — the same lie as the Open object bug in the same patch.
+ *  2. It is site-wide, not per-object. `parseOptions` accepts `commit`,
+ *     `force_build` and `timeout_seconds` — there is no object id — so the
+ *     LABEL must not claim to release one article.
+ */
+describe('W21.3 — the release, offered exactly where it is the next step', () => {
+  const doneRow = (over: Partial<RowActionRowLike>): RowActionRowLike => ({
+    status: 'done',
+    archived: false,
+    chat_id: 'chat_1',
+    object_id: 'obj_1',
+    object_in_library: true,
+    ...over,
+  });
+  const releaseIn = (over: Partial<RowActionRowLike>, roles: readonly string[] = ROLES.owner) =>
+    rowActions(doneRow(over), roles).find((action) => action.id === 'release');
+
+  /** The four states a finished row can be in, and whether a release is the next step. */
+  const PRESENCE = [
+    { name: 'published, no confirmed live URL', over: { object_published: true }, offered: true },
+    {
+      name: 'published and live',
+      over: { object_published: true, live_path: '/retinol-after-40' },
+      offered: false,
+    },
+    { name: 'not published', over: { object_published: false }, offered: false },
+    { name: 'publication unknown', over: {}, offered: false },
+  ] as const;
+
+  for (const state of PRESENCE) {
+    it(`${state.name}: ${state.offered ? 'offers a release' : 'offers none'}`, () => {
+      assert.equal(releaseIn(state.over) !== undefined, state.offered);
+    });
+  }
+
+  it('nothing but a finished row offers it — no other status can be released FROM', () => {
+    for (const status of ['queued', 'running', 'needs_you', 'failed', 'stalled', 'cancelled', 'archived'] as const) {
+      const found = rowActions(
+        { ...doneRow({ object_published: true }), status, archived: status === 'archived' },
+        ROLES.owner
+      ).find((action) => action.id === 'release');
+      assert.equal(found, undefined, status);
+    }
+  });
+
+  it('is admin-gated: an owner and an admin get it live, everyone below gets the reason (D3)', () => {
+    const over = { object_published: true };
+    for (const role of ['admin', 'owner'] as const) {
+      const release = releaseIn(over, ROLES[role]);
+      assert.equal(release?.enabled, true, role);
+      assert.equal(release?.reason, undefined, role);
+    }
+    for (const role of ['viewer', 'editor', 'publisher'] as const) {
+      const release = releaseIn(over, ROLES[role]);
+      assert.equal(release?.enabled, false, role);
+      assert.equal(release?.reason, 'Ask an admin', role);
+      assert.equal(release?.rightRequired, 'admin', role);
+    }
+  });
+
+  it('a publisher gets it DISABLED, not hidden — the endpoint would 403 the click', () => {
+    // Stated on its own because it is the correction to the spec: "publisher+"
+    // would have shipped exactly the class of bug W21.1 removes.
+    const release = releaseIn({ object_published: true }, ROLES.publisher);
+    assert.equal(release?.enabled, false);
+    assert.ok(release, 'and it is still in the list, so a publisher can see who to ask');
+  });
+
+  /**
+   * FIX 3 — the property, tested as BEHAVIOUR rather than as a string.
+   *
+   * W21.3 asserted `rightRequired === 'admin'`, which cannot fail however the
+   * predicate is wired; the code behind it was `admin: registry`, so the very
+   * change this guards against — the fleet widening the request endpoint to
+   * publishers — would have widened Release too. Here the registry seam is
+   * widened IN THE FIXTURE and Release is required to stay shut.
+   */
+  it('widening the request-registry seam does not widen the release seam', () => {
+    const widened = { registry: ['owner', 'admin', 'publisher'], admin: ['owner', 'admin'] };
+    const over = { object_published: true };
+
+    // The premise: the widened seam really does reach a publisher.
+    assert.equal(rowActionRights(ROLES.publisher, widened).registry, true, 'registry widened');
+    assert.equal(rowActionRights(ROLES.publisher, widened).admin, false, 'and release did not');
+
+    const actions = rowActions(doneRow(over), ROLES.publisher, { seams: widened });
+    const release = actions.find((action) => action.id === 'release');
+    assert.equal(release?.enabled, false, 'a publisher still cannot reach a release the endpoint would 403');
+    assert.equal(release?.reason, 'Ask an admin');
+    // …while a registry-gated action on the same row DID widen, which is what
+    // makes the previous assertion about the seam and not about the roles.
+    const registryAction = rowActions({ ...doneRow({}), status: 'failed' }, ROLES.publisher, {
+      seams: widened,
+    }).find((action) => action.id === 'retry');
+    assert.equal(registryAction?.enabled, true, 'the seam that moved, moved');
+  });
+
+  it('the label names a SITE release, never this article', () => {
+    const release = releaseIn({ object_published: true });
+    assert.equal(release?.label, 'Release site');
+    assert.doesNotMatch(
+      release!.label,
+      /\b(article|this|it)\b/i,
+      'the endpoint takes no object id — the label must not imply one'
+    );
+  });
+
+  /**
+   * Wave 1's governing line: attention goes only where a human must act, and
+   * there the action button sits in the same row as the problem. On this row
+   * the problem is "published, not live", so the primary slot belongs to the
+   * one control that can change it — not to a View live that stays dead until
+   * it does. The trade reverses the moment the release confirms a URL.
+   */
+  it('takes the primary slot from View live, which keeps its reason in the overflow (D3)', () => {
+    const actions = rowActions(doneRow({ object_published: true }), ROLES.owner);
+    assert.deepEqual(ids(actions), ['open_object', 'release', 'view_live', 'open_chat', 'archive']);
+    assert.equal(actions.find((action) => action.id === 'release')?.kind, 'primary');
+    const viewLive = actions.find((action) => action.id === 'view_live');
+    assert.equal(viewLive?.kind, 'menu');
+    assert.equal(viewLive?.enabled, false);
+    assert.equal(viewLive?.reason, NO_LIVE_PATH, 'still visible, still saying why — it is just not the next step');
+  });
+
+  it('gives it straight back once the release confirms a URL', () => {
+    const live = rowActions(doneRow({ object_published: true, live_path: '/retinol-after-40' }), ROLES.owner);
+    assert.deepEqual(ids(live), ['open_object', 'view_live', 'open_chat', 'archive']);
+    assert.equal(live.find((action) => action.id === 'view_live')?.kind, 'primary');
+    assert.equal(live.find((action) => action.id === 'view_live')?.enabled, true);
+    assert.equal(live.find((action) => action.id === 'release'), undefined, 'nothing left to release for this row');
+  });
+
+  it('the trade never costs the row its two-primary budget, on either side of it', () => {
+    for (const over of [{ object_published: true }, { object_published: true, live_path: '/retinol-after-40' }]) {
+      const primaries = rowActions(doneRow(over), ROLES.owner).filter((action) => action.kind === 'primary');
+      assert.equal(primaries.length, 2, JSON.stringify(over));
+      // …and primaries still come first, so a surface can slice rather than sort.
+      const actions = rowActions(doneRow(over), ROLES.owner);
+      assert.deepEqual(actions.slice(0, 2), primaries, JSON.stringify(over));
+    }
+  });
+});
+
+
 describe('rowActionRights — the ladder', () => {
   it('is additive: publish implies edit, owner implies publish', () => {
     for (const role of ROLE_NAMES) {
@@ -568,6 +864,7 @@ describe('rowActionRights — the ladder', () => {
       edit: false,
       publish: false,
       registry: false,
+      admin: false,
       owner: false,
       ...over,
     });
@@ -575,9 +872,14 @@ describe('rowActionRights — the ladder', () => {
     assert.deepEqual(rowActionRights(ROLES.editor), r({ edit: true }));
     assert.deepEqual(rowActionRights(ROLES.publisher), r({ edit: true, publish: true }));
     // The seam: a publisher may publish but may not reach the registry; an
-    // admin may reach the registry but is not an Owner.
-    assert.deepEqual(rowActionRights(ROLES.admin), r({ edit: true, publish: true, registry: true }));
-    assert.deepEqual(rowActionRights(ROLES.owner), r({ edit: true, publish: true, registry: true, owner: true }));
+    // admin may reach the registry but is not an Owner. FIX 3: `admin` is an
+    // independent seam that happens to answer the same today — the widening
+    // test above is what pins the independence.
+    assert.deepEqual(rowActionRights(ROLES.admin), r({ edit: true, publish: true, registry: true, admin: true }));
+    assert.deepEqual(
+      rowActionRights(ROLES.owner),
+      r({ edit: true, publish: true, registry: true, admin: true, owner: true })
+    );
   });
 });
 

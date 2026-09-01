@@ -214,8 +214,22 @@ export const OBJECT_BACKFILL_MAX = 5;
  *   click on an article that was already live — hiding exactly the transition
  *   this wave exists to make visible.
  */
-const objectProbeSkipUntil = new Map<string, number>();
-const OBJECT_PROBE_MEMO_MAX = 500;
+export interface ObjectProbeVerdict {
+  /**
+   * W21.1 — whether the probe SAW a platform object record. This is the fact
+   * `open_object` is gated on, and the only place it exists: the index row
+   * cannot carry it (`store.ts`'s row field set is closed, and both fields it
+   * does carry — `object_id` from `sweep.ts`, `object_published` from the run's
+   * receipts — describe the RUN, not the library).
+   */
+  in_library: boolean;
+  /** When this row is worth one object read again. `Infinity` = never. */
+  until: number;
+}
+
+const objectProbeMemo = new Map<string, ObjectProbeVerdict>();
+/** Bound on the memo; oldest-out past it (`remember`). Exported for the bound test. */
+export const OBJECT_PROBE_MEMO_MAX = 500;
 
 /**
  * How long an "exists but unpublished" answer stands. Matched to
@@ -227,29 +241,82 @@ const OBJECT_PROBE_MEMO_MAX = 500;
  */
 export const OBJECT_UNPUBLISHED_TTL_MS = 30_000;
 
-/** The suite clears this between cases; nothing else may touch it. */
-export const resetObjectBackfillMemoForTesting = (): void => objectProbeSkipUntil.clear();
+/**
+ * FIX 2 — how long "the library has no record for this row" is believed.
+ *
+ * `Infinity` was right while a miss meant "this run made nothing and never
+ * will". It stopped being right the moment W21.1 put that answer on screen as
+ * "Not in the library yet — publish first": publishing is PRECISELY the
+ * transition that creates the record, so the operator does what the row asks,
+ * `object_publish` writes the object store — and nothing writes the request
+ * doc (`recordPublication` is the sweeper's, and the sweeper is not in this
+ * path), so the row stayed a candidate on paper and was excluded by its own
+ * `until: Infinity` for the life of the process. The reason told the truth and
+ * then refused to notice it had been acted on.
+ *
+ * 60 s, against the read-rate bound:
+ *  - The HARD bound is untouched: `objectBackfillCandidates` still slices to
+ *    `OBJECT_BACKFILL_MAX`, so a list call makes at most 5 object reads no
+ *    matter how many rows are in this state.
+ *  - The steady-state cadence for a page with nothing live is 30 s
+ *    (`requestPollIntervalFor`), so this is one read per row per TWO polls —
+ *    half the rate C2c already accepts for "exists but unpublished" (30 s),
+ *    which is the right ordering: a miss changes only when a human acts.
+ *  - And it is inside the operator's own attention span: the record appears
+ *    on the next publish, and the row picks it up within a minute — the same
+ *    poll that flips `object_published` and retires the row from the candidate
+ *    set for good.
+ */
+export const OBJECT_MISSING_TTL_MS = 60_000;
 
-const rememberSkip = (skipUntil: Map<string, number>, requestId: string, until: number): void => {
-  if (skipUntil.size >= OBJECT_PROBE_MEMO_MAX) skipUntil.clear();
-  skipUntil.set(requestId, until);
+/** The suite clears this between cases; nothing else may touch it. */
+export const resetObjectBackfillMemoForTesting = (): void => objectProbeMemo.clear();
+
+/**
+ * FIX 8 — evict the oldest entries, rather than wiping the map.
+ *
+ * `memo.clear()` was cheap and, while the memo only suppressed reads, harmless.
+ * It stopped being harmless when W21.1 made the memo a source of what the ROW
+ * SAYS: a single write past the cap dropped every verdict at once, so a whole
+ * page reverted to "not in the library" and re-converged at
+ * `OBJECT_BACKFILL_MAX` rows per poll. FIX 1 removes most of that exposure —
+ * published rows no longer depend on the memo at all — but the blunt instrument
+ * is still a blunt instrument, and a `Map` iterates in insertion order, so
+ * dropping from the front is the whole change.
+ */
+const remember = (memo: Map<string, ObjectProbeVerdict>, requestId: string, verdict: ObjectProbeVerdict): void => {
+  memo.delete(requestId); // re-inserting moves it to the young end
+  while (memo.size >= OBJECT_PROBE_MEMO_MAX) {
+    const oldest = memo.keys().next();
+    if (oldest.done) break;
+    memo.delete(oldest.value);
+  }
+  memo.set(requestId, verdict);
 };
 
 /** Which rows on this page are worth one object read. Exported for the bound test. */
 export const objectBackfillCandidates = (
   rows: readonly { request_id: string; status: RequestStatus; object_id?: string; object_published?: boolean }[],
-  skipUntil: ReadonlyMap<string, number> = objectProbeSkipUntil,
+  memo: ReadonlyMap<string, ObjectProbeVerdict> = objectProbeMemo,
   nowMs: number = Date.now(),
   max: number = OBJECT_BACKFILL_MAX
 ): string[] =>
   rows
     // C2b: a finished row is worth a read while EITHER answer is still
     // missing — the object it names, or whether that object was published.
+    //
+    // FIX 1 removes W21.1's third term (`|| !memo.has(...)`). It made every
+    // published row a candidate so the probe could confirm library presence,
+    // but a published row does not need a probe: publication ENTAILS the
+    // platform record (see `libraryPresence`). Asking anyway cost a read per
+    // row AND — because only `OBJECT_BACKFILL_MAX` of them fit in a page —
+    // left the rest of the page rendering "not in the library" about rows the
+    // library certainly holds. The read profile here is exactly C2's again.
     .filter(
       (row) =>
         row.status === 'done' &&
         (!row.object_id || !row.object_published) &&
-        (skipUntil.get(row.request_id) ?? 0) <= nowMs
+        (memo.get(row.request_id)?.until ?? 0) <= nowMs
     )
     .slice(0, max)
     .map((row) => row.request_id);
@@ -299,12 +366,16 @@ export type ObjectExistenceProbe = (objectId: string) => Promise<{ published: bo
  * One request. `undefined` back means nothing changed — either the object is
  * not there (recorded in the memo, so the next poll is free) or the probe
  * could not answer, which is NOT a verdict and is deliberately not memoised.
+ *
+ * It WRITES the memo and never reads it, so the `get` case is a second
+ * recovery door on top of FIX 2's window: opening a row asks the library
+ * again straight away rather than waiting for the window to lapse.
  */
 const reconcileOneObject = async (
   store: EditorialRequestStore,
   requestId: string,
   exists: ObjectExistenceProbe,
-  skipUntil: Map<string, number>,
+  memo: Map<string, ObjectProbeVerdict>,
   nowMs: number
 ): Promise<EditorialRequest | undefined> => {
   let found: { published: boolean } | undefined;
@@ -316,8 +387,11 @@ const reconcileOneObject = async (
     return undefined;
   }
   if (!found) {
-    // A true miss: there is no object, and a terminal run will not make one.
-    rememberSkip(skipUntil, requestId, Number.POSITIVE_INFINITY);
+    // The library has no record. That is the state `open_object` must refuse,
+    // and the only place it is ever proven — but FIX 2 holds it for a window
+    // rather than for ever, because the publish the row is asking for is what
+    // makes the record appear (see `OBJECT_MISSING_TTL_MS`).
+    remember(memo, requestId, { in_library: false, until: nowMs + OBJECT_MISSING_TTL_MS });
     return undefined;
   }
   const doc = await reconcileObject(store, requestId, {
@@ -325,15 +399,20 @@ const reconcileOneObject = async (
     object_id: requestId,
     ...(found.published ? { published: true } : {}),
   }).catch(() => undefined);
-  // C2c: the object is THERE and simply not published yet. That answer is only
-  // good for a moment — a click on this row's own Publish changes it — so it
-  // is held briefly to bound the read rate and then re-read, never cached
-  // until the process recycles.
+  // W21.1: the record was READ, so library presence is settled whatever the
+  // reconciliation write then did with it — the two are separate facts and
+  // only this one gates Open object.
   if (doc?.object?.published !== true) {
-    rememberSkip(skipUntil, requestId, nowMs + OBJECT_UNPUBLISHED_TTL_MS);
+    // C2c: the object is THERE and simply not published yet. That answer is
+    // only good for a moment — a click on this row's own Publish changes it —
+    // so it is held briefly to bound the read rate and then re-read, never
+    // cached until the process recycles.
+    remember(memo, requestId, { in_library: true, until: nowMs + OBJECT_UNPUBLISHED_TTL_MS });
   } else {
-    // Answered for good — the row carries it now and is not a candidate again.
-    skipUntil.delete(requestId);
+    // Answered for good. `Infinity` rather than a delete: the row is no longer
+    // a candidate on the publication question, and W21.1's library question is
+    // settled too — dropping the entry would make it a candidate again forever.
+    remember(memo, requestId, { in_library: true, until: Number.POSITIVE_INFINITY });
   }
   return doc?.object ? doc : undefined;
 };
@@ -347,17 +426,17 @@ export const backfillPageObjects = async (
   store: EditorialRequestStore,
   page: readonly RequestIndexRow[],
   exists: ObjectExistenceProbe,
-  skipUntil: Map<string, number> = objectProbeSkipUntil,
+  memo: Map<string, ObjectProbeVerdict> = objectProbeMemo,
   nowMs: number = Date.now()
-): Promise<{ rows: RequestIndexRow[]; wrote: boolean }> => {
-  const candidates = objectBackfillCandidates(page, skipUntil, nowMs);
-  if (candidates.length === 0) return { rows: [...page], wrote: false };
+): Promise<{ rows: RequestListRow[]; wrote: boolean }> => {
+  const candidates = objectBackfillCandidates(page, memo, nowMs);
+  if (candidates.length === 0) return { rows: withLibraryFacts(page, memo), wrote: false };
 
   const repaired = new Map<string, RequestIndexRow>();
   let wrote = false;
   for (const requestId of candidates) {
     const before = page.find((row) => row.request_id === requestId);
-    const doc = await reconcileOneObject(store, requestId, exists, skipUntil, nowMs);
+    const doc = await reconcileOneObject(store, requestId, exists, memo, nowMs);
     if (!doc) continue;
     // Project the row from the doc that was just written, so the response and
     // the index cannot disagree about what was recorded.
@@ -365,8 +444,66 @@ export const backfillPageObjects = async (
     repaired.set(requestId, row);
     if (JSON.stringify(before) !== JSON.stringify(row)) wrote = true;
   }
-  return { rows: page.map((row) => repaired.get(row.request_id) ?? row), wrote };
+  return {
+    rows: withLibraryFacts(
+      page.map((row) => repaired.get(row.request_id) ?? row),
+      memo
+    ),
+    wrote,
+  };
 };
+
+/**
+ * W21.1 — the response row, which is the stored row plus one fact the store
+ * does not hold.
+ *
+ * `RequestIndexRow`'s field set is CLOSED by `store.ts` (and asserted there),
+ * and `server/lib/requests/*` is not this task's to widen — nor should it be:
+ * library presence is a per-process observation about ANOTHER store, not a
+ * property of the request. It rides the response only.
+ */
+export type RequestListRow = RequestIndexRow & { object_in_library?: boolean };
+
+/**
+ * FIX 1 — the one place library presence is decided, in the two ways it can
+ * be known.
+ *
+ * PUBLICATION ENTAILS PRESENCE, so a published row needs no read at all.
+ * `object_published` is only ever set from proof: the sweeper's publication
+ * evidence (the run's own publish receipt, `sweep.ts`) or the object record's
+ * `published_time` (`publicationFromObjectRecord`). Neither can exist without
+ * a platform record, so `true` here is DERIVED, not assumed — guardrail 5 is
+ * about not inventing facts, and an entailment is not an invention.
+ *
+ * That leaves the probe answering the one question it is actually needed for:
+ * `done && !object_published`, the finished-but-unpublished row W21.1 exists
+ * for. There, and only there, "Not in the library yet — publish first" is both
+ * true and actionable, because Publish is the primary on that branch.
+ *
+ * `undefined` back means nobody has looked and nothing entails an answer,
+ * which `rowActions` renders as unconfirmed rather than as present.
+ */
+export const libraryPresence = (
+  published: boolean,
+  memoed: ObjectProbeVerdict | undefined
+): boolean | undefined => (published ? true : memoed?.in_library);
+
+/**
+ * Attach what the probe has actually seen. Three states survive to the wire —
+ * `true` (a record was read), `false` (a probe looked and found none) and
+ * ABSENT (nobody has looked) — because `rowActions` must be able to tell
+ * "proven absent" from "unknown" even though it renders them the same way.
+ * Only `done` rows carry the field at all; it is the only status probed.
+ */
+export const withLibraryFacts = (
+  rows: readonly RequestIndexRow[],
+  memo: ReadonlyMap<string, ObjectProbeVerdict> = objectProbeMemo
+): RequestListRow[] =>
+  rows.map((row) => {
+    if (row.status !== 'done') return row;
+    const inLibrary = libraryPresence(row.object_published === true, memo.get(row.request_id));
+    return inLibrary === undefined ? row : { ...row, object_in_library: inLibrary };
+  });
 
 /**
  * The probe, over the site's object store. Created per call and connected
@@ -469,9 +606,23 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         // drawer opened — the detail view draws the same row actions.
         const reconciled =
           doc.status === 'done' && doc.object?.published === undefined
-            ? await reconcileOneObject(store, doc.request_id, siteObjectProbe(event), objectProbeSkipUntil, Date.now())
+            ? await reconcileOneObject(store, doc.request_id, siteObjectProbe(event), objectProbeMemo, Date.now())
             : undefined;
-        return jsonResponse(200, { request: reconciled ?? doc });
+        const settled = reconciled ?? doc;
+        // W21.1 — this is also the RECOVERY door. `reconcileOneObject` never
+        // consults the memo (it only writes it), so opening a row whose object
+        // was memoised as absent re-asks the library and, if the record now
+        // exists because someone published it, records the confirmation that
+        // the next list poll reads.
+        // FIX 1: the same derivation the list makes, from the same helper, so
+        // the drawer and the row can never disagree about the library.
+        const inLibrary =
+          settled.status === 'done'
+            ? libraryPresence(settled.object?.published === true, objectProbeMemo.get(settled.request_id))
+            : undefined;
+        return jsonResponse(200, {
+          request: inLibrary === undefined ? settled : { ...settled, object_in_library: inLibrary },
+        });
       }
 
       case 'archive':

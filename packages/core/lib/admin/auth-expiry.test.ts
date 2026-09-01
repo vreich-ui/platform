@@ -239,7 +239,17 @@ describe('the poll chain pauses while the session is gone, and resumes when it i
 });
 
 describe('the disabled reasons — the honest half of the task', () => {
-  const doneRow: RowActionRowLike = { status: 'done', archived: false, chat_id: 'c_1', object_id: 'o_1' };
+  // W21.1: `object_in_library` joins the "everything is attached" fixture, so
+  // a disabled action here is only ever about the SESSION — which is what
+  // these cases are about. Without it Open object is blocked by a fact about
+  // the row (`NOT_IN_LIBRARY`), not by the expiry.
+  const doneRow: RowActionRowLike = {
+    status: 'done',
+    archived: false,
+    chat_id: 'c_1',
+    object_id: 'o_1',
+    object_in_library: true,
+  };
   const needsYouRow: RowActionRowLike = { status: 'needs_you', archived: false, chat_id: 'c_1', object_id: 'o_1' };
   const failedRow: RowActionRowLike = { status: 'failed', archived: false, chat_id: 'c_1', object_id: 'o_1' };
 
