@@ -253,9 +253,16 @@ That is how this publish is attributed in the ledger.`
   blind. The retry is safe by design: a write that landed before the error comes back as the
   ORIGINAL receipt with \`replayed_from_idempotency_key: true\`, not as a second publish. If you
   did not set an idempotency key, check state with \`object_inventory\` before doing anything else.
-- Large payloads can fail in transport before they reach the CMS. Keep any single call modest —
-  split a long article across several patches — and treat a transport error as "unknown", never
-  as "failed".
+- A 502 from this endpoint is a **transport** failure, not a CMS failure. Measured 2026-09-01: the
+  endpoint answers in 250–650 ms and 502s hit calls of every size, \`ping\` included — so do not
+  read a 502 as "the payload was too big" and do not back off 60 s. **Retry immediately.** Then
+  treat the outcome as "unknown" and check state (\`object_inventory\`) before assuming anything;
+  for a write, the \`idempotency_key\` rule above makes the retry safe.
+- Ask for the read you need. \`object_get {projection:"nodes"}\` is the read before revising an
+  article — the full body without the history ledger, which grows by one entry per verb forever.
+  \`projection:"summary"\` answers "what is this and how is it shaped" without the body.
+  \`projection:"full"\` (the default) is for auditing what happened to an object.
+- Keep any single call modest anyway — split a long article across several patches.
 - Report honestly: published ≠ released ≠ verified. Always say which state you reached.
 - **One article at a time, or a handful.** A publication-wide job — re-voicing every article, a
   batch refresh — is twenty-plus lock/patch/publish cycles in one conversation, and it is fragile

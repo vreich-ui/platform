@@ -126,7 +126,21 @@ const opsField = z.array(z.unknown());
 const objectId = z.string().min(1);
 
 export const objectVerbRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('get'), object_type: objectTypeSchema, object_id: objectId }),
+  z.object({
+    action: z.literal('get'),
+    object_type: objectTypeSchema,
+    object_id: objectId,
+    /**
+     * W6 D3: bounded reads. `full` (the default) is the historical shape,
+     * byte-identical — nothing that omits `projection` moves. The other two
+     * exist because a record grows without bound: `history` accumulates one
+     * entry per verb forever (a live drlurie article is at version 88), and a
+     * finished article's `body.nodes` dwarfs everything else. Reading an
+     * article to revise it needs the nodes but never the ledger; deciding
+     * WHICH article to open needs neither.
+     */
+    projection: z.enum(['summary', 'nodes', 'full']).optional(),
+  }),
   z.object({
     action: z.literal('list'),
     object_type: objectTypeSchema,
@@ -769,6 +783,53 @@ const marginaliaDenied = (principal: Principal, roles: readonly Role[] | undefin
   return err(403, { error: 'Commenting requires a configured role.' });
 };
 
+// ─── bounded reads (W6 D3) ────────────────────────────────────────────────────
+
+/**
+ * W6 D3. `object_get` used to have exactly one shape: the whole record.
+ * That shape has two unbounded parts. `history` grows by one entry per verb
+ * and is never pruned — a live drlurie article sits at version 88, and its
+ * `patch` entries embed the ops they applied, so the ledger can outweigh the
+ * article it describes. `body.nodes` is the article itself.
+ *
+ * Neither is wrong to return; returning them when the caller did not ask is.
+ * A plugin revising an article needs the nodes and never the ledger; a plugin
+ * deciding WHICH article to open needs neither. So:
+ *
+ *   full     — unchanged, and the DEFAULT. No existing caller moves.
+ *   nodes    — envelope + body, ledger replaced by `history_length`.
+ *   summary  — nodes replaced by `{id, kind, visibility}` per node plus
+ *              `node_count`; ledger replaced by `history_length`.
+ *
+ * The projection is a VIEW: nothing is dropped from the stored record, and a
+ * projected read is never a basis for a write (patches carry ops, not bodies).
+ */
+const projectNode = (node: unknown): Record<string, unknown> => {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return {};
+  const source = node as Record<string, unknown>;
+  return {
+    ...(typeof source.id === 'string' ? { id: source.id } : {}),
+    ...(typeof source.kind === 'string' ? { kind: source.kind } : {}),
+    ...(typeof source.visibility === 'string' ? { visibility: source.visibility } : {}),
+  };
+};
+
+export const projectRecord = (record: ObjectRecord, projection: 'summary' | 'nodes'): Record<string, unknown> => {
+  const { history, body, ...envelope } = record;
+  const base: Record<string, unknown> = { ...envelope, history_length: Array.isArray(history) ? history.length : 0 };
+
+  if (projection === 'nodes') return { ...base, body };
+
+  const bodyRecord =
+    body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : undefined;
+  if (!bodyRecord) return { ...base, body };
+
+  const { nodes, ...restOfBody } = bodyRecord;
+  if (!Array.isArray(nodes)) return { ...base, body: bodyRecord };
+
+  return { ...base, body: { ...restOfBody, node_count: nodes.length, nodes: nodes.map(projectNode) } };
+};
+
 // ─── read-only bulk enumeration (T9.11) ───────────────────────────────────────
 
 /**
@@ -839,7 +900,12 @@ export const handleObjectVerb = async (
   switch (request.action) {
     case 'get': {
       const record = await loadRecord(store, objectRecordKey(request.object_type, request.object_id));
-      return record ? ok({ record }) : err(404, { error: 'Object record not found', not_found: true });
+      if (!record) return err(404, { error: 'Object record not found', not_found: true });
+
+      const projection = request.projection ?? 'full';
+      if (projection === 'full') return ok({ record });
+
+      return ok({ record: projectRecord(record, projection), projection });
     }
 
     case 'list': {

@@ -184,7 +184,30 @@ test('the skill explains why an idempotent retry is safe', () => {
   // a cautious model will refuse to retry and leave the article half-published.
   const { skill_md: skill } = render();
   assert.match(skill, /replayed_from_idempotency_key/);
-  assert.match(skill, /treat a transport error as "unknown", never/);
+  assert.match(skill, /treat the outcome as "unknown"/);
+});
+
+test('the skill tells the truth about what a 502 means (W6 D3)', () => {
+  // The W2 run inferred "large payloads 502" and the skill inherited a
+  // back-off-and-shrink posture from it. Measured 2026-09-01 that inference is
+  // wrong: `ping` 502s too and the endpoint answers in 250-650 ms. A plugin
+  // that waits 60 s and then splits its payload is following a fiction; the
+  // correct move is an immediate retry.
+  const { skill_md: skill } = render();
+  assert.match(skill, /transport\*\* failure, not a CMS failure/);
+  assert.match(skill, /Retry immediately/);
+  assert.ok(
+    !/back off 60 s\.$/m.test(skill),
+    'the skill must not instruct a 60-second backoff as the response to a 502'
+  );
+});
+
+test('the skill points reads at the projection that fits (W6 D3)', () => {
+  // object_get returns an unbounded history ledger by default. The skill is
+  // where a plugin learns to ask for less.
+  const { skill_md: skill } = render();
+  assert.match(skill, /projection:"nodes"/);
+  assert.match(skill, /projection:"summary"/);
 });
 
 test('a missing voice degrades to a warning and a placeholder skill, never a throw', () => {
