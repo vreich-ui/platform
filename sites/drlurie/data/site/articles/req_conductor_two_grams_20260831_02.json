@@ -1,0 +1,183 @@
+{
+  "__generated": {
+    "at": "2026-09-01T09:34:32.467Z",
+    "from": "objects/content_item/by-id/req_conductor_two_grams_20260831_02.json",
+    "record_version": 15
+  },
+  "author": "Dr. Lurie",
+  "deck": "SPF labels are based on standardized testing. In daily life, the protection you get depends on using enough sunscreen, covering evenly, and reapplying when the sunscreen film wears down.",
+  "description": "SPF labels are tested under standard conditions. Learn how amount, coverage, and reapplication affect the sun protection you get in real life.",
+  "editorial": {
+    "framework": "Calm, practical dermatology education",
+    "writer_notes": "Built from the approved draft with review-requested precision edits: softened broad claims, removed the unresolved numeric SPF testing thickness, omitted unresolved named-study references, added everyday context, and preserved the non-commercial clinician-boundary next step."
+  },
+  "image": {
+    "alt": "Simple sunscreen amount cues showing a generous visible layer and a rough one-ounce body estimate.",
+    "src": "/img/req_conductor_two_grams_20260831_02/6c18324f11e918f156b191c1248fe177378b25edce123c177a63bb50360eb4ca.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_a1",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Opens with the reader’s practical doubt, quickly preserves trust in SPF labels, and frames the problem as fixable routine technique rather than personal failure.",
+        "intent": "reassure",
+        "strategy": "hook"
+      },
+      "public": {
+        "body": "If you apply sunscreen before a morning commute, a long walk, a beach day, or a weekend outside and still wonder whether you are getting the protection promised on the label, that is a reasonable question.\n\nThe short answer is: the SPF number is not fake. It is measured under standardized testing conditions. But the protection you get in daily life depends on what happens after the bottle is opened: how much you apply, how evenly you cover your skin, and whether you reapply when the sunscreen film has been disrupted.\n\nThe goal is not to measure sunscreen like a lab. The goal is to build a routine that gets you closer to the labeled SPF in a practical, repeatable way.\n\nFor many people, the bigger gap is not the SPF number itself, but how much product reaches the skin and how evenly it stays there.",
+        "title": "Are you getting the SPF on the bottle?"
+      }
+    },
+    {
+      "id": "n_b2",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Establishes the label’s meaning and limits so the reader understands that SPF is useful but not a complete description of real-world protection.",
+        "intent": "educate",
+        "strategy": "context"
+      },
+      "public": {
+        "body": "SPF stands for sun protection factor. In simple terms, it is a tested measure related mainly to protection from UVB rays, the part of ultraviolet light most closely tied to sunburn.\n\nThat does not mean SPF tells the whole story. UVA exposure also matters for skin health, which is why broad-spectrum labeling is important. In the U.S., a sunscreen labeled broad spectrum has met testing requirements related to UVA protection as well as SPF testing.\n\nDermatology guidance commonly recommends using a broad-spectrum sunscreen with SPF 30 or higher on exposed skin. Water resistance matters when you are swimming or sweating, but it does not mean the sunscreen stays unchanged all day.\n\nSo the label matters. It gives you useful information. It just cannot control whether the product is applied in a thick enough, even enough layer once you are using it in real life.",
+        "title": "What SPF tells you — and what it does not"
+      }
+    },
+    {
+      "id": "n_c3",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Explains the mechanism behind the label-to-skin gap while removing the unresolved numeric testing thickness and avoiding simplified delivered-SPF math.",
+        "intent": "educate",
+        "strategy": "explanation"
+      },
+      "public": {
+        "body": "SPF testing uses a standardized amount of sunscreen on the skin. That controlled setting is useful for understanding the label, but it is not a realistic measuring task for most people at home. You should not need a scale or a ruler to use sunscreen well.\n\nThe practical issue is that, in daily use, it is easy to apply less sunscreen than the amount used in testing. People also miss edges, thin out product while rubbing, or apply carefully to the face but much less carefully to the neck, ears, hands, or feet.\n\nA thin or patchy layer can still provide some protection. It just may not give you the full protection reflected by the SPF on the bottle.\n\nIt is also worth being careful with the math. You cannot reliably say that half the sunscreen gives half the SPF. Real skin, product texture, sweating, rubbing, and uneven coverage make the relationship more complicated than that.",
+        "title": "Why the amount you apply changes the protection you get"
+      }
+    },
+    {
+      "id": "n_d4",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Translates the testing concept into repeatable behavior using approved flexible amount cues and the verified inline educational diagram.",
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Instead of trying to recreate a lab measurement, aim for a generous, even layer over every area of exposed skin.\n\nA useful cue is to apply enough that you can see a visible film before you rub it in. Then spread it evenly rather than stretching one tiny amount over a large area.\n\nFor exposed adult body skin, about one ounce — roughly a shot-glass amount — is a common public-health estimate. That is a rough guide, not a rule for every body. A taller body, more exposed skin, swimwear, shorts, or sleeveless clothing can change how much you need. More covered clothing can reduce the skin area that needs sunscreen.\n\nFor the face, some people use the two-finger rule as a reminder to use more than a pea-sized amount. It can be helpful as a cue, but it is not precise. Finger size, sunscreen texture, and whether you include the neck and ears all change the amount.\n\nThe better test is coverage: did you apply enough to create an even layer everywhere light will reach? If the answer is no, add more before you head outside.",
+        "images": [
+          {
+            "alt": "Illustration of practical sunscreen amount cues, including a generous visible layer and a rough one-ounce body estimate.",
+            "caption": "Use amount cues as guides, not exact rules: body size, clothing, and exposed skin area change how much sunscreen you need.",
+            "contentType": "image/webp",
+            "sizeBytes": 89720,
+            "src": "/img/req_conductor_two_grams_20260831_02/6c18324f11e918f156b191c1248fe177378b25edce123c177a63bb50360eb4ca.webp",
+            "title": "Sunscreen amount cues",
+            "type": "image"
+          }
+        ],
+        "title": "How much sunscreen to use in real life"
+      }
+    },
+    {
+      "id": "n_e5",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Gives concrete missed-area examples requested by review and binds the verified annotated map where it directly supports the reader task.",
+        "intent": "educate",
+        "strategy": "example"
+      },
+      "public": {
+        "body": "Sunscreen routines often become less reliable at the edges. That does not mean you are careless. These areas are simply easy to skip when you are moving quickly.\n\nUse the same order each time so you are not relying on memory in the moment. Start with the face, then the neck and ears. Move to exposed arms, hands, legs, and feet. Finish with a border check.\n\nPay special attention to the ears, back and sides of the neck, hairline or exposed scalp, lips, tops of the hands, tops of the feet, and the skin near straps, sleeves, collars, ankles, and waistbands.\n\nIf your hair part or scalp is exposed, it needs protection too. Depending on your hair and skin, that may mean sunscreen made for that area, a hat, or both.\n\nFor lips, choose a lip product with SPF when you will be outdoors. Regular sunscreen is not always pleasant or practical on the lips, and many people forget this area entirely.",
+        "images": [
+          {
+            "alt": "Annotated face and body map highlighting commonly missed sunscreen areas such as ears, neck, hairline, lips, hands, feet, and clothing borders.",
+            "caption": "A quick border check can help catch easy-to-miss areas before you go outside.",
+            "contentType": "image/webp",
+            "sizeBytes": 133944,
+            "src": "/img/req_conductor_two_grams_20260831_02/edd237157b8ed3d2ca26b8f860dc31b657a1c1822d803afeee7fc1cd9b495111.webp",
+            "title": "Commonly missed sunscreen areas",
+            "type": "image"
+          }
+        ],
+        "title": "Where sunscreen gets missed"
+      }
+    },
+    {
+      "id": "n_f6",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Addresses the higher-SPF objection by comparing label strength with the practical limits of thin, missed, or worn-down coverage.",
+        "intent": "persuade",
+        "strategy": "comparison"
+      },
+      "public": {
+        "body": "A higher SPF can be useful in some situations, especially when it is applied correctly. But it does not solve the basic problem of too little product or uneven coverage.\n\nIf SPF 50 is spread so thinly that it barely covers the skin, the number on the bottle cannot do all the work. The same is true if the sunscreen is applied well at 9 a.m. and then rubbed away by sweat, water, towels, clothing, or hands.\n\nThink of higher SPF as one part of a margin, not permission to apply less. The routine still matters: enough product, even coverage, reapplication during ongoing outdoor exposure, and physical protection when the sun exposure is more intense or prolonged.\n\nThat physical protection can be simple. Shade, hats, sunglasses, and UPF or tightly woven clothing reduce how much skin is relying on sunscreen alone.",
+        "title": "Why higher SPF does not replace enough product"
+      }
+    },
+    {
+      "id": "n_g7",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Turns reapplication into a maintenance step and includes a practical nod to makeup or texture disruption without expanding into product advice.",
+        "intent": "educate",
+        "strategy": "step"
+      },
+      "public": {
+        "body": "Sunscreen does not stay in a perfect film forever. Time, sweat, water, towel-drying, rubbing, touching your face, makeup adjustments, and clothing friction can all change the layer on your skin.\n\nFor ongoing outdoor exposure, general guidance is to reapply about every two hours. Reapply sooner after swimming, heavy sweating, towel-drying, or anything that visibly removes or moves the product.\n\nThis is not meant to make sunscreen feel extreme. Reapplication is simply maintenance. If the layer is what helps protect exposed skin, then rebuilding that layer during a long outdoor day helps keep the routine working.\n\nOn a normal indoor day with brief incidental exposure, your needs may look different from a beach day, a hike, an outdoor sports event, or a long walk at midday. Context matters. When exposure is longer, hotter, wetter, or more reflective, your routine has to do more work.",
+        "title": "When and why to reapply"
+      }
+    },
+    {
+      "id": "n_h8",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Places sunscreen inside a broader sun-protection plan and gives clinician-boundary guidance for readers whose risks or routines may require individual advice.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "Sunscreen is useful, but it should not be your only plan for prolonged sun exposure.\n\nWhen you can, combine it with shade, a broad-brimmed hat, sunglasses, and protective clothing. This is especially helpful because clothing and shade do not depend on applying a perfectly even layer of product to every inch of exposed skin.\n\nSome people need more individualized guidance. If you have a history of skin cancer, melasma or persistent hyperpigmentation, recent cosmetic or dermatologic procedures, pregnancy, photosensitizing medications, prescription actives such as retinoids, or a photosensitive condition, ask your dermatologist what sun-protection plan fits your skin.\n\nThat does not mean sunscreen is unsafe or useless. It means your risk factors, medications, procedures, and skin goals can change what a careful plan looks like.",
+        "title": "Sunscreen is one part of sun protection"
+      }
+    },
+    {
+      "id": "n_i9",
+      "kind": "content",
+      "private": {
+        "agentNotes": "Resolves the article’s tension by summarizing the routine in calm, repeatable terms and preserving the approved reassurance line.",
+        "intent": "reassure",
+        "strategy": "resolution"
+      },
+      "public": {
+        "body": "You do not need to apply sunscreen perfectly to make it worth using. But a more consistent routine can help you get closer to the protection the label describes.\n\nStart with a broad-spectrum SPF 30 or higher. Choose water-resistant sunscreen when swimming or sweating is part of the day. Apply a generous, even layer to all exposed skin, then check the easy-to-miss areas: ears, neck, hairline, lips, hands, feet, and clothing borders.\n\nDuring ongoing outdoor exposure, reapply about every two hours and sooner after swimming, sweating, towel-drying, or rubbing. Add shade, hats, sunglasses, and protective clothing when the exposure is longer or more intense.\n\nThe point is not fear or perfection. It is a routine you can repeat.",
+        "title": "A sunscreen routine you can trust"
+      }
+    },
+    {
+      "id": "n_j10",
+      "kind": "action",
+      "private": {
+        "agentNotes": "Adds the approved low-pressure clinician boundary as a non-commercial next step rather than a sales-oriented conversion prompt.",
+        "intent": "navigate",
+        "strategy": "recommendation"
+      },
+      "public": {
+        "body": "If your sun-protection needs are shaped by melasma, a history of skin cancer, recent procedures, pregnancy, photosensitizing medications, or a routine with prescription actives, a dermatologist can help you adapt the routine to your skin.",
+        "ctaText": "Ask your dermatologist what sun-protection plan fits your skin.",
+        "title": "When to ask your dermatologist"
+      }
+    }
+  ],
+  "publication_context": {
+    "publication_name": "Dr. Lurie",
+    "topic_scope": "Dermatology patient education about sunscreen application and sun protection."
+  },
+  "seo": {
+    "meta_description": "SPF labels are tested under standard conditions. Learn how amount, coverage, and reapplication affect the sun protection you get in real life.",
+    "meta_title": "How Much Sunscreen to Apply to Get the SPF on the Label"
+  },
+  "slug": "how-much-sunscreen-to-apply-spf",
+  "title": "Are You Getting the SPF on the Bottle? How to Apply Sunscreen More Effectively"
+}
