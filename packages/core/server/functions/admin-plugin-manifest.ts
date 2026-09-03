@@ -68,6 +68,34 @@ const originFromEvent = (event: LambdaEvent): string | null => {
 const parsePlatform = (value: unknown): PluginPlatform =>
   pluginPlatforms.includes(value as PluginPlatform) ? (value as PluginPlatform) : 'claude';
 
+/**
+ * The named steps of a request, in the order they run.
+ *
+ * /admin/plugins showed "Plugin manifest unavailable — Request failed (502)".
+ * A 502 is Netlify saying the lambda died; it carries no stage, no message and
+ * no way to tell "the tool surface threw" from "the store is down" from "the
+ * render is broken". The operator's only next move was to ask someone to read
+ * a function log they cannot reach.
+ *
+ * So a domain failure anywhere below never becomes a 502: it answers HTTP 200
+ * with {ok:false, stage, error}, and the page names the stage. HTTP codes stay
+ * honest for TRANSPORT-level facts — 401/403 for auth, 405 for method, 400 for
+ * a missing Host, 409 for "no draft to promote" — those are well-formed
+ * answers, not crashes.
+ */
+type ManifestStage =
+  | 'mcp_siblings'
+  | 'manifest_store'
+  | 'manifest_doc'
+  | 'approval'
+  | 'tool_surface'
+  | 'voice'
+  | 'summary'
+  | 'export'
+  | 'render'
+  | 'promote'
+  | 'persist';
+
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   const method = event.httpMethod ?? 'GET';
   if (method !== 'GET' && method !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
@@ -89,143 +117,171 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
    * — it can never inject another tenant's handlers, and never downgrades a
    * real /mcp shim that already injected a richer set.
    */
-  ensureMcpSiblings(binding);
+  // Every step from here on names itself, so a failure can say WHERE.
+  let stage: ManifestStage = 'mcp_siblings';
 
-  const origin = originFromEvent(event);
-  if (!origin)
-    return jsonResponse(400, { error: 'The request carried no Host header, so the tenant origin is unknown.' });
-
-  let store;
   try {
-    store = await getPluginManifestBlobStore(event, binding);
-  } catch (error) {
-    console.error('Plugin manifest store unavailable.', error);
-    return jsonResponse(500, { error: 'The plugin manifest store is unavailable.' });
-  }
+    ensureMcpSiblings(binding);
 
-  const doc = await getPluginManifestDoc(store);
+    const origin = originFromEvent(event);
+    if (!origin)
+      return jsonResponse(400, { error: 'The request carried no Host header, so the tenant origin is unknown.' });
 
-  const approval = await resolveApproval(event);
-  const liveTools = buildPluginTools(visibleToolDefinitions());
-  const liveDigest = toolSurfaceDigest(liveTools);
+    stage = 'manifest_store';
+    const store = await getPluginManifestBlobStore(event, binding);
 
-  if (method === 'GET') {
-    const exportKind = event.queryStringParameters?.export;
-    if (exportKind) {
-      if (!['skill', 'plugin', 'gpt', 'gemini'].includes(exportKind)) {
-        return jsonResponse(400, { error: 'export must be "skill", "plugin", "gpt" or "gemini".' });
-      }
-      if (!doc.active) {
-        return jsonResponse(409, {
-          error: 'There is no active bundle to export. Render a draft and promote it first.',
-        });
-      }
+    stage = 'manifest_doc';
+    const doc = await getPluginManifestDoc(store);
 
-      // Gemini is markdown, not a zip: a Gem has one instructions field and
-      // nothing to connect (plan D6), so there is no bundle to build.
-      if (exportKind === 'gemini') {
-        const gem = buildGemInstructions(doc.active);
+    stage = 'approval';
+    const approval = await resolveApproval(event);
+
+    stage = 'tool_surface';
+    const liveTools = buildPluginTools(visibleToolDefinitions());
+    const liveDigest = toolSurfaceDigest(liveTools);
+
+    if (method === 'GET') {
+      const exportKind = event.queryStringParameters?.export;
+      if (exportKind) {
+        if (!['skill', 'plugin', 'gpt', 'gemini'].includes(exportKind)) {
+          return jsonResponse(400, { error: 'export must be "skill", "plugin", "gpt" or "gemini".' });
+        }
+        if (!doc.active) {
+          return jsonResponse(409, {
+            error: 'There is no active bundle to export. Render a draft and promote it first.',
+          });
+        }
+
+        stage = 'export';
+
+        // Gemini is markdown, not a zip: a Gem has one instructions field and
+        // nothing to connect (plan D6), so there is no bundle to build.
+        if (exportKind === 'gemini') {
+          const gem = buildGemInstructions(doc.active);
+          return {
+            statusCode: 200,
+            headers: {
+              'Content-Type': 'text/markdown; charset=utf-8',
+              'Content-Disposition': `attachment; filename="${gem.filename}"`,
+              'Cache-Control': 'no-store',
+              'X-Plugin-Manifest-Version': doc.active.manifest_version,
+            },
+            body: gem.content,
+          };
+        }
+        let artifact;
+        try {
+          artifact =
+            exportKind === 'skill'
+              ? buildSkillZip(doc.active)
+              : exportKind === 'plugin'
+                ? buildCoworkPlugin(doc.active)
+                : buildGptConfigZip(doc.active);
+        } catch (error) {
+          // The GPT instructions cap is ChatGPT's, not ours: a bundle that would
+          // not fit is a render defect to fix, never something to truncate
+          // silently into a half-instruction.
+          if (error instanceof GptInstructionsTooLongError) {
+            return jsonResponse(500, { error: error.message, error_code: 'gpt_instructions_too_long' });
+          }
+          throw error;
+        }
         return {
           statusCode: 200,
           headers: {
-            'Content-Type': 'text/markdown; charset=utf-8',
-            'Content-Disposition': `attachment; filename="${gem.filename}"`,
+            'Content-Type': 'application/zip',
+            'Content-Disposition': `attachment; filename="${artifact.filename}"`,
             'Cache-Control': 'no-store',
+            // The version the human is installing, readable without unzipping —
+            // this is what an operator compares against the live manifest when
+            // an install looks stale.
             'X-Plugin-Manifest-Version': doc.active.manifest_version,
           },
-          body: gem.content,
+          body: artifact.bytes.toString('base64'),
+          isBase64Encoded: true,
         };
       }
-      let artifact;
-      try {
-        artifact =
-          exportKind === 'skill'
-            ? buildSkillZip(doc.active)
-            : exportKind === 'plugin'
-              ? buildCoworkPlugin(doc.active)
-              : buildGptConfigZip(doc.active);
-      } catch (error) {
-        // The GPT instructions cap is ChatGPT's, not ours: a bundle that would
-        // not fit is a render defect to fix, never something to truncate
-        // silently into a half-instruction.
-        if (error instanceof GptInstructionsTooLongError) {
-          return jsonResponse(500, { error: error.message, error_code: 'gpt_instructions_too_long' });
-        }
-        throw error;
-      }
-      return {
-        statusCode: 200,
-        headers: {
-          'Content-Type': 'application/zip',
-          'Content-Disposition': `attachment; filename="${artifact.filename}"`,
-          'Cache-Control': 'no-store',
-          // The version the human is installing, readable without unzipping —
-          // this is what an operator compares against the live manifest when
-          // an install looks stale.
-          'X-Plugin-Manifest-Version': doc.active.manifest_version,
-        },
-        body: artifact.bytes.toString('base64'),
-        isBase64Encoded: true,
+
+      stage = 'voice';
+      const voice = await readVoiceRecord(event, binding, getSiteObjectsBlobStore).catch(() => null);
+
+      stage = 'summary';
+      const live = {
+        voiceRecordVersion: voice?.record_version ?? null,
+        toolSurfaceDigest: liveDigest,
+        approvalPosture: approval.master,
       };
+      return jsonResponse(200, {
+        active: doc.active ?? null,
+        draft: doc.draft ?? null,
+        stale: doc.active ? manifestStaleReasons(doc.active, live) : [],
+        updated_by: doc.updated_by,
+        updated_at: doc.updated_at,
+        history: doc.history.slice(0, 10),
+        exports: doc.active
+          ? {
+              skill_zip: '/.netlify/functions/admin-plugin-manifest?export=skill',
+              cowork_plugin: '/.netlify/functions/admin-plugin-manifest?export=plugin',
+              gpt_config: '/.netlify/functions/admin-plugin-manifest?export=gpt',
+              gem_instructions: '/.netlify/functions/admin-plugin-manifest?export=gemini',
+              actions_openapi: '/api/plugin/openapi.json',
+            }
+          : null,
+      });
     }
 
+    let payload: Record<string, unknown> = {};
+    try {
+      const raw = event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
+      payload = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    } catch {
+      return jsonResponse(400, { error: 'Invalid JSON body.' });
+    }
+
+    const action = typeof payload.action === 'string' ? payload.action : '';
+
+    if (action === 'promote') {
+      stage = 'promote';
+      const promoted = promoteDraft(doc, access.email, new Date().toISOString());
+      if (!promoted.ok) return jsonResponse(409, { error: promoted.error });
+      stage = 'persist';
+      await putPluginManifestDoc(store, promoted.doc);
+      return jsonResponse(200, { active: promoted.doc.active, promoted: true });
+    }
+
+    if (action !== 'render') {
+      return jsonResponse(400, { error: 'action must be "render" or "promote".' });
+    }
+
+    stage = 'voice';
     const voice = await readVoiceRecord(event, binding, getSiteObjectsBlobStore).catch(() => null);
-    const live = {
-      voiceRecordVersion: voice?.record_version ?? null,
-      toolSurfaceDigest: liveDigest,
-      approvalPosture: approval.master,
-    };
+
+    stage = 'render';
+    const bundle = buildManifestBundle({
+      origin,
+      definitions: visibleToolDefinitions(),
+      voice,
+      platform: parsePlatform(payload.platform),
+      approval,
+    });
+
+    stage = 'persist';
+    const next = recordRenderedDraft(doc, bundle, access.email);
+    await putPluginManifestDoc(store, next);
+    return jsonResponse(200, { draft: bundle, warnings: bundle.warnings });
+  } catch (error) {
+    /**
+     * The whole point: an operator sees WHICH step failed and what it said,
+     * on a page that still renders. A 502 told them only that something died.
+     */
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`admin-plugin-manifest failed at stage "${stage}".`, error);
     return jsonResponse(200, {
-      active: doc.active ?? null,
-      draft: doc.draft ?? null,
-      stale: doc.active ? manifestStaleReasons(doc.active, live) : [],
-      updated_by: doc.updated_by,
-      updated_at: doc.updated_at,
-      history: doc.history.slice(0, 10),
-      exports: doc.active
-        ? {
-            skill_zip: '/.netlify/functions/admin-plugin-manifest?export=skill',
-            cowork_plugin: '/.netlify/functions/admin-plugin-manifest?export=plugin',
-            gpt_config: '/.netlify/functions/admin-plugin-manifest?export=gpt',
-            gem_instructions: '/.netlify/functions/admin-plugin-manifest?export=gemini',
-            actions_openapi: '/api/plugin/openapi.json',
-          }
-        : null,
+      ok: false,
+      stage,
+      error: detail.slice(0, 500),
     });
   }
-
-  let payload: Record<string, unknown> = {};
-  try {
-    const raw = event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
-    payload = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-  } catch {
-    return jsonResponse(400, { error: 'Invalid JSON body.' });
-  }
-
-  const action = typeof payload.action === 'string' ? payload.action : '';
-
-  if (action === 'promote') {
-    const promoted = promoteDraft(doc, access.email, new Date().toISOString());
-    if (!promoted.ok) return jsonResponse(409, { error: promoted.error });
-    await putPluginManifestDoc(store, promoted.doc);
-    return jsonResponse(200, { active: promoted.doc.active, promoted: true });
-  }
-
-  if (action !== 'render') {
-    return jsonResponse(400, { error: 'action must be "render" or "promote".' });
-  }
-
-  const voice = await readVoiceRecord(event, binding, getSiteObjectsBlobStore).catch(() => null);
-  const bundle = buildManifestBundle({
-    origin,
-    definitions: visibleToolDefinitions(),
-    voice,
-    platform: parsePlatform(payload.platform),
-    approval,
-  });
-  const next = recordRenderedDraft(doc, bundle, access.email);
-  await putPluginManifestDoc(store, next);
-  return jsonResponse(200, { draft: bundle, warnings: bundle.warnings });
 };
 
 const resolveApproval = async (event: LambdaEvent): Promise<{ master: string; overrides?: Record<string, string> }> => {

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  fetchPluginManifest,
+  renderPluginDraft,
   platformCards,
   installerIdentityStep,
   ceilingRows,
@@ -145,4 +147,80 @@ test('the ChatGPT card explains that two shapes ship together', () => {
   assert.match(String(openai?.downloadLabel), /both shapes/i);
   assert.ok(openai?.steps.some((s) => /Agent Studio/i.test(s)));
   assert.ok(openai?.steps.some((s) => /Remove any direct PDF-Tool app/i.test(s)));
+});
+
+/* ── transport: a domain failure now arrives as HTTP 200 ──────────────────── */
+
+/**
+ * The endpoint used to die and let Netlify answer 502, which is how
+ * /admin/plugins ended up showing "Request failed (502)" and nothing else. It
+ * now answers 200 with {ok:false, stage, error}. That makes `response.ok`
+ * insufficient on its own: without the body check a stage failure would be
+ * treated as a successful fetch and the page would render an empty manifest
+ * instead of saying what broke.
+ */
+const withFetch = async (reply: { status: number; body: Record<string, unknown> }, run: () => Promise<unknown>) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    ({
+      ok: reply.status >= 200 && reply.status < 300,
+      status: reply.status,
+      json: async () => reply.body,
+    }) as unknown as Response) as typeof fetch;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = original;
+  }
+};
+
+const noToken = async () => 'test-token';
+
+test('a 200 carrying ok:false is a failure, and the message names the stage', async () => {
+  await assert.rejects(
+    () =>
+      withFetch(
+        { status: 200, body: { ok: false, stage: 'render', error: 'voice record unreadable' } },
+        () => fetchPluginManifest(noToken) as Promise<unknown>
+      ),
+    /voice record unreadable \(failed at: render\)/,
+    'the operator must be told WHICH step failed, not just that something did'
+  );
+});
+
+test('a stage failure on render is a failure too — not an empty draft', async () => {
+  await assert.rejects(
+    () =>
+      withFetch({ status: 200, body: { ok: false, stage: 'persist', error: 'store write refused' } }, () =>
+        renderPluginDraft(noToken, 'claude')
+      ),
+    /store write refused \(failed at: persist\)/
+  );
+});
+
+test('a failure with no stage still surfaces its message', async () => {
+  await assert.rejects(
+    () =>
+      withFetch(
+        { status: 200, body: { ok: false, error: 'something went wrong' } },
+        () => fetchPluginManifest(noToken) as Promise<unknown>
+      ),
+    /^Error: something went wrong$/
+  );
+});
+
+test('a genuine transport error still reports its status', async () => {
+  await assert.rejects(
+    () => withFetch({ status: 502, body: {} }, () => fetchPluginManifest(noToken) as Promise<unknown>),
+    /Request failed \(502\)/
+  );
+});
+
+test('ok:true passes straight through — the happy path is untouched', async () => {
+  const state = await withFetch(
+    { status: 200, body: { ok: true, active: null, draft: null, stale: [], history: [], exports: null } },
+    () => fetchPluginManifest(noToken) as Promise<unknown>
+  );
+  assert.equal((state as PluginManifestState).active, null);
+  assert.deepEqual((state as PluginManifestState).stale, []);
 });

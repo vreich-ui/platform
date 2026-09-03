@@ -3,6 +3,8 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { mkdir, writeFile } from 'node:fs/promises';
+
 import { handler } from '../../netlify/functions/admin-plugin-manifest.js';
 import { setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
 
@@ -71,4 +73,35 @@ test('render produces a draft, promote makes it active', async () => {
   const after = parseBody(await handler({ httpMethod: 'GET', headers: HEADERS }, ADMIN));
   assert.equal((after.active as { manifest_version?: string })?.manifest_version, draft.manifest_version);
   assert.ok(after.exports, 'an active bundle advertises its export routes');
+});
+
+/**
+ * The other half of the rule: a domain failure must never become a 502 again.
+ *
+ * Forced for real rather than mocked — the blobs root is pointed INSIDE a
+ * regular file, so every write under it fails with ENOTDIR. That is a faithful
+ * stand-in for "the store is unavailable at write time", and it throws from a
+ * different stage than the original bug did, which is the point: the wrapper
+ * has to name whichever step actually failed.
+ */
+test('a store that cannot be written answers 200 with the failing stage, never a 502', async () => {
+  const blocked = join(process.cwd(), '.netlify', 'local-blobs-test', 'plugin-manifest-blocked');
+  await mkdir(join(blocked, '..'), { recursive: true });
+  await writeFile(blocked, 'not a directory');
+  setLocalBlobsRootForTesting(join(blocked, 'root'));
+
+  try {
+    const response = await handler(
+      { httpMethod: 'POST', headers: HEADERS, body: JSON.stringify({ action: 'render' }) },
+      ADMIN
+    );
+    const body = parseBody(response);
+
+    assert.equal(response.statusCode, 200, 'a domain failure is not a transport failure');
+    assert.equal(body.ok, false, 'and it is honestly reported as a failure');
+    assert.equal(body.stage, 'persist', `expected the write stage to be named, got ${JSON.stringify(body.stage)}`);
+    assert.match(String(body.error), /ENOTDIR|not a directory/i, 'the operator gets the real reason');
+  } finally {
+    setLocalBlobsRootForTesting(LOCAL_BLOBS_ROOT);
+  }
 });
