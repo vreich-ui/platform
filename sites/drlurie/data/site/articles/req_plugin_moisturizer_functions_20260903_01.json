@@ -1,8 +1,8 @@
 {
   "__generated": {
-    "at": "2026-09-03T13:38:55.160Z",
+    "at": "2026-09-03T13:47:30.162Z",
     "from": "objects/content_item/by-id/req_plugin_moisturizer_functions_20260903_01.json",
-    "record_version": 11
+    "record_version": 15
   },
   "author": "Dr. Lurie",
   "deck": "Most moisturizers perform three basic jobs. Understanding them makes it easier to choose a formula that suits your skin without getting pulled in by the label.",
@@ -136,9 +136,18 @@
       "id": "n_k1q6d8",
       "kind": "action",
       "public": {
-        "body": "If your skin remains uncomfortable despite simplifying your routine, raise it with your dermatologist.",
-        "ctaLink": "/contact",
-        "ctaText": "Talk with your dermatologist"
+        "body": "A concise five-page version of this article is available to save or print.",
+        "ctaLink": "/pdf/req_plugin_moisturizer_functions_20260903_01/c90a53be0852336d1675cb19eabc829251b6fe2de2bcdbc3dec93e30cc0245d9.pdf",
+        "ctaText": "Download the PDF guide",
+        "media": {
+          "caption": "A five-page guide to humectants, emollients, occlusives, and moisturizer textures.",
+          "contentType": "application/pdf",
+          "sizeBytes": 28934,
+          "src": "/pdf/req_plugin_moisturizer_functions_20260903_01/c90a53be0852336d1675cb19eabc829251b6fe2de2bcdbc3dec93e30cc0245d9.pdf",
+          "title": "What Moisturizers Actually Do",
+          "type": "document"
+        },
+        "title": "Keep the guide handy"
       },
       "visibility": "public"
     },
