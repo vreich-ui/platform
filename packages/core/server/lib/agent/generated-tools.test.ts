@@ -158,7 +158,73 @@ test('defaults: read -> auto, draft/creation/publication/privileged -> ask, chat
   assert.equal(defaults.object_submit_review, 'ask');
   assert.equal(defaults.set_image_search_policy, 'off');
   assert.equal(defaults.set_image_model_policy, 'off');
-  assert.equal(defaults.delete_pdf_template, 'off');
+});
+
+/**
+ * Reported defect (brand-imagery wave): `delete_pdf_template` carried
+ * `chatDefaultOff`, so it resolved to `off` and the admin chat agent could not
+ * remove a PDF template at all. Asked to, it reached for `object_checkout` on
+ * the template ids instead — PDF templates are pdf-tool records, not platform
+ * objects — collected "Object record not found" repeatedly, and told the user
+ * templates are hard-deleted after a 30-day grace period, which is false.
+ *
+ * The new posture: default `'ask'` (an approval card EVERY time) and never
+ * `'auto'` — proportionate for a soft, reversible, idempotent deactivation
+ * that preserves the stored bytes. The membership tools and the two image
+ * policy setters are untouched, which the set assertion below pins.
+ */
+test('delete_pdf_template defaults to ask — an approval card every time, and never auto', () => {
+  const defaults = resolveGeneratedAutonomy(undefined, undefined);
+  assert.equal(defaults.delete_pdf_template, 'ask');
+
+  // The privileged floor still makes 'auto' unreachable from either layer.
+  assert.equal(resolveGeneratedAutonomy({ delete_pdf_template: 'auto' }, undefined).delete_pdf_template, 'ask');
+  assert.equal(resolveGeneratedAutonomy(undefined, { delete_pdf_template: 'auto' }).delete_pdf_template, 'ask');
+  // An operator who wants it off again still can.
+  assert.equal(resolveGeneratedAutonomy({ delete_pdf_template: 'off' }, undefined).delete_pdf_template, 'off');
+});
+
+test('the default-OFF set is EXACTLY the two image-policy setters plus the thirteen restricted membership tools — delete_pdf_template is not among them, and every membership tool that was off stays off', () => {
+  const defaults = resolveGeneratedAutonomy(undefined, undefined);
+  const off = new Set(
+    Object.entries(defaults)
+      .filter(([, mode]) => mode === 'off')
+      .map(([name]) => name)
+  );
+
+  const membershipOff = [
+    'member_invite',
+    'invitation_resend',
+    'invitation_revoke',
+    'member_set_role',
+    'member_suspend',
+    'member_reinstate',
+    'member_remove',
+    'member_purge',
+    'ownership_transfer',
+    'membership_policy_set',
+  ];
+  assert.deepEqual(off, new Set([...membershipOff, 'set_image_search_policy', 'set_image_model_policy']));
+  for (const name of membershipOff) assert.equal(defaults[name], 'off', `${name} must stay default-off`);
+  assert.ok(!off.has('delete_pdf_template'));
+});
+
+/**
+ * Pinned as-is, NOT endorsed: `defaultAutonomyForGenerated` returns 'auto' for
+ * every `toolClass: 'read'` tool BEFORE it consults `CHAT_DEFAULT_OFF_NAMES`,
+ * so the three membership READS that carry `chatDefaultOff`
+ * (mcp-tool-definitions-membership.ts) resolve to 'auto' in chat regardless.
+ * That is pre-existing behaviour, untouched by the delete_pdf_template change
+ * above; this test exists so the next person to change either side sees it.
+ */
+test('chatDefaultOff on a read-class tool does not take effect in the generated registry (existing behaviour, pinned)', () => {
+  const defaults = resolveGeneratedAutonomy(undefined, undefined);
+  for (const name of ['member_audit', 'membership_policy_get', 'member_export']) {
+    const definition = TOOL_DEFINITIONS_MEMBERSHIP.find((def) => def.name === name);
+    assert.equal(definition?.governance.chatDefaultOff, true, `${name} is declared chatDefaultOff`);
+    assert.equal(definition?.governance.toolClass, 'read');
+    assert.equal(defaults[name], 'auto', `${name} resolves to auto because read wins over chatDefaultOff`);
+  }
 });
 
 // ─── object_patch.parse: schema check, then agent-authored-ops check ─────

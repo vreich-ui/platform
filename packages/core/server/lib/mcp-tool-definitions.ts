@@ -566,7 +566,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'list_pdf_templates',
     description:
-      'List pdf-tool PDF templates for THIS site through the trusted Platform bridge. Site ownership, canonical project, and storage grant are resolved server-side.',
+      "List pdf-tool PDF templates for THIS site through the trusted Platform bridge. Site ownership, canonical project, and storage grant are resolved server-side. NOT PLATFORM OBJECTS: a PDF template is a pdf-tool record living in pdf-tool's own store, NOT a CMS object — the ids returned here are not object ids, they do not appear in object_list/object_inventory, and object_checkout / object_patch / object_retire / object_publish will all fail on them with \"Object record not found\". Every operation on a template goes through the *_pdf_template tools on this bridge: get_pdf_template to read one, create_pdf_template to create or version, publish_pdf_template to activate, delete_pdf_template to deactivate. Disabled templates are hidden from this list by default.",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
@@ -579,7 +579,8 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   },
   {
     name: 'get_pdf_template',
-    description: 'Fetch a pdf-tool PDF template record for THIS site through the trusted Platform bridge.',
+    description:
+      "Fetch a pdf-tool PDF template record for THIS site through the trusted Platform bridge. NOT A PLATFORM OBJECT: this is a pdf-tool record in pdf-tool's own store, NOT a CMS object — object_get / object_checkout / object_patch / object_retire do not address it and fail with \"Object record not found\". Read it here, change it with create_pdf_template (new version) / publish_pdf_template (activate) / delete_pdf_template (soft, reversible deactivation).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
@@ -639,7 +640,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'delete_pdf_template',
     description:
-      'Deactivate a pdf-tool PDF template for THIS site through the trusted Platform bridge. This is a soft, reversible deactivation (status -> disabled), NOT a hard delete: the underlying template data and stored bytes are preserved. A disabled template is hidden from list_pdf_templates by default, and is blocked from publish_pdf_template and from rendering (create_agent_artifact_job) until reactivated. Deactivating an already-disabled template succeeds without error (idempotent).',
+      "THE ONLY WAY to remove a PDF template — use this, not the object_* verbs. A PDF template is a pdf-tool record in pdf-tool's own store, NOT a platform CMS object: object_checkout / object_retire / object_patch / object_discard do not address template ids at all and fail with \"Object record not found\" no matter how many times they are retried. Deactivates the template for THIS site through the trusted Platform bridge. SOFT AND REVERSIBLE (status -> disabled), NOT a hard delete and NOT a timed deletion: the underlying template data and stored bytes are preserved indefinitely, there is NO grace period, and nothing is ever purged by this call — do not tell an editor a template will be hard-deleted after any number of days (that is the MEMBERSHIP purge model, member_purge, and it has nothing to do with templates). A disabled template is hidden from list_pdf_templates by default, and is blocked from publish_pdf_template and from rendering (create_agent_artifact_job) while disabled. Deactivating an already-disabled template succeeds without error (idempotent).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
@@ -649,11 +650,23 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       },
       ['site_id', 'template_id']
     ),
+    /**
+     * Reported defect (brand-imagery wave): this carried `chatDefaultOff`, so
+     * it resolved to autonomy `off` and the admin chat agent could not call it
+     * at all. Asked to remove some templates the agent reached for
+     * `object_checkout` on the template ids instead, got "Object record not
+     * found" repeatedly, and invented a 30-day hard-delete grace period that
+     * does not exist for templates. The default is now `'ask'` — an approval
+     * card EVERY time, never `'auto'` (the privileged `autonomyFloor: 'ask'`
+     * below makes `'auto'` unreachable even if someone overrides it). That is
+     * proportionate for a soft, reversible, idempotent deactivation that
+     * preserves the stored bytes. The membership writes and the two image
+     * policy setters keep their `chatDefaultOff`.
+     */
     governance: {
       toolClass: 'privileged',
       autonomyFloor: 'ask',
       preview: { kind: 'input_echo' },
-      chatDefaultOff: true,
     },
   },
   {

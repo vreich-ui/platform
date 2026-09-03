@@ -20,11 +20,12 @@
  * hole for it — the optional `rail` prop — and every tool-backed button routes
  * through `runIntent`. With a rail present the intent opens the docked chat;
  * without one it opens a small dialog showing the exact instruction and a link
- * to the agents page, so the affordance is honest rather than dead. Nothing
- * here imports or edits `chat.tsx`, `AgentRail.tsx`, `chat-*.ts` or
- * `agent-starters.ts`.
+ * to the agents page, so the affordance is honest rather than dead. U1 itself
+ * added nothing to `chat.tsx` / `AgentRail.tsx`; U3 then docked the rail here,
+ * and the "New chat" defect fix extended both shared chat components (the
+ * control belongs wherever a chat lives, not on this one route).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import { AgentRail } from './AgentRail';
@@ -42,8 +43,19 @@ import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { fetchStudioData } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { fetchGovernance } from '@core/lib/admin/governance-client';
-import { agentStarterByKey } from '@core/lib/admin/agent-starters';
 import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import {
+  VISUAL_IDENTITY_CHAT_SCOPE,
+  browserDockedChatStorage,
+  clearDockedChatId,
+  dockedChatControl,
+  dockedChatReducer,
+  dockedChatSeed,
+  dockedChatStorageKey,
+  initialDockedChatSession,
+  readDockedChatId,
+  writeDockedChatId,
+} from '@core/lib/admin/docked-chat-session';
 import { callObjectVerb } from '@core/lib/edit-mode/verbs-client';
 import { buildVisualIdentityViewModel, type VisualIdentityViewModel } from '@core/lib/admin/visual-identity';
 import {
@@ -554,27 +566,64 @@ function VisualIdentityBody({
  * alone. `sessionStorage` keeps ONE conversation per browser tab across a
  * tab-switch remount (`PdfTemplateRoom`'s existing pattern, TemplatesWorkspace.tsx) —
  * the starter's opening turn goes out once, not on every remount.
+ *
+ * ONE CHAT PER SITE STAYS. Imagery and PDF templates share this conversation
+ * on purpose, so image standards and PDF templates can be part of the same
+ * generation process. The reported defect was not the sharing — it was that
+ * the cached id was never cleared, so a conversation that broke server-side
+ * became the only conversation this page could ever reach, and a failed
+ * `createFreeChat` left the dock pointed at `undefined` with nothing to
+ * retry. `reset` below fixes exactly that: clear the key, mint a fresh chat,
+ * re-seed the SAME starter (`dockedChatSeed`, shared with first load).
+ *
+ * Every decision — the key, when the control is offered, what a reset does —
+ * lives in `lib/admin/docked-chat-session.ts` and is unit-tested there; this
+ * hook is only the effect that performs it, and its hook list stays flat and
+ * unconditional (one reducer, one effect, one callback — no hook behind a
+ * branch or an early return).
  */
 function useDockedVisualIdentityChat(siteId: string, enabled: boolean) {
-  const [chatId, setChatId] = useState<string | undefined>(undefined);
+  const [session, dispatch] = useReducer(dockedChatReducer, undefined, initialDockedChatSession);
+  const generation = session.attempt;
+
   useEffect(() => {
-    if (!enabled || typeof window === 'undefined') return;
-    const key = `visual-identity-chat:${siteId}`;
-    const existing = sessionStorage.getItem(key);
-    if (existing) {
-      setChatId(existing);
+    if (!enabled) return;
+    const storage = browserDockedChatStorage();
+    const key = dockedChatStorageKey(VISUAL_IDENTITY_CHAT_SCOPE, siteId);
+    // A reset (generation > 0) is the human saying "not this conversation",
+    // and has already cleared the key — so it MUST mint. Re-reading the cache
+    // here would let an id another tab wrote put them straight back in it.
+    const cached = generation === 0 ? readDockedChatId(storage, key) : undefined;
+    if (cached) {
+      dispatch({ type: 'attached', chatId: cached });
       return;
     }
-    const starter = agentStarterByKey('visual-identity');
-    createFreeChat(getToken, starter?.label ?? 'Visual identity')
+    let cancelled = false;
+    dispatch({ type: 'minting' });
+    const seed = dockedChatSeed('visual-identity', 'Visual identity');
+    createFreeChat(getToken, seed.title)
       .then(async ({ chat: created }) => {
-        sessionStorage.setItem(key, created.chat_id);
-        setChatId(created.chat_id);
-        if (starter) await sendChatMessage(getToken, created.chat_id, starter.prompt);
+        // Cache before the cancellation check: the chat EXISTS now, and a
+        // remount must re-attach to it rather than mint a second one.
+        writeDockedChatId(storage, key, created.chat_id);
+        if (cancelled) return;
+        dispatch({ type: 'minted', chatId: created.chat_id });
+        if (seed.prompt) await sendChatMessage(getToken, created.chat_id, seed.prompt);
       })
-      .catch(() => setChatId(undefined));
-  }, [enabled, siteId]);
-  return chatId;
+      .catch((reason) => {
+        if (!cancelled) dispatch({ type: 'failed', reason });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, generation, siteId]);
+
+  const reset = useCallback(() => {
+    clearDockedChatId(browserDockedChatStorage(), dockedChatStorageKey(VISUAL_IDENTITY_CHAT_SCOPE, siteId));
+    dispatch({ type: 'reset' });
+  }, [siteId]);
+
+  return { session, reset };
 }
 
 export default function VisualIdentityWorkspace({
@@ -592,8 +641,8 @@ export default function VisualIdentityWorkspace({
   const [ownerKnown, setOwnerKnown] = useState<boolean | null>(null);
   const onOwnerChange = useCallback((next: boolean) => setOwnerKnown(next), []);
   const dockActive = dockNeeded && ownerKnown === true;
-  const chatId = useDockedVisualIdentityChat(identity.siteId, dockActive);
-  const chat = useChat(getToken, chatId);
+  const { session: chatSession, reset: startNewChat } = useDockedVisualIdentityChat(identity.siteId, dockActive);
+  const chat = useChat(getToken, chatSession.chatId);
   const [composerSeed, setComposerSeed] = useState<{ key: string; text: string } | undefined>(undefined);
 
   const dockedRail: VisualIdentityRailSeam = useMemo(
@@ -620,6 +669,11 @@ export default function VisualIdentityWorkspace({
               chat={chat}
               focus="the publication’s visual identity"
               isOwner
+              // The way out of a dead conversation: clears the cached id,
+              // mints a fresh chat, re-seeds the visual-identity starter. The
+              // rail shows it in its header AND in the composer, so it is
+              // reachable both as a button and from the chat window.
+              newChat={{ control: dockedChatControl(chatSession), onStart: startNewChat }}
               suggestions={[
                 'Summarize the current theme, image style and PDF templates.',
                 'What would you change about the image style?',

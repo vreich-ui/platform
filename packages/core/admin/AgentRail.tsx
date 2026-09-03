@@ -1,12 +1,13 @@
 import { useState } from 'react';
 
-import { EmptyState, IconButton } from './primitives';
+import { Button, EmptyState, IconButton } from './primitives';
 import { ChatComposer, ChatStateChip, ChatThread, type UseChatState } from './chat';
-import { IconChevronLeft, IconChevronRight, IconSparkles } from './icons';
+import { IconChevronLeft, IconChevronRight, IconPlus, IconSparkles } from './icons';
 import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { cn } from './utils';
 import { objectIdFromEvents } from '@core/lib/admin/chat-liveness';
+import type { DockedChatControl } from '@core/lib/admin/docked-chat-session';
 
 export function AgentRail({
   chat,
@@ -18,6 +19,7 @@ export function AgentRail({
   belowHeader,
   contextActions,
   draftSeed,
+  newChat,
   approvalInStage = false,
   canUseTestMode = false,
   isOwner = false,
@@ -35,6 +37,19 @@ export function AgentRail({
   belowHeader?: React.ReactNode;
   contextActions?: Array<{ id: string; label: string; text: string }>;
   draftSeed?: { key: string; text: string };
+  /**
+   * "New chat" for a surface that HOSTS its own conversation (the docked
+   * rails, which mint a chat and cache its id) rather than listing chats the
+   * way `AgentsHub` does. Reported defect: a conversation that broke
+   * server-side stayed the only conversation that surface could ever reach,
+   * because the cached id was never cleared and nothing on screen offered a
+   * fresh one. The rail renders it in its header AND passes it to the
+   * composer, so it is reachable both as a button and from the chat window
+   * itself; `control` (`dockedChatControl`) decides the label, the disabled
+   * state while minting, and the retry text after a failed mint. Optional, so
+   * a surface with no conversation of its own to reset renders unchanged.
+   */
+  newChat?: { control: DockedChatControl; onStart: () => void };
   approvalInStage?: boolean;
   /**
    * Owner-only test mode. The rail does not resolve roles itself — the surface
@@ -145,6 +160,18 @@ export function AgentRail({
               events={chat.events}
               lastEventAtMs={chat.lastEventAtMs}
             />
+            {newChat ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={newChat.onStart}
+                disabled={newChat.control.disabled}
+                aria-label={newChat.control.hint}
+                leftIcon={<IconPlus size={14} />}
+              >
+                {newChat.control.label}
+              </Button>
+            ) : null}
             {onToggleCollapsed ? (
               <IconButton
                 label="Collapse the agent dock"
@@ -159,6 +186,13 @@ export function AgentRail({
         <p className="mt-0.5 truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
           Working on {focus}
         </p>
+        {/* A failed mint must never be a silent `undefined` chat: the reason
+            stays on screen next to the control that retries it. */}
+        {newChat?.control.error ? (
+          <p role="alert" className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">
+            {newChat.control.error}
+          </p>
+        ) : null}
       </header>
       {belowHeader ? <div className="shrink-0 pt-3">{belowHeader}</div> : null}
       {/* W19: what the job is doing, above the transcript. Collapsed to one
@@ -230,6 +264,7 @@ export function AgentRail({
           suggestions={suggestions}
           contextActions={contextActions}
           draftSeed={draftSeed}
+          {...(newChat ? { newChat } : {})}
           quote={quote}
           above={aboveComposer}
         />
