@@ -29,7 +29,14 @@ import {
   hostOf,
   type TrackerEnv,
 } from '../../packages/core/lib/tracking/loader/core.js';
-import { classifyClick, trackableRefOf, type ElementLike } from '../../packages/core/lib/tracking/loader/dom.js';
+import {
+  classifyClick,
+  resolveObservationTarget,
+  trackableRefOf,
+  trackableRefOfClosest,
+  type BoxElementLike,
+  type ElementLike,
+} from '../../packages/core/lib/tracking/loader/dom.js';
 
 const DEFAULTS = {
   page: ['pageview', 'scroll_depth', 'engagement'],
@@ -94,6 +101,52 @@ const makeTracker = () => {
   const harness = makeEnv();
   const tracker = createTracker(CONFIG, harness.env, harness.timerApi);
   return { tracker, ...harness };
+};
+
+// A tiny real-enough DOM stub for the T21.9 box-observation tests: nodes have
+// attrs, an optional parent (for `closest`), children (for the box-tree
+// walk), and a `box` flag standing in for whether they generate a CSS box.
+type BoxNode = {
+  attrs?: Record<string, string>;
+  /** Whether this node itself generates a CSS box (getClientRects().length > 0). */
+  box?: boolean;
+  /** Simulate an environment that doesn't implement getClientRects at all. */
+  noRects?: boolean;
+  children?: BoxNode[];
+  parent?: BoxNode;
+};
+
+const matchesBoxSelector = (attrs: Record<string, string>, selector: string): boolean =>
+  selector.split(',').some((part) => {
+    const match = /^\[([a-zA-Z0-9-]+)(?:="([^"]*)")?\]$/.exec(part.trim());
+    if (!match) return false;
+    const [, name, value] = match;
+    if (!(name! in attrs)) return false;
+    if (value !== undefined && attrs[name!] !== value) return false;
+    return true;
+  });
+
+const boxElement = (node: BoxNode): BoxElementLike => {
+  const attrs = node.attrs ?? {};
+  const element: BoxElementLike = {
+    closest(selector: string): BoxElementLike | null {
+      let current: BoxNode | undefined = node;
+      while (current) {
+        if (matchesBoxSelector(current.attrs ?? {}, selector)) return boxElement(current);
+        current = current.parent;
+      }
+      return null;
+    },
+    getAttribute(name: string): string | null {
+      return attrs[name] ?? null;
+    },
+    textContent: null,
+    children: (node.children ?? []).map(boxElement),
+  };
+  if (!node.noRects) {
+    element.getClientRects = () => (node.box ? [{}] : []);
+  }
+  return element;
 };
 
 // ═══ pageview + context ═══════════════════════════════════════════════════════
@@ -572,6 +625,164 @@ test('browser checkout bridge emits buy_click without commerce_event_id on check
   }
 });
 
+test('T21.9: end-to-end — node_impression and completion fire off the box-child observer, not the dead marker', async () => {
+  // Pins the exact production defect: both node markers render
+  // `display:contents` (box:false) and wrap one real box-generating child.
+  // Before the fix, bindPage() observed the markers themselves — 0×0,
+  // intersectionRatio always 0 at threshold 0.5 — so elementVisible() (and
+  // therefore node_impression/completion/dwell) never fired in production.
+  const nodeMarker1Node: BoxNode = {
+    attrs: { 'data-cms-node-id': 'n_a1', 'data-cms-node-kind': 'content', 'data-cms-object-id': 'req_agent_x_1' },
+    box: false,
+  };
+  nodeMarker1Node.children = [{ attrs: { 'data-test-role': 'box' }, box: true, parent: nodeMarker1Node }];
+  const nodeMarker2Node: BoxNode = { attrs: { 'data-cms-node-id': 'n_d4', 'data-cms-node-kind': 'content' }, box: false };
+  nodeMarker2Node.children = [{ attrs: { 'data-test-role': 'box' }, box: true, parent: nodeMarker2Node }];
+  const nodeMarker1 = boxElement(nodeMarker1Node);
+  const nodeMarker2 = boxElement(nodeMarker2Node);
+
+  const listeners = new Map<string, ((event?: Event) => void)[]>();
+  const sent: SentBatch[] = [];
+  // A wrapper object, not a bare `let`, so TS's control-flow analysis doesn't
+  // narrow the property away — it's only ever assigned from inside the
+  // IntersectionObserver constructor closure below.
+  const io: { instance: { callback: (entries: unknown[]) => void; observed: unknown[] } | null } = { instance: null };
+
+  const addDocumentListener = (type: string, callback: EventListenerOrEventListenerObject): void => {
+    const list = listeners.get(type) ?? [];
+    list.push(typeof callback === 'function' ? callback : (event?: Event) => callback.handleEvent(event!));
+    listeners.set(type, list);
+  };
+  const fire = (type: string): void => {
+    for (const callback of listeners.get(type) ?? []) callback(new Event(type));
+  };
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    navigator: globalThis.navigator,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+    crypto: globalThis.crypto,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+    addEventListener: globalThis.addEventListener,
+    IntersectionObserver: globalThis.IntersectionObserver,
+  };
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      readyState: 'complete',
+      body: {},
+      referrer: '',
+      hidden: false,
+      documentElement: { scrollHeight: 1000 },
+      addEventListener: addDocumentListener,
+      getElementById: (id: string) =>
+        id === 'trk-config'
+          ? { textContent: JSON.stringify({ defaults: DEFAULTS, batch: { max_events: 20, max_wait_ms: 10000 } }) }
+          : null,
+      querySelector: () => null,
+      querySelectorAll: (selector: string) => {
+        if (selector === '[data-cms-node-id]') return [nodeMarker1, nodeMarker2];
+        if (selector === '[data-cms-section-id],[data-cms-node-id]') return [nodeMarker1, nodeMarker2];
+        return [];
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { pathname: '/learn/barrier', search: '', hostname: 'drluriescience.netlify.app' },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      language: 'en-US',
+      sendBeacon: (sendPath: string, bodyText: string) => {
+        const parsed = JSON.parse(bodyText) as { schema: string; events: Record<string, unknown>[] };
+        sent.push({ path: sendPath, events: parsed.events });
+        return true;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 1200 });
+  Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: 800 });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => '00000000-0000-4000-8000-000000000997' },
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+  });
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: () => Promise.resolve(new Response(null, { status: 204 })),
+  });
+  Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: addDocumentListener });
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    value: class {
+      callback: (entries: unknown[]) => void;
+      observed: unknown[] = [];
+      constructor(callback: (entries: unknown[]) => void) {
+        this.callback = callback;
+        io.instance = this;
+      }
+      observe(element: unknown): void {
+        this.observed.push(element);
+      }
+      disconnect(): void {}
+    },
+  });
+
+  try {
+    const { startTracker } = await import(`../../packages/core/lib/tracking/loader/index.js?t219=${Date.now()}`);
+    startTracker(); // readyState is 'complete' — bindPage runs synchronously
+
+    assert.ok(io.instance, 'the observer was constructed');
+    assert.equal(io.instance!.observed.length, 2, 'exactly one observed element per marker — the two box children');
+    const observedTargets = io.instance!.observed as BoxElementLike[];
+    for (const target of observedTargets) {
+      assert.equal(
+        target.getAttribute('data-cms-node-id'),
+        null,
+        'the box CHILD is observed, never the display:contents marker itself'
+      );
+    }
+
+    // First node becomes visible, then the LAST node — the completion trigger.
+    io.instance!.callback([{ target: observedTargets[0], isIntersecting: true }]);
+    io.instance!.callback([{ target: observedTargets[1], isIntersecting: true }]);
+    fire('pagehide'); // endPage() -> tracker.pageEnd() -> flush()
+
+    const events = sent.flatMap((batch) => batch.events);
+    const impressions = events.filter((event) => event.event === 'node_impression');
+    assert.equal(impressions.length, 2, 'both nodes impressed — dead in production before this fix');
+    const completions = events.filter((event) => event.event === 'completion');
+    assert.equal(completions.length, 1, 'completion fires off the last node becoming visible');
+    assert.equal((completions[0] as { object?: { node_id?: string } }).object?.node_id, 'n_d4');
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous.window });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previous.document });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: previous.location });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previous.navigator });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: previous.innerWidth });
+    Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: previous.innerHeight });
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous.crypto });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous.localStorage });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: previous.fetch });
+    Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: previous.addEventListener });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: previous.IntersectionObserver,
+    });
+  }
+});
+
 test('term pages emit one term_view on page-load and non-term pages emit none', () => {
   const { tracker, allEvents, fireTimers } = makeTracker();
   tracker.pageLoad({
@@ -657,6 +868,98 @@ test('sampling gates impressions/dwell but NEVER pageviews or goals', () => {
     'goals always 1.0'
   );
   assert.ok(!events.some((event) => event.event === 'section_impression'), 'impression sampled out');
+});
+
+// ═══ display:contents marker observation (T21.9) ══════════════════════════════
+//
+// Every CMS marker (`[data-cms-section-id]`/`[data-cms-node-id]`) renders as
+// `<div style="display:contents">` — it generates NO box, so a 0.5-threshold
+// IntersectionObserver watching the marker itself can never cross the
+// threshold (getBoundingClientRect is 0×0, intersectionRatio is always 0).
+// `elementVisible` — and everything downstream (section_impression,
+// node_impression, completion, dwell) — was therefore dead in production.
+// The fix observes the first box-generating descendant instead and maps the
+// callback's target back to the marker via `closest`.
+
+test('T21.9: a display:contents marker observes its box-generating child; the callback resolves the MARKER ref', () => {
+  const markerNode: BoxNode = {
+    attrs: { 'data-cms-section-id': 's_hero', 'data-cms-section-type': 'hero' },
+    box: false, // display:contents — no box of its own
+  };
+  const childNode: BoxNode = { attrs: {}, box: true, parent: markerNode };
+  markerNode.children = [childNode];
+
+  const target = resolveObservationTarget(boxElement(markerNode));
+  assert.ok(target, 'a box-generating descendant is found');
+  assert.equal(target!.getAttribute('data-cms-section-id'), null, 'the CHILD is observed, not the boxless marker');
+  assert.deepEqual(
+    trackableRefOfClosest(target!),
+    { kind: 'section', section_id: 's_hero', section_type: 'hero' },
+    'the callback still resolves to the section_impression ref via closest()'
+  );
+});
+
+test('T21.9: a marker that itself generates a box is still observed directly — no regression', () => {
+  const markerNode: BoxNode = { attrs: { 'data-cms-node-id': 'n_x', 'data-cms-node-kind': 'content' }, box: true };
+  const target = resolveObservationTarget(boxElement(markerNode));
+  assert.equal(target!.getAttribute('data-cms-node-id'), 'n_x', 'the marker itself is observed, unchanged');
+  assert.deepEqual(trackableRefOfClosest(target!), { kind: 'node', node_id: 'n_x', node_kind: 'content' });
+});
+
+test('T21.9: a marker with no box-generating descendant anywhere is skipped, no throw', () => {
+  const markerNode: BoxNode = { attrs: { 'data-cms-section-id': 's_empty' }, box: false };
+  const boxlessChild: BoxNode = { attrs: {}, box: false, parent: markerNode };
+  const boxlessGrandchild: BoxNode = { attrs: {}, box: false, parent: boxlessChild };
+  boxlessChild.children = [boxlessGrandchild];
+  markerNode.children = [boxlessChild];
+
+  assert.doesNotThrow(() => resolveObservationTarget(boxElement(markerNode)));
+  assert.equal(resolveObservationTarget(boxElement(markerNode)), null);
+});
+
+test('T21.9: exactly one element resolves per marker — first box-generating child wins, in order', () => {
+  const markerNode: BoxNode = { attrs: { 'data-cms-section-id': 's_multi' }, box: false };
+  const first: BoxNode = { attrs: { 'data-test-id': 'first' }, box: true, parent: markerNode };
+  const second: BoxNode = { attrs: { 'data-test-id': 'second' }, box: true, parent: markerNode };
+  markerNode.children = [first, second];
+
+  const target = resolveObservationTarget(boxElement(markerNode));
+  assert.equal(target!.getAttribute('data-test-id'), 'first', 'only the first match is ever returned — one per marker');
+});
+
+test('T21.9: a node marker nested inside a section marker resolves to the NODE ref, not the section', () => {
+  const sectionNode: BoxNode = {
+    attrs: { 'data-cms-section-id': 's_wrap', 'data-cms-section-type': 'article_body' },
+    box: false,
+  };
+  const nodeMarkerNode: BoxNode = {
+    attrs: { 'data-cms-node-id': 'n_inner', 'data-cms-node-kind': 'content' },
+    box: false,
+    parent: sectionNode,
+  };
+  const boxChild: BoxNode = { attrs: {}, box: true, parent: nodeMarkerNode };
+  nodeMarkerNode.children = [boxChild];
+  sectionNode.children = [nodeMarkerNode];
+
+  // bindPage() resolves each matched marker independently — this simulates
+  // the NODE marker's own turn in that loop.
+  const target = resolveObservationTarget(boxElement(nodeMarkerNode));
+  assert.ok(target);
+  assert.deepEqual(
+    trackableRefOfClosest(target!),
+    { kind: 'node', node_id: 'n_inner', node_kind: 'content' },
+    'closest() finds the nearer NODE marker, not the outer section'
+  );
+});
+
+test('T21.9: generatesBox degrades sanely (no throw, assumes a box) when getClientRects is not implemented', () => {
+  const markerNode: BoxNode = { attrs: { 'data-cms-section-id': 's_stub' }, noRects: true };
+  const target = resolveObservationTarget(boxElement(markerNode));
+  assert.equal(
+    target!.getAttribute('data-cms-section-id'),
+    's_stub',
+    'a stub with no getClientRects is treated as box-generating — old "observe the marker" behaviour preserved'
+  );
 });
 
 // ═══ scroll + engagement ══════════════════════════════════════════════════════

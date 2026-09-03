@@ -12,7 +12,13 @@
  * never fire pagehide — the flush rides before-swap).
  */
 import { COMMERCE_EVENT_ID, createTracker, parseTrackerConfig, type PageContext, type Tracker } from './core.js';
-import { classifyClick, trackableRefOf, type ElementLike } from './dom.js';
+import {
+  classifyClick,
+  resolveObservationTarget,
+  trackableRefOfClosest,
+  type BoxElementLike,
+  type ElementLike,
+} from './dom.js';
 import { clearPersistentId, readOrMintPersistentId } from './persistent-id.js';
 
 let tracker: Tracker | null = null;
@@ -197,14 +203,19 @@ const bindPage = (): void => {
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
-        const ref = trackableRefOf(entry.target as unknown as ElementLike);
+        const ref = trackableRefOfClosest(entry.target as unknown as ElementLike);
         if (ref) tracker!.elementVisible(ref, entry.isIntersecting);
       }
     },
     { threshold: 0.5 }
   );
-  for (const element of document.querySelectorAll('[data-cms-section-id],[data-cms-node-id]')) {
-    observer.observe(element);
+  // Markers render `display:contents` (12-plan §5.1 / T21.9 fix) and so
+  // generate NO box themselves — a 0.5-threshold observer on the marker never
+  // fires. Observe the first box-generating descendant instead, exactly one
+  // per marker; the callback maps back to the marker's ref via `closest`.
+  for (const marker of document.querySelectorAll('[data-cms-section-id],[data-cms-node-id]')) {
+    const target = resolveObservationTarget(marker as unknown as BoxElementLike);
+    if (target) observer.observe(target as unknown as Element);
   }
 };
 
