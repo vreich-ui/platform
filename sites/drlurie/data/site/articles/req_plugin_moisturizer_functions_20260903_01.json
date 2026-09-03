@@ -1,15 +1,15 @@
 {
   "__generated": {
-    "at": "2026-09-03T13:24:56.753Z",
+    "at": "2026-09-03T13:38:55.160Z",
     "from": "objects/content_item/by-id/req_plugin_moisturizer_functions_20260903_01.json",
-    "record_version": 5
+    "record_version": 11
   },
   "author": "Dr. Lurie",
   "deck": "Most moisturizers perform three basic jobs. Understanding them makes it easier to choose a formula that suits your skin without getting pulled in by the label.",
   "description": "A clear guide to humectants, emollients, and occlusives: how they support the skin barrier, where common ingredients fit, and how to choose a moisturizer.",
   "image": {
-    "alt": "Moisturizer textures arranged beside a model of the outer skin barrier.",
-    "src": "/img/req_plugin_moisturizer_functions_20260903_01/58fb1e362f55bada0a1141473213a4d69ac83464e32effcee70f09403239b0ff.webp"
+    "alt": "Four unbranded moisturizer textures arranged on a bathroom counter in natural light.",
+    "src": "/img/req_plugin_moisturizer_functions_20260903_01/d913a7c895e13d5909afe43dbfdfaddbffd62b19b783a61202102f241685cd5a.webp"
   },
   "nodes": [
     {
@@ -34,11 +34,11 @@
       "kind": "content",
       "public": {
         "media": {
-          "alt": "Cross-section showing skin cells, barrier lipids, and water loss from the outer skin layer.",
-          "caption": "Moisturizers work at the surface, helping the outer layer hold water and feel smoother.",
+          "alt": "Close-up of moisturizer being gently applied to natural cheek skin.",
+          "caption": "Moisturizer works at the surface, where texture and comfort are easier to observe than the barrier itself.",
           "contentType": "image/webp",
-          "sizeBytes": 34082,
-          "src": "/img/req_plugin_moisturizer_functions_20260903_01/16a934a958820284204febccdba74b684e1bc11c54fa7e6803aa6d07e6471455.webp",
+          "sizeBytes": 60936,
+          "src": "/img/req_plugin_moisturizer_functions_20260903_01/4f42c0703cfc21d9de10f495aa405fc39d42cabc942678708ef90594eca427a4.webp",
           "type": "image"
         }
       },
@@ -81,11 +81,11 @@
       "kind": "content",
       "public": {
         "media": {
-          "alt": "Three-part comparison of humectant, emollient, and occlusive moisturizer functions.",
-          "caption": "Humectants hold water, emollients smooth the surface, and occlusives slow water loss.",
+          "alt": "Photographed swatches of a translucent gel, a white cream, and a clear ointment balm.",
+          "caption": "Gel, cream, and balm textures feel different, although finished formulas may combine several moisturizing functions.",
           "contentType": "image/webp",
-          "sizeBytes": 13182,
-          "src": "/img/req_plugin_moisturizer_functions_20260903_01/cb70ed019e5322f433771a53805ade12f67053c623b9307a42cf22d3832d8922.webp",
+          "sizeBytes": 32380,
+          "src": "/img/req_plugin_moisturizer_functions_20260903_01/3256c4b4bd1241786d8adf3d38316e9090bdaaa90e6eb7d3fc0c1ea12b16c68d.webp",
           "type": "image"
         }
       },
