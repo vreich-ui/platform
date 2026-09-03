@@ -370,9 +370,22 @@ press **Update**.
 
 ## Read actions
 
-This tenant now annotates its tools with the MCP \`readOnlyHint\`, so a client can tell reads from
-writes. If the agent still reports "Read actions: none", it is holding a cached tool list — detach
-and re-attach the App to re-read it.
+Agent Studio will list every tool under **Write actions** and report *"No read actions are
+available for this app"*, including plain reads like \`object_get\`, \`object_contract\` and \`ping\`.
+That is a client-side gap, not a fault here, and **detaching and re-attaching does not clear it** —
+tested against a clean re-attach on 2026-09-03.
+
+This tenant does classify reads, on both surfaces, from one field on the tool definition: MCP
+\`annotations.readOnlyHint\`, and \`x-openai-isConsequential\` in the Actions schema. Check it from
+outside with no credentials:
+
+    ${c.openapi_url ?? `${c.origin}/api/plugin/openapi.json`}
+
+\`object_get\` and \`object_contract\` come back \`x-openai-isConsequential: false\`; \`object_publish\`
+comes back \`true\`.
+
+So set Approval to **"Allow low-risk actions"**. It is what keeps a read from costing a
+confirmation click, and with the Read bucket empty the stricter setting confirms every single call.
 
 ## When authorization fails
 

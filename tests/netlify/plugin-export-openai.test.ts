@@ -306,3 +306,36 @@ test('the app card points the operator at the zip, and warns off the bundle', ()
   assert.match(card, /gizmo\.yaml/, 'the card must name the error the wrong zip produces');
   assert.match(card, /does not autosave/, 'Update is a step, not a formality');
 });
+
+/**
+ * The read-actions advice has to be TRUE.
+ *
+ * The card used to say that "Read actions: none" meant a cached tool list, and
+ * to detach and re-attach the App to clear it. That was never tested. On
+ * 2026-09-03 it was: a clean detach and re-attach against live drlurie left the
+ * Read bucket empty, with `object_get`, `object_contract` and `ping` all filed
+ * under Write actions. Agent Studio ignores `readOnlyHint`.
+ *
+ * Advice that sends an operator to redo a working attach, and then blames their
+ * tenant when it does not help, is worse than no advice. The card now names the
+ * gap as client-side, gives the credential-free check that proves the server
+ * classifies reads, and points at the setting that actually helps.
+ */
+test('the app card tells the truth about "No read actions"', () => {
+  const card = readZip(buildGptConfigZip(claudeBundle).bytes).read('agent/app-setup.md');
+
+  assert.match(card, /No read actions/i, 'the card must name the symptom an operator will actually see');
+  assert.match(card, /does not clear it|does not fix it/i, 'and say plainly that re-attaching is not the fix');
+  assert.ok(
+    !/detach\s+and\s+re-?attach the App to re-?read/i.test(card),
+    'the disproved instruction must not come back'
+  );
+
+  // The evidence the operator can check themselves, with no credentials.
+  assert.match(card, /x-openai-isConsequential/);
+  assert.match(card, /api\/plugin\/openapi\.json/);
+  assert.ok(!card.includes('undefined'), 'the openapi URL is optional on the bundle and must still render');
+
+  // And the setting that actually helps.
+  assert.match(card, /Allow low-risk actions/);
+});
