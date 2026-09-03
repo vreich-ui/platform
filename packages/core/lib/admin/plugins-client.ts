@@ -96,6 +96,62 @@ export const renderPluginDraft = (getToken: GetToken, platform: PluginPlatformId
 export const promotePluginDraft = (getToken: GetToken) =>
   request<{ active: ManifestBundleView }>(getToken, { method: 'POST', body: JSON.stringify({ action: 'promote' }) });
 
+/**
+ * The filename the server chose, from `Content-Disposition`.
+ *
+ * It matters: the bundle name carries the tenant and the manifest version, and
+ * an operator comparing an installed copy against the live manifest reads it
+ * off the file. A browser-invented "admin-plugin-manifest" would throw that
+ * away. Falls back to a sane name rather than failing the download.
+ */
+export const filenameFromDisposition = (disposition: string | null, fallback: string): string => {
+  if (!disposition) return fallback;
+  const quoted = disposition.match(/filename\s*=\s*"([^"]+)"/i);
+  if (quoted) return quoted[1];
+  const bare = disposition.match(/filename\s*=\s*([^;]+)/i);
+  return bare ? bare[1].trim() : fallback;
+};
+
+/**
+ * Fetch one export bundle AS THE SIGNED-IN ADMIN.
+ *
+ * The page used to `window.open(url)` these. A top-level navigation carries no
+ * `Authorization` header, so the admin function answered
+ * {"ok":false,"status":401,"error":"Authentication is required."} and the
+ * browser displayed that JSON instead of saving a file. Every export button —
+ * the Claude .plugin, the OpenAI config, the Gem instructions — had been dead
+ * since they shipped, in a way that looked like a broken download rather than
+ * a missing credential.
+ *
+ * The bytes have to come through `fetch` with the same bearer every other call
+ * on this page uses, and reach the disk as a blob.
+ */
+export const fetchPluginExport = async (
+  getToken: GetToken,
+  url: string,
+  fallbackName: string
+): Promise<{ blob: Blob; filename: string }> => {
+  const token = await getToken();
+  const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+
+  if (!response.ok) {
+    // The endpoint answers JSON on refusal — surface its reason, not "failed".
+    let reason = `Download failed (${response.status})`;
+    try {
+      const body = (await response.clone().json()) as { error?: string };
+      if (body.error) reason = body.error;
+    } catch {
+      /* a non-JSON body: the status is all there is to say */
+    }
+    throw new Error(reason);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get('Content-Disposition'), fallbackName),
+  };
+};
+
 /* ── presentation ─────────────────────────────────────────────────────────── */
 
 export interface PlatformCard {
