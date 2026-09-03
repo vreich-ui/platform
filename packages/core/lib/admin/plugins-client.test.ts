@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   fetchPluginManifest,
+  fetchPluginExport,
+  filenameFromDisposition,
   renderPluginDraft,
   platformCards,
   installerIdentityStep,
@@ -223,4 +225,91 @@ test('ok:true passes straight through — the happy path is untouched', async ()
   );
   assert.equal((state as PluginManifestState).active, null);
   assert.deepEqual((state as PluginManifestState).stale, []);
+});
+
+/* ── exports must be FETCHED with the bearer, never navigated to ──────────── */
+
+/**
+ * The page used to `window.open()` these URLs. A top-level navigation carries
+ * no Authorization header, so the admin function answered
+ * {"ok":false,"status":401,"error":"Authentication is required."} and Chrome
+ * displayed that JSON. Every export button — Claude .plugin, OpenAI config,
+ * Gem instructions — had been dead since it shipped, and it read as a broken
+ * download rather than a missing credential.
+ */
+const withExportFetch = async (
+  reply: { status: number; body?: unknown; disposition?: string },
+  run: () => Promise<unknown>
+) => {
+  const original = globalThis.fetch;
+  const seen: { url?: string; auth?: string } = {};
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    seen.url = String(url);
+    seen.auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
+    return {
+      ok: reply.status >= 200 && reply.status < 300,
+      status: reply.status,
+      headers: { get: (name: string) => (name === 'Content-Disposition' ? (reply.disposition ?? null) : null) },
+      blob: async () => ({ size: 42 }) as unknown as Blob,
+      clone: () => ({ json: async () => reply.body }),
+    } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    return { result: await run(), seen };
+  } finally {
+    globalThis.fetch = original;
+  }
+};
+
+const token = async () => 'admin-token';
+
+test('an export is fetched with the admin bearer — the bug was sending none', async () => {
+  const { seen } = await withExportFetch(
+    { status: 200, disposition: 'attachment; filename="dr-lurie-claude-20260903-9b3d171f.plugin"' },
+    () => fetchPluginExport(token, '/.netlify/functions/admin-plugin-manifest?export=plugin', 'fallback.zip')
+  );
+  assert.equal(seen.auth, 'Bearer admin-token', 'without this header the endpoint answers 401');
+  assert.match(String(seen.url), /export=plugin/);
+});
+
+test('the server-chosen filename wins — it carries the tenant and the manifest version', async () => {
+  const { result } = await withExportFetch(
+    { status: 200, disposition: 'attachment; filename="dr-lurie-openai-config-20260903.zip"' },
+    () => fetchPluginExport(token, '/x?export=gpt', 'fallback.zip')
+  );
+  assert.equal((result as { filename: string }).filename, 'dr-lurie-openai-config-20260903.zip');
+});
+
+test('a missing Content-Disposition falls back rather than failing the download', async () => {
+  const { result } = await withExportFetch({ status: 200 }, () =>
+    fetchPluginExport(token, '/x?export=gpt', 'fallback.zip')
+  );
+  assert.equal((result as { filename: string }).filename, 'fallback.zip');
+});
+
+test('a refusal surfaces the endpoint reason, not a bare status', async () => {
+  await assert.rejects(
+    () =>
+      withExportFetch(
+        { status: 409, body: { ok: false, error: 'There is no active bundle to export.' } },
+        () => fetchPluginExport(token, '/x?export=skill', 'fallback.zip') as Promise<unknown>
+      ),
+    /There is no active bundle to export\./
+  );
+});
+
+test('a non-JSON refusal still reports its status', async () => {
+  await assert.rejects(
+    () =>
+      withExportFetch({ status: 502 }, () => fetchPluginExport(token, '/x?export=skill', 'f.zip') as Promise<unknown>),
+    /Download failed \(502\)/
+  );
+});
+
+test('filenameFromDisposition handles quoted, bare and absent forms', () => {
+  assert.equal(filenameFromDisposition('attachment; filename="a b.zip"', 'f'), 'a b.zip');
+  assert.equal(filenameFromDisposition('attachment; filename=plain.zip', 'f'), 'plain.zip');
+  assert.equal(filenameFromDisposition('attachment; filename=plain.zip; charset=utf-8', 'f'), 'plain.zip');
+  assert.equal(filenameFromDisposition(null, 'fallback.zip'), 'fallback.zip');
+  assert.equal(filenameFromDisposition('attachment', 'fallback.zip'), 'fallback.zip');
 });

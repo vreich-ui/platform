@@ -22,6 +22,7 @@ import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { useToast } from './overlays';
 import {
   fetchPluginManifest,
+  fetchPluginExport,
   renderPluginDraft,
   promotePluginDraft,
   platformCards,
@@ -122,6 +123,34 @@ function PluginsBody({ identity }: { identity: SiteIdentity }) {
     }
   };
 
+  /**
+   * Exports are fetched, not navigated to.
+   *
+   * `window.open(url)` sends no Authorization header, so the admin function
+   * answered 401 and the browser rendered that JSON — every export button on
+   * this page was dead from the day it shipped, in a way that looked like a
+   * broken download rather than a missing credential. The bytes come through
+   * the same authenticated fetch as everything else here and reach the disk as
+   * a blob, under the filename the server chose (it carries the tenant and the
+   * manifest version).
+   */
+  const onDownload = async (url: string, label: string) => {
+    try {
+      const { blob, filename } = await fetchPluginExport(getToken, url, 'plugin-bundle.zip');
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      toast({ title: 'Downloaded', description: filename, tone: 'success' });
+    } catch (cause) {
+      toast({ title: `${label} failed`, description: cause instanceof Error ? cause.message : '', tone: 'danger' });
+    }
+  };
+
   if (loading) return <Skeleton className="h-64 w-full" />;
   if (error) {
     return <EmptyState severity="error" title="Plugin manifest unavailable" message={error} />;
@@ -217,7 +246,11 @@ function PluginsBody({ identity }: { identity: SiteIdentity }) {
           ) : null}
 
           {card.downloadUrl ? (
-            <Button size="sm" variant="secondary" onClick={() => window.open(card.downloadUrl!, '_blank')}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void onDownload(card.downloadUrl!, card.downloadLabel)}
+            >
               {card.downloadLabel}
             </Button>
           ) : (
