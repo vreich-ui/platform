@@ -704,6 +704,33 @@ export class CmsAgentClient {
 
   /** Low-level `tools/call`. Unwraps CMS-Agent's `{ok:true,data}` envelope. */
   async callTool<T>(name: string, args: Record<string, unknown>): Promise<CmsAgentResult<T>> {
+    return this.callToolAttempt<T>(name, args, false);
+  }
+
+  /**
+   * One `tools/call` attempt, with in-place recovery from a lost session.
+   *
+   * `sessionId` is process-local and Cloud Run recycles instances freely, so the
+   * id we hold frequently belongs to an instance that no longer exists. Losing a
+   * session is ROUTINE, not exceptional. This used to clear it and return
+   * `cms_agent_protocol_error` telling the caller to retry — and no caller ever
+   * did, so a perfectly healthy service surfaced in admin chat as an
+   * authentication failure whose timing looked random. It was not random: it
+   * tracked instance recycling, not the 30-minute idle window.
+   *
+   * Replaying is safe by this module's own rule. A call rejected before tool
+   * dispatch never wrote an idempotency claim, which is exactly why that path
+   * sets `retryableWithSameTurnId`. The replay is byte-identical and the
+   * `turn_id` is NOT re-minted — reusing it either replays a completed turn for
+   * free or claims an id that was never taken.
+   *
+   * Bounded to ONE retry: a second 404 is a real fault, not a stale session.
+   */
+  private async callToolAttempt<T>(
+    name: string,
+    args: Record<string, unknown>,
+    isRetry: boolean
+  ): Promise<CmsAgentResult<T>> {
     const config = this.config();
     if (!config.ok) return config;
     const secrets = [config.data.token];
@@ -720,10 +747,13 @@ export class CmsAgentClient {
 
     const { response, text } = posted.data;
     if (response.status === 404 && this.sessionId) {
-      // The session expired (30-min idle / 12-h max). Drop it; the caller
-      // retries with a fresh handshake. Not a turn-claiming failure.
+      // The session expired (30-min idle / 12-h max), or the instance holding it
+      // is gone. Either way it is recoverable here and invisible to the caller.
       this.sessionId = undefined;
-      return fail('cms_agent_protocol_error', 'The CMS-Agent MCP session expired; retry to open a new one.', {
+      // ensureSession de-dupes concurrent handshakes, so parallel turns recovering
+      // at the same moment still converge on a single new session.
+      if (!isRetry) return this.callToolAttempt<T>(name, args, true);
+      return fail('cms_agent_protocol_error', 'The CMS-Agent MCP session expired and could not be reopened; retry.', {
         retryableWithSameTurnId: true,
         statusCode: 404,
       });
