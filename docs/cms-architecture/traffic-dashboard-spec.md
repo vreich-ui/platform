@@ -1,6 +1,6 @@
 # `/admin/traffic` — dashboard specification (R6.0)
 
-**Status:** proposed, awaiting approval — this is `GATE-TRK-5`. No R6 code is written until this document is approved.
+**Status:** APPROVED by Wolf 2026-09-03 — `GATE-TRK-5` passed. R6.1 may start.
 **Commissioned:** 2026-09-03/04 (runner plan §R6). **Written:** 2026-09-03.
 **Scope:** the `/admin/traffic` page on every tenant, both feeds, plus the `/stats` additions in `kugel-data` that the page needs.
 
@@ -78,7 +78,7 @@ Each decision states what it rejects, so a future reader can tell a choice from 
 
 **D9 — The two feeds are compared on pageviews only.** **Capture rate = own pageviews ÷ Netlify pageviews** over the same window, in the footer strip, with the standing honesty rule from doc 12 §5.5 — never a claim of 100 %. Sessions and visitors are **not** cross-compared anywhere on the page, and the footer says in one line that the two feeds count sessions differently by design.
 
-**D10 — Range picker applies to both tabs.** `7d` / `30d` / `90d` / `custom` (≤180 d), plus `24h` when hourly data is available. The sink's `days`-only parameter is replaced by `from`/`to` (R6.2), which is what removes the current silent fallback to 30.
+**D10 — Range picker applies to both tabs.** `7d` / `30d` / `90d` / `custom` (≤180 d). No `24h` option — see §9.3. The sink's `days`-only parameter is replaced by `from`/`to` (R6.2), which is what removes the current silent fallback to 30.
 
 ## 5. Page anatomy
 
@@ -120,7 +120,7 @@ Adds to the payload:
 * `entry_pages` / `exit_pages` — first and last pageview per `shash`.
 * `scroll_depth_distribution` — 25 / 50 / 75 / 90 / 100 buckets.
 * `engagement_funnel` per object — pageview → read_progress → completion → cta_click → buy_click.
-* `events_by_kind` per day; `hourly` when `days ≤ 2`.
+* `events_by_kind` per day. **No `hourly` bucket** — see §9.4.
 
 ### 6.2 `admin-traffic.ts` (R6.2)
 
@@ -154,12 +154,14 @@ uPlot ships **no** accessibility affordances — canvas is opaque to a screen re
 * Every interactive element — tiles, tabs, rows, chips — reachable by keyboard with a visible focus ring.
 * Acceptance: Lighthouse a11y ≥ 90 on `/admin/traffic`.
 
-## 9. Open questions for approval
+## 9. Questions — resolved at the gate
 
-1. **D3's default-on comparison** diverges from every product surveyed. Accept, or default it off?
-2. **Netlify tab click-to-filter** is impossible (no filter params on that API). Accept rows-as-links there, or drop filtering from the Netlify tab's copy entirely?
-3. **`24h` / hourly** — worth the `hourly` bucket work in R6.2, or is `7d` the shortest useful window in practice?
-4. **Engagement card** is the one card with no precedent in any surveyed product (it is ours, from doc 12's event kinds). Keep it in R6, or defer to R7?
+Answered by Wolf 2026-09-03 when this document was approved. Recorded here so a later reader sees a decision, not an omission.
+
+1. **D3's default-on comparison** — **kept**, divergence and all. Comparison-period deltas default ON for `7d`/`30d`/`90d`, off for `custom`.
+2. **Netlify tab click-to-filter** — not possible; that API takes no filter parameters. Rows on the Netlify tab are links, and the tab says so once. Click-to-filter (D7) is own-tab only in R6.
+3. **`24h` / hourly** — **dropped.** At current volume an hourly view is mostly noise and it costs a separate bucketing path in `/stats`. The range picker is `7d` / `30d` / `90d` / `custom` (≤180 d); D10's mention of a `24h` option does not apply, and `/stats` gains no `hourly` field.
+4. **Engagement card** — **kept in R6.** It is the only card that shows what the first-party tracker can do and Netlify cannot, and `engagement_funnel` was already inside R6.2's scope.
 
 ## 10. Build order and acceptance
 
