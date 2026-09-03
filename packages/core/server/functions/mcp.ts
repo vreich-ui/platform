@@ -384,8 +384,17 @@ export const parseJsonResponseBody = (bodyText: string | undefined) => {
   }
 };
 
+/**
+ * Every tool result crosses the wire TWICE — once as `content[0].text` and once
+ * as `structuredContent` — because the MCP spec wants both and clients differ
+ * in which they read. That duplication is the spec's; the INDENTATION was ours.
+ * Pretty-printing the text half cost ~40% on top of an already-doubled payload
+ * (measured on a real 10-node article: 11,693 B record → 31,889 B wire, of
+ * which 18,844 B was the indented text). No client renders that whitespace —
+ * they parse it. Compact serialization, same bytes of meaning (W6 D3).
+ */
 export const toolResult = (payload: Record<string, unknown>) => ({
-  content: textContent(JSON.stringify(payload, null, 2)),
+  content: textContent(JSON.stringify(payload)),
   structuredContent: payload,
 });
 
@@ -1020,7 +1029,12 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
 
     // ── Object verbs (T0.9) → object-store.ts (publish key injected). ──
     case 'object_get':
-      return callObjectAction(event, { action: 'get', object_type: input.object_type, object_id: input.object_id });
+      return callObjectAction(event, {
+        action: 'get',
+        object_type: input.object_type,
+        object_id: input.object_id,
+        ...(input.projection ? { projection: input.projection } : {}),
+      });
     case 'object_list':
       return callObjectAction(event, { action: 'list', object_type: input.object_type, status: input.status });
     case 'object_create':

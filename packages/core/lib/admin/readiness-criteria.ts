@@ -6,7 +6,16 @@
 
 import type { ArticleBodyNode } from '../../schema/article-content-v1.js';
 
-export type CriterionStatus = 'complete' | 'warning' | 'missing' | 'optional';
+/**
+ * `info` (W6 D4) is a TRUE statement about the object that is not an ask.
+ * `optional` means "you could add this"; `warning` means "you probably should";
+ * `missing` blocks. `info` means "this is how it is, and that is fine" — the
+ * tier that was absent when a criterion needed to report a fact rather than a
+ * shortfall. `summarize` (object-validate.ts) collects warnings on
+ * `status === 'warning'`, so an `info` criterion is never an operator action
+ * item and is never a blocker.
+ */
+export type CriterionStatus = 'complete' | 'warning' | 'missing' | 'optional' | 'info';
 
 export type ReadinessCriterion = {
   id: string;

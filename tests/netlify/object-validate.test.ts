@@ -1218,7 +1218,9 @@ test('media budget: a block policy makes over-budget a publish blocker (draft st
 
 const SOURCED = {
   sources: { source_list: [{ source_id: 's1', name: 'A journal', url: 'https://example.org/a' }] },
-  claims: { claim_list: [{ claim_id: 'c1', text: 'A modest claim.', risk: 'low', status: 'verified', source_ids: ['s1'] }] },
+  claims: {
+    claim_list: [{ claim_id: 'c1', text: 'A modest claim.', risk: 'low', status: 'verified', source_ids: ['s1'] }],
+  },
 };
 
 test('ART-2/D7: a body with no sources or claims WARNS at both stages and never blocks the governed path', () => {
@@ -1235,20 +1237,44 @@ test('ART-2/D7: a body with no sources or claims WARNS at both stages and never 
   );
 });
 
-test('ART-2: partial and empty substrates warn with the specific gap named', () => {
+test('ART-2 (W6 D4): sources with no claim ledger is INFO — the plugin path working, not a gap', () => {
+  // This used to warn "no claims recorded" on a body carrying three real
+  // sources, which was both unclearable (the plugin skill forbids writing
+  // `claims`) and false about what was on the body. The sourced-but-unledgered
+  // state is now reported as what it is.
   const sourcesOnly = articleStructure(articleBodyWith({ sources: SOURCED.sources }), {}, true);
-  assert.equal(statusOf(sourcesOnly, 'article_claim_substrate'), 'warning');
-  assert.match(sourcesOnly.find((c) => c.id === 'article_claim_substrate')!.message, /no claims recorded/);
+  const criterion = sourcesOnly.find((c) => c.id === 'article_claim_substrate')!;
+  assert.equal(statusOf(sourcesOnly, 'article_claim_substrate'), 'info');
+  assert.match(criterion.message, /sources? listed, no claim ledger — plugin path/);
+  assert.ok(!/no claims recorded/.test(criterion.message));
+});
 
+test('ART-2 (W6 D4): no sources warns, and the text names the thing that is missing', () => {
   const claimsOnly = articleStructure(articleBodyWith({ claims: SOURCED.claims }), {}, true);
-  assert.match(claimsOnly.find((c) => c.id === 'article_claim_substrate')!.message, /no sources recorded/);
+  assert.equal(statusOf(claimsOnly, 'article_claim_substrate'), 'warning');
+  assert.match(claimsOnly.find((c) => c.id === 'article_claim_substrate')!.message, /No sources listed/);
 
-  const empty = articleBodyWith({ sources: { source_list: [] }, claims: { claim_list: [] } });
-  assert.equal(statusOf(articleStructure(empty, {}, true), 'article_claim_substrate'), 'warning');
-  assert.match(
-    articleStructure(empty, {}, true).find((c) => c.id === 'article_claim_substrate')!.message,
-    /no sources recorded and no claims recorded/
+  const empty = articleStructure(
+    articleBodyWith({ sources: { source_list: [] }, claims: { claim_list: [] } }),
+    {},
+    true
   );
+  assert.equal(statusOf(empty, 'article_claim_substrate'), 'warning');
+  assert.match(empty.find((c) => c.id === 'article_claim_substrate')!.message, /No sources listed/);
+
+  const nothing = articleStructure(articleBodyWith({}), {}, true);
+  assert.equal(statusOf(nothing, 'article_claim_substrate'), 'warning');
+});
+
+test('ART-2 (W6 D4): the criterion never blocks, in any of its three states', () => {
+  for (const extra of [{ sources: SOURCED.sources }, { claims: SOURCED.claims }, {}, SOURCED]) {
+    const criteria = articleStructure(articleBodyWith(extra), {}, true);
+    assert.notEqual(
+      statusOf(criteria, 'article_claim_substrate'),
+      'missing',
+      'article_claim_substrate warns; article_claim_verification is the one that blocks'
+    );
+  }
 });
 
 test('ART-2: a fully sourced body passes both criteria cleanly', () => {
@@ -1272,22 +1298,38 @@ test('ART-2: a high-risk claim BLOCKS publish while unverified, disputed, retrac
     );
   }
 
-  assert.equal(statusOf(articleStructure(highRisk({ source_ids: ['s1'] }), {}, true), 'article_claim_verification'), 'missing');
-  assert.equal(statusOf(articleStructure(highRisk({ status: 'verified' }), {}, true), 'article_claim_verification'), 'missing');
   assert.equal(
-    statusOf(articleStructure(highRisk({ status: 'verified', source_ids: ['s1'] }), {}, true), 'article_claim_verification'),
+    statusOf(articleStructure(highRisk({ source_ids: ['s1'] }), {}, true), 'article_claim_verification'),
+    'missing'
+  );
+  assert.equal(
+    statusOf(articleStructure(highRisk({ status: 'verified' }), {}, true), 'article_claim_verification'),
+    'missing'
+  );
+  assert.equal(
+    statusOf(
+      articleStructure(highRisk({ status: 'verified', source_ids: ['s1'] }), {}, true),
+      'article_claim_verification'
+    ),
     'complete'
   );
-  assert.equal(statusOf(articleStructure(highRisk({ source_ids: ['s1'] }), {}, false), 'article_claim_verification'), 'warning');
+  assert.equal(
+    statusOf(articleStructure(highRisk({ source_ids: ['s1'] }), {}, false), 'article_claim_verification'),
+    'warning'
+  );
   assert.match(
-    articleStructure(highRisk({ source_ids: ['s1'] }), {}, true).find((c) => c.id === 'article_claim_verification')!.message,
+    articleStructure(highRisk({ source_ids: ['s1'] }), {}, true).find((c) => c.id === 'article_claim_verification')!
+      .message,
     /c9/
   );
 });
 
 test("ART-2: low and medium risk claims are the editor's judgement — they never block", () => {
   for (const risk of ['low', 'medium']) {
-    const body = articleBodyWith({ sources: SOURCED.sources, claims: { claim_list: [{ claim_id: 'c2', text: 'A softer claim.', risk }] } });
+    const body = articleBodyWith({
+      sources: SOURCED.sources,
+      claims: { claim_list: [{ claim_id: 'c2', text: 'A softer claim.', risk }] },
+    });
     assert.equal(statusOf(articleStructure(body, {}, true), 'article_claim_verification'), 'complete');
   }
 });

@@ -32,9 +32,26 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   //    above are unchanged. Submit/publish/review arrive in P1. ──
   {
     name: 'object_get',
-    description: 'Fetch a CMS object record (current draft state) by type and id from the site-objects store.',
+    description:
+      'Fetch a CMS object record (current draft state) by type and id from the site-objects store. ' +
+      'A record has two unbounded parts — the `history` ledger (one entry per verb, never pruned) and, ' +
+      'for an article, `body.nodes` — so ask for what you need: projection "summary" (envelope + one ' +
+      '{id, kind, visibility} line per node + node_count + history_length: what article is this and how ' +
+      'is it shaped), "nodes" (envelope + the full body, ledger replaced by history_length: the read you ' +
+      'want before revising an article), or "full" (everything, including the ledger — the default, and ' +
+      'the only one you need when you are auditing what happened to an object).',
     inputSchema: objectSchema(
-      { object_type: objectTypeEnumSchema(), object_id: stringSchema('The object id, e.g. page_home.') },
+      {
+        object_type: objectTypeEnumSchema(),
+        object_id: stringSchema('The object id, e.g. page_home.'),
+        projection: {
+          type: 'string',
+          enum: ['summary', 'nodes', 'full'],
+          description:
+            'How much of the record to return. Defaults to "full" (unchanged historical shape). Prefer ' +
+            '"nodes" to read an article you are about to revise, and "summary" to inspect shape without the body.',
+        },
+      },
       ['object_type', 'object_id']
     ),
     governance: { toolClass: 'read' },
