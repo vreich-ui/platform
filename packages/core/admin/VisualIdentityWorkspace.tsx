@@ -671,13 +671,22 @@ export default function VisualIdentityWorkspace({
               isOwner
               // The way out of a dead conversation: clears the cached id,
               // mints a fresh chat, re-seeds the visual-identity starter. The
-              // rail shows it in its header AND in the composer, so it is
-              // reachable both as a button and from the chat window.
+              // rail header is the one place this control appears now (see
+              // AgentRail's own comment on `newChat` — the composer no
+              // longer duplicates it as a second row).
               newChat={{ control: dockedChatControl(chatSession), onStart: startNewChat }}
-              suggestions={[
-                'Summarize the current theme, image style and PDF templates.',
-                'What would you change about the image style?',
-              ]}
+              // FIX: the two starter-suggestion chips ("Summarize the
+              // current theme…" / "What would you change…") duplicated the
+              // opening turn this dock already seeds (`dockedChatSeed`,
+              // unchanged below) and, stacked with the autonomy row and the
+              // New chat chip, ate most of a narrow viewport before the
+              // composer even started. Dropped here only — this dock's
+              // conversation always opens with that seeded turn already in
+              // the transcript, so the chips were never the only prompt
+              // affordance. `ObjectWorkspace`'s readiness-derived suggestions
+              // and `TemplatesWorkspace`'s stay: those are genuinely
+              // situational (and, for a whole-object focus, the only chip
+              // affordance in that composer), not a copy of a starter.
               draftSeed={composerSeed}
             />
           </div>
