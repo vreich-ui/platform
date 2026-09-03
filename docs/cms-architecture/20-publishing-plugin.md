@@ -176,6 +176,8 @@ member is running.
 ## 8. Runbooks
 
 - `docs/plugin/w2-claude-install.md` — Claude connector + skill, and the `?health=auth` triage.
-- `docs/plugin/w3-chatgpt-install.md` — Actions import, OAuth, and testing the refusal.
+- `docs/plugin/w3-chatgpt-install.md` — both OpenAI shapes: Actions import, OAuth, the Agent Studio
+  App, and testing the refusal.
 - `docs/plugin/w2-acceptance-2026-08-31.md` — the live end-to-end run and its four defects.
+- `docs/plugin/w6-acceptance-2026-09-03.md` — the W6 re-run, from ChatGPT, through release.
 - `docs/plugin/recon-mcp.md`, `recon-genesis.md`, `legacy-gpt.md` — the W0 recon this was built on.
