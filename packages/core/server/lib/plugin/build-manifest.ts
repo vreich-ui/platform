@@ -113,6 +113,8 @@ export const buildManifestBundle = (input: BuildManifestInput): ManifestBundle =
     manifest_version: manifestVersion,
     rendered_at: now.toISOString(),
     skill_md: skillMd,
+    // Recorded so an export never has to GUESS which actor the text declares.
+    ...(primaryActorFor(input.platform) ? { actor_id: primaryActorFor(input.platform)! } : {}),
     tools,
     connection: buildConnection(input.origin, identity.siteSlug, identity.siteId),
     sources: {

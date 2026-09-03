@@ -271,12 +271,21 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     return jsonResponse(200, { draft: bundle, warnings: bundle.warnings });
   } catch (error) {
     /**
-     * The whole point: an operator sees WHICH step failed and what it said,
-     * on a page that still renders. A 502 told them only that something died.
+     * An operator sees WHICH step failed and what it said, on a page that still
+     * renders. A 502 told them only that something died.
+     *
+     * But HTTP 200 is only honest where the SUCCESS is also JSON. The export
+     * routes answer bytes: a 200 carrying {ok:false} there is indistinguishable
+     * from a bundle to any client that checks `response.ok`, and that is not
+     * theoretical — it shipped. The GPT export threw, this wrapper answered
+     * 200, and the browser saved 148 bytes of error JSON as
+     * `plugin-bundle.zip`, which of course would not open. A download that
+     * fails must fail loudly enough that a client cannot mistake it for a file.
      */
     const detail = error instanceof Error ? error.message : String(error);
     console.error(`admin-plugin-manifest failed at stage "${stage}".`, error);
-    return jsonResponse(200, {
+    const isBinaryRoute = Boolean(event.queryStringParameters?.export);
+    return jsonResponse(isBinaryRoute ? 500 : 200, {
       ok: false,
       stage,
       error: detail.slice(0, 500),

@@ -118,6 +118,19 @@ export const manifestBundleSchema = z
     tools: z.array(manifestToolSchema),
     connection: manifestConnectionSchema,
     sources: manifestSourcesSchema,
+    /**
+     * The actor `skill_md` declares — the platform's primary shape.
+     *
+     * The bundle used to record only its rendered text, and the OpenAI export
+     * ASSUMED that text said `plugin:openai-gpt`. It does not when the active
+     * bundle was rendered for Claude, which is what the page's Render button
+     * produces by default, so the ChatGPT download failed on every tenant that
+     * had promoted a Claude bundle — which is all of them.
+     *
+     * Optional because bundles promoted before this field existed are still
+     * in the stores; `sourceActorFor` falls back to reading the skill text.
+     */
+    actor_id: z.enum(pluginActors).optional(),
     /** Non-fatal render notes an operator should see (e.g. no live voice object). */
     warnings: z.array(z.string()).default([]),
   })
