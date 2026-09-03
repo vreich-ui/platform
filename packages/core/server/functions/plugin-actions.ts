@@ -22,6 +22,7 @@ import { handler as mcpHandler } from './mcp.js';
 import { visibleToolDefinitions } from './mcp.js';
 import { getPluginManifestBlobStore, getPluginManifestDoc } from '../lib/plugin/manifest-store.js';
 import { buildOpenApiDocument, PLUGIN_ACTION_PATH_PREFIX } from '../lib/plugin/build-openapi.js';
+import { ensureMcpSiblings } from '../lib/agent/mcp-siblings.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -84,6 +85,25 @@ const httpStatusForRpcError = (code: number): number => {
 };
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: unknown) => {
+  /**
+   * This façade reads the live tool surface (`visibleToolDefinitions()` in the
+   * schema branch) and forwards tool calls into the `/mcp` handler — both of
+   * which reach mcp.ts's injected siblings. This is a different lambda from
+   * /mcp, so nothing had ever injected them here.
+   *
+   * It hid behind an earlier refusal: with no promoted manifest the schema
+   * route answered 409 and returned before the throwing line. The moment a
+   * manifest was promoted on drlurie (2026-09-03) the route proceeded and died
+   * with "MCP server not configured", and Netlify answered a 502 carrying a raw
+   * stack — on a PUBLIC endpoint. Same defect as admin-plugin-manifest, one
+   * function over, uncovered because every handler test here stops at 404/405/
+   * 409/400 and the document tests call buildOpenApiDocument directly.
+   *
+   * tests/scripts/mcp-siblings-coverage.test.mjs now fails any core function
+   * that reaches into mcp.ts without this line.
+   */
+  ensureMcpSiblings(binding);
+
   const method = event.httpMethod ?? 'GET';
   const toolName = toolNameFromPath(event.path);
 
@@ -200,4 +220,28 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   return json(result.isError ? 422 : 200, payload as Record<string, unknown>);
 };
 
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+/**
+ * Nothing here may reach a caller as a bare Netlify 502.
+ *
+ * When the siblings defect fired, this PUBLIC endpoint answered 502 with
+ * Netlify's own error envelope: `errorType`, `errorMessage`, and a full stack
+ * naming `/var/task/netlify/functions/plugin-actions.js` line numbers. An
+ * unauthenticated caller learned the internal module layout and the exact
+ * failure text. It also gave ChatGPT — which imports this URL as its Actions
+ * schema — an unparseable body where it expects OpenAPI.
+ *
+ * An unexpected throw is now a clean JSON refusal. The reason goes to the
+ * function log, where it belongs, not to the wire. Deliberate refusals
+ * (404/405/409/400/403 and the tool-level codes) are untouched: they are
+ * well-formed answers this wrapper never sees.
+ */
+const guarded = (binding: SiteBinding) => async (event: LambdaEvent, context?: unknown) => {
+  try {
+    return await buildHandlerImpl(binding)(event, context);
+  } catch (error) {
+    console.error('plugin-actions failed.', error);
+    return refusal(500, 'The plugin actions façade could not serve this request.');
+  }
+};
+
+export const createHandler = (binding: SiteBinding) => guarded(binding);
