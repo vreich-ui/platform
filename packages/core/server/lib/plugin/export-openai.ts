@@ -335,7 +335,7 @@ Manifest \`${bundle.manifest_version}\`, rendered ${bundle.rendered_at}.
 `;
 };
 
-const agentAppCard = (bundle: ManifestBundle): string => {
+const agentAppCard = (bundle: ManifestBundle, skillZipName: string): string => {
   const c = bundle.connection;
   return `# Agent setup (operator)
 
@@ -355,9 +355,18 @@ bridges pdf-tool server-side with minted grants, and a direct attachment only ex
 
 ## Editorial layer
 
-Attach \`skill/SKILL.md\` as the agent's skill, and paste \`operational-instructions.md\` into its
-instructions. The skill is the same text the Claude desk uses; the operational file covers what
-differs on this surface.
+Skills → Add skill → **Upload skill** → **Upload .zip file** → pick \`${skillZipName}\`, which sits
+next to this file. Then paste \`operational-instructions.md\` into the agent's instructions. The
+skill is the same text the Claude desk uses; the operational file covers what differs here.
+
+Agent Studio takes a skill as a \`.zip\` whose ROOT is \`SKILL.md\` — \`${skillZipName}\` is exactly
+that, built for you. Do NOT upload this whole config bundle: it is refused with *"This archive
+isn't a supported GPT export or plugin: it lacks \`gizmo.yaml\` and a plugin manifest"*, which reads
+like a broken tenant and is only the wrong zip shape. \`skill/SKILL.md\` is the same text loose, for
+reading and diffing.
+
+Agent Studio does not autosave. It counts pending changes in the header and holds them until you
+press **Update**.
 
 ## Read actions
 
@@ -412,12 +421,40 @@ Manifest \`${bundle.manifest_version}\`, rendered ${bundle.rendered_at}.
  * gets a projection of it under the 8k cap; `agent/` gets the skill itself,
  * retargeted to its own actor id. There is no hand-maintained duplicate.
  */
+/**
+ * The name of the inner skill archive, derived from the skill's own frontmatter
+ * `name:` so the chip Agent Studio shows matches the file the operator picked.
+ * A skill without a parseable name falls back to the tenant — never to a
+ * generic label, which would collide across tenants in the operator's Downloads.
+ */
+export const skillZipNameFor = (bundle: ManifestBundle, skillMd: string): string => {
+  const declared = /^name:\s*(\S+)\s*$/m.exec(skillMd)?.[1];
+  return `${declared ?? bundle.connection.tenant}-skill.zip`;
+};
+
 export const buildGptConfigZip = (bundle: ManifestBundle): { filename: string; bytes: Buffer } => {
   const sourceActor = sourceActorFor(bundle);
   const instructions = renderGptInstructions(bundle, 'plugin:openai-gpt');
   if (instructions.length > GPT_INSTRUCTIONS_LIMIT) throw new GptInstructionsTooLongError(instructions.length);
 
+  const agentSkill = retargetActor(bundle.skill_md, sourceActor, 'plugin:openai-agent');
+
+  /**
+   * Agent Studio's "Upload skill" takes a `.zip` that contains `SKILL.md` AT
+   * ITS ROOT — nothing above it. Handing it this whole config bundle is
+   * refused with "This archive isn't a supported GPT export or plugin: it
+   * lacks gizmo.yaml and a plugin manifest", which reads like a broken tenant
+   * and is really the wrong zip shape. Ship the inner archive ready-made so
+   * the install is one drag-and-drop instead of a `cd` and a `zip` the
+   * operator has to be told about.
+   *
+   * The loose `agent/skill/SKILL.md` stays: it is the readable copy, and the
+   * Claude and Gemini shapes want the text rather than an archive.
+   */
+  const skillZip = createZip([{ path: 'SKILL.md', content: agentSkill }]);
+
   const entries: ZipEntry[] = [
+    { path: `agent/${skillZipNameFor(bundle, agentSkill)}`, content: skillZip },
     { path: 'README.md', content: shapeChooser(bundle) },
 
     // Shape A — Custom GPT, through the Actions façade.
@@ -429,11 +466,8 @@ export const buildGptConfigZip = (bundle: ManifestBundle): { filename: string; b
 
     // Shape B — Agent Studio, tenant /mcp attached directly as an App.
     { path: 'agent/operational-instructions.md', content: agentOperationalInstructions(bundle) },
-    { path: 'agent/app-setup.md', content: agentAppCard(bundle) },
-    {
-      path: 'agent/skill/SKILL.md',
-      content: retargetActor(bundle.skill_md, sourceActor, 'plugin:openai-agent'),
-    },
+    { path: 'agent/app-setup.md', content: agentAppCard(bundle, skillZipNameFor(bundle, agentSkill)) },
+    { path: 'agent/skill/SKILL.md', content: agentSkill },
   ];
   return { filename: `${bundle.connection.tenant}-openai-config.zip`, bytes: createZip(entries) };
 };

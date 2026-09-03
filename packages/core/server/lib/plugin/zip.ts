@@ -12,7 +12,14 @@
  * something rather than just carrying a new mtime.
  */
 
-export type ZipEntry = { path: string; content: string };
+/**
+ * `content` takes a Buffer as well as a string because one entry this writer
+ * produces is itself a zip: ChatGPT's Agent Studio installs a skill from a
+ * `.zip` whose ROOT is `SKILL.md`, so the OpenAI bundle ships that inner
+ * archive alongside the loose file. Store-only is exactly right for it — a zip
+ * inside a zip should not be compressed twice.
+ */
+export type ZipEntry = { path: string; content: string | Buffer };
 
 const CRC_TABLE = (() => {
   const table = new Int32Array(256);
@@ -43,7 +50,7 @@ export const createZip = (entries: readonly ZipEntry[]): Buffer => {
 
   for (const entry of sorted) {
     const nameBuffer = Buffer.from(entry.path, 'utf8');
-    const dataBuffer = Buffer.from(entry.content, 'utf8');
+    const dataBuffer = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, 'utf8');
     const crc = crc32(dataBuffer);
 
     const localHeader = Buffer.alloc(30);

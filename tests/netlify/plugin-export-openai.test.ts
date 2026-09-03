@@ -12,6 +12,7 @@ import {
   GPT_INSTRUCTIONS_LIMIT,
   GptInstructionsTooLongError,
   retargetActor,
+  skillZipNameFor,
   sourceActorFor,
 } from '../../packages/core/server/lib/plugin/export-openai.js';
 import { buildManifestBundle } from '../../packages/core/server/lib/plugin/build-manifest.js';
@@ -89,6 +90,8 @@ test('one download carries BOTH OpenAI shapes — they are not alternatives', ()
   assert.deepEqual([...names].sort(), [
     'README.md',
     'agent/app-setup.md',
+    // The ready-to-upload skill archive: Agent Studio takes a zip, not a file.
+    'agent/dr-lurie-publisher-skill.zip',
     'agent/operational-instructions.md',
     'agent/skill/SKILL.md',
     'gpt/actions-setup.md',
@@ -241,4 +244,65 @@ test('retargeting a bundle already rendered for the target shape is a no-op, not
     retargetActor('declares plugin:openai-agent', 'plugin:openai-agent', 'plugin:openai-agent'),
     'declares plugin:openai-agent'
   );
+});
+
+/**
+ * The skill has to install, not just be present.
+ *
+ * Agent Studio's "Upload skill" accepts a `.zip` whose ROOT entry is
+ * `SKILL.md`. Handing it this config bundle is refused with
+ *
+ *     This archive isn't a supported GPT export or plugin:
+ *     it lacks `gizmo.yaml` and a plugin manifest.
+ *
+ * — a message about the wrong zip SHAPE that reads like a broken tenant, and
+ * which cost a real install on 2026-09-03. The bundle shipped `SKILL.md` only
+ * as a loose file, so every operator had to be told to `cd` and `zip` before
+ * ChatGPT would take it. Ship the inner archive instead.
+ */
+test('the bundle carries a ready-to-upload skill zip with SKILL.md at its ROOT', () => {
+  const zip = readZip(buildGptConfigZip(claudeBundle).bytes);
+  const name = `dr-lurie-publisher-skill.zip`;
+
+  assert.ok(
+    zip.names.includes(`agent/${name}`),
+    `expected agent/${name} in the bundle, got:\n  ${zip.names.join('\n  ')}`
+  );
+
+  // Extract the INNER archive and open it the way ChatGPT would.
+  const dir = mkdtempSync(join(tmpdir(), 'gpt-skillzip-'));
+  const outer = join(dir, 'outer.zip');
+  writeFileSync(outer, buildGptConfigZip(claudeBundle).bytes);
+  execFileSync('unzip', ['-q', '-o', outer, `agent/${name}`, '-d', dir]);
+  const inner = join(dir, 'agent', name);
+
+  assert.match(execFileSync('unzip', ['-t', inner], { encoding: 'utf8' }), /No errors detected/);
+  const innerNames = execFileSync('unzip', ['-Z1', inner], { encoding: 'utf8' })
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  assert.deepEqual(innerNames, ['SKILL.md'], 'SKILL.md must sit at the root with nothing above it');
+
+  // And it is the AGENT copy, not the actor the manifest was rendered for.
+  const skill = execFileSync('unzip', ['-p', inner, 'SKILL.md'], { encoding: 'utf8' });
+  assert.ok(skill.includes('plugin:openai-agent'));
+  assert.ok(!skill.includes('plugin:claude'), 'the inner zip carries the retargeted skill, not the source');
+  assert.equal(skill, zip.read('agent/skill/SKILL.md'), 'the loose copy and the zipped copy cannot drift');
+});
+
+test('the skill zip is named from the skill, so two tenants never collide in Downloads', () => {
+  assert.equal(
+    skillZipNameFor(claudeBundle, '---\nname: dr-lurie-publisher\n---\nbody'),
+    'dr-lurie-publisher-skill.zip'
+  );
+  // No parseable name is a fallback to the tenant, never a generic label.
+  assert.equal(skillZipNameFor(claudeBundle, 'no frontmatter here'), `${claudeBundle.connection.tenant}-skill.zip`);
+});
+
+test('the app card points the operator at the zip, and warns off the bundle', () => {
+  const card = readZip(buildGptConfigZip(claudeBundle).bytes).read('agent/app-setup.md');
+  assert.match(card, /Upload skill/);
+  assert.match(card, /dr-lurie-publisher-skill\.zip/);
+  assert.match(card, /gizmo\.yaml/, 'the card must name the error the wrong zip produces');
+  assert.match(card, /does not autosave/, 'Update is a step, not a formality');
 });
