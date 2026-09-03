@@ -109,3 +109,64 @@ export const trackableRefOf = (element: ElementLike): TrackableRef | null => {
   }
   return null;
 };
+
+/**
+ * Resolve a trackable ref for an OBSERVED element that may not be the marker
+ * itself (T21.9): the observer watches the first box-generating descendant of
+ * a `display:contents` marker, not the marker, so the callback target's own
+ * attributes are meaningless. `closest` walks back up to the nearest marker
+ * (correctly landing on a NODE marker nested inside a SECTION marker) and
+ * `trackableRefOf` reads its identity the normal way — reuse, not a new path.
+ */
+export const trackableRefOfClosest = (element: ElementLike): TrackableRef | null => {
+  const marker = element.closest('[data-cms-section-id],[data-cms-node-id]');
+  return marker ? trackableRefOf(marker) : null;
+};
+
+/** Element shape needed to walk into a `display:contents` marker's subtree. */
+export type BoxElementLike = ElementLike & {
+  children?: ArrayLike<BoxElementLike>;
+  getClientRects?: () => ArrayLike<unknown>;
+};
+
+/**
+ * True when `element` generates at least one CSS box (`getBoundingClientRect`-
+ * style geometry). `display:contents` (and `display:none`, and a detached
+ * node) produce zero client rects — the honest, layout-agnostic test, unlike
+ * `getComputedStyle` which a DOM stub in tests won't implement at all. When
+ * the environment doesn't implement `getClientRects` (some stubs, and any
+ * element that isn't a real box-model-capable Element), assume it generates a
+ * box — that preserves "observe the marker itself" for every caller that
+ * doesn't model layout.
+ */
+export const generatesBox = (element: BoxElementLike): boolean => {
+  if (typeof element.getClientRects !== 'function') return true;
+  try {
+    return element.getClientRects().length > 0;
+  } catch {
+    return true;
+  }
+};
+
+/**
+ * Resolve the element the IntersectionObserver should actually watch for a
+ * given CMS marker (T21.9): the marker itself if it generates a box
+ * (unchanged behaviour for any marker that isn't `display:contents`),
+ * otherwise the FIRST element child, depth-first, that generates a box —
+ * descending through any boxless child in between. Returns null when nothing
+ * in the marker's subtree generates a box (nothing to observe; skip it).
+ * Exactly one element is ever returned per marker, so `impressed`/
+ * `dwellStart`/`dwellAcc` in core.ts (keyed per ref) never double-count.
+ */
+export const resolveObservationTarget = (marker: BoxElementLike): BoxElementLike | null => {
+  if (generatesBox(marker)) return marker;
+  const children = marker.children;
+  if (!children) return null;
+  for (let i = 0; i < children.length; i += 1) {
+    const child = children[i];
+    if (!child) continue;
+    const resolved = resolveObservationTarget(child);
+    if (resolved) return resolved;
+  }
+  return null;
+};
