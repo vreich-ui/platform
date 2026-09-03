@@ -65,6 +65,22 @@ const request = async <T>(getToken: GetToken, init: RequestInit & { query?: stri
   });
   const body = (await response.json()) as Record<string, unknown>;
   if (!response.ok) throw new Error(String(body.error ?? `Request failed (${response.status})`));
+  /**
+   * A DOMAIN failure now answers HTTP 200 with {ok:false, stage, error} rather
+   * than dying and letting Netlify return a bare 502 (the state /admin/plugins
+   * was stuck in). `response.ok` is therefore no longer the whole test — without
+   * this check a stage failure would sail through as a success and the page
+   * would render an empty manifest instead of saying what broke.
+   *
+   * The stage rides in the message because that is what the page displays;
+   * naming the step is the difference between "unavailable" and "the render
+   * step threw, here is what it said".
+   */
+  if (body.ok === false) {
+    const detail = String(body.error ?? 'The request failed.');
+    const stage = typeof body.stage === 'string' ? body.stage : '';
+    throw new Error(stage ? `${detail} (failed at: ${stage})` : detail);
+  }
   return body as T;
 };
 

@@ -101,10 +101,33 @@ const listFiles = async (current: string): Promise<string[]> => {
 
 export const createLocalBlobStore = (storeName: string): LocalBlobStore => {
   const storeRoot = join(getLocalBlobsRoot(), storeName);
-  const getBlob = async (key: string, options?: { type?: 'arrayBuffer' | 'buffer' | 'text' }) => {
+  const getBlob = async (key: string, options?: { type?: 'arrayBuffer' | 'buffer' | 'text' | 'json' }) => {
     try {
       if (options?.type === 'buffer') {
         return await readFile(toPath(storeName, key));
+      }
+
+      /**
+       * `type: 'json'` is part of the Netlify Blobs `get` contract and this
+       * shim did not implement it — the option fell through to the text branch
+       * and callers got a STRING where production hands them a parsed object.
+       * Silent, because the callers that use it are defensive: the plugin
+       * manifest store's reader safe-parses and falls back to an empty doc, so
+       * offline every read of a stored manifest looked like "nothing has ever
+       * been rendered". A render followed by a promote could not be proven
+       * anywhere but production.
+       *
+       * Parse failure returns null (the key exists but is not JSON) rather
+       * than throwing, matching how the real client refuses to hand back a
+       * half-value.
+       */
+      if (options?.type === 'json') {
+        const text = await readFile(toPath(storeName, key), 'utf8');
+        try {
+          return JSON.parse(text) as unknown;
+        } catch {
+          return null;
+        }
       }
 
       if (options?.type === 'arrayBuffer') {

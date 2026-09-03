@@ -38,7 +38,7 @@ import { resolveRolesForPrincipalAsync } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
 import { buildToolContext } from '../lib/agent/context.js';
 import { composeRequestFocus, requestRowForChat } from '../lib/requests/chat-binding.js';
-import { ensureMcpSiblingsForChat } from '../lib/agent/mcp-siblings.js';
+import { ensureMcpSiblings } from '../lib/agent/mcp-siblings.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import { humanCopyForCmsAgentError } from '../lib/agent/engine.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -281,7 +281,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // The generated registry's operational tools run through mcp.ts's handler
   // bodies, which reach the object store via its injected siblings — this
   // lambda is not the MCP shim, so it injects them itself from ITS binding.
-  ensureMcpSiblingsForChat(binding);
+  ensureMcpSiblings(binding);
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
