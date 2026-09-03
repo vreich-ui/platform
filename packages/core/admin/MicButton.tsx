@@ -10,22 +10,25 @@
  * severity standard red is reserved for Error/Blocked, and "the mic is on" is
  * an active state, not a failure.
  */
-import { IconButton } from './primitives';
+import { IconButton, type ButtonSize } from './primitives';
 import { IconMic } from './icons';
 
 export interface MicButtonProps {
   listening: boolean;
   onToggle: () => void;
   disabled?: boolean;
+  /** Defaults to 'md' (unchanged) — `ChatComposer` passes 'sm' to sit flush with its other compact input-row controls. */
+  size?: ButtonSize;
 }
 
-export function MicButton({ listening, onToggle, disabled }: MicButtonProps) {
+export function MicButton({ listening, onToggle, disabled, size }: MicButtonProps) {
   return (
     <IconButton
       label={listening ? 'Stop dictating' : 'Dictate with your voice'}
       aria-pressed={listening}
-      icon={<IconMic size={18} />}
+      icon={<IconMic size={size === 'sm' ? 16 : 18} />}
       variant="ghost"
+      size={size}
       onClick={onToggle}
       disabled={disabled}
       className={

@@ -17,7 +17,7 @@ import { ControlsCard } from './ControlsCard';
 import { MicButton } from './MicButton';
 import { ApprovalCard, RunProgress, type ApprovalCardProps } from './approval';
 import { SeverityIcon } from './severity';
-import { IconRobot, IconSend } from './icons';
+import { IconPlus, IconRobot, IconSend } from './icons';
 import {
   cancelChatRun,
   chooseCandidate as chooseCandidateRequest,
@@ -1751,7 +1751,7 @@ export function ChatComposer({
     setText('');
   };
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5">
       {above}
       {!live && contextActions && contextActions.length > 0 ? (
         <div>
@@ -1786,20 +1786,26 @@ export function ChatComposer({
           ))}
         </div>
       ) : null}
-      {!live && newChat ? (
-        <div className="flex flex-wrap gap-1.5">
+      <div className="flex items-end gap-1.5">
+        {/* FIX: New chat used to be its own full-width chip row here,
+            duplicating the rail header's control the moment a host renders
+            one (`AgentRail` no longer forwards it for exactly that reason).
+            Folded into the input row as a compact icon button instead — the
+            same reachability (still gated on `!live`, still the pure
+            `newChat.control` from `dockedChatControl`/`DockedChatControl`
+            deciding label/disabled/hint), none of the row. A host with no
+            header of its own (none exists today) still gets this. */}
+        {!live && newChat ? (
           <button
             type="button"
             aria-label={newChat.control.hint}
             disabled={newChat.control.disabled}
-            className="adm-focusable rounded-full border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)] disabled:cursor-not-allowed disabled:opacity-50"
             onClick={newChat.onStart}
+            className="adm-focusable inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {newChat.control.label}
+            <IconPlus size={16} />
           </button>
-        </div>
-      ) : null}
-      <div className="flex items-end gap-2">
+        ) : null}
         <Textarea
           ref={textareaRef}
           value={text}
@@ -1828,17 +1834,18 @@ export function ChatComposer({
           className="flex-1"
         />
         {dictation.supported ? (
-          <MicButton listening={dictation.listening} onToggle={dictation.toggle} disabled={busy && !live} />
+          <MicButton listening={dictation.listening} onToggle={dictation.toggle} disabled={busy && !live} size="sm" />
         ) : null}
         {live && onCancel ? (
-          <Button variant="secondary" onClick={onCancel} disabled={busy}>
+          <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
             Stop
           </Button>
         ) : (
           <Button
+            size="sm"
             onClick={submit}
             disabled={busy || live || text.trim().length === 0}
-            leftIcon={<IconSend size={16} />}
+            leftIcon={<IconSend size={14} />}
           >
             Send
           </Button>

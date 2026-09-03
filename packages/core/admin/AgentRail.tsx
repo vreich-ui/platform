@@ -247,15 +247,6 @@ export function AgentRail({
         <p className="shrink-0 py-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
       ) : null}
       <div className="shrink-0 border-t border-[var(--adm-border)] pt-3">
-        <div className="mb-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2 py-1.5">
-          <RunApprovalControls
-            mode={approvalMode}
-            onChange={setApprovalMode}
-            testMode={testMode}
-            onTestModeChange={setTestMode}
-            canUseTestMode={canUseTestMode}
-          />
-        </div>
         <ChatComposer
           status={chat.status}
           busy={chat.busy}
@@ -264,9 +255,32 @@ export function AgentRail({
           suggestions={suggestions}
           contextActions={contextActions}
           draftSeed={draftSeed}
-          {...(newChat ? { newChat } : {})}
+          // FIX: `newChat` is intentionally NOT forwarded to the composer
+          // here — the header above already renders it (`Button` next to
+          // the state chip), and that stays the one place this rail offers
+          // it. Forwarding it too was the second half of a row that, once
+          // the starter-suggestion chips were dropped, had nothing left in
+          // it but this one chip. `ChatComposer` still accepts `newChat` on
+          // its own (compactly, no full-width row) for a caller that hosts
+          // it with no header of its own — none does today, but the prop
+          // stays so that case isn't a silent dead end.
           quote={quote}
           above={aboveComposer}
+          // FIX: moved out of a bordered `mb-2` row above the composer and
+          // into its `runMode` slot (bottom-left of the input row) — the
+          // placement `RunApprovalControls`' own doc comment already
+          // describes ("A5 ... rather than a full-width row above it") and
+          // that `AgentsHub` already uses. The rail just hadn't caught up:
+          // it alone still spent a full boxed row on the autonomy controls.
+          runMode={
+            <RunApprovalControls
+              mode={approvalMode}
+              onChange={setApprovalMode}
+              testMode={testMode}
+              onTestModeChange={setTestMode}
+              canUseTestMode={canUseTestMode}
+            />
+          }
         />
       </div>
     </section>
