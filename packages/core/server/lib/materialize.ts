@@ -65,6 +65,13 @@ export function materialize(
       return materializeProduct(objectId, body, meta);
     case 'content_item':
       return materializeContentItem(objectId, body, meta);
+    case 'visual_standard':
+      // Brand-imagery wave (BRIEF.md §3.1): visual_standard is deliberately
+      // NOT in governedObjectTypes (approval-policy.ts) — object_publish
+      // refuses it (content_item_not_gated) before materialize() is ever
+      // reached. This case exists only so the exhaustive switch compiles; it
+      // must never actually run.
+      throw new Error('visual_standard is not a publishable object type — it must never reach materialize().');
     default: {
       const exhaustive: never = objectType;
       throw new Error(`No materializer registered for object type: ${String(exhaustive)}`);

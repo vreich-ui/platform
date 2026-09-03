@@ -50,6 +50,7 @@ import type { ToolContext } from './tools.js';
 import type { LambdaEvent } from '../../functions/mcp.js';
 import { callPing } from '../../functions/mcp.js';
 import {
+  callBrandImageryPropose,
   callCommerceOrders,
   callCreateAgentArtifactJob,
   callCreatePdfTemplate,
@@ -246,6 +247,12 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   order_reissue: callOrderReissue,
   commerce_orders: callCommerceOrders,
   registry_get: callRegistryGet,
+  // P5 (brand-imagery wave, BRIEF §3.5): a plain read-class bridge tool like
+  // every other entry above — it needs no ctx.cmsAgent/ctx.requests state of
+  // its own (callBrandImageryPropose builds its own CmsAgentClient bridge,
+  // same posture as this file's `operationalEvent`-threaded handlers), so it
+  // is generated (agent/generated-tools.ts), not hand-authored in tools.ts.
+  brand_imagery_propose: callBrandImageryPropose,
 };
 
 /** Adapts the MCP tool-result shape to ChatTool's {content: string, is_error: boolean}. */

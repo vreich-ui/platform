@@ -20,6 +20,11 @@ export const objectTypes = [
   // one per site, read by agents through the ordinary object surface, never
   // rendered. See schema/bodies/editorial-voice-v1.ts.
   'editorial_voice',
+  // Brand-imagery wave (BRIEF.md §3.1): a site's image style as a governed
+  // mood-board object — `kind:'house'` singleton or `kind:'template'`
+  // (unbounded). Deliberately NOT in approval-policy.ts governedObjectTypes —
+  // never publishable; see schema/bodies/visual-standard-v1.ts.
+  'visual_standard',
 ] as const;
 export type ObjectType = (typeof objectTypes)[number];
 

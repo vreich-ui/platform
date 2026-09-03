@@ -747,3 +747,472 @@ test('brand-aware assembly does not apply to non-image-generation job kinds (tem
     globalThis.fetch = originalFetch;
   }
 });
+
+// ─── P4 (brand-imagery wave, BRIEF §3.4/§3.7): the `style` override channel,
+// the guardrail, and the aspectRatio/usageContext requirements mapping. ─────
+
+const seedGovernanceOverride = async (brandImageryOverrides: 'allow' | 'lock') => {
+  const store = createLocalBlobStore('governance');
+  await store.setJSON('overrides.v1', {
+    schema_version: 'overrides.v1',
+    brandImageryOverrides,
+    updated_by: 'test@example.com',
+    updated_at: '2026-09-01T00:00:00.000Z',
+    history: [],
+  });
+};
+
+const clearGovernanceOverride = () => seedGovernanceOverride('allow');
+
+const seedVisualStandard = async (id: string, styleSentence: string) => {
+  const created = await rpc('object_create', {
+    object_type: 'visual_standard',
+    site: 'site_drlurie',
+    requested_id: id,
+    body: {
+      version: 1,
+      kind: 'template',
+      label: 'Editorial template',
+      brandImagery: {
+        version: 1,
+        medium: 'photograph',
+        styleSentence,
+        palette: ['#112233'],
+        negative: [],
+        aspectRatios: { article_header: '1:1' },
+        seedBase: 42,
+      },
+      references: [],
+      sampleSubjects: ['a subject'],
+      status: 'active',
+    },
+  });
+  assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+};
+
+test('style.override is forwarded to pdf-tool verbatim and styleSource "override" is reported, merged over the site\'s own brandImagery', async () => {
+  await resetAndSeedRequest();
+  await clearGovernanceOverride();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-style-override-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const styleArg = { override: { styleSentence: 'A one-off editorial look for this job only.' }, note: 'seasonal' };
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'image',
+      operation: 'generate',
+      prompt: 'A jar of moisturizer on a marble countertop',
+      filename: 'moisturizer-hero.webp',
+      slot: 'article_image_style_1',
+      style: styleArg,
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    // Forwarded to pdf-tool verbatim -- pdf-tool stores/echoes it, never
+    // resolves it itself.
+    assert.deepEqual(call!.body.style, styleArg);
+    // Platform's own resolution: the override's styleSentence, not the site's.
+    assert.ok(String(call!.body.prompt).startsWith('A one-off editorial look for this job only.'));
+
+    assert.equal(created.result.structuredContent?.styleSource, 'override');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('style.visualStandardId resolves the named visual_standard and wins over the site\'s own declared brandImagery; styleSource "visual_standard"', async () => {
+  await resetAndSeedRequest();
+  await clearGovernanceOverride();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+  await seedVisualStandard('vis_drlurie_editorial', 'The named visual_standard\'s own style.');
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-style-standard-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'image',
+      operation: 'generate',
+      prompt: 'A jar of moisturizer on a marble countertop',
+      filename: 'moisturizer-hero.webp',
+      slot: 'article_image_style_2',
+      style: { visualStandardId: 'vis_drlurie_editorial' },
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    assert.ok(String(call!.body.prompt).startsWith('The named visual_standard\'s own style.'));
+    assert.deepEqual(call!.body.style, { visualStandardId: 'vis_drlurie_editorial' });
+
+    assert.equal(created.result.structuredContent?.styleSource, 'visual_standard');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('guardrail lock ignores the style channel entirely (never an error), reports it in overriddenFields, and styleSource is "site_locked"', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+  await seedGovernanceOverride('lock');
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-style-locked-1'),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'image',
+      operation: 'generate',
+      prompt: 'A jar of moisturizer on a marble countertop',
+      filename: 'moisturizer-hero.webp',
+      slot: 'article_image_style_3',
+      style: { override: { styleSentence: 'Should never win.' } },
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    // The site's own declared brandImagery applies -- the override never wins.
+    assert.ok(String(call!.body.prompt).startsWith(SEEDED_BRAND_IMAGERY.styleSentence));
+    // Still forwarded to pdf-tool verbatim for its own record, even though
+    // Platform ignored it.
+    assert.deepEqual(call!.body.style, { override: { styleSentence: 'Should never win.' } });
+
+    assert.equal(created.result.structuredContent?.styleSource, 'site_locked');
+    assert.deepEqual(created.result.structuredContent?.overriddenFields, ['style']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await clearGovernanceOverride();
+  }
+});
+
+test('requirements.image.size is omitted, so aspectRatios[usageContext] maps to the nearest of the 5 allowed sizes', async () => {
+  await resetAndSeedRequest();
+  await clearGovernanceOverride();
+  // article_header: '3:2' -> nearest allowed size is 1536x1024.
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-size-map-1'),
+    get_image_model_policy: () => ({
+      body: {
+        policy: { byUsageContext: { article_header: { model: 'flux-2' } } },
+        contexts: ['article_header', 'article_body'],
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'image',
+      operation: 'generate',
+      prompt: 'A jar of moisturizer on a marble countertop',
+      filename: 'moisturizer-hero.webp',
+      slot: 'article_image_size_1',
+      requirements: { image: { outputFormat: 'webp', usageContext: 'article_header' } },
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    const requirements = call!.body.requirements as {
+      image?: { size?: string; usageContext?: string; outputFormat?: string };
+    };
+    assert.equal(requirements.image?.size, '1536x1024');
+    assert.equal(requirements.image?.usageContext, 'article_header');
+    assert.equal(requirements.image?.outputFormat, 'webp', 'other requirements.image fields survive untouched');
+    assert.equal(created.result.structuredContent?.warnings, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('an unrecognized requirements.image.usageContext is coerced to article_body and reported in warnings', async () => {
+  await resetAndSeedRequest();
+  await clearGovernanceOverride();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute('job-context-coerce-1'),
+    get_image_model_policy: () => ({
+      body: {
+        policy: { byUsageContext: { article_header: { model: 'flux-2' } } },
+        contexts: ['article_header', 'article_body'],
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'image',
+      operation: 'generate',
+      prompt: 'A jar of moisturizer on a marble countertop',
+      filename: 'moisturizer-hero.webp',
+      slot: 'article_image_context_1',
+      requirements: { image: { outputFormat: 'webp', usageContext: 'newsletter_hero' } },
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const call = calls.find((entry) => entry.tool === 'create_agent_artifact_job');
+    assert.ok(call);
+    const requirements = call!.body.requirements as { image?: { usageContext?: string } };
+    assert.equal(requirements.image?.usageContext, 'article_body');
+    assert.deepEqual(created.result.structuredContent?.warnings, ['usage_context_not_in_policy:newsletter_hero']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ─── REVIEW (brand-imagery wave) ────────────────────────────────────────────
+//
+// Every P4 style/warnings test above passes `wait: false`, so none of them
+// ever reached the COMPLETED inline-wait path — the default one, and the one
+// the tool's own description tells agents to expect ("a SINGLE completing
+// create call may come back with the terminal artifactReference"). On that
+// path `...safeStatus` (pdf-tool's echo) is spread AFTER the create call's
+// own payload, so pdf-tool's best-effort styleSource overwrote Platform's
+// resolved one and Platform's warnings were dropped.
+
+const completingArtifactJobStub = (jobId: string, extraStatusFields: Record<string, unknown> = {}) => ({
+  create_agent_artifact_job: (body: Record<string, unknown>) => ({
+    status: 202,
+    body: {
+      jobId,
+      status: 'pending',
+      projectId: body.projectId,
+      requestId: body.requestId,
+      artifactKind: body.artifactKind,
+      polling: { tool: 'get_agent_artifact_job_status', input: { projectId: body.projectId } },
+    },
+  }),
+  get_agent_artifact_job_status: (body: Record<string, unknown>) => ({
+    body: {
+      jobId,
+      status: 'complete',
+      projectId: body.projectId,
+      requestId: REQUEST_ID,
+      artifactKind: 'image',
+      artifactReference: referenceForSlot('article_image_1'),
+      materializationProof: PROOF_SECRET,
+      ...extraStatusFields,
+    },
+  }),
+  verify_agent_artifact: (body: Record<string, unknown>) => ({
+    body: {
+      verified: true,
+      projectId: body.projectId,
+      requestId: body.requestId,
+      artifactReference: body.artifactReference,
+      materializationProof: `${PROOF_SECRET}-rotated`,
+    },
+  }),
+});
+
+test('a COMPLETING inline job still reports Platform’s styleSource and warnings, not pdf-tool’s echo', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+  await seedGovernanceOverride('lock');
+
+  const originalFetch = globalThis.fetch;
+  const { fetchImpl } = stubPdfToolMcp({
+    ...completingArtifactJobStub('job-style-completing-1', {
+      // Exactly what pdf-tool really echoes (agent-artifact-mcp.ts's
+      // styleResponseFields / deriveLocalStyleSource) plus a render warning.
+      styleSource: 'override',
+      warnings: ['pdf_tool_render_warning'],
+    }),
+    get_image_model_policy: () => ({
+      body: { policy: { byUsageContext: {} }, contexts: ['article_header', 'article_body'] },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'image',
+      operation: 'generate',
+      prompt: 'A jar of moisturizer on a marble countertop',
+      filename: 'moisturizer-hero.webp',
+      slot: 'article_image_1',
+      requirements: { image: { usageContext: 'newsletter_hero' } },
+      style: { override: { styleSentence: 'Should never win.' } },
+      // The DEFAULT — this is the path that was untested.
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+    const body = created.result.structuredContent!;
+    assert.equal(body.verified, true, 'the job completed inline — this is the terminal-merge path');
+
+    assert.equal(body.styleSource, 'site_locked', "pdf-tool's best-effort styleSource must not overwrite Platform's");
+    assert.deepEqual(body.overriddenFields, ['style']);
+    // Platform's warning survives, and pdf-tool's is kept rather than replaced.
+    assert.deepEqual(body.warnings, ['usage_context_not_in_policy:newsletter_hero', 'pdf_tool_render_warning']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await clearGovernanceOverride();
+  }
+});
+
+// X1's example generator invents its own `req_visimg_*` request id — there is
+// no content_item that owns a visual standard's preview images — so
+// `resolveArtifactBridgeScope` refused every example job with
+// `artifact_request_not_found`, and the persist step then asked for a second
+// checkout on an object whose lock the triggering `object_patch` was still
+// holding (423). Between them, not one example was ever written by any
+// trigger. This drives the whole path through the real MCP surface.
+test('an object_patch on a visual_standard writes the generated examples back, under the caller’s own lock', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
+  await clearGovernanceOverride();
+
+  const standardId = 'vis_drlurie_examples';
+  const brandImagery = {
+    version: 1,
+    medium: 'photograph',
+    styleSentence: 'Example-standard style.',
+    palette: ['#123456'],
+    negative: [],
+    aspectRatios: { article_header: '3:2' },
+    seedBase: 7,
+  };
+  // Born a DRAFT with no sampleSubjects, so `object_create` plans no jobs
+  // (`no_sample_subjects`) and the patch below is the only trigger under test.
+  const created = await rpc('object_create', {
+    object_type: 'visual_standard',
+    site: 'site_drlurie',
+    requested_id: standardId,
+    body: {
+      version: 1,
+      kind: 'template',
+      label: 'Examples template',
+      brandImagery,
+      references: [],
+      sampleSubjects: [],
+      status: 'draft',
+    },
+  });
+  assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+  const originalFetch = globalThis.fetch;
+  const jobRequestIds: string[] = [];
+  const { fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: (body) => {
+      const requestId = String(body.requestId);
+      jobRequestIds.push(requestId);
+      return {
+        status: 202,
+        body: {
+          jobId: `job-${requestId}`,
+          status: 'pending',
+          projectId: body.projectId,
+          requestId,
+          artifactKind: body.artifactKind,
+          polling: { tool: 'get_agent_artifact_job_status', input: { projectId: body.projectId } },
+        },
+      };
+    },
+    get_agent_artifact_job_status: (body) => {
+      const requestId = String(body.jobId).replace(/^job-/, '');
+      const sha = 'c'.repeat(64);
+      return {
+        body: {
+          jobId: body.jobId,
+          status: 'complete',
+          projectId: body.projectId,
+          requestId,
+          artifactKind: 'image',
+          artifactReference: {
+            blobKey: `image/${requestId}/${sha}.png`,
+            sha256: sha,
+            sizeBytes: 4096,
+            contentType: 'image/png',
+            artifactKind: 'image',
+            originalFilename: 'example.png',
+          },
+          materializationProof: PROOF_SECRET,
+        },
+      };
+    },
+    verify_agent_artifact: (body) => ({
+      body: {
+        verified: true,
+        projectId: body.projectId,
+        requestId: body.requestId,
+        artifactReference: body.artifactReference,
+        materializationProof: `${PROOF_SECRET}-rotated`,
+      },
+    }),
+    get_image_model_policy: () => ({ body: { policy: { byUsageContext: {} }, contexts: [] } }),
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const checkout = await rpc('object_checkout', { object_type: 'visual_standard', object_id: standardId });
+    const lockToken = checkout.result.structuredContent?.lockToken as string;
+    assert.ok(lockToken, JSON.stringify(checkout.result.structuredContent));
+
+    const patched = await rpc('object_patch', {
+      object_type: 'visual_standard',
+      object_id: standardId,
+      lock_token: lockToken,
+      expected_record_version: checkout.result.structuredContent?.record_version,
+      ops: [
+        {
+          op: 'set_visual_standard_fields',
+          fields: { sampleSubjects: ['a person reading at a small table'], status: 'active' },
+        },
+      ],
+    });
+    assert.ok(!patched.result.isError, JSON.stringify(patched.result.structuredContent));
+
+    // The lock is STILL held here — check-in is a separate call — which is
+    // exactly the state the generator has to write in.
+    assert.equal(jobRequestIds.length, 1, 'one sampleSubject → one example job actually reached pdf-tool');
+    assert.match(jobRequestIds[0]!, /^req_visimg_vis_drlurie_examples_article_header_\d{8}_\d{2}$/);
+
+    const read = await rpc('object_get', { object_type: 'visual_standard', object_id: standardId });
+    const body = (read.result.structuredContent?.record as { body: Record<string, unknown> }).body;
+    const examples = body.examples as Array<{ usageContext: string; blobKey: string; contractHash: string }>;
+    assert.equal(examples?.length, 1, 'the generated example must be persisted, not silently dropped');
+    assert.equal(examples[0]!.usageContext, 'article_header');
+    assert.match(examples[0]!.blobKey, /^image\/req_visimg_vis_drlurie_examples_article_header_/);
+    assert.equal(examples[0]!.contractHash.length, 64);
+
+    await rpc('object_checkin', { object_type: 'visual_standard', object_id: standardId, lock_token: lockToken });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

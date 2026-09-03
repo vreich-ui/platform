@@ -3,7 +3,7 @@ import type { ObjectType } from '../schema/object-record-v1.js';
 
 export type ObjectIdValidationResult = NamingValidationResult;
 
-export const OBJECT_ID_CEILING_RE = /^(site|page|tpl|stpl|sec|nav|tax|thm|prod|req|trk|voice)_[a-z0-9_]+$/;
+export const OBJECT_ID_CEILING_RE = /^(site|page|tpl|stpl|sec|nav|tax|thm|prod|req|trk|voice|vis)_[a-z0-9_]+$/;
 export const SECTION_INSTANCE_ID_RE = /^s_[a-z0-9]+$/;
 
 const OBJECT_ID_PATTERNS = {
@@ -20,6 +20,10 @@ const OBJECT_ID_PATTERNS = {
   // D1: `voice_` spelled out rather than abbreviated — the id is read by agents
   // in contract output far more often than it is typed by a human.
   editorial_voice: /^voice_[a-z0-9]+(?:_[a-z0-9]+)*$/,
+  // Brand-imagery wave (BRIEF.md §3.1, R2): `vis_<site>` (house, singleton) or
+  // `vis_<site>_<slug>` (template) — the same generic segment grammar; the
+  // house/template distinction is a body-level (`kind`) fact, not an id shape.
+  visual_standard: /^vis_[a-z0-9]+(?:_[a-z0-9]+)*$/,
 } satisfies Record<Exclude<ObjectType, 'content_item'>, RegExp>;
 
 const OBJECT_TYPE_PREFIXES = {
@@ -35,6 +39,7 @@ const OBJECT_TYPE_PREFIXES = {
   content_item: 'req_',
   tracking_config: 'trk_',
   editorial_voice: 'voice_',
+  visual_standard: 'vis_',
 } satisfies Record<ObjectType, string>;
 
 export const isObjectIdWithinCeiling = (value: string): boolean => OBJECT_ID_CEILING_RE.test(value);

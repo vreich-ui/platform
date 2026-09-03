@@ -32,6 +32,54 @@ describe('editorial asset projection', () => {
     assert.doesNotMatch(JSON.stringify(projected), /never-expose|pdf-templates|templateJson/);
   });
 
+  // FIX-U1: kind/renderDataSchema/sampleData/thumbnailKey (BRIEF §3.6) used
+  // to be dropped by the whitelist, leaving U1's thumbnail/kind/render-sample
+  // affordances permanently dark. They must now forward — while `storage`
+  // (and anything else not named) still does not, so this stays a whitelist,
+  // never a passthrough.
+  it('forwards kind/renderDataSchema/sampleData/thumbnailKey when the upstream row carries them, and still drops storage', () => {
+    const schema = { type: 'object', properties: { headline: { type: 'string' } }, required: ['headline'] };
+    const projected = projectPdfTemplate({
+      templateId: 'tpl_article_brochure',
+      latestVersion: 1,
+      status: 'active',
+      renderer: 'chromium',
+      kind: 'article',
+      thumbnailKey: 'image/tpl_article_brochure/thumb.png',
+      renderDataSchema: schema,
+      sampleData: { headline: 'A sample headline' },
+      storage: { token: 'never-expose' },
+    });
+    assert.deepStrictEqual(projected, {
+      id: 'tpl_article_brochure',
+      label: 'Article Brochure',
+      status: 'active',
+      renderer: 'chromium',
+      version: 1,
+      kind: 'article',
+      thumbnail_key: 'image/tpl_article_brochure/thumb.png',
+      render_data_schema: schema,
+      sample_data: { headline: 'A sample headline' },
+    });
+    assert.doesNotMatch(JSON.stringify(projected), /never-expose/);
+  });
+
+  it('omits the four §3.6 fields entirely when the upstream row predates them, unchanged from before', () => {
+    const projected = projectPdfTemplate({
+      templateId: 'tpl_legacy',
+      latestVersion: 1,
+      status: 'active',
+      renderer: 'pdfme',
+    });
+    assert.deepStrictEqual(projected, {
+      id: 'tpl_legacy',
+      label: 'Legacy',
+      status: 'active',
+      renderer: 'pdfme',
+      version: 1,
+    });
+  });
+
   it('never exposes a UUID as a PDF template label', () => {
     const projected = projectPdfTemplate({
       templateId: 'e43c0e58-f68b-4ff5-8e8b-9d3c6c5a1b90',

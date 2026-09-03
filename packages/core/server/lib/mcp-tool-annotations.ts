@@ -53,6 +53,7 @@ const DESTRUCTIVE_TOOLS = new Set([
   'member_purge',
   'ownership_transfer',
   'site_apply_theme',
+  'site_apply_brand_imagery',
 ]);
 
 /**

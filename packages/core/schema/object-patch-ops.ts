@@ -668,6 +668,23 @@ const setVoiceFieldsSchema = z.strictObject({
   ...guard,
 });
 
+// ——— Visual standard (brand-imagery wave, BRIEF.md §3.1) ———
+
+// The set_voice_fields idiom, verbatim: ONE open deep-merge op over the whole
+// body (null unsets), no forbidKeys. Unlike site.brandImagery's privileged
+// funnel, `brandImagery` HERE is ordinary agent-writable — the governed thing
+// is the site's APPLIED copy (set_site_brand_imagery), not this proposal a
+// writer/human is still iterating on. `references[]`/`sampleSubjects[]` are
+// small declared sets that replace wholesale on a partial merge — exactly the
+// editorial_voice `frameworks[]` posture, for the same reason (upsert/move/
+// remove ops would be ceremony without a guarantee a mood board needs).
+// Inverse = the captured before-tree. Agent-submittable; NOT privileged.
+const setVisualStandardFieldsSchema = z.strictObject({
+  op: z.literal('set_visual_standard_fields'),
+  fields: fieldsSchema,
+  ...guard,
+});
+
 // ——— The grammar ———
 
 // Union members stay plain object schemas (a zod discriminated-union
@@ -719,6 +736,7 @@ export const patchOpUnionSchema = z.discriminatedUnion('op', [
   setTrackingSchema,
   setTrackingConfigFieldsSchema,
   setVoiceFieldsSchema,
+  setVisualStandardFieldsSchema,
 ]);
 
 const requireMergedIntoOnlyWhenDeprecated = (term: TermPayload, ctx: z.RefinementCtx, path: (string | number)[]) => {
@@ -822,6 +840,9 @@ export const patchOpNamesByObjectType: Record<ObjectType, readonly PatchOpName[]
   // No set_tracking: a voice is authoring law, never a tracked surface (the
   // tracking_config precedent).
   editorial_voice: ['set_voice_fields'],
+  // No set_tracking: a mood board is never a reader-facing surface (the same
+  // exemption, same reason).
+  visual_standard: ['set_visual_standard_fields'],
 };
 
 export const isPatchOpAllowedForObjectType = (objectType: ObjectType, opName: PatchOpName): boolean =>

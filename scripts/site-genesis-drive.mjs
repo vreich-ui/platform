@@ -44,7 +44,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { genesisSeedFiles, SEED_MODULES } from '../packages/core/cli/genesis-manifest.mjs';
+import { genesisSeedFiles, isPublishableObjectType, SEED_MODULES } from '../packages/core/cli/genesis-manifest.mjs';
 import { driftFields } from './lib/roundtrip-reconcile.mjs';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -337,12 +337,26 @@ export const runDrive = async ({ siteDir, siteRoot, endpoint, tool, dryRun, noRe
       }
       console.log(`created      ${entry.objectId}`);
       created += 1;
+    } else if (!isPublishableObjectType(entry.objectType)) {
+      console.log(`ok           ${entry.objectId} (already seeded — ${entry.objectType} is not publishable)`);
+      continue;
     } else if (record.publication?.published_time) {
       console.log(`ok           ${entry.objectId} (already published)`);
       continue;
     } else {
       console.log(`exists       ${entry.objectId} (unpublished — publishing)`);
     }
+
+    // REVIEW (brand-imagery wave): `visual_standard` is deliberately outside
+    // the generic publish gate (genesis-manifest.mjs's
+    // NON_PUBLISHABLE_OBJECT_TYPES / approval-policy.ts's
+    // governedObjectTypes) — `object_publish` on it is refused
+    // (`content_item_not_gated`), so attempting it could only ever add a
+    // spurious FAIL and a non-zero exit to a genesis run that had in fact
+    // seeded everything. Creating the record IS the deliverable for such a
+    // type; the only way its content reaches anything published is a
+    // separate, deliberate apply (site_apply_brand_imagery).
+    if (!isPublishableObjectType(entry.objectType)) continue;
 
     // Publish under a fresh lock, then ALWAYS check in: publish deliberately
     // keeps the lock (W14 F5), so skipping check-in would strand the object for

@@ -163,6 +163,44 @@ test('object_contract(navigation) returns the derived body schema, patch ops, an
   assert.equal(contract.publish_policy.requires_approval, false);
 });
 
+// REVIEW (brand-imagery wave, BRIEF §3.7): the guardrail READ path. P4 put a
+// `brand_imagery_override_policy` constraint on object_contract('site') and
+// gave buildObjectContract an option for its value, but no caller ever passed
+// one — so the live MCP surface CMS-Agent's contractPrefetch reads reported
+// the hardcoded default 'allow' even on a LOCKED site. This asserts the wire,
+// not the pure builder.
+test('object_contract("site") reports the LIVE brandImageryOverrides guardrail, not the default', async () => {
+  const { getGovernanceBlobStore, putGovernanceDoc } = await import(
+    '../../packages/core/server/lib/governance-store.js'
+  );
+  const govStore = await getGovernanceBlobStore(undefined);
+
+  const policyOf = async () => {
+    const res = await callTool('object_contract', { object_type: 'site' });
+    assert.ok(!res.isError, JSON.stringify(res.structuredContent));
+    const contract = res.structuredContent?.contract as { constraints: Array<{ id: string; value?: string }> };
+    return contract.constraints.find((c) => c.id === 'brand_imagery_override_policy')?.value;
+  };
+
+  await putGovernanceDoc(govStore, {
+    schema_version: 'overrides.v1',
+    brandImageryOverrides: 'lock',
+    updated_by: 'review@example.com',
+    updated_at: '2026-09-01T00:00:00.000Z',
+    history: [],
+  });
+  assert.equal(await policyOf(), 'lock', 'a locked guardrail must reach the contract');
+
+  await putGovernanceDoc(govStore, {
+    schema_version: 'overrides.v1',
+    brandImageryOverrides: 'allow',
+    updated_by: 'review@example.com',
+    updated_at: '2026-09-01T00:00:00.000Z',
+    history: [],
+  });
+  assert.equal(await policyOf(), 'allow');
+});
+
 test('object_contract rejects an unknown object_type', async () => {
   const res = await callTool('object_contract', { object_type: 'widget' });
   assert.equal(res.isError, true);

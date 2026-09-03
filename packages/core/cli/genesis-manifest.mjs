@@ -197,6 +197,28 @@ export const SCAFFOLD_GROUPS = [
   },
 ];
 
+// ─── publishability (the genesis drive's one exception) ────────────────────
+//
+// REVIEW (brand-imagery wave): the genesis drive's write loop is
+// create -> checkout -> object_publish -> checkin for EVERY object in the
+// plan, because until now every seeded type was publishable. P6 added a
+// `visual_standard` entry to `site-seed-data.mjs`'s CONVERSION_SEEDS, and
+// `visual_standard` is deliberately OUTSIDE the generic publish gate
+// (BRIEF.md rule 4 / `governedObjectTypes` in packages/core/lib/
+// approval-policy.ts) — `object_publish` on it is refused with
+// `content_item_not_gated`. Left unhandled, every genesis run (and every
+// re-run, since the object never records a published_time) reported one
+// FAIL and exited non-zero on a site that was in fact fully seeded.
+//
+// Kept HERE rather than imported from approval-policy.ts so the ops scripts
+// stay plain `.mjs` with no TypeScript-interop dependency; the two are
+// pinned together by tests/scripts/genesis-manifest.test.mjs, which reads
+// `governedObjectTypes` from that module and fails if this list drifts.
+export const NON_PUBLISHABLE_OBJECT_TYPES = Object.freeze(['visual_standard']);
+
+/** Whether the genesis drive should attempt `object_publish` on this type. */
+export const isPublishableObjectType = (objectType) => !NON_PUBLISHABLE_OBJECT_TYPES.includes(objectType);
+
 // ─── accessors (tiny, pure) ─────────────────────────────────────────────────
 
 /** Seed files `create-site` must scaffold, in the order it writes them. */

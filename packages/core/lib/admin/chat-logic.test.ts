@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  brandImageryApplyPrompt,
+  brandImageryApprovalPreview,
+  brandImageryProposalPresentation,
   createdObjectsFromEvents,
   groupChatEvents,
   publishedObjectFromEvents,
@@ -126,9 +129,172 @@ describe('quiet chat activity', () => {
       'publish',
       'discard',
       'apply_theme',
+      'apply_brand_imagery',
+      'brand_imagery_propose',
     ]) {
       assert.doesNotMatch(toolLabelForName(tool), /_/);
     }
+  });
+
+  it('U3: a successful brand_imagery_propose result breaks out of the quiet activity group', () => {
+    const items = groupChatEvents([
+      event(1, 'tool_call', { tool: 'brand_imagery_propose' }),
+      event(2, 'tool_result', {
+        tool: 'brand_imagery_propose',
+        output: JSON.stringify({ artifact: 'brand_imagery_proposal.v1' }),
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((item) => item.kind),
+      ['activity', 'event']
+    );
+  });
+
+  it('U3: a held-gate error on brand_imagery_propose still defers to the normal classifier, not the new special-case', () => {
+    // The special-case only fires for a SUCCESSFUL result — an error result
+    // (even a mere held gate, never expected from a toolClass:'read' proxy in
+    // practice, but the boundary this test pins) falls through to the same
+    // classifier every other tool_result uses, and a gate stays quiet there.
+    const items = groupChatEvents([
+      event(1, 'tool_call', { tool: 'brand_imagery_propose' }),
+      event(2, 'tool_result', { tool: 'brand_imagery_propose', is_error: true, output: '{"code":"not_permitted"}' }),
+    ]);
+    assert.deepEqual(
+      items.map((item) => item.kind),
+      ['activity']
+    );
+  });
+
+  it('U3: a genuinely failed brand_imagery_propose still breaks out, same as any other tool failure', () => {
+    const items = groupChatEvents([
+      event(1, 'tool_call', { tool: 'brand_imagery_propose' }),
+      event(2, 'tool_result', { tool: 'brand_imagery_propose', is_error: true, output: '{"error":"cms_agent_unreachable"}' }),
+    ]);
+    assert.deepEqual(
+      items.map((item) => item.kind),
+      ['activity', 'event']
+    );
+  });
+});
+
+// ─── U3: apply_brand_imagery approval preview ──────────────────────────────
+
+describe('brandImageryApprovalPreview', () => {
+  const AFTER = { styleSentence: 'Clinical-clean skincare editorial photography.', palette: ['#2E5C42', '#C2A878'] };
+  const BEFORE = { styleSentence: 'Warm lifestyle photography with natural light.', palette: ['#E8B4B8'] };
+
+  it('reads the style sentence and palette from a real apply_brand_imagery dry run', () => {
+    const preview = brandImageryApprovalPreview('apply_brand_imagery', { before: BEFORE, after: AFTER });
+    assert.deepEqual(preview, {
+      afterSentence: AFTER.styleSentence,
+      beforeSentence: BEFORE.styleSentence,
+      beforePalette: BEFORE.palette,
+      afterPalette: AFTER.palette,
+    });
+  });
+
+  it('omits beforeSentence when there was no prior contract (first-ever apply)', () => {
+    const preview = brandImageryApprovalPreview('apply_brand_imagery', { before: null, after: AFTER });
+    assert.equal(preview?.beforeSentence, undefined);
+    assert.deepEqual(preview?.beforePalette, []);
+    assert.equal(preview?.afterSentence, AFTER.styleSentence);
+  });
+
+  it('omits beforeSentence when the apply leaves the sentence unchanged (only the palette/other fields moved)', () => {
+    const preview = brandImageryApprovalPreview('apply_brand_imagery', {
+      before: { ...AFTER, palette: BEFORE.palette },
+      after: AFTER,
+    });
+    assert.equal(preview?.beforeSentence, undefined);
+  });
+
+  it('is undefined for any other tool — never invents a diff for a dry run it does not recognise', () => {
+    assert.equal(brandImageryApprovalPreview('apply_theme', { before: BEFORE, after: AFTER }), undefined);
+    assert.equal(brandImageryApprovalPreview('apply_brand_imagery', undefined), undefined);
+    assert.equal(brandImageryApprovalPreview('apply_brand_imagery', { before: BEFORE, after: {} }), undefined);
+  });
+});
+
+// ─── U3: brand_imagery_propose result card ─────────────────────────────────
+
+describe('brandImageryProposalPresentation', () => {
+  const PROPOSAL_OUTPUT = {
+    artifact: 'brand_imagery_proposal.v1',
+    mode: 'house',
+    rationale: 'The mood board leans clinical-clean with a sage/gold palette.',
+    sampleSubjects: ['a woman applying serum', 'a dermatologist consultation'],
+    confidence: 'high',
+    label: 'Clinical-clean house look',
+  };
+
+  it('reads a successful proposal result into a display-ready shape', () => {
+    const presentation = brandImageryProposalPresentation(
+      event(1, 'tool_result', { tool: 'brand_imagery_propose', output: JSON.stringify(PROPOSAL_OUTPUT) })
+    );
+    assert.deepEqual(presentation, {
+      mode: 'house',
+      label: 'Clinical-clean house look',
+      rationale: PROPOSAL_OUTPUT.rationale,
+      confidence: 'high',
+      sampleSubjects: PROPOSAL_OUTPUT.sampleSubjects,
+    });
+  });
+
+  it('defaults an unreadable confidence to medium rather than dropping the card', () => {
+    const presentation = brandImageryProposalPresentation(
+      event(1, 'tool_result', {
+        tool: 'brand_imagery_propose',
+        output: JSON.stringify({ ...PROPOSAL_OUTPUT, confidence: 'unknown' }),
+      })
+    );
+    assert.equal(presentation?.confidence, 'medium');
+  });
+
+  it('is undefined for a failed call, a different tool, or a payload that is not the proposal artifact', () => {
+    assert.equal(
+      brandImageryProposalPresentation(
+        event(1, 'tool_result', { tool: 'brand_imagery_propose', is_error: true, output: '{"error":"bad"}' })
+      ),
+      undefined
+    );
+    assert.equal(
+      brandImageryProposalPresentation(event(1, 'tool_result', { tool: 'patch', output: JSON.stringify(PROPOSAL_OUTPUT) })),
+      undefined
+    );
+    assert.equal(
+      brandImageryProposalPresentation(
+        event(1, 'tool_result', { tool: 'brand_imagery_propose', output: JSON.stringify({ artifact: 'other.v1' }) })
+      ),
+      undefined
+    );
+    assert.equal(brandImageryProposalPresentation(event(1, 'tool_call', { tool: 'brand_imagery_propose' })), undefined);
+  });
+
+  it('the Apply prompt names the exact tools, in order, and never invents style words', () => {
+    const prompt = brandImageryApplyPrompt({ mode: 'house', label: 'Clinical-clean house look' });
+    assert.match(prompt, /visual_standard_materializer/);
+    assert.match(prompt, /site_apply_brand_imagery/);
+    assert.match(prompt, /dry run/);
+    assert.ok(prompt.indexOf('visual_standard_materializer') < prompt.indexOf('site_apply_brand_imagery'));
+  });
+
+  // REVIEW (brand-imagery wave): `visual_standard_materializer` is a CMS-Agent
+  // NODE. No platform chat registry (generated or legacy) wires a tool that can
+  // execute it — `brand_imagery_propose` proxies only the WRITER node — so a
+  // prompt naming it alone left the agent with a dead end. And asking for
+  // `apply: true` while also asking for a dry run and approval contradicted
+  // itself: the materializer would have applied before the human ever saw the
+  // diff.
+  it('the Apply prompt gives a reachable fallback and never pre-applies', () => {
+    const house = brandImageryApplyPrompt({ mode: 'house', label: 'Clinical-clean house look' });
+    assert.match(house, /apply: false/);
+    assert.doesNotMatch(house, /apply: true/);
+    assert.match(house, /object_create/);
+    assert.match(house, /set_visual_standard_fields/);
+    assert.match(house, /vis_<site>/);
+
+    const template = brandImageryApplyPrompt({ mode: 'template', label: 'Summer campaign' });
+    assert.match(template, /vis_<site>_<slug>/);
   });
 });
 

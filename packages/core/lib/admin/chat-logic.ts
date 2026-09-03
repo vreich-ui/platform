@@ -23,8 +23,15 @@ const QUIET_TOOL_EVENTS = new Set(['tool_call', 'tool_result']);
  */
 const isProminentToolResult = (event: ChatEventView): boolean => {
   if (event.type !== 'tool_result') return false;
+  const tool = String(event.detail?.tool ?? 'tool');
+  // U3 (brand-imagery wave, BRIEF §3.5): a successful `brand_imagery_propose`
+  // carries a proposal an editor decides on — rationale, confidence, an
+  // Apply CTA (`BrandImageryProposalCard`, chat.tsx) — never something to
+  // bury inside the collapsed "N steps" activity accordion the way a quiet
+  // read tool's result normally is.
+  if (tool === 'brand_imagery_propose' && !event.detail?.is_error) return true;
   const classified = classifyToolResult({
-    tool: String(event.detail?.tool ?? 'tool'),
+    tool,
     isError: Boolean(event.detail?.is_error),
     output: event.detail?.output,
   });
@@ -140,6 +147,12 @@ export const TOOL_LABELS: Record<string, string> = {
   publish: 'Publish',
   discard: 'Discard changes',
   apply_theme: 'Apply a theme',
+  // U3 (brand-imagery wave, BRIEF §3.3/§3.5): the imagery siblings of
+  // apply_theme/the theme-preview flow — same wire names the chat event
+  // stream carries (`CHAT_TOOL_ALIASES`, mcp-tool-definitions.ts), not the
+  // privileged MCP tool names (`site_apply_brand_imagery`) those alias to.
+  apply_brand_imagery: 'Apply brand imagery',
+  brand_imagery_propose: 'Propose an image style',
   // Legacy event names remain readable in persisted chat history.
   object_get: 'Read an object',
   object_validate: 'Check readiness',
@@ -267,3 +280,105 @@ export function requestProgressCopy(detail: Record<string, unknown> | undefined,
     ...(stepLine ? { stepLine } : {}),
   };
 }
+
+// ─── U3: apply_brand_imagery approval preview (BRIEF §3.3) ─────────────────
+
+export interface BrandImageryApprovalPreview {
+  /** `dryRun.after.styleSentence` — always present when this fires. */
+  afterSentence: string;
+  /** `dryRun.before.styleSentence`, only when it differs from `afterSentence` — undefined for a first-ever apply, or one that leaves the sentence unchanged. */
+  beforeSentence?: string;
+  /** `dryRun.before.palette` hex swatches — empty when there was no prior contract. */
+  beforePalette: string[];
+  /** `dryRun.after.palette` hex swatches. */
+  afterPalette: string[];
+}
+
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+
+/**
+ * U3: `apply_brand_imagery`'s dry run returns `{before, after, changedFields}`
+ * — the site's whole-block `brandImagery` before/after (object-verbs.ts's
+ * `apply_brand_imagery` case). The approval card reads the two facts an
+ * editor actually judges a re-style by — the style SENTENCE and the PALETTE —
+ * rather than the raw op JSON, which stays available underneath in the
+ * existing `JsonDisclosure`. `undefined` for every other tool, or a dry run
+ * whose shape doesn't match (no `after.styleSentence`) — the card falls back
+ * to the plain JSON view then, never an invented diff.
+ */
+export function brandImageryApprovalPreview(
+  tool: string,
+  dryRun: Record<string, unknown> | undefined
+): BrandImageryApprovalPreview | undefined {
+  if (tool !== 'apply_brand_imagery' || !dryRun) return undefined;
+  const after = dryRun.after;
+  if (!after || typeof after !== 'object') return undefined;
+  const afterBag = after as Record<string, unknown>;
+  const afterSentence = afterBag.styleSentence;
+  if (typeof afterSentence !== 'string' || !afterSentence) return undefined;
+  const before = dryRun.before;
+  const beforeBag = before && typeof before === 'object' ? (before as Record<string, unknown>) : undefined;
+  const beforeSentence = typeof beforeBag?.styleSentence === 'string' ? beforeBag.styleSentence : undefined;
+  return {
+    afterSentence,
+    ...(beforeSentence && beforeSentence !== afterSentence ? { beforeSentence } : {}),
+    beforePalette: asStringArray(beforeBag?.palette),
+    afterPalette: asStringArray(afterBag.palette),
+  };
+}
+
+// ─── U3: brand_imagery_propose result card (BRIEF §3.5) ────────────────────
+
+export interface BrandImageryProposalPresentation {
+  mode: 'house' | 'template';
+  label: string;
+  rationale: string;
+  confidence: 'high' | 'medium' | 'low';
+  sampleSubjects: string[];
+}
+
+/**
+ * U3: reads a successful `brand_imagery_propose` result — the writer's
+ * `brand_imagery_proposal.v1` (BRIEF §3.5, validated server-side against
+ * `brandImagerySchema` before it ever reaches this event,
+ * `brand-imagery-proxy.ts`) — off the tool_result event's own `output`
+ * (the same JSON-text field `ToolCallCard`'s `rawOutput` already parses).
+ * `undefined` for a failed call, a different tool, or any payload that
+ * doesn't parse as the proposal artifact — the caller falls back to the
+ * plain `<ToolCallCard>` then, never a half-built card.
+ */
+export function brandImageryProposalPresentation(event: ChatEventView): BrandImageryProposalPresentation | undefined {
+  if (event.type !== 'tool_result' || event.detail?.is_error) return undefined;
+  if (String(event.detail?.tool ?? '') !== 'brand_imagery_propose') return undefined;
+  const raw = event.detail?.output;
+  if (typeof raw !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const bag = parsed as Record<string, unknown>;
+  if (bag.artifact !== 'brand_imagery_proposal.v1') return undefined;
+  const mode = bag.mode === 'house' || bag.mode === 'template' ? bag.mode : undefined;
+  const label = typeof bag.label === 'string' && bag.label ? bag.label : undefined;
+  const rationale = typeof bag.rationale === 'string' && bag.rationale ? bag.rationale : undefined;
+  if (!mode || !label || !rationale) return undefined;
+  const confidence = bag.confidence === 'high' || bag.confidence === 'low' ? bag.confidence : 'medium';
+  return { mode, label, rationale, confidence, sampleSubjects: asStringArray(bag.sampleSubjects) };
+}
+
+/**
+ * The "Apply" CTA's follow-up turn — a precise, deterministic instruction
+ * naming the exact tools (never style words of its own, R4), matching the
+ * pattern `visual-identity-imagery.ts`'s intents already use. Materializing
+ * first is required (§3.5): the proposal itself writes nothing, so there is
+ * no `visual_standard` for `site_apply_brand_imagery` to point at until
+ * `visual_standard_materializer` has run.
+ */
+export const brandImageryApplyPrompt = (presentation: Pick<BrandImageryProposalPresentation, 'mode' | 'label'>): string =>
+  `Apply the "${presentation.label}" ${presentation.mode} proposal you just returned. First file it as a visual_standard: run visual_standard_materializer with apply: false if that node is available to you, and otherwise do it with the ordinary object tools — object_create a visual_standard (kind ${
+    presentation.mode === 'house' ? '"house", id vis_<site>' : '"template", id vis_<site>_<slug>'
+  }, derivedFrom.method "writer", status "draft") carrying this proposal's brandImagery and sampleSubjects, or check out the existing standard and patch it with set_visual_standard_fields. Then run site_apply_brand_imagery as a dry run so I can see before/after, and wait for my approval before applying.`;

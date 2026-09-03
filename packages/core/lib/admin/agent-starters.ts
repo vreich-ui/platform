@@ -4,7 +4,7 @@
  * still proposes every write and the normal approval card remains in charge.
  */
 export interface AgentStarter {
-  key: 'article' | 'page' | 'section-template' | 'retheme' | 'media';
+  key: 'article' | 'page' | 'section-template' | 'visual-identity' | 'media';
   label: string;
   description: string;
   prompt: string;
@@ -34,11 +34,15 @@ export const AGENT_STARTERS: readonly AgentStarter[] = [
       'I want a new section template (stpl_*). Check the existing recipes in the inventory first so we do not duplicate one. Then draft the blueprint and the REQUIRED description/whenToUse/scope metadata, and propose create_object.',
   },
   {
-    key: 'retheme',
-    label: 'Retheme',
-    description: 'Owner-only: preview a theme apply as an exact-token diff, then apply.',
+    // R8: replaces the old `retheme` starter — theme was one third of the
+    // wave's one Visual identity surface (identity · imagery · PDF
+    // templates, BRIEF §0/§4). `retheme` stays resolvable as an alias (see
+    // `agentStarterByKey` below) so links minted before this rename don't die.
+    key: 'visual-identity',
+    label: 'Visual identity',
+    description: 'Review theme, image style and PDF templates; propose changes as dry runs.',
     prompt:
-      'I want to look at retheming the site. List the theme objects, then propose apply_theme with a dry run so I can see the exact brandTokens diff before deciding. Do not apply anything without my approval.',
+      'I want to review this publication\'s visual identity — theme, image style and PDF templates. List the theme objects and the current visual_standard (house image style), and the PDF templates, then propose changes (apply_theme, brand_imagery_propose, or a PDF template change) as a dry run so I can see the exact diff before deciding. Do not apply anything without my approval.',
     ownerOnly: true,
   },
   {
@@ -52,7 +56,19 @@ export const AGENT_STARTERS: readonly AgentStarter[] = [
 
 export type AgentStarterKey = AgentStarter['key'];
 
-export const agentStarterByKey = (key: string | null | undefined): AgentStarter | undefined =>
-  AGENT_STARTERS.find((starter) => starter.key === key);
+/**
+ * R8: `retheme` was renamed `visual-identity` — this keeps `?starter=retheme`
+ * (bookmarks, the old `VISUAL_IDENTITY_STARTER_HREF` fallback) resolving to
+ * the SAME starter rather than 404-ing into "no starter matched", without
+ * showing `retheme` a second time in the starter list itself (`AGENT_STARTERS`
+ * carries only the current key).
+ */
+const STARTER_KEY_ALIASES: Record<string, AgentStarterKey> = { retheme: 'visual-identity' };
+
+export const agentStarterByKey = (key: string | null | undefined): AgentStarter | undefined => {
+  if (!key) return undefined;
+  const resolved = STARTER_KEY_ALIASES[key] ?? key;
+  return AGENT_STARTERS.find((starter) => starter.key === resolved);
+};
 
 export const agentStarterHref = (key: AgentStarterKey): string => `/admin/agents?starter=${encodeURIComponent(key)}`;

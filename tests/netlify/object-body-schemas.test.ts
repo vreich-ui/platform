@@ -27,6 +27,9 @@ import {
   type ProductBody,
 } from '../../packages/core/schema/bodies/product-v1.js';
 import { SITE_SCHEMA_VERSION, siteBodySchema, type SiteBody } from '../../packages/core/schema/bodies/site-v1.js';
+import { patchOpSchema } from '../../packages/core/schema/object-patch-ops.js';
+import { applyPatchOps } from '../../packages/core/lib/object-patch-apply.js';
+import type { ObjectRecord } from '../../packages/core/schema/object-record-v1.js';
 import {
   TAXONOMY_SCHEMA_VERSION,
   taxonomyBodySchema,
@@ -899,6 +902,91 @@ test('site.brandImagery: optional, bounded, and matches the §4 vocabulary', () 
     siteBodySchema.safeParse({ ...siteFixture, brandImagery: { ...VALID_BRAND_IMAGERY, lora: { url: '' } } }).success,
     false
   );
+});
+
+// site.pdf (brand-imagery wave, BRIEF.md §3.2): additive-optional, and —
+// unlike brandTokens/brandImagery — ORDINARY agent-writable via
+// set_site_fields, because a template pointer is a reference, not a governed
+// value needing a privileged apply funnel.
+test('site.pdf: optional, bounded, and matches the §3.2 shape', () => {
+  assert.equal(siteBodySchema.safeParse(siteFixture).success, true, 'pdf is optional — a site without one still parses');
+
+  const withPdf = { ...siteFixture, pdf: { defaultTemplateId: 'article_brochure_v1' } };
+  assert.equal(siteBodySchema.safeParse(withPdf).success, true, 'defaultTemplateId alone is a complete pdf block');
+
+  const withByKind = {
+    ...siteFixture,
+    pdf: {
+      defaultTemplateId: 'article_brochure_v1',
+      byKind: { article: 'article_brochure_v1', guide: 'guide_v1', checklist: 'checklist_v1' },
+    },
+  };
+  assert.equal(siteBodySchema.safeParse(withByKind).success, true);
+
+  // defaultTemplateId is required.
+  assert.equal(siteBodySchema.safeParse({ ...siteFixture, pdf: { byKind: { article: 'x' } } }).success, false);
+  // Unknown keys are rejected (strict), matching brandTokens/brandImagery's posture.
+  assert.equal(
+    siteBodySchema.safeParse({ ...siteFixture, pdf: { defaultTemplateId: 'x', stray: true } }).success,
+    false
+  );
+  // byKind keys must be lowercase snake_case (the aspectRatios context-key posture).
+  assert.equal(
+    siteBodySchema.safeParse({
+      ...siteFixture,
+      pdf: { defaultTemplateId: 'x', byKind: { 'Not Valid': 'x' } },
+    }).success,
+    false
+  );
+});
+
+// The point of §3.2: pdf is ORDINARY (set_site_fields), brandImagery stays
+// PRIVILEGED (set_site_fields still refuses it — W16 C1 governance untouched).
+test('set_site_fields: pdf.defaultTemplateId is patchable; brandImagery is still REFUSED', () => {
+  assert.equal(
+    patchOpSchema.safeParse({ op: 'set_site_fields', fields: { pdf: { defaultTemplateId: 'article_brochure_v1' } } })
+      .success,
+    true,
+    'pdf is not in set_site_fields forbidKeys'
+  );
+  assert.equal(
+    patchOpSchema.safeParse({ op: 'set_site_fields', fields: { brandImagery: { styleSentence: 'x' } } }).success,
+    false,
+    'brandImagery stays privileged-only (W16 C1) — set_site_fields must still refuse it'
+  );
+  // brandTokens and tracking keep refusing too — pdf's addition must not have
+  // loosened the existing forbidKeys list.
+  assert.equal(
+    patchOpSchema.safeParse({ op: 'set_site_fields', fields: { brandTokens: { colors: {} } } }).success,
+    false
+  );
+  assert.equal(patchOpSchema.safeParse({ op: 'set_site_fields', fields: { tracking: { enabled: true } } }).success, false);
+
+  // End to end: applying the op actually lands pdf on the site body and the
+  // result still parses as a valid site.v1.
+  const AT = '2026-09-01T00:00:00.000Z';
+  const record: ObjectRecord<unknown> = {
+    object_id: 'site_drlurie',
+    object_type: 'site',
+    schema_version: SITE_SCHEMA_VERSION,
+    site: 'site_drlurie',
+    created_at: AT,
+    updated_at: AT,
+    status: 'active',
+    body: siteFixture,
+    publication: { published_time: null },
+    history: [],
+    version: 1,
+    content_revision: 1,
+  };
+  const result = applyPatchOps(
+    record,
+    [{ op: 'set_site_fields', fields: { pdf: { defaultTemplateId: 'article_brochure_v1' } } }],
+    { actor: { kind: 'agent', agent_name: 'pdf-test', auth: 'publish_key' }, at: AT }
+  );
+  const body = result.record.body as SiteBody;
+  assert.deepEqual(body.pdf, { defaultTemplateId: 'article_brochure_v1' });
+  assert.equal(siteBodySchema.safeParse(body).success, true, 'the patched site body still parses as site.v1');
 });
 
 // ---------------------------------------------------------------------------

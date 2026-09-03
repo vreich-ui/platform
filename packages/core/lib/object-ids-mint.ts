@@ -89,6 +89,7 @@ const OBJECT_PREFIX: Record<Exclude<ObjectType, 'content_item'>, string> = {
   product: 'prod',
   tracking_config: 'trk',
   editorial_voice: 'voice',
+  visual_standard: 'vis',
 };
 
 /**

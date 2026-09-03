@@ -12,8 +12,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 88 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 88, `Expected 88 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 90 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + brand_imagery_propose, P5)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 90, `Expected 90 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -72,6 +72,7 @@ describe('Tool definitions', () => {
       'trigger_netlify_build',
       'release_to_production',
       'site_apply_theme',
+      'site_apply_brand_imagery',
       'set_image_search_policy',
       'set_image_model_policy',
       'delete_pdf_template',
@@ -115,12 +116,13 @@ describe('Tool definitions', () => {
     }
   });
 
-  it('verb_dry_run previews appear only on: object_create_variant, object_instantiate_template, object_instantiate_section_template, site_apply_theme, and the four dry-runnable membership writes', () => {
+  it('verb_dry_run previews appear only on: object_create_variant, object_instantiate_template, object_instantiate_section_template, site_apply_theme, site_apply_brand_imagery, and the four dry-runnable membership writes', () => {
     const expectedVerbDryRun = new Set([
       'object_create_variant',
       'object_instantiate_template',
       'object_instantiate_section_template',
       'site_apply_theme',
+      'site_apply_brand_imagery',
       // W18 T18.6b: the membership writes the core supports dry_run on
       'member_invite',
       'member_set_role',

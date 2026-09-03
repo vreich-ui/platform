@@ -69,7 +69,9 @@ import { sectionBodySchema, sectionTypes, type SectionType } from '../../schema/
 import { sectionTemplateBodySchema } from '../../schema/bodies/section-template-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
 import { editorialVoiceBodySchema } from '../../schema/bodies/editorial-voice-v1.js';
+import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
 import { promptMarkerSummary } from './voice-prose.js';
+import { carriesTrackingAttribute } from '../../schema/bodies/tracking-attribute-v1.js';
 import { trackingConfigBodySchema } from '../../schema/bodies/tracking-config-v1.js';
 import { navigationBodySchema } from '../../schema/bodies/navigation-v1.js';
 import { siteBodySchema } from '../../schema/bodies/site-v1.js';
@@ -102,6 +104,7 @@ const BODY_SCHEMA: Partial<Record<ObjectType, z.ZodType>> = {
   content_item: contentItemBodySchema,
   tracking_config: trackingConfigBodySchema,
   editorial_voice: editorialVoiceBodySchema,
+  visual_standard: visualStandardBodySchema,
 };
 
 // ─── section-type editor hints (only the component-bound types carry them) ───
@@ -225,6 +228,14 @@ export type Constraint = {
   severity: ConstraintSeverity;
   enforced_live: boolean;
   description: string;
+  /**
+   * P4 (brand-imagery wave, BRIEF §3.7's overridePolicy read path): a
+   * constraint MAY carry a machine-readable value alongside its prose, for a
+   * setting a caller needs to branch on rather than merely be warned about.
+   * Only `brand_imagery_override_policy` (site) sets this today — every
+   * other constraint omits it.
+   */
+  value?: string;
 };
 
 const RICHTEXT_ALLOWLIST = 'p, br, strong, em, a, ul, ol, li, h2, h3';
@@ -320,7 +331,7 @@ const COMMON_CONSTRAINTS: Constraint[] = [
   },
 ];
 
-const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
+const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 'allow' | 'lock'): Constraint[] => {
   switch (objectType) {
     case 'page':
       return [
@@ -671,9 +682,42 @@ const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
             'brandImagery (W16 C1) is the site’s visual-identity contract for AI image generation/search — the ' +
             'STYLE half an agent must never author itself (agents supply SUBJECT only). It cannot be patched via ' +
             'set_site_fields; the only writer is the privileged set_site_brand_imagery op (tool-authored — do not ' +
-            'hand-author it), exactly the set_site_brand_tokens funnel applied to imagery. No agent-facing verb ' +
-            'produces it yet. Every field is bounded (capped array/string lengths) by the site.v1 schema so ' +
-            'nothing unbounded lands in the store.',
+            'hand-author it), exactly the set_site_brand_tokens funnel applied to imagery. The agent-facing verb ' +
+            'is site_apply_brand_imagery (brand-imagery wave §3.3): whole-block replace from EXACTLY ONE of a ' +
+            'visual_standard (house OR template — promoting a template is a legitimate apply) or a theme’s own ' +
+            'optional brandImagery preset; both or neither source is refused. Owner-only for humans, ' +
+            'autonomyFloor "ask", dry-run first. Every field is bounded (capped array/string lengths) by the ' +
+            'site.v1 schema so nothing unbounded lands in the store.',
+        },
+        {
+          id: 'site_pdf_ordinary_write',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'pdf.defaultTemplateId / pdf.byKind (brand-imagery wave, site.v1) are ORDINARY agent-writable via ' +
+            'set_site_fields — UNLIKE brandTokens/brandImagery, a template pointer is a reference, not a governed ' +
+            'value, so it needs no privileged apply verb. byKind keys are an open lowercase snake_case set ' +
+            '("article", "guide", "checklist", …) — a new content kind is pinned without a schema change.',
+        },
+        {
+          // P4 (brand-imagery wave, BRIEF §3.7's overridePolicy read path): the
+          // `brandImageryOverrides` guardrail (governance-store.ts, default
+          // 'allow'), surfaced here so CMS-Agent's contractPrefetch/sitePrefetch
+          // can read it via the SAME object_contract('site') call it already
+          // makes — no new tool. The id AND the `value` strings are load-bearing
+          // (sitePrefetch.ts's extractOverridePolicyValue matches on both) — do
+          // not rename or reshape this entry.
+          id: 'brand_imagery_override_policy',
+          severity: 'blocks_write',
+          enforced_live: true,
+          value: brandImageryOverridePolicy,
+          description:
+            'Per-site guardrail on the `style` override channel (create_agent_artifact_job, brand-imagery wave ' +
+            '§3.4): "allow" (the default) lets a job point at a visual_standard or a one-off brandImagery override; ' +
+            '"lock" makes this site’s own declared/derived brandImagery the only source — style is ignored (never ' +
+            'an error) and reported in the job response’s overriddenFields with styleSource "site_locked". Owner-' +
+            'editable at /admin/settings/guardrails (governance-store.ts’s runtime-override doc, provenance-tracked ' +
+            'the same way as the approval/creation policies on this same page).',
         },
       ];
     case 'section_template':
@@ -767,6 +811,40 @@ const perTypeConstraints = (objectType: ObjectType): Constraint[] => {
             'ordinary object surface: object_contract("editorial_voice") then object_get("voice_<project>"). No ' +
             'private side-channel exists, deliberately — a voice an engine can only learn out-of-band is a voice ' +
             'nobody can review.',
+        },
+      ];
+    case 'visual_standard':
+      return [
+        {
+          id: 'visual_standard_brand_imagery_reused',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'brandImagery here is the SAME schema site.brandImagery uses (site-v1.ts, reused verbatim, never forked) ' +
+            '— but, unlike the site’s applied copy, it is ORDINARY agent-writable via set_visual_standard_fields: the ' +
+            'governed thing is the site’s APPLIED copy (set_site_brand_imagery), not a standard still being drafted ' +
+            'or iterated on. Applying a standard to the site is the separate, privileged site_apply_brand_imagery ' +
+            'tool (whole-object replace) — this type never writes site.brandImagery directly.',
+        },
+        {
+          id: 'visual_standard_house_singleton',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'kind:"house" is a per-site SINGLETON (id vis_<site>, the voice_<site>/trk_<site> convention) — creating ' +
+            'a second ACTIVE house standard is refused (409); edit the existing one via set_visual_standard_fields. ' +
+            'kind:"template" (id vis_<site>_<slug>) is an ORDINARY, unbounded collection in the SAME object type — a ' +
+            'template create never trips the house singleton, and a house create never conflicts with an existing ' +
+            'template, however many templates the site already has.',
+        },
+        {
+          id: 'visual_standard_not_publishable',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'visual_standard is deliberately NOT in the generic publish gate’s governed-type list — object_publish ' +
+            'on it is refused (content_item_not_gated). The only way its imagery reaches something published is the ' +
+            'separate, privileged site_apply_brand_imagery tool, which copies it onto the site.',
         },
       ];
     default:
@@ -1106,11 +1184,24 @@ export const buildObjectContract = (
     mediaPolicy?: MediaPolicy;
     /** Override the site-identity ceiling (tests / a future governance layer). */
     aggressionCeiling?: AggressionCeiling;
+    /**
+     * P4 (brand-imagery wave, BRIEF §3.7): the `brandImageryOverrides`
+     * guardrail value to report on the `brand_imagery_override_policy`
+     * constraint (site only — inert for every other object type). Defaults
+     * to 'allow', the same disaster-fallback default
+     * brand-imagery-resolve.ts's getBrandImageryOverridePolicy uses — this
+     * function stays synchronous/in-process (no store round-trip, same as
+     * approvalPolicy/creationPolicy above), so a caller wanting the LIVE
+     * runtime-override value resolves it first (as it already does for
+     * approvalPolicy) and passes it here.
+     */
+    brandImageryOverridePolicy?: 'allow' | 'lock';
   } = {}
 ): ObjectContract => {
   const policy = options.approvalPolicy ?? activeApprovalPolicy();
   const creationPolicy = options.creationPolicy ?? activeCreationPolicy();
   const mediaPolicy = options.mediaPolicy ?? activeMediaPolicy();
+  const brandImageryOverridePolicy = options.brandImageryOverridePolicy ?? 'allow';
   const aggressionCeiling = options.aggressionCeiling
     ? aggressionCeilingFor(objectType, options.aggressionCeiling)
     : aggressionCeilingFor(objectType);
@@ -1131,23 +1222,32 @@ export const buildObjectContract = (
               ? 'The per-project tracker registry singleton (W13, 12-plan §3): fixed-key provider blocks with regex-pinned IDs (never script/URLs), the consent posture (geo-adaptive seed per OQ-W13-1), and the per-type collection defaults matrix. Publishing it is the site-wide script switch: the export (the site export root plus tracking.json — W11 T11.6 parameterized the export root per site) decides which trackers execute on every page. Human/seed-minted; agents edit via set_tracking_config_fields.'
               : objectType === 'editorial_voice'
                 ? 'The site’s declared editorial identity as governed data (D1, 2026-07-28) — one per site (voice_<project>): audience, tone, cadence, lexicon (prefer/avoid), claim policy, CTA policy, reader-safety boundaries, and the PLURAL frameworks[] this publication publishes with a declared default_framework. Read it the ordinary way — object_contract then object_get — so no engine needs a private side-channel to learn a client’s voice; agents edit via set_voice_fields. It is DATA, never a prompt: prompt-formatted text is refused at write (voice_not_a_prompt). Materializes to <exportRoot>/voice/ as an audit trail; no route renders it.'
-                : `Everything an agent needs to create and edit a ${objectType} object: body schema, patch ops, constraints, publish policy, and required side-data.`,
+                : objectType === 'visual_standard'
+                  ? 'A site’s image style as governed data (brand-imagery wave): a mood board (references[], max 24) plus a ' +
+                    'brandImagery contract (REUSED from site.brandImagery, site-v1.ts) and 1..6 sampleSubjects for previews — ' +
+                    'except a DRAFT standard, which may start with none (e.g. a clone minted from imagery observations, ' +
+                    'derivedFrom.method:"clone": a page snapshot can say what a picture looks like, never what it is of, ' +
+                    'so the clone omits sampleSubjects rather than inventing them). That exception ends at draft: a ' +
+                    'standard needs 1..6 sampleSubjects before it can go active, or be applied to the site. ' +
+                    'kind:"house" is the site’s one declared standard (singleton, id vis_<site>); kind:"template" (id ' +
+                    'vis_<site>_<slug>) is an ordinary, unbounded collection an override can point a run/slot at. Agents ' +
+                    'edit freely via set_visual_standard_fields; applying a standard to the site is the separate, ' +
+                    'privileged site_apply_brand_imagery tool. NOT publishable — object_publish on it is refused.'
+                  : `Everything an agent needs to create and edit a ${objectType} object: body schema, patch ops, constraints, publish policy, and required side-data.`,
     body_schema: schema ? toJson(schema) : { note: `${objectType} has no generic body schema.` },
     ...(includesSections ? { section_types: listSectionTypeContracts() } : {}),
     ...(objectType === 'page' ? { page_types: listPageTypeDefinitions() } : {}),
     patch_ops: patchOpContracts(objectType),
-    // tracking_config and editorial_voice do not carry the per-object tracking
-    // attribute (schema-level) — the shared constraint would be a false promise
-    // there. A voice is authoring law, never a tracked surface.
+    // tracking_config, editorial_voice and visual_standard do not carry the
+    // per-object tracking attribute (schema-level) — the shared constraint
+    // would be a false promise there. DERIVED from the same exemption list
+    // the coverage suites check (tracking-attribute-v1.ts), so a future
+    // exempt type cannot silently keep a stale constraint.
     constraints: [
       ...COMMON_CONSTRAINTS.filter(
-        (constraint) =>
-          !(
-            (objectType === 'tracking_config' || objectType === 'editorial_voice') &&
-            constraint.id === 'tracking_attribute'
-          )
+        (constraint) => !(!carriesTrackingAttribute(objectType) && constraint.id === 'tracking_attribute')
       ),
-      ...perTypeConstraints(objectType),
+      ...perTypeConstraints(objectType, brandImageryOverridePolicy),
     ],
     publish_policy: {
       ...publishPolicy(objectType, policy),

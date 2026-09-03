@@ -42,6 +42,7 @@
  * Usage:
  *   node packages/core/cli/create-site.mjs --name acme --dry-run
  *   node packages/core/cli/create-site.mjs --name acme
+ *   node packages/core/cli/create-site.mjs --name acme --niche 'veterinary clinic'
  *   node packages/core/cli/create-site.mjs --name acme --netlify-token $NETLIFY_API_TOKEN
  *   node packages/core/cli/create-site.mjs --name acme --provision-only --netlify-token $NETLIFY_API_TOKEN \
  *     --known-tenant-site kugel-platform --known-tenant-site kugel-fernwell --known-tenant-site dr-lurie-root
@@ -68,6 +69,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { dataSiteSubdirs, scaffoldSeedFiles } from './genesis-manifest.mjs';
 import { siteReaderRouteTemplates } from './site-reader-route-templates.mjs';
+import {
+  buildHouseVisualStandardBody,
+  deriveBrandImageryFromTokens,
+  visualStandardIdFor,
+} from './visual-standard-genesis.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -466,6 +472,10 @@ export const idsFor = (clientSlug) => {
     siteId: `site_${clientId}`,
     taxonomyId: `tax_${clientId}`,
     themeId: `thm_${clientId}_default`,
+    // P6: the house visual_standard singleton — id-shaped like voice_<client>
+    // (BRIEF.md R2), not site-scoped like the others above, so it survives a
+    // site rename the same way voice_<client> already does.
+    visualStandardId: visualStandardIdFor(clientId),
   };
 };
 
@@ -820,7 +830,57 @@ const packageJsonTemplate = (ids) =>
     2
   ) + '\n';
 
-const siteSeedTemplate = (ids, brandName, canonicalHost) => `/**
+// P6: the starter brandTokens block every new site is born with — kept as a
+// real JS object (not just the literal below) so `deriveBrandImageryFromTokens`
+// can compute a real house `brandImagery` contract from it at scaffold time.
+// MUST mirror the `brandTokens:` block inside `siteSeedTemplate` below
+// value-for-value; exported so create-site.test.ts's scratch-site coverage
+// can deep-equal the WRITTEN seed file's `siteBody.brandTokens` against this
+// constant, so the two cannot silently drift.
+export const DEFAULT_BRAND_TOKENS = {
+  colors: {
+    primary: 'rgb(51 102 204)',
+    secondary: 'rgb(38 77 153)',
+    accent: 'rgb(0 150 136)',
+    gold: 'rgb(191 155 48)',
+    'text-heading': 'rgb(20 24 28)',
+    'text-default': 'rgb(38 43 48)',
+    'text-muted': 'rgb(60 67 75 / 76%)',
+    'bg-page': 'rgb(255 255 255)',
+    'bg-surface': 'rgb(245 246 248)',
+    'bg-page-dark': 'rgb(10 12 20)',
+  },
+  fonts: {
+    sans: 'system-ui, sans-serif',
+    serif: 'Georgia, serif',
+    heading: 'Georgia, serif',
+  },
+};
+
+/**
+ * P6: computes the house `visual_standard` — `brandImagery` derived from
+ * DEFAULT_BRAND_TOKENS (the only palette a brand-new site ever starts with)
+ * plus the standard's own body (BRIEF §3.1: kind 'house', status 'active',
+ * derivedFrom.method 'tokens'). Called once per `buildPlan()` so
+ * `siteSeedTemplate` can both declare `site.brandImagery` (the applied copy,
+ * R1) and mint `vis_<client>` (the governed source) from the SAME record —
+ * byte-identical at genesis, the same "applying it is a provable no-op"
+ * shape `themeSeedTemplate` already uses for brandTokens/theme.
+ */
+const houseVisualStandardFor = (ids, brandName, niche) => {
+  const brandImagery = deriveBrandImageryFromTokens({ brandTokens: DEFAULT_BRAND_TOKENS }, ids.siteId);
+  if (!brandImagery) {
+    // Can only happen if DEFAULT_BRAND_TOKENS above stops carrying any
+    // parseable color — fail loudly rather than scaffold a site with a
+    // broken/absent visual identity silently.
+    throw new Error('houseVisualStandardFor: DEFAULT_BRAND_TOKENS did not derive a brandImagery contract');
+  }
+  return { brandImagery, body: buildHouseVisualStandardBody({ brandName, brandImagery, niche }) };
+};
+
+const siteSeedTemplate = (ids, brandName, canonicalHost, niche) => {
+  const { brandImagery, body: visualStandardBody } = houseVisualStandardFor(ids, brandName, niche);
+  return `/**
  * Baseline site-singleton seed for '${ids.siteId}' (T11.7 create-site
  * scaffold). This is a STARTER body — placeholder branding an operator
  * replaces before going live, not finished client content. Follows the
@@ -867,6 +927,13 @@ export const siteBody = {
       heading: 'Georgia, serif',
     },
   },
+  // P6: the applied copy of the house visual_standard below (BRIEF §R1 —
+  // "site keeps brandImagery as the applied copy", mirroring
+  // theme -> site.brandTokens). Derived from brandTokens above via
+  // deriveBrandImageryFromTokens at scaffold time, byte-identical to
+  // visualStandardBody.brandImagery, so site.brandImagery is never empty for
+  // a new site even before any agent or human ever touches visual identity.
+  brandImagery: ${JSON.stringify(brandImagery, null, 2).replace(/\n/g, '\n  ')},
   chrome: {
     showRssFeed: false,
     showThemeToggle: true,
@@ -883,8 +950,21 @@ export const siteBody = {
   },
 };
 
-export const CONVERSION_SEEDS = [{ objectType: 'site', objectId: '${ids.siteId}', body: siteBody }];
+// P6: the house visual_standard (BRIEF §3.1/R1/R2) — the governed SOURCE
+// object \`site.brandImagery\` above is the applied copy of. \`visual_standard\`
+// is a brand-new object type landing concurrently (P1/P3); this is a plain
+// object literal, not validated against that schema here (it does not exist
+// in this worktree) — packages/core/cli/visual-standard-genesis.mjs is the
+// one place that shape is assembled, so the merge only ever needs to touch
+// that file, never this one, once the type lands.
+export const visualStandardBody = ${JSON.stringify(visualStandardBody, null, 2)};
+
+export const CONVERSION_SEEDS = [
+  { objectType: 'site', objectId: '${ids.siteId}', body: siteBody },
+  { objectType: 'visual_standard', objectId: '${ids.visualStandardId}', body: visualStandardBody },
+];
 `;
+};
 
 const navigationSeedTemplate = (ids, brandName) => `/**
  * Baseline navigation SKELETON for '${ids.siteId}' (T11.7 create-site
@@ -1831,7 +1911,10 @@ export const buildPlan = (opts) => {
   // call; this table only says how each one is rendered. A manifest entry with
   // no template here is a scaffold gap and the drift test says so.
   const seedTemplates = {
-    'site-seed-data.mjs': () => siteSeedTemplate(ids, brandName, canonicalHost),
+    // P6: `--niche` (opts.niche) shapes the house visual_standard's
+    // sampleSubjects; `siteSeedTemplate` falls back to a small generic set
+    // whenever it is omitted.
+    'site-seed-data.mjs': () => siteSeedTemplate(ids, brandName, canonicalHost, opts.niche),
     'navigation-seed-data.mjs': () => navigationSeedTemplate(ids, brandName),
     'taxonomy-seed-data.mjs': () => taxonomySeedTemplate(ids),
     'themes-seed-data.mjs': () => themeSeedTemplate(ids),
@@ -2415,6 +2498,14 @@ const parseArgs = (argv) => {
       i += 1;
     } else if (arg === '--canonical-host') {
       opts.canonicalHost = argv[i + 1];
+      i += 1;
+    } else if (arg === '--niche') {
+      // P6: optional one-line description of what the client publishes
+      // about (e.g. "veterinary clinic") — feeds the house visual_standard's
+      // sampleSubjects (houseVisualStandardFor); every other field of the
+      // scaffold is unaffected. Omitted, sampleSubjects falls back to a
+      // small generic set.
+      opts.niche = argv[i + 1];
       i += 1;
     } else if (arg === '--netlify-token') {
       opts.netlifyToken = argv[i + 1];

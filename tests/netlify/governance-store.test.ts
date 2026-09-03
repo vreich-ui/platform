@@ -45,12 +45,23 @@ test('empty store → committed policy, provenance committed', async () => {
   assert.deepEqual(active.approval, activeApprovalPolicy());
   assert.deepEqual(active.creation, activeCreationPolicy());
   assert.equal(active.learning_mode, false);
-  assert.deepEqual(active.provenance, { approval: 'committed', creation: 'committed', learning_mode: 'committed' });
+  assert.equal(active.brandImageryOverrides, 'allow');
+  assert.deepEqual(active.provenance, {
+    approval: 'committed',
+    creation: 'committed',
+    learning_mode: 'committed',
+    brandImageryOverrides: 'committed',
+  });
 });
 
 test('undefined store → committed policy', async () => {
   const active = await resolveActivePolicies(undefined);
-  assert.deepEqual(active.provenance, { approval: 'committed', creation: 'committed', learning_mode: 'committed' });
+  assert.deepEqual(active.provenance, {
+    approval: 'committed',
+    creation: 'committed',
+    learning_mode: 'committed',
+    brandImageryOverrides: 'committed',
+  });
 });
 
 test('a valid approval override wins; creation without an override stays committed', async () => {
@@ -74,6 +85,23 @@ test('learning mode is an explicit override and otherwise remains off', async ()
   assert.equal(active.provenance.learning_mode, 'override');
 });
 
+test('U2: brandImageryOverrides defaults to allow and becomes an explicit override once written', async () => {
+  const store = memStore();
+  assert.equal((await resolveActivePolicies(store)).brandImageryOverrides, 'allow', 'unset -> the hardcoded default');
+
+  await putGovernanceDoc(store, doc({ brandImageryOverrides: 'lock' }));
+  const locked = await resolveActivePolicies(store);
+  assert.equal(locked.brandImageryOverrides, 'lock');
+  assert.equal(locked.provenance.brandImageryOverrides, 'override');
+
+  // An explicit 'allow' is still a written override (provenance is about
+  // WHETHER the doc says something, not which value it says).
+  await putGovernanceDoc(store, doc({ brandImageryOverrides: 'allow' }));
+  const explicitAllow = await resolveActivePolicies(store);
+  assert.equal(explicitAllow.brandImageryOverrides, 'allow');
+  assert.equal(explicitAllow.provenance.brandImageryOverrides, 'override');
+});
+
 test('a legacy chat-mode field still parses but cannot affect active policies', async () => {
   const store = memStore();
   await putGovernanceDoc(store, doc({ cms_agent_chat_mode: 'off', learning_mode: true }));
@@ -88,7 +116,12 @@ test('a corrupt governance doc falls back to committed (never applies)', async (
   store.map.set(GOVERNANCE_DOC_KEY, '{ not json');
   assert.equal(await getGovernanceDoc(store), null);
   const active = await resolveActivePolicies(store);
-  assert.deepEqual(active.provenance, { approval: 'committed', creation: 'committed', learning_mode: 'committed' });
+  assert.deepEqual(active.provenance, {
+    approval: 'committed',
+    creation: 'committed',
+    learning_mode: 'committed',
+    brandImageryOverrides: 'committed',
+  });
 });
 
 test('a doc with an INVALID override shape is rejected on read → committed stands', async () => {
@@ -114,5 +147,10 @@ test('a store read that throws degrades to committed', async () => {
     setJSON: async () => {},
   };
   const active = await resolveActivePolicies(throwing);
-  assert.deepEqual(active.provenance, { approval: 'committed', creation: 'committed', learning_mode: 'committed' });
+  assert.deepEqual(active.provenance, {
+    approval: 'committed',
+    creation: 'committed',
+    learning_mode: 'committed',
+    brandImageryOverrides: 'committed',
+  });
 });

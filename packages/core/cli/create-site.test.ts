@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildPlan,
   CORE_BLOB_STORES,
+  DEFAULT_BRAND_TOKENS,
   ENV_CHECKLIST,
   executeNetlifyProvisioning,
   idsFor,
@@ -32,7 +33,7 @@ import {
 import { CANONICAL_INFRA_REDIRECTS, parseNetlifyTomlRedirects, parseSiteConfigRedirects } from './admin-parity.mjs';
 import { navigationBodySchema } from '../schema/bodies/navigation-v1.js';
 import { sectionTemplateBodySchema } from '../schema/bodies/section-template-v1.js';
-import { siteBodySchema } from '../schema/bodies/site-v1.js';
+import { brandImagerySchema, siteBodySchema } from '../schema/bodies/site-v1.js';
 import { taxonomyBodySchema } from '../schema/bodies/taxonomy-v1.js';
 import { templateBodySchema } from '../schema/bodies/template-v1.js';
 import { themeBodySchema } from '../schema/bodies/theme-v1.js';
@@ -65,11 +66,14 @@ test('idsFor scopes every generated id to the client — no cross-client collisi
   assert.equal(acme.siteId, 'site_acme_clinic');
   assert.equal(acme.taxonomyId, 'tax_acme_clinic');
   assert.equal(acme.themeId, 'thm_acme_clinic_default');
+  // P6: id-shaped like voice_<client> (BRIEF R2), not site-scoped.
+  assert.equal(acme.visualStandardId, 'vis_acme_clinic');
 
   const other = idsFor('globex');
   assert.notEqual(acme.siteId, other.siteId);
   assert.notEqual(acme.taxonomyId, other.taxonomyId);
   assert.notEqual(acme.themeId, other.themeId);
+  assert.notEqual(acme.visualStandardId, other.visualStandardId);
 });
 
 test('buildPlan scaffolds the full baseline pack: config bundle + empty export tree + six seed modules', () => {
@@ -115,6 +119,37 @@ test('buildPlan scaffolds the full baseline pack: config bundle + empty export t
   const listRoute = plan.files.find((file) => file.path === 'sites/acme/app/pages/[...blog]/[...page].astro');
   assert.match(articleRoute?.content ?? '', /getStaticPathsBlogPost/);
   assert.match(listRoute?.content ?? '', /getStaticPathsBlogList/);
+});
+
+test('P6: the house visual_standard falls back to a small generic sampleSubjects set with no niche, and uses the niche when one is given', () => {
+  const seedFor = (opts: Parameters<typeof buildPlan>[0]) => {
+    const plan = buildPlan(opts);
+    const seedFile = plan.files.find((f) => f.path === `sites/${opts.name}/seeds/site-seed-data.mjs`);
+    assert.ok(seedFile, 'expected a site-seed-data.mjs in the plan');
+    // Cheapest way to get real sampleSubjects out of the rendered template
+    // without a filesystem round trip: the visualStandardBody export is a
+    // self-contained JSON object literal (see siteSeedTemplate) — pull it
+    // out with the exact same anchor create-site.mjs itself writes.
+    const bodyMatch = /export const visualStandardBody = (\{[\s\S]*?\});/.exec(seedFile!.content);
+    assert.ok(bodyMatch, 'expected a parseable visualStandardBody literal');
+    return JSON.parse(bodyMatch![1]);
+  };
+
+  const withoutNiche = seedFor({ name: 'acme' });
+  assert.deepEqual(withoutNiche.sampleSubjects, [
+    'a person reading at a small table',
+    'an open notebook beside a warm drink',
+    'a pair of hands writing notes',
+    'a small potted plant on a sunlit windowsill',
+  ]);
+
+  const withNiche = seedFor({ name: 'acme', niche: 'veterinary clinic' });
+  assert.ok(withNiche.sampleSubjects.length >= 1 && withNiche.sampleSubjects.length <= 6);
+  assert.ok(
+    withNiche.sampleSubjects.every((subject: string) => subject.includes('veterinary clinic')),
+    'expected the niche to actually shape the generated subjects'
+  );
+  assert.notDeepEqual(withNiche.sampleSubjects, withoutNiche.sampleSubjects);
 });
 
 test('the committed-export tree ships as BOOTSTRAP only — enough to build, nothing store-backed', () => {
@@ -564,6 +599,45 @@ test('scaffolded seed bodies parse against the real object schemas, and ids stay
     const tpl = await import(path.join(scratchDir, 'seeds', 'templates-seed-data.mjs'));
 
     assert.equal(siteBodySchema.safeParse(site.siteBody).success, true);
+
+    // P6: site.brandImagery is never empty for a new site — derived from
+    // DEFAULT_BRAND_TOKENS (the starter palette) at scaffold time, and it
+    // parses as a real brandImagery contract, not just an arbitrary object.
+    assert.deepEqual(site.siteBody.brandTokens, DEFAULT_BRAND_TOKENS, "siteBody.brandTokens must mirror DEFAULT_BRAND_TOKENS exactly — the derived house visual_standard is only trustworthy if it was derived from what the site actually shipped with");
+    assert.ok(site.siteBody.brandImagery, 'expected siteBody.brandImagery to be populated for a new site');
+    const brandImageryResult = brandImagerySchema.safeParse(site.siteBody.brandImagery);
+    assert.equal(
+      brandImageryResult.success,
+      true,
+      brandImageryResult.success ? '' : JSON.stringify(brandImageryResult.error.issues)
+    );
+
+    // P6: the house visual_standard (`vis_<client>`) is minted alongside the
+    // site in the SAME seed file, and it is the SOURCE `site.brandImagery`
+    // is the applied COPY of (BRIEF §R1). `visual_standard` is not yet a
+    // registered object type in this worktree (P1/P3, concurrent) so there
+    // is no schema to validate the whole body against — assert the §3.1
+    // shape field-by-field instead, and validate the `brandImagery` half
+    // against the schema that DOES already exist.
+    const visualStandardSeed = site.CONVERSION_SEEDS.find((seed: { objectType: string }) => seed.objectType === 'visual_standard');
+    assert.ok(visualStandardSeed, 'expected a visual_standard entry in site-seed-data.mjs CONVERSION_SEEDS');
+    assert.equal(visualStandardSeed.objectId, 'vis_cli_test_scratch');
+    const visualStandardBody = visualStandardSeed.body;
+    assert.equal(visualStandardBody.version, 1);
+    assert.equal(visualStandardBody.kind, 'house');
+    assert.equal(visualStandardBody.status, 'active');
+    assert.deepEqual(visualStandardBody.derivedFrom, { method: 'tokens' });
+    assert.equal(typeof visualStandardBody.label, 'string');
+    assert.ok(visualStandardBody.label.length > 0 && visualStandardBody.label.length <= 80);
+    assert.deepEqual(visualStandardBody.references, []);
+    assert.ok(Array.isArray(visualStandardBody.sampleSubjects));
+    assert.ok(visualStandardBody.sampleSubjects.length >= 1 && visualStandardBody.sampleSubjects.length <= 6);
+    // The applied copy on the site and the governed source on the standard
+    // are byte-identical at genesis — the same "applying it is a provable
+    // no-op" shape theme -> site.brandTokens already uses.
+    assert.deepEqual(visualStandardBody.brandImagery, site.siteBody.brandImagery);
+    assert.equal(brandImagerySchema.safeParse(visualStandardBody.brandImagery).success, true);
+
     assert.equal(navigationBodySchema.safeParse(nav.navHeaderBody).success, true);
     assert.equal(navigationBodySchema.safeParse(nav.navFooterBody).success, true);
     assert.equal(taxonomyBodySchema.safeParse(tax.taxonomyBody).success, true);

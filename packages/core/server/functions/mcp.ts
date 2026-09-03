@@ -148,6 +148,7 @@ import { saveArtifactFromUrl } from '../lib/artifact-url-ingest.js';
 import { withIdempotentToolCall } from '../lib/idempotency-store.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { buildObjectContract, OBJECT_CONTRACT_TYPES } from '../../lib/registry/object-contract.js';
+import { getBrandImageryOverridePolicy } from '../lib/brand-imagery-resolve.js';
 import type { ObjectType } from '../../schema/object-record-v1.js';
 import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS } from '../lib/mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../lib/mcp-tool-definitions-2.js';
@@ -173,6 +174,7 @@ import {
 } from '../lib/mcp-artifact-admin.js';
 import {
   callArtifactUpload,
+  callBrandImageryPropose,
   callCreateAgentArtifactJob,
   callCreateArtifactUploadIntent,
   callCreatePdfTemplate,
@@ -810,6 +812,7 @@ const CMS_AGENT_NAME_ATTRIBUTION_TOOLS = new Set([
   'object_instantiate_template',
   'object_instantiate_section_template',
   'site_apply_theme',
+  'site_apply_brand_imagery',
   'product_set_price',
   'order_reissue',
   // Object-lock owner attribution bug (2026-08-28): these three forward
@@ -1093,6 +1096,19 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         dry_run: input.dry_run,
         agent_name: input.agent_name,
       });
+    case 'site_apply_brand_imagery':
+      return callObjectAction(event, {
+        action: 'apply_brand_imagery',
+        visual_standard_id: input.visual_standard_id,
+        theme_id: input.theme_id,
+        site_id: input.site_id,
+        lock_token: input.lock_token,
+        expected_record_version: input.expected_record_version,
+        dry_run: input.dry_run,
+        agent_name: input.agent_name,
+      });
+    case 'brand_imagery_propose':
+      return callBrandImageryPropose(event, input);
     case 'object_checkout':
       // Object-lock owner attribution bug (2026-08-28): agent_name was never
       // forwarded here, so every agent checkout recorded the object-store.ts
@@ -1260,9 +1276,21 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
           error_code: 'invalid_object_type',
         });
       }
-      // Pure, in-process, read-only — no store round-trip; derived from the
-      // enforcing schemas/registries/policy so it cannot drift.
-      return toolResult({ contract: buildObjectContract(objectType as ObjectType) });
+      // Derived from the enforcing schemas/registries/policy so it cannot
+      // drift. REVIEW (brand-imagery wave): `site` additionally reports the
+      // LIVE `brandImageryOverrides` guardrail on its
+      // `brand_imagery_override_policy` constraint — BRIEF §3.7 makes this
+      // the read path (`contractPrefetch` already calls object_contract), and
+      // buildObjectContract is synchronous, so the runtime-override value has
+      // to be resolved HERE and passed in. Without it the contract reported
+      // the hardcoded default 'allow' on every site, including a locked one.
+      // One governance blob read, `site` only; any failure degrades to
+      // 'allow' inside getBrandImageryOverridePolicy.
+      const contractOptions =
+        objectType === 'site'
+          ? { brandImageryOverridePolicy: await getBrandImageryOverridePolicy(getSiteIdentity().siteId, event) }
+          : {};
+      return toolResult({ contract: buildObjectContract(objectType as ObjectType, contractOptions) });
     }
     case 'registry_get':
       return callRegistryGet(event, input);

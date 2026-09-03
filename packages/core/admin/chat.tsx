@@ -36,6 +36,9 @@ import {
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
 import {
+  brandImageryApplyPrompt,
+  brandImageryApprovalPreview,
+  brandImageryProposalPresentation,
   createdObjectsFromEvents,
   groupChatEvents,
   publishedObjectFromEvents,
@@ -125,6 +128,7 @@ const WRITE_TOOLS = new Set([
   'submit_review',
   'discard',
   'apply_theme',
+  'apply_brand_imagery',
   'create_pdf_template',
   'publish_pdf_template',
   'delete_pdf_template',
@@ -1164,16 +1168,128 @@ function PendingApprovalCard({
       }
     : {};
 
+  // U3: apply_brand_imagery's dry run carries the whole-block brandImagery
+  // before/after — the style sentence and palette an editor actually judges
+  // a re-style by, ahead of the raw op JSON `JsonDisclosure` still shows
+  // underneath. `undefined` for every other tool.
+  const imageryPreview = brandImageryApprovalPreview(pending.tool, pending.dry_run);
+
   return (
     <ApprovalCard severity={view.severity} title={view.title} cause={view.cause} actions={decisions}>
       <div className="flex flex-col gap-2">
         <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
           Action: <code>{pending.tool}</code>
         </p>
+        {imageryPreview ? <BrandImageryDiff preview={imageryPreview} /> : null}
         <JsonDisclosure label="Proposed arguments" value={pending.args} />
         {pending.dry_run ? <JsonDisclosure label="Dry-run details" value={pending.dry_run} /> : null}
       </div>
     </ApprovalCard>
+  );
+}
+
+/**
+ * U3 — the before/after an editor judges an `apply_brand_imagery` dry run by:
+ * the style sentence (struck-through when it's changing) and the palette
+ * swatches either side of the apply. Pure presentation over
+ * `brandImageryApprovalPreview` (chat-logic.ts) — every branch decided there.
+ */
+function BrandImageryDiff({ preview }: { preview: NonNullable<ReturnType<typeof brandImageryApprovalPreview>> }) {
+  const hasPalette = preview.beforePalette.length > 0 || preview.afterPalette.length > 0;
+  return (
+    <div className="flex flex-col gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
+      <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+        {preview.beforeSentence ? (
+          <>
+            <span className="text-[var(--adm-text-muted)] line-through">{preview.beforeSentence}</span>
+            {' → '}
+            <span className="font-medium text-[var(--adm-text-heading)]">{preview.afterSentence}</span>
+          </>
+        ) : (
+          <span className="font-medium text-[var(--adm-text-heading)]">{preview.afterSentence}</span>
+        )}
+      </p>
+      {hasPalette ? (
+        <div className="flex flex-wrap items-center gap-3">
+          {preview.beforePalette.length ? (
+            <span className="flex items-center gap-1">
+              <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">Before</span>
+              {preview.beforePalette.map((hex, index) => (
+                <span
+                  key={`before-${index}-${hex}`}
+                  title={hex}
+                  aria-hidden="true"
+                  className="h-4 w-4 rounded-full border border-black/10"
+                  style={{ backgroundColor: hex }}
+                />
+              ))}
+            </span>
+          ) : null}
+          <span className="flex items-center gap-1">
+            <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">After</span>
+            {preview.afterPalette.map((hex, index) => (
+              <span
+                key={`after-${index}-${hex}`}
+                title={hex}
+                aria-hidden="true"
+                className="h-4 w-4 rounded-full border border-black/10"
+                style={{ backgroundColor: hex }}
+              />
+            ))}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * U3 — the `brand_imagery_propose` result card (BRIEF §3.5): the proposal's
+ * rationale plus an Apply CTA (a precise, deterministic follow-up turn —
+ * `brandImageryApplyPrompt`, chat-logic.ts) and a link to the one surface
+ * that owns this decision, `/admin/settings/visual-identity` (R8/§4).
+ * `onApply` is omitted (button hidden) when this thread has nowhere to send
+ * the follow-up — a chat that has already ended its poll loop, for instance.
+ */
+function BrandImageryProposalCard({
+  presentation,
+  busy,
+  onApply,
+}: {
+  presentation: NonNullable<ReturnType<typeof brandImageryProposalPresentation>>;
+  busy: boolean;
+  onApply?: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text-heading)]">
+          {presentation.label}
+        </span>
+        <span className="rounded-[var(--adm-radius-pill)] bg-[var(--adm-surface-sunken)] px-2 py-0.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          {presentation.confidence} confidence
+        </span>
+      </div>
+      <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{presentation.rationale}</p>
+      <div className="flex flex-wrap items-center gap-4 pt-0.5 text-[length:var(--adm-text-xs)]">
+        {onApply ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onApply}
+            className="adm-focusable w-fit rounded font-medium text-[var(--adm-accent)] hover:underline disabled:opacity-50"
+          >
+            Apply
+          </button>
+        ) : null}
+        <a
+          href="/admin/settings/visual-identity"
+          className="adm-focusable w-fit rounded text-[var(--adm-accent)] hover:underline"
+        >
+          Open Visual identity
+        </a>
+      </div>
+    </div>
   );
 }
 
@@ -1493,6 +1609,20 @@ export function ChatThread({
           // than restating the sweeper's line a second time in the thread.
           if (hasRunCard) return null;
           return <RequestProgressLine key={event.seq} event={event} isOwner={isOwner} />;
+        }
+        // U3: a successful brand_imagery_propose result is a proposal to
+        // decide on, not routine activity — `groupChatEvents` already keeps
+        // it out of the quiet accordion (chat-logic.ts's `isProminentToolResult`).
+        const brandImageryProposal = brandImageryProposalPresentation(event);
+        if (brandImageryProposal) {
+          return (
+            <BrandImageryProposalCard
+              key={event.seq}
+              presentation={brandImageryProposal}
+              busy={busy}
+              onApply={onSendControls ? () => onSendControls(brandImageryApplyPrompt(brandImageryProposal)) : undefined}
+            />
+          );
         }
         return <ToolCallCard key={event.seq} event={event} />;
       })}

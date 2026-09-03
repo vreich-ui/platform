@@ -506,11 +506,16 @@ describe('receiptLine — E2b: a proven publish, worded to what it proves', () =
 });
 
 describe('undo — exact inverses only', () => {
-  it('offers an undo prompt for patch, submit_review, and apply_theme', () => {
+  it('offers an undo prompt for patch, submit_review, apply_theme, and apply_brand_imagery', () => {
     assert.equal(hasKnownInverse('patch'), true);
     assert.equal(hasKnownInverse('submit_review'), true);
     assert.equal(hasKnownInverse('apply_theme'), true);
+    // U3: apply_brand_imagery documents the SAME exact-inverse sentence as
+    // apply_theme on its own tool description (mcp-tool-definitions-2.ts) —
+    // an equally exact inverse gets the same undo affordance.
+    assert.equal(hasKnownInverse('apply_brand_imagery'), true);
     assert.equal(typeof undoPrompt('patch'), 'string');
+    assert.equal(typeof undoPrompt('apply_brand_imagery'), 'string');
   });
 
   it('omits the link rather than rendering a dead one for tools with no exact inverse', () => {

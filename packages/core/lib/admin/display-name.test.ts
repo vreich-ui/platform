@@ -198,6 +198,13 @@ describe('verbToPhrase', () => {
       'Final Article (agent) published'
     );
   });
+  // U3 (brand-imagery wave): the imagery sibling of apply_theme gets the
+  // same treatment.
+  it('renders apply_brand_imagery, alongside its apply_theme sibling', () => {
+    const actor = { kind: 'human' as const, id: 'u1', email: 'wolf@kugelbrands.com' };
+    assert.strictEqual(verbToPhrase({ action: 'apply_theme', actor }), 'Wolf applied a theme');
+    assert.strictEqual(verbToPhrase({ action: 'apply_brand_imagery', actor }), 'Wolf applied brand imagery');
+  });
   it('refines review_decide by the decision detail', () => {
     assert.strictEqual(
       verbToPhrase({

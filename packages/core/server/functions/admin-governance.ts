@@ -78,6 +78,9 @@ export const requestSchema = z.discriminatedUnion('verb', [
     /** Task 3: the chat-tool registry override — the no-deploy rollback lever
      *  back to the legacy (tools.ts) registry. Unset resolves to 'generated'. */
     chat_registry: z.enum(['legacy', 'generated']).optional(),
+    /** U2 (BRIEF §3.7/R5): the `style` override channel guardrail on
+     *  create_agent_artifact_job. Unset resolves to 'allow' (governance-store.ts). */
+    brandImageryOverrides: z.enum(['allow', 'lock']).optional(),
   }),
   z.object({
     verb: z.literal('revert'),
@@ -88,6 +91,7 @@ export const requestSchema = z.discriminatedUnion('verb', [
       'learning_mode',
       'cms_agent_chat_mode',
       'chat_registry',
+      'brandImageryOverrides',
       'all',
     ]),
   }),
@@ -262,6 +266,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         req.chat_tools && 'chat_tools',
         req.learning_mode !== undefined && 'learning_mode',
         req.chat_registry !== undefined && `chat_registry=${req.chat_registry}`,
+        req.brandImageryOverrides !== undefined && `brandImageryOverrides=${req.brandImageryOverrides}`,
       ]
         .filter(Boolean)
         .join(', ');
@@ -277,6 +282,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         ...(req.chat_tools !== undefined ? { chat_tools: canonicalChatTools, chat_tools_migrated: true } : {}),
         ...(req.learning_mode !== undefined ? { learning_mode: req.learning_mode } : {}),
         ...(req.chat_registry !== undefined ? { chat_registry: req.chat_registry } : {}),
+        ...(req.brandImageryOverrides !== undefined ? { brandImageryOverrides: req.brandImageryOverrides } : {}),
         updated_by: email,
         updated_at: nowIso(),
         history: [...existing.history, { at: nowIso(), actor_email: email, action: 'set', detail: touched || 'none' }],
@@ -291,6 +297,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         delete next.learning_mode;
         delete next.cms_agent_chat_mode;
         delete next.chat_registry;
+        delete next.brandImageryOverrides;
       } else {
         delete next[req.target];
         if (req.target === 'chat_tools') delete next.chat_tools_migrated;

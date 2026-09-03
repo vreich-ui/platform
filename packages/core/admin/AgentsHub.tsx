@@ -47,7 +47,7 @@ const STARTER_ICONS: Record<AgentStarter['key'], React.ReactNode> = {
   article: <IconPencil size={18} />,
   page: <IconFilePlus size={18} />,
   'section-template': <IconPlus size={18} />,
-  retheme: <IconPalette size={18} />,
+  'visual-identity': <IconPalette size={18} />,
   media: <IconSparkles size={18} />,
 };
 
@@ -621,7 +621,7 @@ function HubBody() {
           <EmptyState
             icon={<IconSparkles size={26} />}
             title="CMS Agents"
-            message="Pick a conversation, or use a starter — create articles, pages from templates, section recipes, or preview a retheme. Every write shows an approval card first."
+            message="Pick a conversation, or use a starter — create articles, pages from templates, section recipes, or review visual identity. Every write shows an approval card first."
           />
         )}
       </Card>

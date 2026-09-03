@@ -69,9 +69,10 @@ import { contentItemBodySchema } from '../../schema/bodies/content-item-v1.js';
 import { pageBodySchema, pageTypeIdSchema } from '../../schema/bodies/page-v1.js';
 import { sectionTemplateBodySchema } from '../../schema/bodies/section-template-v1.js';
 import type { SectionInstance } from '../../schema/bodies/section-v1.js';
-import { siteBodySchema } from '../../schema/bodies/site-v1.js';
+import { brandImagerySchema, siteBodySchema, type BrandImagery } from '../../schema/bodies/site-v1.js';
 import { templateBodySchema } from '../../schema/bodies/template-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
+import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
 import { THEME_AXIS_GROUPS, THEME_COLOR_KEYS } from '../../lib/registry/theme-tokens.js';
 import {
   objectTypes,
@@ -234,6 +235,27 @@ export const objectVerbRequestSchema = z.discriminatedUnion('action', [
     lock_token: z.string().min(1).optional(),
     expected_record_version: z.number().int().nonnegative().optional(),
     // Preview mode: return the computed op + candidate validation, persist NOTHING.
+    dry_run: z.boolean().optional(),
+  }),
+  // ─── P3: apply a visual_standard (house OR template) OR a theme's
+  // brandImagery to the site singleton (BRIEF.md §3.3, R6) — the imagery
+  // sibling of apply_theme. Whole-block replace: after the apply,
+  // site.brandImagery EQUALS the source's brandImagery, no per-key diff
+  // exposed at this grammar (see the handler for how exact-replace is
+  // achieved through the shared object-patch-apply merge engine). Exactly
+  // one of visual_standard_id / theme_id — the handler 400s on both or
+  // neither.
+  z.object({
+    action: z.literal('apply_brand_imagery'),
+    visual_standard_id: objectId.optional(),
+    theme_id: objectId.optional(),
+    site_id: objectId,
+    // Required for a REAL apply (the handler 400s without them); optional
+    // here so dry_run previews need no checkout at all.
+    lock_token: z.string().min(1).optional(),
+    expected_record_version: z.number().int().nonnegative().optional(),
+    // Preview mode: return {before, after, changedFields} + candidate
+    // validation, persist NOTHING.
     dry_run: z.boolean().optional(),
   }),
   z.object({
@@ -423,7 +445,8 @@ export const verbNeedsValidationContext = (action: ObjectVerbRequest['action']):
       return false;
     default:
       // create, create_variant, instantiate, instantiate_section,
-      // apply_theme, patch, validate, publish_by_time — and anything future.
+      // apply_theme, apply_brand_imagery, patch, validate, publish_by_time —
+      // and anything future.
       return true;
   }
 };
@@ -736,11 +759,69 @@ const seedForCreate = (objectType: ObjectType, body: unknown): string => {
 // declared voice per site, edited via set_voice_fields. A second voice would
 // make "the site's voice" ambiguous at exactly the moment an agent needs an
 // unambiguous answer.
+// Brand-imagery wave (BRIEF.md §3.1, R2): visual_standard is a singleton only
+// for kind:'house' — kind:'template' is an ordinary, unbounded collection
+// living in the SAME object type. `appliesToBody` narrows both (a) which
+// CREATE attempts are singleton-gated at all, and (b) which EXISTING active
+// records count as a conflict, so a template create never trips the house
+// singleton and a house create never conflicts with an existing template.
 // Module-scoped (not local to `create`) so the object_validate candidate-body
 // dry-run can report the same conflict a real object_create would hit.
-const SINGLETON_TYPES: Partial<Record<ObjectType, { label: string; editOp: string; noun: string }>> = {
+const SINGLETON_TYPES: Partial<
+  Record<ObjectType, { label: string; editOp: string; noun: string; appliesToBody?: (body: unknown) => boolean }>
+> = {
   tracking_config: { label: 'tracking_config', editOp: 'set_tracking_config_fields', noun: 'tracker registry' },
   editorial_voice: { label: 'editorial_voice', editOp: 'set_voice_fields', noun: 'declared editorial voice' },
+  visual_standard: {
+    label: 'visual_standard (house)',
+    editOp: 'set_visual_standard_fields',
+    noun: 'house visual standard',
+    appliesToBody: (body) => isRecord(body) && body.kind === 'house',
+  },
+};
+
+type SingletonConflict = { object_id: string | undefined; label: string; editOp: string; noun: string };
+
+/**
+ * The one singleton-conflict check, shared by `create` and the `validate`
+ * candidate-body dry-run so the two can never drift. For a plain singleton
+ * (tracking_config/editorial_voice — the WHOLE type is the singleton class)
+ * this is exactly the old inline listing-count check. For visual_standard
+ * (`appliesToBody` set), a create that isn't itself a house (kind:'template')
+ * skips the check entirely, and the existing-active scan loads each
+ * candidate's body to find another ACTIVE house among what may otherwise be
+ * many active templates.
+ */
+const findSingletonConflict = async (
+  store: ObjectVerbStore,
+  objectType: ObjectType,
+  body: unknown
+): Promise<SingletonConflict | undefined> => {
+  const singleton = SINGLETON_TYPES[objectType];
+  if (!singleton) return undefined;
+  if (singleton.appliesToBody && !singleton.appliesToBody(body)) return undefined;
+
+  const items = await collectBlobListItems(await store.list({ prefix: objectStatusIndexPrefix(objectType, 'active') }));
+
+  if (!singleton.appliesToBody) {
+    if (items.length === 0) return undefined;
+    return {
+      object_id: items[0]!.key.split('/').at(-1),
+      label: singleton.label,
+      editOp: singleton.editOp,
+      noun: singleton.noun,
+    };
+  }
+
+  for (const item of items) {
+    const id = item.key.split('/').at(-1);
+    if (!id) continue;
+    const record = await loadRecord(store, objectRecordKey(objectType, id));
+    if (record && singleton.appliesToBody(record.body)) {
+      return { object_id: id, label: singleton.label, editOp: singleton.editOp, noun: singleton.noun };
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -1009,19 +1090,13 @@ export const handleObjectVerb = async (
       const key = objectRecordKey(objectType, objectIdValue);
       if (await store.get(key)) return err(409, { error: 'Object already exists', object_id: objectIdValue });
 
-      const singleton = SINGLETON_TYPES[objectType];
-      if (singleton) {
-        const existing = await collectBlobListItems(
-          await store.list({ prefix: objectStatusIndexPrefix(objectType, 'active') })
-        );
-        if (existing.length > 0) {
-          const existingId = existing[0]!.key.split('/').at(-1);
-          return err(409, {
-            error: `A ${singleton.label} singleton already exists (${existingId}) — edit it via ${singleton.editOp}; a site has exactly one ${singleton.noun}.`,
-            object_id: existingId,
-            singleton: true,
-          });
-        }
+      const singletonConflict = await findSingletonConflict(store, objectType, request.body);
+      if (singletonConflict) {
+        return err(409, {
+          error: `A ${singletonConflict.label} singleton already exists (${singletonConflict.object_id}) — edit it via ${singletonConflict.editOp}; a site has exactly one ${singletonConflict.noun}.`,
+          object_id: singletonConflict.object_id,
+          singleton: true,
+        });
       }
 
       const groups = validateObject({ objectType, objectId: objectIdValue, body: request.body }, context);
@@ -1578,6 +1653,211 @@ export const handleObjectVerb = async (
       return ok({ ...result.body, applied_theme: themeRecord.object_id });
     }
 
+    case 'apply_brand_imagery': {
+      // Exactly one source (R6) — refused BEFORE any store read.
+      if ((request.visual_standard_id === undefined) === (request.theme_id === undefined)) {
+        return err(400, { error: 'Provide exactly one of visual_standard_id or theme_id.' });
+      }
+
+      let sourceKind: 'visual_standard' | 'theme';
+      let sourceRecord: ObjectRecord;
+      let sourceImagery: BrandImagery;
+      if (request.visual_standard_id !== undefined) {
+        sourceKind = 'visual_standard';
+        const vsRecord = await loadRecord(store, objectRecordKey('visual_standard', request.visual_standard_id));
+        if (!vsRecord) {
+          return err(404, {
+            error: 'Visual standard not found',
+            not_found: true,
+            visual_standard_id: request.visual_standard_id,
+          });
+        }
+        const parsedVs = visualStandardBodySchema.safeParse(vsRecord.body);
+        if (!parsedVs.success) {
+          return err(422, {
+            error: 'Visual standard body does not parse as visual_standard.v1 — fix it before applying.',
+            visual_standard_id: request.visual_standard_id,
+            issues: parsedVs.error.issues,
+          });
+        }
+        // FIX-E: before the schema fix that lets a DRAFT standard start with
+        // an empty sampleSubjects (a page-snapshot clone,
+        // `derivedFrom.method:'clone'`, cannot say what a picture is OF), a
+        // body with none could not even PARSE — the safeParse above already
+        // refused it, unconditionally. That incidental cover is gone now, so
+        // this checks it directly: a standard with no sample subjects is not
+        // a usable apply source, draft or not — draft only relaxes CREATE,
+        // never APPLY.
+        if (parsedVs.data.sampleSubjects.length === 0) {
+          return err(422, {
+            error:
+              'Visual standard has no sample subjects — add at least one before applying it to the site (a draft standard may start empty, but an applied one may not).',
+            visual_standard_id: request.visual_standard_id,
+          });
+        }
+        // A `kind:'template'` standard is a legitimate apply source —
+        // promoting a template is intended (BRIEF.md §3.3) — so `kind` is
+        // never checked here; both house and template apply the same way.
+        sourceRecord = vsRecord;
+        sourceImagery = parsedVs.data.brandImagery;
+      } else {
+        sourceKind = 'theme';
+        const themeRecord = await loadRecord(store, objectRecordKey('theme', request.theme_id!));
+        if (!themeRecord) {
+          return err(404, { error: 'Theme not found', not_found: true, theme_id: request.theme_id });
+        }
+        const parsedTheme = themeBodySchema.safeParse(themeRecord.body);
+        if (!parsedTheme.success) {
+          return err(422, {
+            error: 'Theme body does not parse as theme.v1 — fix the theme before applying.',
+            theme_id: request.theme_id,
+            issues: parsedTheme.error.issues,
+          });
+        }
+        // Unlike visual_standard.brandImagery (required), a theme's is
+        // optional (theme-v1.ts) — most themes today preset brandTokens
+        // only, so there may be nothing here to apply.
+        if (!parsedTheme.data.brandImagery) {
+          return err(422, {
+            error: `Theme "${request.theme_id}" carries no brandImagery — nothing to apply. Add one to the theme, or apply from a visual_standard instead.`,
+            theme_id: request.theme_id,
+          });
+        }
+        sourceRecord = themeRecord;
+        sourceImagery = parsedTheme.data.brandImagery;
+      }
+
+      const siteRecord = await loadRecord(store, objectRecordKey('site', request.site_id));
+      if (!siteRecord) {
+        return err(404, { error: 'Site not found', not_found: true, object_id: request.site_id });
+      }
+      const parsedSite = siteBodySchema.safeParse(siteRecord.body);
+      if (!parsedSite.success) {
+        return err(422, {
+          error: 'Site body does not parse as site.v1 — heal it before applying brand imagery.',
+          object_id: request.site_id,
+          issues: parsedSite.error.issues,
+        });
+      }
+
+      // Whole-block replace (R6, no per-key diff exposed by this verb):
+      // after the apply site.brandImagery EQUALS sourceImagery exactly.
+      // brandImagerySchema's scalar/array fields (version/medium/
+      // styleSentence/palette/negative/seedBase) overwrite outright through
+      // object-patch-apply's merge (a scalar or array target never
+      // recurses). Its two open-ended nested shapes — aspectRatios (a
+      // record) and the optional composition/lora sub-objects — DO recurse
+      // (mergeFields descends whenever both sides are plain objects), so any
+      // stale sub-key the site carries but the source doesn't needs an
+      // explicit null unset here, same reasoning as apply_theme's per-color
+      // unsets, scoped to brandImagery's own three nested fields instead of
+      // brandTokens' groups.
+      const currentImagery = parsedSite.data.brandImagery;
+      const exactReplaceSubObject = (
+        current: Record<string, unknown> | undefined,
+        next: Record<string, unknown> | undefined
+      ): Record<string, unknown> | null | undefined => {
+        if (next === undefined) return current === undefined ? undefined : null;
+        const staleUnsets = Object.fromEntries(
+          Object.keys(current ?? {})
+            .filter((key) => !(key in next))
+            .map((key) => [key, null])
+        );
+        return { ...staleUnsets, ...next };
+      };
+      const opBrandImagery: Record<string, unknown> = {
+        version: sourceImagery.version,
+        medium: sourceImagery.medium,
+        styleSentence: sourceImagery.styleSentence,
+        palette: [...sourceImagery.palette],
+        negative: [...sourceImagery.negative],
+        aspectRatios: exactReplaceSubObject(
+          currentImagery?.aspectRatios as Record<string, unknown> | undefined,
+          sourceImagery.aspectRatios as Record<string, unknown>
+        ),
+        seedBase: sourceImagery.seedBase,
+        composition: exactReplaceSubObject(
+          currentImagery?.composition as Record<string, unknown> | undefined,
+          sourceImagery.composition as Record<string, unknown> | undefined
+        ),
+        lora: exactReplaceSubObject(
+          currentImagery?.lora as Record<string, unknown> | undefined,
+          sourceImagery.lora as Record<string, unknown> | undefined
+        ),
+      };
+      const op = { op: 'set_site_brand_imagery', fields: { brandImagery: opBrandImagery } };
+
+      // The clean, resolved state this apply produces — independent of the
+      // op's internal null-unset markers — is what dry_run reports as
+      // `before`/`after`/`changedFields` (§3.3).
+      const before: BrandImagery | null = currentImagery ?? null;
+      const after: BrandImagery = sourceImagery;
+      const changedFields = Object.keys(brandImagerySchema.shape).filter((key) => {
+        const beforeValue = (before as Record<string, unknown> | null)?.[key];
+        const afterValue = (after as unknown as Record<string, unknown>)[key];
+        return JSON.stringify(beforeValue) !== JSON.stringify(afterValue);
+      });
+
+      if (request.dry_run) {
+        const validation = validateCandidatePatch(siteRecord, [op], context, ['set_site_brand_imagery']);
+        return ok({
+          dry_run: true,
+          object_id: request.site_id,
+          source: { kind: sourceKind, id: sourceRecord.object_id },
+          before,
+          after,
+          changedFields,
+          op,
+          eligible: validation.eligible,
+          validation: validation.groups,
+          apply_error: validation.applyError,
+        });
+      }
+
+      // A REAL apply by a HUMAN requires the Owner tier — dry_run stays open
+      // to any admin (preview is a read), mirroring apply_theme's T9.18 gate.
+      if (principal.kind === 'human' && !(options.roles ?? []).includes('owner')) {
+        return err(403, { error: 'Applying brand imagery requires the Owner role.' });
+      }
+
+      // A REAL apply needs the caller's site checkout (schema-optional only
+      // so dry_run can omit them).
+      if (request.lock_token === undefined || request.expected_record_version === undefined) {
+        return err(400, {
+          error:
+            'Applying brand imagery requires lock_token and expected_record_version from YOUR site checkout (only dry_run: true works without them).',
+        });
+      }
+
+      // ONE op = one atomic content_revision bump; the history entry carries
+      // the source provenance; the exact inverse (fields capture) makes
+      // "revert the applied imagery" a standard Discard.
+      const result = await handleObjectVerb(
+        store,
+        {
+          action: 'patch',
+          object_type: 'site',
+          object_id: request.site_id,
+          lock_token: request.lock_token,
+          expected_record_version: request.expected_record_version,
+          ops: [op],
+        },
+        principal,
+        {
+          ...options,
+          patchEntryDetails: { applied_brand_imagery_source: { kind: sourceKind, id: sourceRecord.object_id } },
+          // The imagery writer is not agent-submittable; only THIS verb applies it.
+          privilegedOps: ['set_site_brand_imagery'],
+        }
+      );
+      if (result.status !== 200) return result;
+      return ok({
+        ...result.body,
+        applied_brand_imagery_source: { kind: sourceKind, id: sourceRecord.object_id },
+        changedFields,
+      });
+    }
+
     case 'checkout': {
       const key = objectRecordKey(request.object_type, request.object_id);
       const result = await checkoutObjectLock(store, key, {
@@ -1794,20 +2074,7 @@ export const handleObjectVerb = async (
 
         const idTaken = Boolean(await store.get(objectRecordKey(objectType, objectIdValue)));
 
-        const singleton = SINGLETON_TYPES[objectType];
-        let singletonConflict: { object_id: string | undefined; label: string; editOp: string } | undefined;
-        if (singleton) {
-          const existing = await collectBlobListItems(
-            await store.list({ prefix: objectStatusIndexPrefix(objectType, 'active') })
-          );
-          if (existing.length > 0) {
-            singletonConflict = {
-              object_id: existing[0]!.key.split('/').at(-1),
-              label: singleton.label,
-              editOp: singleton.editOp,
-            };
-          }
-        }
+        const singletonConflict = await findSingletonConflict(store, objectType, request.body);
 
         const groups = validateObject({ objectType, objectId: objectIdValue, body: request.body }, context);
         const summary = summarizeValidation(groups);

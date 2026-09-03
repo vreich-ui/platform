@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { deriveBrandImageryFromTokens, fnv1aHash } from '../../packages/core/server/lib/brand-imagery-derive.js';
+import * as deriveCore from '../../packages/core/server/lib/brand-imagery-derive-core.mjs';
 import { brandImagerySchema } from '../../packages/core/schema/bodies/site-v1.js';
 
 // The live site_platform palette (theme thm_platform_anthropic): warm cream
@@ -128,4 +129,16 @@ test('returns undefined when there is nothing to derive from', () => {
     undefined,
     'no parseable colour means no derivation -- never an invented identity'
   );
+});
+
+// The derivation is plain JavaScript (brand-imagery-derive-core.mjs) so the
+// `.mjs` CLI genesis/backfill path can import it under bare `node` on every
+// supported Node -- Node 20, this repo's `engines` floor, cannot load a `.ts`
+// module at all. brand-imagery-derive.ts re-exports it so TypeScript callers
+// keep one entry point. There must be exactly ONE implementation: this pins
+// that the two names are the SAME function, so a future copy back into the
+// `.ts` (the drift this split exists to prevent) fails here.
+test('the TypeScript entry point re-exports the one derivation, never a second copy', () => {
+  assert.equal(deriveBrandImageryFromTokens, deriveCore.deriveBrandImageryFromTokens);
+  assert.equal(fnv1aHash, deriveCore.fnv1aHash);
 });
