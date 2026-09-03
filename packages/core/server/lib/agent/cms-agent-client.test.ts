@@ -20,6 +20,8 @@ const TOKEN = 'scoped-bearer-value-do-not-log';
 type ServerBehavior = {
   initializeStatus?: number;
   callStatus?: number;
+  /** Status codes applied to successive tools/call requests, one per entry, then callStatus. */
+  callStatusQueue?: number[];
   /** Return an SSE-framed body instead of application/json. */
   sse?: boolean;
   /** JSON-RPC error object returned from tools/call. */
@@ -117,7 +119,9 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
   if (rpc.method === 'tools/call') {
     state.toolCalls.push({ name: rpc.params?.name ?? '', args: rpc.params?.arguments ?? {} });
-    const status = state.behavior.callStatus ?? 200;
+    const status = state.behavior.callStatusQueue?.length
+      ? (state.behavior.callStatusQueue.shift() as number)
+      : (state.behavior.callStatus ?? 200);
     if (status !== 200) {
       send(res, status, { error: { code: 'unauthorized', message: 'Missing or invalid bearer token.' } }, false);
       return;
@@ -344,11 +348,33 @@ describe('Streamable-HTTP transport', () => {
     assert.equal(result.ok === false && result.retryableWithSameTurnId, true);
   });
 
-  it('drops an expired session on 404 so the next call re-handshakes', async () => {
+  it('recovers from an expired session in place — one 404 is invisible to the caller', async () => {
     state.behavior.toolData = { agent_ref: 'agt_client_manager@2' };
     const client = new CmsAgentClient();
     await client.resolveAgent({ role: 'client_manager', project_id: 'platform' });
     assert.ok(client.currentSessionId());
+
+    // The session dies between turns, exactly as it does when Cloud Run recycles
+    // the instance holding it. The caller must never see that.
+    state.behavior.toolData = { assistant_text: 'ok', usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 }, agent_rev: 2, model: 'gpt-4.1' };
+    state.behavior.callStatusQueue = [404];
+    const recovered = await client.converse(validRequest());
+    assert.equal(recovered.ok, true, 'a stale session must not reach the caller as an error');
+    assert.equal(recovered.ok === true && recovered.data.assistant_text, 'ok');
+
+    // Two handshakes total: the original, plus the one that replaced the dead session.
+    assert.equal(state.requests.filter((entry) => entry.rpcMethod === 'initialize').length, 2);
+    const converseCalls = state.toolCalls.filter((call) => call.name === 'agent_converse');
+    assert.equal(converseCalls.length, 2, 'the call is replayed once');
+    assert.deepEqual(converseCalls[0]!.args, converseCalls[1]!.args, 'the replay must be byte-identical');
+    assert.equal((converseCalls[1]!.args as { turn_id?: string }).turn_id, 't_run_1_0', 'the turn_id is reused, never re-minted');
+    assert.ok(client.currentSessionId());
+  });
+
+  it('gives up after exactly one retry — a persistent 404 is a fault, not a stale session', async () => {
+    state.behavior.toolData = { agent_ref: 'agt_client_manager@2' };
+    const client = new CmsAgentClient();
+    await client.resolveAgent({ role: 'client_manager', project_id: 'platform' });
 
     state.behavior.callStatus = 404;
     const expired = await client.converse(validRequest());
@@ -356,6 +382,8 @@ describe('Streamable-HTTP transport', () => {
     assert.equal(expired.ok === false && expired.code, 'cms_agent_protocol_error');
     assert.equal(expired.ok === false && expired.retryableWithSameTurnId, true);
     assert.equal(client.currentSessionId(), undefined);
+    // Bounded: the original attempt plus one replay, never a loop.
+    assert.equal(state.toolCalls.filter((call) => call.name === 'agent_converse').length, 2);
   });
 });
 
