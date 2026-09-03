@@ -62,6 +62,7 @@ import {
   type OAuthBlobStore,
   type OAuthClientRecord,
 } from './oauth-store.js';
+import { surfaceForOAuthClient } from './caller-surface.js';
 
 export type OAuthErrorBody = { error: string; error_description: string };
 /**
@@ -580,6 +581,8 @@ const issueTokenPair = async (
   const common = {
     client_id: input.client.client_id,
     client_name: input.client.client_name,
+    // Derived ONCE, here, where the full client record is in hand.
+    ...(surfaceForOAuthClient(input.client) ? { surface: surfaceForOAuthClient(input.client) as string } : {}),
     subject_email: input.subject_email,
     subject_id: input.subject_id,
     scope: input.scope,
@@ -783,6 +786,13 @@ export type ResolvedOAuthPrincipal = {
   /** W18 T18.6a: the GoTrue user id of the approving human — the membership core's human principal id. */
   subject_id: string;
   scope: string;
+  /**
+   * The chat surface behind this grant (2026-09-03). Read off the token record,
+   * where it was denormalised at issuance from the client's registered redirect
+   * hosts — so it is as trustworthy as the redirect allowlist and costs no
+   * extra store read. Absent = unknown surface, never a guess.
+   */
+  surface?: string;
 };
 
 /**
@@ -864,6 +874,7 @@ export const describeOAuthPrincipal = async (
       subject_email: record.subject_email,
       subject_id: record.subject_id,
       scope: record.scope,
+      ...(record.surface ? { surface: record.surface } : {}),
     },
   };
 };

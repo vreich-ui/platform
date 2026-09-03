@@ -242,6 +242,19 @@ export type LambdaEvent = {
   /** W18 T18.6a: the OAuth principal (a Netlify Identity HUMAN + client) this request authenticated with, if any. */
   oauthPrincipal?: ResolvedOAuthPrincipal;
   /**
+   * The chat surface this call arrived through, when the ENTRY POINT knows it
+   * for certain and a redirect-host derivation would get it wrong. Today that
+   * is exactly one caller: the Actions façade (`/api/plugin/*`), which is
+   * `plugin:openai-gpt` by construction — a Custom GPT registers OAuth
+   * callbacks on chatgpt.com, so deriving from the redirect host would label
+   * its calls `plugin:openai-agent`.
+   *
+   * Deliberately an in-process event FIELD and not a header: Netlify builds
+   * this event from the HTTP request, so a client can set headers but cannot
+   * invent a property. Nothing reachable from outside can claim a surface.
+   */
+  pluginSurface?: string;
+  /**
    * QA-W16-3: set once per request, right after `getAuthResult` succeeds —
    * i.e. this request already cleared the platform's own MCP gate (the
    * shared MCP_HTTP_AUTH_TOKEN, a verified per-agent token, or an OAuth

@@ -18,6 +18,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
 
 import { getHeader } from '../lib/admin-auth.js';
+import { CALLER_ACTOR_HEADER, decodeCallerActor } from '../lib/caller-actor.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
 import { getArtifactIndexBlobStore, getMarginaliaBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import {
@@ -75,10 +76,32 @@ const verifyPublishKey = (event: LambdaEvent) => {
   return undefined;
 };
 
+/**
+ * The self-declared path, unchanged: a publish-key caller with no derived
+ * actor (a script, a cron, a fleet job) is its declared name or the sentinel.
+ * This is still the ONLY thing a model-authored payload can reach.
+ */
 export const agentPrincipal = (payload: unknown): Principal => {
   const declared = isRecord(payload) && typeof payload.agent_name === 'string' ? payload.agent_name.trim() : '';
-  return { kind: 'agent', agent_name: declared || 'unattributed-agent', auth: 'publish_key' };
+  return declared
+    ? { kind: 'agent', agent_name: declared, auth: 'publish_key', attribution: 'self_declared' }
+    : { kind: 'agent', agent_name: 'unattributed-agent', auth: 'publish_key', attribution: 'publish_key' };
 };
+
+/**
+ * WHO is writing (2026-09-03, Wolf's ruling).
+ *
+ * A derived actor on `CALLER_ACTOR_HEADER` wins over anything in the payload.
+ * It is only present on a request that already satisfied `verifyPublishKey`,
+ * and only `/mcp` mints it — from the OAuth grant or verified agent token that
+ * authorized the original call. A model can write the payload; it cannot write
+ * this header.
+ *
+ * Absent or malformed, this degrades to `agentPrincipal` — exactly the previous
+ * behaviour — so a script keeps working and a bad header never fails a write.
+ */
+export const callerPrincipal = (event: LambdaEvent, payload: unknown): Principal =>
+  decodeCallerActor(getHeader(event.headers, CALLER_ACTOR_HEADER)) ?? agentPrincipal(payload);
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
@@ -132,7 +155,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) =>
     // four marginalia_* actions over the publish key exactly like every
     // other object verb.
     const marginaliaStore = (await getMarginaliaBlobStore(event)) as unknown as MarginaliaStore;
-    const result = await handleObjectVerb(store, request.data, agentPrincipal(parsed.value), {
+    const result = await handleObjectVerb(store, request.data, callerPrincipal(event, parsed.value), {
       validationContext,
       publishDeps: { exportRoot: binding.dataRoot },
       marginaliaStore,

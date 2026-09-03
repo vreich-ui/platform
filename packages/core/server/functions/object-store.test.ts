@@ -73,11 +73,17 @@ const makeSiteRecord = (): ObjectRecord => ({
 
 describe('agentPrincipal (object-store.ts) — the payload → Principal derivation', () => {
   it('derives the agent Principal from a declared agent_name, exactly as the checkout/refresh_lock/checkin payloads now carry it', () => {
-    assert.deepStrictEqual(agentPrincipal({ action: 'checkout', object_type: 'site', object_id: 'site_drlurie', agent_name: 'cms-agent' }), {
-      kind: 'agent',
-      agent_name: 'cms-agent',
-      auth: 'publish_key',
-    });
+    assert.deepStrictEqual(
+      agentPrincipal({ action: 'checkout', object_type: 'site', object_id: 'site_drlurie', agent_name: 'cms-agent' }),
+      {
+        kind: 'agent',
+        agent_name: 'cms-agent',
+        auth: 'publish_key',
+        // 2026-09-03: a declared name is still honoured on the publish-key path,
+        // and now says so — it is a label the caller chose, not a proven identity.
+        attribution: 'self_declared',
+      }
+    );
   });
 
   it('still falls back to the unattributed-agent sentinel when no identity is declared at all (the intentional degrade, not the bug)', () => {
@@ -85,6 +91,7 @@ describe('agentPrincipal (object-store.ts) — the payload → Principal derivat
       kind: 'agent',
       agent_name: 'unattributed-agent',
       auth: 'publish_key',
+      attribution: 'publish_key',
     });
   });
 
@@ -93,6 +100,7 @@ describe('agentPrincipal (object-store.ts) — the payload → Principal derivat
       kind: 'agent',
       agent_name: 'unattributed-agent',
       auth: 'publish_key',
+      attribution: 'publish_key',
     });
   });
 });

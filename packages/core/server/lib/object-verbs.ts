@@ -89,6 +89,7 @@ import {
   matchesInventoryFilters,
   type InventoryFilters,
 } from './object-inventory.js';
+import { inheritActorFromLock } from './caller-actor.js';
 import { publishObject, type PublishObjectDeps } from './object-publish.js';
 import { checkPublishGate } from './publish-gate.js';
 import { canDecideReview, resolveRolesForPrincipal } from './roles.js';
@@ -2178,6 +2179,18 @@ const dispatchObjectVerb = async (
       if (!record.lock || record.lock.token !== request.lock_token || !isObjectLockActive(record.lock, ts)) {
         return err(423, { error: 'Lock required', locked: true, lock: sanitizeObjectLock(record.lock) });
       }
+      /**
+       * LAST-fallback attribution (2026-09-03). With the actor now derived from
+       * auth, this should almost never fire — it covers the residue: a
+       * publish-key caller that declared no name at all. The write is then
+       * credited to the holder of the lease it is riding, stamped
+       * `attribution:'inherited_lock'` so it can never be read as proven.
+       *
+       * ATTRIBUTION ONLY. `principal` — not this — stays the input to every
+       * authorization decision; a write must never be able to borrow rights
+       * from whoever happens to hold the lock.
+       */
+      const patchActor = inheritActorFromLock(principal, record.lock.owner_label);
       // Optimistic concurrency (409): your view must be current.
       if (record.version !== request.expected_record_version) {
         return err(409, {
@@ -2215,7 +2228,7 @@ const dispatchObjectVerb = async (
       let appliedRecord: ObjectRecord;
       try {
         const applied = applyPatchOps(record, normalizedOps, {
-          actor: principal,
+          actor: patchActor,
           at: timestamp,
           ...(options.patchEntryDetails ? { entryDetails: options.patchEntryDetails } : {}),
           ...(options.privilegedOps ? { privilegedOps: options.privilegedOps } : {}),
@@ -2541,7 +2554,8 @@ const dispatchObjectVerb = async (
           object_id: request.object_id,
           published_time: request.published_time,
           lock_token: request.lock_token,
-          actor: principal,
+          // Attribution only — the gate above already ran on `principal`.
+          actor: inheritActorFromLock(principal, record.lock?.owner_label),
           ...(request.producer ? { producer: request.producer } : {}),
         },
         { nowMs: ts, validationContext: context, ...options.publishDeps }

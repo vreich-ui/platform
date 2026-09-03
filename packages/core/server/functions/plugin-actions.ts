@@ -174,6 +174,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       httpMethod: 'POST',
       path: '/mcp',
       isBase64Encoded: false,
+      // Every call through this route is a Custom GPT, by construction — this
+      // IS the surface, not a guess at it. Set in-process so nothing a client
+      // sends can claim it (see LambdaEvent.pluginSurface in mcp.ts).
+      pluginSurface: 'plugin:openai-gpt',
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
