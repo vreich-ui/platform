@@ -1676,6 +1676,7 @@ export function ChatComposer({
   draftSeed,
   quote,
   above,
+  newChat,
   runMode,
 }: {
   status: ChatStatus | undefined;
@@ -1689,6 +1690,17 @@ export function ChatComposer({
   quote?: { token: number; text: string };
   /** The readiness strip mounts directly above the composer (plan §4). */
   above?: React.ReactNode;
+  /**
+   * "Start a new chat", right where the user types. Reported defect: when a
+   * conversation broke server-side, the only thing the user could do with the
+   * chat window was type "start new chat" INTO the dead thread — which posted
+   * another doomed message. A surface that hosts its own conversation
+   * (`AgentRail`'s `newChat`) passes the same descriptor here, so the escape
+   * is reachable from the chat window as well as from the rail header. The
+   * chip hides while a run is live, exactly like the suggestion chips: a new
+   * conversation mid-run would strand the run the user is watching.
+   */
+  newChat?: { control: { label: string; disabled: boolean; hint: string }; onStart: () => void };
   /**
    * A5: the run-mode segmented pill (`RunApprovalControls`), anchored to the
    * bottom-left of the input row — same corner Claude's own UI puts its
@@ -1772,6 +1784,19 @@ export function ChatComposer({
               {suggestion}
             </button>
           ))}
+        </div>
+      ) : null}
+      {!live && newChat ? (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            aria-label={newChat.control.hint}
+            disabled={newChat.control.disabled}
+            className="adm-focusable rounded-full border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)] disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={newChat.onStart}
+          >
+            {newChat.control.label}
+          </button>
         </div>
       ) : null}
       <div className="flex items-end gap-2">

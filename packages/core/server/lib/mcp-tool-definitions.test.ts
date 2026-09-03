@@ -106,6 +106,76 @@ describe('Tool definitions', () => {
     );
   });
 
+  /**
+   * Reported defect (brand-imagery wave): `delete_pdf_template` carried
+   * `chatDefaultOff`, so admin chat could not remove a PDF template at all and
+   * the agent reached for `object_checkout` on template ids instead. It is now
+   * `'ask'`-by-default (an approval card every time; the privileged floor
+   * above still forbids `'auto'`), which is proportionate for a soft,
+   * reversible, idempotent deactivation that preserves the stored bytes.
+   *
+   * The membership family and the two image-policy setters are UNCHANGED —
+   * this set is what proves it.
+   */
+  it('exactly these tools are chatDefaultOff: the two image-policy setters and the thirteen restricted membership tools — NOT delete_pdf_template', () => {
+    const expectedDefaultOff = new Set([
+      'set_image_search_policy',
+      'set_image_model_policy',
+      // W18 T18.6b: every membership write, plus the three restricted reads.
+      'member_audit',
+      'membership_policy_get',
+      'member_invite',
+      'invitation_resend',
+      'invitation_revoke',
+      'member_set_role',
+      'member_suspend',
+      'member_reinstate',
+      'member_remove',
+      'member_purge',
+      'ownership_transfer',
+      'membership_policy_set',
+      'member_export',
+    ]);
+
+    const defaultOff = new Set(TOOL_DEFINITIONS.filter((t) => t.governance.chatDefaultOff).map((t) => t.name));
+
+    assert.deepStrictEqual(defaultOff, expectedDefaultOff, 'chatDefaultOff set does not match expected list');
+    assert.ok(!defaultOff.has('delete_pdf_template'), 'delete_pdf_template must default to ask, not off');
+
+    // It stays privileged and ask-floored — the change removes the block, not the approval card.
+    const del = TOOL_DEFINITIONS.find((t) => t.name === 'delete_pdf_template');
+    assert.strictEqual(del?.governance.toolClass, 'privileged');
+    assert.strictEqual(del?.governance.autonomyFloor, 'ask');
+  });
+
+  /**
+   * The agent's second wrong turn: it tried `object_checkout` on PDF template
+   * ids, and then invented a 30-day hard-delete grace period for templates
+   * (that is the membership purge model). Both descriptions now say so
+   * explicitly, in both directions.
+   */
+  it('the pdf-template tools say they are NOT platform objects, and object_checkout/object_retire say the converse', () => {
+    const describe_ = (name: string) => TOOL_DEFINITIONS.find((t) => t.name === name)?.description ?? '';
+
+    for (const name of ['delete_pdf_template', 'get_pdf_template', 'list_pdf_templates']) {
+      const text = describe_(name);
+      assert.match(text, /NOT (a |)platform (CMS )?object|NOT PLATFORM OBJECTS/i, `${name} must deny object-hood`);
+      assert.match(text, /object_checkout/, `${name} must name object_checkout as inapplicable`);
+      assert.match(text, /object_retire|object_patch/, `${name} must name the other object verbs as inapplicable`);
+    }
+
+    const del = describe_('delete_pdf_template');
+    assert.match(del, /soft/i);
+    assert.match(del, /reversible/i);
+    assert.match(del, /NO grace period/i);
+    assert.match(del, /idempotent/i);
+
+    for (const name of ['object_checkout', 'object_retire']) {
+      assert.match(describe_(name), /pdf-tool PDF TEMPLATE/i, `${name} must say templates are not addressed here`);
+    }
+    assert.match(describe_('object_retire'), /delete_pdf_template/, 'object_retire must point at the right tool');
+  });
+
   it('every alias target in CHAT_TOOL_ALIASES exists as a definition name', () => {
     const toolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name));
     for (const [alias, target] of Object.entries(CHAT_TOOL_ALIASES)) {

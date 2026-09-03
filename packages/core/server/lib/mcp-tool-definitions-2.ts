@@ -241,7 +241,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'object_checkout',
     description:
-      'Acquire the record lease before patching. Returns lockToken and record_version (use it as expected_record_version).',
+      'Acquire the record lease before patching. Returns lockToken and record_version (use it as expected_record_version). GOVERNED CMS OBJECTS ONLY — the object_type enum is the complete list of what this addresses. Records owned by a bridged tool are NOT objects and have no lease here: a pdf-tool PDF TEMPLATE id in particular returns "Object record not found" every time, no matter how it is retried — read it with get_pdf_template and change it with create_pdf_template / publish_pdf_template / delete_pdf_template instead.',
     inputSchema: objectSchema(
       {
         object_type: objectTypeEnumSchema(),
@@ -485,7 +485,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'object_retire',
     description:
-      'RETIRE an object: the governed way to remove one (W14 F6). Archives the record (reversible — history is preserved, and a separate purge hard-deletes only after a 30-day grace period), REMOVES its committed export in the same commit, and — for a page — writes a 301 redirect from the retired route so no reader is dropped on a 404. Requires a held lock_token, exactly like patch and publish. REFUSED (409) when anything still references the object (the referrers are named — repoint or retire those first), when a review is open, or for the site singleton. The retirement commits to main with [skip netlify]: the live site keeps serving the old build until an explicit release_to_production, which is when the page actually disappears. Idempotent — retiring an already-archived object reports success.',
+      'RETIRE an object: the governed way to remove one (W14 F6) — a governed CMS OBJECT, of the object_type enum, and nothing else: a pdf-tool PDF TEMPLATE is not an object and is not retired here (it fails with "Object record not found"); deactivate one with delete_pdf_template, which is soft, reversible, and has NO grace period and no hard delete. Archives the record (reversible — history is preserved, and a separate purge hard-deletes only after a 30-day grace period; that grace period is THIS object purge, and applies to nothing outside it), REMOVES its committed export in the same commit, and — for a page — writes a 301 redirect from the retired route so no reader is dropped on a 404. Requires a held lock_token, exactly like patch and publish. REFUSED (409) when anything still references the object (the referrers are named — repoint or retire those first), when a review is open, or for the site singleton. The retirement commits to main with [skip netlify]: the live site keeps serving the old build until an explicit release_to_production, which is when the page actually disappears. Idempotent — retiring an already-archived object reports success.',
     inputSchema: objectSchema(
       {
         object_type: objectTypeEnumSchema(),
