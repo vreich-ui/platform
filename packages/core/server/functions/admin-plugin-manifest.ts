@@ -36,6 +36,7 @@ import { buildSkillZip, buildCoworkPlugin } from '../lib/plugin/export-claude.js
 import { buildGptConfigZip, GptInstructionsTooLongError } from '../lib/plugin/export-openai.js';
 import { buildGemInstructions } from '../lib/plugin/export-gemini.js';
 import { readVoiceRecord } from '../lib/plugin/read-voice.js';
+import { ensureMcpSiblings } from '../lib/agent/mcp-siblings.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -74,6 +75,21 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const access = await resolveAdminAccessFromEvent(event, context);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
+
+  /**
+   * This function reads the live tool surface through `visibleToolDefinitions()`,
+   * and that filter calls `requireSiblings()` — which throws by design in a
+   * process that never injected the /mcp siblings. This is a different lambda
+   * from /mcp, so nothing had ever injected them here: an authenticated GET
+   * threw "MCP server not configured" one line below the auth gate and Netlify
+   * answered a bare 502. Every test this endpoint had stopped at 401/403/405,
+   * so no test ever reached the throwing line.
+   *
+   * Derived from this function's OWN binding and guarded by `isMcpConfigured()`
+   * — it can never inject another tenant's handlers, and never downgrades a
+   * real /mcp shim that already injected a richer set.
+   */
+  ensureMcpSiblings(binding);
 
   const origin = originFromEvent(event);
   if (!origin)

@@ -10,21 +10,21 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { isMcpConfigured } from '../../functions/mcp.js';
-import { ensureMcpSiblingsForChat } from './mcp-siblings.js';
+import { ensureMcpSiblings } from './mcp-siblings.js';
 import { drlurieSiteBinding } from '../../../../../sites/drlurie/config/site-binding.js';
 
 describe('chat lambdas inject mcp.ts siblings', () => {
   it('configures the trio from the caller-supplied binding, then short-circuits', () => {
-    ensureMcpSiblingsForChat(drlurieSiteBinding);
+    ensureMcpSiblings(drlurieSiteBinding);
     assert.equal(isMcpConfigured(), true);
     // Idempotent: a warm instance re-entering the handler must not rebuild or
     // clobber (a real MCP shim may have injected a richer set).
-    ensureMcpSiblingsForChat(drlurieSiteBinding);
+    ensureMcpSiblings(drlurieSiteBinding);
     assert.equal(isMcpConfigured(), true);
   });
 
   it('objectStoreHandler is reachable — the exact call create_agent_artifact_job made when it failed', async () => {
-    ensureMcpSiblingsForChat(drlurieSiteBinding);
+    ensureMcpSiblings(drlurieSiteBinding);
     const { objectStoreHandler } = await import('../../functions/mcp.js');
     // Not asserting the RESULT (no blob store in a unit test) — only that the
     // sibling lookup itself no longer throws "MCP server not configured".
