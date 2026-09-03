@@ -171,6 +171,10 @@ test('anti-drift coverage guard: contract types match objectTypes exactly', () =
         'content_item',
         'tracking_config',
         'editorial_voice',
+        // Brand-imagery wave (BRIEF.md §3.1): the thirteenth object type,
+        // deliberately NOT a fourteenth GOVERNED one (see the GOVERNED const
+        // above and approval-policy.ts governedObjectTypes).
+        'visual_standard',
       ] as ObjectType[]),
     ].sort()
   );
@@ -238,4 +242,33 @@ test('W8.3b: creation_policy is served on every contract and reflects the inject
   }).creation_policy;
   assert.deepEqual(restricted.agents, { allowlist: ['site-builder'] });
   assert.match(restricted.note, /creation_restricted/);
+});
+
+// P4 (brand-imagery wave, BRIEF §3.7's overridePolicy read path): the
+// `brand_imagery_override_policy` constraint on object_contract('site') --
+// CMS-Agent's sitePrefetch.ts reads exactly this id/value pair, so both
+// strings are load-bearing.
+test('object_contract("site") carries the brand_imagery_override_policy constraint with the effective value', () => {
+  const findConstraint = (contract: ObjectContract) =>
+    contract.constraints.find((constraint) => constraint.id === 'brand_imagery_override_policy');
+
+  const defaulted = findConstraint(buildObjectContract('site'));
+  assert.ok(defaulted, 'the constraint is present by default');
+  assert.equal(defaulted!.value, 'allow', 'default guardrail is allow (R5)');
+
+  const allowed = findConstraint(buildObjectContract('site', { brandImageryOverridePolicy: 'allow' }));
+  assert.equal(allowed!.value, 'allow');
+
+  const locked = findConstraint(buildObjectContract('site', { brandImageryOverridePolicy: 'lock' }));
+  assert.equal(locked!.value, 'lock');
+
+  // Inert everywhere else -- the guardrail is a site-only setting.
+  for (const type of OBJECT_CONTRACT_TYPES) {
+    if (type === 'site') continue;
+    assert.equal(
+      findConstraint(buildObjectContract(type)),
+      undefined,
+      `${type} does not carry the site-only brand_imagery_override_policy constraint`
+    );
+  }
 });

@@ -665,6 +665,60 @@ const applyTheme: ChatTool = {
   describe: (args) => `Apply theme ${args.theme_id} to ${args.site_id}`,
 };
 
+// P3 (brand-imagery wave §3.3) — the imagery sibling of apply_theme: EXACTLY
+// one of visual_standard_id / theme_id (both or neither is refused by the
+// verb; the parse schema also refuses it up front so a malformed call never
+// reaches an approval card).
+const applyBrandImagery: ChatTool = {
+  name: 'apply_brand_imagery',
+  toolClass: 'privileged',
+  description:
+    "OWNER-ONLY. Apply a visual_standard's (house or template) or a theme's brandImagery to the site singleton (whole-block replace) under YOUR site checkout. Exactly one of visual_standard_id / theme_id. Publish/release stay separate deliberate steps.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      visual_standard_id: { type: 'string' },
+      theme_id: { type: 'string' },
+      site_id: { type: 'string' },
+      lock_token: { type: 'string' },
+      expected_record_version: { type: 'integer' },
+    },
+    required: ['site_id', 'lock_token', 'expected_record_version'],
+    additionalProperties: false,
+  },
+  parse: zodParse(
+    z
+      .object({
+        visual_standard_id: z.string().min(1).optional(),
+        theme_id: z.string().min(1).optional(),
+        site_id: z.string().min(1),
+        lock_token: z.string().min(1),
+        expected_record_version: z.number().int().nonnegative(),
+      })
+      .refine((value) => (value.visual_standard_id === undefined) !== (value.theme_id === undefined), {
+        message: 'Provide exactly one of visual_standard_id or theme_id.',
+      })
+  ),
+  execute: async (ctx, args) => {
+    // The role wall is here, at execution — independent of autonomy config.
+    if (!ctx.roles.includes('owner')) {
+      return { content: json({ error: 'apply_brand_imagery requires the Owner role.' }), is_error: true };
+    }
+    return verbResult(ctx, { action: 'apply_brand_imagery', ...args });
+  },
+  dryRun: async (ctx, args) =>
+    (
+      await ctx.verb({
+        action: 'apply_brand_imagery',
+        visual_standard_id: args.visual_standard_id,
+        theme_id: args.theme_id,
+        site_id: args.site_id,
+        dry_run: true,
+      })
+    ).body,
+  describe: (args) => `Apply brand imagery ${args.visual_standard_id ?? args.theme_id} to ${args.site_id}`,
+};
+
 // ─── PF4: workspace orchestration (CMS-Agent bridge; P3.1's surviving half) ──
 
 const CMS_AGENT_UNAVAILABLE = {
@@ -1788,6 +1842,7 @@ export const CHAT_TOOLS: readonly ChatTool[] = [
   publish,
   discard,
   applyTheme,
+  applyBrandImagery,
   listWorkspaceNodes,
   runWorkspaceWorkflow,
   getWorkspaceRun,

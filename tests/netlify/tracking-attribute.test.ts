@@ -38,6 +38,7 @@ import { taxonomyBodySchema } from '../../packages/core/schema/bodies/taxonomy-v
 import { templateBodySchema } from '../../packages/core/schema/bodies/template-v1.js';
 import { themeBodySchema } from '../../packages/core/schema/bodies/theme-v1.js';
 import { editorialVoiceBodySchema } from '../../packages/core/schema/bodies/editorial-voice-v1.js';
+import { visualStandardBodySchema } from '../../packages/core/schema/bodies/visual-standard-v1.js';
 import { productBodySchema } from '../../packages/core/schema/bodies/product-v1.js';
 import { trackingConfigBodySchema } from '../../packages/core/schema/bodies/tracking-config-v1.js';
 import { patchOpSchema, patchOpNamesByObjectType } from '../../packages/core/schema/object-patch-ops.js';
@@ -115,6 +116,10 @@ const BODIES: Record<ObjectType, { schema: { safeParse: (v: unknown) => { succes
   // editorial_voice likewise carries no tracking attribute (D1): a voice is
   // authoring law, never a tracked surface. Covered by editorial-voice.test.ts.
   editorial_voice: { schema: editorialVoiceBodySchema, body: null },
+  // visual_standard likewise carries no tracking attribute (brand-imagery
+  // wave, BRIEF.md §3.1): a mood board is never a reader-facing surface.
+  // Covered by visual-standard.test.ts.
+  visual_standard: { schema: visualStandardBodySchema, body: null },
 };
 
 test('the tracking shape parses on every attribute-carrying body; bodies without it still parse (additive guarantee)', () => {

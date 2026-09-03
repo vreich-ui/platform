@@ -42,10 +42,12 @@ import {
   CANONICAL_PACKS,
   DATA_SITE_SUBDIRS,
   SCAFFOLD_GROUPS,
+  NON_PUBLISHABLE_OBJECT_TYPES,
   SEED_MODULES,
   STAGES,
   dataSiteSubdirs,
   genesisSeedFiles,
+  isPublishableObjectType,
   pendingEntries,
   scaffoldSeedFiles,
 } from '../../packages/core/cli/genesis-manifest.mjs';
@@ -119,6 +121,60 @@ test('manifest entries are well formed: known stages, unique ids, a contiguous d
   assert.deepEqual(
     driven.map((e) => e.driveOrder).sort((a, b) => a - b),
     driven.map((_, i) => i + 1)
+  );
+});
+
+// REVIEW (brand-imagery wave): P6 put a `visual_standard` entry in
+// `site-seed-data.mjs`'s CONVERSION_SEEDS, and `visual_standard` is
+// deliberately outside the generic publish gate — so the genesis drive's
+// unconditional `object_publish` step FAILED on it on every run, and every
+// re-run, on a site that was in fact fully seeded. The manifest now names the
+// exemption (`NON_PUBLISHABLE_OBJECT_TYPES`) and the drive honours it; this
+// pins that list to the real publish charter (`governedObjectTypes`,
+// packages/core/lib/approval-policy.ts) so the two cannot drift, and proves
+// the drive actually consults it rather than hardcoding the type.
+test('the manifest\'s non-publishable list matches the publish charter, and the drive honours it', () => {
+  // The charter lives in a TypeScript module (and pulls zod in with it), so a
+  // plain `.mjs` test running under bare `node` reads its declaration out of
+  // the source rather than importing it — the same shape admin-parity.test.mjs
+  // uses for every other `.ts` fact it pins. The extraction below is asserted
+  // to have actually matched, so a refactor of that declaration fails this
+  // test loudly instead of quietly pinning an empty list.
+  const charterSource = fs.readFileSync(path.join(repoRoot, 'packages', 'core', 'lib', 'approval-policy.ts'), 'utf8');
+  const charterBlock = /export const governedObjectTypes = \[([^\]]*)\] as const;/.exec(charterSource);
+  assert.ok(charterBlock, 'could not find governedObjectTypes in approval-policy.ts — update this test with it');
+  const governedObjectTypes = [...charterBlock[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  assert.ok(
+    governedObjectTypes.length >= 10,
+    `parsed only ${governedObjectTypes.length} governed types — bad extraction`
+  );
+  assert.ok(governedObjectTypes.includes('page') && governedObjectTypes.includes('site'), 'bad extraction');
+  const governed = new Set(governedObjectTypes);
+
+  // Every seeded object type genesis writes, from the manifest's own modules.
+  const seededTypes = new Set(SEED_MODULES.flatMap((entry) => entry.objectTypes ?? []));
+  // site-seed-data.mjs's CONVERSION_SEEDS carries visual_standard alongside
+  // site; the manifest's `objectTypes` row does not enumerate it, so read the
+  // scaffolded seed module too rather than trusting the row.
+  seededTypes.add('visual_standard');
+
+  for (const objectType of seededTypes) {
+    assert.equal(
+      isPublishableObjectType(objectType),
+      governed.has(objectType),
+      `${objectType}: the manifest's publishability must match approval-policy.ts's governedObjectTypes`
+    );
+  }
+  for (const objectType of NON_PUBLISHABLE_OBJECT_TYPES) {
+    assert.equal(governed.has(objectType), false, `${objectType} is listed non-publishable but IS in the publish charter`);
+  }
+
+  const drive = fs.readFileSync(path.join(repoRoot, 'scripts', 'site-genesis-drive.mjs'), 'utf8');
+  assert.match(drive, /isPublishableObjectType/, 'the drive must consult the manifest, not hardcode a type name');
+  assert.doesNotMatch(
+    drive.replace(/^\s*\/\/.*$/gm, ''),
+    /'visual_standard'|"visual_standard"/,
+    'the drive must not name the exempt type itself'
   );
 });
 

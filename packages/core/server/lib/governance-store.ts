@@ -51,6 +51,15 @@ export const governanceDocSchema = z.object({
    *  legitimately set the canonical `search_artifacts` key without it being
    *  reinterpreted as its legacy meaning. */
   chat_tools_migrated: z.boolean().optional(),
+  /** Brand-imagery wave (BRIEF §3.7/R5): per-site guardrail on the `style`
+   *  override channel (create_agent_artifact_job). 'allow' (the default when
+   *  unset) lets an agent point a job at a visual_standard or a one-off
+   *  override; 'lock' makes the site's own brandImagery the only source --
+   *  the style channel is ignored (never an error) and reported in the job
+   *  response's overriddenFields. Read by brand-imagery-resolve.ts's
+   *  getBrandImageryOverridePolicy, the SAME doc the admin GovernancePage's
+   *  Visual identity guardrail card edits (owner-write, same as `approval`). */
+  brandImageryOverrides: z.enum(['allow', 'lock']).optional(),
   updated_by: z.string(),
   updated_at: z.string(),
   history: z.array(governanceHistoryEntrySchema),
@@ -87,7 +96,19 @@ export interface ActivePolicies {
   /** Task 3: the runtime chat-registry override, when one is set. Callers
    *  apply the effective default (`chat_registry ?? 'generated'`) themselves. */
   chat_registry?: 'legacy' | 'generated';
-  provenance: { approval: PolicyProvenance; creation: PolicyProvenance; learning_mode: PolicyProvenance };
+  /** U2 (BRIEF §3.7/R5): the `style` override channel guardrail, resolved the
+   *  same way as every other lever here — doc override when present, else the
+   *  hardcoded default 'allow'. getBrandImageryOverridePolicy resolves this
+   *  SAME field independently (it is called from the artifact-job path, which
+   *  does not otherwise need the rest of ActivePolicies); this copy is what
+   *  the admin GovernancePage's guardrail card reads for display. */
+  brandImageryOverrides: 'allow' | 'lock';
+  provenance: {
+    approval: PolicyProvenance;
+    creation: PolicyProvenance;
+    learning_mode: PolicyProvenance;
+    brandImageryOverrides: PolicyProvenance;
+  };
 }
 
 /**
@@ -109,11 +130,13 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
     creation: doc?.creation ?? activeCreationPolicy(),
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
+    brandImageryOverrides: doc?.brandImageryOverrides ?? 'allow',
     ...(doc?.chat_registry ? { chat_registry: doc.chat_registry } : {}),
     provenance: {
       approval: doc?.approval ? 'override' : 'committed',
       creation: doc?.creation ? 'override' : 'committed',
       learning_mode: doc?.learning_mode !== undefined ? 'override' : 'committed',
+      brandImageryOverrides: doc?.brandImageryOverrides !== undefined ? 'override' : 'committed',
     },
   };
 };

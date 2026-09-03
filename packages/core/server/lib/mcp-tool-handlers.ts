@@ -19,16 +19,30 @@
  */
 import { createHash } from 'node:crypto';
 import {
-  deriveBrandImageryFromTokens,
   fnv1aHash,
-  type BrandImageryComposition,
-  type BrandImageryLora,
+  parseBrandImagery,
+  toFiniteNumber,
   type BrandImageryRecord,
-  type ImageMedium,
 } from './brand-imagery-derive.js';
+import {
+  getBrandImageryOverridePolicy,
+  resolveEffectiveBrandImagery,
+  resolveImageSizeForContext,
+  resolveUsageContext,
+  toStyleInput,
+  type StyleSource,
+} from './brand-imagery-resolve.js';
 import { isNetlifyBuildHookConfigured, NetlifyBuildHookTriggerError, triggerNetlifyBuild } from './netlify-deploys.js';
 import { releaseToProduction } from './production-release.js';
 import { buildPdfToolStorageGrant } from './pdf-tool-storage-grant.js';
+import { injectPdfRenderDataBrand } from './pdf-render-brand.js';
+import { CmsAgentClient, isCmsAgentConfigured } from './agent/cms-agent-client.js';
+import { proposeBrandImagery, type BrandImageryProposeInput, type BrandImageryReferenceInput } from './brand-imagery-proxy.js';
+import {
+  generateVisualStandardExamplesWithDeps,
+  type VisualStandardExampleRecord,
+} from './brand-imagery-examples.js';
+import { publicPathForArtifactRef } from './artifact-trust.js';
 import {
   CAPTURE_BRIDGE_MAX_PAGES,
   validateCaptureBridgePolicy,
@@ -81,6 +95,7 @@ import { validateFilename, validateRequestId } from '../../lib/agents-naming.js'
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { normalizeArtifactKindInput } from './mcp-artifact-admin.js';
 import {
+  getArtifactBlobStore,
   getCommerceBlobStore,
   getCommerceEventsBlobStore,
   getIdempotencyBlobStore,
@@ -703,10 +718,36 @@ const pollArtifactJobForInlineWait = async (
   scope: ArtifactBridgeScope,
   grant: Extract<ReturnType<typeof buildArtifactBridgeGrant>, { ok: true }>['grant'],
   jobId: string,
-  basePayload: Record<string, unknown>
+  basePayload: Record<string, unknown>,
+  /**
+   * REVIEW (brand-imagery wave): the fields ONLY Platform can compute
+   * (`styleSource`, `overriddenFields`, its own `warnings`). pdf-tool echoes
+   * a best-effort `styleSource` of its own — 'override' | 'visual_standard',
+   * derived from the request alone (it has neither the site's brandImagery
+   * nor its visual_standard objects) — and `...safeStatus` is spread AFTER
+   * `basePayload`, so on the COMPLETED inline path (the default: `wait`
+   * defaults to true, and the tool advertises that a fast job often finishes
+   * inside the create call) pdf-tool's guess overwrote Platform's answer. A
+   * locked site therefore reported styleSource 'override' — telling the
+   * agent its override had been honoured at the exact moment it was ignored,
+   * the opposite of R5's reporting contract — and Platform's
+   * `usage_context_not_in_policy` warning was dropped the same way. These are
+   * re-applied last on every terminal response; `warnings` MERGE (Platform's
+   * first) rather than replace, since pdf-tool's are about the render.
+   */
+  platformAuthoritative: Record<string, unknown> = {}
 ): Promise<
   { terminal: false } | { terminal: true; response: ReturnType<typeof toolResult> | ReturnType<typeof toolError> }
 > => {
+  const asStringList = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  const withPlatformAuthority = (merged: Record<string, unknown>): Record<string, unknown> => {
+    const warnings = [
+      ...new Set([...asStringList(platformAuthoritative.warnings), ...asStringList(merged.warnings)]),
+    ];
+    return { ...merged, ...platformAuthoritative, ...(warnings.length > 0 ? { warnings } : {}) };
+  };
+
   const status = await getPlatformArtifactJobStatus(grant, jobId);
   if (!status.ok) {
     // A transient status-lookup hiccup shouldn't fail the whole create call
@@ -731,7 +772,7 @@ const pollArtifactJobForInlineWait = async (
     // Terminal failure: surface it (status: 'failed' + whatever error detail
     // pdf-tool sent) directly in this call's response instead of swallowing
     // it into the generic pending/202 shape.
-    return { terminal: true, response: toolResult({ ...basePayload, ...safeStatus }) };
+    return { terminal: true, response: toolResult(withPlatformAuthority({ ...basePayload, ...safeStatus })) };
   }
 
   const claimed =
@@ -762,13 +803,15 @@ const pollArtifactJobForInlineWait = async (
   });
   return {
     terminal: true,
-    response: toolResult({
-      ...basePayload,
-      ...safeStatus,
-      artifactReference: verified.canonical.artifactReference,
-      public_path: verified.canonical.publicPath,
-      verified: true,
-    }),
+    response: toolResult(
+      withPlatformAuthority({
+        ...basePayload,
+        ...safeStatus,
+        artifactReference: verified.canonical.artifactReference,
+        public_path: verified.canonical.publicPath,
+        verified: true,
+      })
+    ),
   };
 };
 
@@ -785,22 +828,6 @@ const pollArtifactJobForInlineWait = async (
 // Types and the FNV-1a helper live in brand-imagery-derive.ts alongside the
 // brandTokens-derived fallback that produces the same record shape.
 type ImageLoraRef = { path: string; scale?: number };
-
-const IMAGE_MEDIUMS = new Set<ImageMedium>(['photograph', 'digital_illustration', 'flat_vector', 'editorial_collage']);
-
-const toFiniteNumber = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-
-const toMedium = (value: unknown): ImageMedium | undefined => {
-  const str = toNonEmptyString(value);
-  return str && (IMAGE_MEDIUMS as Set<string>).has(str) ? (str as ImageMedium) : undefined;
-};
-
-const toStringArray = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) return undefined;
-  const items = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-  return items.length > 0 ? items : undefined;
-};
 
 // Agent-supplied loras wire shape (pdf-tool's ImageLoraRef: path + optional
 // scale) -- distinct from the site's brandImagery.lora (url + optional
@@ -819,97 +846,13 @@ const toLoraList = (value: unknown): ImageLoraRef[] | undefined => {
   return loras.length > 0 ? loras : undefined;
 };
 
-const toComposition = (value: unknown): BrandImageryComposition | undefined => {
-  const record = getRecordValue(value);
-  if (!record) return undefined;
-  const composition: BrandImageryComposition = {};
-  const subjectScale = toNonEmptyString(record.subjectScale);
-  if (subjectScale) composition.subjectScale = subjectScale;
-  const cropRule = toNonEmptyString(record.cropRule);
-  if (cropRule) composition.cropRule = cropRule;
-  const depthOfField = toNonEmptyString(record.depthOfField);
-  if (depthOfField) composition.depthOfField = depthOfField;
-  return Object.keys(composition).length > 0 ? composition : undefined;
-};
-
-const toAspectRatios = (value: unknown): Record<string, string> | undefined => {
-  const record = getRecordValue(value);
-  if (!record) return undefined;
-  const ratios: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(record)) {
-    const ratio = toNonEmptyString(raw);
-    if (ratio) ratios[key] = ratio;
-  }
-  return Object.keys(ratios).length > 0 ? ratios : undefined;
-};
-
-const toLora = (value: unknown): BrandImageryLora | undefined => {
-  const record = getRecordValue(value);
-  const url = toNonEmptyString(record?.url);
-  if (!url) return undefined;
-  const scale = toFiniteNumber(record?.scale);
-  const triggerPhrase = toNonEmptyString(record?.triggerPhrase);
-  const version = toNonEmptyString(record?.version);
-  const modelEndpoint = toNonEmptyString(record?.modelEndpoint);
-  return {
-    url,
-    ...(scale === undefined ? {} : { scale }),
-    ...(triggerPhrase ? { triggerPhrase } : {}),
-    ...(version ? { version } : {}),
-    ...(modelEndpoint ? { modelEndpoint } : {}),
-  };
-};
-
-const parseBrandImagery = (body: Record<string, unknown> | undefined): BrandImageryRecord | undefined => {
-  const raw = getRecordValue(body?.brandImagery);
-  if (!raw) return undefined;
-  const medium = toMedium(raw.medium);
-  const styleSentence = toNonEmptyString(raw.styleSentence);
-  const palette = toStringArray(raw.palette);
-  const seedBase = toFiniteNumber(raw.seedBase);
-  // version/medium/styleSentence/palette/seedBase are all REQUIRED by the
-  // site.v1 schema -- a stored record missing one of them failed to write
-  // validly, so degrade to "no brandImagery" (additive contract, never a
-  // hard failure -- rule 3, backward-compatible passthrough) instead of
-  // half-applying an incomplete contract.
-  if (raw.version !== 1 || !medium || !styleSentence || !palette || seedBase === undefined) return undefined;
-  return {
-    version: 1,
-    medium,
-    styleSentence,
-    palette,
-    negative: toStringArray(raw.negative) ?? [],
-    composition: toComposition(raw.composition),
-    aspectRatios: toAspectRatios(raw.aspectRatios),
-    seedBase,
-    lora: toLora(raw.lora),
-  };
-};
-
-// Read-only site lookup reusing the SAME object-store access path
-// resolveArtifactBridgeScope already uses for content_item ownership --
-// there is exactly one store-access seam in this file, not a second one.
-// Any lookup failure (site object absent, transient error) degrades to "no
-// brandImagery" rather than failing the job: this is an additive style
-// contract, not a required one (rule 3 -- backward compatible passthrough).
-// A site that never declared brandImagery still has a governed palette (the
-// theme-apply funnel is brandTokens' one writer), so rather than generating
-// with no visual identity at all we DERIVE a contract from those tokens --
-// deterministic, unstored, and superseded the moment a real brandImagery
-// block is declared. `source` tells the caller which of the two applied so it
-// can be surfaced rather than silently guessed at.
-type LoadedBrandImagery = { brand: BrandImageryRecord; source: 'declared' | 'derived' };
-
-const loadSiteBrandImagery = async (event: LambdaEvent, siteId: string): Promise<LoadedBrandImagery | undefined> => {
-  const lookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
-  if ('isError' in lookup) return undefined;
-  const record = getRecordValue(lookup.record);
-  const body = getRecordValue(record?.body);
-  const declared = parseBrandImagery(body);
-  if (declared) return { brand: declared, source: 'declared' };
-  const derived = deriveBrandImageryFromTokens(body, siteId);
-  return derived ? { brand: derived, source: 'derived' } : undefined;
-};
+// parseBrandImagery/toFiniteNumber moved to brand-imagery-derive.ts (P4,
+// brand-imagery wave) so brand-imagery-resolve.ts's pure resolver can share
+// them without importing this handler file. Imported above. The site-body
+// fetch + declared/derived resolution that used to live in a dedicated
+// loadSiteBrandImagery() here now flows straight into resolveEffectiveBrandImagery
+// (brand-imagery-resolve.ts), inline in callCreateAgentArtifactJob below --
+// one store-access seam, one resolution path, whether or not `style` is used.
 
 // Fits a signed 32-bit int -- the common range image-model seed params
 // accept -- and keeps `seedBase % SAFE_SEED_BOUND` inside float64's exact-
@@ -985,8 +928,124 @@ const assembleBrandAwareImageRequest = (brand: BrandImageryRecord, agent: BrandA
   return { prompt, negativePrompt, seed, loras, overriddenFields };
 };
 
-export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Record<string, unknown>) => {
-  const scoped = await resolveArtifactBridgeScope(event, input);
+// ── P5 (brand-imagery wave, BRIEF §3.5): the thin `brand_imagery_propose`
+// proxy. One module-level CmsAgentClient (same lifetime/reuse posture as
+// admin-agent-chat.ts's `cmsAgentClient` — one client per process, its
+// session id and agent-ref cache carried across calls). The real work
+// (building the writer input, resolving references, validating the
+// proposal) lives in brand-imagery-proxy.ts; this handler only wires real
+// dependencies (the CmsAgent bridge, this site's own artifact blob store for
+// region-cropping bytes, and its public URL for the non-cropped case). No
+// object-store read or write happens anywhere in this path.
+const brandImageryCmsAgentClient = new CmsAgentClient();
+
+const toBrandImageryReference = (value: unknown): BrandImageryReferenceInput | undefined => {
+  const record = getRecordValue(value);
+  if (!record) return undefined;
+  const blobKey = toNonEmptyString(record.blob_key);
+  const url = toNonEmptyString(record.url);
+  const regionRecord = getRecordValue(record.region);
+  const rx = toFiniteNumber(regionRecord?.x);
+  const ry = toFiniteNumber(regionRecord?.y);
+  const rw = toFiniteNumber(regionRecord?.w);
+  const rh = toFiniteNumber(regionRecord?.h);
+  const region = rx !== undefined && ry !== undefined && rw !== undefined && rh !== undefined ? { x: rx, y: ry, w: rw, h: rh } : undefined;
+  const note = toNonEmptyString(record.note);
+  const weight = toFiniteNumber(record.weight);
+  if (!blobKey && !url) return undefined;
+  return {
+    ...(blobKey ? { blobKey } : {}),
+    ...(url ? { url } : {}),
+    ...(region ? { region } : {}),
+    ...(note ? { note } : {}),
+    ...(weight !== undefined ? { weight } : {}),
+  };
+};
+
+export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  if (!isCmsAgentConfigured()) {
+    return toolError('The workspace orchestration bridge is not configured for this site.', {
+      error_code: 'cms_agent_not_configured',
+    });
+  }
+
+  const mode = toNonEmptyString(input.mode);
+  if (mode !== 'house' && mode !== 'template') {
+    return toolError('mode must be "house" or "template".', {
+      error_code: 'brand_imagery_propose_invalid_mode',
+      statusCode: 400,
+    });
+  }
+
+  const referencesInput = Array.isArray(input.references) ? input.references : undefined;
+  const references = referencesInput
+    ?.map(toBrandImageryReference)
+    .filter((reference): reference is BrandImageryReferenceInput => reference !== undefined);
+
+  // Never caller-supplied: this site's OWN CMS-Agent project, from the
+  // authenticated site binding, exactly like every other CmsAgent call site.
+  const proposeInput: BrandImageryProposeInput = {
+    projectId: getSiteIdentity().cmsAgentProjectId,
+    mode,
+    ...(toNonEmptyString(input.visual_standard_id) ? { visualStandardId: toNonEmptyString(input.visual_standard_id) } : {}),
+    ...(references && references.length > 0 ? { references } : {}),
+    ...(toNonEmptyString(input.brief) ? { brief: toNonEmptyString(input.brief) } : {}),
+    ...(input.existing_brand_imagery !== undefined ? { existingBrandImagery: input.existing_brand_imagery } : {}),
+    ...(toNonEmptyString(input.template_slug) ? { templateSlug: toNonEmptyString(input.template_slug) } : {}),
+  };
+
+  const artifactStore = (await getArtifactBlobStore(event)) as {
+    get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null>;
+  };
+  const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
+
+  const result = await proposeBrandImagery(proposeInput, {
+    cmsAgent: brandImageryCmsAgentClient,
+    resolveBlobUrl: (blobKey) => `${baseUrl}${publicPathForArtifactRef(blobKey)}`,
+    readBlobBytes: async (blobKey) => {
+      try {
+        const raw = await artifactStore.get(blobKey, { type: 'arrayBuffer' });
+        return raw ? Buffer.from(raw) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    log: event.log,
+  });
+
+  if (!result.ok) {
+    return toolError(result.error, {
+      error_code: result.errorCode,
+      statusCode: result.status,
+      ...(result.detail ?? {}),
+    });
+  }
+  return toolResult(result.body);
+};
+
+/**
+ * REVIEW (brand-imagery wave): `presolvedScope` is the ONE way a job can skip
+ * `resolveArtifactBridgeScope`, and it is reachable only from inside this
+ * module — mcp.ts's dispatch calls this with `(event, input)` and nothing
+ * else, so no tool argument can forge it and the content_item-ownership wall
+ * every agent-reachable call hits is untouched.
+ *
+ * It exists because X1's example generator is a PLATFORM-INTERNAL caller with
+ * no content_item to own its artifacts: it mints its own
+ * `req_visimg_<standard>_<context>_<date>_<nn>` request id, and the ownership
+ * lookup therefore failed with `artifact_request_not_found` on every single
+ * example job — which is why not one example image was ever produced, on any
+ * trigger. The check it skips is an authorization check on the CALLER's claim
+ * to a request; a scope this module computed itself has no claim to check.
+ */
+export const callCreateAgentArtifactJob = async (
+  event: LambdaEvent,
+  input: Record<string, unknown>,
+  presolvedScope?: ArtifactBridgeScope
+) => {
+  const scoped = presolvedScope
+    ? ({ ok: true, scope: presolvedScope } as const)
+    : await resolveArtifactBridgeScope(event, input);
   if (!scoped.ok) return scoped.result;
   const artifactKind = toNonEmptyString(input.artifact_kind);
   const filename = toNonEmptyString(input.filename);
@@ -1006,14 +1065,63 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
   let lorasOverride = toLoraList(input.loras);
   let brandOverriddenFields: string[] = [];
   let brandImagerySource: 'declared' | 'derived' | undefined;
+  let styleSourceForResponse: StyleSource | undefined;
+  let requirementsOverride =
+    input.requirements && typeof input.requirements === 'object' && !Array.isArray(input.requirements)
+      ? (input.requirements as Record<string, unknown>)
+      : undefined;
+  const sizeUsageWarnings: string[] = [];
+
+  // P4 (brand-imagery wave, BRIEF §3.4): the `style` override channel, always
+  // forwarded to pdf-tool verbatim (it stores/echoes it, never resolves it --
+  // see PlatformArtifactJobInput's `style` doc comment) regardless of
+  // artifactKind/operation. undefined for an absent OR all-empty style block.
+  const styleInputParsed = toStyleInput(input.style);
 
   // Rule 1: image-GENERATION jobs only -- never template renders (artifactKind
   // "pdf"), never edits (a masked_edit/image_variation/deterministic_transform
   // job carries no `prompt` at all).
   if (artifactKind === 'image' && (operationInput ?? 'generate') === 'generate') {
-    const loaded = await loadSiteBrandImagery(event, scoped.scope.siteId);
-    if (loaded) {
-      const assembled = assembleBrandAwareImageRequest(loaded.brand, {
+    const siteLookup = await invokeObjectStore(event, {
+      action: 'get',
+      object_type: 'site',
+      object_id: scoped.scope.siteId,
+    });
+    const siteRecord = 'isError' in siteLookup ? undefined : getRecordValue(siteLookup.record);
+    const siteBody = getRecordValue(siteRecord?.body);
+    const declaredBrand = parseBrandImagery(siteBody);
+
+    // The guardrail store is a runtime override read (governance-store.ts) --
+    // only consult it when the caller actually supplied a style block, so a
+    // job that never touches `style` costs no extra round trip.
+    const policy = styleInputParsed
+      ? await getBrandImageryOverridePolicy(scoped.scope.siteId, event)
+      : ('allow' as const);
+
+    let standardBrand: BrandImageryRecord | undefined;
+    if (policy === 'allow' && styleInputParsed?.visualStandardId) {
+      const standardLookup = await invokeObjectStore(event, {
+        action: 'get',
+        object_type: 'visual_standard',
+        object_id: styleInputParsed.visualStandardId,
+      });
+      if (!('isError' in standardLookup)) {
+        const standardRecord = getRecordValue(standardLookup.record);
+        standardBrand = parseBrandImagery(getRecordValue(standardRecord?.body));
+      }
+    }
+
+    const resolved = resolveEffectiveBrandImagery(
+      { siteId: scoped.scope.siteId, brandImagery: declaredBrand, body: siteBody },
+      standardBrand,
+      styleInputParsed,
+      policy
+    );
+    styleSourceForResponse = resolved.styleSource;
+    if (resolved.overriddenFields.length > 0) brandOverriddenFields = resolved.overriddenFields;
+
+    if (resolved.brandImagery) {
+      const assembled = assembleBrandAwareImageRequest(resolved.brandImagery, {
         subject: promptOverride,
         negativePrompt: negativePromptOverride,
         requestId: scoped.scope.requestId,
@@ -1025,17 +1133,71 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
       negativePromptOverride = assembled.negativePrompt;
       seedOverride = assembled.seed;
       lorasOverride = assembled.loras;
-      brandOverriddenFields = assembled.overriddenFields;
-      brandImagerySource = loaded.source;
+      brandOverriddenFields = [...brandOverriddenFields, ...assembled.overriddenFields];
+      brandImagerySource =
+        resolved.styleSource === 'site' ? 'declared' : resolved.styleSource === 'derived' ? 'derived' : undefined;
       event.log?.({
         event: 'brand_prompt_assembled',
         siteId: scoped.scope.siteId,
         requestId: scoped.scope.requestId,
-        brandImagerySource: loaded.source,
+        brandImagerySource: brandImagerySource ?? resolved.styleSource,
+        styleSource: resolved.styleSource,
         overriddenFields: brandOverriddenFields,
         derivedSeedPresent: assembled.seed !== undefined,
       });
+
+      // aspectRatios[usageContext] -> requirements.image.size (nearest of the
+      // 5 allowed sizes) when the caller omitted size. A usageContext not in
+      // this project's image-model-policy keys is coerced to article_body and
+      // reported in `warnings` -- never an error.
+      const imageRequirements = getRecordValue(requirementsOverride?.image);
+      if (imageRequirements) {
+        const requestedContext = toNonEmptyString(imageRequirements.usageContext);
+        let policyContexts: string[] | undefined;
+        if (requestedContext) {
+          const modelPolicy = await getPlatformImageModelPolicy(built.grant);
+          const contexts = modelPolicy.ok ? modelPolicy.body.contexts : undefined;
+          policyContexts = Array.isArray(contexts) ? contexts.filter((c): c is string => typeof c === 'string') : undefined;
+        }
+        const { usageContext: effectiveContext, warnings: contextWarnings } = resolveUsageContext(
+          requestedContext,
+          policyContexts
+        );
+        sizeUsageWarnings.push(...contextWarnings);
+
+        const explicitSize = toNonEmptyString(imageRequirements.size);
+        const mappedSize = explicitSize
+          ? undefined
+          : resolveImageSizeForContext(effectiveContext, resolved.brandImagery.aspectRatios);
+
+        const requirementsPatch: Record<string, unknown> = {};
+        if (requestedContext && effectiveContext !== requestedContext) requirementsPatch.usageContext = effectiveContext;
+        if (!explicitSize && mappedSize) requirementsPatch.size = mappedSize;
+
+        if (Object.keys(requirementsPatch).length > 0) {
+          requirementsOverride = { ...requirementsOverride, image: { ...imageRequirements, ...requirementsPatch } };
+        }
+      }
     }
+  }
+
+  // FIX-3: a template-render pdf job (artifactKind "pdf", a templateId
+  // present -- edits/masked-patches carry no renderDataSchema to satisfy)
+  // gets `data.brand` filled from the site's brandTokens when the caller
+  // didn't already supply one. Only Platform has brandTokens; pdf-tool's own
+  // deterministic mapper deliberately refuses to invent it. See
+  // pdf-render-brand.ts for the exact shape and the no-brandTokens fallback.
+  const templateIdInput = toNonEmptyString(input.template_id);
+  let dataOverride = input.data;
+  if (artifactKind === 'pdf' && templateIdInput) {
+    const siteLookup = await invokeObjectStore(event, {
+      action: 'get',
+      object_type: 'site',
+      object_id: scoped.scope.siteId,
+    });
+    const siteRecord = 'isError' in siteLookup ? undefined : getRecordValue(siteLookup.record);
+    const siteBody = getRecordValue(siteRecord?.body);
+    dataOverride = injectPdfRenderDataBrand(siteBody, input.data);
   }
 
   const jobInput: PlatformArtifactJobInput = {
@@ -1047,16 +1209,15 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     ...(negativePromptOverride ? { negativePrompt: negativePromptOverride } : {}),
     ...(slotInput ? { slot: slotInput } : {}),
     ...(toNonEmptyString(input.model) ? { model: toNonEmptyString(input.model) } : {}),
-    ...(input.requirements && typeof input.requirements === 'object' && !Array.isArray(input.requirements)
-      ? { requirements: input.requirements as Record<string, unknown> }
-      : {}),
-    ...(toNonEmptyString(input.template_id) ? { templateId: toNonEmptyString(input.template_id) } : {}),
-    ...(input.data !== undefined ? { data: input.data } : {}),
+    ...(requirementsOverride ? { requirements: requirementsOverride } : {}),
+    ...(templateIdInput ? { templateId: templateIdInput } : {}),
+    ...(dataOverride !== undefined ? { data: dataOverride } : {}),
     ...(input.assets && typeof input.assets === 'object' && !Array.isArray(input.assets)
       ? { assets: input.assets as { images?: unknown[] } }
       : {}),
     ...(seedOverride !== undefined ? { seed: seedOverride } : {}),
     ...(lorasOverride ? { loras: lorasOverride } : {}),
+    ...(styleInputParsed ? { style: styleInputParsed } : {}),
   };
   const created = await createPlatformArtifactJob(built.grant, jobInput);
   if (!created.ok) return pdfToolBridgeError(created);
@@ -1071,6 +1232,19 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     jobId,
   });
   const { polling: _pdfToolPolling, ...safeBody } = created.body;
+  // REVIEW: the subset of this response only Platform can compute. Kept as
+  // one bag so the pending shape and every terminal inline-wait shape report
+  // exactly the same values — see pollArtifactJobForInlineWait's
+  // `platformAuthoritative` for what went wrong when they did not.
+  const platformAuthoritative: Record<string, unknown> = {
+    // P4 (BRIEF §3.4): the resolved style channel source, replacing whatever
+    // best-effort styleSource pdf-tool itself echoed -- pdf-tool has neither
+    // the site's brandImagery nor its visual_standard objects, so only
+    // Platform can compute the real value.
+    ...(styleSourceForResponse ? { styleSource: styleSourceForResponse } : {}),
+    ...(brandOverriddenFields.length > 0 ? { overriddenFields: brandOverriddenFields } : {}),
+    ...(sizeUsageWarnings.length > 0 ? { warnings: sizeUsageWarnings } : {}),
+  };
   // Today's response shape -- ALWAYS present, on every path (fast-completed,
   // failed-inline, timed-out, or wait:false), so an existing polling caller
   // that only looks at jobId + polling keeps working unchanged.
@@ -1083,7 +1257,7 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
     // Additive: tells the caller a brand contract shaped this job, and whether
     // it was the site's declared block or one derived from its brandTokens.
     ...(brandImagerySource ? { brandImagerySource } : {}),
-    ...(brandOverriddenFields.length > 0 ? { overriddenFields: brandOverriddenFields } : {}),
+    ...platformAuthoritative,
   };
 
   if (!wait) return toolResult(pendingResponsePayload);
@@ -1094,7 +1268,14 @@ export const callCreateAgentArtifactJob = async (event: LambdaEvent, input: Reco
 
   while (Date.now() < deadline) {
     pollCount += 1;
-    const polled = await pollArtifactJobForInlineWait(event, scoped.scope, built.grant, jobId, pendingResponsePayload);
+    const polled = await pollArtifactJobForInlineWait(
+      event,
+      scoped.scope,
+      built.grant,
+      jobId,
+      pendingResponsePayload,
+      platformAuthoritative
+    );
     if (polled.terminal) {
       event.log?.({
         event: 'artifact_bridge_job_inline_wait_resolved',
@@ -1985,10 +2166,230 @@ export const callSetImageModelPolicy = async (event: LambdaEvent, input: Record<
   return toolResult({ ...saved.body, siteId: scoped.siteId });
 };
 
+// ── X1 (brand-imagery wave, BRIEF §3.1/R9, last/cosmetic): example images
+// per visual standard. Both trigger moments the brief names -- "apply" (an
+// agent's site_apply_brand_imagery) and "propose-accept" (the CMS-Agent
+// visual_standard_materializer's object_create/object_patch of a
+// visual_standard, BRIEF §3.5) -- reach Platform through this SAME MCP verb
+// dispatch (callObjectAction), since both are tool calls a workflow node
+// makes over CmsAgentClient's mirror, ProjectMcpAdapter. A human's browser
+// click on ImageryBoard.tsx's "Make this the site's imagery" or its mood-
+// board save goes through the SEPARATE admin-object.ts (Netlify-Identity)
+// endpoint, which shares object-verbs.ts's core but not this file -- out of
+// X1's file boundary, so it is deliberately NOT hooked here (see the task
+// report). The admin's "Regenerate examples" affordance closes that gap for
+// a human: it asks the agent to clear examples[] via the ordinary
+// set_visual_standard_fields op, which lands right back on this same path.
+//
+// All DECISIONS (hash, plan, merge) live in brand-imagery-examples.ts; this
+// is the thin, best-effort integration layer -- it never throws out of
+// callObjectAction, and it never delays a failed object-store write (only a
+// SUCCESSFUL create/patch/apply can trigger it).
+const VISUAL_STANDARD_EXAMPLE_TRIGGER_ACTIONS = new Set(['create', 'patch', 'apply_brand_imagery']);
+
+const getVisualStandardBodyForExamples = async (
+  event: LambdaEvent,
+  visualStandardId: string
+): Promise<Record<string, unknown> | undefined> => {
+  const lookup = await invokeObjectStore(event, {
+    action: 'get',
+    object_type: 'visual_standard',
+    object_id: visualStandardId,
+  });
+  if ('isError' in lookup) return undefined;
+  const record = getRecordValue(lookup.record);
+  return getRecordValue(record?.body);
+};
+
+/**
+ * The lease this write rides. REVIEW (brand-imagery wave): the generator used
+ * to ALWAYS take its own checkout — which can never succeed when the trigger
+ * is an `object_patch`, because `object_patch` REQUIRES a live lock and
+ * check-in is a separate later call, so the caller is still holding it when
+ * this runs. `checkoutObjectLock` refuses ANY active lock (423, regardless of
+ * owner), so every regenerate-through-a-patch round generated up to three
+ * real, paid image jobs and then dropped them on the floor in silence. When
+ * the trigger already holds the lease, the write rides THAT lease and leaves
+ * check-in to its owner.
+ */
+type HeldObjectLease = { lockToken: string; recordVersion?: number };
+
+/** Best-effort set_visual_standard_fields(examples), under the trigger's own
+ * lease when it has one, and otherwise under a checkout → patch → checkin of
+ * its own (the sequence the CMS-Agent materializer uses for this same object
+ * type) -- own lease released in a `finally`, never left dangling. */
+const persistVisualStandardExamples = async (
+  event: LambdaEvent,
+  visualStandardId: string,
+  examples: VisualStandardExampleRecord[],
+  held?: HeldObjectLease
+): Promise<void> => {
+  const patchUnder = async (lockToken: string, recordVersion: number | undefined): Promise<void> => {
+    const patched = await invokeObjectStore(event, {
+      action: 'patch',
+      object_type: 'visual_standard',
+      object_id: visualStandardId,
+      lock_token: lockToken,
+      ...(recordVersion !== undefined ? { expected_record_version: recordVersion } : {}),
+      ops: [{ op: 'set_visual_standard_fields', fields: { examples } }],
+      agent_name: 'brand_imagery_examples',
+    });
+    // REVIEW: a refused write here USED to be the end of the story, in
+    // silence -- the images had already been generated and paid for. Say so.
+    if ('isError' in patched) {
+      event.log?.({
+        event: 'visual_standard_examples_persist_refused',
+        visualStandardId,
+        detail: patched.structuredContent,
+      });
+    }
+  };
+
+  if (held) {
+    await patchUnder(held.lockToken, held.recordVersion);
+    return;
+  }
+
+  const checkout = await invokeObjectStore(event, {
+    action: 'checkout',
+    object_type: 'visual_standard',
+    object_id: visualStandardId,
+    agent_name: 'brand_imagery_examples',
+  });
+  if ('isError' in checkout) return;
+  const lockToken = toNonEmptyString(checkout.lockToken);
+  if (!lockToken) return;
+  const recordVersion = typeof checkout.record_version === 'number' ? checkout.record_version : undefined;
+  try {
+    await patchUnder(lockToken, recordVersion);
+  } finally {
+    await invokeObjectStore(event, {
+      action: 'checkin',
+      object_type: 'visual_standard',
+      object_id: visualStandardId,
+      lock_token: lockToken,
+      agent_name: 'brand_imagery_examples',
+    }).catch(() => undefined);
+  }
+};
+
+/** Reuses callCreateAgentArtifactJob verbatim (P4's style-override resolver,
+ * the aspectRatios→size mapping, brand-aware prompt assembly, and the inline
+ * wait/poll/verify loop) rather than re-deriving any of it -- an example job
+ * is, deliberately, just an ordinary agent-triggered image job whose caller
+ * happens to be this file instead of an external tool call. */
+const createVisualStandardExampleJob = async (
+  event: LambdaEvent,
+  input: Record<string, unknown>
+): Promise<{ ok: boolean; blobKey?: string }> => {
+  // The scope is this module's OWN (see callCreateAgentArtifactJob's
+  // `presolvedScope`): an example belongs to a visual_standard, never to a
+  // content_item, so there is no ownership claim to verify — and verifying
+  // one is what silently killed every example job before this.
+  const result = await callCreateAgentArtifactJob(event, input, {
+    siteId: toNonEmptyString(input.site_id) ?? getSiteIdentity().siteId,
+    requestId: toNonEmptyString(input.request_id) ?? '',
+  });
+  if ('isError' in result) return { ok: false };
+  const structured = getRecordValue((result as { structuredContent?: unknown }).structuredContent);
+  const artifactReference = getRecordValue(structured?.artifactReference);
+  const blobKey = toNonEmptyString(artifactReference?.blobKey);
+  return blobKey ? { ok: true, blobKey } : { ok: false };
+};
+
+const maybeGenerateVisualStandardExamples = async (
+  event: LambdaEvent,
+  visualStandardId: string,
+  body: Record<string, unknown>,
+  held?: HeldObjectLease
+): Promise<void> => {
+  await generateVisualStandardExamplesWithDeps(
+    {
+      siteId: getSiteIdentity().siteId,
+      now: () => Date.now(),
+      createExampleJob: (input) => createVisualStandardExampleJob(event, input),
+      persistExamples: (id, examples) => persistVisualStandardExamples(event, id, examples, held),
+      log: (entry) => event.log?.(entry),
+    },
+    visualStandardId,
+    {
+      sampleSubjects: Array.isArray(body.sampleSubjects) ? body.sampleSubjects : [],
+      brandImagery: body.brandImagery,
+      examples: Array.isArray(body.examples) ? (body.examples as VisualStandardExampleRecord[]) : [],
+    }
+  );
+};
+
+/** Never throws -- a failure here must never turn a SUCCESSFUL object-store
+ * write into a failed tool call for the caller (apply/propose-accept still
+ * succeeded; only the examples side effect was best-effort). */
+const triggerVisualStandardExamplesAfterObjectAction = async (
+  event: LambdaEvent,
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>
+): Promise<void> => {
+  const action = toNonEmptyString(payload.action);
+  if (!action || !VISUAL_STANDARD_EXAMPLE_TRIGGER_ACTIONS.has(action)) return;
+
+  try {
+    if (action === 'create') {
+      if (toNonEmptyString(payload.object_type) !== 'visual_standard') return;
+      const record = getRecordValue(result.record);
+      const visualStandardId = toNonEmptyString(record?.object_id);
+      const body = getRecordValue(record?.body);
+      if (visualStandardId && body) await maybeGenerateVisualStandardExamples(event, visualStandardId, body);
+      return;
+    }
+
+    if (action === 'patch') {
+      if (toNonEmptyString(payload.object_type) !== 'visual_standard') return;
+      const visualStandardId = toNonEmptyString(payload.object_id);
+      if (!visualStandardId) return;
+      const body = await getVisualStandardBodyForExamples(event, visualStandardId);
+      // REVIEW: `object_patch` requires a live lock and does NOT release it
+      // (check-in is a separate call), so the caller is still holding the
+      // lease right here. Ride it — a second checkout would be refused (423)
+      // and the freshly generated examples silently discarded. The record
+      // version to write against is the one THIS patch just produced
+      // (`result.version`), not the caller's now-stale expectation.
+      const lockToken = toNonEmptyString(payload.lock_token);
+      const held: HeldObjectLease | undefined = lockToken
+        ? {
+            lockToken,
+            ...(typeof result.version === 'number' ? { recordVersion: result.version } : {}),
+          }
+        : undefined;
+      if (body) await maybeGenerateVisualStandardExamples(event, visualStandardId, body, held);
+      return;
+    }
+
+    // apply_brand_imagery: only a REAL apply (dry_run previews and writes
+    // nothing) sourced from a visual_standard (never a theme_id apply, which
+    // has no standard to attach examples to). `result.applied_brand_imagery_
+    // source` reflects what object-verbs.ts actually resolved server-side --
+    // read from the RESULT, never re-derived from the caller's own input.
+    if (result.dry_run === true) return;
+    const source = getRecordValue(result.applied_brand_imagery_source);
+    if (source?.kind !== 'visual_standard') return;
+    const visualStandardId = toNonEmptyString(source.id);
+    if (!visualStandardId) return;
+    const body = await getVisualStandardBodyForExamples(event, visualStandardId);
+    if (body) await maybeGenerateVisualStandardExamples(event, visualStandardId, body);
+  } catch (error) {
+    event.log?.({
+      event: 'visual_standard_examples_trigger_failed',
+      action,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
 export const callObjectAction = async (event: LambdaEvent, payload: Record<string, unknown>) => {
   const result = await invokeObjectStore(event, payload);
 
   if ('isError' in result) return result;
+
+  await triggerVisualStandardExamplesAfterObjectAction(event, payload, result);
 
   return toolResult(result);
 };

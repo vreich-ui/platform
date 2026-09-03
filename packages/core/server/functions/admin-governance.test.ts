@@ -57,6 +57,16 @@ describe('admin-governance requestSchema — agent_keys_* verbs', () => {
     assert.strictEqual(requestSchema.safeParse({ verb: 'set', learning_mode: false }).success, true);
     assert.strictEqual(requestSchema.safeParse({ verb: 'revert', target: 'learning_mode' }).success, true);
   });
+
+  it('U2: accepts the brandImageryOverrides guardrail set (allow/lock) and its dedicated revert target', () => {
+    assert.strictEqual(requestSchema.safeParse({ verb: 'set', brandImageryOverrides: 'allow' }).success, true);
+    assert.strictEqual(requestSchema.safeParse({ verb: 'set', brandImageryOverrides: 'lock' }).success, true);
+    assert.strictEqual(requestSchema.safeParse({ verb: 'revert', target: 'brandImageryOverrides' }).success, true);
+  });
+
+  it('U2: rejects an unrecognized brandImageryOverrides value', () => {
+    assert.strictEqual(requestSchema.safeParse({ verb: 'set', brandImageryOverrides: 'sometimes' }).success, false);
+  });
 });
 
 describe('admin-governance source wiring — agent_keys_create/revoke are Owner-gated, agent_keys_list is not', () => {

@@ -1092,6 +1092,11 @@ const applyOp = (objectType: ObjectType, body: UnknownRecord, op: PatchOp): Patc
     case 'set_voice_fields':
       return applyFieldsOp(op, body, op.fields as UnknownRecord);
 
+    // Brand-imagery wave (BRIEF.md §3.1): the visual-standard singleton/
+    // template family — same open deep-merge idiom as set_voice_fields.
+    case 'set_visual_standard_fields':
+      return applyFieldsOp(op, body, op.fields as UnknownRecord);
+
     // ——— tracking (W13, 12-plan §2) ———
     // The uniform writer of the shared `tracking` block on all ten types.
     // Captures are WHOLE-BLOCK ({tracking: <tree|null>} on both sides, null =
@@ -1312,6 +1317,7 @@ export const derivePatchInverse = (op: PatchOp, capture: PatchOpCapture): PatchO
     case 'update_blueprint_data':
     case 'set_tracking_config_fields':
     case 'set_voice_fields':
+    case 'set_visual_standard_fields':
     case 'set_theme_fields': {
       const fieldsCapture = expectCaptureKind(op, capture, 'fields');
       return patchOpSchema.parse({ op: op.op, fields: fieldsCapture.before, ...guardOf(fieldsCapture.after) });

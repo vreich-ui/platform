@@ -162,6 +162,26 @@ export const brandImagerySchema = z
   .strict();
 export type BrandImagery = z.infer<typeof brandImagerySchema>;
 
+// pdf (brand-imagery wave, BRIEF.md §3.2): PDFs as a real slot — every site
+// declares a default published-article template, and may pin a different
+// template per content `kind` ('article' | 'guide' | 'checklist' … — an open
+// key set, same posture as brandImagery.aspectRatios' context keys, so a new
+// kind lands without a schema change). Deliberately additive/optional and
+// ORDINARY (patchable via set_site_fields, unlike brandTokens/brandImagery):
+// a template pointer is a reference, not a governed value that must funnel
+// through a privileged apply verb.
+const pdfKindKeySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,39}$/, 'pdf.byKind keys must be lowercase snake_case, e.g. article');
+const pdfTemplateIdSchema = boundedString(200);
+export const sitePdfSchema = z
+  .object({
+    defaultTemplateId: pdfTemplateIdSchema,
+    byKind: z.record(pdfKindKeySchema, pdfTemplateIdSchema).optional(),
+  })
+  .strict();
+export type SitePdf = z.infer<typeof sitePdfSchema>;
+
 export const siteBodySchema = z
   .object({
     // W13: shared tracking attribute (12-plan §2) — set_tracking is its one writer.
@@ -192,6 +212,11 @@ export const siteBodySchema = z
     // set_site_brand_imagery) — not patchable via set_site_fields, same funnel
     // as brandTokens/site_apply_theme.
     brandImagery: brandImagerySchema.optional(),
+    // Brand-imagery wave (BRIEF.md §3.2): additive-optional, ORDINARY
+    // agent-writable via set_site_fields (see the doc comment on
+    // sitePdfSchema above) — unlike brandTokens/brandImagery, a template
+    // pointer needs no privileged apply funnel.
+    pdf: sitePdfSchema.optional(),
     chrome: z
       .object({
         showRssFeed: z.boolean(),

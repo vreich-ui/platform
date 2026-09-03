@@ -25,6 +25,14 @@ export interface PdfTemplateSummary {
   version: number;
   active_version?: number;
   created_at?: string;
+  /** FIX-U1 / BRIEF §3.6: 'article' | 'guide' | 'checklist' … an open key set. */
+  kind?: string;
+  /** FIX-U1 / BRIEF §3.6: set by publish; an image blob key. */
+  thumbnail_key?: string;
+  /** FIX-U1 / BRIEF §3.6: the JSON Schema the materializer fills deterministically (R7). */
+  render_data_schema?: unknown;
+  /** FIX-U1 / BRIEF §3.6: must validate against render_data_schema at create and publish. */
+  sample_data?: unknown;
 }
 
 export interface EditorialAssetsPayload {
@@ -90,6 +98,18 @@ export function projectPdfTemplate(value: unknown): PdfTemplateSummary | undefin
     version: Number.isInteger(version) && version > 0 ? version : 1,
     ...(Number.isInteger(activeVersion) && activeVersion > 0 ? { active_version: activeVersion } : {}),
     ...(typeof row.createdAt === 'string' ? { created_at: row.createdAt } : {}),
+    // FIX-U1 / BRIEF §3.6: four additive fields, named explicitly — STILL a
+    // whitelist (tests/netlify/admin-editorial-assets.test.ts asserts an
+    // upstream `storage` secret never leaks), not a passthrough. Each is
+    // forwarded only when the upstream row actually carries it, so a
+    // pre-§3.6 template (or a store that predates this) still projects the
+    // original six fields unchanged.
+    ...(typeof row.kind === 'string' && row.kind.trim() ? { kind: row.kind.trim() } : {}),
+    ...(typeof row.thumbnailKey === 'string' && row.thumbnailKey.trim() ? { thumbnail_key: row.thumbnailKey.trim() } : {}),
+    ...(row.renderDataSchema && typeof row.renderDataSchema === 'object' && !Array.isArray(row.renderDataSchema)
+      ? { render_data_schema: row.renderDataSchema }
+      : {}),
+    ...(row.sampleData !== undefined ? { sample_data: row.sampleData } : {}),
   };
 }
 

@@ -1,0 +1,354 @@
+/**
+ * `visual_standard.v1` — the brand-imagery wave's thirteenth object type
+ * (BRIEF.md §3.1, R1/R2). Pins: the body schema (reused brandImagery, bounds
+ * on label/references/sampleSubjects/weight/region), the id shape (vis_<site>
+ * house / vis_<site>_<slug> template), the kind:'house' singleton (409 on a
+ * second ACTIVE house — a template create never trips it), the ordinary
+ * set_visual_standard_fields patch op (apply + exact inverse), the published
+ * contract (constraints, NOT governed), and — the point of the type — that it
+ * is NOT publishable (outside approval-policy.ts governedObjectTypes; the
+ * publish gate refuses it; object_publish never widens to cover it).
+ */
+import '../../sites/drlurie/config/policy-bindings.js'; // W11 T11.2: register providers for tests hitting active*/getSiteIdentity
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  VISUAL_STANDARD_SCHEMA_VERSION,
+  visualStandardBodySchema,
+  type VisualStandardBody,
+} from '../../packages/core/schema/bodies/visual-standard-v1.js';
+import { brandImagerySchema } from '../../packages/core/schema/bodies/site-v1.js';
+import { buildObjectContract } from '../../packages/core/lib/registry/object-contract.js';
+import { governedObjectTypes } from '../../packages/core/lib/approval-policy.js';
+import { validateObjectIdForType } from '../../packages/core/lib/object-ids.js';
+import { patchOpNamesByObjectType } from '../../packages/core/schema/object-patch-ops.js';
+import {
+  applyPatchOps,
+  derivePatchInverse,
+  type PatchOpCapture,
+} from '../../packages/core/lib/object-patch-apply.js';
+import { checkPublishGate } from '../../packages/core/server/lib/publish-gate.js';
+import {
+  handleObjectVerb,
+  type ObjectVerbRequest,
+  type ObjectVerbStore,
+} from '../../packages/core/server/lib/object-verbs.js';
+import { buildStoreValidationContext } from '../../packages/core/server/lib/object-validation-context.js';
+import { validateObject } from '../../packages/core/server/lib/object-validate.js';
+import { objectTypes, type ObjectRecord, type Principal } from '../../packages/core/schema/object-record-v1.js';
+
+const AGENT: Principal = { kind: 'agent', agent_name: 'vis-test', auth: 'publish_key' };
+const HUMAN: Principal = { kind: 'human', id: 'wolf', email: 'wolf@example.com' };
+const NOW = Date.parse('2026-09-01T12:00:00.000Z');
+const AT = '2026-09-01T12:00:00.000Z';
+
+const VALID_BRAND_IMAGERY: VisualStandardBody['brandImagery'] = {
+  version: 1,
+  medium: 'photograph',
+  styleSentence: 'Clinical-clean skincare editorial photography with soft studio light.',
+  palette: ['#2E5C42', '#C2A878'],
+  negative: ['no stock-photo gloss'],
+  aspectRatios: { article_header: '3:2' },
+  seedBase: 100001,
+};
+
+const VALID: VisualStandardBody = {
+  version: 1,
+  kind: 'house',
+  label: 'Dr. Lurié house look',
+  description: 'The site-wide default image style.',
+  brandImagery: VALID_BRAND_IMAGERY,
+  references: [
+    { id: 'ref_a1b2c3d4', blobKey: 'img/mood/1.jpg', note: 'the palette, not the subject', weight: 0.8 },
+    { id: 'ref_e5f6g7h8', blobKey: 'img/mood/2.jpg', region: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } },
+  ],
+  sampleSubjects: ['a woman applying serum', 'a dermatologist consultation'],
+  status: 'draft',
+};
+
+// ─── the type exists and is reachable the ordinary way ───────────────────────
+
+test('visual_standard is a governed-surface object type but deliberately NOT a governed (publishable) one', () => {
+  assert.ok((objectTypes as readonly string[]).includes('visual_standard'));
+  assert.equal(objectTypes.length, 13);
+  assert.ok(!(governedObjectTypes as readonly string[]).includes('visual_standard'));
+});
+
+test('the id shape is vis_<site> (house) or vis_<site>_<slug> (template) and nothing else', () => {
+  assert.ok(validateObjectIdForType('visual_standard', 'vis_drlurie').ok);
+  assert.ok(validateObjectIdForType('visual_standard', 'vis_drlurie_editorial').ok);
+  assert.ok(!validateObjectIdForType('visual_standard', 'thm_drlurie').ok);
+  assert.ok(!validateObjectIdForType('visual_standard', 'vis_Drlurie').ok);
+});
+
+test('brandImagery is REUSED verbatim from site-v1.ts — never forked', () => {
+  assert.equal(visualStandardBodySchema.shape.brandImagery, brandImagerySchema);
+});
+
+test('object_contract("visual_standard") is reachable, NOT governed, and NOT publishable', () => {
+  const contract = buildObjectContract('visual_standard');
+  assert.equal(contract.object_type, 'visual_standard');
+  assert.equal(contract.governed, false);
+  assert.equal(contract.publish_policy.gated, false);
+  assert.equal(contract.publish_policy.requires_approval, false);
+  const properties = (contract.body_schema as { properties?: Record<string, unknown> }).properties ?? {};
+  for (const field of ['kind', 'label', 'brandImagery', 'references', 'sampleSubjects', 'status']) {
+    assert.ok(field in properties, `${field} must appear in the published body_schema`);
+  }
+  assert.deepEqual(patchOpNamesByObjectType.visual_standard, ['set_visual_standard_fields']);
+  const op = contract.patch_ops.find((candidate) => candidate.op === 'set_visual_standard_fields');
+  assert.ok(op?.arg_schema, 'set_visual_standard_fields must publish an arg_schema');
+  // Never a tracked surface — the shared constraint must not be a false promise here.
+  assert.ok(!contract.constraints.some((constraint) => constraint.id === 'tracking_attribute'));
+  for (const id of [
+    'visual_standard_brand_imagery_reused',
+    'visual_standard_house_singleton',
+    'visual_standard_not_publishable',
+  ]) {
+    assert.ok(
+      contract.constraints.some((constraint) => constraint.id === id),
+      `${id} must be published`
+    );
+  }
+});
+
+// ─── shape + bounds ────────────────────────────────────────────────────────
+
+test('a well-formed standard parses; unknown keys are refused (strict)', () => {
+  assert.ok(visualStandardBodySchema.safeParse(VALID).success);
+  assert.ok(!visualStandardBodySchema.safeParse({ ...VALID, extra: true }).success);
+});
+
+test('label is bounded to 80 chars', () => {
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, label: 'x'.repeat(80) }).success);
+  assert.ok(!visualStandardBodySchema.safeParse({ ...VALID, label: 'x'.repeat(81) }).success);
+});
+
+test('references is bounded to 24 entries', () => {
+  const makeRefs = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `ref_${String(i).padStart(8, '0')}`, blobKey: `img/${i}.jpg` }));
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, references: makeRefs(24) }).success);
+  assert.ok(!visualStandardBodySchema.safeParse({ ...VALID, references: makeRefs(25) }).success);
+});
+
+test('sampleSubjects must have 1..6 entries once active/archived; a draft may start empty (FIX-E)', () => {
+  // VALID is status:'draft' — a fresh clone (derivedFrom.method:'clone') may
+  // start with zero sample subjects, since a page snapshot can say what a
+  // picture looks like, never what it is OF.
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: [] }).success);
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['one'] }).success);
+  assert.ok(
+    visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['a', 'b', 'c', 'd', 'e', 'f'] }).success
+  );
+  // The 6-entry ceiling is unconditional — it never depended on status.
+  assert.ok(
+    !visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }).success
+  );
+
+  // The floor comes BACK the moment status leaves 'draft' — active and
+  // archived (which was active once) both require 1..6.
+  for (const status of ['active', 'archived'] as const) {
+    const empty = visualStandardBodySchema.safeParse({ ...VALID, status, sampleSubjects: [] });
+    assert.ok(!empty.success, `status:'${status}' with 0 sampleSubjects must be refused`);
+    assert.ok(visualStandardBodySchema.safeParse({ ...VALID, status, sampleSubjects: ['one'] }).success);
+  }
+});
+
+test('reference weight is bounded 0..1', () => {
+  const withWeight = (weight: number) => ({
+    ...VALID,
+    references: [{ ...VALID.references[0]!, weight }],
+  });
+  assert.ok(visualStandardBodySchema.safeParse(withWeight(0)).success);
+  assert.ok(visualStandardBodySchema.safeParse(withWeight(1)).success);
+  assert.ok(!visualStandardBodySchema.safeParse(withWeight(1.01)).success);
+  assert.ok(!visualStandardBodySchema.safeParse(withWeight(-0.01)).success);
+});
+
+test('reference region fractions are bounded 0..1', () => {
+  const withRegion = (region: Record<string, number>) => ({
+    ...VALID,
+    references: [{ ...VALID.references[0]!, region }],
+  });
+  assert.ok(visualStandardBodySchema.safeParse(withRegion({ x: 0, y: 0, w: 1, h: 1 })).success);
+  assert.ok(!visualStandardBodySchema.safeParse(withRegion({ x: -0.1, y: 0, w: 1, h: 1 })).success);
+  assert.ok(!visualStandardBodySchema.safeParse(withRegion({ x: 0, y: 0, w: 1.1, h: 1 })).success);
+});
+
+test('kind is house or template, nothing else', () => {
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, kind: 'house' }).success);
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, kind: 'template', whenToUse: 'For guide PDFs.' }).success);
+  assert.ok(!visualStandardBodySchema.safeParse({ ...VALID, kind: 'default' }).success);
+});
+
+test('schema_version constant matches the object type', () => {
+  assert.equal(VISUAL_STANDARD_SCHEMA_VERSION, 'visual_standard.v1');
+});
+
+// ─── patch + inverse ──────────────────────────────────────────────────────
+
+const visualStandardRecord = (body: unknown): ObjectRecord<unknown> => ({
+  object_id: 'vis_drlurie',
+  object_type: 'visual_standard',
+  schema_version: VISUAL_STANDARD_SCHEMA_VERSION,
+  site: 'site_drlurie',
+  created_at: AT,
+  updated_at: AT,
+  status: 'active',
+  body,
+  publication: { published_time: null },
+  history: [],
+  version: 1,
+  content_revision: 1,
+});
+
+test('set_visual_standard_fields deep-merges and inverts exactly, including brandImagery and references', () => {
+  const result = applyPatchOps(
+    visualStandardRecord(VALID),
+    [
+      {
+        op: 'set_visual_standard_fields',
+        fields: { label: 'Updated look', brandImagery: { styleSentence: 'Warmer, softer light.' } },
+      },
+    ],
+    { actor: { kind: 'agent', agent_name: 'writer', auth: 'mcp_token' }, at: AT }
+  );
+  const applied = result.record.body as VisualStandardBody;
+  assert.equal(applied.label, 'Updated look');
+  assert.equal(applied.brandImagery.styleSentence, 'Warmer, softer light.');
+  // Untouched sibling fields survive the deep merge.
+  assert.equal(applied.brandImagery.medium, VALID_BRAND_IMAGERY.medium);
+  assert.equal(result.body_mutated, true);
+
+  const entry = result.record.history.at(-1)!;
+  const inverse = derivePatchInverse(entry.details!.op as never, entry.details!.capture as PatchOpCapture);
+  const back = applyPatchOps(result.record, [inverse], { actor: HUMAN, at: AT });
+  assert.deepEqual(back.record.body, VALID);
+});
+
+// ─── singleton refusal (verbs) — kind:'house' only ────────────────────────
+
+const createMemoryStore = () => {
+  const blobs = new Map<string, string>();
+  return {
+    blobs,
+    async get(key: string) {
+      return blobs.get(key) ?? null;
+    },
+    async setJSON(key: string, value: unknown) {
+      blobs.set(key, JSON.stringify(value));
+    },
+    async list({ prefix }: { prefix: string }) {
+      return { blobs: [...blobs.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })) };
+    },
+  };
+};
+
+test('create: a house is a singleton (409 on a second active house); templates are an ordinary, unbounded collection', async () => {
+  const store = createMemoryStore();
+  const call = async (request: ObjectVerbRequest, principal: Principal) => {
+    const verbStore = store as unknown as ObjectVerbStore;
+    const validationContext = await buildStoreValidationContext(verbStore);
+    return handleObjectVerb(verbStore, request, principal, { nowMs: NOW, validationContext });
+  };
+  const createRequest = (id: string, body: VisualStandardBody): ObjectVerbRequest => ({
+    action: 'create',
+    object_type: 'visual_standard',
+    site: 'site_drlurie',
+    body,
+    requested_id: id,
+  });
+
+  // Agents may create visual_standard objects (open by default — the writer
+  // materializer must be able to mint/patch the house standard, R§3.5).
+  const houseCreated = await call(createRequest('vis_drlurie', VALID), AGENT);
+  assert.equal(houseCreated.status, 200, JSON.stringify(houseCreated.body));
+
+  const secondHouse = await call(createRequest('vis_second', VALID), HUMAN);
+  assert.equal(secondHouse.status, 409, 'a second active house is refused regardless of id');
+  assert.match(JSON.stringify(secondHouse.body), /singleton|exactly one/i);
+
+  // A template create never trips the house singleton...
+  const template1 = await call(
+    createRequest('vis_drlurie_editorial', { ...VALID, kind: 'template', whenToUse: 'For guide PDFs.' }),
+    AGENT
+  );
+  assert.equal(template1.status, 200, JSON.stringify(template1.body));
+  const template2 = await call(
+    createRequest('vis_drlurie_seasonal', { ...VALID, kind: 'template', whenToUse: 'For seasonal campaigns.' }),
+    AGENT
+  );
+  assert.equal(template2.status, 200, JSON.stringify(template2.body));
+
+  // ...and, symmetrically, the two now-active templates never conflict with
+  // (or count toward) the house singleton check.
+  const objectValidate = await call(
+    { action: 'validate', object_type: 'visual_standard', site: 'site_drlurie', body: VALID } as ObjectVerbRequest,
+    HUMAN
+  );
+  assert.equal(objectValidate.status, 200);
+  assert.ok(
+    (objectValidate.body as { singleton_conflict?: unknown }).singleton_conflict,
+    'a candidate house dry-run still reports the real existing-house conflict'
+  );
+});
+
+// ─── REVIEW (brand-imagery wave): a mood board must be able to hold a REAL
+// pdf-tool image key ─────────────────────────────────────────────────────────
+//
+// The fixture above uses `img/mood/1.jpg`, which is not a Major-Key artifact
+// ref, so it never met `checkRenderableImageRefs` — the "raw artifact key in a
+// renderable field breaks the build" guard. A real reference (what
+// `import_images_from_url`, the admin's library picker via
+// `blobKeyFromPreviewUrl`, and X1's example generator all produce) IS a Major
+// Key, and it was refused 422 `render_image_ref` on every create and every
+// patch: the mood-board Save button, the import flow, and the example writer
+// were all dead against the one field the type exists to carry. Nothing
+// renders a visual_standard, so the guard does not apply to it.
+test('a mood board and its examples may hold real pdf-tool artifact keys (nothing renders a visual_standard)', async () => {
+  const store = createMemoryStore();
+  const verbStore = store as unknown as ObjectVerbStore;
+  const sha = 'a'.repeat(64);
+  const withRealKeys: VisualStandardBody = {
+    ...VALID,
+    references: [{ id: 'ref_a1b2c3d4', blobKey: `image/req_agent_mood_board_20260901_01/${sha}.webp` }],
+    examples: [
+      {
+        usageContext: 'article_header',
+        blobKey: `image/req_visimg_vis_drlurie_article_header_20260901_02/${sha}.png`,
+        contractHash: sha,
+      },
+    ],
+  };
+
+  const created = await handleObjectVerb(
+    verbStore,
+    { action: 'create', object_type: 'visual_standard', site: 'site_drlurie', body: withRealKeys, requested_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+
+  // ...and the same body still fails the guard on a type something DOES
+  // render, so the exemption is scoped, not a hole in the check.
+  const renderable = validateObject(
+    { objectType: 'theme', objectId: 'thm_drlurie_default', body: { imageAssetRefButRendered: `image/req_x_y_20260901_01/${sha}.webp` } },
+    await buildStoreValidationContext(verbStore)
+  );
+  const imageRefCriterion = renderable
+    .flatMap((group) => group.criteria)
+    .find((criterion) => criterion.id === 'render_image_ref');
+  assert.equal(imageRefCriterion?.status, 'missing', 'the guard still fires for a rendered type');
+});
+
+// ─── the point of the type: NOT publishable ───────────────────────────────
+
+test('object_publish is refused for visual_standard — it is outside the generic publish gate', () => {
+  const record = visualStandardRecord(VALID) as ObjectRecord;
+  const result = checkPublishGate({ record, principal: HUMAN, roles: ['admin'], requested: {} });
+  assert.equal(result.allow, false);
+  if (!result.allow) {
+    assert.equal(result.code, 'content_item_not_gated');
+  }
+});

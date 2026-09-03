@@ -67,6 +67,7 @@ import { sectionBodySchema, type SectionInstance, type SectionType } from '../..
 import { sectionTemplateBodySchema } from '../../schema/bodies/section-template-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
 import { editorialVoiceBodySchema } from '../../schema/bodies/editorial-voice-v1.js';
+import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
 import { findPromptFormattedText } from '../../lib/registry/voice-prose.js';
 import { isStandalonePlaceableSectionType } from '../../lib/registry/components/registered-types.js';
 import {
@@ -291,6 +292,7 @@ const BODY_SCHEMAS: Partial<Record<ObjectType, { safeParse: (v: unknown) => { su
     content_item: contentItemBodySchema,
     tracking_config: trackingConfigBodySchema,
     editorial_voice: editorialVoiceBodySchema,
+    visual_standard: visualStandardBodySchema,
   };
 
 // Mirrors node-renderer.ts TIPTAP_ALLOWED (A§1.5): the only tags TipTap emits.
@@ -879,7 +881,25 @@ export const checkMediaBudget = (
 // else that carries a raw ref is a rendered field and needs the /img|/pdf path.
 const RAW_REF_CARRIER_KEY_RE = /(assetref|artifact_ref)$/i;
 
-export const checkRenderableImageRefs = (body: unknown): ReadinessCriterion[] => {
+// REVIEW (brand-imagery wave): object types NOTHING renders. The whole reason
+// this guard exists is that a raw Major Key in a RENDERED string field reaches
+// Astro's <Image>/getImage and fails the build — so it has nothing to say
+// about a type that has no materializer, no route, and is not publishable at
+// all. `visual_standard` is exactly that (schema/bodies/visual-standard-v1.ts;
+// it is absent from approval-policy.ts's governedObjectTypes and throws in
+// materialize.ts), and its interface-frozen `references[].blobKey` /
+// `examples[].blobKey` fields hold pdf-tool image keys BY DESIGN — read
+// server-side by the brand_imagery_propose proxy and by the admin's
+// authenticated blob-image endpoint, never by a renderer. Without this
+// exemption every mood-board save, every imported reference, and every
+// generated example was refused 422 `render_image_ref`, which is to say the
+// object type could not hold the one thing it exists to hold.
+const UNRENDERED_OBJECT_TYPES = new Set<ObjectType>(['visual_standard']);
+
+export const checkRenderableImageRefs = (body: unknown, objectType?: ObjectType): ReadinessCriterion[] => {
+  if (objectType && UNRENDERED_OBJECT_TYPES.has(objectType)) {
+    return [crit('render_image_ref', 'Renderable image refs', 'optional', `Nothing renders a ${objectType}.`)];
+  }
   const problems: string[] = [];
   walkStrings(body, (path, value) => {
     const key = path[path.length - 1] ?? '';
@@ -3002,7 +3022,7 @@ export const validateObject = (
       criteria: [
         ...checkRenderability(input.objectType, input.body),
         ...checkRenderTargetSupport(input.objectType, input.body, context, atPublish),
-        ...checkRenderableImageRefs(input.body),
+        ...checkRenderableImageRefs(input.body, input.objectType),
       ],
     },
     { id: 'deploy_safety', label: 'Deploy safety', criteria: checkDeploySafety(input.body) },

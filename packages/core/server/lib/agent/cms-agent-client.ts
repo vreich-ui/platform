@@ -816,6 +816,20 @@ export class CmsAgentClient {
   }
 
   /**
+   * P5 (brand-imagery wave, BRIEF §3.5): run one CMS-Agent workspace node
+   * (e.g. `brand_imagery_writer`) outside a full workflow run — the same
+   * `tools/call` shape `node_prepare_execution`/`node_validate_input` already
+   * use (`{nodeId, input}`, no `projectId` — the authenticated session is
+   * already project-scoped). A thin wrapper over `callTool`, exactly like
+   * `converse` above, kept here so every CmsAgentClient caller (the
+   * brand-imagery proxy included) shares one call site instead of
+   * hand-building the `node_execute` args inline.
+   */
+  async nodeExecute<T = unknown>(nodeId: string, input: Record<string, unknown>): Promise<CmsAgentResult<T>> {
+    return this.callTool<T>('node_execute', { nodeId, input });
+  }
+
+  /**
    * DELETE the session. Idempotent, best-effort, and never throws: a failed
    * close costs an idle server-side session that expires on its own.
    */

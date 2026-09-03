@@ -156,6 +156,70 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'verb_dry_run' } },
   },
   {
+    name: 'site_apply_brand_imagery',
+    description:
+      'Apply a visual_standard\'s (or a theme\'s) brandImagery to the site singleton (brand-imagery wave §3.3): computes ONE exact-replace set_site_brand_imagery op (the privileged imagery writer — brandImagery is not patchable via set_site_fields). Whole-block replace: after the apply, site.brandImagery EQUALS the source\'s brandImagery — no stale sub-field survives, and (unlike site_apply_theme) there is no totality check to satisfy, since visual_standard.brandImagery is always a fully-populated schema-required object. Pass EXACTLY ONE of visual_standard_id (house OR template — promoting a template look to the live site is a normal use) or theme_id (a theme MAY carry a brandImagery preset alongside its brandTokens; a theme with none is refused with a clear error naming it); both or neither is a 400. Applies through the standard patch path under YOUR site checkout (lock_token + expected_record_version from object_checkout on the site object; the verb never auto-checkouts). One op = one atomic content_revision; history records the source; the exact inverse makes reverting a standard discard. The site COPIES the imagery (nothing live-binds to the source), and going live still requires the separate object_publish + release_to_production steps. Pass dry_run: true to preview {before, after, changedFields} plus the computed op and full validation without persisting — dry_run needs neither lock_token nor expected_record_version. Read object_contract("visual_standard") first.',
+    inputSchema: objectSchema(
+      {
+        visual_standard_id: stringSchema('The visual_standard object id (house vis_<site> or template vis_<site>_<slug>); exactly one of this or theme_id.'),
+        theme_id: stringSchema('The theme object id whose brandImagery preset to apply; exactly one of this or visual_standard_id.'),
+        site_id: stringSchema('The site singleton object id, e.g. site_acme.'),
+        lock_token: stringSchema('Your held site lock (from object_checkout on the site object); dry_run needs none.'),
+        expected_record_version: intSchema('The record_version your checkout returned; dry_run needs none.'),
+        dry_run: {
+          type: 'boolean',
+          description: 'true → return {before, after, changedFields}, the computed op, and validation; persist nothing (no lock).',
+        },
+        agent_name: stringSchema('Optional self-declared agent name recorded on history (attribution only).'),
+      },
+      ['site_id']
+    ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'verb_dry_run' } },
+  },
+  {
+    name: 'brand_imagery_propose',
+    description:
+      "Propose a brandImagery contract from a mood board and/or a brief (brand-imagery wave §3.5). A THIN proxy: Platform makes NO model call itself — it forwards to CMS-Agent's vision-capable `brand_imagery_writer` node and returns the proposal for review; nothing is written anywhere (not the site, not a visual_standard). Pass mode:'house' to propose the site's single house standard, or 'template' (with template_slug) for a named alternate look; pass visual_standard_id to revise an existing standard rather than start fresh. references[] is the mood board (max 8 — the node runner's image cap): each item needs a blob_key (an existing image artifact) or a url, an optional 0..1 region {x,y,w,h} to crop to just the swatch that matters (\"the palette, not the subject\"), an optional note, and an optional weight (0..1, default 1, a Midjourney --sw analogue). Provide brief when there is no mood board yet, or alongside references to steer the reading of them. Returns brand_imagery_proposal.v1: {brandImagery, rationale, sampleSubjects, confidence, label, whenToUse?}. To apply a proposal: run visual_standard_materializer (creates/patches the visual_standard) then site_apply_brand_imagery (or object_create for a brand-new template) — never write brandImagery directly.",
+    inputSchema: objectSchema(
+      {
+        mode: { type: 'string', enum: ['house', 'template'], description: "'house' for the site's one standard; 'template' for a named alternate look." },
+        visual_standard_id: stringSchema('Revise this existing visual_standard (house or template) instead of proposing from scratch.'),
+        references: arraySchema(
+          {
+            type: 'object',
+            properties: {
+              blob_key: stringSchema('An existing image artifact key (e.g. from import_image_from_url).'),
+              url: stringSchema('A directly fetchable image URL, when there is no blob_key.'),
+              region: {
+                type: 'object',
+                description: '0..1 fractions of the source image to crop to — "the palette, not the subject". Omit for the whole image.',
+                properties: {
+                  x: { type: 'number', minimum: 0, maximum: 1 },
+                  y: { type: 'number', minimum: 0, maximum: 1 },
+                  w: { type: 'number', minimum: 0, maximum: 1 },
+                  h: { type: 'number', minimum: 0, maximum: 1 },
+                },
+                required: ['x', 'y', 'w', 'h'],
+                additionalProperties: false,
+              },
+              note: stringSchema('What this reference is FOR, e.g. "the palette, not the subject" (<=200 chars).'),
+              weight: { type: 'number', minimum: 0, maximum: 1, description: 'Influence weight, default 1 (a Midjourney --sw analogue).' },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+          'The mood board — at most 8 references; at least one of references or brief is required.'
+        ),
+        brief: stringSchema('A free-text style brief, used alone or to steer the reading of references.'),
+        existing_brand_imagery: anyObjectSchema('The current brandImagery contract, when refining one that already exists.'),
+        template_slug: stringSchema("Required with mode:'template' when visual_standard_id is omitted — names the new template standard."),
+        agent_name: stringSchema('Optional self-declared agent name recorded on usage telemetry (attribution only).'),
+      },
+      ['mode']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
     name: 'object_create_variant',
     description:
       'Clone a content_item (article) object as a DRAFT variant for judge/score/A-B work (W7.3): node ids are re-minted (annotations that reference them — claims/compliance node_ids — are re-pointed), lineage.parent_content_id is set to the source, scores reset, and the clone flows through the standard create validation. Variants need their own slug (defaults to "<source-slug>-variant"; pass slug when creating a second variant). Serving/traffic-splitting is out of scope — publishing a winner is an ordinary object_publish.',
@@ -223,7 +287,7 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'object_patch',
     description:
-      'Apply typed patch ops under a held lock. Requires lock_token and expected_record_version (stale version → 409; missing/expired/wrong lock → 423). Omitted ids on add_term/upsert_* ops are minted server-side. A resulting body that fails validation rejects the op (422) without persisting. Palette governance: site.brandTokens is NOT patchable here — a set_site_fields carrying brandTokens is refused; the palette changes only through the site_apply_theme tool (theme-only, Wolf 2026-07-15). set_site_brand_tokens is tool-authored (do not hand-author it). Same governance for site.brandImagery (W16 C1, the visual-identity contract for AI image generation/search) via the privileged set_site_brand_imagery op — no agent-facing writer exists yet.',
+      'Apply typed patch ops under a held lock. Requires lock_token and expected_record_version (stale version → 409; missing/expired/wrong lock → 423). Omitted ids on add_term/upsert_* ops are minted server-side. A resulting body that fails validation rejects the op (422) without persisting. Palette governance: site.brandTokens is NOT patchable here — a set_site_fields carrying brandTokens is refused; the palette changes only through the site_apply_theme tool (theme-only, Wolf 2026-07-15). set_site_brand_tokens is tool-authored (do not hand-author it). Same governance for site.brandImagery (W16 C1, the visual-identity contract for AI image generation/search) via the privileged set_site_brand_imagery op — the agent-facing writer is the site_apply_brand_imagery tool (brand-imagery wave §3.3), not object_patch.',
     inputSchema: objectSchema(
       {
         object_type: objectTypeEnumSchema(),

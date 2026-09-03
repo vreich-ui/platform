@@ -27,6 +27,7 @@ export const OBJECT_TYPE_LABELS: Record<ObjectType, string> = {
   content_item: 'Article',
   tracking_config: 'Tracking config',
   editorial_voice: 'Editorial voice',
+  visual_standard: 'Visual standard',
 };
 
 export function objectTypeLabel(type: ObjectType): string {
@@ -256,6 +257,10 @@ export const VERB_PHRASES: Record<string, string> = {
   publish_by_time: 'published',
   set_published_time: 'scheduled publication',
   apply_theme: 'applied a theme',
+  // U3 (brand-imagery wave): the imagery sibling of apply_theme, same reason
+  // for existing here (see the file header — every action-name surface needs
+  // a phrase, not just the ones observed in history so far).
+  apply_brand_imagery: 'applied brand imagery',
   discard: 'discarded changes',
   refresh_lock: 'refreshed the lock',
   refresh: 'refreshed the lock',
@@ -325,6 +330,8 @@ export const VERB_PHRASES: Record<string, string> = {
   set_tracking: 'updated tracking settings',
   set_tracking_config_fields: 'updated the tracker registry',
   set_voice_fields: 'updated the editorial voice',
+  // Visual standard (brand-imagery wave)
+  set_visual_standard_fields: 'updated the visual standard',
 };
 
 /**

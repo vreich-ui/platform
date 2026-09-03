@@ -179,6 +179,12 @@ export type PlatformArtifactJobInput = {
   negativePrompt?: string;
   seed?: number;
   loras?: Array<{ path: string; scale?: number }>;
+  // P4 (brand-imagery wave, BRIEF §3.4/D4): the `style` override channel.
+  // pdf-tool stores and echoes this verbatim (plus its own best-effort
+  // styleSource) -- it does NOT resolve style into brand pixels; Platform
+  // does that (brand-imagery-resolve.ts) and reports the REAL styleSource in
+  // its own response, overriding pdf-tool's best-effort one.
+  style?: { visualStandardId?: string; override?: Record<string, unknown>; note?: string };
 };
 
 const projectPayload = (grant: PdfToolStorageGrant, payload: Record<string, unknown>) => ({
@@ -210,6 +216,7 @@ export const createPlatformArtifactJob = (
       negativePrompt: input.negativePrompt,
       seed: input.seed,
       loras: input.loras,
+      style: input.style,
     }),
     options
   );

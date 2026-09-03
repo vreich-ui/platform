@@ -2,18 +2,59 @@
  * Visual Identity is an aggregate lens, not a second theme/template catalog.
  * It reads the existing site singleton (active tokens), theme objects
  * (named alternatives), and safe artifact projections (available logos).
+ *
+ * U1 (brand-imagery wave) turns it into the wave's ONE surface — identity ·
+ * imagery · PDF templates — as three tabs on THIS route. BRIEF §4 puts new
+ * admin routes out of scope, so the tab is a `?tab=` round-trip
+ * (`parseVisualIdentityTab`), not a route.
+ *
+ * ONE LOADER, THREE TABS. Every record all three tabs read is fetched here,
+ * once, and passed down: the site singleton, the theme objects, the
+ * `visual_standard` collection, the guardrail value, and the editorial-asset
+ * payload (which already carries both `list_pdf_templates` and the rendered
+ * artifacts). The tab components stay stateless about loading, which keeps
+ * their hook lists short and unconditional.
+ *
+ * THE U3 SEAM. R8 docks the visual-identity chat on this page and renames the
+ * `retheme` starter; that rail is task U3's. This file exposes exactly one
+ * hole for it — the optional `rail` prop — and every tool-backed button routes
+ * through `runIntent`. With a rail present the intent opens the docked chat;
+ * without one it opens a small dialog showing the exact instruction and a link
+ * to the agents page, so the affordance is honest rather than dead. Nothing
+ * here imports or edits `chat.tsx`, `AgentRail.tsx`, `chat-*.ts` or
+ * `agent-starters.ts`.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
+import { AgentRail } from './AgentRail';
 import { ArtifactStagePreview } from './ArtifactStagePreview';
+import { useChat } from './chat';
+import { ImageryBoard } from './ImageryBoard';
+import { PdfTemplatesPanel } from './PdfTemplatesPanel';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
-import { IconExternalLink, IconPalette } from './icons';
+import { Tabs } from './menus';
+import { Dialog } from './overlays';
+import { IconExternalLink, IconPalette, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
+import type { EditorialAssetsPayload } from '@core/lib/admin/editorial-assets';
 import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { fetchStudioData } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
+import { fetchGovernance } from '@core/lib/admin/governance-client';
+import { agentStarterByKey } from '@core/lib/admin/agent-starters';
+import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { callObjectVerb } from '@core/lib/edit-mode/verbs-client';
 import { buildVisualIdentityViewModel, type VisualIdentityViewModel } from '@core/lib/admin/visual-identity';
+import {
+  VISUAL_IDENTITY_STARTER_HREF,
+  VISUAL_IDENTITY_TAB_LABELS,
+  VISUAL_IDENTITY_TABS,
+  parseVisualIdentityTab,
+  type BrandImageryOverridePolicy,
+  type VisualIdentityChatIntent,
+  type VisualIdentityTab,
+} from '@core/lib/admin/visual-identity-imagery';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -21,12 +62,42 @@ async function getToken(): Promise<string> {
 }
 
 async function fetchSite(siteId: string): Promise<StudioRecord> {
-  const { callObjectVerb } = await import('@core/lib/edit-mode/verbs-client');
   const result = await callObjectVerb(getToken, { action: 'get', object_type: 'site', object_id: siteId });
   if (result.status !== 200 || !result.body.record) {
     throw new Error(String(result.body.error ?? 'The publication identity could not be loaded.'));
   }
   return result.body.record as StudioRecord;
+}
+
+/**
+ * The `visual_standard` collection (house + templates) through the SAME
+ * `admin-object` verbs every other admin read uses — list, then one parallel
+ * `get` per id, exactly `studio-client`'s shape. A tenant that predates the
+ * type (or an unavailable store) yields an empty list rather than failing the
+ * whole page: the identity tab must still paint.
+ */
+async function fetchVisualStandards(): Promise<StudioRecord[]> {
+  const listed = await callObjectVerb(getToken, { action: 'list', object_type: 'visual_standard' });
+  if (listed.status !== 200 || !Array.isArray(listed.body.objects)) return [];
+  const ids = (listed.body.objects as Array<{ object_id?: string }>)
+    .map((row) => row.object_id)
+    .filter((id): id is string => Boolean(id));
+  const records = await Promise.all(
+    ids.map((id) => callObjectVerb(getToken, { action: 'get', object_type: 'visual_standard', object_id: id }))
+  );
+  return records
+    .filter((result) => result.status === 200 && result.body.record)
+    .map((result) => result.body.record as StudioRecord);
+}
+
+/** The guardrail is Owner-read too; an unreadable one is reported as the default. */
+async function fetchOverridePolicy(): Promise<BrandImageryOverridePolicy> {
+  try {
+    const governance = await fetchGovernance(getToken);
+    return governance.active?.brandImageryOverrides === 'lock' ? 'lock' : 'allow';
+  } catch {
+    return 'allow';
+  }
 }
 
 function Swatches({ colors }: { colors: VisualIdentityViewModel['colors'] }) {
@@ -90,7 +161,15 @@ function Typography({ rows }: { rows: VisualIdentityViewModel['typography'] }) {
   );
 }
 
-function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; identity: SiteIdentity }) {
+function IdentityBoard({
+  model,
+  identity,
+  onRetheme,
+}: {
+  model: VisualIdentityViewModel;
+  identity: SiteIdentity;
+  onRetheme: () => void;
+}) {
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -98,19 +177,26 @@ function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; id
           <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
             Publication identity
           </p>
-          <h1 className="mt-1 text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">
-            Visual identity
-          </h1>
+          <h2 className="mt-1 text-[length:var(--adm-text-xl)] font-semibold text-[var(--adm-text-heading)]">
+            The brand board
+          </h2>
           <p className="mt-1 max-w-2xl text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
             The active visual system drawn from this publication’s site and theme objects.
           </p>
         </div>
-        <a
-          href={`/admin/content/${encodeURIComponent(identity.siteId)}?type=site`}
-          className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)]"
-        >
-          Open publication settings <IconExternalLink size={15} />
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* R8's retheme CTA. It opens the docked chat when U3 supplies a rail,
+              and otherwise hands over the same instruction to paste. */}
+          <Button onClick={onRetheme}>
+            <IconSparkles size={15} /> Retheme
+          </Button>
+          <a
+            href={`/admin/content/${encodeURIComponent(identity.siteId)}?type=site`}
+            className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-surface-raised)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:bg-[var(--adm-surface-sunken)]"
+          >
+            Open publication settings <IconExternalLink size={15} />
+          </a>
+        </div>
       </header>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(18rem,0.82fr)_minmax(0,1.18fr)]">
@@ -202,11 +288,92 @@ function IdentityBoard({ model, identity }: { model: VisualIdentityViewModel; id
   );
 }
 
-function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
+/**
+ * The one hole U3 fills. A rail-bearing host passes `open`; without it the
+ * page still offers every tool-backed action, as an instruction the human can
+ * take to the agent themselves.
+ */
+export interface VisualIdentityRailSeam {
+  open: (intent: VisualIdentityChatIntent) => void;
+}
+
+const RETHEME_INTENT: VisualIdentityChatIntent = {
+  starter: 'visual-identity',
+  tool: 'site_apply_theme',
+  label: 'Retheme',
+  prompt:
+    'I want to look at the visual identity of this publication — theme, imagery and PDF templates. Start with the theme: list the theme objects, then propose site_apply_theme with a dry run so I can see the exact brandTokens diff before deciding. Do not apply anything without my approval.',
+};
+
+function IntentDialog({ intent, onClose }: { intent: VisualIdentityChatIntent | undefined; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Dialog
+      open={Boolean(intent)}
+      onClose={() => {
+        setCopied(false);
+        onClose();
+      }}
+      size="lg"
+      title={intent?.label ?? 'Ask the agent'}
+      description={`This runs through the agent, so the approval card stays in charge. Tool: ${intent?.tool ?? ''}`}
+      footer={
+        <span className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const text = intent?.prompt;
+              if (!text) return;
+              void navigator.clipboard?.writeText(text).then(
+                () => setCopied(true),
+                () => setCopied(false)
+              );
+            }}
+          >
+            {copied ? 'Copied' : 'Copy instruction'}
+          </Button>
+          <a
+            href={VISUAL_IDENTITY_STARTER_HREF}
+            className="adm-focusable inline-flex h-10 items-center gap-2 rounded-[var(--adm-radius-md)] bg-[var(--adm-accent)] px-4 text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent-contrast,#fff)]"
+          >
+            Open the agent <IconExternalLink size={15} />
+          </a>
+        </span>
+      }
+    >
+      <pre className="max-h-[45dvh] overflow-auto whitespace-pre-wrap rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] p-3 text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+        {intent?.prompt}
+      </pre>
+    </Dialog>
+  );
+}
+
+function VisualIdentityBody({
+  identity,
+  rail,
+  onOwnerChange,
+}: {
+  identity: SiteIdentity;
+  rail?: VisualIdentityRailSeam;
+  /**
+   * U3: reports the SAME owner check this body already gates its own tabs
+   * on, so the docked rail (mounted by the OUTER component, which has no
+   * owner check of its own) can stay off a non-owner's screen too — a
+   * governed "Do not apply anything without my approval" chat has no
+   * business being live next to an "Owner-only" empty state.
+   */
+  onOwnerChange?: (owner: boolean) => void;
+}) {
   const [owner, setOwner] = useState<boolean | null>(null);
   const [model, setModel] = useState<VisualIdentityViewModel | null>(null);
+  const [site, setSite] = useState<StudioRecord | undefined>(undefined);
+  const [standards, setStandards] = useState<StudioRecord[]>([]);
+  const [assets, setAssets] = useState<EditorialAssetsPayload | undefined>(undefined);
+  const [overridePolicy, setOverridePolicy] = useState<BrandImageryOverridePolicy>('allow');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<VisualIdentityTab>('identity');
+  const [pendingIntent, setPendingIntent] = useState<VisualIdentityChatIntent | undefined>(undefined);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -216,17 +383,24 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
       const me = await fetchMe(getToken);
       const isOwner = me.roles.includes('owner');
       setOwner(isOwner);
+      onOwnerChange?.(isOwner);
       if (!isOwner) return;
-      const [site, studio, assets] = await Promise.all([
+      const [siteRecord, studio, editorial, visualStandards, policy] = await Promise.all([
         fetchSite(identity.siteId),
         fetchStudioData(getToken),
         fetchEditorialAssets(getToken),
+        fetchVisualStandards(),
+        fetchOverridePolicy(),
       ]);
+      setSite(siteRecord);
+      setStandards(visualStandards);
+      setAssets(editorial);
+      setOverridePolicy(policy);
       setModel(
         buildVisualIdentityViewModel({
-          site,
+          site: siteRecord,
           themes: studio.themes,
-          artifacts: assets.artifacts,
+          artifacts: editorial.artifacts,
           fallbackName: identity.brandName,
         })
       );
@@ -235,11 +409,92 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
     } finally {
       setLoading(false);
     }
-  }, [identity.brandName, identity.siteId]);
+  }, [identity.brandName, identity.siteId, onOwnerChange]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // `?tab=` round-trip. Read once on mount (the URL is the entry point, not a
+  // second source of truth for the session) and written back on every change,
+  // so a deep link and a shared link both land on the right tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setTab(parseVisualIdentityTab(new URLSearchParams(window.location.search).get('tab')));
+  }, []);
+
+  const selectTab = useCallback((next: string) => {
+    const resolved = parseVisualIdentityTab(next);
+    setTab(resolved);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', resolved);
+    window.history.replaceState({}, '', url);
+  }, []);
+
+  /**
+   * The seam. With a rail (U3) the intent opens the docked chat; without one it
+   * surfaces the exact instruction. Either way the tool call itself is the
+   * agent's, under the normal approval card — this page never invents a
+   * client-side write path for a tool that has no admin endpoint.
+   */
+  const runIntent = useCallback(
+    (intent: VisualIdentityChatIntent) => {
+      if (rail) {
+        rail.open(intent);
+        return;
+      }
+      setPendingIntent(intent);
+    },
+    [rail]
+  );
+
+  const tabs = useMemo(
+    () => [
+      {
+        id: 'identity' as const,
+        label: VISUAL_IDENTITY_TAB_LABELS.identity,
+        content:
+          model && site ? (
+            <IdentityBoard model={model} identity={identity} onRetheme={() => runIntent(RETHEME_INTENT)} />
+          ) : null,
+      },
+      {
+        id: 'imagery' as const,
+        label: VISUAL_IDENTITY_TAB_LABELS.imagery,
+        content: (
+          <ImageryBoard
+            identity={identity}
+            site={site}
+            standards={standards}
+            overridePolicy={overridePolicy}
+            isOwner={owner === true}
+            getToken={getToken}
+            onIntent={runIntent}
+            onChanged={load}
+          />
+        ),
+      },
+      {
+        id: 'pdf' as const,
+        label: VISUAL_IDENTITY_TAB_LABELS.pdf,
+        content: (
+          <PdfTemplatesPanel
+            identity={identity}
+            site={site}
+            templates={assets?.pdf_templates ?? []}
+            artifacts={assets?.artifacts ?? []}
+            available={assets?.pdf_templates_available === true}
+            isOwner={owner === true}
+            getToken={getToken}
+            onIntent={runIntent}
+            onChanged={load}
+          />
+        ),
+      },
+    ],
+    [assets, identity, load, model, overridePolicy, owner, runIntent, site, standards]
+  );
 
   if (loading || owner === null) {
     return (
@@ -273,13 +528,110 @@ function VisualIdentityBody({ identity }: { identity: SiteIdentity }) {
       />
     );
   }
-  return <IdentityBoard model={model} identity={identity} />;
+  return (
+    <div className="flex flex-col gap-4">
+      <header>
+        <h1 className="text-[length:var(--adm-text-2xl)] font-semibold text-[var(--adm-text-heading)]">
+          Visual identity
+        </h1>
+        <p className="mt-1 max-w-3xl text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          One place for how this publication looks: its brand board, the image style every generated picture obeys, and
+          the PDF templates its documents render from.
+        </p>
+      </header>
+      <Tabs tabs={tabs} value={tab} onChange={selectTab} />
+      <IntentDialog intent={pendingIntent} onClose={() => setPendingIntent(undefined)} />
+    </div>
+  );
 }
 
-export default function VisualIdentityWorkspace({ identity }: { identity: SiteIdentity }) {
+/**
+ * U3 (R8, BRIEF §4): docks `AgentRail` on THIS route, seeded with the
+ * `visual-identity` starter, and wires its `chat.send` into the `rail` seam
+ * U1 left. A `rail` passed in from outside (tests, a future host) is used
+ * as-is instead — this self-hosted dock only fills the gap when nobody
+ * supplied one, exactly the gap the seam's own fallback dialog used to fill
+ * alone. `sessionStorage` keeps ONE conversation per browser tab across a
+ * tab-switch remount (`PdfTemplateRoom`'s existing pattern, TemplatesWorkspace.tsx) —
+ * the starter's opening turn goes out once, not on every remount.
+ */
+function useDockedVisualIdentityChat(siteId: string, enabled: boolean) {
+  const [chatId, setChatId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return;
+    const key = `visual-identity-chat:${siteId}`;
+    const existing = sessionStorage.getItem(key);
+    if (existing) {
+      setChatId(existing);
+      return;
+    }
+    const starter = agentStarterByKey('visual-identity');
+    createFreeChat(getToken, starter?.label ?? 'Visual identity')
+      .then(async ({ chat: created }) => {
+        sessionStorage.setItem(key, created.chat_id);
+        setChatId(created.chat_id);
+        if (starter) await sendChatMessage(getToken, created.chat_id, starter.prompt);
+      })
+      .catch(() => setChatId(undefined));
+  }, [enabled, siteId]);
+  return chatId;
+}
+
+export default function VisualIdentityWorkspace({
+  identity,
+  rail: externalRail,
+}: {
+  identity: SiteIdentity;
+  rail?: VisualIdentityRailSeam;
+}) {
+  const dockNeeded = !externalRail;
+  // Gates the docked rail on the SAME owner check `VisualIdentityBody`
+  // already gates its own tabs on (see that prop's own comment) — `null`
+  // until the first `fetchMe` resolves, so the dock stays unmounted rather
+  // than flashing on for a viewer who turns out not to be an Owner.
+  const [ownerKnown, setOwnerKnown] = useState<boolean | null>(null);
+  const onOwnerChange = useCallback((next: boolean) => setOwnerKnown(next), []);
+  const dockActive = dockNeeded && ownerKnown === true;
+  const chatId = useDockedVisualIdentityChat(identity.siteId, dockActive);
+  const chat = useChat(getToken, chatId);
+  const [composerSeed, setComposerSeed] = useState<{ key: string; text: string } | undefined>(undefined);
+
+  const dockedRail: VisualIdentityRailSeam = useMemo(
+    () => ({
+      open: (intent) => setComposerSeed({ key: `${intent.tool}:${Date.now()}`, text: intent.prompt }),
+    }),
+    []
+  );
+  const rail = externalRail ?? dockedRail;
+
   return (
-    <AdminShell currentPath="/admin/settings/visual-identity" title="Visual identity" identity={identity}>
-      <VisualIdentityBody identity={identity} />
+    <AdminShell currentPath="/admin/settings/visual-identity" title="Visual identity" identity={identity} wide>
+      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0">
+          <VisualIdentityBody identity={identity} rail={rail} {...(dockNeeded ? { onOwnerChange } : {})} />
+        </div>
+        {dockActive ? (
+          <div className="sticky top-4 self-start" aria-label="Visual identity agent dock">
+            {/* REVIEW: this dock only mounts once `fetchMe` has confirmed an
+                Owner (see `dockActive`), so the rail's Owner-only provider
+                error detail belongs on. `isOwner` defaults to false, which
+                silently hid it from the only role that can reach this page. */}
+            <AgentRail
+              chat={chat}
+              focus="the publication’s visual identity"
+              isOwner
+              suggestions={[
+                'Summarize the current theme, image style and PDF templates.',
+                'What would you change about the image style?',
+              ]}
+              draftSeed={composerSeed}
+            />
+          </div>
+        ) : null}
+      </div>
     </AdminShell>
   );
 }
+
+/** Re-exported so the route (and U3's rail host) can name the tabs without reaching into the lib. */
+export { VISUAL_IDENTITY_TABS };

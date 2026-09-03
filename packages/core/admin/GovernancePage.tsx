@@ -25,6 +25,7 @@ import {
   setApprovalOverride,
   setChatToolsOverride,
   setLearningMode,
+  setBrandImageryOverrides,
   revertGovernance,
   effectiveApprovalMode,
   type GovernanceState,
@@ -32,6 +33,7 @@ import {
   type ApprovalMode,
   type ChatToolCatalogEntry,
   type ToolAutonomy,
+  type BrandImageryOverridePolicy,
 } from '@core/lib/admin/governance-client';
 import {
   describeTrackingGovernance,
@@ -45,6 +47,7 @@ import {
   autonomyEffect,
   governanceProvenanceLabel,
   toolGroupLabel,
+  describeBrandImageryGuardrail,
 } from '@core/lib/admin/governance-presentation';
 
 async function getToken(): Promise<string> {
@@ -285,6 +288,8 @@ function GovernanceBody({
         </TechnicalDetails>
       </Card>
 
+      <BrandImageryGuardrailCard gov={gov} owner={owner} onSaved={refresh} />
+
       <ChatToolAutonomyCard
         catalog={gov.chat_tools_catalog ?? []}
         current={gov.doc?.chat_tools ?? {}}
@@ -393,6 +398,94 @@ function LearningModeCard({
       ) : (
         <p className="mt-4 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
           Only Owners can change learning mode.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// ─── brand imagery override guardrail (U2, BRIEF §3.7/R5) ──────────────────
+
+function BrandImageryGuardrailCard({
+  gov,
+  owner,
+  onSaved,
+}: {
+  gov: GovernanceState;
+  owner: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const active = gov.active.brandImageryOverrides;
+  const [draft, setDraft] = useState<BrandImageryOverridePolicy>(active);
+  const [saving, setSaving] = useState(false);
+  const overridden = gov.active.provenance.brandImageryOverrides === 'override';
+  const view = describeBrandImageryGuardrail(draft, gov.active.provenance.brandImageryOverrides);
+
+  useEffect(() => setDraft(active), [active]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await setBrandImageryOverrides(getToken, draft);
+      await onSaved();
+      toast({
+        title: draft === 'allow' ? 'Agents may now override brand imagery per run' : 'Brand imagery locked to the site default',
+        tone: 'success',
+      });
+    } catch (err) {
+      toast({ title: 'Save failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const revert = async () => {
+    setSaving(true);
+    try {
+      await revertGovernance(getToken, 'brandImageryOverrides');
+      await onSaved();
+      toast({ title: 'Brand imagery guardrail restored to the site default', tone: 'success' });
+    } catch (err) {
+      toast({ title: 'Revert failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      kicker="Visual identity"
+      title="Brand imagery — agents may override per run"
+      actions={<Badge tone={overridden ? 'accent' : 'neutral'}>{view.provenanceLabel}</Badge>}
+    >
+      <Switch
+        checked={draft === 'allow'}
+        onCheckedChange={(checked) => setDraft(checked ? 'allow' : 'lock')}
+        disabled={!owner || saving}
+        label={view.label}
+        hint={view.effect}
+      />
+      <TechnicalDetails>
+        {view.rows.map((row) => (
+          <p key={row.label}>
+            {row.label}: {row.value}
+          </p>
+        ))}
+        <p>Stored values: allow, lock. Read by create_agent_artifact_job&rsquo;s style resolver.</p>
+      </TechnicalDetails>
+      {owner ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button onClick={save} loading={saving} disabled={saving || draft === active}>
+            Save setting
+          </Button>
+          <Button variant="secondary" onClick={revert} disabled={saving || !overridden}>
+            Revert to site default
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-4 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          Only Owners can change this guardrail.
         </p>
       )}
     </Card>

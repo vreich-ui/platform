@@ -29,19 +29,26 @@ export interface ChatToolCatalogEntry {
   description: string;
 }
 
+/** The `style` override channel guardrail (BRIEF §3.7/R5) — 'allow' is the
+ *  default; 'lock' makes an artifact job ignore a supplied `style` and use
+ *  only the site's own brandImagery. */
+export type BrandImageryOverridePolicy = 'allow' | 'lock';
+
 export interface GovernanceState {
   doc: {
     approval?: ApprovalConfig;
     creation?: unknown;
     chat_tools?: Record<string, ToolAutonomy>;
     learning_mode?: boolean;
+    brandImageryOverrides?: BrandImageryOverridePolicy;
   } | null;
   committed: { approval: ApprovalConfig; creation: unknown };
   active: {
     approval: ApprovalConfig;
     creation: unknown;
     learning_mode: boolean;
-    provenance: { approval: string; creation: string; learning_mode: string };
+    brandImageryOverrides: BrandImageryOverridePolicy;
+    provenance: { approval: string; creation: string; learning_mode: string; brandImageryOverrides: string };
   };
   chat_tools_catalog?: ChatToolCatalogEntry[];
 }
@@ -71,9 +78,13 @@ export const setChatToolsOverride = (getToken: GetToken, chatTools: Record<strin
 export const setLearningMode = (getToken: GetToken, enabled: boolean) =>
   post<GovernanceState>(getToken, { verb: 'set', learning_mode: enabled });
 
+/** Write the brand-imagery override guardrail (U2). Owner-only server-side. */
+export const setBrandImageryOverrides = (getToken: GetToken, policy: BrandImageryOverridePolicy) =>
+  post<GovernanceState>(getToken, { verb: 'set', brandImageryOverrides: policy });
+
 export const revertGovernance = (
   getToken: GetToken,
-  target: 'approval' | 'creation' | 'chat_tools' | 'learning_mode' | 'all'
+  target: 'approval' | 'creation' | 'chat_tools' | 'learning_mode' | 'brandImageryOverrides' | 'all'
 ) => post<GovernanceState>(getToken, { verb: 'revert', target });
 
 /** Effective mode for a type given a config (per-type override, else master). */

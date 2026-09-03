@@ -43,15 +43,15 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 // ─── registry shape ────────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 85 names: every visible TOOL_DEFINITION (58 + 16 membership, W18) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
+test('the registry has exactly the expected 87 names: every visible TOOL_DEFINITION (60 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
     ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
   );
-  assert.equal(expectedVisible.size, 74);
+  assert.equal(expectedVisible.size, 76);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 85);
-  assert.equal(new Set(registryNames).size, 85, 'no duplicate names');
+  assert.equal(registryNames.length, 87);
+  assert.equal(new Set(registryNames).size, 87, 'no duplicate names');
 
   const workspaceNames = [
     'list_workspace_nodes',
@@ -83,9 +83,9 @@ test('the registry has exactly the expected 85 names: every visible TOOL_DEFINIT
   }
 });
 
-test('wire-tool budget: the non-membership registry (69) + present_candidates <= 96; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
+test('wire-tool budget: the non-membership registry (71) + present_candidates <= 96; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
   const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
-  assert.equal(nonMembership.length, 69);
+  assert.equal(nonMembership.length, 71);
   // W19 T19.8: the old ceiling was 64 and the registry sat at exactly 63 + the
   // learning-mode tool — no headroom at all, so one more tool would have been
   // silently sliced off the wire. The bound moved to 96 on both sides.
@@ -324,6 +324,28 @@ test('site_apply_theme.execute refuses without the owner role, proceeds with it'
   assert.equal(calls[0].action, 'apply_theme');
 });
 
+test('site_apply_brand_imagery.execute refuses without the owner role, proceeds with it', async () => {
+  const tool = generatedChatToolByName('site_apply_brand_imagery')!;
+  const noOwner = stubCtx({ roles: ['admin'] });
+  const refused = await tool.execute(noOwner, { visual_standard_id: 'vis_acme', site_id: 'site_acme' });
+  assert.equal(refused.is_error, true);
+  assert.match(refused.content, /Owner role/);
+
+  const calls: Record<string, unknown>[] = [];
+  const asOwner = stubCtx({
+    roles: ['owner'],
+    verb: async (request) => {
+      calls.push(request);
+      return { status: 200, body: { ok: true } };
+    },
+  });
+  const applied = await tool.execute(asOwner, { visual_standard_id: 'vis_acme', site_id: 'site_acme' });
+  assert.equal(applied.is_error, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].action, 'apply_brand_imagery');
+  assert.equal(calls[0].visual_standard_id, 'vis_acme');
+});
+
 test('release_to_production.execute refuses without the owner role, proceeds with it (via the operational bridge)', async () => {
   const tool = generatedChatToolByName('release_to_production')!;
   const noOwner = stubCtx({ roles: ['admin'] });
@@ -462,8 +484,8 @@ test('compileSchema throws at compile time on an unsupported keyword', () => {
   );
 });
 
-test('every one of the 88 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 88);
+test('every one of the 90 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 90);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }

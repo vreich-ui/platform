@@ -8,9 +8,10 @@
  *
  * Execution bindings (verified against object-verbs.ts / mcp.ts's dispatch
  * switch, not assumed):
- *  - `object_*` + `site_apply_theme`  → `ctx.verb(...)`, same HUMAN-principal
- *    path tools.ts's own object tools already ride. Payloads are built field-
- *    for-field the way mcp.ts's callTool switch builds them.
+ *  - `object_*` + `site_apply_theme` + `site_apply_brand_imagery` → `ctx.verb(...)`,
+ *    same HUMAN-principal path tools.ts's own object tools already ride.
+ *    Payloads are built field-for-field the way mcp.ts's callTool switch
+ *    builds them.
  *  - `object_contract`                → `ctx.contract(...)`.
  *  - `list_artifacts_for_request`     → `ctx.listArtifacts(...)`.
  *  - everything else (artifact reads/search, marginalia_*, registry_get,
@@ -20,9 +21,10 @@
  *    a new optional ToolContext member (tools.ts) wired in agent/context.ts.
  *    Absent operational bridge → a clear is_error result, never a crash.
  *
- * `site_apply_theme` and `release_to_production` are Owner-gated AT
- * EXECUTION, mirroring tools.ts's `apply_theme` — the gate is independent of
- * autonomy, so a misconfigured 'auto' still cannot bypass it.
+ * `site_apply_theme`, `site_apply_brand_imagery`, and `release_to_production`
+ * are Owner-gated AT EXECUTION, mirroring tools.ts's `apply_theme` /
+ * `apply_brand_imagery` — the gate is independent of autonomy, so a
+ * misconfigured 'auto' still cannot bypass it.
  */
 import { INTERNAL_ONLY_TOOLS, CHAT_TOOL_ALIASES } from '../mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART1 } from '../mcp-tool-definitions.js';
@@ -161,6 +163,16 @@ const VERB_PAYLOAD_BUILDERS: Record<string, VerbPayloadBuilder> = {
     dry_run: args.dry_run,
     agent_name: args.agent_name,
   }),
+  site_apply_brand_imagery: (args) => ({
+    action: 'apply_brand_imagery',
+    visual_standard_id: args.visual_standard_id,
+    theme_id: args.theme_id,
+    site_id: args.site_id,
+    lock_token: args.lock_token,
+    expected_record_version: args.expected_record_version,
+    dry_run: args.dry_run,
+    agent_name: args.agent_name,
+  }),
   object_checkout: (args) => ({
     action: 'checkout',
     object_type: args.object_type,
@@ -282,6 +294,7 @@ const DESCRIBE_OVERRIDES: Record<string, (args: Record<string, unknown>) => stri
   object_publish: (args) => `Publish ${args.object_type} ${args.object_id}`,
   object_discard: (args) => `Discard drafted changes on ${args.object_type} ${args.object_id}`,
   site_apply_theme: (args) => `Apply theme ${args.theme_id} to ${args.site_id}`,
+  site_apply_brand_imagery: (args) => `Apply brand imagery ${args.visual_standard_id ?? args.theme_id} to ${args.site_id}`,
 };
 
 const describeGenerated = (name: string, args: Record<string, unknown>): string => {
@@ -428,10 +441,10 @@ const buildExecute = (name: string, verbPayload: VerbPayloadBuilder | undefined)
     return async (ctx, args) => ({ content: json(await ctx.listArtifacts(args.requestId as string)), is_error: false });
   }
   if (verbPayload) {
-    if (name === 'site_apply_theme') {
+    if (name === 'site_apply_theme' || name === 'site_apply_brand_imagery') {
       return async (ctx, args) => {
         // The role wall is here, at execution — independent of autonomy
-        // config, mirroring tools.ts's applyTheme.
+        // config, mirroring tools.ts's applyTheme/applyBrandImagery.
         if (!ctx.roles.includes('owner')) return ownerRequired(name);
         return verbResult(ctx, verbPayload(args));
       };

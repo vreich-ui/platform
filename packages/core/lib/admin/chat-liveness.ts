@@ -441,7 +441,11 @@ export function receiptLine({ outcome, chips, message, hasRunCard, created, publ
  * (`server/lib/review-state.ts`, "compensating inverse write"); `apply_theme`
  * documents `discard` as its own exact inverse verbatim
  * (`server/lib/mcp-tool-definitions-2.ts`: "the exact inverse makes
- * reverting a standard discard"). Every other write this chat can call —
+ * reverting a standard discard"). U3 (brand-imagery wave): `apply_brand_imagery`
+ * carries the SAME sentence verbatim for its own site-checkout patch
+ * (`mcp-tool-definitions-2.ts`'s `site_apply_brand_imagery` description:
+ * "the exact inverse makes reverting a standard discard") — an equally exact
+ * inverse, so it belongs here too. Every other write this chat can call —
  * `create_object`/`create_variant`/`instantiate_template`/
  * `instantiate_section_template` (nothing un-creates an object),
  * `publish` (unpublish is explicitly rejected server-side today,
@@ -449,7 +453,7 @@ export function receiptLine({ outcome, chips, message, hasRunCard, created, publ
  * tools — has no exact inverse in this repo. Omit the link rather than
  * invent one.
  */
-const UNDOABLE_TOOLS = new Set(['patch', 'submit_review', 'apply_theme']);
+const UNDOABLE_TOOLS = new Set(['patch', 'submit_review', 'apply_theme', 'apply_brand_imagery']);
 
 export const hasKnownInverse = (tool: string): boolean => UNDOABLE_TOOLS.has(tool);
 
