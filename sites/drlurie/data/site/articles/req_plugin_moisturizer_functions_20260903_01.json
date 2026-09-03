@@ -1,0 +1,186 @@
+{
+  "__generated": {
+    "at": "2026-09-03T13:24:56.753Z",
+    "from": "objects/content_item/by-id/req_plugin_moisturizer_functions_20260903_01.json",
+    "record_version": 5
+  },
+  "author": "Dr. Lurie",
+  "deck": "Most moisturizers perform three basic jobs. Understanding them makes it easier to choose a formula that suits your skin without getting pulled in by the label.",
+  "description": "A clear guide to humectants, emollients, and occlusives: how they support the skin barrier, where common ingredients fit, and how to choose a moisturizer.",
+  "image": {
+    "alt": "Moisturizer textures arranged beside a model of the outer skin barrier.",
+    "src": "/img/req_plugin_moisturizer_functions_20260903_01/58fb1e362f55bada0a1141473213a4d69ac83464e32effcee70f09403239b0ff.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_a7k2m9",
+      "kind": "content",
+      "public": {
+        "body": "The moisturizer shelf can make a basic step feel like a specialist subject. There are water creams, barrier creams, overnight masks, lotions, gels, and ointments, each promising something slightly different.\n\nUnderneath those labels, most moisturizers perform one or more of three jobs. They help water remain in the skin's outer layer, smooth the spaces around its surface cells, or slow water from escaping.\n\nThose jobs are usually described as humectant, emollient, and occlusive. You do not need to choose just one. Most useful moisturizers combine them."
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_b4r8q1",
+      "kind": "content",
+      "public": {
+        "body": "The outermost layer of your skin is called the stratum corneum. It is often compared to a brick wall: flattened skin cells form the bricks, while a mixture of lipids surrounds them like mortar.\n\nThis structure helps keep water in and potential irritants out. When it is disrupted, skin may feel tight, rough, flaky, or unusually sensitive. A moisturizer supports that surface while the barrier carries on with its normal renewal.",
+        "title": "Start with the skin barrier"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_m8f2r6",
+      "kind": "content",
+      "public": {
+        "media": {
+          "alt": "Cross-section showing skin cells, barrier lipids, and water loss from the outer skin layer.",
+          "caption": "Moisturizers work at the surface, helping the outer layer hold water and feel smoother.",
+          "contentType": "image/webp",
+          "sizeBytes": 34082,
+          "src": "/img/req_plugin_moisturizer_functions_20260903_01/16a934a958820284204febccdba74b684e1bc11c54fa7e6803aa6d07e6471455.webp",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "section"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_c6t3v8",
+      "kind": "content",
+      "public": {
+        "body": "Humectants are ingredients that bind water within the outer layer of the skin. Common examples include glycerin, urea, hyaluronic acid, and propylene glycol.\n\nThey often appear in light lotions and gels, but they are also used in richer creams. Their presence does not tell you how the finished product will feel because texture depends on the complete formula.\n\nA humectant-heavy gel may feel comfortable on oily skin or in humid weather. For skin that is very dry, water-binding ingredients may work better when the formula also contains emollient or occlusive ingredients.",
+        "title": "Humectants help the outer layer hold water"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_d9p5x2",
+      "kind": "content",
+      "public": {
+        "body": "Emollients soften the skin by filling some of the spaces around its surface cells. They can make rough or flaky skin feel smoother and more flexible.\n\nExamples include squalane, fatty alcohols, ceramides, fatty acids, and many plant-derived oils. These ingredients differ from one another, and belonging to the same category does not mean they will suit every person equally.\n\nCeramides are naturally present among the lipids of the skin barrier. Still, the overall formulation matters more than the presence of one fashionable ingredient near the end of a label.",
+        "title": "Emollients smooth the surface"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_e2w7j4",
+      "kind": "content",
+      "public": {
+        "body": "Occlusive ingredients form a film over the surface that reduces the rate at which water escapes. Petrolatum is a familiar example. Mineral oil and dimethicone can also contribute to this protective effect.\n\nOcclusive products tend to feel richer. That can be useful on dry hands, flaky patches, or skin exposed to cold and wind. It may feel unnecessary on skin that is already comfortable or in a warm, humid environment.\n\nRichness is not automatically better, and it is not automatically harmful. The useful question is whether the texture protects your skin without making the routine unpleasant to follow.",
+        "title": "Occlusives slow water loss"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_n3k7w9",
+      "kind": "content",
+      "public": {
+        "media": {
+          "alt": "Three-part comparison of humectant, emollient, and occlusive moisturizer functions.",
+          "caption": "Humectants hold water, emollients smooth the surface, and occlusives slow water loss.",
+          "contentType": "image/webp",
+          "sizeBytes": 13182,
+          "src": "/img/req_plugin_moisturizer_functions_20260903_01/cb70ed019e5322f433771a53805ade12f67053c623b9307a42cf22d3832d8922.webp",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "section"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_f8n1s6",
+      "kind": "content",
+      "public": {
+        "body": "A cream might contain glycerin as a humectant, fatty alcohols or ceramides as emollients, and dimethicone or petrolatum as an occlusive component. The balance between them helps determine how the product behaves.\n\nThis is why front-label categories are imperfect. A hydrating gel may contain emollients. A barrier cream may rely heavily on humectants. Ingredient lists offer clues, but they do not reveal the precise amount of each ingredient or predict exactly how the formula will feel on your skin.",
+        "title": "Most moisturizers combine all three"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_g3h9u5",
+      "kind": "content",
+      "public": {
+        "body": "If your skin feels tight or mildly flaky, a lotion or cream combining all three functions is a sensible place to start.\n\nIf your skin produces plenty of oil but still feels tight after cleansing, a lighter lotion may be more comfortable. Oil production does not necessarily prevent water loss from the surface.\n\nIf your skin is cracked or persistently rough, a thicker cream or ointment may provide more protection. Apply it where you need it rather than assuming your entire face requires the same texture.\n\nIf products frequently sting, choose a short, fragrance-free formula and pause unnecessary active ingredients while the skin settles. Unscented and fragrance-free are not always equivalent descriptions.",
+        "title": "Choose by condition and texture"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_h5c2y7",
+      "kind": "content",
+      "public": {
+        "body": "Apply moisturizer after cleansing, while the skin is still slightly damp if that feels comfortable. The goal is an even layer, not a precisely measured dose.\n\nGive the formula a little time before layering sunscreen or makeup. If it pills, the problem may be the combination of products or the amount applied rather than the moisturizer itself.\n\nA moisturizer should leave your skin more comfortable. It does not need to tingle, feel cold, or create an immediate visible transformation to be doing its job.",
+        "title": "How to use one"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_j7m4z1",
+      "kind": "content",
+      "public": {
+        "body": "Dryness that keeps returning may have causes a cosmetic product cannot resolve. Persistent itching, painful cracks, bleeding, oozing, or a spreading rash deserves clinical assessment.",
+        "title": "When moisturizer is not enough"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_k1q6d8",
+      "kind": "action",
+      "public": {
+        "body": "If your skin remains uncomfortable despite simplifying your routine, raise it with your dermatologist.",
+        "ctaLink": "/contact",
+        "ctaText": "Talk with your dermatologist"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_l4v9b3",
+      "kind": "content",
+      "public": {
+        "body": "Loden M. Role of Topical Emollients and Moisturizers in the Treatment of Dry Skin Barrier Disorders. American Journal of Clinical Dermatology. 2003. https://doi.org/10.2165/00128071-200304110-00005\n\nRawlings AV, Harding CR. Moisturization and Skin Barrier Function. Dermatologic Therapy. 2004. https://doi.org/10.1111/j.1396-0296.2004.04s1005.x\n\nPurnamawati S, Indrastuti N, Danarti R, Saefudin T. The Role of Moisturizers in Addressing Various Kinds of Dermatitis: A Review. Clinical Medicine & Research. 2017. https://doi.org/10.3121/cmr.2017.1363",
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Learn how humectants, emollients, and occlusives support the skin barrier and how to choose a moisturizer by skin condition and texture.",
+    "meta_title": "What Moisturizers Actually Do"
+  },
+  "slug": "what-moisturizers-actually-do",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-03",
+        "name": "Role of Topical Emollients and Moisturizers in the Treatment of Dry Skin Barrier Disorders",
+        "publisher": "American Journal of Clinical Dermatology",
+        "source_id": "src_loden_2003",
+        "url": "https://doi.org/10.2165/00128071-200304110-00005"
+      },
+      {
+        "accessed_at": "2026-09-03",
+        "name": "Moisturization and Skin Barrier Function",
+        "publisher": "Dermatologic Therapy",
+        "source_id": "src_rawlings_harding_2004",
+        "url": "https://doi.org/10.1111/j.1396-0296.2004.04s1005.x"
+      },
+      {
+        "accessed_at": "2026-09-03",
+        "name": "The Role of Moisturizers in Addressing Various Kinds of Dermatitis: A Review",
+        "publisher": "Clinical Medicine & Research",
+        "source_id": "src_purnamawati_2017",
+        "url": "https://doi.org/10.3121/cmr.2017.1363"
+      }
+    ]
+  },
+  "title": "What Moisturizers Actually Do: Humectants, Emollients, and Occlusives"
+}
