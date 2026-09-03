@@ -59,8 +59,8 @@ import {
 import { retireObject } from './object-retire.js';
 import { purgeArchivedObjects } from './object-purge.js';
 import { loadSiteRedirects } from './site-redirects.js';
-import { validateObjectIdForType } from '../../lib/object-ids.js';
-import { mintId, MintIdError } from '../../lib/object-ids-mint.js';
+import { objectTypeFromId, siteShortId, validateObjectIdForType } from '../../lib/object-ids.js';
+import { mintId, MintIdError, opaqueSeed, visualStandardSeed } from '../../lib/object-ids-mint.js';
 import { applyPatchOps, PatchApplyError } from '../../lib/object-patch-apply.js';
 import { buildVariantBody } from '../../lib/article-object/variant.js';
 import { buildPageBodyFromTemplate } from '../../lib/template-instantiate.js';
@@ -73,6 +73,7 @@ import { brandImagerySchema, siteBodySchema, type BrandImagery } from '../../sch
 import { templateBodySchema } from '../../schema/bodies/template-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
 import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
+import { deriveBrandImageryFromTokens } from './brand-imagery-derive.js';
 import { THEME_AXIS_GROUPS, THEME_COLOR_KEYS } from '../../lib/registry/theme-tokens.js';
 import {
   objectTypes,
@@ -304,6 +305,16 @@ export const objectVerbRequestSchema = z.discriminatedUnion('action', [
     candidate_patch: opsField.optional(),
     body: z.unknown().optional(),
     requested_id: z.string().min(1).optional(),
+    /**
+     * Mode (2) only, and only for the types whose id is derived from the site
+     * rather than from the body (`vis_<site>`, `voice_<site>`, `trk_<site>` —
+     * SITE_DERIVED_ID_TYPES). `create` always carries a site; a candidate
+     * dry-run has no record to read one off, so it is accepted here and
+     * otherwise resolved from the store's own site singleton. Optional
+     * because every other type mints from the body's own route/name/slug and
+     * never needs it.
+     */
+    site: z.string().min(1).optional(),
   }),
   // ─── T1.4 review-state wiring ───────────────────────────────────────────
   z.object({
@@ -732,7 +743,42 @@ const patchErrorStatus = (code: PatchApplyError['code']): number => {
   return 422; // op_not_applicable | invalid_body | target_not_found | alias_required | alias_conflict
 };
 
-const seedForCreate = (objectType: ObjectType, body: unknown): string => {
+/**
+ * The three types whose id is a fact about the SITE, not about the body:
+ * `voice_<site>` (editorial-voice-v1.ts), `trk_<site>` (tracking-config-v1.ts)
+ * and `vis_<site>` / `vis_<site>_<slug>` (visual-standard-v1.ts, BRIEF R2).
+ * Seeding any of these from the body is always wrong — see seedForCreate.
+ */
+const SITE_DERIVED_ID_TYPES = new Set<ObjectType>(['visual_standard', 'editorial_voice', 'tracking_config']);
+
+/**
+ * What a minted id for a brand-new object is DERIVED from — a human-meaningful
+ * hint (a route, a name, a slug), never the object's content.
+ *
+ * `site` is the create request's site (the site OBJECT id, `site_drlurie`);
+ * the three SITE_DERIVED_ID_TYPES need it and nothing else does.
+ *
+ * TWO rules make this function safe, and both were learned from the 2026-09
+ * incident where a `visual_standard` create minted an id from its whole body:
+ *
+ *  1. Every type that HAS an id convention states it here. `visual_standard`
+ *     had none — it was added to OBJECT_PREFIX (P1) without a matching case —
+ *     so it fell through to the body, producing a several-hundred-character
+ *     id the blob store rejected with an opaque 400. Even a short body-derived
+ *     id would have been wrong: the fleet addresses the house standard as
+ *     `vis_<site>` (visual-standard-genesis.mjs, visual-identity-imagery.ts,
+ *     CMS-Agent's visualStandardIds.ts), so a body-derived id is an id nothing
+ *     else can ever find.
+ *
+ *  2. The fallback for a body with no rule is a short HASH, never the body
+ *     itself. Any future type added to OBJECT_PREFIX without a case here now
+ *     mints `<prefix>_<12 hex>` — ugly, but short, valid and deterministic —
+ *     instead of an id that cannot be a store key. The same holds for a body
+ *     of a known type that is missing its seed field (a page with neither
+ *     route nor title, a product with no slug). This closes the CLASS of bug,
+ *     not just the one instance of it.
+ */
+export const seedForCreate = (objectType: ObjectType, body: unknown, site: string | undefined): string => {
   if (isRecord(body)) {
     if (objectType === 'page' && typeof body.route === 'string') return body.route;
     if (objectType === 'page' && typeof body.title === 'string') return body.title;
@@ -748,7 +794,66 @@ const seedForCreate = (objectType: ObjectType, body: unknown): string => {
     if (objectType === 'section' && isRecord(body.section) && typeof body.section.type === 'string')
       return `shared_${body.section.type}`;
   }
-  return stableStringify(body);
+
+  if (SITE_DERIVED_ID_TYPES.has(objectType)) {
+    if (!site) {
+      throw new MintIdError(
+        `A ${objectType} id is derived from the site it belongs to, never from its body — supply site, or an ` +
+          'explicit requested_id.'
+      );
+    }
+    if (objectType !== 'visual_standard') return siteShortId(site);
+    // house ⇒ vis_<site>; template ⇒ vis_<site>_<slug>, from an explicit
+    // templateSlug when the caller carries one, else the label the human
+    // gave it (the admin studio's own "new template" rule).
+    const kind = isRecord(body) ? body.kind : undefined;
+    if (kind !== 'template') return visualStandardSeed(site);
+    const slugHint = isRecord(body)
+      ? [body.templateSlug, body.label].find((value): value is string => typeof value === 'string' && value.trim() !== '')
+      : undefined;
+    return visualStandardSeed(site, slugHint ?? '');
+  }
+
+  return opaqueSeed(stableStringify(body));
+};
+
+/**
+ * The site a candidate-body dry-run mints against.
+ *
+ * `create` is handed its site by the caller; `validate` in candidate-body mode
+ * has no record and — before this — no way to name one, which is exactly how
+ * the incident call (`object_validate` with a house `visual_standard` body and
+ * nothing else) ended up seeding an id from the body. An explicit `site`
+ * always wins; otherwise the store's own `site` singleton answers it, which is
+ * unambiguous by construction for every type in SITE_DERIVED_ID_TYPES: those
+ * ids are per-site singleton conventions, and an object store holding two
+ * different sites could not have a single `voice_<site>`/`trk_<site>`/
+ * `vis_<site>` anyway. Two (or zero) sites ⇒ undefined, and seedForCreate
+ * refuses with a readable MintIdError naming what to pass instead.
+ *
+ * Costs one prefix list, and only for the three types that need it — the
+ * other ten mint from the body's own route/name/slug and never reach here.
+ */
+export const resolveSiteForMint = async (
+  store: ObjectVerbStore,
+  objectType: ObjectType,
+  explicit: string | undefined
+): Promise<string | undefined> => {
+  if (explicit) return explicit;
+  if (!SITE_DERIVED_ID_TYPES.has(objectType)) return undefined;
+  const prefix = 'objects/site/by-id/';
+  try {
+    const listed = await collectBlobListItems(await store.list({ prefix, directories: false, paginate: true }));
+    const siteIds = listed
+      .map((item) => item.key.slice(prefix.length).replace(/\.json$/, ''))
+      .filter((value) => value.length > 0);
+    return siteIds.length === 1 ? siteIds[0] : undefined;
+  } catch {
+    // A dry-run must never fail because the site LOOKUP failed; the caller
+    // gets the same readable "pass site or requested_id" refusal it would get
+    // from a store with no site in it.
+    return undefined;
+  }
 };
 
 // W13 (12-plan §3): tracking_config is a per-site SINGLETON (the
@@ -965,9 +1070,90 @@ export const listAllObjectRecords = async (
   return records;
 };
 
+// ─── store failures, made legible ─────────────────────────────────────────────
+
+/**
+ * A blob-store failure surfacing through an object verb, as a typed platform
+ * error instead of the provider's own words.
+ *
+ * The 2026-09 incident ended with this reaching a user's admin chat, verbatim
+ * and alone: "Netlify Blobs has generated an internal error (400 status code,
+ * ID: cb90450d-…)". Every actionable fact was missing — which verb, which
+ * object type, whether anything was written, what to do next — and the one
+ * thing present (a support ID for someone else's support desk) was useless to
+ * the person reading it. The store's message is now DATA on a platform error
+ * that names the operation, never the message itself.
+ *
+ * Deliberately narrow: only a recognisably-Blobs failure is converted. Any
+ * other throw still propagates untouched, because turning every exception into
+ * a 502 would hide real bugs in the verbs behind a storage excuse.
+ */
+export const OBJECT_STORE_ERROR_CODE = 'object_store_error';
+
+const isBlobStoreError = (message: string): boolean => /netlify blobs/i.test(message);
+
+/** The store's status code and support id, pulled OUT of its message so they stay facts, not prose. */
+const blobStoreErrorFacts = (message: string): { store_status?: number; store_support_id?: string } => {
+  const status = /(\d{3})\s+status code/i.exec(message)?.[1];
+  const supportId = /ID:\s*([0-9a-zA-Z-]+)/.exec(message)?.[1];
+  return {
+    ...(status ? { store_status: Number(status) } : {}),
+    ...(supportId ? { store_support_id: supportId } : {}),
+  };
+};
+
+/** "create of visual_standard (site site_drlurie)" — what the caller actually asked for. */
+const describeVerbTarget = (request: ObjectVerbRequest): string => {
+  const fields = request as unknown as Record<string, unknown>;
+  const parts = [
+    typeof fields.object_type === 'string' ? fields.object_type : undefined,
+    typeof fields.object_id === 'string' ? fields.object_id : undefined,
+    typeof fields.site_id === 'string' ? `site ${fields.site_id}` : undefined,
+    typeof fields.site === 'string' && typeof fields.object_id !== 'string' ? `site ${fields.site}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length > 0 ? `${request.action} of ${parts.join(' ')}` : request.action;
+};
+
+const storeErrorResult = (request: ObjectVerbRequest, error: unknown): ObjectVerbResult | undefined => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (!isBlobStoreError(message)) return undefined;
+  const facts = blobStoreErrorFacts(message);
+  return err(502, {
+    error:
+      `The object store could not complete the ${describeVerbTarget(request)} — the storage layer refused the ` +
+      `operation${facts.store_status ? ` (HTTP ${facts.store_status})` : ''}. This is a platform-side failure, not ` +
+      'a problem with the body you sent, and the operation did not complete. Retry once; if it repeats, report the ' +
+      'store_support_id below rather than re-sending a different body.',
+    code: OBJECT_STORE_ERROR_CODE,
+    action: request.action,
+    ...facts,
+  });
+};
+
 // ─── the dispatcher ───────────────────────────────────────────────────────────
 
+/**
+ * The public entry point. Every object verb goes through here, including the
+ * verbs that recurse into another one (create_variant, instantiate,
+ * apply_theme, apply_brand_imagery), so a store failure anywhere beneath is
+ * converted exactly once, at the boundary the caller sees.
+ */
 export const handleObjectVerb = async (
+  store: ObjectVerbStore,
+  request: ObjectVerbRequest,
+  principal: Principal,
+  options: HandleObjectVerbOptions = {}
+): Promise<ObjectVerbResult> => {
+  try {
+    return await dispatchObjectVerb(store, request, principal, options);
+  } catch (error) {
+    const converted = storeErrorResult(request, error);
+    if (!converted) throw error;
+    return converted;
+  }
+};
+
+const dispatchObjectVerb = async (
   store: ObjectVerbStore,
   request: ObjectVerbRequest,
   principal: Principal,
@@ -1077,9 +1263,9 @@ export const handleObjectVerb = async (
             objectType === 'content_item'
               ? mintId(
                   { kind: 'content_item', yyyymmdd: timestamp.slice(0, 10).replaceAll('-', '') },
-                  seedForCreate(objectType, request.body)
+                  seedForCreate(objectType, request.body, request.site)
                 )
-              : mintId({ kind: 'object', objectType }, seedForCreate(objectType, request.body));
+              : mintId({ kind: 'object', objectType }, seedForCreate(objectType, request.body, request.site));
         } catch (error) {
           if (error instanceof MintIdError)
             return err(400, { error: 'Could not mint an object id', detail: error.message });
@@ -1302,7 +1488,7 @@ export const handleObjectVerb = async (
           objectIdValue = request.requested_id;
         } else {
           try {
-            objectIdValue = mintId({ kind: 'object', objectType: 'page' }, seedForCreate('page', built.body));
+            objectIdValue = mintId({ kind: 'object', objectType: 'page' }, seedForCreate('page', built.body, request.site));
           } catch (error) {
             if (error instanceof MintIdError)
               return err(400, { error: 'Could not mint an object id', detail: error.message });
@@ -1659,9 +1845,43 @@ export const handleObjectVerb = async (
         return err(400, { error: 'Provide exactly one of visual_standard_id or theme_id.' });
       }
 
+      // An id in the WRONG SLOT is a naming mistake, not a missing object.
+      // The incident: an agent asked to build imagery "from the current
+      // theme" passed thm_drlurie_default as visual_standard_id and got back
+      // "Visual standard not found" — technically true, and useless. Object
+      // ids are self-describing by prefix (object-ids.ts), so say which
+      // parameter the id it actually passed belongs in.
+      const slotMismatch = ([
+        ['visual_standard', 'visual_standard_id', request.visual_standard_id],
+        ['theme', 'theme_id', request.theme_id],
+      ] as const)
+        .map(([expectedType, parameter, value]) => {
+          if (value === undefined) return undefined;
+          const actualType = objectTypeFromId(value);
+          if (actualType === undefined || actualType === expectedType) return undefined;
+          const correctParameter = actualType === 'theme' ? 'theme_id' : undefined;
+          return err(400, {
+            error:
+              `"${value}" is a ${actualType} id, not a ${expectedType} id, so it cannot be passed as ${parameter}` +
+              (correctParameter
+                ? ` — pass it as ${correctParameter} instead.`
+                : `. A ${expectedType} id looks like ${expectedType === 'theme' ? 'thm_<site>_<slug>' : 'vis_<site> (house) or vis_<site>_<slug> (template)'}.`),
+            [parameter]: value,
+            expected_object_type: expectedType,
+            actual_object_type: actualType,
+            ...(correctParameter ? { use_parameter: correctParameter } : {}),
+          });
+        })
+        .find((result) => result !== undefined);
+      if (slotMismatch) return slotMismatch;
+
       let sourceKind: 'visual_standard' | 'theme';
       let sourceRecord: ObjectRecord;
       let sourceImagery: BrandImagery;
+      // Whether the imagery was READ off the source or DERIVED from its
+      // tokens — reported on the dry-run and recorded in history, so a human
+      // approving an apply can see which of the two they are approving.
+      let sourceImageryOrigin: 'declared' | 'derived_from_theme_tokens' = 'declared';
       if (request.visual_standard_id !== undefined) {
         sourceKind = 'visual_standard';
         const vsRecord = await loadRecord(store, objectRecordKey('visual_standard', request.visual_standard_id));
@@ -1716,15 +1936,43 @@ export const handleObjectVerb = async (
         }
         // Unlike visual_standard.brandImagery (required), a theme's is
         // optional (theme-v1.ts) — most themes today preset brandTokens
-        // only, so there may be nothing here to apply.
-        if (!parsedTheme.data.brandImagery) {
-          return err(422, {
-            error: `Theme "${request.theme_id}" carries no brandImagery — nothing to apply. Add one to the theme, or apply from a visual_standard instead.`,
-            theme_id: request.theme_id,
-          });
+        // only. A DECLARED preset always wins; when there is none, the
+        // theme's own `tokens` derive one.
+        //
+        // WHY DERIVE RATHER THAN REFUSE: "based on the current theme, create
+        // the site's brandImagery" had no agent-reachable path at all — the
+        // typical tenant's theme carries tokens and no brandImagery, and its
+        // site has no visual_standard yet either, so BOTH sources were empty
+        // and the ask 422'd twice with nothing to do about it. The derivation
+        // is not a new concept here: `deriveBrandImageryFromTokens` is the
+        // one shipped implementation (brand-imagery-derive-core.mjs), it is
+        // what site genesis already writes into every new site's house
+        // standard, and P4's resolver already treats derived-from-tokens as
+        // its last precedence tier. This makes the verb agree with them.
+        //
+        // It is still a governed input, not an agent authoring the style
+        // half: the derivation is a fixed, deterministic function of the
+        // theme's own committed palette, and nothing the caller supplies
+        // reaches it.
+        const declaredImagery = parsedTheme.data.brandImagery;
+        if (declaredImagery) {
+          sourceImagery = declaredImagery;
+        } else {
+          const derived = deriveBrandImageryFromTokens({ brandTokens: parsedTheme.data.tokens }, request.site_id);
+          const parsedDerived = derived ? brandImagerySchema.safeParse(derived) : undefined;
+          if (!parsedDerived?.success) {
+            return err(422, {
+              error:
+                `Theme "${request.theme_id}" carries no brandImagery, and none could be derived from its tokens ` +
+                '(its palette has no usable colours) — add a brandImagery preset to the theme, or apply from a ' +
+                'visual_standard instead.',
+              theme_id: request.theme_id,
+            });
+          }
+          sourceImagery = parsedDerived.data;
+          sourceImageryOrigin = 'derived_from_theme_tokens';
         }
         sourceRecord = themeRecord;
-        sourceImagery = parsedTheme.data.brandImagery;
       }
 
       const siteRecord = await loadRecord(store, objectRecordKey('site', request.site_id));
@@ -1798,12 +2046,29 @@ export const handleObjectVerb = async (
         return JSON.stringify(beforeValue) !== JSON.stringify(afterValue);
       });
 
+      // One provenance object, used by the dry-run preview, the real apply's
+      // response and the history entry alike, so "where did this imagery come
+      // from" reads the same in all three.
+      const sourceProvenance = {
+        kind: sourceKind,
+        id: sourceRecord.object_id,
+        imagery: sourceImageryOrigin,
+        ...(sourceImageryOrigin === 'derived_from_theme_tokens'
+          ? {
+              note:
+                `This theme declares no brandImagery of its own — the imagery below was DERIVED from its ` +
+                `brandTokens palette (the same derivation site genesis uses), not read from the theme. Applying ` +
+                `it writes the derived contract to the site verbatim.`,
+            }
+          : {}),
+      };
+
       if (request.dry_run) {
         const validation = validateCandidatePatch(siteRecord, [op], context, ['set_site_brand_imagery']);
         return ok({
           dry_run: true,
           object_id: request.site_id,
-          source: { kind: sourceKind, id: sourceRecord.object_id },
+          source: sourceProvenance,
           before,
           after,
           changedFields,
@@ -1845,7 +2110,7 @@ export const handleObjectVerb = async (
         principal,
         {
           ...options,
-          patchEntryDetails: { applied_brand_imagery_source: { kind: sourceKind, id: sourceRecord.object_id } },
+          patchEntryDetails: { applied_brand_imagery_source: sourceProvenance },
           // The imagery writer is not agent-submittable; only THIS verb applies it.
           privilegedOps: ['set_site_brand_imagery'],
         }
@@ -1853,7 +2118,7 @@ export const handleObjectVerb = async (
       if (result.status !== 200) return result;
       return ok({
         ...result.body,
-        applied_brand_imagery_source: { kind: sourceKind, id: sourceRecord.object_id },
+        applied_brand_imagery_source: sourceProvenance,
         changedFields,
       });
     }
@@ -2057,14 +2322,15 @@ export const handleObjectVerb = async (
           if (!check.ok) return err(400, { error: 'Invalid requested_id', detail: check.error });
           objectIdValue = request.requested_id;
         } else {
+          const mintSite = await resolveSiteForMint(store, objectType, request.site);
           try {
             objectIdValue =
               objectType === 'content_item'
                 ? mintId(
                     { kind: 'content_item', yyyymmdd: timestamp.slice(0, 10).replaceAll('-', '') },
-                    seedForCreate(objectType, request.body)
+                    seedForCreate(objectType, request.body, mintSite)
                   )
-                : mintId({ kind: 'object', objectType }, seedForCreate(objectType, request.body));
+                : mintId({ kind: 'object', objectType }, seedForCreate(objectType, request.body, mintSite));
           } catch (error) {
             if (error instanceof MintIdError)
               return err(400, { error: 'Could not mint an object id', detail: error.message });

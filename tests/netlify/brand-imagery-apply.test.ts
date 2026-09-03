@@ -23,6 +23,7 @@ import type { VisualStandardBody } from '../../packages/core/schema/bodies/visua
 import type { BrandImagery, SiteBody } from '../../packages/core/schema/bodies/site-v1.js';
 import type { ObjectRecord, Principal } from '../../packages/core/schema/object-record-v1.js';
 import { siteBody } from '../../sites/drlurie/seeds/site-seed-data.mjs';
+import { deriveBrandImageryFromTokens } from '../../packages/core/server/lib/brand-imagery-derive.js';
 
 const NOW = Date.parse('2026-09-01T12:00:00.000Z');
 const AGENT: Principal = { kind: 'agent', agent_name: 'brand-imagery-test', auth: 'publish_key' };
@@ -207,7 +208,13 @@ test('apply from a visual_standard (house): site.brandImagery EQUALS the source 
     expected_record_version: recordVersion,
   });
   assert.equal(res.status, 200, JSON.stringify(res.body));
-  assert.deepEqual(res.body.applied_brand_imagery_source, { kind: 'visual_standard', id: 'vis_drlurie' });
+  assert.deepEqual(res.body.applied_brand_imagery_source, {
+    kind: 'visual_standard',
+    id: 'vis_drlurie',
+    // `imagery` says whether the block was READ off the source or derived from
+    // a theme's tokens — always present, so neither case is the silent default.
+    imagery: 'declared',
+  });
 
   const site = loadSite(store);
   const imagery = (site.body as SiteBody).brandImagery;
@@ -215,7 +222,11 @@ test('apply from a visual_standard (house): site.brandImagery EQUALS the source 
 
   const entry = site.history.at(-1)!;
   assert.equal(entry.action, 'set_site_brand_imagery');
-  assert.deepEqual(entry.details?.applied_brand_imagery_source, { kind: 'visual_standard', id: 'vis_drlurie' });
+  assert.deepEqual(entry.details?.applied_brand_imagery_source, {
+    kind: 'visual_standard',
+    id: 'vis_drlurie',
+    imagery: 'declared',
+  });
 
   // Reverting is a Discard: the exact inverse re-applies through the
   // PRIVILEGED path, never a raw agent object_patch.
@@ -268,7 +279,7 @@ test('apply from a theme\'s optional brandImagery preset: site.brandImagery EQUA
     expected_record_version: recordVersion,
   });
   assert.equal(res.status, 200, JSON.stringify(res.body));
-  assert.deepEqual(res.body.applied_brand_imagery_source, { kind: 'theme', id: 'thm_editorial' });
+  assert.deepEqual(res.body.applied_brand_imagery_source, { kind: 'theme', id: 'thm_editorial', imagery: 'declared' });
 
   const site = loadSite(store);
   assert.deepEqual((site.body as SiteBody).brandImagery, themeWithImagery().brandImagery);
@@ -284,7 +295,18 @@ test('apply from a theme\'s optional brandImagery preset: site.brandImagery EQUA
   assert.equal((reverted.record.body as SiteBody).brandImagery, undefined);
 });
 
-test('REJECTION: a theme with no brandImagery preset is refused with a clear error naming it', async () => {
+// ═══ deriving from a theme that declares no brandImagery ═══════════════════
+//
+// The other half of the 2026-09 incident. A user asked twice for "based on
+// the current theme create the site's brandImagery" and no agent-reachable
+// path did it: thm_drlurie_default carries `tokens` and no `brandImagery`, so
+// this verb 422'd, and the site had no visual_standard yet either, so that
+// source was empty too. `deriveBrandImageryFromTokens` already existed and is
+// already what site genesis writes into every new site's house standard, and
+// P4's resolver already treats derived-from-tokens as its last precedence
+// tier — so the verb agreeing with them is consistency, not a new concept.
+
+test('a theme with no brandImagery preset DERIVES one from its tokens, and the dry-run says it derived', async () => {
   const store = createMemoryStore();
   await seedSite(store);
   await seedObject(store, 'theme', 'thm_palette_only', themeWithoutImagery());
@@ -295,9 +317,139 @@ test('REJECTION: a theme with no brandImagery preset is refused with a clear err
     site_id: 'site_drlurie',
     dry_run: true,
   });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+
+  // It is the shipped derivation, byte for byte — not a second implementation.
+  const expected = deriveBrandImageryFromTokens({ brandTokens: themeWithoutImagery().tokens }, 'site_drlurie');
+  assert.deepEqual(res.body.after, expected);
+
+  // A human approving this must be able to see it was DERIVED, not read.
+  const source = res.body.source as { kind: string; id: string; imagery: string; note?: string };
+  assert.equal(source.kind, 'theme');
+  assert.equal(source.id, 'thm_palette_only');
+  assert.equal(source.imagery, 'derived_from_theme_tokens');
+  assert.match(String(source.note), /derived/i);
+  assert.ok((res.body.changedFields as string[]).length > 0);
+
+  // Still a dry run: nothing written.
+  assert.equal(loadSite(store).body ? (loadSite(store).body as SiteBody).brandImagery : undefined, undefined);
+});
+
+test('the derived imagery applies for real, and the history entry records that it was derived', async () => {
+  const store = createMemoryStore();
+  await seedSite(store);
+  await seedObject(store, 'theme', 'thm_palette_only', themeWithoutImagery());
+  const { lockToken, recordVersion } = await checkoutSite(store);
+
+  const res = await call(store, {
+    action: 'apply_brand_imagery',
+    theme_id: 'thm_palette_only',
+    site_id: 'site_drlurie',
+    lock_token: lockToken,
+    expected_record_version: recordVersion,
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+
+  const expected = deriveBrandImageryFromTokens({ brandTokens: themeWithoutImagery().tokens }, 'site_drlurie');
+  assert.deepEqual((loadSite(store).body as SiteBody).brandImagery, expected);
+
+  const provenance = res.body.applied_brand_imagery_source as { kind: string; id: string; imagery: string };
+  assert.deepEqual(
+    { kind: provenance.kind, id: provenance.id, imagery: provenance.imagery },
+    { kind: 'theme', id: 'thm_palette_only', imagery: 'derived_from_theme_tokens' }
+  );
+  const entry = loadSite(store).history.at(-1)!;
+  assert.equal(
+    (entry.details as { applied_brand_imagery_source: { imagery: string } }).applied_brand_imagery_source.imagery,
+    'derived_from_theme_tokens'
+  );
+});
+
+test('a theme that DOES declare brandImagery is still used verbatim — derivation never overrides a declared preset', async () => {
+  const store = createMemoryStore();
+  await seedSite(store);
+  await seedObject(store, 'theme', 'thm_editorial', themeWithImagery());
+
+  const res = await call(store, {
+    action: 'apply_brand_imagery',
+    theme_id: 'thm_editorial',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.deepEqual(res.body.after, themeWithImagery().brandImagery);
+  assert.equal((res.body.source as { imagery: string }).imagery, 'declared');
+  // And it is NOT what the tokens would have derived — the two are provably distinct.
+  assert.notDeepEqual(
+    res.body.after,
+    deriveBrandImageryFromTokens({ brandTokens: themeWithImagery().tokens }, 'site_drlurie')
+  );
+});
+
+test('REJECTION: a theme with neither a preset nor a derivable palette is refused with a clear error naming it', async () => {
+  const store = createMemoryStore();
+  await seedSite(store);
+  // brandTokensSchema allows an EMPTY colors record, and the derivation needs
+  // at least one parseable colour — the one theme shape that still has nothing
+  // to offer either way.
+  await seedObject(store, 'theme', 'thm_colourless', {
+    name: 'Colourless Theme',
+    tokens: { ...siteBody.brandTokens, colors: {} },
+  } satisfies ThemeBody);
+
+  const res = await call(store, {
+    action: 'apply_brand_imagery',
+    theme_id: 'thm_colourless',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
   assert.equal(res.status, 422, JSON.stringify(res.body));
   assert.match(String(res.body.error), /carries no brandImagery/);
-  assert.equal(res.body.theme_id, 'thm_palette_only');
+  assert.match(String(res.body.error), /derived from its tokens/);
+  assert.equal(res.body.theme_id, 'thm_colourless');
+});
+
+// ═══ an id in the wrong parameter slot ═════════════════════════════════════
+
+test('a theme id passed as visual_standard_id names the parameter it belongs in, not "not found"', async () => {
+  const store = createMemoryStore();
+  await seedSite(store);
+  await seedObject(store, 'theme', 'thm_drlurie_default', themeWithoutImagery());
+
+  const res = await call(store, {
+    action: 'apply_brand_imagery',
+    visual_standard_id: 'thm_drlurie_default',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
+  // The incident answer was 404 "Visual standard not found" — true, and
+  // useless. Object ids are self-describing by prefix, so say so.
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.match(String(res.body.error), /is a theme id/);
+  assert.match(String(res.body.error), /pass it as theme_id/);
+  assert.equal(res.body.use_parameter, 'theme_id');
+  assert.equal(res.body.actual_object_type, 'theme');
+
+  // Symmetric: a visual_standard id in the theme_id slot.
+  const flipped = await call(store, {
+    action: 'apply_brand_imagery',
+    theme_id: 'vis_drlurie',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
+  assert.equal(flipped.status, 400, JSON.stringify(flipped.body));
+  assert.match(String(flipped.body.error), /is a visual_standard id/);
+  assert.equal(flipped.body.actual_object_type, 'visual_standard');
+
+  // A well-formed-but-absent visual_standard id is STILL an honest 404 — the
+  // new check is about the wrong slot, never a substitute for not-found.
+  const missing = await call(store, {
+    action: 'apply_brand_imagery',
+    visual_standard_id: 'vis_drlurie_nope',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
+  assert.equal(missing.status, 404, JSON.stringify(missing.body));
 });
 
 // ═══ exactly one of visual_standard_id / theme_id ══════════════════════════

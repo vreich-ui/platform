@@ -24,7 +24,7 @@
  */
 import { createHash } from 'node:crypto';
 
-import { validateObjectIdForType, validateSectionInstanceId } from './object-ids.js';
+import { siteShortId, validateObjectIdForType, validateSectionInstanceId } from './object-ids.js';
 import type { ObjectType } from '../schema/object-record-v1.js';
 
 // Repeated from taxonomy-v1.ts / object-patch-ops.ts (term ids are body-internal
@@ -152,6 +152,66 @@ export const mintId = (target: MintTarget, seed: string): string => {
     case 'template_slot':
       return assertOpaque(`slot_${shortHash(trimmed)}`);
   }
+};
+
+/**
+ * The seed for a value with no human-meaningful id hint: a short, deterministic
+ * content hash rather than the value itself.
+ *
+ * Exported so `seedForCreate` (object-verbs.ts) can reach for it as its LAST
+ * resort without hashing inline — hashing belongs to this module, and
+ * object-store-auth.test.ts holds the verbs to that. The point is a bound: a
+ * seed that goes through here can never grow an id past what a store key may
+ * be, however large the value it was derived from. See seedForCreate for the
+ * incident that made that a rule.
+ */
+export const opaqueSeed = (value: string): string => shortHash(value);
+
+/**
+ * The seed that mints a `visual_standard` id by its DECLARED rule (BRIEF.md
+ * §3.1/R2) rather than from the candidate body.
+ *
+ * `vis_<site>` for the house standard (the `voice_<site>`/`trk_<site>`
+ * singleton convention) and `vis_<site>_<slug>` for a template. Passed
+ * through `mintId`'s ordinary object path, so the result is snake-normalised
+ * and validated by the real T0.3 validator exactly like every other minted
+ * id — this function only decides WHAT the id is derived from.
+ *
+ * This exists because the alternative is what shipped and broke: with no
+ * per-type seed rule, `seedForCreate` fell through to stringifying the whole
+ * body, so a realistic standard (a 230-character styleSentence, a palette, a
+ * description) minted a several-hundred-character id that the blob store
+ * refused with an opaque 400 — and an id short enough to "work" would still
+ * have been an id nothing else in the fleet could ever find, since
+ * `packages/core/cli/visual-standard-genesis.mjs` (`visualStandardIdFor`),
+ * `packages/core/lib/admin/visual-identity-imagery.ts`
+ * (`visualStandardTemplateId`) and CMS-Agent's `visualStandardIds.ts` all
+ * already implement the rule above. Agreement with those is pinned by test
+ * across a table of slugs, since they cannot all import one module (the
+ * genesis half is plain `.mjs` for bare-node CLI use).
+ */
+export const visualStandardSeed = (site: string, templateSlug?: string): string => {
+  const short = siteShortId((site ?? '').trim());
+  if (!short) throw new MintIdError('Cannot mint a visual_standard id without the site it belongs to.');
+  if (templateSlug === undefined) return short;
+  // Byte-identical to `templateSlug()` in packages/core/lib/admin/
+  // visual-identity-imagery.ts (the admin's "new template" flow), so an id
+  // minted here for a template named in chat is the SAME id the studio would
+  // have produced for the same name. That module stays a browser-safe leaf
+  // and cannot import this one (node:crypto), so the two are pinned by test.
+  const slug = String(templateSlug)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .join('_');
+  if (!slug) {
+    throw new MintIdError(
+      'A template visual_standard id is vis_<site>_<slug>, built from templateSlug or the label — this one has no ' +
+        'letters or digits to build a slug from. Give the template a name, or pass an explicit requested_id.'
+    );
+  }
+  return `${short}_${slug}`;
 };
 
 const assertOpaque = (id: string): string => {

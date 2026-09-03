@@ -1156,6 +1156,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         candidate_patch: input.candidate_patch,
         body: input.body,
         requested_id: input.requested_id,
+        site: input.site,
       });
     case 'object_inventory':
       return callObjectAction(event, {

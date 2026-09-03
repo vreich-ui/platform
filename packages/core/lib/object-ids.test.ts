@@ -3,6 +3,8 @@ import assert from 'node:assert';
 import {
   isObjectIdWithinCeiling,
   isSectionInstanceId,
+  OBJECT_ID_MAX_LENGTH,
+  siteShortId,
   validateObjectIdForType,
   validateSectionInstanceId,
   type ObjectIdValidationResult,
@@ -62,6 +64,43 @@ describe('object ID validators', () => {
 
     assert.deepStrictEqual(validateObjectIdForType('content_item', knownBad), validateRequestId(knownBad));
     assert.deepStrictEqual(validateObjectIdForType('content_item', valid), validateRequestId(valid));
+  });
+
+  // An object id becomes a blob-store key. Before this bound, an over-long id
+  // reached the store and came back as an opaque provider error — the 2026-09
+  // incident, where a several-hundred-character minted id surfaced in a user's
+  // chat as "Netlify Blobs has generated an internal error (400 status code,
+  // ID: cb90450d-…)" and nothing else.
+  it('refuses an over-long id for every type, with a readable error naming the length', () => {
+    const longSuffix = 'a_'.repeat(OBJECT_ID_MAX_LENGTH).slice(0, OBJECT_ID_MAX_LENGTH);
+    for (const [objectType] of validObjectIds) {
+      const tooLong = `${objectType === 'content_item' ? 'req' : 'page'}_${longSuffix}`;
+      assert.ok(tooLong.length > OBJECT_ID_MAX_LENGTH);
+      const result = validateObjectIdForType(objectType, tooLong);
+      assert.strictEqual(result.ok, false, objectType);
+      assert.match(result.ok ? '' : result.error, new RegExp(String(OBJECT_ID_MAX_LENGTH)));
+      assert.match(result.ok ? '' : result.error, /blob-store key|requested_id/);
+    }
+  });
+
+  it('leaves every id the fleet actually mints comfortably inside the bound', () => {
+    // The longest live id in the repo today is a 70-character
+    // req_agent_<topic>_<yyyymmdd>_01, so the bound is a backstop, not a
+    // constraint anyone writing an ordinary id can feel.
+    for (const [objectType, value] of validObjectIds) {
+      assert.ok(value.length <= OBJECT_ID_MAX_LENGTH, `${objectType}:${value}`);
+      assert.strictEqual(validateObjectIdForType(objectType, value).ok, true);
+    }
+    assert.strictEqual(
+      validateObjectIdForType('page', `page_${'a'.repeat(OBJECT_ID_MAX_LENGTH - 5)}`).ok,
+      true,
+      'exactly at the bound is still valid'
+    );
+  });
+
+  it('siteShortId strips the site_ prefix and is a no-op on a bare slug', () => {
+    assert.strictEqual(siteShortId('site_drlurie'), 'drlurie');
+    assert.strictEqual(siteShortId('drlurie'), 'drlurie');
   });
 
   it('validates section-instance IDs with no underscores inside the suffix', () => {

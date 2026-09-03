@@ -327,6 +327,9 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
         requested_id: stringSchema(
           'Mode (2) only: optional explicit id for the candidate; a valid id is minted from the body when omitted (same minting object_create uses).'
         ),
+        site: stringSchema(
+          'Mode (2) only: the site object id (site_<slug>, as object_inventory reports it) this candidate belongs to. Needed ONLY for the types whose id is a per-site convention rather than something derived from the body — visual_standard (vis_<site> for the house, vis_<site>_<slug> for a template), editorial_voice (voice_<site>) and tracking_config (trk_<site>). Resolved automatically from the store when omitted; pass it explicitly if the dry-run reports that it could not mint an id.'
+        ),
       },
       ['object_type']
     ),
