@@ -2014,7 +2014,19 @@ const dispatchObjectVerb = async (
         );
         return { ...staleUnsets, ...next };
       };
-      const opBrandImagery: Record<string, unknown> = {
+      // An `undefined` from exactReplaceSubObject means "neither side has this
+      // sub-object" — nothing to say, not an unset. It must be OMITTED, not
+      // written as a key holding `undefined`: `fields` is validated by
+      // `z.record(z.string(), patchJsonValueSchema)`, which refuses a present
+      // key whose value is undefined, and the failure is INVISIBLE in the
+      // dry-run response because JSON.stringify drops exactly those keys. Any
+      // source without a `lora` — i.e. every one, LoRA being out of scope for
+      // this wave — produced `lora: undefined` here and made the op unparseable
+      // with a bare "Invalid input" while the echoed op looked perfectly valid.
+      // `null` still travels: that is the meaningful stale-unset marker.
+      const definedOnly = (fields: Record<string, unknown>): Record<string, unknown> =>
+        Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+      const opBrandImagery: Record<string, unknown> = definedOnly({
         version: sourceImagery.version,
         medium: sourceImagery.medium,
         styleSentence: sourceImagery.styleSentence,
@@ -2033,7 +2045,7 @@ const dispatchObjectVerb = async (
           currentImagery?.lora as Record<string, unknown> | undefined,
           sourceImagery.lora as Record<string, unknown> | undefined
         ),
-      };
+      });
       const op = { op: 'set_site_brand_imagery', fields: { brandImagery: opBrandImagery } };
 
       // The clean, resolved state this apply produces — independent of the
