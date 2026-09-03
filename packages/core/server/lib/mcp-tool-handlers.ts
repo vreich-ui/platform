@@ -18,12 +18,7 @@
  * of these handlers actually runs.
  */
 import { createHash } from 'node:crypto';
-import {
-  fnv1aHash,
-  parseBrandImagery,
-  toFiniteNumber,
-  type BrandImageryRecord,
-} from './brand-imagery-derive.js';
+import { fnv1aHash, parseBrandImagery, toFiniteNumber, type BrandImageryRecord } from './brand-imagery-derive.js';
 import {
   getBrandImageryOverridePolicy,
   resolveEffectiveBrandImagery,
@@ -37,11 +32,12 @@ import { releaseToProduction } from './production-release.js';
 import { buildPdfToolStorageGrant } from './pdf-tool-storage-grant.js';
 import { injectPdfRenderDataBrand } from './pdf-render-brand.js';
 import { CmsAgentClient, isCmsAgentConfigured } from './agent/cms-agent-client.js';
-import { proposeBrandImagery, type BrandImageryProposeInput, type BrandImageryReferenceInput } from './brand-imagery-proxy.js';
 import {
-  generateVisualStandardExamplesWithDeps,
-  type VisualStandardExampleRecord,
-} from './brand-imagery-examples.js';
+  proposeBrandImagery,
+  type BrandImageryProposeInput,
+  type BrandImageryReferenceInput,
+} from './brand-imagery-proxy.js';
+import { generateVisualStandardExamplesWithDeps, type VisualStandardExampleRecord } from './brand-imagery-examples.js';
 import { publicPathForArtifactRef } from './artifact-trust.js';
 import {
   CAPTURE_BRIDGE_MAX_PAGES,
@@ -127,6 +123,7 @@ import {
   toolResult,
   type LambdaEvent,
 } from '../functions/mcp.js';
+import { CALLER_ACTOR_HEADER, actorFromMcpAuth, encodeCallerActor } from './caller-actor.js';
 
 export const callDeployStatus = async (event: LambdaEvent, payload: Record<string, unknown>) => {
   const publishSecret = process.env.PUBLISH_SECRET || process.env.NETLIFY_PUBLISH_SECRET;
@@ -444,12 +441,29 @@ export const callArtifactUpload = async (event: LambdaEvent, payload: Record<str
 // ── Object-verb proxy (T0.9) for the generic object store. Injects the
 //    publish key server-side and forwards to object-store.ts, exactly the
 //    A§1.8 proxy pattern. ──
-const createObjectStoreHeaders = (event: LambdaEvent, publishSecret: string) => ({
-  ...(event.headers ?? {}),
-  ...(getHeader(event.headers, 'x-nf-site-id') ? { 'x-nf-site-id': getHeader(event.headers, 'x-nf-site-id') } : {}),
-  'x-publish-key': publishSecret,
-  'content-type': 'application/json',
-});
+/**
+ * The sibling call's headers.
+ *
+ * SECURITY NOTE (2026-09-03). This spreads the ORIGINAL caller's headers, so
+ * `CALLER_ACTOR_HEADER` must be written on every call and DELETED when there
+ * is no derived actor. Left to pass through, a client could set it on its own
+ * `/mcp` request and hand itself any identity it liked — which would be a far
+ * worse version of the `agent_name` defect this whole change exists to fix.
+ */
+const createObjectStoreHeaders = (event: LambdaEvent, publishSecret: string, payload?: Record<string, unknown>) => {
+  const headers: Record<string, string | undefined> = {
+    ...(event.headers ?? {}),
+    ...(getHeader(event.headers, 'x-nf-site-id') ? { 'x-nf-site-id': getHeader(event.headers, 'x-nf-site-id') } : {}),
+    'x-publish-key': publishSecret,
+    'content-type': 'application/json',
+  };
+
+  const derived = encodeCallerActor(actorFromMcpAuth(event, payload?.agent_name));
+  if (derived) headers[CALLER_ACTOR_HEADER] = derived;
+  else delete headers[CALLER_ACTOR_HEADER];
+
+  return headers;
+};
 
 const stripObjectEnvelope = (payload: Record<string, unknown>): Record<string, unknown> => {
   const rest = { ...payload };
@@ -467,7 +481,7 @@ const invokeObjectStore = async (event: LambdaEvent, payload: Record<string, unk
 
   const objectResponse = await objectStoreHandler({
     httpMethod: 'POST',
-    headers: createObjectStoreHeaders(event, publishSecret),
+    headers: createObjectStoreHeaders(event, publishSecret, payload),
     body: JSON.stringify(payload),
   });
 
@@ -742,9 +756,7 @@ const pollArtifactJobForInlineWait = async (
   const asStringList = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
   const withPlatformAuthority = (merged: Record<string, unknown>): Record<string, unknown> => {
-    const warnings = [
-      ...new Set([...asStringList(platformAuthoritative.warnings), ...asStringList(merged.warnings)]),
-    ];
+    const warnings = [...new Set([...asStringList(platformAuthoritative.warnings), ...asStringList(merged.warnings)])];
     return { ...merged, ...platformAuthoritative, ...(warnings.length > 0 ? { warnings } : {}) };
   };
 
@@ -949,7 +961,10 @@ const toBrandImageryReference = (value: unknown): BrandImageryReferenceInput | u
   const ry = toFiniteNumber(regionRecord?.y);
   const rw = toFiniteNumber(regionRecord?.w);
   const rh = toFiniteNumber(regionRecord?.h);
-  const region = rx !== undefined && ry !== undefined && rw !== undefined && rh !== undefined ? { x: rx, y: ry, w: rw, h: rh } : undefined;
+  const region =
+    rx !== undefined && ry !== undefined && rw !== undefined && rh !== undefined
+      ? { x: rx, y: ry, w: rw, h: rh }
+      : undefined;
   const note = toNonEmptyString(record.note);
   const weight = toFiniteNumber(record.weight);
   if (!blobKey && !url) return undefined;
@@ -987,7 +1002,9 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
   const proposeInput: BrandImageryProposeInput = {
     projectId: getSiteIdentity().cmsAgentProjectId,
     mode,
-    ...(toNonEmptyString(input.visual_standard_id) ? { visualStandardId: toNonEmptyString(input.visual_standard_id) } : {}),
+    ...(toNonEmptyString(input.visual_standard_id)
+      ? { visualStandardId: toNonEmptyString(input.visual_standard_id) }
+      : {}),
     ...(references && references.length > 0 ? { references } : {}),
     ...(toNonEmptyString(input.brief) ? { brief: toNonEmptyString(input.brief) } : {}),
     ...(input.existing_brand_imagery !== undefined ? { existingBrandImagery: input.existing_brand_imagery } : {}),
@@ -1157,7 +1174,9 @@ export const callCreateAgentArtifactJob = async (
         if (requestedContext) {
           const modelPolicy = await getPlatformImageModelPolicy(built.grant);
           const contexts = modelPolicy.ok ? modelPolicy.body.contexts : undefined;
-          policyContexts = Array.isArray(contexts) ? contexts.filter((c): c is string => typeof c === 'string') : undefined;
+          policyContexts = Array.isArray(contexts)
+            ? contexts.filter((c): c is string => typeof c === 'string')
+            : undefined;
         }
         const { usageContext: effectiveContext, warnings: contextWarnings } = resolveUsageContext(
           requestedContext,
@@ -1171,7 +1190,8 @@ export const callCreateAgentArtifactJob = async (
           : resolveImageSizeForContext(effectiveContext, resolved.brandImagery.aspectRatios);
 
         const requirementsPatch: Record<string, unknown> = {};
-        if (requestedContext && effectiveContext !== requestedContext) requirementsPatch.usageContext = effectiveContext;
+        if (requestedContext && effectiveContext !== requestedContext)
+          requirementsPatch.usageContext = effectiveContext;
         if (!explicitSize && mappedSize) requirementsPatch.size = mappedSize;
 
         if (Object.keys(requirementsPatch).length > 0) {

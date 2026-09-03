@@ -31,16 +31,59 @@ export type ObjectType = (typeof objectTypes)[number];
 export const objectTypeSchema = z.enum(objectTypes);
 export const objectIdSchema = z.string();
 
+/**
+ * HOW an actor was established. Added 2026-09-03 (Wolf's ruling) after a live
+ * plugin run recorded `create` as `plugin:openai-agent` and its next sixteen
+ * verbs — four patches and three publishes included — as `unattributed-agent`,
+ * because the model stopped passing `agent_name`. Identity now comes from the
+ * token that authorized the call; this field records which derivation produced
+ * the actor, so a reader can tell a proven identity from a self-declared one
+ * WITHOUT having to know the code that wrote the line.
+ *
+ * - `oauth`                — an OAuth grant a named human approved. Strongest.
+ * - `verified_agent_token` — an active per-agent key (W11 T11.10).
+ * - `publish_key`          — the shared fleet secret; the caller is the fleet.
+ * - `self_declared`        — a label the caller supplied. Coordination, not identity.
+ * - `inherited_lock`       — LAST fallback only: attributed to the holder of the
+ *                            live lease this write rode, because the call itself
+ *                            carried nothing. Never inherited from the creating
+ *                            actor — a create says who started an object, not who
+ *                            is writing to it now.
+ * Optional: every entry written before this existed has none, and absence
+ * means exactly "unknown", not "self-declared".
+ */
+export const actorAttributionSchema = z.enum([
+  'oauth',
+  'verified_agent_token',
+  'publish_key',
+  'self_declared',
+  'inherited_lock',
+]);
+export type ActorAttribution = z.infer<typeof actorAttributionSchema>;
+
 export const principalSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('human'),
     id: z.string(),
     email: z.string(),
+    /** The OAuth client the human approved. Server-minted; never client-asserted. */
+    client_id: z.string().optional(),
+    /** Which chat surface the grant belongs to (plugin:claude / plugin:openai-agent / plugin:openai-gpt). */
+    surface: z.string().optional(),
+    /**
+     * The caller's self-declared `agent_name`, DEMOTED. It rides along as a
+     * label because it is occasionally useful (which node of a workflow), and
+     * it is never the identity.
+     */
+    label: z.string().optional(),
+    attribution: actorAttributionSchema.optional(),
   }),
   z.object({
     kind: z.literal('agent'),
     agent_name: z.string(),
     auth: z.enum(['publish_key', 'mcp_token']),
+    surface: z.string().optional(),
+    attribution: actorAttributionSchema.optional(),
   }),
 ]);
 export type Principal = z.infer<typeof principalSchema>;

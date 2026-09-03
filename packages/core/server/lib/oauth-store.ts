@@ -142,6 +142,14 @@ export const accessTokenSchema = z.object({
   schema_version: z.literal('oauth-access-token.v1'),
   client_id: z.string().min(1),
   client_name: z.string().min(1),
+  /**
+   * The chat surface this grant belongs to, derived from the client's
+   * REGISTERED REDIRECT HOSTS at issuance (see caller-surface.ts) and
+   * denormalised here so validating a token costs no extra client read.
+   * Optional: tokens minted before 2026-09-03 have none, and an unrecognised
+   * host legitimately has none either — absent means unknown, never a guess.
+   */
+  surface: z.string().min(1).optional(),
   subject_email: z.string().min(1),
   subject_id: z.string().min(1),
   scope: z.string(),
@@ -157,6 +165,8 @@ export const refreshTokenSchema = z.object({
   schema_version: z.literal('oauth-refresh-token.v1'),
   client_id: z.string().min(1),
   client_name: z.string().min(1),
+  /** Same denormalised surface as the access token, so a refresh preserves it. */
+  surface: z.string().min(1).optional(),
   subject_email: z.string().min(1),
   subject_id: z.string().min(1),
   scope: z.string(),
