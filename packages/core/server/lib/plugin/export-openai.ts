@@ -14,7 +14,7 @@
  * numbers, and the two rules that block a publish are not.
  */
 import { createZip, type ZipEntry } from './zip.js';
-import type { ManifestBundle, PluginActorId } from './manifest-types.js';
+import { pluginActors, type ManifestBundle, type PluginActorId } from './manifest-types.js';
 
 /** ChatGPT's hard cap on the Custom GPT instructions field. */
 export const GPT_INSTRUCTIONS_LIMIT = 8000;
@@ -30,7 +30,43 @@ export const GPT_INSTRUCTIONS_LIMIT = 8000;
  * occurrence of the old actor, throws rather than shipping a bundle that
  * misattributes its own publishes.
  */
+/**
+ * Which actor THIS bundle's `skill_md` actually declares.
+ *
+ * `buildGptConfigZip` used to hardcode `plugin:openai-gpt` as the retarget
+ * source. That is only true of a bundle rendered with `platform: "openai"` —
+ * and the page renders `claude` by default, so the active manifest on every
+ * live tenant declared `plugin:claude` and the ChatGPT download threw
+ * "Actor retarget produced no change" for anyone who tried it.
+ *
+ * Read it off the bundle instead of assuming. `actor_id` is authoritative;
+ * a bundle promoted before that field existed is inspected directly, which is
+ * safe because the actor ids are a closed set and exactly one appears in a
+ * rendered skill. Ambiguity or absence throws with the reason rather than
+ * silently picking one.
+ */
+export const sourceActorFor = (bundle: ManifestBundle): PluginActorId => {
+  if (bundle.actor_id) return bundle.actor_id;
+
+  const present = pluginActors.filter((actor) => bundle.skill_md.includes(actor));
+  if (present.length === 1) return present[0];
+  if (present.length === 0) {
+    throw new Error(
+      `This bundle (${bundle.manifest_version}) declares no known plugin actor, so the OpenAI shapes cannot be ` +
+        're-pointed at theirs. Render and promote the manifest again to record one.'
+    );
+  }
+  throw new Error(
+    `This bundle (${bundle.manifest_version}) declares more than one plugin actor (${present.join(', ')}), so the ` +
+      'OpenAI retarget would be ambiguous. Render and promote the manifest again.'
+  );
+};
+
 export const retargetActor = (text: string, from: PluginActorId, to: PluginActorId): string => {
+  // Already the target: nothing to substitute, and nothing wrong. This happens
+  // when the active bundle was rendered for the very shape being exported.
+  if (from === to) return text;
+
   const out = text.split(from).join(to);
   if (out === text) {
     throw new Error(`Actor retarget produced no change: "${from}" does not appear in the rendered skill.`);
@@ -377,6 +413,7 @@ Manifest \`${bundle.manifest_version}\`, rendered ${bundle.rendered_at}.
  * retargeted to its own actor id. There is no hand-maintained duplicate.
  */
 export const buildGptConfigZip = (bundle: ManifestBundle): { filename: string; bytes: Buffer } => {
+  const sourceActor = sourceActorFor(bundle);
   const instructions = renderGptInstructions(bundle, 'plugin:openai-gpt');
   if (instructions.length > GPT_INSTRUCTIONS_LIMIT) throw new GptInstructionsTooLongError(instructions.length);
 
@@ -395,7 +432,7 @@ export const buildGptConfigZip = (bundle: ManifestBundle): { filename: string; b
     { path: 'agent/app-setup.md', content: agentAppCard(bundle) },
     {
       path: 'agent/skill/SKILL.md',
-      content: retargetActor(bundle.skill_md, 'plugin:openai-gpt', 'plugin:openai-agent'),
+      content: retargetActor(bundle.skill_md, sourceActor, 'plugin:openai-agent'),
     },
   ];
   return { filename: `${bundle.connection.tenant}-openai-config.zip`, bytes: createZip(entries) };

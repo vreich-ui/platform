@@ -12,6 +12,7 @@ import {
   GPT_INSTRUCTIONS_LIMIT,
   GptInstructionsTooLongError,
   retargetActor,
+  sourceActorFor,
 } from '../../packages/core/server/lib/plugin/export-openai.js';
 import { buildManifestBundle } from '../../packages/core/server/lib/plugin/build-manifest.js';
 import { visibleToolDefinitions } from '../../netlify/functions/mcp.js';
@@ -163,4 +164,81 @@ test('the setup card names the import URL, the real OAuth endpoints and the empt
 test('the GPT bundle carries no credential', () => {
   const text = buildGptConfigZip(bundle).bytes.toString('utf8');
   assert.ok(!/client_secret|PUBLISH_SECRET|MCP_HTTP_AUTH_TOKEN|Bearer\s+[A-Za-z0-9._-]{12,}/i.test(text));
+});
+
+/* ── the bundle an operator actually promotes ─────────────────────────────── */
+
+/**
+ * Every test above builds its fixture with `platform: "openai"`. The page's
+ * Render button renders `claude`, and that is the bundle that gets promoted —
+ * so the ChatGPT download ran against a skill declaring `plugin:claude` and
+ * threw "Actor retarget produced no change" on every live tenant. The fixture
+ * was the only reason the suite stayed green.
+ */
+const claudeBundle = buildManifestBundle({
+  origin: 'https://drluriescience.netlify.app',
+  definitions: visibleToolDefinitions(),
+  voice: {
+    object_id: 'voice_drlurie',
+    record_version: 14,
+    body: {
+      name: 'Dr. Lurie — evidence-led skin health',
+      tone: ['warm', 'calm'],
+      lexicon: { prefer: ['barrier'], avoid: ['miracle'] },
+      frameworks: [{ framework_id: 'fw_concern', label: 'Concern', when_to_use: 'Reader arrives worried.' }],
+    },
+  },
+  platform: 'claude',
+  now: () => new Date('2026-09-03T12:00:00.000Z'),
+  approval: { master: 'all-autonomous' },
+});
+
+test('the ChatGPT bundle builds from the CLAUDE bundle an operator actually promotes', () => {
+  assert.equal(claudeBundle.actor_id, 'plugin:claude');
+  assert.match(claudeBundle.manifest_version, /-claude-/);
+
+  const { bytes, filename } = buildGptConfigZip(claudeBundle);
+  assert.match(filename, /-openai-config\.zip$/);
+
+  const zip = readZip(bytes);
+  assert.ok(zip.names.includes('agent/skill/SKILL.md'));
+  assert.ok(zip.names.includes('agent/operational-instructions.md'));
+  assert.ok(zip.names.includes('gpt/instructions.md'));
+});
+
+test('the agent skill is re-pointed at its own actor whatever the source was', () => {
+  const zip = readZip(buildGptConfigZip(claudeBundle).bytes);
+  const skill = zip.read('agent/skill/SKILL.md');
+
+  assert.ok(skill.includes('plugin:openai-agent'), 'the agent shape declares its own actor');
+  assert.ok(!skill.includes('plugin:claude'), 'no trace of the actor it was rendered for may survive');
+});
+
+test('the archive is a real archive — it has to open on the operator’s machine', () => {
+  const { bytes } = buildGptConfigZip(claudeBundle);
+  const dir = mkdtempSync(join(tmpdir(), 'gpt-open-'));
+  const archive = join(dir, 'bundle.zip');
+  writeFileSync(archive, bytes);
+
+  const report = execFileSync('unzip', ['-t', archive], { encoding: 'utf8' });
+  assert.match(report, /No errors detected/);
+  assert.equal(bytes.subarray(0, 2).toString('utf8'), 'PK', 'a zip starts PK — a JSON error body does not');
+});
+
+test('sourceActorFor reads a legacy bundle that predates actor_id', () => {
+  const { actor_id, ...legacy } = claudeBundle;
+  assert.equal(actor_id, 'plugin:claude');
+  assert.equal(sourceActorFor(legacy as typeof claudeBundle), 'plugin:claude', 'inferred from the skill text');
+
+  const nothing = { ...legacy, skill_md: 'a skill that names no actor at all' } as typeof claudeBundle;
+  assert.throws(() => sourceActorFor(nothing), /declares no known plugin actor/);
+});
+
+test('retargeting a bundle already rendered for the target shape is a no-op, not an error', () => {
+  // `platform: "openai"` renders plugin:openai-gpt; exporting the AGENT copy
+  // from an already-agent skill must not throw just because nothing changed.
+  assert.equal(
+    retargetActor('declares plugin:openai-agent', 'plugin:openai-agent', 'plugin:openai-agent'),
+    'declares plugin:openai-agent'
+  );
 });

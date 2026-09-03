@@ -146,6 +146,32 @@ export const fetchPluginExport = async (
     throw new Error(reason);
   }
 
+  /**
+   * A 2xx is not proof of a bundle.
+   *
+   * The endpoint's failure envelope is JSON, and for a while a failing export
+   * answered HTTP 200 with it — so `response.ok` was true, this function
+   * returned the JSON as a "blob", and the page wrote 148 bytes of error text
+   * to disk named `plugin-bundle.zip`. The operator got a zip that would not
+   * open instead of the reason it could not be built. The server no longer
+   * does that; refusing it here too means no future variant of the same
+   * mistake reaches the disk.
+   */
+  // Narrow on purpose: the refusal envelope is application/json, while the Gem
+  // export is legitimately text/markdown. Rejecting "not a zip" would break a
+  // working download to guard against a broken one.
+  const contentType = response.headers.get('Content-Type') ?? '';
+  if (/application\/json/i.test(contentType)) {
+    let reason = 'The server returned a message instead of a bundle.';
+    try {
+      const body = (await response.clone().json()) as { error?: string; stage?: string };
+      if (body.error) reason = body.stage ? `${body.error} (failed at: ${body.stage})` : body.error;
+    } catch {
+      /* not JSON after all — keep the generic reason */
+    }
+    throw new Error(reason);
+  }
+
   return {
     blob: await response.blob(),
     filename: filenameFromDisposition(response.headers.get('Content-Disposition'), fallbackName),
