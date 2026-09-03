@@ -45,6 +45,41 @@ const OBJECT_TYPE_PREFIXES = {
 export const isObjectIdWithinCeiling = (value: string): boolean => OBJECT_ID_CEILING_RE.test(value);
 
 /**
+ * Hard upper bound on the length of ANY object id, enforced by
+ * `validateObjectIdForType` — so it binds a `requested_id` a caller supplies
+ * and a server-minted id identically, and binds BOTH before the id is ever
+ * turned into a store key.
+ *
+ * WHY: an object id is a blob-key segment
+ * (`objects/<type>/by-id/<id>.json`, object-store-keys.ts) and the blob store
+ * rejects an over-long key with an opaque provider error — the 2026-09
+ * incident where a `visual_standard` id minted from a whole candidate body
+ * produced a several-hundred-character key and the store's raw
+ * "Netlify Blobs has generated an internal error (400 …)" reached a user's
+ * chat with nothing actionable in it. The store's limit is not ours to
+ * assume, so this bound is deliberately far BELOW it: 200 characters leaves
+ * the longest key template this repo builds
+ * (`objects/section_template/index/by-status/archived/<id>`, 49 chars of
+ * prefix) an order of magnitude of headroom, while sitting comfortably above
+ * every id the fleet has ever minted (the longest live id today is a
+ * 70-character `req_agent_<topic>_<yyyymmdd>_01`). An id past this bound is a
+ * typed, readable refusal naming the length — never a store error.
+ */
+export const OBJECT_ID_MAX_LENGTH = 200;
+
+/**
+ * The bare site slug an id convention is built from: `site_drlurie` →
+ * `drlurie`. Several singleton ids are the site's own short id under a
+ * different prefix — `voice_<site>` (editorial-voice-v1.ts), `trk_<site>`
+ * (tracking-config-v1.ts) and `vis_<site>` (visual-standard-v1.ts, BRIEF R2)
+ * — and each of those conventions was previously spelled out by hand at
+ * every call site. Tolerates an already-short id (passing `drlurie` is a
+ * no-op) so a caller that holds a slug rather than a site object id is not
+ * forced to know which it has.
+ */
+export const siteShortId = (site: string): string => site.replace(/^site_/, '');
+
+/**
  * W15 S1 — reverse lookup: derive the object type from an id's prefix, for
  * surfaces that receive a bare id (e.g. a /admin/content/<id> deep link with
  * no `?type=`). Deliberately EXCLUDES content_item: `req_*` ids historically
@@ -74,6 +109,18 @@ const validatePattern = (value: string, objectType: Exclude<ObjectType, 'content
 };
 
 export const validateObjectIdForType = (objectType: ObjectType, value: string): ObjectIdValidationResult => {
+  // Length first, for every type: an over-long id is refused HERE, as a typed
+  // readable error, rather than downstream as an opaque store failure on the
+  // blob key it would have become. See OBJECT_ID_MAX_LENGTH.
+  if (value && value.length > OBJECT_ID_MAX_LENGTH) {
+    return {
+      ok: false,
+      error:
+        `${objectType} id is ${value.length} characters — the limit is ${OBJECT_ID_MAX_LENGTH}. ` +
+        'An object id becomes a blob-store key, so it must stay short: supply a deliberate, human-readable ' +
+        'requested_id instead of one derived from a large value.',
+    };
+  }
   if (objectType === 'content_item') return validateRequestId(value);
   return validatePattern(value, objectType);
 };

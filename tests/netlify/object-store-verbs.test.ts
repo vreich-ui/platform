@@ -438,7 +438,15 @@ test('validate with body reports a singleton_conflict for a would-be second trac
 
   // An agent may not CREATE a second tracking_config, but validate is a
   // read-only preview and still reports the conflict it would hit.
-  const res = await call(store, { action: 'validate', object_type: 'tracking_config', body: singletonBody }, AGENT);
+  // `site` is required for a candidate dry-run of a SITE-DERIVED id type
+  // (trk_<site>/voice_<site>/vis_<site>): this store holds no `site` record
+  // for the dry-run to resolve one from, and seeding such an id from the body
+  // is exactly the bug this parameter exists to prevent.
+  const res = await call(
+    store,
+    { action: 'validate', object_type: 'tracking_config', site: 'site_drlurie', body: singletonBody },
+    AGENT
+  );
   assert.equal(res.status, 200, JSON.stringify(res.body));
   const conflict = res.body.singleton_conflict as { object_id: string } | undefined;
   assert.ok(conflict, 'expected a singleton_conflict to be reported');
@@ -537,4 +545,174 @@ test('an id-less upsert_node is minted a valid opaque node id server-side (W7.7)
     .nodes;
   assert.equal(nodes.length, 2);
   assert.equal(nodes[1].id, minted[0].id);
+});
+
+// ═══ the 2026-09 minting incident: nothing derives an id from a body ════════
+//
+// seedForCreate had no case for `visual_standard` — P1 added the `vis` prefix
+// to OBJECT_PREFIX without the matching seed rule — so it fell through to
+// stringifying the WHOLE BODY as the id seed. A realistic body minted a
+// several-hundred-character id, the blob store refused the key, and its raw
+// "Netlify Blobs has generated an internal error (400 status code, ID: …)"
+// reached a user's chat. Three separate guarantees close that, and each is
+// pinned here.
+
+test('SEED AUDIT: every object type mints a short, valid id even from a body carrying none of its seed fields', async () => {
+  // A body with no route/name/slug/title/role for ANY type: whatever the seed
+  // rule was going to reach for, it is not here. Before the fix this became
+  // the id verbatim; now it becomes a bounded hash.
+  const opaqueBody = {
+    prose: 'x'.repeat(4000),
+    nested: { deep: Array.from({ length: 40 }, (_, i) => ({ index: i, text: 'y'.repeat(80) })) },
+  };
+  // The three site-derived singleton types are covered by their own rule (and
+  // their own tests) — they mint from the site, never from the body at all.
+  const bodySeeded = [
+    'page',
+    'section',
+    'navigation',
+    'taxonomy',
+    'site',
+    'template',
+    'section_template',
+    'theme',
+    'product',
+    'content_item',
+  ] as const;
+
+  for (const objectType of bodySeeded) {
+    const store = createMemoryStore();
+    const res = await call(store, {
+      action: 'validate',
+      object_type: objectType,
+      site: 'site_drlurie',
+      body: opaqueBody,
+    });
+    assert.equal(res.status, 200, `${objectType}: ${JSON.stringify(res.body)}`);
+    const objectId = res.body.object_id as string;
+    assert.ok(validateObjectIdForType(objectType, objectId).ok, `${objectType}: ${objectId} must be a valid id`);
+    assert.ok(objectId.length <= 80, `${objectType}: ${objectId} must be short (${objectId.length} chars)`);
+    assert.ok(!objectId.includes('prose'), `${objectType}: the id must carry no trace of the body`);
+  }
+});
+
+test('SEED AUDIT: the singleton types mint their per-site convention, never a body-derived id', async () => {
+  // editorial_voice and tracking_config are, like visual_standard was,
+  // singletons with no seed case — reachable today only because every caller
+  // happens to pass requested_id. "Happens to" is what this bug was made of.
+  const store = createMemoryStore();
+  for (const [objectType, expected] of [
+    ['editorial_voice', 'voice_drlurie'],
+    ['tracking_config', 'trk_drlurie'],
+  ] as const) {
+    const res = await call(store, {
+      action: 'validate',
+      object_type: objectType,
+      site: 'site_drlurie',
+      body: { anything: 'at all', anotherKey: 'x'.repeat(500) },
+    });
+    assert.equal(res.status, 200, `${objectType}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.object_id, expected);
+  }
+});
+
+test('an over-long requested_id is a typed 400 naming the length — it never reaches the store', async () => {
+  const store = createMemoryStore();
+  const overLong = `page_${'a'.repeat(400)}`;
+  const res = await call(store, {
+    action: 'create',
+    object_type: 'page',
+    site: 'site_drlurie',
+    body: validPageBody(),
+    requested_id: overLong,
+  });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.equal(res.body.error, 'Invalid requested_id');
+  assert.match(String(res.body.detail), /characters — the limit is 200/);
+  assert.equal(store.blobs.size, 0, 'nothing may reach the store');
+});
+
+test('an over-long MINTED id is a typed 400 (MintIdError), not a store failure', async () => {
+  const store = createMemoryStore();
+  // A page mints from its title, which is genuinely caller-controlled and
+  // genuinely unbounded — the one remaining way to ask for an id too long to
+  // be a store key.
+  const res = await call(store, {
+    action: 'validate',
+    object_type: 'page',
+    body: { ...validPageBody(), route: 'a-'.repeat(200) },
+  });
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.equal(res.body.error, 'Could not mint an object id');
+  assert.match(String(res.body.detail), /the limit is 200/);
+});
+
+test('a blob-store failure becomes a typed platform error naming the verb — never the provider’s own words', async () => {
+  const store = createMemoryStore();
+  // Exactly what the live store threw during the incident.
+  const blobsFailure = new Error('Netlify Blobs has generated an internal error (400 status code, ID: cb90450d-0000)');
+  const failing = {
+    ...store,
+    async get() {
+      throw blobsFailure;
+    },
+  };
+
+  const res = await handleObjectVerb(
+    failing as unknown as ObjectVerbStore,
+    { action: 'get', object_type: 'page', object_id: 'page_home' },
+    AGENT,
+    { nowMs: NOW }
+  );
+
+  assert.equal(res.status, 502, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'object_store_error');
+  assert.equal(res.body.action, 'get');
+  // The facts survive as FIELDS...
+  assert.equal(res.body.store_status, 400);
+  assert.equal(res.body.store_support_id, 'cb90450d-0000');
+  // ...and the message says what the caller did and what it means, rather
+  // than handing them a support id for someone else's support desk.
+  const message = String(res.body.error);
+  assert.match(message, /get of page page_home/);
+  assert.match(message, /did not complete/);
+  assert.doesNotMatch(message, /Netlify Blobs has generated an internal error/);
+});
+
+test('a store failure inside a verb that recurses into another one is still converted exactly once', async () => {
+  const store = createMemoryStore();
+  const failing = {
+    ...store,
+    async list() {
+      throw new Error('Netlify Blobs has generated an internal error (500 status code, ID: deadbeef)');
+    },
+  };
+  const res = await handleObjectVerb(
+    failing as unknown as ObjectVerbStore,
+    { action: 'list', object_type: 'page' },
+    AGENT,
+    { nowMs: NOW }
+  );
+  assert.equal(res.status, 502, JSON.stringify(res.body));
+  assert.equal(res.body.store_status, 500);
+});
+
+test('a non-store exception still propagates — the conversion never hides a real bug', async () => {
+  const store = createMemoryStore();
+  const failing = {
+    ...store,
+    async get() {
+      throw new TypeError('cannot read properties of undefined');
+    },
+  };
+  await assert.rejects(
+    () =>
+      handleObjectVerb(
+        failing as unknown as ObjectVerbStore,
+        { action: 'get', object_type: 'page', object_id: 'page_home' },
+        AGENT,
+        { nowMs: NOW }
+      ),
+    /cannot read properties of undefined/
+  );
 });

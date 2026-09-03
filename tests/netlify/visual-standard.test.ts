@@ -22,6 +22,10 @@ import { brandImagerySchema } from '../../packages/core/schema/bodies/site-v1.js
 import { buildObjectContract } from '../../packages/core/lib/registry/object-contract.js';
 import { governedObjectTypes } from '../../packages/core/lib/approval-policy.js';
 import { validateObjectIdForType } from '../../packages/core/lib/object-ids.js';
+import { mintId, visualStandardSeed } from '../../packages/core/lib/object-ids-mint.js';
+import { templateSlug, visualStandardTemplateId } from '../../packages/core/lib/admin/visual-identity-imagery.js';
+import { visualStandardIdFor } from '../../packages/core/cli/visual-standard-genesis.mjs';
+import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import { patchOpNamesByObjectType } from '../../packages/core/schema/object-patch-ops.js';
 import {
   applyPatchOps,
@@ -351,4 +355,178 @@ test('object_publish is refused for visual_standard — it is outside the generi
   if (!result.allow) {
     assert.equal(result.code, 'content_item_not_gated');
   }
+});
+
+// ─── id MINTING: the 2026-09 incident ─────────────────────────────────────
+//
+// A user asked the admin chat to create the site's house standard. The agent
+// called object_validate with a realistic candidate body and the chat died on
+// a raw, leaked store error: "Netlify Blobs has generated an internal error
+// (400 status code, ID: cb90450d-…)".
+//
+// Cause: seedForCreate (object-verbs.ts) had no case for visual_standard — P1
+// added the `vis` prefix to OBJECT_PREFIX without the matching seed rule — so
+// it fell through to stringifying the WHOLE BODY as the id seed. A tiny probe
+// body minted the (already absurd) id
+// `vis_kind_house_label_probe_samplesubjects_a_hand_status_draft_version_1`
+// and "worked"; a realistic one minted a several-hundred-character id that
+// could not be a blob key.
+//
+// These pin both halves of the fix: the id is minted from the RULE (the site),
+// and it agrees with every other implementation of that rule in the fleet.
+
+/** The candidate body from the live dr-lurie incident, shape-for-shape. */
+const INCIDENT_HOUSE_BODY: VisualStandardBody = {
+  version: 1,
+  kind: 'house',
+  label: 'Dr. Lurié House Visual Standard',
+  description:
+    'The default image style for Dr. Lurié — evidence-led skin health. Applies to article headers, PDF covers and ' +
+    'social cards unless a template overrides it.',
+  brandImagery: {
+    version: 1,
+    medium: 'photograph',
+    styleSentence:
+      'Clinical-clean editorial photography with soft north-facing daylight, matte skin texture, shallow depth of ' +
+      'field, muted sage and warm sand tones, and generous negative space — calm, unglamorised, closer to a ' +
+      'dermatology journal than a cosmetics campaign.',
+    palette: ['#2E5C42', '#C2A878', '#F4F1EC'],
+    negative: ['no stock-photo gloss', 'no oversaturation', 'no visible branding', 'no text overlays'],
+    aspectRatios: { article_header: '3:2', pdf_cover: '1:1', social_card: '16:9' },
+    seedBase: 100001,
+  },
+  references: [],
+  sampleSubjects: ['a hand applying serum to a forearm', 'a dermatologist reviewing a skin chart'],
+  status: 'draft',
+};
+
+test('INCIDENT: the exact live body mints vis_drlurie — never an id derived from the body', async () => {
+  const store = createMemoryStore();
+  const verbStore = store as unknown as ObjectVerbStore;
+  const call = async (request: ObjectVerbRequest) =>
+    handleObjectVerb(verbStore, request, AGENT, {
+      nowMs: NOW,
+      validationContext: await buildStoreValidationContext(verbStore),
+    });
+
+  // object_create, the way the agent would have reached it.
+  const created = await call({
+    action: 'create',
+    object_type: 'visual_standard',
+    site: 'site_drlurie',
+    body: INCIDENT_HOUSE_BODY,
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const record = created.body.record as ObjectRecord;
+  assert.equal(record.object_id, 'vis_drlurie');
+
+  // The failing call itself: object_validate with a candidate body and no id.
+  // The site is resolved from the store's own site singleton, so the incident
+  // call needs nothing new from the caller to mint correctly.
+  const withSite = createMemoryStore();
+  await withSite.setJSON(objectRecordKey('site', 'site_drlurie'), { object_id: 'site_drlurie' });
+  const dryRun = await handleObjectVerb(
+    withSite as unknown as ObjectVerbStore,
+    { action: 'validate', object_type: 'visual_standard', body: INCIDENT_HOUSE_BODY },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(withSite as unknown as ObjectVerbStore) }
+  );
+  assert.equal(dryRun.status, 200, JSON.stringify(dryRun.body));
+  assert.equal(dryRun.body.object_id, 'vis_drlurie');
+
+  // And the old behaviour is gone in the way that matters: nothing about the
+  // body reaches the id.
+  const mintedFromLabel = String(dryRun.body.object_id).includes('house') || String(dryRun.body.object_id).includes('label');
+  assert.equal(mintedFromLabel, false, 'the id must carry no trace of the body');
+});
+
+test('a template mints vis_<site>_<slug> from its label; the house stays vis_<site>', async () => {
+  const store = createMemoryStore();
+  await store.setJSON(objectRecordKey('site', 'site_drlurie'), { object_id: 'site_drlurie' });
+  const verbStore = store as unknown as ObjectVerbStore;
+  const create = async (body: VisualStandardBody) =>
+    handleObjectVerb(
+      verbStore,
+      { action: 'create', object_type: 'visual_standard', site: 'site_drlurie', body },
+      AGENT,
+      { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+    );
+
+  const house = await create(INCIDENT_HOUSE_BODY);
+  assert.equal(house.status, 200, JSON.stringify(house.body));
+  assert.equal((house.body.record as ObjectRecord).object_id, 'vis_drlurie');
+
+  const template = await create({
+    ...INCIDENT_HOUSE_BODY,
+    kind: 'template',
+    label: 'Seasonal Campaign Look',
+    whenToUse: 'For seasonal campaign PDFs.',
+  });
+  assert.equal(template.status, 200, JSON.stringify(template.body));
+  assert.equal((template.body.record as ObjectRecord).object_id, 'vis_drlurie_seasonal_campaign_look');
+
+  // A second template is an ordinary sibling, not a singleton conflict, and
+  // gets its OWN id — the body-seeded minting could not have guaranteed that
+  // for two templates whose bodies differed only in prose.
+  const second = await create({
+    ...INCIDENT_HOUSE_BODY,
+    kind: 'template',
+    label: 'Guide Covers',
+    whenToUse: 'For downloadable guide covers.',
+  });
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.equal((second.body.record as ObjectRecord).object_id, 'vis_drlurie_guide_covers');
+});
+
+test('the minted id agrees with the CLI genesis rule and the admin studio rule across a table of slugs', () => {
+  // Three independent implementations of BRIEF R2, none of which can import
+  // the others (the genesis half is plain .mjs so bare `node` CLIs can load
+  // it; the studio half is browser-safe and cannot pull in node:crypto), plus
+  // CMS-Agent's visualStandardIds.ts outside this repo entirely. This table is
+  // the joint that keeps them from drifting.
+  for (const slug of ['drlurie', 'platform', 'zilberman', 'fernwell', 'acme2', 'a', 'dr_lurie_clinic']) {
+    const site = `site_${slug}`;
+    assert.equal(
+      mintId({ kind: 'object', objectType: 'visual_standard' }, visualStandardSeed(site)),
+      visualStandardIdFor(slug),
+      `house id for ${site}`
+    );
+    for (const label of ['Seasonal Campaign', 'guide-covers', 'PDF Covers 2026']) {
+      assert.equal(
+        mintId({ kind: 'object', objectType: 'visual_standard' }, visualStandardSeed(site, label)),
+        visualStandardTemplateId(slug, templateSlug(label)),
+        `template id for ${site} / ${label}`
+      );
+    }
+  }
+
+  // Every id the rule produces is a legal visual_standard id, by the real validator.
+  for (const id of [visualStandardIdFor('drlurie'), visualStandardTemplateId('drlurie', templateSlug('Guide Covers'))]) {
+    assert.ok(validateObjectIdForType('visual_standard', id).ok, id);
+  }
+});
+
+test('a create with no site to derive from is a readable refusal, never a body-seeded id', async () => {
+  const store = createMemoryStore();
+  const verbStore = store as unknown as ObjectVerbStore;
+  // A dry-run against a store with no site singleton cannot resolve one.
+  const res = await handleObjectVerb(
+    verbStore,
+    { action: 'validate', object_type: 'visual_standard', body: INCIDENT_HOUSE_BODY },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+  assert.match(String(res.body.detail), /derived from the site/i);
+  assert.match(String(res.body.detail), /requested_id/);
+
+  // Naming the site explicitly is all it takes.
+  const withSite = await handleObjectVerb(
+    verbStore,
+    { action: 'validate', object_type: 'visual_standard', site: 'site_drlurie', body: INCIDENT_HOUSE_BODY },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+  assert.equal(withSite.status, 200, JSON.stringify(withSite.body));
+  assert.equal(withSite.body.object_id, 'vis_drlurie');
 });

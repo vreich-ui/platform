@@ -12,6 +12,8 @@ import { resolveActivePolicies, type GovernanceBlobStore } from '../governance-s
 import {
   handleObjectVerb,
   objectVerbRequestSchema,
+  resolveSiteForMint,
+  seedForCreate,
   verbNeedsValidationContext,
   type ObjectVerbStore,
 } from '../object-verbs.js';
@@ -393,15 +395,22 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
         const check = validateObjectIdForType(objectType, objectId);
         if (!check.ok) return { error: 'Invalid requested_id', detail: check.error };
       } else {
+        // The SAME seed rule object_create uses (seedForCreate) — never
+        // JSON.stringify(body), which is how the 2026-09 incident minted a
+        // several-hundred-character visual_standard id from a candidate body.
+        // A preview id that does not match the id a real create would produce
+        // is worse than no preview: the agent plans against an id that will
+        // never exist.
+        const site = await resolveSiteForMint(deps.objectStore, objectType, undefined);
         try {
           const timestamp = new Date(deps.nowMs ? deps.nowMs() : Date.now()).toISOString();
           objectId =
             objectType === 'content_item'
               ? mintId(
                   { kind: 'content_item', yyyymmdd: timestamp.slice(0, 10).replaceAll('-', '') },
-                  JSON.stringify(body)
+                  seedForCreate(objectType, body, site)
                 )
-              : mintId({ kind: 'object', objectType }, JSON.stringify(body));
+              : mintId({ kind: 'object', objectType }, seedForCreate(objectType, body, site));
         } catch (error) {
           if (error instanceof MintIdError) return { error: 'Could not mint a preview id', detail: error.message };
           throw error;
