@@ -92,6 +92,22 @@ export const getDirectArtifactUploadMaxBytes = () => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : defaultDirectArtifactUploadMaxBytes;
 };
 
+/** T-dimension-bound: longest-edge ceiling (px) an uploaded raster image is
+ * bounded to before saveArtifactBytes, mirroring pdf-tool's import-path
+ * quotas.maxImportDimensionPx default. Env-configurable like
+ * getDirectArtifactUploadMaxBytes above, so it can be tuned without a
+ * deploy. */
+export const defaultArtifactUploadMaxImageDimensionPx = 2048;
+
+export const getArtifactUploadMaxImageDimensionPx = () => {
+  const raw =
+    getNetlifyEnvValue('ARTIFACT_UPLOAD_MAX_IMAGE_DIMENSION_PX') || process.env.ARTIFACT_UPLOAD_MAX_IMAGE_DIMENSION_PX;
+  if (!raw) return defaultArtifactUploadMaxImageDimensionPx;
+
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : defaultArtifactUploadMaxImageDimensionPx;
+};
+
 const base64UrlEncode = (value: string) => Buffer.from(value).toString('base64url');
 
 const base64UrlJson = (value: unknown) => base64UrlEncode(JSON.stringify(value));
@@ -266,7 +282,13 @@ const getArrayBuffer = async (store: BlobStore, key: string) => {
   return toBufferOrNull(await binaryStore.get(key, { type: 'arrayBuffer' }));
 };
 
-const validateBytesAgainstIntent = (
+/** Exported so artifact-upload.ts's endpoint can re-run this exact check on
+ * the ORIGINALLY UPLOADED bytes before the dimension bound (which stores a
+ * different buffer than the one the client's signed token/headers describe)
+ * — otherwise saveArtifactBytes below would only ever validate the bounded
+ * bytes against themselves, silently dropping the original integrity check
+ * that catches a caller lying about size/sha256 in its upload token. */
+export const validateBytesAgainstIntent = (
   input: SaveArtifactBytesInput,
   bytes: Buffer
 ): SaveArtifactBytesResult | undefined => {
