@@ -29,8 +29,27 @@ export interface PdfTemplateSummary {
   kind?: string;
   /** FIX-U1 / BRIEF §3.6: set by publish; an image blob key. */
   thumbnail_key?: string;
+  /**
+   * D4 fix (task A5): WHY thumbnail_key is absent, whenever pdf-tool knows —
+   * mirrors pdf-tool's own `PdfTemplateRecord.thumbnailError`
+   * (pdf-template-store.ts). Optional/absent-safe: an older pdf-tool deploy
+   * that predates this field, or a template whose thumbnail simply hasn't
+   * rendered yet (no error, just not attempted), sends nothing here.
+   */
+  thumbnail_error?: string;
   /** FIX-U1 / BRIEF §3.6: the JSON Schema the materializer fills deterministically (R7). */
   render_data_schema?: unknown;
+  /**
+   * D4 fix (task A5): a cheap presence flag alongside `render_data_schema`
+   * itself, for a UI that only needs to know WHETHER a schema exists (e.g.
+   * a badge) without paying for the full schema object on every list row.
+   * Always present and computed defensively (never trusts an upstream
+   * `hasRenderDataSchema` field, which pdf-tool does not send) — false on
+   * an older pdf-tool deploy that predates `renderDataSchema` entirely, not
+   * merely absent, so a UI reading this field never needs its own
+   * `?? false` fallback.
+   */
+  has_render_data_schema: boolean;
   /** FIX-U1 / BRIEF §3.6: must validate against render_data_schema at create and publish. */
   sample_data?: unknown;
 }
@@ -106,9 +125,21 @@ export function projectPdfTemplate(value: unknown): PdfTemplateSummary | undefin
     // original six fields unchanged.
     ...(typeof row.kind === 'string' && row.kind.trim() ? { kind: row.kind.trim() } : {}),
     ...(typeof row.thumbnailKey === 'string' && row.thumbnailKey.trim() ? { thumbnail_key: row.thumbnailKey.trim() } : {}),
+    // D4 fix (task A5): forwarded alongside thumbnail_key, same defensive
+    // shape — an older pdf-tool deploy (or a template with no thumbnail
+    // attempt yet, which is not an error) simply never sends this key.
+    ...(typeof row.thumbnailError === 'string' && row.thumbnailError.trim() ? { thumbnail_error: row.thumbnailError.trim() } : {}),
     ...(row.renderDataSchema && typeof row.renderDataSchema === 'object' && !Array.isArray(row.renderDataSchema)
       ? { render_data_schema: row.renderDataSchema }
       : {}),
+    // D4 fix (task A5): always present (unlike the optional fields above) —
+    // computed from the SAME presence check as render_data_schema itself,
+    // never a passthrough of an upstream field pdf-tool does not send, so
+    // it is exactly as absent-safe on an old pdf-tool deploy as the schema
+    // object it mirrors (both simply read `undefined` off `row`).
+    has_render_data_schema: Boolean(
+      row.renderDataSchema && typeof row.renderDataSchema === 'object' && !Array.isArray(row.renderDataSchema)
+    ),
     ...(row.sampleData !== undefined ? { sample_data: row.sampleData } : {}),
   };
 }

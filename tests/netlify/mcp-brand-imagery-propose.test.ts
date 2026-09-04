@@ -25,8 +25,20 @@ const LOCAL_BLOBS_ROOT = join(process.cwd(), '.netlify', 'local-blobs-test', 'mc
  * module-level CmsAgentClient in mcp-tool-handlers.ts) is imported. Same rig
  * as admin-requests-view.test.ts / request-activity-approve.test.ts.
  */
-let dispatch: (name: string, args: Record<string, unknown>) => { ok: true; data: unknown } | { ok: false; code: string; message: string } =
-  () => ({ ok: true, data: {} });
+type DispatchOutcome =
+  | { ok: true; data: unknown }
+  | { ok: false; code: string; message: string }
+  // D1 fix (task A2): simulates the RAW JSON-RPC error CMS-Agent's dispatcher
+  // sends for a tool name it does not recognize at all (workspace/server.ts:
+  // `{code:-32602, message:"Unknown tool: <name>"}`, no `data`) — distinct
+  // from the `{ok:false,...}` structuredContent shape below, which is what a
+  // TOOL's own thrown business error looks like once CmsAgentClient.callTool
+  // has parsed a normal `result.structuredContent`. Only a real JSON-RPC
+  // `error` field (not this envelope) sets `fromJsonBody` the way an actual
+  // "unknown tool" failure does on the wire.
+  | { jsonRpcError: { code: number; message: string } };
+
+let dispatch: (name: string, args: Record<string, unknown>) => DispatchOutcome = () => ({ ok: true, data: {} });
 let calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
 const jsonRes = (body: unknown, headers: Record<string, string> = {}) =>
@@ -45,6 +57,9 @@ globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
   const args = payload.params?.arguments ?? {};
   calls.push({ name, args });
   const outcome = dispatch(name, args);
+  if ('jsonRpcError' in outcome) {
+    return jsonRes({ jsonrpc: '2.0', id: 2, error: outcome.jsonRpcError });
+  }
   return jsonRes({
     jsonrpc: '2.0',
     id: 2,
@@ -136,10 +151,10 @@ test('tools/list exposes brand_imagery_propose', async () => {
   assert.ok(tools.some((tool) => tool.name === 'brand_imagery_propose'));
 });
 
-test('brand_imagery_propose forwards the §3.5 input shape to node_execute(brand_imagery_writer) and returns the proposal', async () => {
+test('brand_imagery_propose forwards the §3.5 input shape to visual_identity_propose and returns the proposal (D1 fix, task A2)', async () => {
   await reset();
   dispatch = (name) =>
-    name === 'node_execute'
+    name === 'visual_identity_propose'
       ? { ok: true, data: nodeExecuteResult(validProposal()) }
       : { ok: false, code: 'unexpected', message: 'unexpected' };
 
@@ -155,14 +170,16 @@ test('brand_imagery_propose forwards the §3.5 input shape to node_execute(brand
   assert.deepEqual(result.structuredContent?.brandImagery, VALID_BRAND_IMAGERY);
   assert.equal(result.structuredContent?.confidence, 'high');
 
-  const call = calls.find((c) => c.name === 'node_execute');
+  const call = calls.find((c) => c.name === 'visual_identity_propose');
   assert.ok(call);
-  assert.equal(call!.args.nodeId, 'brand_imagery_writer');
-  const writerInput = call!.args.input as Record<string, unknown>;
+  assert.equal(calls.some((c) => c.name === 'node_execute'), false, 'must never call the retired node_execute tool');
+  const writerInput = call!.args as Record<string, unknown>;
   assert.equal(writerInput.mode, 'house');
+  assert.equal(writerInput.kind, 'brand_imagery');
   assert.equal(writerInput.brief, 'Clinical-clean skincare, warm neutrals.');
-  assert.equal(typeof writerInput.projectId, 'string');
-  assert.ok((writerInput.projectId as string).length > 0);
+  assert.equal(typeof writerInput.project_id, 'string');
+  assert.ok((writerInput.project_id as string).length > 0);
+  assert.equal(writerInput.projectId, undefined, 'project_id must be snake_case on the wire');
   assert.deepEqual(writerInput.references, [{ blobKey: MOOD_BLOB_KEY, note: 'the palette, not the subject' }]);
   // Whole-image reference (no region) resolves to a fetchable absolute URL.
   assert.deepEqual(writerInput.imageRefs, [
@@ -185,14 +202,14 @@ test('brand_imagery_propose: more than 8 references is a 400 and never calls CMS
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent?.statusCode, 400);
   assert.equal(result.structuredContent?.error_code, 'brand_imagery_propose_too_many_references');
-  assert.equal(calls.filter((c) => c.name === 'node_execute').length, 0);
+  assert.equal(calls.filter((c) => c.name === 'visual_identity_propose').length, 0);
   assert.deepEqual(after, before);
 });
 
 test('brand_imagery_propose: an invalid proposal from CMS-Agent is a 502 carrying the reason, with zero object writes', async () => {
   await reset();
   dispatch = (name) => {
-    if (name !== 'node_execute') return { ok: false, code: 'unexpected', message: 'unexpected' };
+    if (name !== 'visual_identity_propose') return { ok: false, code: 'unexpected', message: 'unexpected' };
     const { sampleSubjects: _drop, ...rest } = validProposal();
     return { ok: true, data: rest };
   };
@@ -218,5 +235,15 @@ test('brand_imagery_propose: neither references nor brief is a 400, never calls 
   const { result } = await rpc('brand_imagery_propose', { mode: 'house' });
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent?.statusCode, 400);
-  assert.equal(calls.filter((c) => c.name === 'node_execute').length, 0);
+  assert.equal(calls.filter((c) => c.name === 'visual_identity_propose').length, 0);
+});
+
+test('brand_imagery_propose: an unrecognized-tool-name CMS-Agent failure surfaces its own error_code, never a generic 502 (D1 fix, task A2)', async () => {
+  await reset();
+  dispatch = () => ({ jsonRpcError: { code: -32602, message: 'Unknown tool: visual_identity_propose' } });
+
+  const { result } = await rpc('brand_imagery_propose', { mode: 'house', brief: 'Warm neutrals.' });
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent?.statusCode, 502);
+  assert.equal(result.structuredContent?.error_code, 'brand_imagery_propose_tool_not_allowed');
 });
