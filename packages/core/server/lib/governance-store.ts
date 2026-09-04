@@ -60,6 +60,22 @@ export const governanceDocSchema = z.object({
    *  getBrandImageryOverridePolicy, the SAME doc the admin GovernancePage's
    *  Visual identity guardrail card edits (owner-write, same as `approval`). */
   brandImageryOverrides: z.enum(['allow', 'lock']).optional(),
+  /**
+   * W7.5 — the per-surface kill switch.
+   *
+   * `member_suspend` cuts a PERSON. This cuts a CHAT APP: when a client starts
+   * behaving badly — a runaway agent, a cached schema hammering a retired tool,
+   * a shape whose vendor changed something overnight — the operator needs to
+   * stop that surface without suspending the editors who use it, and without a
+   * deploy. Unset means allow, so an untouched tenant behaves exactly as before.
+   *
+   * Keys are `PluginActorId`s (`plugin:claude`, `plugin:openai-gpt`,
+   * `plugin:openai-agent`). A blocked surface still reaches `ping` and
+   * `whoami`, deliberately: an installer whose surface was cut must be able to
+   * find out that THAT is what happened, rather than reading a wall of tool
+   * errors.
+   */
+  surfaces: z.record(z.string(), z.enum(['allow', 'block'])).optional(),
   updated_by: z.string(),
   updated_at: z.string(),
   history: z.array(governanceHistoryEntrySchema),
@@ -103,6 +119,8 @@ export interface ActivePolicies {
    *  does not otherwise need the rest of ActivePolicies); this copy is what
    *  the admin GovernancePage's guardrail card reads for display. */
   brandImageryOverrides: 'allow' | 'lock';
+  /** W7.5: per-surface allow/block. Absent keys are allowed. */
+  surfaces?: Record<string, 'allow' | 'block'>;
   provenance: {
     approval: PolicyProvenance;
     creation: PolicyProvenance;
@@ -128,6 +146,7 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
   return {
     approval: doc?.approval ?? activeApprovalPolicy(),
     creation: doc?.creation ?? activeCreationPolicy(),
+    ...(doc?.surfaces ? { surfaces: doc.surfaces } : {}),
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
     brandImageryOverrides: doc?.brandImageryOverrides ?? 'allow',

@@ -72,8 +72,23 @@ test('openWorldHint marks only the tools that reach outside this tenant', () => 
 
 test('the wire tool carries the MCP fields and NOT the internal governance field', () => {
   const wire = toWireTool(definition('object_publish'));
-  assert.deepEqual(Object.keys(wire).sort(), ['annotations', 'description', 'inputSchema', 'name']);
+  // `_meta` is the spec's extension slot; W7.5 puts the per-tool schema digest
+  // there rather than at the top level, where an unknown key is a client's
+  // prerogative to reject.
+  assert.deepEqual(Object.keys(wire).sort(), ['_meta', 'annotations', 'description', 'inputSchema', 'name']);
   assert.ok(!('governance' in wire), 'governance is an internal classification, not protocol');
+  assert.match(wire._meta.schema_version, /^v[0-9a-f]{8}$/);
+});
+
+test('a tool schema version moves when the SCHEMA moves, and not when the prose does', () => {
+  const tool = definition('object_publish');
+  const sameProse = { ...tool, description: 'A completely different sentence for the model.' };
+  const changedSchema = {
+    ...tool,
+    inputSchema: { ...(tool.inputSchema as Record<string, unknown>), required: ['object_id', 'something_new'] },
+  };
+  assert.equal(toWireTool(sameProse)._meta.schema_version, toWireTool(tool)._meta.schema_version);
+  assert.notEqual(toWireTool(changedSchema)._meta.schema_version, toWireTool(tool)._meta.schema_version);
 });
 
 test('tools/list over the real handler emits annotations and leaks no governance', async () => {

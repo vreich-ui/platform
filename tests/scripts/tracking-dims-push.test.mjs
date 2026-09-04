@@ -50,6 +50,11 @@ test('dimensionRowsForExport emits the exact /dims object_version, producer, and
         published_at: '2026-08-28T12:00:00.000Z',
         route: '/article-one',
         variant_of: 'req_agent_parent_20260827_01',
+        // W7.4: which chat surface published this revision, and how that
+        // identity was established. Null here because this fixture's marker
+        // predates the stamp — which is the state most of the live corpus is in.
+        surface: null,
+        attribution: null,
       },
     ],
     producer: [{ object_id: 'req_agent_article_20260828_01', version: 17, ...producer }],
@@ -80,6 +85,10 @@ test('dimensionRowsForExport emits the exact /dims object_version, producer, and
         published_at: '2026-08-28T12:05:00.000Z',
         route: '/',
         variant_of: null,
+        // W7.4: pages carry the same two columns. A page published by the
+        // admin has no chat surface, which is exactly what null says.
+        surface: null,
+        attribution: null,
       },
     ],
     producer: [],

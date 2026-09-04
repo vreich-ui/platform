@@ -43,15 +43,15 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 // ─── registry shape ────────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 87 names: every visible TOOL_DEFINITION (60 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
+test('the registry has exactly the expected 88 names: every visible TOOL_DEFINITION (60 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
     ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
   );
-  assert.equal(expectedVisible.size, 76);
+  assert.equal(expectedVisible.size, 77);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 87);
-  assert.equal(new Set(registryNames).size, 87, 'no duplicate names');
+  assert.equal(registryNames.length, 88);
+  assert.equal(new Set(registryNames).size, 88, 'no duplicate names');
 
   const workspaceNames = [
     'list_workspace_nodes',
@@ -83,9 +83,9 @@ test('the registry has exactly the expected 87 names: every visible TOOL_DEFINIT
   }
 });
 
-test('wire-tool budget: the non-membership registry (71) + present_candidates <= 96; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
+test('wire-tool budget: the non-membership registry (72) + present_candidates <= 96; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
   const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
-  assert.equal(nonMembership.length, 71);
+  assert.equal(nonMembership.length, 72);
   // W19 T19.8: the old ceiling was 64 and the registry sat at exactly 63 + the
   // learning-mode tool — no headroom at all, so one more tool would have been
   // silently sliced off the wire. The bound moved to 96 on both sides.
@@ -550,8 +550,8 @@ test('compileSchema throws at compile time on an unsupported keyword', () => {
   );
 });
 
-test('every one of the 90 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 90);
+test('every one of the 91 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 91);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }

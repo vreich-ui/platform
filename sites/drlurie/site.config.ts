@@ -56,6 +56,12 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     // adding a tool to the plugin charter never needs a routing change. The
     // facade forwards to the same handler and the same OAuth as /mcp.
     { from: '/api/plugin/*', to: '/.netlify/functions/plugin-actions', status: 200 },
+    // W7.1 — the public install page's data endpoint. NOT under /api/plugin/*:
+    // that prefix is the Actions facade, whose path list IS the charter, so
+    // /api/plugin/install would arrive there and be refused as a tool out of
+    // charter. Facts are public; the bundle downloads behind ?download= are
+    // gated on tenant membership (editor and above).
+    { from: '/api/plugin-install', to: '/.netlify/functions/plugin-install', status: 200 },
     {
       from: '/.well-known/oauth-protected-resource',
       to: '/.netlify/functions/mcp-oauth?oauth_endpoint=protected-resource-metadata',

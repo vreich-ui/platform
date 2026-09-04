@@ -1,0 +1,130 @@
+---
+// /plugin/install (W7.1) — the PUBLIC per-tenant install page.
+//
+// Deliberately NOT on AdminLayout, for the same reason /admin/accept is not:
+// the person following the link from an invitation often has no session yet,
+// and an auth gate here would ask them to sign in before they know what they
+// are signing in to. The page renders unauthenticated; only the bundle
+// downloads behind it ask for a session (plugin-install.ts draws that line).
+//
+// noindex: it is public because it must be reachable, not because it wants to
+// be found — an install card for a tenant's publishing tools has no business
+// in search results.
+import '~/styles/admin-tokens.css';
+import '@site/config/policy-bindings'; // register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import Layout from '~/layouts/Layout.astro';
+import PluginInstallPage from '~/admin/PluginInstallPage';
+
+// Resolved once, server-side, and passed down explicitly — the island must not
+// call getSiteIdentity() itself (D2).
+const identity = getSiteIdentity();
+const metadata = {
+  title: `Install the ${identity.brandName} publishing plugin`,
+  robots: { index: false, follow: false },
+};
+---
+
+<Layout metadata={metadata}>
+  <div class="adm-root pi-root">
+    <PluginInstallPage client:load identity={identity} />
+  </div>
+</Layout>
+
+<style is:global>
+  /* Scoped to this page's root. Uses the admin token palette so the page reads
+     as part of the workspace without pulling in the admin shell chrome. */
+  .pi-root {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+  .pi-header h1 {
+    font-size: 1.75rem;
+    line-height: 1.25;
+    margin: 0 0 0.75rem;
+  }
+  .pi-header p {
+    margin: 0 0 0.75rem;
+    max-width: 46rem;
+    line-height: 1.55;
+  }
+  .pi-meta {
+    font-size: 0.8125rem;
+    opacity: 0.75;
+  }
+  .pi-meta code,
+  .pi-copy code,
+  .pi-errors code {
+    font-size: 0.8125rem;
+    word-break: break-all;
+  }
+  .pi-cards {
+    display: grid;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+  }
+  .pi-suits {
+    margin: 0 0 1rem;
+    line-height: 1.5;
+  }
+  .pi-steps {
+    margin: 0;
+    padding-left: 1.25rem;
+    display: grid;
+    gap: 1rem;
+  }
+  .pi-steps > li > p {
+    margin: 0 0 0.5rem;
+  }
+  .pi-step-do {
+    line-height: 1.55;
+  }
+  .pi-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .pi-prove {
+    list-style: none;
+    margin-left: -1.25rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid currentColor;
+    border-color: color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .pi-errors {
+    margin-top: 1.25rem;
+    font-size: 0.875rem;
+  }
+  .pi-errors dt {
+    margin-top: 0.75rem;
+  }
+  .pi-errors dd {
+    margin: 0.25rem 0 0;
+    line-height: 1.5;
+  }
+  .pi-note {
+    margin: 1rem 0 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    opacity: 0.8;
+  }
+  .pi-advanced {
+    margin-top: 1.5rem;
+  }
+  .pi-download-error {
+    margin-top: 1.25rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid #e0b4b4;
+    background: #fdf3f3;
+    color: #7c2b2b;
+    line-height: 1.5;
+  }
+  .pi-footer {
+    margin-top: 2rem;
+    font-size: 0.875rem;
+    opacity: 0.75;
+  }
+</style>

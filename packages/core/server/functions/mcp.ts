@@ -160,6 +160,12 @@ import {
 import { handleMembershipVerb } from '../lib/membership/verbs.js';
 import { callerPrincipalFromMcpEvent } from '../lib/membership/caller-principal.js';
 import { getUsersBlobStore } from '../lib/users-store.js';
+import { buildWhoami } from '../lib/whoami.js';
+import { recordWhoamiSignal } from '../lib/plugin/install-signals.js';
+import { buildPluginTools, toolSurfaceDigest } from '../lib/plugin/build-tools.js';
+import { getPluginManifestBlobStore, getPluginManifestDoc } from '../lib/plugin/manifest-store.js';
+import { countWrite, type RateLimitStore } from '../lib/write-rate-limit.js';
+import { resolveActivePolicies } from '../lib/governance-store.js';
 import {
   getArtifactMetadata,
   listArtifactsByKind,
@@ -412,6 +418,62 @@ export const toolResult = (payload: Record<string, unknown>) => ({
   content: textContent(JSON.stringify(payload)),
   structuredContent: payload,
 });
+
+/**
+ * The wire budget for one tool result (W7.5).
+ *
+ * Netlify's Lambda response limit is 6 MB, but a result is serialized TWICE
+ * (see `toolResult`: once as text, once as structuredContent), and a body that
+ * crosses the platform limit does not come back as a tool error — it comes back
+ * as a bare 502 with no JSON at all. To a chat app that is indistinguishable
+ * from the tenant being down, and the operator's next move is to retry the same
+ * oversized read forever.
+ *
+ * 900 KB leaves generous headroom under half of the doubled limit, and it is
+ * well past any legitimate result: the largest real article record is ~32 KB on
+ * the wire (W6 D3's measurement).
+ */
+export const MAX_TOOL_RESULT_BYTES = 900_000;
+
+/**
+ * What to do instead, per tool. A size refusal that does not name the narrower
+ * call is a dead end — the model has no way to guess that `object_get` takes a
+ * projection, and it will simply retry.
+ */
+const NARROWER_CALL: Record<string, string> = {
+  object_get:
+    'Call object_get again with projection:"summary" (envelope + one line per node), or "nodes" (the body without the history ledger).',
+  object_list: 'Filter with `status`, or read the objects you need individually with object_get.',
+  object_inventory: 'Ask for one object_type at a time.',
+  member_list: 'Page it: pass a smaller `limit` and follow the cursor.',
+  member_export: 'Export one member at a time.',
+  list_artifacts_by_kind: 'Narrow by requestId, or lower the limit.',
+  list_artifacts_by_request: 'Lower the limit and page.',
+  search_artifacts: 'Lower the limit and page.',
+  audit_feed: 'Narrow the time range.',
+};
+
+/**
+ * Refuse an oversized result as a TOOL ERROR rather than letting the platform
+ * refuse the request as a 502. The distinction matters to the caller: a tool
+ * error is something a model can read and act on; a 502 is something it retries.
+ */
+export const guardToolResultSize = (name: string, result: unknown) => {
+  const serialized = JSON.stringify(result);
+  const bytes = Buffer.byteLength(serialized ?? '', 'utf8');
+  if (bytes <= MAX_TOOL_RESULT_BYTES) return result;
+
+  return toolError(
+    `The result of "${name}" is ${Math.round(bytes / 1024)} KB, over this endpoint's ${Math.round(MAX_TOOL_RESULT_BYTES / 1024)} KB limit, so it was refused instead of failing the request. ${NARROWER_CALL[name] ?? 'Request less: narrow the filter, lower the limit, or ask for one item at a time.'}`,
+    {
+      error_code: 'too_large',
+      tool: name,
+      bytes,
+      limit_bytes: MAX_TOOL_RESULT_BYTES,
+      ...(NARROWER_CALL[name] ? { use_instead: NARROWER_CALL[name] } : {}),
+    }
+  );
+};
 
 export const toolError = (message: string, payload: Record<string, unknown> = {}) => ({
   isError: true,
@@ -845,6 +907,45 @@ const CMS_AGENT_NAME_ATTRIBUTION_TOOLS = new Set([
   'object_publish',
 ]);
 
+/**
+ * `whoami`, plus the W7.6 install signal it leaves behind.
+ *
+ * Deliberately the UNSCOPED tool surface, the same one admin-plugin-manifest
+ * renders a bundle against: `tools_digest` is only useful because it is
+ * comparable to the manifest's, and computing it over a request-scoped surface
+ * would make an OAuth caller's digest differ from an agent's on an unchanged
+ * deployment — sending every installer to re-add a healthy connector.
+ *
+ * The signal is recorded AFTER the answer is built and its failure is
+ * swallowed (install-signals.ts): a status board must never be able to fail the
+ * diagnostic that feeds it.
+ */
+const callWhoami = async (event: LambdaEvent) => {
+  const result = await buildWhoami({
+    definitions: visibleToolDefinitions(),
+    event,
+    surfacePolicy: async () =>
+      (await resolveActivePolicies(await getGovernanceBlobStore(event).catch(() => undefined))).surfaces,
+    auth: {
+      oauthPrincipal: event.oauthPrincipal,
+      verifiedAgentName: event.verifiedAgentName,
+      pluginSurface: event.pluginSurface,
+    },
+  });
+
+  if (result.member?.email && result.surface !== 'unknown') {
+    await recordWhoamiSignal(event, {
+      email: result.member.email,
+      surface: result.surface,
+      manifestVersion: result.manifest_version,
+      toolsDigest: result.tools_digest,
+      canWrite: result.can_write,
+      at: new Date().toISOString(),
+    });
+  }
+  return result;
+};
+
 const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
   const input = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
   // A verified per-agent token (see getAuthResult) overrides whatever
@@ -861,6 +962,11 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // T16.5: pure, synchronous, in-process — no store round trip, nothing
       // secret-shaped in the response (booleans + env-var NAMES only).
       return toolResult(getCapabilityStatus());
+    case 'whoami':
+      // W7.2: identity + charter + rules for THIS caller. Every input comes
+      // from the request's own auth (never from `input`), which is why it can
+      // be read-class and in charter — see lib/whoami.ts.
+      return toolResult(await callWhoami(event));
     case 'membership_status':
       // W18 T18.7: the fleet probe's `membership` family — store reachability +
       // policy provenance, non-secret by construction (names/numbers only).
@@ -1354,6 +1460,77 @@ const callMembershipTool = async (event: LambdaEvent, name: string, input: Recor
   });
 };
 
+/**
+ * Tools that answer even on a surface the operator has cut off, and even when
+ * a caller is rate-limited (W7.5).
+ *
+ * Both refusals exist to stop WRITES. A caller who cannot find out WHY its
+ * calls are failing will read a blocked surface as a broken tenant and escalate
+ * to the owner — so the two diagnostics stay open. Neither writes anything, and
+ * `whoami` reports only the caller's own grant.
+ */
+const ALWAYS_ANSWERABLE_TOOLS = new Set(['ping', 'whoami']);
+
+/**
+ * Refusals that run BEFORE a tool does: the per-surface kill switch, then the
+ * per-member write budget.
+ *
+ * Order matters. A cut surface is a decision an operator made about this
+ * client, and it should be reported as that whether or not the caller also
+ * happens to be over its write budget — the reverse order would tell a
+ * suspended surface it was merely busy.
+ */
+const preflightToolCall = async (event: LambdaEvent, name: string) => {
+  if (ALWAYS_ANSWERABLE_TOOLS.has(name)) return undefined;
+
+  const surface = toNonEmptyString(event.pluginSurface) ?? event.oauthPrincipal?.surface;
+  if (surface) {
+    let blocked = false;
+    try {
+      const policies = await resolveActivePolicies(await getGovernanceBlobStore(event));
+      blocked = policies.surfaces?.[surface] === 'block';
+    } catch {
+      // A governance-store fault must never cut a surface that was never cut.
+      blocked = false;
+    }
+    if (blocked) {
+      event.log?.({ event: 'mcp_surface_blocked', rpcMethod: 'tools/call', slug: null, toolName: name, surface });
+      return toolError(
+        `This tenant has disabled the "${surface}" surface. Every tool except ping and whoami is refused from it until an owner re-enables it in the admin — this is a decision about the chat app, not about you or your account.`,
+        { error_code: 'surface_blocked', surface }
+      );
+    }
+  }
+
+  const definition = TOOL_DEFINITIONS.find((tool) => tool.name === name);
+  if (!definition || definition.governance.toolClass === 'read') return undefined;
+
+  /**
+   * The budget is per PERSON where there is one. Two editors sharing a chat app
+   * must not throttle each other, and one editor with a Claude connector and a
+   * Custom GPT should share one budget rather than getting two.
+   */
+  const subject = event.oauthPrincipal?.subject_id ?? toNonEmptyString(event.verifiedAgentName) ?? undefined;
+  if (!subject) return undefined;
+
+  const verdict = await countWrite(
+    (await getGovernanceBlobStore(event).catch(() => undefined)) as RateLimitStore | undefined,
+    subject
+  );
+  if (verdict.allowed) return undefined;
+
+  event.log?.({ event: 'mcp_write_rate_limited', rpcMethod: 'tools/call', slug: null, toolName: name });
+  return toolError(
+    `Write rate limit: ${verdict.limit} writes per ${Math.round(verdict.windowSeconds / 60)} minutes, per member. Wait ${verdict.retryAfterSeconds}s and try again. If you did not make ${verdict.limit} writes on purpose, something is retrying in a loop — stop it before it fills this object's history.`,
+    {
+      error_code: 'write_rate_limited',
+      limit: verdict.limit,
+      window_seconds: verdict.windowSeconds,
+      retry_after_seconds: verdict.retryAfterSeconds,
+    }
+  );
+};
+
 const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Promise<JsonRpcResponse | undefined> => {
   const rpcMethod = typeof request.method === 'string' ? request.method : null;
   const slug = getRpcSlug(request);
@@ -1381,7 +1558,16 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
       return rpcResponse(request.id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: SERVER_NAME, version: '0.1.0' },
+        /**
+         * W7.5: `tools_digest` rides on the server info because `initialize` is
+         * the ONE message every MCP client sends and shows, and the cached-schema
+         * defect is invisible without it: a client that imported an older tool
+         * list keeps calling a surface that has moved and reports nothing but
+         * tool errors. `whoami` returns the same value, so a human and a model
+         * can compare the same number. Additive to the spec's {name, version} —
+         * a client that ignores it is unaffected.
+         */
+        serverInfo: { name: SERVER_NAME, version: '0.1.0', tools_digest: liveToolsDigest() },
       });
     case 'tools/list':
       // Serialize to the MCP wire shape: adds `annotations` (so a client stops
@@ -1389,12 +1575,24 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
       // and drops the internal `governance` field, which is this repo's chat
       // autonomy classification and has no business in a protocol response.
       return rpcResponse(request.id, { tools: visibleToolDefinitions(event).map(toWireTool) });
-    case 'tools/call':
+    case 'tools/call': {
       event.log?.({ event: 'rpc_tool_call_started', rpcMethod, slug, toolName: request.params?.name });
+      const toolName = typeof request.params?.name === 'string' ? request.params.name : '';
+      const refused = toolName ? await preflightToolCall(event, toolName) : undefined;
+      if (refused) return rpcResponse(request.id, refused);
+      /**
+       * W7.5: the result passes a size guard on the way out. An oversized body
+       * used to come back as a bare Netlify 502 with no JSON — indistinguishable
+       * from an outage, and retried forever by the client that caused it.
+       */
       return rpcResponse(
         request.id,
-        await callTool({ ...event, rpcMethod, slug }, request.params?.name, request.params?.arguments)
+        guardToolResultSize(
+          toolName,
+          await callTool({ ...event, rpcMethod, slug }, request.params?.name, request.params?.arguments)
+        )
       );
+    }
     default:
       event.log?.({ event: 'rpc_method_not_found', rpcMethod, slug });
       return rpcError(request.id, -32601, `Method not found: ${request.method}`);
@@ -1406,6 +1604,14 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
  * that injects every optional handler; a site missing one omits the tools that
  * depend on it entirely.
  */
+/**
+ * The live tool-surface digest, over the PLUGIN-eligible surface — the same
+ * value `buildManifestBundle` records in `sources.tool_surface_digest` and
+ * `whoami` returns. Three places had better agree, or the number is worse than
+ * useless: it would send installers to re-add healthy connectors.
+ */
+export const liveToolsDigest = (): string => toolSurfaceDigest(buildPluginTools(visibleToolDefinitions()));
+
 export const visibleToolDefinitions = (event?: Pick<LambdaEvent, 'oauthPrincipal'>): ToolDefinition[] =>
   TOOL_DEFINITIONS.filter(
     (tool) =>
@@ -1485,6 +1691,24 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
                 .then((store) => store.get('oauth/__health_probe__').then(() => true))
                 .catch(() => false),
             },
+            /**
+             * W7.5. The other half of a connector diagnosis, and the half that
+             * needed no credential all along: WHICH tool surface and WHICH
+             * promoted bundle this deploy is serving right now. An operator
+             * comparing an installed export against the live tenant can now do
+             * it with one unauthenticated curl instead of a screen share.
+             *
+             * Both are public facts — the digest is derived from tool names
+             * already listed to any authenticated client, the manifest version
+             * is stamped on every export's own filename.
+             */
+            surface: {
+              tools_digest: liveToolsDigest(),
+              manifest_version: await getPluginManifestBlobStore(event)
+                .then((store) => getPluginManifestDoc(store))
+                .then((doc) => doc.active?.manifest_version ?? null)
+                .catch(() => null),
+            },
           }
         : {};
 
@@ -1546,11 +1770,36 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
         ? authResult.oauthFailure
         : undefined;
 
+    /**
+     * W7.5. A refusal a client can ACT on.
+     *
+     * `re_authenticate` is set whenever a bearer was presented and refused —
+     * expired, revoked, unknown, all of them. It leaks nothing (it says
+     * "whatever you are holding, stop holding it", not whether a token exists)
+     * and it is the one instruction that resolves the most common live failure:
+     * a connector sitting on a dead token, reporting "unauthorized" forever
+     * because nothing ever told it to re-run the flow.
+     *
+     * `accepted_audiences` rides along on an audience mismatch, which is OUR
+     * fault and not the caller's: the token was minted through a hostname this
+     * deploy does not accept, which is invisible client-side and looks exactly
+     * like a bad credential. The list is already public on `?health=auth`;
+     * putting it in the refusal saves the operator the second request.
+     */
+    const presentedABearer = authResult.reason === 'invalid_authorization' || Boolean(authResult.oauthFailure);
+
     return response(
       401,
       rpcError(null, -32001, 'Unauthorized', {
         reason: diagnosticReason,
         ...(disclosableFailure ? { oauth_failure: disclosableFailure } : {}),
+        ...(presentedABearer
+          ? {
+              re_authenticate: true,
+              hint: 'This token was refused. Remove the connector and add it again, or re-run the OAuth flow — retrying with the same token will keep failing.',
+            }
+          : {}),
+        ...(authResult.oauthFailure === 'audience_mismatch' ? { accepted_audiences: mcpResourceAudiences(event) } : {}),
       }),
       {
         ...jsonHeaders,

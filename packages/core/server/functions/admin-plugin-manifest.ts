@@ -7,6 +7,8 @@
  *   GET ?export=plugin       → the Cowork `.plugin` bundle (W2.2).
  *   POST {action:"render"}   → render a fresh draft from live state.
  *   POST {action:"promote"}  → make the current draft the active bundle.
+ *   POST {action:"invite"}   → invite a member AND send them the install link
+ *                              in one click (W7.1).
  *
  * Exports serve the ACTIVE bundle only. A draft is a proposal — shipping one to
  * a human's Claude org would put an unreviewed skill in front of the team, and
@@ -37,6 +39,34 @@ import { buildGptConfigZip, GptInstructionsTooLongError } from '../lib/plugin/ex
 import { buildGemInstructions } from '../lib/plugin/export-gemini.js';
 import { readVoiceRecord } from '../lib/plugin/read-voice.js';
 import { ensureMcpSiblings } from '../lib/agent/mcp-siblings.js';
+import { handleMembershipVerb } from '../lib/membership/verbs.js';
+import { getUsersBlobStore } from '../lib/users-store.js';
+import { installInviteMail } from '../lib/mail/send.js';
+import { resolveMailSender } from '../lib/mail/send.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
+import type { GoTrueIdentity } from '../lib/membership/invitations.js';
+import { getInstallSignalsDoc, type InstallSignalsStore } from '../lib/plugin/install-signals.js';
+import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY } from '../lib/blob-list.js';
+import type { ObjectRecord } from '../../schema/object-record-v1.js';
+
+/**
+ * W7.6 — how many published articles the installers board looks back over.
+ *
+ * The board answers "when did this member last publish, from which surface".
+ * Reading every article on every plugins-page load would be a scan an operator
+ * pays for on a page they open to read two numbers, so the board is served on
+ * its own request (`?view=installers`) and bounded here. Sixty covers months of
+ * real publishing on a tenant this size; past that the answer is "a while ago",
+ * which the board says by having no row.
+ */
+const INSTALLERS_PUBLISH_SCAN_CAP = 60;
+
+/**
+ * Tiers this action may grant. `owner` is deliberately absent: transferring
+ * ownership is its own verb with its own confirmation, and it has no business
+ * riding a convenience button on the plugins page.
+ */
+const INVITABLE_ROLES = ['admin', 'publisher', 'editor', 'viewer'];
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -94,6 +124,7 @@ type ManifestStage =
   | 'export'
   | 'render'
   | 'promote'
+  | 'invite'
   | 'persist';
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
@@ -139,6 +170,29 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     stage = 'tool_surface';
     const liveTools = buildPluginTools(visibleToolDefinitions());
     const liveDigest = toolSurfaceDigest(liveTools);
+
+    if (method === 'GET' && event.queryStringParameters?.view === 'installers') {
+      /**
+       * The installers board (W7.6): who has proven an install, on which
+       * surface, against which manifest — and when they last actually
+       * published from it.
+       *
+       * Its own request, deliberately. It costs a bounded object scan, and the
+       * plugins page's main job (render, promote, download) must not pay for a
+       * section the operator has not opened.
+       */
+      stage = 'manifest_store';
+      const signals = await getInstallSignalsDoc(store as unknown as InstallSignalsStore);
+
+      stage = 'summary';
+      const publishes = await recentPublishes(event);
+
+      return jsonResponse(200, {
+        signals: signals.members,
+        publishes,
+        live: { tools_digest: liveDigest, manifest_version: doc.active?.manifest_version ?? null },
+      });
+    }
 
     if (method === 'GET') {
       const exportKind = event.queryStringParameters?.export;
@@ -249,8 +303,76 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       return jsonResponse(200, { active: promoted.doc.active, promoted: true });
     }
 
+    /**
+     * W7.1 — "Invite & send link", one click.
+     *
+     * It lives HERE rather than on the members page because the operator who
+     * decides someone should publish from ChatGPT is looking at this page, and
+     * the two-surface dance ("go invite them, then come back and send them the
+     * link") is exactly where an install stops happening. One action does both.
+     *
+     * The invitation itself runs in the membership core with the human this
+     * function authenticated — same gate, same tier checks, same audit as the
+     * members page; nothing about permissions is re-decided here. What this
+     * adds is the SECOND message: GoTrue's template cannot interpolate a role
+     * (it has three variables and role is not one of them), and the role is
+     * what tells an invitee whether they can publish at all.
+     *
+     * The mail is best-effort by construction. A tenant with no mail configured
+     * still gets the invitation — `resolveMailSender` returns the null sender,
+     * the response says `mail.sent: false` with the catalogued code, and the
+     * operator copies the link by hand. An invitation must never fail because a
+     * courtesy e-mail could not go out.
+     */
+    if (action === 'invite') {
+      stage = 'invite';
+      const email = typeof payload.email === 'string' ? payload.email.trim() : '';
+      const role = typeof payload.role === 'string' ? payload.role : '';
+      if (!email) return jsonResponse(400, { error: 'email is required.' });
+      if (!INVITABLE_ROLES.includes(role)) {
+        return jsonResponse(400, { error: `role must be one of: ${INVITABLE_ROLES.join(', ')}.` });
+      }
+
+      const identityCtx = (context as { clientContext?: { identity?: GoTrueIdentity } } | undefined)?.clientContext
+        ?.identity;
+      const invited = await handleMembershipVerb({
+        verb: 'invite',
+        args: { email, role },
+        principal: { kind: 'human', id: access.userId ?? '', email: access.email, via: 'admin_ui' },
+        deps: {
+          store: (await getUsersBlobStore(event)) as never,
+          identity: identityCtx,
+          fetchImpl: (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+            fetch(url, init),
+          oauthStore: async () => (await getGovernanceBlobStore(event)) as never,
+          objectStore: async () => (await getSiteObjectsBlobStore(event)) as never,
+        },
+      });
+      if (invited.status < 200 || invited.status >= 300) return jsonResponse(invited.status, invited.body);
+
+      const message = installInviteMail({
+        brandName: getSiteIdentity().brandName,
+        role,
+        origin,
+        invitedBy: access.email,
+      });
+      const mail = await resolveMailSender()
+        .send({ to: email, subject: message.subject, text: message.text, tags: { kind: 'install_invite' } })
+        .catch((error: unknown) => ({
+          ok: false as const,
+          code: 'mail_unreachable' as const,
+          message: error instanceof Error ? error.message : String(error),
+        }));
+
+      return jsonResponse(200, {
+        invited: invited.body,
+        install_url: `${origin}/plugin/install`,
+        mail: mail.ok ? { sent: true } : { sent: false, code: mail.code, error: mail.message },
+      });
+    }
+
     if (action !== 'render') {
-      return jsonResponse(400, { error: 'action must be "render" or "promote".' });
+      return jsonResponse(400, { error: 'action must be "render", "promote" or "invite".' });
     }
 
     stage = 'voice';
@@ -291,6 +413,51 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       error: detail.slice(0, 500),
     });
   }
+};
+
+/**
+ * The most recent publishes, with the surface that made each one.
+ *
+ * Read from `publication.publish_receipt` (W7.4 stamps `surface` and
+ * `attribution` there from the auth-derived actor), so the board reports what
+ * the ledger will agree with rather than a second, drifting derivation.
+ *
+ * Failures are per-record and silent: one unreadable article must not blank a
+ * board that is otherwise useful, and an operator can tell "no row" from
+ * "everything is missing" at a glance.
+ */
+const recentPublishes = async (event: LambdaEvent) => {
+  type Row = { object_id: string; surface: string | null; published_at: string; attribution: string | null };
+  let rows: Row[] = [];
+  try {
+    const objects = await getSiteObjectsBlobStore(event);
+    const keys = (await collectBlobListItems(await objects.list({ prefix: 'objects/content_item/by-id/' })))
+      .map((item) => item.key)
+      .slice(0, INSTALLERS_PUBLISH_SCAN_CAP);
+
+    const read = await mapWithConcurrency(keys, STORE_READ_CONCURRENCY, async (key) => {
+      try {
+        const raw = await objects.get(key);
+        if (!raw) return null;
+        const record = JSON.parse(raw as string) as ObjectRecord;
+        const receipt = record.publication?.publish_receipt;
+        const publishedAt = record.publication?.published_time;
+        if (!publishedAt) return null;
+        return {
+          object_id: record.object_id,
+          surface: receipt?.surface ?? null,
+          attribution: receipt?.attribution ?? null,
+          published_at: publishedAt,
+        } satisfies Row;
+      } catch {
+        return null;
+      }
+    });
+    rows = read.filter((row): row is Row => row !== null);
+  } catch {
+    return [];
+  }
+  return rows.sort((a, b) => b.published_at.localeCompare(a.published_at)).slice(0, 20);
 };
 
 const resolveApproval = async (event: LambdaEvent): Promise<{ master: string; overrides?: Record<string, string> }> => {

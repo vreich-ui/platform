@@ -159,7 +159,9 @@ const buildReceipt = (
   commit: CommitMaterializedFilesResult,
   file: MaterializedFile,
   contentRevision: number,
-  exportedAt: string
+  exportedAt: string,
+  /** W7.4: who published this revision, from the AUTH-derived actor. */
+  provenance: { surface?: string; attribution?: string; promptVersion?: string } = {}
 ): ObjectPublishReceipt => ({
   kind: 'object_export_commit',
   branch: commit.branch,
@@ -170,6 +172,24 @@ const buildReceipt = (
   files: [file.path],
   content_revision: contentRevision,
   exported_at: exportedAt,
+  ...(provenance.surface ? { surface: provenance.surface } : {}),
+  ...(provenance.attribution ? { attribution: provenance.attribution } : {}),
+  ...(provenance.promptVersion ? { prompt_version: provenance.promptVersion } : {}),
+});
+
+/**
+ * W7.4 — the provenance a published revision carries, read off the actor the
+ * request authenticated as.
+ *
+ * Deliberately NOT read from tool arguments: `caller-actor.ts` exists because
+ * `agent_name` proved untrustworthy (a live run passed it once and dropped it
+ * for sixteen calls), and a learning signal built on a field a model may forget
+ * is a learning signal that silently stops being true.
+ */
+const publishProvenance = (input: PublishObjectInput) => ({
+  ...(typeof input.actor.surface === 'string' ? { surface: input.actor.surface } : {}),
+  ...(typeof input.actor.attribution === 'string' ? { attribution: input.actor.attribution } : {}),
+  ...(input.producer?.prompt_version ? { promptVersion: input.producer.prompt_version } : {}),
 });
 
 export const publishObject = async (
@@ -262,6 +282,10 @@ export const publishObject = async (
       record_version: record.version,
       exportRoot: deps.exportRoot,
       ...(input.producer ? { producer: input.producer } : {}),
+      // W7.4: the export is what the owner DB ingests, so the surface travels
+      // with it rather than living only in the store.
+      ...(publishProvenance(input).surface ? { surface: publishProvenance(input).surface } : {}),
+      ...(publishProvenance(input).attribution ? { attribution: publishProvenance(input).attribution } : {}),
     });
     if (!file.path || !file.content) throw new Error('Materializer returned an empty export.');
   } catch (error) {
@@ -299,7 +323,13 @@ export const publishObject = async (
     }
     throw error;
   }
-  const receipt = buildReceipt(commit, file, contentRevisionAtMaterialize, effectivePublishedTime);
+  const receipt = buildReceipt(
+    commit,
+    file,
+    contentRevisionAtMaterialize,
+    effectivePublishedTime,
+    publishProvenance(input)
+  );
 
   // ── D§5.6 step 5: single stamp+receipt write, only after the commit ───────
   // Reload so the write is based on the freshest envelope (lock heartbeats

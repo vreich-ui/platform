@@ -17,6 +17,7 @@
  *     on this surface the plugin allowlist is real enforcement rather than the
  *     advisory list it is on `/mcp` (see recon-mcp.md §4.2).
  */
+import { PLUGIN_ALWAYS_IN_CHARTER } from './build-tools.js';
 import type { ManifestConnection, ManifestTool } from './manifest-types.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 
@@ -62,7 +63,25 @@ export const buildOpenApiDocument = (input: BuildOpenApiInput): Record<string, u
   const byName = new Map(input.definitions.map((d) => [d.name, d]));
   const paths: Record<string, unknown> = {};
 
-  for (const tool of input.tools) {
+  /**
+   * W7.2: the always-in-charter diagnostics are emitted even when the promoted
+   * manifest predates them, so the schema a Custom GPT imports today can prove
+   * its own install tomorrow. The façade admits them by the same rule
+   * (PLUGIN_ALWAYS_IN_CHARTER), so document and enforcement agree.
+   */
+  const alwaysIn = [...PLUGIN_ALWAYS_IN_CHARTER]
+    .filter((name) => byName.has(name) && !input.tools.some((tool) => tool.name === name))
+    .map((name) => {
+      const definition = byName.get(name)!;
+      return {
+        name,
+        tool_class: definition.governance.toolClass as ManifestTool['tool_class'],
+        consequential: definition.governance.toolClass !== 'read',
+        summary: definition.description.split(/\.\s/)[0].slice(0, 240),
+      } satisfies ManifestTool;
+    });
+
+  for (const tool of [...input.tools, ...alwaysIn]) {
     const definition = byName.get(tool.name);
     // A tool in the manifest that no longer exists on the surface is skipped
     // rather than emitted with a guessed schema — a stale manifest must not

@@ -28,8 +28,11 @@ import {
   DEFAULT_TRAFFIC_RANGE,
   type TrafficRangeKey,
 } from '../../lib/admin/traffic-logic.js';
-import { isOwnTrackerDays, type OwnTrackerDays } from '../../lib/admin/own-traffic-logic.js';
+import { isOwnTrackerDays, surfaceSplit, type OwnTrackerDays } from '../../lib/admin/own-traffic-logic.js';
 import { fetchOwnTrackerStats, ownTrackerMissingEnvVars } from '../lib/own-tracker-stats.js';
+import { getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import { objectRecordKey } from '../lib/object-store-keys.js';
+import type { ObjectRecord } from '../../schema/object-record-v1.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -80,6 +83,57 @@ const DEFAULT_OWN_TRACKER_DAYS: OwnTrackerDays = 7;
  * Netlify branch already returns for "not connected" — never a 500 for an
  * honest not-configured state.
  */
+/**
+ * W7.4 — the publishing surface for each object in the top-N window.
+ *
+ * Read from the PUBLISH RECEIPT on each record: that receipt is stamped at
+ * publish from the auth-derived actor, so it says which chat app (or the
+ * autonomous workflow) produced the revision that is live. `null` means the
+ * record exists and carries no surface — the workflow path, or a revision
+ * published before W7.4 stamped one; an id absent from the map entirely means
+ * the record could not be read, which the split reports as `unknown` rather
+ * than folding into either.
+ *
+ * Bounded by construction: `top_objects` is a top-N list (tens, not thousands),
+ * so this is a handful of point reads on an admin dashboard load, not a scan.
+ * Individual read failures are skipped rather than failing the page — a traffic
+ * dashboard that 500s because one object is unreadable is worse than one that
+ * says "unknown" for that row.
+ */
+const publishingSurfaces = async (
+  binding: SiteBinding,
+  topObjects: ReadonlyArray<{ object_id?: unknown }>
+): Promise<Record<string, string | null>> => {
+  const ids = [...new Set(topObjects.map((row) => (typeof row?.object_id === 'string' ? row.object_id : '')))].filter(
+    Boolean
+  );
+  if (ids.length === 0) return {};
+
+  let store: Awaited<ReturnType<typeof getSiteObjectsBlobStore>>;
+  try {
+    store = await getSiteObjectsBlobStore({}, binding);
+  } catch {
+    return {};
+  }
+
+  const entries = await Promise.all(
+    ids.map(async (objectId) => {
+      for (const objectType of ['content_item', 'page'] as const) {
+        try {
+          const raw = await store.get(objectRecordKey(objectType, objectId));
+          if (!raw) continue;
+          const record = JSON.parse(raw as string) as ObjectRecord;
+          return [objectId, record.publication?.publish_receipt?.surface ?? null] as const;
+        } catch {
+          // Unreadable or not this type — try the next, then give up quietly.
+        }
+      }
+      return null;
+    })
+  );
+  return Object.fromEntries(entries.filter((entry): entry is readonly [string, string | null] => entry !== null));
+};
+
 const ownTrafficResponse = async (binding: SiteBinding, rawDays: number, ifNoneMatch: string | undefined) => {
   const days: OwnTrackerDays = isOwnTrackerDays(rawDays) ? rawDays : DEFAULT_OWN_TRACKER_DAYS;
 
@@ -104,7 +158,14 @@ const ownTrafficResponse = async (binding: SiteBinding, rawDays: number, ifNoneM
 
   try {
     const stats = await fetchOwnTrackerStats(days);
-    const body = { configured: true, enabled: true, days, stats };
+    const body = {
+      configured: true,
+      enabled: true,
+      days,
+      stats,
+      // W7.4: which surface published each of the objects in this window.
+      surfaces: surfaceSplit(stats, await publishingSurfaces(binding, stats.top_objects ?? [])),
+    };
     const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
     memo.set(cacheKey, entry);
     return cachedResponse(entry, ifNoneMatch);
