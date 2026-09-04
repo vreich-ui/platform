@@ -97,6 +97,29 @@ describe('editorial asset projection', () => {
     });
   });
 
+  // T2.6 / W1: a template pdf-tool could not thumbnail now says why instead
+  // of the panel guessing a generic reason from the absence of a key.
+  it('forwards thumbnailError when publish could not produce a thumbnail', () => {
+    const projected = projectPdfTemplate({
+      templateId: 'tpl_no_thumb',
+      latestVersion: 1,
+      status: 'active',
+      renderer: 'chromium',
+      thumbnailError: 'Chromium render timed out before the thumbnail step.',
+      storage: { token: 'never-expose' },
+    });
+    assert.deepStrictEqual(projected, {
+      id: 'tpl_no_thumb',
+      label: 'No Thumb',
+      status: 'active',
+      renderer: 'chromium',
+      version: 1,
+      has_render_data_schema: false,
+      thumbnail_error: 'Chromium render timed out before the thumbnail step.',
+    });
+    assert.doesNotMatch(JSON.stringify(projected), /never-expose/);
+  });
+
   // D4 fix (task A5): the defensiveness the field additions are FOR — an
   // older pdf-tool deploy that predates label/kind/thumbnailKey/
   // thumbnailError/renderDataSchema entirely must not crash and must not

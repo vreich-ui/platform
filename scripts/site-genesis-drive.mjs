@@ -22,6 +22,12 @@
  * Idempotent: an object that already exists is left alone and only published if
  * it has never been published. Re-running after a partial failure is safe.
  *
+ * T2.7: after the object seed pack, `runDrive` also seeds the generic
+ * `article_brochure_v1` pdf-tool template for this site and populates
+ * `site.pdf` (ruling D-B) — see `runArticleTemplateSeed` in
+ * `seed-article-pdf-template.mjs`. This step warns rather than blocks: it
+ * never turns a genesis run non-zero on its own (see the call site below).
+ *
  * Usage:
  *   MCP_HTTP_AUTH_TOKEN=… node scripts/site-genesis-drive.mjs \
  *     --site sites/<client> --endpoint https://<host>/mcp [--dry-run] [--no-release]
@@ -46,6 +52,7 @@ import { pathToFileURL } from 'node:url';
 
 import { genesisSeedFiles, isPublishableObjectType, SEED_MODULES } from '../packages/core/cli/genesis-manifest.mjs';
 import { driftFields } from './lib/roundtrip-reconcile.mjs';
+import { runArticleTemplateSeed } from './seed-article-pdf-template.mjs';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const AGENT = 'site-genesis-drive';
@@ -385,6 +392,30 @@ export const runDrive = async ({ siteDir, siteRoot, endpoint, tool, dryRun, noRe
     console.error('[genesis] not releasing — fix the failures above and re-run (the drive is idempotent).');
     return 1;
   }
+
+  // T2.7 (ruling D-B; "genesis is never a manual step"): seed the generic
+  // article_brochure_v1 template + site.pdf defaults for the site this plan
+  // just birthed. Deliberately NOT counted in `failed` / does not block
+  // release: the object seed pack above is the tenant's actual existence,
+  // and (per BRIEF's own framing of the known create_pdf_template bridge
+  // gap — see seed-article-pdf-template.mjs's header) this step can fail
+  // for a reason genesis cannot fix by re-running. A failure here is loud
+  // (printed, non-zero exit further down is deliberately NOT set) rather
+  // than silent — same D-A posture ("warns, never blocks") applied to a
+  // script instead of the admin UI.
+  const siteId = plan.find((entry) => entry.objectType === 'site')?.objectId;
+  if (siteId) {
+    const pdfSeed = await runArticleTemplateSeed({ tool, siteId });
+    for (const step of pdfSeed.steps) console.log(`   pdf-template-seed  ${JSON.stringify(step)}`);
+    console.log(
+      pdfSeed.ok
+        ? `[genesis] pdf-template-seed OK (${pdfSeed.templateId})`
+        : `[genesis] pdf-template-seed WARN (not blocking release): ${pdfSeed.error}`
+    );
+  } else {
+    console.log('[genesis] pdf-template-seed skipped — this plan has no site object.');
+  }
+
   if (noRelease) {
     console.log('[genesis] --no-release: skipping release_to_production.');
     return 0;

@@ -30,7 +30,36 @@ import {
 import { isNetlifyBuildHookConfigured, NetlifyBuildHookTriggerError, triggerNetlifyBuild } from './netlify-deploys.js';
 import { releaseToProduction } from './production-release.js';
 import { buildPdfToolStorageGrant } from './pdf-tool-storage-grant.js';
-import { injectPdfRenderDataBrand } from './pdf-render-brand.js';
+import {
+  classifyRenderDataBrandSlot,
+  injectPdfRenderDataBrandForSlot,
+  pdfRenderBrandFromSiteBody,
+  pdfRenderBrandNameFromSiteBody,
+} from './pdf-render-brand.js';
+import {
+  ARTICLE_BROCHURE_V1_RENDER_DATA_SCHEMA,
+  ARTICLE_BROCHURE_V1_TEMPLATE_ID,
+} from '../../lib/pdf/article-brochure-v1-render-data-schema.js';
+import { buildRenderData } from '../../lib/pdf/render-data-mapper.js';
+import { checkRenderDataAgainstSchema, checkRenderDataAssets } from '../../lib/pdf/render-data-schema-check.js';
+import {
+  readArticlePdfJobView,
+  renderArticlePdf,
+  resolveRenderArticlePdfPollBudgetMs,
+  type ArticleNodeLike,
+} from '../../lib/pdf/article-pdf-render.js';
+import {
+  readSitePdfDefaults,
+  resolvePdfDefaultFilename,
+  resolvePdfDefaultTemplateId,
+  resolvePdfJobKind,
+  resolvePdfRequirementsDefault,
+} from '../../lib/pdf/pdf-bridge-defaults.js';
+import {
+  defaultPdfRenderDataMapper,
+  resolvePdfJobRenderData,
+  type PdfRenderDataMapper,
+} from '../../lib/pdf/pdf-render-data-mapper-seam.js';
 import { CmsAgentClient, isCmsAgentConfigured } from './agent/cms-agent-client.js';
 import {
   proposeBrandImagery,
@@ -38,7 +67,16 @@ import {
   type BrandImageryReferenceInput,
 } from './brand-imagery-proxy.js';
 import { generateVisualStandardExamplesWithDeps, type VisualStandardExampleRecord } from './brand-imagery-examples.js';
-import { publicPathForArtifactRef } from './artifact-trust.js';
+import { publicPathForArtifactRef, MAJOR_KEY_ARTIFACT_REF_RE } from './artifact-trust.js';
+import {
+  failedContentCheckFromQualityGate,
+  inspectDocumentContent,
+  inspectDocumentContentFromPublicPath,
+  type DocumentContentCheck,
+} from './pdf-content-inspection.js';
+import { recordPdfContentCheck } from './pdf-content-check-store.js';
+import type { ArtifactIndexStore } from './artifact-index.js';
+import type { DocumentContentRequirement } from '../../lib/pdf/document-content-check.js';
 import {
   CAPTURE_BRIDGE_MAX_PAGES,
   validateCaptureBridgePolicy,
@@ -92,6 +130,7 @@ import { getSiteIdentity } from '../../lib/site-identity.js';
 import { normalizeArtifactKindInput } from './mcp-artifact-admin.js';
 import {
   getArtifactBlobStore,
+  getArtifactIndexBlobStore,
   getCommerceBlobStore,
   getCommerceEventsBlobStore,
   getIdempotencyBlobStore,
@@ -177,6 +216,9 @@ export const callVerifyArticleImages = async (event: LambdaEvent, input: Record<
       url: input.url,
       expectedImages: input.expectedImages,
       ...(input.expectedDocuments !== undefined ? { expectedDocuments: input.expectedDocuments } : {}),
+      ...(input.documentContentRequirements !== undefined
+        ? { documentContentRequirements: input.documentContentRequirements }
+        : {}),
       ...(input.commit !== undefined ? { commit: input.commit } : {}),
       ...(input.deployTimeoutSeconds !== undefined ? { deployTimeoutSeconds: input.deployTimeoutSeconds } : {}),
       ...(input.deployPollIntervalSeconds !== undefined
@@ -196,6 +238,118 @@ export const callVerifyArticleImages = async (event: LambdaEvent, input: Record<
   }
 
   return toolResult(body);
+};
+
+const parseDocumentContentRequirementInput = (value: unknown): DocumentContentRequirement | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const minPageCount = typeof record.minPageCount === 'number' ? record.minPageCount : undefined;
+  const maxBytes = typeof record.maxBytes === 'number' ? record.maxBytes : undefined;
+  if (minPageCount === undefined && maxBytes === undefined) return undefined;
+  return { ...(minPageCount !== undefined ? { minPageCount } : {}), ...(maxBytes !== undefined ? { maxBytes } : {}) };
+};
+
+const documentContentCheckToolBody = (siteId: string, check: DocumentContentCheck): Record<string, unknown> => ({
+  siteId,
+  status: check.status,
+  verified: check.status === 'ok',
+  ...(check.status === 'ok' ? { pageCount: check.pageCount, sizeBytes: check.sizeBytes } : {}),
+  ...(check.status === 'failed'
+    ? {
+        reason: check.reason,
+        findings: check.findings,
+        ...(check.pageCount !== undefined ? { pageCount: check.pageCount } : {}),
+        ...(check.sizeBytes !== undefined ? { sizeBytes: check.sizeBytes } : {}),
+      }
+    : {}),
+  ...(check.status === 'unverified' ? { reason: check.reason } : {}),
+});
+
+/**
+ * W2 review (ruling D-D, closed): file a content-quality verdict where
+ * `object_validate` can read it back, keyed by the PDF's own public path. Both
+ * writers — `verify_pdf_content` and `render_article_pdf` — go through here so
+ * there is one place that decides how a verdict is stored, and one place that
+ * swallows a store failure. Best-effort by construction: an unavailable index
+ * store loses the warning, never the render or the verification (D-A).
+ */
+const filePdfContentCheck = async (
+  event: LambdaEvent,
+  publicPath: string | undefined,
+  check: DocumentContentCheck | undefined
+): Promise<void> => {
+  if (!publicPath || !check) return;
+  const store = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+    | ArtifactIndexStore
+    | undefined;
+  const recorded = await recordPdfContentCheck(store, publicPath, check);
+  if (recorded) {
+    event.log?.({ event: 'pdf_content_check_recorded', status: check.status });
+  }
+};
+
+/**
+ * T2.4, deliverable 2 — `verify_pdf_content`: the same content check `verify_article_images`
+ * now runs on `expectedDocuments` (page count, blank pages, unresolved images, unrendered
+ * tokens via pdf-tool's `inspect_pdf_artifact`), exposed standalone so an agent or the admin
+ * PDF card can check one PDF without running a whole page verification. Accepts EITHER a
+ * public artifact path/URL (`/pdf/<requestId>/<sha256>.pdf`, the same public_path this
+ * bridge already hands back everywhere else) or an already-known `artifactReference`
+ * (`{blobKey, sha256?}`) — never a claim this tool cannot back up: an unresolvable url or an
+ * unverifiable reference reports `status: 'unverified'` with a reason, not a guessed pass.
+ */
+export const callVerifyPdfContent = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const siteId = toNonEmptyString(input.site_id);
+  const identity = getSiteIdentity();
+  if (!siteId) {
+    return toolError('site_id is required.', { error_code: 'artifact_scope_required' });
+  }
+  if (siteId !== identity.siteId) {
+    return toolError(
+      `Artifact scope mismatch: this deployment owns ${identity.siteId}, not ${siteId}. Use the owning site's Platform connector.`,
+      { error_code: 'artifact_site_mismatch' }
+    );
+  }
+
+  const requirement = parseDocumentContentRequirementInput(input.requirements);
+  const url = toNonEmptyString(input.url);
+  const artifactReferenceInput =
+    input.artifactReference && typeof input.artifactReference === 'object' && !Array.isArray(input.artifactReference)
+      ? (input.artifactReference as Record<string, unknown>)
+      : undefined;
+
+  let check: DocumentContentCheck;
+  if (url) {
+    check = await inspectDocumentContentFromPublicPath(url, requirement);
+  } else if (artifactReferenceInput) {
+    const blobKey = toNonEmptyString(artifactReferenceInput.blobKey);
+    if (!blobKey || !MAJOR_KEY_ARTIFACT_REF_RE.test(blobKey) || !blobKey.startsWith('pdf/')) {
+      return toolError(
+        'artifactReference.blobKey must be a PDF artifact reference (pdf/<requestId>/<sha256>.pdf).',
+        { error_code: 'artifact_reference_invalid' }
+      );
+    }
+    const requestId = blobKey.split('/')[1];
+    if (!requestId) {
+      return toolError('artifactReference.blobKey is missing its owning request id segment.', {
+        error_code: 'artifact_reference_invalid',
+      });
+    }
+    const sha256 = toNonEmptyString(artifactReferenceInput.sha256);
+    check = await inspectDocumentContent({ blobKey, requestId, ...(sha256 ? { sha256 } : {}), requirement });
+  } else {
+    return toolError('Provide either url or artifactReference.', {
+      error_code: 'verify_pdf_content_input_required',
+    });
+  }
+
+  // D-D: this verdict is the ONE thing that makes `object_validate`'s
+  // `pdf_quality` criterion say anything. Filed under the PDF's own public
+  // path so the next publish attempt reads back what this call found, instead
+  // of the criterion staying silent forever (which is how T2.5 shipped).
+  await filePdfContentCheck(event, url ?? (artifactReferenceInput ? `/${toNonEmptyString(artifactReferenceInput.blobKey)}` : undefined), check);
+
+  return toolResult(documentContentCheckToolBody(identity.siteId, check));
 };
 
 export const callTriggerNetlifyBuild = async (event: LambdaEvent, input: Record<string, unknown>) => {
@@ -654,6 +808,40 @@ const pdfToolBridgeError = (result: { statusCode: number; error: string; body?: 
     ...(result.body ?? {}),
   });
 
+// T2.3/JOIN A: the D-2 mapper is now a plain static import.
+//
+// T2.2 could not do that -- packages/core/lib/pdf/render-data-mapper.ts did
+// not exist in its worktree, and a literal import of a missing module fails
+// the whole repo's `tsc` (TS2307) -- so it loaded the module through a
+// COMPUTED specifier and looked for an export named
+// `mapContentItemToPdfRenderData`. T2.1 landed the module under a different
+// name and a different (pure, synchronous) signature, so that lookup threw
+// PdfRenderDataMapperUnavailableError on every call and D-2 mapped exactly
+// zero articles. `defaultPdfRenderDataMapper` (pdf-render-data-mapper-seam.ts)
+// is the adapter that closes it; the dynamic import, its cache, and the
+// TS2307 hazard that motivated all of it are gone with it.
+//
+// `renderDataSchemaFromTemplateBody` lives here, above BOTH callers, because
+// the bridge and build_pdf_render_data must read a template record's schema
+// the SAME way -- reading it two different ways is how the bridge ended up
+// passing no schema to the mapper at all.
+
+/**
+ * pdf-tool template records carry `renderDataSchema` at the top level of the
+ * record (the same field editorial-assets.ts's projectPdfTemplate forwards
+ * from a list row). Some responses wrap the record under `template`; read
+ * both, and treat anything else as "no author-declared schema".
+ */
+/** A JSON OBJECT — not an array, not null. `getRecordValue` (mcp.ts) admits
+ *  arrays, which is wrong for a schema/assets payload. */
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const renderDataSchemaFromTemplateBody = (body: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const templateRecord = getRecordValue(body.template) ?? body;
+  return getRecordValue(templateRecord.renderDataSchema);
+};
+
 const platformPolling = (scope: ArtifactBridgeScope, jobId: string) => ({
   tool: 'get_agent_artifact_job_status',
   input: { site_id: scope.siteId, request_id: scope.requestId, job_id: jobId },
@@ -1058,15 +1246,26 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
 export const callCreateAgentArtifactJob = async (
   event: LambdaEvent,
   input: Record<string, unknown>,
-  presolvedScope?: ArtifactBridgeScope
+  presolvedScope?: ArtifactBridgeScope,
+  // T2.2/D-2: the mapper seam. Tests inject a hand-written fake here; the
+  // real call path leaves this undefined and falls through to
+  // loadDefaultPdfRenderDataMapper's guarded dynamic import below. See
+  // pdf-render-data-mapper-seam.ts's header for why the import is guarded.
+  deps: { pdfRenderDataMapper?: PdfRenderDataMapper } = {}
 ) => {
   const scoped = presolvedScope
     ? ({ ok: true, scope: presolvedScope } as const)
     : await resolveArtifactBridgeScope(event, input);
   if (!scoped.ok) return scoped.result;
   const artifactKind = toNonEmptyString(input.artifact_kind);
-  const filename = toNonEmptyString(input.filename);
-  if ((artifactKind !== 'image' && artifactKind !== 'pdf') || !filename) {
+  if (artifactKind !== 'image' && artifactKind !== 'pdf') {
+    return toolError('artifact_kind must be image or pdf, and filename is required.');
+  }
+  // D-4 (BRIEF §3): a pdf job's filename may still be resolved below, from
+  // the owning article's slug, when the caller omitted one — an image job
+  // has no such fallback and is checked immediately, exactly as before.
+  let filename = toNonEmptyString(input.filename);
+  if (artifactKind === 'image' && !filename) {
     return toolError('artifact_kind must be image or pdf, and filename is required.');
   }
   const wait = input.wait !== false;
@@ -1201,15 +1400,27 @@ export const callCreateAgentArtifactJob = async (
     }
   }
 
-  // FIX-3: a template-render pdf job (artifactKind "pdf", a templateId
-  // present -- edits/masked-patches carry no renderDataSchema to satisfy)
-  // gets `data.brand` filled from the site's brandTokens when the caller
-  // didn't already supply one. Only Platform has brandTokens; pdf-tool's own
-  // deterministic mapper deliberately refuses to invent it. See
-  // pdf-render-brand.ts for the exact shape and the no-brandTokens fallback.
-  const templateIdInput = toNonEmptyString(input.template_id);
+  // T2.2 (BRIEF-W2.md §3, D-1/D-2/D-3/D-4): the pdf-only bridge defaults.
+  // `kind` has no home on content_item today (see pdf-bridge-defaults.ts's
+  // header for the full reasoning) -- 'article' is the honest default since
+  // every content_item-backed pdf job is one right now.
+  let templateIdInput = toNonEmptyString(input.template_id);
   let dataOverride = input.data;
-  if (artifactKind === 'pdf' && templateIdInput) {
+  // T2.3/JOIN A: what the mapper actually managed to fill, surfaced on every
+  // response shape of this call. undefined when the mapper did not run (the
+  // caller supplied `data`, or there is no template/content_item).
+  let renderDataReport: { mapped: true; schemaSource: string; unfilled: string[] } | undefined;
+  let assetsOverride =
+    input.assets && typeof input.assets === 'object' && !Array.isArray(input.assets)
+      ? (input.assets as { images?: unknown[] })
+      : undefined;
+
+  if (artifactKind === 'pdf') {
+    const kindInput = resolvePdfJobKind(toNonEmptyString(input.kind));
+
+    // Fetched once, unconditionally for a pdf job -- D-1 needs it to resolve
+    // a default templateId, D-3 needs it (siteBody) regardless of whether
+    // templateIdInput came from the caller or from D-1, for brand injection.
     const siteLookup = await invokeObjectStore(event, {
       action: 'get',
       object_type: 'site',
@@ -1217,7 +1428,136 @@ export const callCreateAgentArtifactJob = async (
     });
     const siteRecord = 'isError' in siteLookup ? undefined : getRecordValue(siteLookup.record);
     const siteBody = getRecordValue(siteRecord?.body);
-    dataOverride = injectPdfRenderDataBrand(siteBody, input.data);
+
+    // D-1: resolve template_id from site.pdf when the caller omitted one. A
+    // site with no site.pdf at all resolves to undefined here, exactly
+    // today's behavior -- pdf-tool's own error covers a job with no template.
+    if (!templateIdInput) {
+      templateIdInput = resolvePdfDefaultTemplateId(readSitePdfDefaults(siteBody), kindInput);
+    }
+
+    // D-4: requirements default, article kind only, caller-supplied (even
+    // partial) always wins untouched.
+    requirementsOverride = resolvePdfRequirementsDefault(kindInput, requirementsOverride);
+
+    // The owning content_item -- needed for D-4's filename-from-slug fallback
+    // and D-2's mapper hook. Fetched at most once, and only when at least one
+    // of those actually needs it.
+    //
+    // W2 REVIEW: the RECORD, not just its body. buildRenderData accepts either
+    // (record(outer.body) ?? outer), but the record is where `publication`
+    // and `updated_at` live, and those are the only sources for the `date`
+    // slot. Passing the body alone made `date` unfillable on the real render
+    // path while build_pdf_render_data -- which passes the record -- filled it
+    // in the preview: the tool that answers "what would this render as"
+    // disagreed with what actually rendered.
+    let contentItemRecord: Record<string, unknown> | undefined;
+    let contentItemBody: Record<string, unknown> | undefined;
+    if (!filename || (templateIdInput && input.data === undefined)) {
+      const contentItemLookup = await invokeObjectStore(event, {
+        action: 'get',
+        object_type: 'content_item',
+        object_id: scoped.scope.requestId,
+      });
+      contentItemRecord = 'isError' in contentItemLookup ? undefined : getRecordValue(contentItemLookup.record);
+      contentItemBody = getRecordValue(contentItemRecord?.body);
+    }
+
+    // D-4: filename <- article slug when the caller omitted one.
+    if (!filename) {
+      filename = resolvePdfDefaultFilename(undefined, toNonEmptyString(contentItemBody?.slug));
+    }
+
+    if (templateIdInput) {
+      // D-3 (the [object Object] regression): classify the RESOLVED
+      // template's actual renderDataSchema.properties.brand before injecting
+      // anything -- an object slot gets the brand object (existing shape), a
+      // string slot gets `brand` filled with the site's NAME (W2 review: it
+      // used to get an undeclared `brandName`, which an
+      // additionalProperties:false schema rejects outright), and no schema (or
+      // one that never mentions brand) gets neither. A template lookup failure fails OPEN to
+      // 'none' rather than blocking job creation on it -- createPlatformArtifactJob
+      // below is still the real arbiter of whether templateIdInput is valid.
+      const templateLookup = await getPlatformPdfTemplate(built.grant, { templateId: templateIdInput });
+      // T2.3/JOIN A: read through the SAME helper build_pdf_render_data uses,
+      // so a record that wraps itself under `template` is understood
+      // identically on both paths. The bridge previously read only the
+      // top-level field here, and then never handed what it read to the
+      // mapper at all.
+      const renderDataSchema = templateLookup.ok
+        ? renderDataSchemaFromTemplateBody(getRecordValue(templateLookup.body) ?? {})
+        : undefined;
+      const brandSlot = classifyRenderDataBrandSlot(renderDataSchema);
+      dataOverride = injectPdfRenderDataBrandForSlot(brandSlot, siteBody, input.data);
+
+      // D-2: the mapper hook. Only when the caller omitted `data` entirely --
+      // a caller-supplied data object (even partial) always wins, exactly
+      // like every other default in this file.
+      if (input.data === undefined && contentItemRecord && contentItemBody) {
+        // T2.3/JOIN A: the two things the seam could not carry before.
+        //  - `templateSchema`: the mapper enforces the TARGET template's own
+        //    limits. Without it a long article was mapped against the generic
+        //    contract and then failed W1's RENDER_DATA_INVALID at job
+        //    creation -- the exact failure the mapper exists to prevent. It
+        //    is already in hand for D-3 above, so this costs no round trip.
+        //  - `brand`: only for an OBJECT brand slot. A string slot wants the
+        //    site's NAME in the same slot -- a value this mapper never
+        //    fabricates -- and 'none' wants nothing; both stay with
+        //    injectPdfRenderDataBrandForSlot below, which is also what keeps a
+        //    caller-supplied brand winning.
+        const brandForMapper = brandSlot === 'object' ? pdfRenderBrandFromSiteBody(siteBody) : undefined;
+        const mapped = await resolvePdfJobRenderData({
+          contentItem: contentItemRecord,
+          templateId: templateIdInput,
+          ...(renderDataSchema ? { templateSchema: renderDataSchema } : {}),
+          ...(brandForMapper ? { brand: brandForMapper } : {}),
+          getMapper: async () => deps.pdfRenderDataMapper ?? defaultPdfRenderDataMapper,
+        });
+        if (mapped.ok) {
+          dataOverride = injectPdfRenderDataBrandForSlot(brandSlot, siteBody, mapped.data);
+          if (mapped.assets && input.assets === undefined) assetsOverride = mapped.assets;
+          // `unfilled[]` is the mapper's FIRST-CLASS output and used to be
+          // dropped here: a job created from an article that silently lost six
+          // figures reported nothing at all. It rides every response shape of
+          // this call (see pendingResponsePayload), and render_article_pdf
+          // puts it in the receipt. Safe to show an agent or an editor by
+          // construction -- stable codes, slot names and opaque node ids, no
+          // path, no blobKey, no sha (BRIEF §1).
+          renderDataReport = {
+            mapped: true,
+            schemaSource: renderDataSchema ? 'template' : ARTICLE_BROCHURE_V1_TEMPLATE_ID,
+            unfilled: mapped.unfilled ?? [],
+          };
+          event.log?.({
+            event: 'pdf_render_data_mapped',
+            siteId: scoped.scope.siteId,
+            requestId: scoped.scope.requestId,
+            templateId: templateIdInput,
+            schemaSource: renderDataReport.schemaSource,
+            unfilledCount: (mapped.unfilled ?? []).length,
+          });
+        } else if (mapped.reason === 'mapper_unavailable') {
+          // Cannot happen with the default mapper any more (it is a static
+          // import); reachable only for an INJECTED mapper that could not be
+          // obtained. Log and fall through with whatever brand-only data we
+          // already have -- pdf-tool's own strict binding stays the honest
+          // failure mode (BRIEF §0's "do not paper over it").
+          event.log?.({
+            event: 'pdf_render_data_mapper_unavailable',
+            siteId: scoped.scope.siteId,
+            requestId: scoped.scope.requestId,
+            templateId: templateIdInput,
+            detail: mapped.detail,
+          });
+        } else {
+          return toolError(mapped.error, { error_code: mapped.errorCode ?? 'pdf_render_data_unmappable' });
+        }
+      }
+    }
+  }
+
+  if (!filename) {
+    return toolError('artifact_kind must be image or pdf, and filename is required.');
   }
 
   const jobInput: PlatformArtifactJobInput = {
@@ -1232,9 +1572,7 @@ export const callCreateAgentArtifactJob = async (
     ...(requirementsOverride ? { requirements: requirementsOverride } : {}),
     ...(templateIdInput ? { templateId: templateIdInput } : {}),
     ...(dataOverride !== undefined ? { data: dataOverride } : {}),
-    ...(input.assets && typeof input.assets === 'object' && !Array.isArray(input.assets)
-      ? { assets: input.assets as { images?: unknown[] } }
-      : {}),
+    ...(assetsOverride ? { assets: assetsOverride } : {}),
     ...(seedOverride !== undefined ? { seed: seedOverride } : {}),
     ...(lorasOverride ? { loras: lorasOverride } : {}),
     ...(styleInputParsed ? { style: styleInputParsed } : {}),
@@ -1277,6 +1615,8 @@ export const callCreateAgentArtifactJob = async (
     // Additive: tells the caller a brand contract shaped this job, and whether
     // it was the site's declared block or one derived from its brandTokens.
     ...(brandImagerySource ? { brandImagerySource } : {}),
+    // T2.3/JOIN A: { mapped, schemaSource, unfilled[] } when D-2's mapper ran.
+    ...(renderDataReport ? { renderData: renderDataReport } : {}),
     ...platformAuthoritative,
   };
 
@@ -1582,6 +1922,29 @@ export const callCreatePdfTemplate = async (event: LambdaEvent, input: Record<st
     return toolError('renderer must be one of: pdfme, react-pdf, typst, chromium.');
   }
 
+  // T2.3/JOIN B: forward the render-data CONTRACT, not just the layout.
+  // These three were silently dropped: a template seeded through this bridge
+  // reached pdf-tool with no renderDataSchema, so W1's RENDER_DATA_INVALID
+  // gate -- which only fires on a template that HAS a schema -- never armed
+  // for any platform-seeded template, and publish_pdf_template's thumbnail
+  // render had no sampleAssets to resolve sampleData's images from.
+  // render_data_schema must be an object (a JSON Schema); sample_data may be
+  // any JSON value pdf-tool will validate against it; sample_assets is the
+  // job-assets shape { images: [...] }. Anything malformed is refused HERE,
+  // named, rather than being posted for pdf-tool to reject opaquely.
+  const renderDataSchema = input.render_data_schema;
+  if (renderDataSchema !== undefined && !isJsonObject(renderDataSchema)) {
+    return toolError('render_data_schema must be a JSON Schema object.', {
+      error_code: 'template_render_data_schema_invalid',
+    });
+  }
+  const sampleAssets = input.sample_assets;
+  if (sampleAssets !== undefined && !isJsonObject(sampleAssets)) {
+    return toolError('sample_assets must be an object of the shape { images: [{ assetId, blobKey | dataUri }] }.', {
+      error_code: 'template_sample_assets_invalid',
+    });
+  }
+
   const built = buildArtifactBridgeGrant();
   if (!built.ok) return built.result;
   const created = await createPlatformPdfTemplate(built.grant, {
@@ -1590,6 +1953,9 @@ export const callCreatePdfTemplate = async (event: LambdaEvent, input: Record<st
     ...(toNonEmptyString(input.template_id) ? { templateId: toNonEmptyString(input.template_id) } : {}),
     ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
     ...(Array.isArray(input.tags) ? { tags: input.tags as string[] } : {}),
+    ...(renderDataSchema !== undefined ? { renderDataSchema } : {}),
+    ...(input.sample_data !== undefined ? { sampleData: input.sample_data } : {}),
+    ...(sampleAssets !== undefined ? { sampleAssets } : {}),
   });
   if (!created.ok) return pdfToolBridgeError(created);
 
@@ -1599,8 +1965,19 @@ export const callCreatePdfTemplate = async (event: LambdaEvent, input: Record<st
     projectId: built.grant.projectId,
     templateId: created.body.templateId,
     version: created.body.version,
+    // JOIN B: provable in the logs, so a template seeded without a contract
+    // is visible before the first render fails instead of after.
+    renderDataSchemaForwarded: renderDataSchema !== undefined,
+    sampleDataForwarded: input.sample_data !== undefined,
   });
-  return toolResult({ ...created.body, siteId: scoped.siteId });
+  return toolResult({
+    ...created.body,
+    siteId: scoped.siteId,
+    // Never claimed, always stated (governing principle): what this call
+    // actually forwarded, so a caller can tell a schema'd template from a
+    // schema-less one without a readback.
+    renderDataSchemaForwarded: renderDataSchema !== undefined,
+  });
 };
 
 export const callListPdfTemplates = async (event: LambdaEvent, input: Record<string, unknown>) => {
@@ -1726,6 +2103,463 @@ export const callDeletePdfTemplate = async (event: LambdaEvent, input: Record<st
     version: deleted.body.version,
   });
   return toolResult({ ...deleted.body, siteId: scoped.siteId });
+};
+
+// ── T2.1: build_pdf_render_data ─────────────────────────────────────────────
+//
+// The read-only face of the deterministic article -> render-data mapper
+// (packages/core/lib/pdf/render-data-mapper.ts, ruling D-C). It answers "what
+// would this article actually render as, and what would be missing?" WITHOUT
+// creating a job, which is the question an agent used to answer by
+// hand-authoring `data` and guessing -- root cause #2 of the 2026-09-03
+// garbage PDF.
+//
+// This handler owns all the I/O (the content_item read, and the template read
+// through the existing pdf-tool bridge client); the mapper itself is pure and
+// stays that way. Ownership is checked the same way every other bridge tool
+// checks it: the site must be this deployment's, and the content_item must
+// belong to that site.
+
+export const callBuildPdfRenderData = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const contentItemId = toNonEmptyString(input.content_item_id);
+  if (!contentItemId) return toolError('content_item_id is required.');
+
+  const lookup = await invokeObjectStore(event, {
+    action: 'get',
+    object_type: 'content_item',
+    object_id: contentItemId,
+  });
+  if ('isError' in lookup) {
+    return toolError(
+      `content_item ${contentItemId} does not exist on ${scoped.siteId}. Create or select the article before asking what it would render as.`,
+      { error_code: 'render_data_content_item_not_found' }
+    );
+  }
+  const contentRecord = getRecordValue(lookup.record);
+  if (!contentRecord || contentRecord.object_id !== contentItemId || contentRecord.site !== scoped.siteId) {
+    return toolError(`Render-data scope mismatch: ${contentItemId} is not owned by ${scoped.siteId}.`, {
+      error_code: 'render_data_scope_mismatch',
+    });
+  }
+
+  // With a template_id, the TEMPLATE's own renderDataSchema is the contract --
+  // fetched through the same bridge client every other *_pdf_template tool
+  // uses. Without one, the generic article contract is the target.
+  const templateId = toNonEmptyString(input.template_id);
+  let templateSchema: Record<string, unknown> | undefined;
+  let schemaSource: 'template' | 'article_brochure_v1' = 'article_brochure_v1';
+  if (templateId) {
+    const built = buildArtifactBridgeGrant();
+    if (!built.ok) return built.result;
+    const found = await getPlatformPdfTemplate(built.grant, { templateId });
+    if (!found.ok) return pdfToolBridgeError(found);
+    templateSchema = renderDataSchemaFromTemplateBody(found.body);
+    if (templateSchema) schemaSource = 'template';
+  }
+
+  const mapped = buildRenderData(contentRecord, { ...(templateSchema ? { templateSchema } : {}) });
+
+  return toolResult({
+    siteId: scoped.siteId,
+    contentItemId,
+    ...(templateId ? { templateId } : {}),
+    // Never claimed, always stated: a template with no author-declared schema
+    // was mapped against the generic article contract, not against itself.
+    schemaSource,
+    ...(templateId && schemaSource === 'article_brochure_v1'
+      ? {
+          schemaNote: `Template ${templateId} declares no renderDataSchema; mapped against the generic ${ARTICLE_BROCHURE_V1_TEMPLATE_ID} contract instead.`,
+        }
+      : {}),
+    data: mapped.data,
+    assets: mapped.assets,
+    unfilled: mapped.unfilled,
+  });
+};
+
+
+// ── T2.3: validate_pdf_render_data ──────────────────────────────────────────
+//
+// The dry half of the contract W1 enforces at job creation: does this `data`
+// satisfy the template's renderDataSchema, and does the job's `assets.images[]`
+// actually supply every asset id the data names. Both answers used to cost a
+// real render to obtain (RENDER_DATA_INVALID / ASSET_MISSING are job-time
+// failures). Read-only: creates nothing, renders nothing, spends nothing.
+
+export const callValidatePdfRenderData = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const templateId = toNonEmptyString(input.template_id);
+  if (!templateId) return toolError('template_id is required.');
+  const data = input.data;
+  if (!isJsonObject(data)) {
+    return toolError('data is required and must be a JSON object (the render data to check).', {
+      error_code: 'render_data_invalid_input',
+    });
+  }
+  const assets = input.assets;
+  if (assets !== undefined && !isJsonObject(assets)) {
+    return toolError('assets must be an object of the shape { images: [{ assetId, blobKey }] }.', {
+      error_code: 'render_data_invalid_input',
+    });
+  }
+
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+  const found = await getPlatformPdfTemplate(built.grant, { templateId });
+  if (!found.ok) return pdfToolBridgeError(found);
+
+  // A template with no author-declared schema is checked against the generic
+  // article contract, and the response SAYS so -- never silently, and never
+  // passed as if the template itself had been satisfied.
+  const templateSchema = renderDataSchemaFromTemplateBody(getRecordValue(found.body) ?? {});
+  const schemaSource = templateSchema ? 'template' : ARTICLE_BROCHURE_V1_TEMPLATE_ID;
+  const schema = templateSchema ?? ARTICLE_BROCHURE_V1_RENDER_DATA_SCHEMA;
+
+  const check = checkRenderDataAgainstSchema(schema, data);
+  const assetCheck = checkRenderDataAssets(check.assetRefs, assets);
+
+  return toolResult({
+    siteId: scoped.siteId,
+    templateId,
+    schemaSource,
+    ...(templateSchema
+      ? {}
+      : {
+          schemaNote: `Template ${templateId} declares no renderDataSchema, so this check ran against the generic ${ARTICLE_BROCHURE_V1_TEMPLATE_ID} contract. W1's RENDER_DATA_INVALID gate does not fire for a template with no schema at all -- seed one with create_pdf_template's render_data_schema.`,
+        }),
+    // Both halves of the verdict, separately, so a caller can tell a shape
+    // problem from a missing picture.
+    valid: check.valid && assetCheck.missingAssetIds.length === 0,
+    schemaValid: check.valid,
+    errors: check.errors,
+    missingAssetIds: assetCheck.missingAssetIds,
+    unusedAssetIds: assetCheck.unusedAssetIds,
+    referencedAssetIds: assetCheck.referencedAssetIds,
+    // Never claim more than this check can prove: pdf-tool's ajv is the
+    // arbiter, and a schema using keywords this subset does not implement is
+    // reported rather than silently passed.
+    authoritative: check.authoritative,
+  });
+};
+
+// ── T2.3: get_pdf_render_brand ──────────────────────────────────────────────
+
+/**
+ * What the bridge will ACTUALLY inject as this site's brand, without spending
+ * a render. D-3 made the injection template-dependent (an object slot gets the
+ * `{colors, fonts, logo?}` block; a plain string slot gets the same `brand`
+ * slot filled with the site's NAME; a template that declares neither gets
+ * nothing) -- which is right, and also
+ * means "what brand does this site have" is no longer answerable by looking at
+ * the site alone. With `template_id` this reports the decision for that
+ * template; without one it reports both candidate payloads and says the slot
+ * is what picks between them.
+ *
+ * Read-only, and safe to show: brandTokens are the site's own governed colors
+ * and fonts, and `logo` is emitted only when the site's ref is already a bare
+ * valid asset id (pdf-render-brand.ts's own rule) -- never a blobKey.
+ */
+export const callGetPdfRenderBrand = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+
+  const siteLookup = await invokeObjectStore(event, {
+    action: 'get',
+    object_type: 'site',
+    object_id: scoped.siteId,
+  });
+  if ('isError' in siteLookup) {
+    return toolError(`site ${scoped.siteId} could not be read.`, { error_code: 'pdf_render_brand_site_not_found' });
+  }
+  const siteBody = getRecordValue(getRecordValue(siteLookup.record)?.body);
+
+  const brand = pdfRenderBrandFromSiteBody(siteBody);
+  const brandName = pdfRenderBrandNameFromSiteBody(siteBody);
+
+  const templateId = toNonEmptyString(input.template_id);
+  let brandSlot: 'object' | 'string' | 'none' | undefined;
+  if (templateId) {
+    const built = buildArtifactBridgeGrant();
+    if (!built.ok) return built.result;
+    const found = await getPlatformPdfTemplate(built.grant, { templateId });
+    if (!found.ok) return pdfToolBridgeError(found);
+    brandSlot = classifyRenderDataBrandSlot(renderDataSchemaFromTemplateBody(getRecordValue(found.body) ?? {}));
+  }
+
+  // W2 review: `brand` is ALWAYS the key injected -- the slot the template
+  // declares. Only its TYPE follows the classification: the object block for an
+  // object slot, the site's name as a plain string for a string slot. (It used
+  // to inject `brandName` for a string slot, a key no such schema declares.)
+  const injected =
+    brandSlot === undefined
+      ? undefined
+      : brandSlot === 'object'
+        ? brand
+          ? { brand }
+          : {}
+        : brandSlot === 'string'
+          ? brandName
+            ? { brand: brandName }
+            : {}
+          : {};
+
+  return toolResult({
+    siteId: scoped.siteId,
+    ...(templateId ? { templateId, brandSlot } : {}),
+    // The honest answer when the site has no usable brandTokens: nothing is
+    // injected and the template's own baked-in defaults carry the render.
+    // pdf-render-brand.ts never fabricates a partial brand and neither does this.
+    hasBrandTokens: brand !== undefined,
+    // The two CANDIDATE payloads. `brandName` names the value, not the slot:
+    // both candidates are injected into `data.brand` (see `injected`).
+    ...(brand ? { brand } : {}),
+    ...(brandName ? { brandName } : {}),
+    ...(injected !== undefined ? { injected } : {}),
+    note: templateId
+      ? `This is what create_agent_artifact_job would merge into data for template ${templateId} (D-3 classifies the template's renderDataSchema.properties.brand; a caller-supplied value always wins untouched).`
+      : 'The bridge always injects the `brand` slot the template declares; the TEMPLATE decides its TYPE: an object brand slot gets the { colors, fonts, logo? } block, a plain string brand slot gets the site name as a string, a template that declares neither gets nothing (D-3). Pass template_id for the actual decision.',
+  });
+};
+
+// ── T2.3: render_article_pdf, the composite ─────────────────────────────────
+//
+// One call so an LLM never hand-assembles a PDF again. Everything it DECIDES
+// lives in packages/core/lib/pdf/article-pdf-render.ts (pure, injected
+// effects, tested against fakes); this handler is the I/O binding and nothing
+// else -- it creates the job through the SAME callCreateAgentArtifactJob every
+// other caller uses (so D-1..D-4 and the D-2 mapper apply identically, with no
+// second copy to drift), polls through the SAME status bridge, and writes the
+// attach through the ordinary object-store checkout -> patch -> checkin.
+
+/** Reads a tool result's structuredContent, whether it succeeded or errored. */
+const structuredOf = (result: unknown): Record<string, unknown> | undefined =>
+  getRecordValue((result as { structuredContent?: unknown } | undefined)?.structuredContent);
+
+const toolResultIsError = (result: unknown): boolean =>
+  Boolean(result && typeof result === 'object' && 'isError' in (result as Record<string, unknown>));
+
+const firstToolText = (result: unknown): string | undefined => {
+  const content = (result as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return undefined;
+  for (const entry of content) {
+    const text = toNonEmptyString(getRecordValue(entry)?.text);
+    if (text) return text;
+  }
+  return undefined;
+};
+
+export const callRenderArticlePdf = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const siteId = toNonEmptyString(input.site_id);
+  const contentItemId = toNonEmptyString(input.content_item_id);
+  const identity = getSiteIdentity();
+  if (!siteId || !contentItemId) {
+    return toolError('site_id and content_item_id are required.', { error_code: 'artifact_scope_required' });
+  }
+  if (siteId !== identity.siteId) {
+    return toolError(
+      `Artifact scope mismatch: this deployment owns ${identity.siteId}, not ${siteId}. Use the owning site's Platform connector.`,
+      { error_code: 'artifact_site_mismatch' }
+    );
+  }
+  const attach = input.attach !== false;
+  const templateId = toNonEmptyString(input.template_id);
+
+  // The article, read once: its title (the attached node's alt text) and its
+  // nodes (the attach target). Also the ownership check every artifact tool
+  // makes -- callCreateAgentArtifactJob repeats it, cheaply, from its cache.
+  const lookup = await invokeObjectStore(event, {
+    action: 'get',
+    object_type: 'content_item',
+    object_id: contentItemId,
+  });
+  if ('isError' in lookup) {
+    return toolError(
+      `content_item ${contentItemId} does not exist on ${siteId}. Create or select the article before rendering a PDF for it.`,
+      { error_code: 'artifact_request_not_found' }
+    );
+  }
+  const contentRecord = getRecordValue(lookup.record);
+  if (!contentRecord || contentRecord.object_id !== contentItemId || contentRecord.site !== siteId) {
+    return toolError(`Render scope mismatch: ${contentItemId} is not owned by ${siteId}.`, {
+      error_code: 'artifact_job_scope_mismatch',
+    });
+  }
+  const articleTitle = toNonEmptyString(getRecordValue(contentRecord.body)?.title);
+
+  const pollBudgetMs = resolveRenderArticlePdfPollBudgetMs(event.invocationDeadlineMs, Date.now(), process.env);
+
+  const outcome = await renderArticlePdf(
+    {
+      siteId,
+      contentItemId,
+      attach,
+      pollBudgetMs,
+      ...(articleTitle ? { articleTitle } : {}),
+      polling: {
+        tool: 'get_agent_artifact_job_status',
+        input: { site_id: siteId, request_id: contentItemId },
+      },
+    },
+    {
+      // wait:false -- this composite owns the whole wait, so the bridge must
+      // not spend the invocation's budget on an inline wait of its own first.
+      createJob: async () => {
+        const result = await callCreateAgentArtifactJob(event, {
+          site_id: siteId,
+          request_id: contentItemId,
+          artifact_kind: 'pdf',
+          kind: 'article',
+          wait: false,
+          ...(templateId ? { template_id: templateId } : {}),
+          ...(toNonEmptyString(input.filename) ? { filename: toNonEmptyString(input.filename) } : {}),
+        });
+        if (toolResultIsError(result)) {
+          const body = structuredOf(result);
+          return {
+            ok: false as const,
+            error: {
+              ...(toNonEmptyString(body?.error_code) ? { code: toNonEmptyString(body?.error_code)! } : {}),
+              message: firstToolText(result) ?? 'The PDF job could not be created.',
+            },
+          };
+        }
+        const job = readArticlePdfJobView(structuredOf(result));
+        if (!job) {
+          return { ok: false as const, error: { message: 'pdf-tool returned no job id for this render.' } };
+        }
+        return { ok: true as const, value: job };
+      },
+      pollJob: async (jobId) => {
+        const result = await callGetAgentArtifactJobStatus(event, {
+          site_id: siteId,
+          request_id: contentItemId,
+          job_id: jobId,
+        });
+        if (toolResultIsError(result)) {
+          return { ok: false as const, error: { message: firstToolText(result) ?? 'status poll failed' } };
+        }
+        const job = readArticlePdfJobView({ jobId, ...(structuredOf(result) ?? {}) });
+        return job
+          ? { ok: true as const, value: job }
+          : { ok: false as const, error: { message: 'status poll returned an unreadable body' } };
+      },
+      readArticleNodes: async () => {
+        const fresh = await invokeObjectStore(event, {
+          action: 'get',
+          object_type: 'content_item',
+          object_id: contentItemId,
+        });
+        if ('isError' in fresh) {
+          return { ok: false as const, error: { message: 'The article could not be re-read for the attach.' } };
+        }
+        const body = getRecordValue(getRecordValue(fresh.record)?.body);
+        const nodes = Array.isArray(body?.nodes) ? (body!.nodes as ArticleNodeLike[]) : [];
+        return { ok: true as const, value: nodes };
+      },
+      applyAttach: async (op) => attachPdfToArticle(event, contentItemId, op),
+      sleep: async (ms) => {
+        await sleep(ms);
+      },
+      now: () => Date.now(),
+      log: (entry) => event.log?.({ event: 'render_article_pdf', ...entry, siteId, contentItemId }),
+    }
+  );
+
+  if (!outcome.ok) {
+    // No job id exists, so there is no receipt to hand back -- surface the
+    // typed pdf-tool failure as itself rather than inventing a receipt for a
+    // job that was never created.
+    return toolError(outcome.error.message, {
+      error_code: outcome.error.code ?? 'pdf_render_job_not_created',
+      siteId,
+      contentItemId,
+    });
+  }
+  // D-D (W2 review): the composite is the ONLY place that holds W1's quality
+  // gate for a PDF that just landed on an article, so it files the verdict
+  // where `object_validate`'s `pdf_quality` criterion reads it back. Only when
+  // the PDF is actually ON the article -- that is the document a publish is
+  // about -- and only ever a FAILURE (see failedContentCheckFromQualityGate:
+  // a clean gate is not proof of a clean document, and this call has no page
+  // count to back an "ok" with). Never blocks: a store that will not write
+  // loses the warning, not the render.
+  if (outcome.receipt.attached && outcome.receipt.attachment) {
+    await filePdfContentCheck(
+      event,
+      outcome.receipt.attachment.href,
+      failedContentCheckFromQualityGate(outcome.receipt.qualityGate, {
+        ...(outcome.receipt.pageCount !== undefined ? { pageCount: outcome.receipt.pageCount } : {}),
+      })
+    );
+  }
+
+  return toolResult({ ...outcome.receipt });
+};
+
+/**
+ * The attach write: checkout -> patch(update_node) -> checkin, the same
+ * sequence every other server-side writer in this file uses, with the lease
+ * released in a `finally` so a refused patch never leaves the article locked.
+ *
+ * The op itself was built (and its media type inferred/refused) by
+ * buildArticlePdfAttachOp; the patch engine re-runs the SAME
+ * normalizeArticleNodeMediaFields on the way in, so the discipline holds even
+ * if this call site is ever bypassed.
+ */
+const attachPdfToArticle = async (
+  event: LambdaEvent,
+  contentItemId: string,
+  op: { op: 'update_node'; node_id: string; fields: Record<string, unknown> }
+): Promise<{ ok: true; value: true } | { ok: false; error: { message: string } }> => {
+  const checkout = await invokeObjectStore(event, {
+    action: 'checkout',
+    object_type: 'content_item',
+    object_id: contentItemId,
+    agent_name: 'render_article_pdf',
+  });
+  if ('isError' in checkout) {
+    return {
+      ok: false,
+      error: {
+        message:
+          'The article is checked out by someone else, so the PDF could not be attached. The PDF itself is fine — retry the attach, or attach it by hand.',
+      },
+    };
+  }
+  const lockToken = toNonEmptyString(checkout.lockToken);
+  if (!lockToken) return { ok: false, error: { message: 'The article lease could not be acquired for the attach.' } };
+  const recordVersion = typeof checkout.record_version === 'number' ? checkout.record_version : undefined;
+
+  try {
+    const patched = await invokeObjectStore(event, {
+      action: 'patch',
+      object_type: 'content_item',
+      object_id: contentItemId,
+      lock_token: lockToken,
+      ...(recordVersion !== undefined ? { expected_record_version: recordVersion } : {}),
+      ops: [op],
+      agent_name: 'render_article_pdf',
+    });
+    if ('isError' in patched) {
+      const detail = getRecordValue((patched as { structuredContent?: unknown }).structuredContent);
+      return {
+        ok: false,
+        error: { message: toNonEmptyString(detail?.error) ?? 'The article refused the PDF attach patch.' },
+      };
+    }
+    return { ok: true, value: true };
+  } finally {
+    await invokeObjectStore(event, {
+      action: 'checkin',
+      object_type: 'content_item',
+      object_id: contentItemId,
+      lock_token: lockToken,
+      agent_name: 'render_article_pdf',
+    }).catch(() => undefined);
+  }
 };
 
 /**

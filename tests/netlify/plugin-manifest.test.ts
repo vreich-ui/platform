@@ -91,6 +91,17 @@ test('plugin tools are derived from tool governance, never a hand-kept list', ()
     'deploy_status',
     'verify_article_images',
     'object_contract',
+    // W2 T2.8 — the PDF pipeline's allow-list half of "an agent that can
+    // create an artifact job must also be able to call render_article_pdf,
+    // and one that publishes should be able to call validate_content_item
+    // and verify_pdf_content" (BRIEF-W2.md). All four are already admitted
+    // by class alone (creation/read are both in PLUGIN_TOOL_CLASSES and none
+    // is denylisted) — this pins that admission so a future denylist entry
+    // or reclassification can't silently drop one without a test noticing.
+    'create_agent_artifact_job',
+    'render_article_pdf',
+    'validate_content_item',
+    'verify_pdf_content',
   ]) {
     assert.ok(names.has(required), `${required} is missing from the plugin tool list`);
   }

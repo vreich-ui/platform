@@ -64,6 +64,8 @@ import { ActionRow, ApprovalCard } from './approval';
 import { SeverityIcon } from './severity';
 import { ObjectLens, objectLensMode } from './ObjectLensRegistry';
 import { ObjectDetailForm, commitFieldOps } from './ObjectDetailForm';
+import { ArticlePdfCard } from './ArticlePdfCard';
+import type { ArticlePdfNodeLike } from '@core/lib/admin/article-pdf-card';
 import { AgentRail } from './AgentRail';
 import { CandidateStage } from './CandidateStage';
 import { cn } from './utils';
@@ -1178,6 +1180,25 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
           <DetailSection title="Agent assignment">
             <DedicatedAgentPicker objectId={record.object_id} owner={owner} />
           </DetailSection>
+          {record.object_type === 'content_item' ? (
+            <DetailSection title="PDF">
+              <ArticlePdfCard
+                objectType={record.object_type}
+                objectId={record.object_id}
+                nodes={
+                  Array.isArray((record.body as { nodes?: unknown } | undefined)?.nodes)
+                    ? ((record.body as { nodes: ArticlePdfNodeLike[] }).nodes)
+                    : undefined
+                }
+                events={chat.events}
+                getToken={getToken}
+                onSeedComposer={(prompt) => setComposerSeed({ key: `pdf-${Date.now()}`, text: prompt })}
+                onChanged={async () => {
+                  await load();
+                }}
+              />
+            </DetailSection>
+          ) : null}
           <DetailSection title="Object fields (read-only view)">
             <GeneratedInspector record={record} onEditOnSite={url} />
           </DetailSection>

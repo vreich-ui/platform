@@ -18,6 +18,8 @@ import {
   generatedChatToolByName,
   resolveGeneratedAutonomy,
 } from './generated-tools.js';
+import { OPERATIONAL_BRIDGE_TOOL_NAMES } from './generated-tools.js';
+import { OPERATIONAL_HANDLER_NAMES } from './context.js';
 import { isMembershipTool, TOOL_DEFINITIONS_MEMBERSHIP } from '../mcp-tool-definitions-membership.js';
 import { CMS_AGENT_BOUNDS } from './cms-agent-client.js';
 import { fitToolsToCmsAgentBound } from './engine.js';
@@ -43,15 +45,15 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 // ─── registry shape ────────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 88 names: every visible TOOL_DEFINITION (60 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
+test('the registry has exactly the expected 94 names: every visible TOOL_DEFINITION (62 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
     ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
   );
-  assert.equal(expectedVisible.size, 77);
+  assert.equal(expectedVisible.size, 83);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 88);
-  assert.equal(new Set(registryNames).size, 88, 'no duplicate names');
+  assert.equal(registryNames.length, 94);
+  assert.equal(new Set(registryNames).size, 94, 'no duplicate names');
 
   const workspaceNames = [
     'list_workspace_nodes',
@@ -83,9 +85,30 @@ test('the registry has exactly the expected 88 names: every visible TOOL_DEFINIT
   }
 });
 
-test('wire-tool budget: the non-membership registry (72) + present_candidates <= 96; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
+/**
+ * W2 REVIEW. `verify_pdf_content` was registered in the tool registry, pinned in
+ * the plugin allow-list, and named by the admin PDF card's "Verify" action —
+ * with no entry in `context.ts`'s OPERATIONAL_HANDLERS. Every chat/plugin call
+ * to it came back `No operational handler is wired for "verify_pdf_content"`.
+ * A tool that lists, previews, and then cannot be called is exactly the
+ * "UI must never claim a state it can't prove" failure, one layer down.
+ *
+ * The two lists are derived, not hand-kept: adding a tool to the registry that
+ * routes to the operational bridge fails HERE until its handler exists.
+ */
+test('every registry tool that routes to the operational bridge has a handler wired for it', () => {
+  const wired = new Set(OPERATIONAL_HANDLER_NAMES);
+  const missing = OPERATIONAL_BRIDGE_TOOL_NAMES.filter((name) => !wired.has(name));
+  assert.deepEqual(
+    missing,
+    [],
+    `these tools are in the chat registry but have no OPERATIONAL_HANDLERS entry, so calling them returns "No operational handler is wired": ${missing.join(', ')}`
+  );
+});
+
+test('wire-tool budget: the non-membership registry (78) + present_candidates <= 96; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
   const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
-  assert.equal(nonMembership.length, 72);
+  assert.equal(nonMembership.length, 78);
   // W19 T19.8: the old ceiling was 64 and the registry sat at exactly 63 + the
   // learning-mode tool — no headroom at all, so one more tool would have been
   // silently sliced off the wire. The bound moved to 96 on both sides.
@@ -550,8 +573,8 @@ test('compileSchema throws at compile time on an unsupported keyword', () => {
   );
 });
 
-test('every one of the 91 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 91);
+test('every one of the 97 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 97);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }

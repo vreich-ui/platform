@@ -11,6 +11,11 @@ import {
   pollDeployReceipt,
   type DeployReceipt,
 } from '../lib/netlify-deploys.js';
+import {
+  inspectDocumentContentFromPublicPath,
+  type DocumentContentCheck,
+} from '../../packages/core/server/lib/pdf-content-inspection.js';
+import type { DocumentContentRequirement } from '../../packages/core/lib/pdf/document-content-check.js';
 
 const jsonHeaders = {
   'Content-Type': 'application/json',
@@ -46,6 +51,13 @@ type VerifiedDocument = {
   contentType?: string;
   ok: boolean;
   error?: string;
+  // T2.4: the content check — present/200/application-pdf only proves the document EXISTS
+  // and is servable, never that the pages inside it are any good (the 2026-09-03 defect).
+  // Only set once present/status/contentType already passed; a genuine content failure
+  // flips `ok` above to false the same way a missing/wrong-type document already does. See
+  // packages/core/server/lib/pdf-content-inspection.ts for what 'unverified' means here —
+  // it never claims success it cannot back up.
+  content?: DocumentContentCheck;
 };
 
 const requestSchema = z
@@ -57,6 +69,17 @@ const requestSchema = z
     // page as an <a href> / <object data> / <iframe|embed src> and fetch as
     // application/pdf. Optional so the image contract is untouched.
     expectedDocuments: z.array(z.string().min(1)).optional(),
+    // T2.4: applied uniformly to every expectedDocuments entry's content check this call
+    // runs (page count, blank-page/unresolved-image/unrendered-token findings, byte size).
+    // Optional — evaluateDocumentContent's own default (page count >= 2) applies when
+    // omitted, so existing callers are unaffected.
+    documentContentRequirements: z
+      .object({
+        minPageCount: z.number().int().positive().optional(),
+        maxBytes: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     // Deploy-aware verification (opt-in). When `commit` is supplied, image
     // assertions run ONLY once that commit's Netlify deploy is confirmed ready —
     // a page served by a stale/previous deploy is reported as INCONCLUSIVE
@@ -424,7 +447,8 @@ const matchExpectedDocument = (
 const verifyDocument = async (
   expected: string,
   pageUrl: URL,
-  extractedSources: Set<string>
+  extractedSources: Set<string>,
+  contentRequirement?: DocumentContentRequirement
 ): Promise<VerifiedDocument> => {
   let resolvedUrl: string;
 
@@ -451,7 +475,13 @@ const verifyDocument = async (
     });
     const contentType = response.headers.get('content-type') ?? undefined;
     const isPdf = (contentType?.toLowerCase().split(';')[0]?.trim() ?? '') === 'application/pdf';
-    const ok = present && response.status === 200 && isPdf;
+    const servable = present && response.status === 200 && isPdf;
+
+    // T2.4: only a document that is present, 200, and application/pdf is even a candidate
+    // for a content check — there is nothing to inspect on a 404 or a wrong content-type,
+    // and those already fail below on their own terms.
+    const content = servable ? await inspectDocumentContentFromPublicPath(expected, contentRequirement) : undefined;
+    const ok = servable && content?.status !== 'failed';
 
     return {
       expected,
@@ -461,6 +491,7 @@ const verifyDocument = async (
       status: response.status,
       contentType,
       ok,
+      ...(content ? { content } : {}),
       ...(!present
         ? {
             error:
@@ -471,6 +502,7 @@ const verifyDocument = async (
       ...(response.status === 200 && !isPdf
         ? { error: `Expected document did not return content-type application/pdf (got ${contentType ?? 'none'}).` }
         : {}),
+      ...(content?.status === 'failed' ? { error: content.reason } : {}),
     };
   } catch (error) {
     return {
@@ -509,8 +541,15 @@ export const handler = async (event: LambdaEvent) => {
     return jsonResponse(400, { verified: false, error: 'Invalid request body.', issues: validation.error.issues });
   }
 
-  const { url, expectedImages, expectedDocuments, commit, deployTimeoutSeconds, deployPollIntervalSeconds } =
-    validation.data;
+  const {
+    url,
+    expectedImages,
+    expectedDocuments,
+    documentContentRequirements,
+    commit,
+    deployTimeoutSeconds,
+    deployPollIntervalSeconds,
+  } = validation.data;
   const documentFields = expectedDocuments !== undefined ? { expectedDocuments } : {};
   let pageUrl: URL;
 
@@ -575,7 +614,11 @@ export const handler = async (event: LambdaEvent) => {
     const documentSources = expectedDocuments !== undefined ? extractDocumentSources(html, pageUrl) : undefined;
     const documents =
       expectedDocuments !== undefined && documentSources !== undefined
-        ? await Promise.all(expectedDocuments.map((expected) => verifyDocument(expected, pageUrl, documentSources)))
+        ? await Promise.all(
+            expectedDocuments.map((expected) =>
+              verifyDocument(expected, pageUrl, documentSources, documentContentRequirements)
+            )
+          )
         : undefined;
     const errors = [
       ...images

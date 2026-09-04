@@ -21,11 +21,21 @@
  * docked rail — exactly what `TemplatesWorkspace` has always done for this
  * action. The rendered PDF then comes back as an ordinary indexed artifact and
  * is previewed with the shared `ArtifactStagePreview`.
+ *
+ * T2.6 adds three things, all decided in `visual-identity-pdf.ts`:
+ *  - a DIRECT "Render sample (first page only)" chip over W1's
+ *    `preview_pdf_template` — shorter than the job above (no poll loop),
+ *    labeled so it is never mistaken for the complete document;
+ *  - the byKind selector next to "Set as site default" — the same
+ *    `set_site_fields` merge, scoped to one kind (`buildPinKindDefaultOp`);
+ *  - thumbnails that can now say WHY one is missing (W1's `thumbnailError`),
+ *    not just that it is.
  */
 import { useCallback, useMemo, useState } from 'react';
 
 import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, Card, EmptyState } from './primitives';
+import { Select } from './forms';
 import { IconAlertTriangle } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
@@ -34,9 +44,12 @@ import { EditSession, type GetToken } from '@core/lib/edit-mode/verbs-client';
 import type { VisualIdentityChatIntent } from '@core/lib/admin/visual-identity-imagery';
 import {
   buildPdfTemplatesViewModel,
+  buildPinKindDefaultOp,
+  buildPreviewSampleIntent,
   buildRenderSampleIntent,
   buildSetSiteDefaultOp,
   latestSampleArtifact,
+  pdfKindOptions,
   type PdfTemplateInput,
   type PdfTemplateRow,
 } from '@core/lib/admin/visual-identity-pdf';
@@ -101,6 +114,8 @@ export function PdfTemplatesPanel({
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [previewId, setPreviewId] = useState<string | undefined>(undefined);
+  /** T2.6: the kind each row's byKind selector currently has picked, keyed by template id. */
+  const [kindChoice, setKindChoice] = useState<Record<string, string>>({});
 
   const model = useMemo(
     () =>
@@ -111,6 +126,37 @@ export function PdfTemplatesPanel({
         canEdit: isOwner,
       }),
     [templates, site?.body, available, isOwner]
+  );
+
+  const kindOptions = useMemo(() => pdfKindOptions(model.rows), [model.rows]);
+
+  const pinKind = useCallback(
+    async (templateId: string, kind: string) => {
+      setBusyId(templateId);
+      setError(undefined);
+      setNotice(undefined);
+      const session = new EditSession('site', identity.siteId, getToken);
+      try {
+        const checkout = await session.ensureCheckout();
+        if (!checkout.ok) {
+          setError(`The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
+          return;
+        }
+        const result = await session.patch([buildPinKindDefaultOp(kind, templateId)]);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setNotice(`${templateId} is now the default PDF template for ${kind}.`);
+        await onChanged();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'The kind default could not be set.');
+      } finally {
+        await session.checkin().catch(() => undefined);
+        setBusyId(undefined);
+      }
+    },
+    [getToken, identity.siteId, onChanged]
   );
 
   const setSiteDefault = useCallback(
@@ -214,11 +260,50 @@ export function PdfTemplatesPanel({
                   >
                     Render sample
                   </Button>
+                  {/* T2.6: the DIRECT chip — W1's preview_pdf_template, first
+                      page only. A shorter path than the full sample above
+                      (no job to poll), labeled so it is never mistaken for
+                      the complete rendered document. */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!row.canRenderSample}
+                    onClick={() => {
+                      onIntent(buildPreviewSampleIntent(row));
+                      setPreviewId(row.id);
+                    }}
+                  >
+                    Render sample (first page only)
+                  </Button>
                   {latestSampleArtifact(row.id, artifacts) ? (
                     <Button variant="ghost" size="sm" onClick={() => setPreviewId(row.id)}>
                       Show latest sample
                     </Button>
                   ) : null}
+                </div>
+                {/* T2.6: the byKind selector, alongside "Set as site default" —
+                    the same `set_site_fields` merge, scoped to one kind
+                    (`buildPinKindDefaultOp`) instead of the whole publication. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    aria-label={`Content kind to pin ${row.label} as the default for`}
+                    className="w-40"
+                    options={kindOptions.map((option) => ({ value: option.kind, label: option.label }))}
+                    value={kindChoice[row.id] ?? row.kind ?? kindOptions[0]?.kind ?? ''}
+                    onChange={(event) => setKindChoice((prior) => ({ ...prior, [row.id]: event.target.value }))}
+                    disabled={!row.canSetDefault || busyId !== undefined}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!row.canSetDefault || busyId !== undefined}
+                    onClick={() => {
+                      const kind = kindChoice[row.id] ?? row.kind ?? kindOptions[0]?.kind;
+                      if (kind) void pinKind(row.id, kind);
+                    }}
+                  >
+                    Set as default for kind
+                  </Button>
                 </div>
                 {!row.canSetDefault && row.setDefaultBlockedReason ? (
                   <p className={MUTED}>{row.setDefaultBlockedReason}</p>

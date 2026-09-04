@@ -212,7 +212,7 @@ One routing note that has wasted probes before: `object_patch` **does** edit con
 1. Call Platform `create_agent_artifact_job` with the owning `site_id` and existing content-item `request_id`; Platform resolves the canonical PDF-Tool project and injects the grant server-side. The raw grant RPC is removed, so grants and tokens never enter agent context (`docs/agents/pdf-tool-storage-grant.md`).
 2. Poll Platform `get_agent_artifact_job_status` without recreating the job. Request `requirements.image.outputFormat:'webp'` and `requirements.maxBytes` within budget (may lower the cap, never raise it).
 3. Image formats: **JPEG/PNG/WebP only** (server-decoded by sharp; GIF/AVIF/SVG rejected — `image-validation.ts:19`). Budget: committed defaults `maxImageBytes` 153,600 (~150 KB), `preferredImageFormat` webp, over-budget **warns** (`src/config/media-policy.ts`) — read the live values from `object_contract.media_policy`, and treat the warning as a defect to fix, not noise.
-4. PDF jobs require a **published** PDF template — preflight `list_pdf_templates`, else `create_pdf_template` → `publish_pdf_template`.
+4. PDF jobs require a **published** PDF template — preflight `list_pdf_templates`, else `create_pdf_template` → `publish_pdf_template`. **For an article PDF specifically, skip this whole flow and call `render_article_pdf` instead — see §6.4.**
 5. Platform verifies materialization server-side before returning a completed reference; cross-check `list_artifacts_for_request` when needed **before** any object write. Media failure ⇒ stop; do not publish a degraded article.
 
 ### 6.2 Trust scope
@@ -226,6 +226,50 @@ Artifact references are trusted **per request id** only (`artifact-trust.ts:78`)
 - **A raw blobKey in any renderable field is a write-blocker** (`checkRenderableImageRefs`, `object-validate.ts:786`) — it 404s in the browser and can fail the whole Astro build. Convert with `publicPathForArtifactRef` semantics (`artifact-trust.ts:17`): prefix rewrite `image/… → /img/…`, `pdf/… → /pdf/…`.
 - Also blocked in `media.src`: `data:` URIs and legacy repo paths (`src/assets/…`). Remote `https://` and bare site paths **warn** — avoid them; article media should be materialized artifacts.
 - **A PDF can never be the hero** — write-blocked (`forbidPdf` on hero, `object-validate.ts:1843`); PDF belongs in `media {type:'document', src:'/pdf/…'}` or an action node's `ctaLink` with the exact artifact-derived path.
+
+### 6.4 The one-call path for an article PDF: `render_article_pdf` (W2)
+
+**Use `render_article_pdf`, not `create_agent_artifact_job`, whenever the goal is "make a PDF of
+this article."** It runs the whole §6.1 sequence in one call and attaches the result:
+
+```
+render_article_pdf { site_id, content_item_id, template_id?, filename?, attach? }
+  1. Build render data — Platform's deterministic article → render-data mapper
+     (packages/core/lib/pdf/render-data-mapper.ts, ruling D-C). Never hand-author `data`;
+     build_pdf_render_data previews the same mapper without creating a job, and
+     validate_pdf_render_data dry-checks arbitrary data/assets against a template's contract —
+     both read-only, useful for debugging a thin PDF (their `unfilled[]` codes say why).
+  2. Resolve the template — site.pdf.byKind['article'] ?? site.pdf.defaultTemplateId when
+     template_id is omitted (ruling D-1; get_pdf_render_brand shows what brand payload a
+     template will actually receive, D-3).
+  3. Create the job, poll it to completion (bounded — a still-running job returns
+     status:"pending" with the jobId and polling instructions, never a false success).
+  4. Read the content quality gate (BLANK_PAGE / UNRESOLVED_IMAGE / UNRENDERED_TOKEN).
+     RULING D-A: these WARN, they never block — a job that completes with findings still
+     attaches, and the findings ride the receipt. Report them plainly; never call such a
+     render "failed". Only a typed pdf-tool failure (RENDER_DATA_INVALID, ASSET_MISSING,
+     DATA_BINDING_ERROR, …) is a real failure, and then nothing attaches.
+  5. Attach the finished PDF to the article as a `document` media node (pass attach:false to
+     render without touching the article — the receipt still names the PDF in public_path).
+```
+
+**The receipt is the deliverable.** `status`, `jobId`, `rendered`, `public_path` (where the
+finished PDF lives — the same `public_path` the bridge returns for every completed artifact,
+present on every completed render including `attach:false`), `attached` (+
+`attachment.nodeId`/`href` — the same path again, saying where it landed on the article),
+`pageCount`, `qualityGate` `{passed, findings[]}`, `warnings[]`,
+`unfilled[]` (stable codes for everything the mapper could not fill — the answer to "why is
+this PDF thin"), and a one-sentence `summary`. Read the receipt; do not re-derive its meaning
+from the raw job status.
+
+**`verify_pdf_content`** inspects one already-rendered PDF standalone (page count, body text,
+image resolution, leaked tokens) — the same check `verify_article_images` runs on
+`expectedDocuments`, without a whole page verification. **`validate_content_item`** is the
+standalone form of `object_validate {object_type:"content_item"}` — its report includes a
+`pdf_quality` warning (ruling D-D) when a prior content-quality result exists for the article's
+attached PDF. Both are read-only and never block; see
+[`../cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md`](../cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md)
+for the full ruling set (D-A – D-D) and the D-1–D-4 bridge defaults these tools rely on.
 
 ## 7. Release and build-cost policy — **INTERIM**
 

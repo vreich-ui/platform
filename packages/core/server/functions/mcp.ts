@@ -187,6 +187,7 @@ import {
   callDeletePdfTemplate,
   callDeployStatus,
   callCreateCaptureJob,
+  callBuildPdfRenderData,
   callGetAgentArtifactBySlot,
   callGetAgentArtifactJobStatus,
   callGetCaptureJobStatus,
@@ -213,6 +214,10 @@ import {
   callReleaseToProduction,
   callTriggerNetlifyBuild,
   callVerifyArticleImages,
+  callVerifyPdfContent,
+  callRenderArticlePdf,
+  callValidatePdfRenderData,
+  callGetPdfRenderBrand,
   callCommerceOrders,
   callOrderReissue,
   callProductSetPrice,
@@ -975,6 +980,8 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callDeployStatus(event, input);
     case 'verify_article_images':
       return callVerifyArticleImages(event, input);
+    case 'verify_pdf_content':
+      return callVerifyPdfContent(event, input);
     case 'trigger_netlify_build':
       return callTriggerNetlifyBuild(event, input);
     case 'release_to_production':
@@ -997,6 +1004,21 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callListPdfTemplates(event, input);
     case 'get_pdf_template':
       return callGetPdfTemplate(event, input);
+    // T2.1: read-only, creates nothing — no idempotency wrapper needed.
+    case 'build_pdf_render_data':
+      return callBuildPdfRenderData(event, input);
+    // W2 T2.3: the composite. It creates a real (paid) render job and writes
+    // to the article, so it takes the same idempotency wrapper
+    // create_agent_artifact_job does — a 502/timeout on this call is
+    // ambiguous about whether the job was created, and a same-key retry must
+    // replay the original receipt rather than start a second render.
+    case 'render_article_pdf':
+      return withIdempotentToolCall(event, name, input.idempotency_key, () => callRenderArticlePdf(event, input));
+    // W2 T2.3: both read-only — no job, no render, no write.
+    case 'validate_pdf_render_data':
+      return callValidatePdfRenderData(event, input);
+    case 'get_pdf_render_brand':
+      return callGetPdfRenderBrand(event, input);
     case 'validate_pdf_template':
       return callValidatePdfTemplate(event, input);
     case 'get_pdf_template_validation':
@@ -1276,6 +1298,15 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         body: input.body,
         requested_id: input.requested_id,
         site: input.site,
+      });
+    // T2.5: object_validate, reachable standalone for one content_item — same
+    // 'validate' action, same callObjectAction path, so the result is byte-for-byte
+    // what object_validate {object_type:'content_item', object_id} would return.
+    case 'validate_content_item':
+      return callObjectAction(event, {
+        action: 'validate',
+        object_type: 'content_item',
+        object_id: input.object_id,
       });
     case 'object_inventory':
       return callObjectAction(event, {

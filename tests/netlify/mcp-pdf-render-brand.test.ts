@@ -115,7 +115,44 @@ const pendingArtifactJobRoute = (body: Record<string, unknown>) => ({
   },
 });
 
-test('create_agent_artifact_job injects data.brand from the site brandTokens for a template-render pdf job', async () => {
+// T2.2/D-3: create_agent_artifact_job now asks the RESOLVED template's own
+// renderDataSchema before deciding what shape `brand` gets injected as (the
+// 2026-09-03 `[object Object]` root cause — BRIEF-W2.md §0/§3). These routes
+// stand in for the three schema shapes that decision can find.
+const objectBrandTemplateRoute = (body: Record<string, unknown>) => ({
+  body: {
+    projectId: body.projectId,
+    templateId: body.templateId,
+    renderer: 'chromium',
+    status: 'active',
+    version: 1,
+    renderDataSchema: {
+      properties: { brand: { $ref: '#/$defs/brand' } },
+      $defs: { brand: { type: 'object', properties: { colors: {}, fonts: {} } } },
+    },
+  },
+});
+
+// A real string-brand template, contract and all: `additionalProperties: false`
+// is what these renderDataSchemas actually carry, and it is the reason the slot
+// written has to be `brand` — see the W2 review note on the test below.
+const stringBrandTemplateRoute = (body: Record<string, unknown>) => ({
+  body: {
+    projectId: body.projectId,
+    templateId: body.templateId,
+    renderer: 'pdfme',
+    status: 'active',
+    version: 1,
+    renderDataSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['brand', 'title'],
+      properties: { brand: { type: 'string' }, title: { type: 'string' } },
+    },
+  },
+});
+
+test('create_agent_artifact_job injects data.brand from the site brandTokens for a template-render pdf job whose schema slots brand as an object', async () => {
   await resetAndSeedRequest();
   await seedSiteRecord({
     name: 'Dr. Lurié',
@@ -124,7 +161,10 @@ test('create_agent_artifact_job injects data.brand from the site brandTokens for
   });
 
   const originalFetch = globalThis.fetch;
-  const { calls, fetchImpl } = stubPdfToolMcp({ create_agent_artifact_job: pendingArtifactJobRoute });
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: objectBrandTemplateRoute,
+  });
   globalThis.fetch = fetchImpl;
   try {
     const created = await rpc('create_agent_artifact_job', {
@@ -152,12 +192,101 @@ test('create_agent_artifact_job injects data.brand from the site brandTokens for
   }
 });
 
-test('create_agent_artifact_job leaves a caller-supplied data.brand untouched', async () => {
+// T2.2/D-3 regression test: this is the EXACT 2026-09-03 defect scenario —
+// a template whose renderDataSchema slots `{{ brand }}` as a plain string must
+// never get the brand OBJECT (which rendered as the literal text
+// "[object Object]").
+//
+// W2 REVIEW — the corrected direction. As shipped, D-3 filled `data.brandName`
+// here, a key this schema does not declare. Against the real contract
+// (`additionalProperties: false`, `required: ['brand', ...]` — as stubbed
+// above) that is two hard failures rather than one ugly render: W1's
+// RENDER_DATA_INVALID rejects the undeclared `brandName` AND the required
+// `brand` is still missing, and even past that `{{ brand }}` is unbound and
+// strict binding fails with DATA_BINDING_ERROR. The slot the template declares
+// is `brand`; it gets the site's name, as a string.
+test('create_agent_artifact_job fills data.brand with the site NAME (never the object, never brandName) for a string brand slot', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandTokens: BRAND_TOKENS });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: stringBrandTemplateRoute,
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'pdf',
+      filename: 'string-brand-report.pdf',
+      template_id: 'tpl_string_brand',
+      data: { title: 'Q3 Report' },
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const jobCall = calls.find((call) => call.tool === 'create_agent_artifact_job');
+    assert.ok(jobCall);
+    assert.deepEqual(jobCall!.body.data, { title: 'Q3 Report', brand: 'Dr. Lurié' });
+    const posted = jobCall!.body.data as Record<string, unknown>;
+    assert.equal(typeof posted.brand, 'string', 'never the object for a string slot');
+    assert.equal('brandName' in posted, false, 'never a key an additionalProperties:false schema would reject');
+    // And what was posted actually satisfies the template's own contract, which
+    // is the whole point of classifying the slot in the first place.
+    const schema = stringBrandTemplateRoute({}).body.renderDataSchema;
+    for (const required of schema.required) {
+      assert.ok(required in posted, `the template requires '${required}'`);
+    }
+    for (const key of Object.keys(posted)) {
+      assert.ok(key in schema.properties, `'${key}' is not declared by an additionalProperties:false schema`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// T2.2/D-3: a template the bridge cannot get a renderDataSchema for at all
+// (get_pdf_template unstubbed here, so the stub answers "unexpected tool")
+// must inject NEITHER shape — this is the fail-open default, and it is also
+// exactly today's behavior for a template with no schema on file.
+test('create_agent_artifact_job injects neither brand nor brandName when the template has no renderDataSchema on file', async () => {
   await resetAndSeedRequest();
   await seedSiteRecord({ name: 'Dr. Lurié', brandTokens: BRAND_TOKENS });
 
   const originalFetch = globalThis.fetch;
   const { calls, fetchImpl } = stubPdfToolMcp({ create_agent_artifact_job: pendingArtifactJobRoute });
+  globalThis.fetch = fetchImpl;
+  try {
+    const created = await rpc('create_agent_artifact_job', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      artifact_kind: 'pdf',
+      filename: 'no-schema-report.pdf',
+      template_id: 'tpl_no_schema',
+      data: { title: 'No schema on file' },
+      wait: false,
+    });
+    assert.ok(!created.result.isError, JSON.stringify(created.result.structuredContent));
+
+    const jobCall = calls.find((call) => call.tool === 'create_agent_artifact_job');
+    assert.ok(jobCall);
+    assert.deepEqual(jobCall!.body.data, { title: 'No schema on file' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('create_agent_artifact_job leaves a caller-supplied data.brand untouched', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', brandTokens: BRAND_TOKENS });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: objectBrandTemplateRoute,
+  });
   globalThis.fetch = fetchImpl;
   try {
     const callerBrand = { colors: { primary: '#ffffff' }, fonts: { sans: 'Comic Sans', serif: 'x', heading: 'y' } };
@@ -185,7 +314,10 @@ test('create_agent_artifact_job injects nothing when the site has no brandTokens
   await seedSiteRecord({ name: 'Dr. Lurié' });
 
   const originalFetch = globalThis.fetch;
-  const { calls, fetchImpl } = stubPdfToolMcp({ create_agent_artifact_job: pendingArtifactJobRoute });
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: objectBrandTemplateRoute,
+  });
   globalThis.fetch = fetchImpl;
   try {
     const created = await rpc('create_agent_artifact_job', {

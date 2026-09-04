@@ -12,8 +12,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 91 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 91, `Expected 91 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 97 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 97, `Expected 97 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -174,6 +174,103 @@ describe('Tool definitions', () => {
       assert.match(describe_(name), /pdf-tool PDF TEMPLATE/i, `${name} must say templates are not addressed here`);
     }
     assert.match(describe_('object_retire'), /delete_pdf_template/, 'object_retire must point at the right tool');
+  });
+
+  /**
+   * W2 T2.1: the deterministic mapper's read-only face. It creates nothing and
+   * costs no render, so it must be a `read` tool (that is what makes
+   * annotationsFor emit readOnlyHint and stop a client confirming every
+   * preview), and it must be honest about the one slot it deliberately does
+   * not fill.
+   */
+  it('build_pdf_render_data is a read tool that names its unfilled contract and leaves brand to the bridge', () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === 'build_pdf_render_data');
+    assert.ok(tool, 'build_pdf_render_data must be registered');
+    assert.strictEqual(tool!.governance.toolClass, 'read');
+    assert.strictEqual(tool!.governance.autonomyFloor, undefined, 'a read preview needs no approval floor');
+    const properties = (tool!.inputSchema as { properties?: Record<string, unknown>; required?: string[] }).properties;
+    assert.ok(properties && 'site_id' in properties && 'content_item_id' in properties && 'template_id' in properties);
+    assert.deepStrictEqual((tool!.inputSchema as { required?: string[] }).required, ['site_id', 'content_item_id']);
+    assert.match(tool!.description, /WITHOUT creating a job/i);
+    assert.match(tool!.description, /unfilled/);
+    assert.match(tool!.description, /brand/);
+  });
+
+  /**
+   * W2 T2.8 — the cross-cutting pass. T2.1 pinned `build_pdf_render_data`
+   * above when it landed; T2.3/T2.4/T2.5 registered their five tools with
+   * governance but never pinned the classification with a dedicated
+   * assertion, which is exactly the kind of gap that lets a tier drift
+   * silently on a later merge. This locks in all five by name, in one place.
+   *
+   * `render_article_pdf` is the one that matters most: it WRITES — it
+   * attaches a rendered PDF to the article as a `document` media node — so it
+   * must carry `creation`, the same class as `create_agent_artifact_job` and
+   * `create_pdf_template`, never `read`. The other four only inspect or
+   * dry-check state and cost no render/write, so they are `read`, exactly
+   * like `build_pdf_render_data` and `object_validate`.
+   */
+  it('the five remaining W2 PDF-pipeline tools carry the exact toolClass their neighbours do', () => {
+    const expectedToolClass: Record<string, ToolDefinition['governance']['toolClass']> = {
+      verify_pdf_content: 'read',
+      // The one WRITE in the wave — classed like create_agent_artifact_job /
+      // create_pdf_template, never like a read.
+      render_article_pdf: 'creation',
+      validate_pdf_render_data: 'read',
+      get_pdf_render_brand: 'read',
+      validate_content_item: 'read',
+    };
+    for (const [name, expectedClass] of Object.entries(expectedToolClass)) {
+      const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
+      assert.ok(tool, `${name} must be registered`);
+      assert.strictEqual(
+        tool!.governance.toolClass,
+        expectedClass,
+        `${name} should carry toolClass "${expectedClass}", got "${tool!.governance.toolClass}"`
+      );
+    }
+    // render_article_pdf mutates the article — same shape as its creation
+    // neighbours (an approval-card preview, no privileged floor).
+    const renderArticlePdf = TOOL_DEFINITIONS.find((t) => t.name === 'render_article_pdf')!;
+    assert.strictEqual(renderArticlePdf.governance.preview?.kind, 'input_echo');
+    assert.strictEqual(renderArticlePdf.governance.autonomyFloor, undefined);
+    // None of the four reads carry a floor or a preview binding — reads never do.
+    for (const name of ['verify_pdf_content', 'validate_pdf_render_data', 'get_pdf_render_brand', 'validate_content_item']) {
+      const tool = TOOL_DEFINITIONS.find((t) => t.name === name)!;
+      assert.strictEqual(tool.governance.autonomyFloor, undefined, `${name} is a read; it needs no autonomy floor`);
+      assert.strictEqual(tool.governance.preview, undefined, `${name} is a read; it needs no approval preview`);
+    }
+  });
+
+  /**
+   * W2 REVIEW. `callCreateAgentArtifactJob` reads `input.kind` to route
+   * D-1's `site.pdf.byKind[kind]` template lookup and to gate D-4's
+   * article-shaped `requirements` default — but `kind` was never in the
+   * published inputSchema, so no agent could route to `byKind.sales_brochure`
+   * and no agent could opt out of the A4/min-2-pages floor that `kind`
+   * defaulting to 'article' applies to EVERY pdf job. A handler argument that
+   * is not in the schema is an argument that does not exist.
+   *
+   * `filename` left `required` in the same pass: D-4 makes it optional for a
+   * pdf job (article slug + .pdf), and a schema demanding it made that
+   * fallback unreachable.
+   */
+  it('create_agent_artifact_job publishes every argument its handler actually reads', () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === 'create_agent_artifact_job');
+    assert.ok(tool, 'create_agent_artifact_job must be registered');
+    const schema = tool!.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+    assert.ok(schema.properties?.kind, 'kind routes site.pdf.byKind and gates the D-4 requirements default');
+    assert.match(
+      (schema.properties!.kind as { description: string }).description,
+      /byKind/,
+      "kind's description must say what it routes"
+    );
+    assert.deepEqual(schema.required, ['site_id', 'request_id', 'artifact_kind']);
+    assert.match(
+      (schema.properties!.filename as { description: string }).description,
+      /slug/i,
+      'filename must document the pdf-job slug fallback that took it out of required'
+    );
   });
 
   it('every alias target in CHAT_TOOL_ALIASES exists as a definition name', () => {

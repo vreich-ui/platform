@@ -126,3 +126,119 @@ export const injectPdfRenderDataBrand = (siteBody: Record<string, unknown> | und
 
   return { ...(existing ?? {}), brand };
 };
+
+// ─── D-3 (BRIEF-W2.md §3, T2.2): the `[object Object]` regression ──────────
+//
+// The bug: this bridge used to inject `data.brand = {colors, fonts}` into
+// ANY template-render pdf job that carried a templateId, with no regard for
+// what that template's OWN renderDataSchema slots `brand` AS. A template
+// whose Liquid renders `{{ brand }}` directly (a plain string slot) got the
+// literal string "[object Object]" instead — twice, per the 2026-09-03
+// incident report (BRIEF §0). The fix is to ask the template first.
+
+export type RenderDataBrandSlot = 'object' | 'string' | 'none';
+
+/**
+ * Resolves ONE level of a local JSON-Schema `$ref` (`#/$defs/...` or
+ * `#/definitions/...` — the only two forms pdf-tool's own templates use,
+ * per BRIEF §2's `article_brochure_v1` contract). Any other ref shape (a
+ * remote URL, a fragment that does not resolve) returns undefined — the
+ * caller's cue to classify conservatively as 'none' rather than guess.
+ */
+const resolveLocalSchemaRef = (root: Record<string, unknown>, ref: string): Record<string, unknown> | undefined => {
+  if (!ref.startsWith('#/')) return undefined;
+  let node: unknown = root;
+  for (const rawSegment of ref.slice(2).split('/')) {
+    const segment = decodeURIComponent(rawSegment.replace(/~1/g, '/').replace(/~0/g, '~'));
+    if (!isRecord(node)) return undefined;
+    node = node[segment];
+  }
+  return isRecord(node) ? node : undefined;
+};
+
+/**
+ * D-3: classifies a template's `renderDataSchema.properties.brand` as the
+ * structured object shape (`{colors, fonts, logo?}` — article_brochure_v1's
+ * own contract), a plain string slot, or 'none' when the schema does not
+ * declare a usable `brand` slot at all (no schema, no `properties.brand`,
+ * or an unresolved `$ref`). Deliberately conservative on every ambiguous
+ * case — 'none' means "inject nothing", never "guess object like before".
+ */
+export const classifyRenderDataBrandSlot = (renderDataSchema: unknown): RenderDataBrandSlot => {
+  if (!isRecord(renderDataSchema)) return 'none';
+  const properties = getRecordValue(renderDataSchema.properties);
+  const brandSchema = getRecordValue(properties?.brand);
+  if (!brandSchema) return 'none';
+
+  let resolved = brandSchema;
+  if (typeof resolved.$ref === 'string') {
+    const target = resolveLocalSchemaRef(renderDataSchema, resolved.$ref);
+    if (!target) return 'none';
+    resolved = target;
+  }
+
+  if (resolved.type === 'string') return 'string';
+  if (resolved.type === 'object') return 'object';
+  // No explicit `type` but the resolved schema still describes an object
+  // (has its own `properties`) — the JSON-Schema-implicit-object case.
+  if (resolved.type === undefined && isRecord(resolved.properties)) return 'object';
+  return 'none';
+};
+
+/**
+ * The string-slot sibling of `pdfRenderBrandFromSiteBody`: for a template
+ * that slots `{{ brand }}` as a plain string, the site's display name is
+ * the honest analog of "the brand" — never fabricated, just the one field
+ * every site body already carries (`name`, required by site-v1.ts).
+ */
+export const pdfRenderBrandNameFromSiteBody = (body: Record<string, unknown> | undefined): string | undefined =>
+  toNonEmptyString(body?.name);
+
+/**
+ * String-slot sibling of `injectPdfRenderDataBrand`: fills `data.brand` with
+ * the site's display name for a template whose renderDataSchema types `brand`
+ * as a plain string. Same caller-wins / non-object-data-untouched rules as the
+ * object injector.
+ *
+ * W2 REVIEW — IT WRITES `brand`, NOT `brandName`. As shipped, D-3's string
+ * branch wrote `data.brandName` and left `data.brand` empty, which fails a
+ * template that declares a string `brand` TWICE over: these renderDataSchemas
+ * are `additionalProperties: false`, so an undeclared `brandName` key fails
+ * W1's RENDER_DATA_INVALID at job creation, and `{{ brand }}` stays unbound, so
+ * strict binding fails the render with DATA_BINDING_ERROR. That turns an ugly-
+ * but-rendering `[object Object]` into a hard double failure — strictly worse
+ * than the defect the ruling was written to fix. The slot the template declares
+ * is `brand`; the fix is to fill it with a value of the type it declares.
+ * (Ratified 2026-09-04, W2 review; the rulings doc's D-3 row carries it.)
+ */
+export const injectPdfRenderDataBrandString = (
+  siteBody: Record<string, unknown> | undefined,
+  data: unknown
+): unknown => {
+  if (data !== undefined && !isRecord(data)) return data;
+
+  const existing = getRecordValue(data);
+  if (existing && existing.brand !== undefined) return data;
+
+  const brandName = pdfRenderBrandNameFromSiteBody(siteBody);
+  if (!brandName) return data;
+
+  return { ...(existing ?? {}), brand: brandName };
+};
+
+/**
+ * D-3's top-level decision, and the one function mcp-tool-handlers.ts calls:
+ * given the RESOLVED brand-slot classification for a job's templateId, inject
+ * the object shape, the string shape, or nothing at all. The caller never
+ * has to know which of the two injectors above applies, or duplicate the
+ * 'none' no-op case.
+ */
+export const injectPdfRenderDataBrandForSlot = (
+  slot: RenderDataBrandSlot,
+  siteBody: Record<string, unknown> | undefined,
+  data: unknown
+): unknown => {
+  if (slot === 'object') return injectPdfRenderDataBrand(siteBody, data);
+  if (slot === 'string') return injectPdfRenderDataBrandString(siteBody, data);
+  return data;
+};

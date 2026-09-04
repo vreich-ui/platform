@@ -376,6 +376,25 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     ),
     governance: { toolClass: 'read' },
   },
+  {
+    name: 'validate_content_item',
+    description:
+      'Dry-run readiness check for one article (content_item), standalone — is this article publishable, and what ' +
+      'would it warn about, without attempting a publish. Equivalent to object_validate {object_type: "content_item", ' +
+      'object_id} (mode 1), exposed under its own name because object_validate is otherwise reachable only as a side ' +
+      'effect of another verb. Returns the same grouped validation report and summary object_publish would compute ' +
+      'from the identical context, INCLUDING pdf_quality (T2.5, ruling D-D) — a warn-only signal on an attached ' +
+      'PDF\'s content quality (blank pages, unresolved images, unrendered template tokens) when a prior check result ' +
+      'is available; absent one, this reports nothing rather than a fabricated pass. pdf_quality, like every warning ' +
+      'here, NEVER blocks eligibility — check summary.blockers for what actually would.',
+    inputSchema: objectSchema(
+      {
+        object_id: stringSchema('The content_item object id to validate, e.g. article_2026-09-01-moisturizers.'),
+      },
+      ['object_id']
+    ),
+    governance: { toolClass: 'read' },
+  },
 
   // ── Review + publish verbs (P1): the same submit_review / review_decide /
   //    discard / publish_by_time actions the admin UI (admin-object.ts) drives,

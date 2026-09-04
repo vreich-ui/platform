@@ -208,6 +208,13 @@ const VERB_PAYLOAD_BUILDERS: Record<string, VerbPayloadBuilder> = {
     body: args.body,
     requested_id: args.requested_id,
   }),
+  // T2.5: standalone object_validate for one content_item — same 'validate'
+  // action/payload shape object_validate's builder uses, object_type fixed.
+  validate_content_item: (args) => ({
+    action: 'validate',
+    object_type: 'content_item',
+    object_id: args.object_id,
+  }),
   object_inventory: (args) => ({
     action: 'inventory',
     object_type: args.object_type,
@@ -275,6 +282,7 @@ const DESCRIBE_OVERRIDES: Record<string, (args: Record<string, unknown>) => stri
   // Adapted from tools.ts's `validate` (which always required object_id):
   // object_validate has a second, object_id-less candidate-body mode.
   object_validate: (args) => `Validate ${args.object_type}${args.object_id ? ` ${args.object_id}` : ''}`,
+  validate_content_item: (args) => `Validate content_item ${args.object_id}`,
   list_artifacts_for_request: (args) => `List artifacts for ${args.requestId}`,
   object_checkout: (args) => `Check out ${args.object_type} ${args.object_id} for editing`,
   object_patch: (args) =>
@@ -529,6 +537,25 @@ const buildGeneratedTool = (def: ToolDefinition): ChatTool => {
   };
 };
 
+/**
+ * Which registry tools fall through to the OPERATIONAL bridge
+ * (`ctx.operational.call`) rather than an object verb, the membership core, or
+ * one of the two special-cased executors above. Kept next to `buildExecute` so
+ * the two cannot drift, and exported so a test can prove every one of them has
+ * a handler in `agent/context.ts`'s `OPERATIONAL_HANDLERS`.
+ *
+ * W2 review: `verify_pdf_content` shipped registered here, advertised in the
+ * plugin allow-list, and named by the admin PDF card's "Verify" action — with
+ * no handler wired. Every chat call to it returned
+ * "No operational handler is wired for \"verify_pdf_content\"". Nothing caught
+ * it because nothing compared the two lists.
+ */
+const routesToOperationalBridge = (name: string): boolean =>
+  !isMembershipTool(name) &&
+  name !== 'object_contract' &&
+  name !== 'list_artifacts_for_request' &&
+  VERB_PAYLOAD_BUILDERS[name] === undefined;
+
 const WORKSPACE_TOOL_NAMES = [
   'list_workspace_nodes',
   'run_workspace_workflow',
@@ -563,6 +590,11 @@ export const GENERATED_CHAT_TOOLS: readonly ChatTool[] = [
   ...VISIBLE_DEFINITIONS.map(buildGeneratedTool),
   ...workspaceTools,
 ];
+
+/** The registry names `ctx.operational.call` must be able to serve. */
+export const OPERATIONAL_BRIDGE_TOOL_NAMES: readonly string[] = VISIBLE_DEFINITIONS.map((def) => def.name).filter(
+  routesToOperationalBridge
+);
 
 const registryByName = new Map<string, ChatTool>(GENERATED_CHAT_TOOLS.map((tool) => [tool.name, tool]));
 
