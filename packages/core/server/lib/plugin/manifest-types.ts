@@ -50,6 +50,21 @@ export const primaryActorFor = (platform: PluginPlatform): PluginActorId | null 
   platform === 'claude' ? 'plugin:claude' : platform === 'openai' ? 'plugin:openai-gpt' : null;
 
 /**
+ * The inverse — which platform rendered a bundle that declares this actor.
+ *
+ * Needed to re-render a bundle's skill for comparison (see `skillFingerprint`):
+ * the skill text differs by platform, so comparing a Claude bundle against an
+ * OpenAI render would report a permanent, false staleness — and sending an
+ * operator to re-promote a healthy bundle is the exact failure this check
+ * exists to prevent.
+ *
+ * A bundle with no `actor_id` predates that field; callers must skip the
+ * comparison rather than guess, which is why this takes a defined actor only.
+ */
+export const platformForActor = (actor: PluginActorId): PluginPlatform =>
+  actor === 'plugin:claude' ? 'claude' : 'openai';
+
+/**
  * The chat risk class a tool carries in its own definition
  * (`ToolGovernance.toolClass`). W1.3 derives the plugin's allowlist from this
  * rather than hand-maintaining one — see build-tools.ts.
@@ -105,6 +120,27 @@ export const manifestSourcesSchema = z
     aggression_ceiling: z.record(z.string(), z.number()),
     approval_posture: z.string(),
     tool_surface_digest: z.string(),
+    /**
+     * W7.7 — a fingerprint of the RENDERED SKILL TEXT itself.
+     *
+     * The four fields above track the bundle's *inputs*, and between them they
+     * missed two ways the skill can go stale while the page still reads
+     * "Current":
+     *
+     *   1. The RENDERER changes. `render-skill.ts` is code; editing its prose
+     *      moves no input at all. This shipped for real — a direct-to-main
+     *      commit rewrote the drafting instructions and every promoted bundle
+     *      kept serving the old text, reported as current.
+     *   2. The AGGRESSION CEILING changes. It is recorded in
+     *      `aggression_ceiling` above and was never compared, so a site-identity
+     *      edit rewrote the skill's hard bounds with nothing noticing.
+     *
+     * Hashing the output catches both, and anything else the skill embeds,
+     * without a per-input check for each. Optional because bundles promoted
+     * before this field existed are live in the stores: an absent digest means
+     * "predates the check", and the comparison is skipped rather than guessed.
+     */
+    skill_digest: z.string().optional(),
   })
   .strict();
 export type ManifestSources = z.infer<typeof manifestSourcesSchema>;
