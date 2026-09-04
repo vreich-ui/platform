@@ -41,6 +41,13 @@
  * would refuse fails validation with T0.6's own error code, and the op grammar
  * has exactly one owner. T0.8 calls one or the other; this module still never
  * touches the blob store.
+ *
+ * WARN-ONLY content_item signals (never block, by ruling): `article_claim_substrate`
+ * / `article_claim_verification` (D7) and, since T2.5 (ruling D-D), `pdf_quality` —
+ * an attached PDF's content-quality signal, read off an injected
+ * `resolvePdfContentCheck` resolver rather than fetched live (see that check's own
+ * doc, next to `checkPdfContentQuality`, for why a network call has no place here,
+ * and for the snapshot store the W2 review added to actually feed it).
  */
 import { assertReaderSafe } from '../../lib/article-content/assert-reader-safe.js';
 import {
@@ -101,6 +108,11 @@ import {
 } from './artifact-trust.js';
 import { activeMediaPolicy, type MediaPolicy } from '../../lib/media-policy.js';
 import { inferMediaType } from '../../lib/article-content/media-type.js';
+// Type-only: `DocumentContentCheck` is the shape T2.4's (impure, network-calling)
+// pdf-content-inspection.ts produces. Importing only the TYPE keeps this module's
+// "never touches the blob store" contract intact — see checkPdfContentQuality's own
+// doc for why the function that actually PRODUCES this value is never called from here.
+import type { DocumentContentCheck } from './pdf-content-inspection.js';
 
 export type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
 
@@ -241,6 +253,22 @@ export type ObjectValidationContext = {
   aggressionCeiling?: AggressionCeiling;
   /** W7.3: slack around that ceiling. Absent → the site's, else the fleet default. */
   aggressionTolerance?: AggressionTolerance;
+  /**
+   * T2.5 (D-D) — the LAST KNOWN content-quality check (T2.4's DocumentContentCheck)
+   * for one attached PDF, keyed by its `/pdf/<requestId>/<sha256>.pdf` public path
+   * (the same path form PDF_PUBLIC_PATH_RE / checkContentItemMedia already governs).
+   *
+   * This is a read of a result computed ELSEWHERE, never a trigger to compute one:
+   * validation runs synchronously and on every draft save/patch-dry-run/publish
+   * attempt, while producing a DocumentContentCheck means an HTTP round trip to
+   * pdf-tool's inspect_pdf_artifact bridge (see pdf-content-inspection.ts). Mirrors
+   * resolveArtifactRef/resolveStripePrice exactly: a synchronous resolver over
+   * whatever the caller already has in hand. Absent, or returning undefined for a
+   * given path, both mean "not verified" — checkPdfContentQuality then emits
+   * nothing rather than fabricate a pass (see its own doc for why no caller in this
+   * repo wires it yet).
+   */
+  resolvePdfContentCheck?: (publicPath: string) => DocumentContentCheck | undefined;
 };
 
 export type ObjectValidationInput = {
@@ -2128,6 +2156,124 @@ const checkContentItemMedia = (
 };
 
 /**
+ * pdf_quality (T2.5, ruling D-D) — WARN-ONLY content-quality signal on an article's
+ * attached PDF. Exactly the article_claim_substrate posture (see that check's own
+ * doc block below): this criterion NEVER blocks, at draft or at publish alike, and
+ * it never claims a check this pipeline did not actually run.
+ *
+ * WHERE THE SIGNAL COMES FROM, AND WHY IT ISN'T FETCHED HERE. T2.4 split the work in
+ * two: `evaluateDocumentContent` (packages/core/lib/pdf/document-content-check.ts) is
+ * a PURE decision over an already-computed pdf-tool inspection (page count, blank-
+ * page/unresolved-image/unrendered-token findings); `inspectDocumentContent(FromPublicPath)`
+ * (./pdf-content-inspection.ts) is the IMPURE half that calls pdf-tool's
+ * `inspect_pdf_artifact` bridge over HTTP to actually produce one. `object_validate`
+ * runs SYNCHRONOUSLY, on every draft save, every candidate_patch dry-run, and every
+ * publish attempt — invoking that HTTP call from here would put a network round trip
+ * to a separate site's Netlify function on every one of those, for every attached
+ * PDF, turning an instant local pass into one that is only as fast and as reliable as
+ * pdf-tool's own render/inspect endpoint. That is the literal failure mode this
+ * module's own header warns about ("this module never touches the blob store" — an
+ * outbound HTTP call to another service is the same category of side effect), so this
+ * check never calls inspectDocumentContent* itself, live inspection has no place in a
+ * synchronous validation pass.
+ *
+ * Instead this takes the exact shape every other existence/price/registry check in
+ * this file takes: an injected, SYNCHRONOUS resolver (`context.resolvePdfContentCheck`)
+ * that the CALLER supplies from a result already in hand — "cached from a prior
+ * verification", the brief's own second option.
+ *
+ * WHERE THAT RESULT NOW COMES FROM (W2 review — D-D closed). T2.5 shipped this
+ * resolver deliberately unwired, because nothing persisted a verdict a synchronous
+ * pass could read; D-D was therefore a ruling with no implementation. The missing
+ * half is `pdf-content-check-store.ts`: `render_article_pdf` files the render's own
+ * quality-gate verdict at attach time and `verify_pdf_content` files its inspection,
+ * both keyed by the PDF's `/pdf/<requestId>/<sha256>.pdf` artifact, and
+ * `object-validation-context.ts` preloads them in the SAME artifact-index sweep it
+ * already runs for ref existence — "preload once, resolve sync", exactly like
+ * `resolveArtifactRef`. Still no network call from here, ever.
+ *
+ * Absent (or returning undefined for a given path) means "not verified": this check
+ * then emits NOTHING, never a fabricated pass. A verdict is keyed by the ARTIFACT, so
+ * a re-render never inherits the previous PDF's judgement. A validator that says
+ * nothing is better than one that claims a check it did not run.
+ */
+const collectAttachedPdfPaths = (article: ContentItemBody): string[] => {
+  const paths = new Set<string>();
+  const consider = (value: unknown) => {
+    if (typeof value === 'string' && PDF_PUBLIC_PATH_RE.test(value)) paths.add(value);
+  };
+  article.nodes.forEach((node) => {
+    const media = node.public.media;
+    if (media?.type === 'document') consider(media.src);
+    (node.public.images ?? []).forEach((image) => {
+      if (image.type === 'document') consider(image.src);
+    });
+    consider(node.public.ctaLink);
+  });
+  return [...paths];
+};
+
+// Defense in depth (brief §1: no blobKeys/SHAs/tenant paths in agent- or
+// editor-readable text). document-content-check.ts's own contract already scrubs
+// these from a finding's `detail` at the source, but this criterion's message
+// reaches the same publish receipt and admin PDF card article-pdf-card.ts guards
+// with its own redactArticlePdfText — mirrored locally rather than imported (that
+// module is admin/lib, this one is server/lib; neither may depend on the other).
+const PDF_QUALITY_REDACT_RE = /\b(?:image|pdf|document)\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\b|\b[0-9a-f]{64}\b/gi;
+const redactPdfQualityText = (text: string): string => text.replace(PDF_QUALITY_REDACT_RE, '[reference removed]');
+
+export const checkPdfContentQuality = (
+  article: ContentItemBody,
+  context: ObjectValidationContext
+): ReadinessCriterion[] => {
+  const resolve = context.resolvePdfContentCheck;
+  if (!resolve) return [];
+
+  const paths = collectAttachedPdfPaths(article);
+  if (paths.length === 0) return [];
+
+  const failedReasons: string[] = [];
+  let sawOk = false;
+  let unverifiedReason: string | undefined;
+
+  for (const path of paths) {
+    const check = resolve(path);
+    if (!check) continue;
+    if (check.status === 'failed') failedReasons.push(check.reason);
+    else if (check.status === 'ok') sawOk = true;
+    else unverifiedReason = check.reason;
+  }
+
+  // D-D: 'warning' here, NEVER 'missing' — this criterion does not read `atPublish`
+  // at all, because there is no publish-time escalation for it to make.
+  if (failedReasons.length > 0) {
+    return [
+      crit(
+        'pdf_quality',
+        'Attached PDF content quality',
+        'warning',
+        redactPdfQualityText(
+          `The attached PDF's content did not pass inspection: ${failedReasons.slice(0, 3).join(' ')} ` +
+            `This never blocks publish or release — review the PDF (re-render if needed) at your own judgement.`
+        )
+      ),
+    ];
+  }
+  if (sawOk) return [crit('pdf_quality', 'Attached PDF content quality', 'complete', '')];
+  if (unverifiedReason) {
+    return [
+      crit(
+        'pdf_quality',
+        'Attached PDF content quality',
+        'optional',
+        redactPdfQualityText(`Content quality not verified: ${unverifiedReason}`)
+      ),
+    ];
+  }
+  return [];
+};
+
+/**
  * content_item structural invariants (W7.3): node-id uniqueness, slug
  * uniqueness across article objects AND committed legacy posts (one permalink
  * space), and the article-side ≥1-public-content-node rule (A§1.1, carried
@@ -2195,6 +2341,8 @@ const checkContentItemStructure = (
   criteria.push(...checkContentItemClaimSubstrate(article, atPublish));
 
   criteria.push(...checkContentItemMedia(article, context, atPublish));
+
+  criteria.push(...checkPdfContentQuality(article, context));
 
   return criteria;
 };

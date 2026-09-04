@@ -19,13 +19,15 @@
  * submits under its own site checkout.
  *
  * DEGRADING HONESTLY. §3.6 adds `kind`, `renderDataSchema`, `sampleData` and
- * `thumbnailKey` to a pdf-tool template record. Those are produced in the
- * pdf-tool repo and have to survive the platform's own browser projection
- * (`editorial-assets.ts`'s `projectPdfTemplate`, which today whitelists six
- * fields and drops these four). This module accepts them as OPTIONAL and says
- * plainly, per row, what is missing and which affordance that disables —
- * rather than rendering a thumbnail well that is permanently blank or a
- * "Render sample" button that cannot know the sample data.
+ * `thumbnailKey` to a pdf-tool template record (T2.6 adds a fifth,
+ * `thumbnailError` — W1's own reason when publish could not produce one).
+ * Those are produced in the pdf-tool repo and have to survive the platform's
+ * own browser projection (`editorial-assets.ts`'s `projectPdfTemplate`, which
+ * today whitelists these plus the original six and drops everything else).
+ * This module accepts them as OPTIONAL and says plainly, per row, what is
+ * missing and which affordance that disables — rather than rendering a
+ * thumbnail well that is permanently blank or a "Render sample" button that
+ * cannot know the sample data.
  */
 import { getAdminBlobImageEndpoint } from './artifact-preview.js';
 import type { EditorialArtifact } from './editorial-assets.js';
@@ -57,6 +59,8 @@ export interface PdfTemplateInput {
   kind?: string;
   /** §3.6: set by publish; an image blob key. */
   thumbnail_key?: string;
+  /** W1 (pdf-tool) / T2.6: why publish could not produce a thumbnail, when it couldn't. */
+  thumbnail_error?: string;
   /** §3.6: the JSON Schema the materializer fills deterministically (R7). */
   render_data_schema?: unknown;
   /** §3.6: must validate against renderDataSchema at create and publish. */
@@ -136,6 +140,20 @@ export const pdfKindLabel = (kind: unknown): string => {
   if (!key) return 'Unclassified';
   return KIND_LABELS[key] ?? key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 };
+
+/**
+ * The kind choices the byKind selector offers (T2.6): every KNOWN kind
+ * (`KIND_LABELS`) plus any kind actually present on a listed template — so a
+ * tenant's own open-ended kind still shows up even when it is not one of the
+ * built-in labels, sorted for a stable, human-scanned list.
+ */
+export function pdfKindOptions(rows: readonly Pick<PdfTemplateRow, 'kind'>[]): Array<{ kind: string; label: string }> {
+  const kinds = new Set<string>(Object.keys(KIND_LABELS));
+  for (const row of rows) {
+    if (row.kind) kinds.add(row.kind);
+  }
+  return [...kinds].sort((a, b) => a.localeCompare(b)).map((kind) => ({ kind, label: pdfKindLabel(kind) }));
+}
 
 /**
  * Validation status without inventing a read path.
@@ -244,9 +262,15 @@ export function buildPdfTemplatesViewModel(input: {
       ...(thumbnailUrl
         ? { thumbnailUrl }
         : {
-            thumbnailMissingReason: template.thumbnail_key
-              ? 'The stored thumbnail key is not one the admin image reader can serve.'
-              : 'pdf-tool has not published a thumbnail for this template yet.',
+            // T2.6 / W1's `thumbnailError`: a real, pdf-tool-reported reason
+            // beats this module's own guess — a template can carry NEITHER a
+            // key nor an error (thumbnailing simply hasn't run yet), which
+            // still degrades to the honest generic reasons below.
+            thumbnailMissingReason:
+              template.thumbnail_error ??
+              (template.thumbnail_key
+                ? 'The stored thumbnail key is not one the admin image reader can serve.'
+                : 'pdf-tool has not published a thumbnail for this template yet.'),
           }),
       validation,
       canSetDefault,
@@ -348,6 +372,29 @@ export function buildRenderSampleIntent(row: Pick<PdfTemplateRow, 'id' | 'label'
     tool: 'create_agent_artifact_job',
     label: 'Render sample',
     prompt: `Render a sample PDF from template ${row.id} ("${row.label}"): read its sampleData with get_pdf_template, then create_agent_artifact_job with artifact_kind 'pdf', that template, and that sample data as the render data. Poll the existing job rather than creating a second one, and tell me the artifact id when it lands.`,
+  };
+}
+
+/**
+ * The DIRECT chip (T2.6). W1 landed `preview_pdf_template` — first page
+ * only, no job to poll — a much shorter path than the full
+ * `create_agent_artifact_job` above (which produces a complete, multi-page
+ * artifact and needs a poll loop). Labeled honestly: this is a first-page
+ * preview, not the rendered sample `buildRenderSampleIntent` produces, and
+ * the button copy must say so rather than implying a finished document.
+ *
+ * ASSUMED SHAPE — flagged for verification once `preview_pdf_template`
+ * actually reaches this admin surface (it is a pdf-tool MCP tool with no
+ * browser-reachable endpoint today, same seam as `buildRenderSampleIntent`):
+ * this only asserts the tool's NAME and that it takes the template id plus
+ * its own sampleData, which is everything the brief documents about it.
+ */
+export function buildPreviewSampleIntent(row: Pick<PdfTemplateRow, 'id' | 'label'>): VisualIdentityChatIntent {
+  return {
+    starter: 'visual-identity',
+    tool: 'preview_pdf_template',
+    label: 'Render sample (first page only)',
+    prompt: `Render a first-page-only preview of template ${row.id} ("${row.label}") with preview_pdf_template, reading its sampleData with get_pdf_template first. Tell me the artifact id when it lands — say plainly that this is a first-page preview, not the complete document.`,
   };
 }
 

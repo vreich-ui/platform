@@ -117,7 +117,7 @@ export function projectPdfTemplate(value: unknown): PdfTemplateSummary | undefin
     version: Number.isInteger(version) && version > 0 ? version : 1,
     ...(Number.isInteger(activeVersion) && activeVersion > 0 ? { active_version: activeVersion } : {}),
     ...(typeof row.createdAt === 'string' ? { created_at: row.createdAt } : {}),
-    // FIX-U1 / BRIEF §3.6: four additive fields, named explicitly — STILL a
+    // FIX-U1 / BRIEF §3.6 (+ T2.6 / W1's thumbnailError): five additive fields, named explicitly — STILL a
     // whitelist (tests/netlify/admin-editorial-assets.test.ts asserts an
     // upstream `storage` secret never leaks), not a passthrough. Each is
     // forwarded only when the upstream row actually carries it, so a

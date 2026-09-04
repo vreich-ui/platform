@@ -265,12 +265,47 @@ export const verifyPlatformArtifact = (
     options
   );
 
+/**
+ * T2.4: pdf-tool's `inspect_pdf_artifact` (W1) — page count, per-page text length, and the
+ * render-time content quality-gate report, for an artifact ALREADY known to pdf-tool (it
+ * re-runs the same `verifyArtifactMaterialization` check `verify_agent_artifact` does before
+ * reading any bytes). Mirrors `verifyPlatformArtifact`'s shape exactly: same grant, same
+ * requestId + artifactReference input. See `pdf-content-inspection.ts` for the caller that
+ * turns this call's `body` into a pass/fail verdict.
+ */
+export const inspectPlatformArtifact = (
+  grant: PdfToolStorageGrant,
+  requestId: string,
+  artifactReference: Record<string, unknown>,
+  options: PdfToolClientOptions = {}
+) => postPdfTool('inspect-pdf-artifact', projectPayload(grant, { requestId, artifactReference }), options);
+
+/**
+ * T2.3/JOIN B: `renderDataSchema`, `sampleData` and `sampleAssets` are part of
+ * pdf-tool's own create_pdf_template contract (confirmed against its live MCP
+ * tool schema, not guessed) and this client dropped all three on the floor.
+ * A template seeded through the platform bridge therefore arrived at pdf-tool
+ * with NO schema -- which disarms the entire wave, because W1's
+ * RENDER_DATA_INVALID contract gate only fires on a template that has one, and
+ * publish_pdf_template's thumbnail render resolves sampleData's images out of
+ * sampleAssets (without it the stored preview shows broken images). T2.7's
+ * seed script already sends all three and has a readback assertion that fails
+ * loudly on this exact gap; this is the half that makes it pass.
+ *
+ * Typed `unknown` rather than a mirrored JSON-Schema type on purpose: pdf-tool
+ * compiles the schema with ajv and validates sampleData against it there
+ * (SAMPLE_DATA_SCHEMA_MISMATCH / RENDER_DATA_SCHEMA_INVALID). Re-deriving that
+ * judgement here would only let the two drift.
+ */
 export type PlatformCreateTemplateInput = {
   templateJson: unknown;
   renderer?: 'pdfme' | 'react-pdf' | 'typst' | 'chromium';
   templateId?: string;
   label?: string;
   tags?: string[];
+  renderDataSchema?: unknown;
+  sampleData?: unknown;
+  sampleAssets?: unknown;
 };
 
 export const createPlatformPdfTemplate = (
@@ -286,6 +321,9 @@ export const createPlatformPdfTemplate = (
       ...(input.templateId ? { templateId: input.templateId } : {}),
       ...(input.label ? { label: input.label } : {}),
       ...(input.tags ? { tags: input.tags } : {}),
+      ...(input.renderDataSchema !== undefined ? { renderDataSchema: input.renderDataSchema } : {}),
+      ...(input.sampleData !== undefined ? { sampleData: input.sampleData } : {}),
+      ...(input.sampleAssets !== undefined ? { sampleAssets: input.sampleAssets } : {}),
     }),
     options
   );

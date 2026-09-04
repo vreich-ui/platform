@@ -125,6 +125,25 @@ and `is_error` alone is never a reason to paint something red. Fleet law holds: 
 schedule block belongs in every `sites/<client>/netlify.toml`, and the W19 mail
 env carries the full P2 obligation. Execution: the W19 rows in queue.tsv.
 
+## W2 — PDF PIPELINE FORTIFICATION: ONE-CALL RENDER, WARN-ONLY QUALITY (2026-09-03, GOVERNING)
+
+The article → PDF path is governed by
+[`docs/cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md`](docs/cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md)
+(rulings D-A–D-D, the D-1–D-4 bridge defaults) and its agent-facing contract by
+[`docs/agents/publishing-policy.md`](docs/agents/publishing-policy.md) §6.4 and
+[`docs/agents/pdf-tool-artifacts.md`](docs/agents/pdf-tool-artifacts.md). The two things you will
+hit in ordinary work: **use `render_article_pdf`, not a hand-assembled
+`create_agent_artifact_job`, to make a PDF of an article** — it maps render data
+(`packages/core/lib/pdf/render-data-mapper.ts`, D-C), resolves the template from
+`site.pdf.byKind`/`defaultTemplateId` (D-1), and attaches the result as one call, returning a
+receipt as the deliverable. **Content-quality findings and a failing attached PDF WARN, they
+never block** (D-A, D-D) — a render or a publish with quality findings still completes; only a
+typed pdf-tool failure (`RENDER_DATA_INVALID`, `ASSET_MISSING`, `DATA_BINDING_ERROR`, …) is a
+real failure. Every tool's tier (`governance.toolClass`) and its presence in the drlurie
+publishing plugin's allow-list are pinned by name in
+`packages/core/server/lib/mcp-tool-definitions.test.ts` and `tests/netlify/plugin-manifest.test.ts` —
+extend those, not a parallel test file, when a future wave adds another PDF tool.
+
 ## Definition of "converted" — NO HALF MEASURES (Wolf, 2026-07-10, GOVERNING)
 
 The entire project goal is: **agents can change objects on every page — add

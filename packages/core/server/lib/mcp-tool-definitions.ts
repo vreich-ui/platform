@@ -359,7 +359,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'verify_article_images',
     description:
-      'Verify that a published article page contains the expected images and that each is fetchable as an image. DEPLOY-AWARE TIMING: pass the publish commit as "commit" and this tool correlates the check to that commit\'s Netlify deploy — image assertions run only once that deploy is confirmed "ready", and a page still served by a stale/previous deploy comes back inconclusive:true (deploy timing), never a false missing-image defect. deployReady:true in the response means the target deploy is live and the result is definitive. Without a commit it falls back to the legacy heuristic (poll deploy_status until deployStatus is "ready" yourself first; an immediate check may hit the previous deploy). A response with inconclusive:true means the deploy is probably not live yet — retry later; it is NOT a proven image defect. MATCHING: for LEGACY committed-asset articles pass the display paths from the publish response (e.g. ~/assets/images/uploads/{slug}/{file}.png) — Astro rewrites committed assets to hashed build URLs (/_astro/{file}.{hash}.{ext}), so matching falls back from exact URL to filename-stem. For OBJECT articles (content_item) pass the node media PUBLIC paths (/img/{id}/{sha256}.{ext}) — they appear verbatim as the rendered <img> src, and the object_publish response\'s production.article_path gives the page URL. Each result reports matchedUrl/matchedBy. DOCUMENTS (PDF attachments, node media {type:"document"}): pass their public paths (/pdf/{id}/{sha256}.pdf) as expectedDocuments — each must appear on the page as an <a href> / <object data> (never an <img>) and fetch as content-type application/pdf; results come back under "documents" and count toward verified. Server-only publish credentials are never accepted as inputs or returned.',
+      'Verify that a published article page contains the expected images and that each is fetchable as an image. DEPLOY-AWARE TIMING: pass the publish commit as "commit" and this tool correlates the check to that commit\'s Netlify deploy — image assertions run only once that deploy is confirmed "ready", and a page still served by a stale/previous deploy comes back inconclusive:true (deploy timing), never a false missing-image defect. deployReady:true in the response means the target deploy is live and the result is definitive. Without a commit it falls back to the legacy heuristic (poll deploy_status until deployStatus is "ready" yourself first; an immediate check may hit the previous deploy). A response with inconclusive:true means the deploy is probably not live yet — retry later; it is NOT a proven image defect. MATCHING: for LEGACY committed-asset articles pass the display paths from the publish response (e.g. ~/assets/images/uploads/{slug}/{file}.png) — Astro rewrites committed assets to hashed build URLs (/_astro/{file}.{hash}.{ext}), so matching falls back from exact URL to filename-stem. For OBJECT articles (content_item) pass the node media PUBLIC paths (/img/{id}/{sha256}.{ext}) — they appear verbatim as the rendered <img> src, and the object_publish response\'s production.article_path gives the page URL. Each result reports matchedUrl/matchedBy. DOCUMENTS (PDF attachments, node media {type:"document"}): pass their public paths (/pdf/{id}/{sha256}.pdf) as expectedDocuments — each must appear on the page as an <a href> / <object data> (never an <img>) and fetch as content-type application/pdf; results come back under "documents" and count toward verified. CONTENT CHECK: a document that is present/200/application-pdf is ALSO inspected for actual content (page count, blank pages, unresolved images, unrendered template tokens) via the pdf-tool bridge\'s inspect_pdf_artifact — a document whose pages are garbage is ok:false with a reason, not ok:true just because the file exists. Each result carries a "content" field: {status:"ok",...} on a clean inspection, {status:"failed",reason,findings} when the content itself is bad, or {status:"unverified",reason} when the content could not be inspected at all (never claimed as success either way). Optional documentContentRequirements ({minPageCount, maxBytes}) applies to every expectedDocuments entry this call checks. There is NO page-count floor by default (a one-page PDF is not a defect) — pass minPageCount if this document is contractually longer; a page-count floor otherwise belongs on the render job\'s own requirements.pageCount, which the render enforces. Server-only publish credentials are never accepted as inputs or returned.',
     inputSchema: objectSchema(
       {
         url: stringSchema('Published article URL to fetch and inspect for <img> src/srcset sources.'),
@@ -374,6 +374,16 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
           items: stringSchema('Expected document (PDF) public path, e.g. /pdf/{id}/{sha256}.pdf, or its absolute URL.'),
           description:
             'Optional PDF attachments (node media type "document") that must appear on the page as an <a href> or <object data> and be fetchable with content-type application/pdf. Pass the public_path the artifact bridge returned, verbatim.',
+        },
+        documentContentRequirements: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            minPageCount: { type: 'integer', minimum: 1, description: 'Minimum pages. No floor by default (effectively 1).' },
+            maxBytes: { type: 'integer', minimum: 1 },
+          },
+          description:
+            'Optional content requirement applied to every expectedDocuments entry checked this call (page count, byte size). Omit for no page-count floor and no byte limit; the blank-page / unresolved-image / leaked-token checks always run.',
         },
         commit: stringSchema(
           "Optional publish commit SHA. When set, the check waits for/correlates to that commit's Netlify deploy so a not-yet-live deploy returns inconclusive instead of a false missing-image defect. Use the commit_sha from the publish receipt."
@@ -393,6 +403,38 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         },
       },
       ['url', 'expectedImages']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'verify_pdf_content',
+    description:
+      'Inspect ONE PDF for actual content quality standalone — the same check verify_article_images now runs on expectedDocuments, without needing a whole page verification. Checks whether every content page has readable body text, whether every image reference resolved, and whether any Liquid/template token or "[object Object]"/"undefined" leaked onto a page — via the pdf-tool bridge\'s inspect_pdf_artifact (W1). Pass EITHER url (the public artifact path/URL, /pdf/{requestId}/{sha256}.pdf — the same public_path this bridge hands back everywhere else) OR artifactReference ({blobKey, sha256}) if you already have one; provide exactly one. Never guesses: status is "ok" only on a clean inspection, "failed" with a reason and findings[] when the content itself is bad, or "unverified" with a reason when the content could not be inspected at all (an unrecognized url, the pdf-tool bridge unavailable, an unverifiable reference) — unverified never claims success. Optional requirements ({minPageCount, maxBytes}) ADD a page-count floor and a byte ceiling; neither is applied by default (a one-page PDF is not a defect — a length contract belongs on the render job\'s requirements.pageCount, which the render enforces).',
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        url: stringSchema('Public artifact path or absolute URL, e.g. /pdf/{requestId}/{sha256}.pdf.'),
+        artifactReference: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            blobKey: { type: 'string', description: 'pdf/{requestId}/{sha256}.pdf' },
+            sha256: { type: 'string' },
+          },
+          description: 'Alternative to url when you already hold the artifact reference.',
+        },
+        requirements: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            minPageCount: { type: 'integer', minimum: 1, description: 'Minimum pages. No floor by default (effectively 1).' },
+            maxBytes: { type: 'integer', minimum: 1 },
+          },
+          description:
+            'Optional content requirement. Omit for no page-count floor and no byte limit; the blank-page / unresolved-image / leaked-token checks always run.',
+        },
+      },
+      ['site_id']
     ),
     governance: { toolClass: 'read' },
   },
@@ -433,7 +475,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'create_agent_artifact_job',
     description:
-      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). OVERRIDE CHANNEL (`style`, BRIEF §3.4/D4): pass `style.visualStandardId` and/or `style.override` to point THIS job at a different visual_standard or a one-off partial brandImagery instead of the site's own — see the `style` field's own description for the full resolution order and the guardrail. requirements.image.usageContext not recognized by this project's image-model routing policy (get_image_model_policy's `contexts`) is coerced to article_body and reported in the response's `warnings` (never an error); when requirements.image.size is omitted, the effective brandImagery's aspectRatios[usageContext] (site's own, or from the resolved style) maps to the nearest of pdf-tool's 5 allowed sizes. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
+      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. For a PDF OF AN ARTICLE prefer render_article_pdf, which runs this call with the render-data mapper, the poll and the attach; if you do call this directly, omit `data` (Platform maps the article), and pass `kind` when the render is not an article — `kind` picks the template from site.pdf.byKind and gates the article-shaped requirements default (see the field). If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). OVERRIDE CHANNEL (`style`, BRIEF §3.4/D4): pass `style.visualStandardId` and/or `style.override` to point THIS job at a different visual_standard or a one-off partial brandImagery instead of the site's own — see the `style` field's own description for the full resolution order and the guardrail. requirements.image.usageContext not recognized by this project's image-model routing policy (get_image_model_policy's `contexts`) is coerced to article_body and reported in the response's `warnings` (never an error); when requirements.image.size is omitted, the effective brandImagery's aspectRatios[usageContext] (site's own, or from the resolved style) maps to the nearest of pdf-tool's 5 allowed sizes. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
@@ -443,7 +485,12 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         prompt: stringSchema(
           'Generation prompt; required for image generation. For an image-GENERATION job on a site with a brandImagery contract this is the SUBJECT ONLY (e.g. "a jar of moisturizer on a marble countertop") — Platform prepends the site\'s styleSentence server-side. Never author style/medium/lighting/mood here; a site without brandImagery uses this text verbatim.'
         ),
-        filename: stringSchema('Output filename including the format-matching extension.'),
+        filename: stringSchema(
+          'Output filename including the format-matching extension. REQUIRED for an image job. For a pdf job it may be omitted, in which case Platform uses the owning article\'s slug + ".pdf" (D-4).'
+        ),
+        kind: stringSchema(
+          'PDF jobs only: the artifact kind this render is, used to pick the template from the site\'s configured defaults — site.pdf.byKind[kind] ?? site.pdf.defaultTemplateId (D-1) — when template_id is omitted, AND to decide whether the article requirements default applies (D-4). The set is open and per-site; "article", "lead_magnet" and "sales_brochure" are the seeded ones (list_pdf_templates shows each template\'s own kind). DEFAULTS TO "article", which also means the A4/portrait/min-2-pages/8MB requirements default is applied when you supply no requirements — pass the real kind (e.g. "sales_brochure") for a one-page or non-A4 render, or supply your own requirements, so a correct render is not failed by a floor meant for articles.'
+        ),
         slot: stringSchema('Stable request-scoped slot such as article_image_1.'),
         model: stringSchema('Optional explicit model; omit to use the registered project policy.'),
         requirements: anyObjectSchema(
@@ -493,7 +540,12 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         },
         idempotency_key: idempotencyKeyJsonSchema,
       },
-      ['site_id', 'request_id', 'artifact_kind', 'filename']
+      // `filename` left the required set in the W2 review: D-4 made it optional
+      // for a pdf job (it falls back to the article's slug), and a published
+      // schema that demands what the handler no longer needs makes that
+      // fallback unreachable for any caller that honours the schema. An image
+      // job with no filename is still refused by the handler, by name.
+      ['site_id', 'request_id', 'artifact_kind']
     ),
     governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
@@ -544,7 +596,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'create_pdf_template',
     description:
-      "Create or version a pdf-tool PDF template for THIS site through the trusted Platform bridge. Platform resolves the canonical project and mints/forwards a short-lived storage grant server-side; never call pdf-tool directly or pass a grant yourself — this bridge is the ONLY place the grant is minted, and it is never returned to you. Draft only — call publish_pdf_template to activate. renderer is pinned for the template's life. Required call sequence by renderer: pdfme creates then publishes immediately (warn-only on any lint issues). react-pdf/typst/chromium MUST go create_pdf_template -> validate_pdf_template -> poll get_pdf_template_validation until the report is terminal -> publish_pdf_template, which refuses (HTTP 409 TEMPLATE_VALIDATION_REQUIRED) without a PASSED report for that exact version. If this call itself times out or 502s (ambiguous whether the template/version was created), retry with the SAME idempotency_key to get back the original template/version instead of creating a duplicate. Error codes: template_scope_required, template_site_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed — see the platform's artifact/template error catalog for meaning + remedy.",
+      "Create or version a pdf-tool PDF template for THIS site through the trusted Platform bridge. Platform resolves the canonical project and mints/forwards a short-lived storage grant server-side; never call pdf-tool directly or pass a grant yourself — this bridge is the ONLY place the grant is minted, and it is never returned to you. Draft only — call publish_pdf_template to activate. renderer is pinned for the template's life. PASS render_data_schema (and sample_data / sample_assets) for any template that renders from article data: they are the render-data CONTRACT, forwarded verbatim to pdf-tool, and a template created without a schema gets no contract validation on any job that renders it. Required call sequence by renderer: pdfme creates then publishes immediately (warn-only on any lint issues). react-pdf/typst/chromium MUST go create_pdf_template -> validate_pdf_template -> poll get_pdf_template_validation until the report is terminal -> publish_pdf_template, which refuses (HTTP 409 TEMPLATE_VALIDATION_REQUIRED) without a PASSED report for that exact version. If this call itself times out or 502s (ambiguous whether the template/version was created), retry with the SAME idempotency_key to get back the original template/version instead of creating a duplicate. Error codes: template_scope_required, template_site_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed — see the platform's artifact/template error catalog for meaning + remedy.",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
@@ -557,6 +609,16 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         template_id: stringSchema('Optional existing template id to version instead of creating a new template.'),
         label: stringSchema('Optional human-readable label.'),
         tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional list of tags.'),
+        render_data_schema: anyObjectSchema(
+          "The JSON Schema (draft-07-compatible) describing the `data` this template's renders expect — the RENDER-DATA CONTRACT. Forwarded verbatim to pdf-tool as renderDataSchema. Supply it for any template that will be rendered from article data: a job's `data` is validated against it at job creation and again at render (RENDER_DATA_INVALID), and a template WITHOUT one gets no contract check at all — which is how a render can silently produce blank pages and [object Object]. When sample_data is supplied too, pdf-tool validates the sample against this schema at create and again at publish (SAMPLE_DATA_SCHEMA_MISMATCH, or RENDER_DATA_SCHEMA_INVALID if the schema itself does not compile)."
+        ),
+        sample_data: {
+          description:
+            "Example render data for this template version, forwarded verbatim to pdf-tool as sampleData. Used for previews and for the thumbnail render at publish time, and validated against render_data_schema when both are present. Any JSON value the schema accepts.",
+        },
+        sample_assets: anyObjectSchema(
+          "The image assets sample_data REFERENCES, in exactly the shape a render job's `assets` takes: { images: [{ assetId, blobKey } | { assetId, dataUri }] }. Forwarded verbatim as sampleAssets. Supply it whenever sample_data names image assetIds — publish_pdf_template's thumbnail render resolves those images from here, and without it the stored preview shows broken images."
+        ),
         idempotency_key: idempotencyKeyJsonSchema,
       },
       ['site_id', 'template_json']
@@ -588,6 +650,80 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         version: intSchema('Optional specific version; omit for the active version.'),
       },
       ['site_id', 'template_id']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'build_pdf_render_data',
+    description:
+      "Show what a content_item WOULD render as: runs Platform's deterministic article -> render-data mapper over the article and returns { data, assets, unfilled } WITHOUT creating a job, changing anything, or costing a render. Read-only. `data` is the render data for the template's renderDataSchema; `assets.images[]` is the { assetId, blobKey } job-asset list the images need (an article's images are site-relative /img/... paths, which the render service cannot fetch — the mapper converts each one and puts the BARE asset id in the data slot, so never hand-author these); `unfilled[]` names, in stable codes, everything the article carried nothing for (missing:<slot>), everything skipped (skipped_node:<kind>:<nodeId>) and every image that could not be converted (unconvertible_image:<slot>) — it is the answer to \"why is this PDF thin\". With template_id, the output is shaped to THAT template's renderDataSchema (a template that declares none is mapped against the generic article_brochure_v1 contract, and the response says so in schemaSource); without one, article_brochure_v1's contract is the target. `data.brand` is NOT filled here and is reported as missing:brand on purpose — the bridge injects the site's brand at job creation. Use this to preview or debug; to actually render, call create_agent_artifact_job with the same content_item_id and let it run the same mapper.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        content_item_id: stringSchema('The content_item object id (the article) to map.'),
+        template_id: stringSchema(
+          "Optional pdf-tool template id whose renderDataSchema to target; omit for the generic article contract."
+        ),
+      },
+      ['site_id', 'content_item_id']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'render_article_pdf',
+    description:
+      "THE ONE CALL that turns an article into an attached PDF — use this, not create_agent_artifact_job, whenever the goal is 'make a PDF of this article'. It runs the whole sequence in one shot: builds the render data with Platform's deterministic article -> render-data mapper (never hand-author `data`), resolves the template (site.pdf.byKind['article'] ?? site.pdf.defaultTemplateId when template_id is omitted) and the site's brand, creates the render job, POLLS it to completion, reads the content quality gate, and attaches the finished PDF to the article as a `document` media node. Returns a RECEIPT — the receipt is the deliverable: `status`, `jobId`, `rendered`, `public_path` (where the finished PDF lives — the same public_path this bridge returns for every completed artifact, present on every completed render including attach:false), `attached` (+ `attachment.nodeId`/`href`, the same path again, saying where it landed on the article), `pageCount`, `qualityGate` {passed, findings[]}, `warnings[]`, `unfilled[]` (stable codes for everything the article carried nothing for — the answer to 'why is this PDF thin'), and a one-sentence `summary`. QUALITY-GATE FINDINGS WARN, THEY NEVER BLOCK: a job that completes WITH findings (BLANK_PAGE / UNRESOLVED_IMAGE / UNRENDERED_TOKEN) still attaches and the findings ride the receipt — report them plainly, do not describe such a render as failed. A real failure is a real failure: pdf-tool's own typed codes (RENDER_DATA_INVALID, ASSET_MISSING, DATA_BINDING_ERROR, …) come back as themselves in `error.code`, `status` is 'failed', and nothing is attached. POLLING TERMINATES: if the render outlives this call's budget the receipt comes back with `status: 'pending'`, the jobId, and polling instructions — that means STILL RENDERING, never a silent success; poll get_agent_artifact_job_status with that jobId, do not re-render. Pass attach:false to render without touching the article — the receipt still names the PDF in `public_path`. Error codes: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_job_scope_mismatch, pdf_render_job_not_created.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        content_item_id: stringSchema('The content_item object id (the article) to render and attach a PDF for.'),
+        template_id: stringSchema(
+          "Optional pdf-tool template id. Omit to use the site's configured default for kind 'article' (site.pdf.byKind.article ?? site.pdf.defaultTemplateId)."
+        ),
+        filename: stringSchema(
+          "Optional artifact filename. Omit to derive it from the article's own slug — never pass a generic placeholder like 'document' or 'output'."
+        ),
+        attach: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Attach the finished PDF to the article as a `document` media node (default true). false renders and reports without touching the article at all.',
+        },
+        idempotency_key: idempotencyKeyJsonSchema,
+      },
+      ['site_id', 'content_item_id']
+    ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'validate_pdf_render_data',
+    description:
+      "Dry-check render data against a template's contract WITHOUT creating a job or spending a render. Answers the two questions W1 fails a real job on: does `data` satisfy the template's renderDataSchema (RENDER_DATA_INVALID at job creation), and does `assets` supply every job asset the data names (ASSET_MISSING at dispatch). Returns `valid`, `schemaValid`, ajv-shaped `errors[]` ({instancePath, schemaPath, keyword, message} — JSON pointers into your data), `missingAssetIds[]`, `unusedAssetIds[]` and `referencedAssetIds[]`. `authoritative` is false when the template's schema uses a keyword this pre-flight does not implement — pdf-tool's own validator is always the final word, and this tool never claims otherwise. A template that declares no renderDataSchema is checked against the generic article_brochure_v1 contract and the response says so in `schemaSource` (such a template also gets NO contract check on a real job — seed one via create_pdf_template's render_data_schema). Read-only. To get data worth checking, call build_pdf_render_data; to render, call render_article_pdf.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        template_id: stringSchema("The pdf-tool template id whose renderDataSchema to check against."),
+        data: anyObjectSchema('The render data object to check.'),
+        assets: anyObjectSchema(
+          "The job assets that would accompany the render: { images: [{ assetId, blobKey }] }. Omit to check the schema only — any asset id `data` names then reports as missing, which is the truth for a job with no assets."
+        ),
+      },
+      ['site_id', 'template_id', 'data']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'get_pdf_render_brand',
+    description:
+      "Show the brand payload this site's PDF renders will actually be given, without rendering anything. Platform injects the site's governed brandTokens into a template-render job's `data` — but WHAT it injects depends on the template: a renderDataSchema that slots `brand` as an object gets the full { colors, fonts, logo? } block; one that slots it as a plain string gets the SAME `brand` slot filled with the site's name as a string (injecting an object there is what printed `[object Object]` on 2026-09-03; injecting a `brandName` key the schema never declares would fail an `additionalProperties:false` contract outright, which is why the slot written is always `brand`); a template that declares neither gets nothing and the template's own baked-in defaults carry the render. Pass template_id for the actual decision for that template (`brandSlot` + `injected`); omit it to see both candidate payloads. `hasBrandTokens: false` means the site has no usable brandTokens and NOTHING is injected — a partial or invented brand is never fabricated. Read-only.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        template_id: stringSchema(
+          "Optional pdf-tool template id. With it, the response reports the actual brand slot classification and exactly what would be merged into `data` for that template."
+        ),
+      },
+      ['site_id']
     ),
     governance: { toolClass: 'read' },
   },

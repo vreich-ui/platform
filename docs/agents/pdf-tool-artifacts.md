@@ -18,6 +18,36 @@ There is no raw grant RPC. The three visible bridge tools are the supported
 agent contract, so storage credentials cannot enter agent context even if a
 legacy tool name is guessed.
 
+## Rendering a PDF FOR AN ARTICLE (W2): use `render_article_pdf`, not the raw job flow
+
+Everything below this point in the doc describes the general artifact-job flow (any
+`artifact_kind`, any `template_id`). For the common case — "make a PDF of this content_item
+article" — skip straight to **`render_article_pdf {site_id, content_item_id, template_id?,
+filename?, attach?}`**. It runs build render data → resolve template → create job → poll to
+completion → read the quality gate → attach as a `document` media node, as one call, and
+returns a receipt (`status`, `jobId`, `rendered`, `attached`, `qualityGate`, `warnings[]`,
+`unfilled[]`, `summary`). It never hand-authors `data` — that is exactly the mistake that
+produced a `[object Object]`/blank-page PDF on 2026-09-03.
+
+Five read-only tools support it, none of which cost a render:
+
+| Tool | What it answers |
+|---|---|
+| `build_pdf_render_data` | What would this article map to as render data — `{data, assets, unfilled}` — without creating a job. |
+| `validate_pdf_render_data` | Does this `data`/`assets` pair satisfy a template's `renderDataSchema` and asset list, without spending a render. |
+| `get_pdf_render_brand` | What brand payload (object, string, or nothing) a template will actually receive — see the D-3 rule below. |
+| `verify_pdf_content` | Inspect one already-rendered PDF's content quality standalone (page count, body text, image resolution, leaked tokens). |
+| `validate_content_item` | The standalone form of `object_validate` for one article, including its `pdf_quality` warning when a prior PDF check exists. |
+
+**Content quality WARNS, it never blocks (ruling D-A).** A render that completes with
+quality-gate findings still attaches; only a typed pdf-tool failure (`RENDER_DATA_INVALID`,
+`ASSET_MISSING`, `DATA_BINDING_ERROR`, …) is a real failure. Full ruling set (D-A–D-D) and the
+bridge's D-1–D-4 defaults (template resolution via `site.pdf`, the mapper running by default,
+brand-shape-aware injection, filename/requirements defaults):
+[`../cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md`](../cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md).
+The mapper itself lives at `packages/core/lib/pdf/render-data-mapper.ts` (ruling D-C — this
+platform's own mapper, not cms-agent's workflow-plane one).
+
 ## Current architecture
 
 1. The agent creates or updates the Dr. Lurie workflow JSON through the existing Dr. Lurie MCP checkout, patch, and checkin tools.

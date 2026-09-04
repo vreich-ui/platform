@@ -23,6 +23,8 @@ import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY, type 
 import { isBlobCredentialsConfigured } from './blob-store.js';
 import { loadContentItemIds } from './content-item-index.js';
 import type { ArtifactRefResolution, ObjectValidationContext, PageTypeConstraint } from './object-validate.js';
+import type { DocumentContentCheck } from './pdf-content-inspection.js';
+import { loadPdfContentChecks } from './pdf-content-check-store.js';
 import type { ObjectVerbStore } from './object-verbs.js';
 import { getPageTypeDefinition } from '../../lib/registry/page-types.js';
 import { isRegisteredSectionType } from '../../lib/registry/components/registered-types.js';
@@ -48,6 +50,25 @@ type SelfRef = {
    * Loaded record bodies are always swept in addition.
    */
   artifactRefSources?: unknown[];
+  /**
+   * T2.5 — a pre-computed snapshot of PDF content-quality checks, keyed by the
+   * exact `/pdf/<requestId>/<sha256>.pdf` public path `object-validate.ts`'s
+   * `pdf_quality` criterion looks up (`resolvePdfContentCheck` on
+   * ObjectValidationContext). This is a PASSTHROUGH, not a fetch: nothing in
+   * this function calls out to pdf-tool's `inspect_pdf_artifact` bridge to
+   * populate it — that would be exactly the live-network-call-in-a-synchronous-
+   * validation-pass this check's own doc refuses to do.
+   *
+   * W2 review: this OVERRIDE is now the exception, not the only source. When it
+   * is absent, the artifact-index sweep below preloads whatever
+   * `render_article_pdf` / `verify_pdf_content` last recorded for the PDFs this
+   * write is about (`pdf-content-check-store.ts`) — that is what closes ruling
+   * D-D. Supply this only to pin a specific verdict (a test, or a caller with a
+   * fresher result in hand); it wins over the stored snapshot.
+   * Absent, and nothing stored → `resolvePdfContentCheck` is absent → the
+   * criterion emits nothing, which is still "not verified", never a pass.
+   */
+  documentContentChecks?: Record<string, DocumentContentCheck>;
 };
 
 // Bounds the per-write index preload; validation resolves at most this many
@@ -304,19 +325,29 @@ export const buildStoreValidationContext = async (
   // validation. Any resulting body validation sees derives from these sources.
   let resolveArtifactRef: ObjectValidationContext['resolveArtifactRef'];
   let artifactIndexUnreadable: string[] | undefined;
+  // W2 review (ruling D-D, closed): the SAME sweep also names every PDF this
+  // write is about, so the last-known content-quality snapshot for each is
+  // preloaded here — one `get` per attached PDF (in practice zero or one),
+  // beside the reference read already happening for the same key. "Preload
+  // once, resolve sync", exactly like `resolveArtifactRef` above; nothing
+  // calls pdf-tool, and a missing snapshot stays "not verified".
+  let preloadedContentChecks: Record<string, DocumentContentCheck> | undefined;
   if (self.artifactIndexStore) {
     const candidates = collectArtifactRefCandidates([
       ...(self.artifactRefSources ?? []),
       ...[...records.values()].map((record) => record.body),
     ]);
     if (candidates.size > 0) {
-      const preloaded = await preloadArtifactRefResolutions(
-        self.artifactIndexStore,
-        candidates,
-        isBlobCredentialsConfigured()
-      );
+      const [preloaded, contentChecks] = await Promise.all([
+        preloadArtifactRefResolutions(self.artifactIndexStore, candidates, isBlobCredentialsConfigured()),
+        loadPdfContentChecks(
+          self.artifactIndexStore,
+          [...candidates].filter((ref) => ref.startsWith('pdf/')).map((ref) => `/${ref}`)
+        ),
+      ]);
       resolveArtifactRef = (blobKey) => preloaded.resolutions.get(blobKey);
       if (preloaded.unreadable.length > 0) artifactIndexUnreadable = preloaded.unreadable;
+      if (Object.keys(contentChecks).length > 0) preloadedContentChecks = contentChecks;
     }
   }
 
@@ -359,6 +390,14 @@ export const buildStoreValidationContext = async (
       }
     : undefined;
 
+  // A caller-supplied snapshot always wins over the preloaded one (same
+  // "caller wins" rule as every other default in this wave); otherwise the
+  // store's own snapshots answer.
+  const documentContentChecks = self.documentContentChecks ?? preloadedContentChecks;
+  const resolvePdfContentCheck: ObjectValidationContext['resolvePdfContentCheck'] = documentContentChecks
+    ? (publicPath) => documentContentChecks[publicPath]
+    : undefined;
+
   return {
     resolveObject,
     resolveSharedSectionType,
@@ -372,5 +411,6 @@ export const buildStoreValidationContext = async (
     ...(resolveTaxonomyTerm ? { resolveTaxonomyTerm } : {}),
     ...(resolveArtifactRef ? { resolveArtifactRef } : {}),
     ...(artifactIndexUnreadable ? { artifactIndexUnreadable } : {}),
+    ...(resolvePdfContentCheck ? { resolvePdfContentCheck } : {}),
   };
 };

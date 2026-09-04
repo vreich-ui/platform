@@ -66,6 +66,11 @@ import {
   callGetImageSearchJobStatus,
   callGetImageSearchPolicy,
   callGetPdfTemplate,
+  callBuildPdfRenderData,
+  callVerifyPdfContent,
+  callRenderArticlePdf,
+  callValidatePdfRenderData,
+  callGetPdfRenderBrand,
   callGetPdfTemplateValidation,
   callImportImageFromUrl,
   callImportImagesFromUrl,
@@ -196,6 +201,20 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
     ),
   list_pdf_templates: callListPdfTemplates,
   get_pdf_template: callGetPdfTemplate,
+  build_pdf_render_data: callBuildPdfRenderData,
+  // W2 review: registered in the tool registry and named by the admin PDF
+  // card's "Verify" action from the day it landed, but never wired here — so
+  // every chat/plugin call to it came back "No operational handler is wired".
+  // OPERATIONAL_BRIDGE_TOOL_NAMES + generated-tools.test.ts now pin the pair.
+  verify_pdf_content: callVerifyPdfContent,
+  // W2 T2.3: the composite creates a paid render job and patches the article,
+  // so it replicates create_agent_artifact_job's idempotency wrapping exactly.
+  render_article_pdf: (event, args) =>
+    withIdempotentToolCall(event, 'render_article_pdf', args.idempotency_key, () =>
+      callRenderArticlePdf(event, args)
+    ),
+  validate_pdf_render_data: callValidatePdfRenderData,
+  get_pdf_render_brand: callGetPdfRenderBrand,
   validate_pdf_template: callValidatePdfTemplate,
   get_pdf_template_validation: callGetPdfTemplateValidation,
   publish_pdf_template: callPublishPdfTemplate,
@@ -273,6 +292,15 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   // is generated (agent/generated-tools.ts), not hand-authored in tools.ts.
   brand_imagery_propose: callBrandImageryPropose,
 };
+
+/**
+ * The names `ctx.operational.call` can actually serve. Exported so
+ * `generated-tools.test.ts` can prove it covers every registry tool that routes
+ * here (`OPERATIONAL_BRIDGE_TOOL_NAMES`) — a registry entry with no handler
+ * lists and previews fine and then fails at call time, which is exactly how
+ * `verify_pdf_content` shipped in W2.
+ */
+export const OPERATIONAL_HANDLER_NAMES: readonly string[] = Object.keys(OPERATIONAL_HANDLERS);
 
 /** Adapts the MCP tool-result shape to ChatTool's {content: string, is_error: boolean}. */
 const toOperationalToolResult = (raw: RawToolResult): { content: string; is_error: boolean } => {

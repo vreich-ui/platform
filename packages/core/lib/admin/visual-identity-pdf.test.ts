@@ -10,11 +10,13 @@ import type { EditorialArtifact } from './editorial-assets.js';
 import {
   buildPdfTemplatesViewModel,
   buildPinKindDefaultOp,
+  buildPreviewSampleIntent,
   buildRenderSampleIntent,
   buildSetSiteDefaultOp,
   latestSampleArtifact,
   pdfDefaultBadges,
   pdfKindLabel,
+  pdfKindOptions,
   pdfValidationView,
   type PdfTemplateInput,
 } from './visual-identity-pdf.js';
@@ -177,6 +179,14 @@ test('a row missing the §3.6 fields degrades honestly instead of faking them', 
   assert.match(String(row.renderSampleBlockedReason), /no sample data/);
 });
 
+test('T2.6: a real thumbnailError from pdf-tool beats this module\'s own generic guess', () => {
+  const row = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article', thumbnail_error: 'Chromium render timed out before the thumbnail step.' })],
+  }).rows[0]!;
+  assert.equal(row.thumbnailUrl, undefined);
+  assert.equal(row.thumbnailMissingReason, 'Chromium render timed out before the thumbnail step.');
+});
+
 test('an unservable thumbnail key says so rather than rendering a permanently broken image', () => {
   const row = buildPdfTemplatesViewModel({
     templates: [template({ id: 'tpl_article', thumbnail_key: 'pdf/not-an-image-key' })],
@@ -202,6 +212,15 @@ test('an empty list distinguishes "none yet" from "the bridge is not configured"
   assert.equal(unavailable.available, false);
 });
 
+test('T2.6: byKind selector options cover every known kind plus any open kind actually in use', () => {
+  const options = pdfKindOptions([{ kind: 'article' }, { kind: 'case_study' }, { kind: undefined }]);
+  assert.deepEqual(
+    options.map((o) => o.kind),
+    ['article', 'brochure', 'case_study', 'checklist', 'guide', 'report'].sort()
+  );
+  assert.equal(options.find((o) => o.kind === 'case_study')?.label, 'Case study');
+});
+
 test('kind labels humanize an open key set', () => {
   assert.equal(pdfKindLabel('article'), 'Article');
   assert.equal(pdfKindLabel('case_study'), 'Case study');
@@ -216,6 +235,15 @@ test('the render-sample intent names the tool and lets the agent read sampleData
   assert.equal(intent.starter, 'visual-identity');
   assert.match(intent.prompt, /tpl_article/);
   assert.match(intent.prompt, /get_pdf_template/);
+});
+
+test('T2.6: the direct preview chip names preview_pdf_template and is honest about first-page-only', () => {
+  const intent = buildPreviewSampleIntent({ id: 'tpl_article', label: 'Article brochure' });
+  assert.equal(intent.tool, 'preview_pdf_template');
+  assert.match(intent.label, /first page only/);
+  assert.match(intent.prompt, /preview_pdf_template/);
+  assert.match(intent.prompt, /tpl_article/);
+  assert.match(intent.prompt, /first-page preview, not the complete document/);
 });
 
 test('the newest rendered PDF for a template is what the stage previews', () => {
