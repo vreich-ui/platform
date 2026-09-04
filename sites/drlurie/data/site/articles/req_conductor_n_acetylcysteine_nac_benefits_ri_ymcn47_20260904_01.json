@@ -1,9 +1,8 @@
 {
   "__generated": {
-    "at": "2026-09-04T17:48:51.082Z",
-    "attribution": "inherited_lock",
+    "at": "2026-09-04T18:20:30.272Z",
     "from": "objects/content_item/by-id/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01.json",
-    "record_version": 47
+    "record_version": 53
   },
   "deck": "NAC is often marketed around antioxidants, glutathione support, detox, clarity, and healthy aging. Here is what is actually known, what is still uncertain, and how to decide whether it belongs in your routine.",
   "description": "NAC is marketed for antioxidant and glutathione support, but its role in skin health is more limited and nuanced than many product claims suggest. This guide explains the evidence, risks, product types, marketing strategies, and decision points to consider before adding NAC to a skincare or supplement routine.",
@@ -129,6 +128,13 @@
       "kind": "content",
       "public": {
         "body": "[1] Janeczek M, Moy L, Riopelle A, Vetter O, Reserva J, Tung R, Swan J. “The Potential Uses of N-acetylcysteine in Dermatology: A Review.” Journal of Clinical and Aesthetic Dermatology. 2019;12(5):20-26. PMID 31320973. PMCID PMC6561714.\n\n[2] Lee DK, Lipner SR. “The Potential of N-Acetylcysteine for Treatment of Trichotillomania, Excoriation Disorder, Onychophagia, and Onychotillomania: An Updated Literature Review.” International Journal of Environmental Research and Public Health. 2022;19(11):6370. DOI 10.3390/ijerph19116370. PMID 35681955. PMCID PMC9180086.\n\n[3] Grant JE et al. “N-Acetylcysteine in the Treatment of Excoriation Disorder: A Randomized Clinical Trial.” JAMA Psychiatry. 2016;73:490-496. DOI 10.1001/jamapsychiatry.2016.0060. PMID 27007062.\n\n[4] Grant JE et al. “N-acetylcysteine, a glutamate modulator, in the treatment of trichotillomania: A double-blind, placebo-controlled study.” Archives of General Psychiatry. 2009;66:756-763. DOI 10.1001/archgenpsychiatry.2009.60. PMID 19581567.",
+        "media": {
+          "alt": "NAC for Skin Health: What the Evidence Says Before You Add It to Your Routine",
+          "contentType": "application/pdf",
+          "sizeBytes": 36199,
+          "src": "/pdf/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/fd360cf7fb0f6e3a8bedf977e9c0c4ac5aafae2819b4b8b99526697162f42b0a.pdf",
+          "type": "document"
+        },
         "title": "References"
       }
     }
