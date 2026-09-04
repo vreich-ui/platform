@@ -127,6 +127,30 @@ export type BrandImageryProxyDeps = {
   readBlobBytes?: (blobKey: string) => Promise<Buffer | undefined>;
   /** Fetches bytes for a bare `url` reference that also carries a `region`. Defaults to globalThis.fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * Hydrates `references` / `existingBrandImagery` from the visual_standard
+   * named by `input.visualStandardId`, called BEFORE validation. This is the
+   * fix for the live defect (2026-09-04): `visual_standard_id` was accepted
+   * as "revise this existing standard" but nothing ever read the standard it
+   * named, so a caller passing ONLY `visual_standard_id` (no references, no
+   * brief) hit "requires at least one of references or brief" even though
+   * the standard's own record carries a mood board — an agent has no way to
+   * discover or supply what this proxy silently threw away.
+   *
+   * OPTIONAL, deliberately: this module makes NO object-store read or write
+   * of its own (see the file header — P5's whole design is a proxy with no
+   * store reach), so hydration can only ever be a caller-supplied lookup.
+   * Optional also means every EXISTING caller and every hand-written test
+   * stub that constructs `BrandImageryProxyDeps` without this field keeps
+   * working byte-identical to before this existed — the regression guard for
+   * every caller that predates the fix. A loader that throws or resolves to
+   * `undefined` is treated as "no hydration available", never a crash (see
+   * `hydrateFromVisualStandard`) — the ordinary validation below then still
+   * runs and produces its normal 400 if the caller supplied nothing else.
+   */
+  loadVisualStandard?: (
+    visualStandardId: string
+  ) => Promise<{ references?: BrandImageryReferenceInput[]; brandImagery?: unknown } | undefined>;
   /** Structured usage/telemetry logging — the existing `event.log?.(...)` convention. */
   log?: (event: Record<string, unknown>) => void;
 };
@@ -499,6 +523,116 @@ const buildVisualIdentityProposeArgs = (
 const looksLikeUnknownToolFailure = (failure: { code?: string; message?: string; fromJsonBody?: boolean }): boolean =>
   failure.fromJsonBody === true && /^unknown tool:/i.test((failure.message ?? '').trim());
 
+// ─── hydrating a revision from its named visual_standard (live-defect fix) ──
+
+type StandardHydrationResult = {
+  /** `input`, unchanged, or a shallow copy with `references`/`existingBrandImagery` filled in from the standard. */
+  input: BrandImageryProposeInput;
+  /**
+   * True only once `deps.loadVisualStandard` actually ran to completion and
+   * returned a defined record — i.e. we KNOW what the standard does or does
+   * not carry. False when there was no `visualStandardId`, no loader wired,
+   * or the loader threw/returned `undefined` ("no hydration available",
+   * deps.loadVisualStandard's own contract) — in every one of those cases we
+   * have no basis for saying the standard has no board, so the ordinary
+   * generic-missing-input 400 is what fires below, not the standard-specific
+   * one.
+   */
+  standardLookupSucceeded: boolean;
+  /** True once hydration actually changed `references` and/or `existingBrandImagery` on the input handed to validation/CmsAgent. */
+  hydratedFromStandard: boolean;
+  /** Raw reference count found on the standard, before any cap truncation (0 when hydration didn't touch references). */
+  referencesFromStandard: number;
+  /** True when the standard's own references exceeded BRAND_IMAGERY_MAX_REFERENCES and were truncated to the cap (see the truncation-vs-refusal decision below). */
+  referencesTruncated: boolean;
+};
+
+/**
+ * Fills in `references` and `existingBrandImagery` from the named
+ * visual_standard — ONLY the fields the caller did not already supply. A
+ * caller-supplied board always wins outright and is never merged with the
+ * standard's own (merging would silently double a mood board the model then
+ * sees twice); a caller-supplied `existing_brand_imagery` wins the same way.
+ * This is what turns "propose from scratch" into "revise this standard": the
+ * standard's own current `brandImagery` becomes `existingBrandImagery` only
+ * when the caller left it unset.
+ *
+ * Reference-cap decision (task requirement): a standard's OWN stored mood
+ * board is trusted, already-persisted content — never a caller trying to
+ * smuggle extra images past the node-runner's `imageRefs` cap (BRIEF §3.9) —
+ * so a board that has grown past `BRAND_IMAGERY_MAX_REFERENCES` (e.g. the
+ * cap shrank, or references accumulated over several revisions before the
+ * cap applied) is TRUNCATED to the first N, never refused outright. Refusing
+ * would turn "this standard's own board happens to be a little large" into a
+ * hard failure the caller has no way to fix by supplying different input —
+ * their only ask was "revise this standard". Truncation never happens
+ * silently: it is reported in `referencesTruncated` / the caller's
+ * `brand_imagery_proposed` log line.
+ *
+ * Never throws: a loader failure (reject) or an `undefined` resolution both
+ * mean "no hydration available" and fall straight through to ordinary
+ * validation, which then raises its own normal 400 if the caller supplied
+ * nothing else — see `deps.loadVisualStandard`'s own doc comment.
+ */
+const hydrateFromVisualStandard = async (
+  input: BrandImageryProposeInput,
+  deps: BrandImageryProxyDeps
+): Promise<StandardHydrationResult> => {
+  const visualStandardId = toNonEmptyString(input.visualStandardId);
+  const notHydrated: StandardHydrationResult = {
+    input,
+    standardLookupSucceeded: false,
+    hydratedFromStandard: false,
+    referencesFromStandard: 0,
+    referencesTruncated: false,
+  };
+  if (!visualStandardId || !deps.loadVisualStandard) return notHydrated;
+
+  let standard: { references?: BrandImageryReferenceInput[]; brandImagery?: unknown } | undefined;
+  try {
+    standard = await deps.loadVisualStandard(visualStandardId);
+  } catch {
+    return notHydrated;
+  }
+  if (!standard) return notHydrated;
+
+  const callerHasReferences = Array.isArray(input.references) && input.references.length > 0;
+  const callerHasExistingBrandImagery = input.existingBrandImagery !== undefined;
+
+  const standardReferences = Array.isArray(standard.references) ? standard.references : [];
+  const referencesFromStandard = standardReferences.length;
+
+  let referencesTruncated = false;
+  let hydratedReferences: BrandImageryReferenceInput[] | undefined;
+  if (!callerHasReferences && standardReferences.length > 0) {
+    if (standardReferences.length > BRAND_IMAGERY_MAX_REFERENCES) {
+      hydratedReferences = standardReferences.slice(0, BRAND_IMAGERY_MAX_REFERENCES);
+      referencesTruncated = true;
+    } else {
+      hydratedReferences = standardReferences;
+    }
+  }
+
+  const hydratedExistingBrandImagery =
+    !callerHasExistingBrandImagery && standard.brandImagery !== undefined ? standard.brandImagery : undefined;
+
+  const hydratedFromStandard = hydratedReferences !== undefined || hydratedExistingBrandImagery !== undefined;
+
+  return {
+    input: hydratedFromStandard
+      ? {
+          ...input,
+          ...(hydratedReferences !== undefined ? { references: hydratedReferences } : {}),
+          ...(hydratedExistingBrandImagery !== undefined ? { existingBrandImagery: hydratedExistingBrandImagery } : {}),
+        }
+      : input,
+    standardLookupSucceeded: true,
+    hydratedFromStandard,
+    referencesFromStandard,
+    referencesTruncated,
+  };
+};
+
 /**
  * The proxy's entire job: build the tool-call arguments, call
  * `visual_identity_propose`, validate what comes back, and return it. Makes
@@ -508,13 +642,34 @@ export const proposeBrandImagery = async (
   input: BrandImageryProposeInput,
   deps: BrandImageryProxyDeps
 ): Promise<BrandImageryProxyResult> => {
-  const invalid = validateBrandImageryProposeInput(input);
-  if (invalid) return invalid;
+  const hydration = await hydrateFromVisualStandard(input, deps);
+  const hydratedInput = hydration.input;
 
-  const references = input.references ?? [];
+  const invalid = validateBrandImageryProposeInput(hydratedInput);
+  if (invalid) {
+    // Sharpen the generic "requires at least one of references or brief"
+    // refusal into one that names the REAL problem once we actually know it:
+    // a visualStandardId was given, the loader ran and told us definitively
+    // what that standard carries, and it carries neither references nor (of
+    // course) a brief of its own to fall back on. `standardLookupSucceeded`
+    // is what gates this — a missing/throwing loader means we DON'T know
+    // that, and must leave the generic 400 alone (see
+    // `hydrateFromVisualStandard`'s doc comment / task requirement 3).
+    if (invalid.errorCode === 'brand_imagery_propose_missing_input' && hydration.standardLookupSucceeded) {
+      return err(
+        400,
+        'brand_imagery_propose_standard_has_no_board',
+        `visual_standard_id "${hydratedInput.visualStandardId}" carries no mood board (no references) and no existing brandImagery to revise. Supply references or a brief.`,
+        { visualStandardId: hydratedInput.visualStandardId }
+      );
+    }
+    return invalid;
+  }
+
+  const references = hydratedInput.references ?? [];
   const { imageRefs, unresolvedReferences } = await resolveImageRefs(references, deps);
 
-  const proposeArgs = buildVisualIdentityProposeArgs(input, imageRefs);
+  const proposeArgs = buildVisualIdentityProposeArgs(hydratedInput, imageRefs);
 
   const executed = await deps.cmsAgent.callTool<Record<string, unknown>>('visual_identity_propose', proposeArgs);
   if (!executed.ok) {
@@ -560,12 +715,22 @@ export const proposeBrandImagery = async (
 
   deps.log?.({
     event: 'brand_imagery_proposed',
-    mode: input.mode,
+    mode: hydratedInput.mode,
     referencesRequested: references.length,
     imageRefsResolved: imageRefs.length,
     ...(unresolvedReferences.length > 0 ? { unresolvedReferences } : {}),
     ...(upstreamWarnings.length > 0 ? { prefetchWarnings: upstreamWarnings } : {}),
     confidence: parsed.data.confidence,
+    // Traceability for the live-defect fix: a thin `visual_standard_id`-only
+    // call now silently becomes a full revision, so the log line is what
+    // makes that visible after the fact.
+    ...(hydration.hydratedFromStandard
+      ? {
+          hydratedFromStandard: true,
+          referencesFromStandard: hydration.referencesFromStandard,
+          ...(hydration.referencesTruncated ? { referencesFromStandardTruncated: true } : {}),
+        }
+      : {}),
   });
 
   return {

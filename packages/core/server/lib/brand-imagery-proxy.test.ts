@@ -467,3 +467,160 @@ test('proposeBrandImagery: omits prefetchWarnings entirely when CMS-Agent report
   assert.equal(result.ok, true);
   assert.ok(result.ok && !('prefetchWarnings' in result.body), 'an older CMS-Agent deploy sends no warnings field');
 });
+
+// ─── visual_standard_id hydration (live-defect fix, 2026-09-04) ────────────
+//
+// The live defect: `brand_imagery_propose { visual_standard_id: "vis_drlurie" }`
+// alone failed with the GENERIC "requires at least one of references or
+// brief" 400, even though `vis_drlurie`'s own record carries a mood board
+// (`references[]`) and a current `brandImagery` -- the tool advertised
+// `visual_standard_id` as "revise this existing standard" but never read
+// what that standard held. These tests cover `hydrateFromVisualStandard`'s
+// contract: caller-supplied fields always win (never merged with the
+// standard's), a loader failure/absence never crashes and never over-claims
+// "the standard has no board" (it falls through to the ordinary generic
+// 400), and the reference cap still applies after hydration.
+
+const standardReferences = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ blobKey: `image/req_smoke/ref-${i}.png`, note: `ref ${i}`, weight: 1 }));
+
+test('proposeBrandImagery: visual_standard_id alone hydrates references + existingBrandImagery from the standard and succeeds', async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const loadVisualStandard = async (visualStandardId: string) => {
+    assert.equal(visualStandardId, 'vis_drlurie');
+    return {
+      references: [
+        { blobKey: 'image/req_smoke_featured_20260702_01/d0c446a2.png', note: 'Featured-only smoke test hero image', weight: 1 },
+      ],
+      brandImagery: VALID_BRAND_IMAGERY,
+    };
+  };
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie' }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const writerInput = calls[0]?.args as Record<string, unknown>;
+  assert.deepEqual(writerInput.references, [
+    { blobKey: 'image/req_smoke_featured_20260702_01/d0c446a2.png', note: 'Featured-only smoke test hero image', weight: 1 },
+  ]);
+  assert.deepEqual(writerInput.existingBrandImagery, VALID_BRAND_IMAGERY);
+});
+
+test("proposeBrandImagery: caller-supplied references win over the standard's and are not merged with them", async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const callerReferences = [{ blobKey: 'image/caller/own-ref.png' }];
+  const loadVisualStandard = async () => ({
+    references: [{ blobKey: 'image/standard/board-ref.png' }],
+  });
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie', references: callerReferences }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const writerInput = calls[0]?.args as Record<string, unknown>;
+  assert.deepEqual(writerInput.references, callerReferences, "the standard's reference must not appear at all -- no merge");
+});
+
+test("proposeBrandImagery: caller-supplied existing_brand_imagery wins over the standard's", async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const callerExisting = { ...VALID_BRAND_IMAGERY, medium: 'photograph' };
+  const loadVisualStandard = async () => ({
+    references: [{ blobKey: 'image/standard/board-ref.png' }],
+    brandImagery: { ...VALID_BRAND_IMAGERY, medium: 'digital_illustration' },
+  });
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie', existingBrandImagery: callerExisting }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const writerInput = calls[0]?.args as Record<string, unknown>;
+  assert.deepEqual(writerInput.existingBrandImagery, callerExisting);
+});
+
+test('proposeBrandImagery: a standard with no references and no brief gets the standard-specific error code, not the generic one', async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const loadVisualStandard = async () => ({ references: [] });
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie' }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.status, 400);
+  assert.equal(!result.ok && result.errorCode, 'brand_imagery_propose_standard_has_no_board');
+  assert.ok(!result.ok && result.error.includes('vis_drlurie'), `expected the message to name the standard: ${!result.ok && result.error}`);
+  assert.equal(calls.length, 0, 'must not call CmsAgent once the standard is confirmed to carry no board');
+});
+
+test('proposeBrandImagery: a throwing loader does not crash the call and falls through to the ordinary missing-input 400', async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const loadVisualStandard = async (): Promise<never> => {
+    throw new Error('blob store unreachable');
+  };
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie' }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.status, 400);
+  assert.equal(
+    !result.ok && result.errorCode,
+    'brand_imagery_propose_missing_input',
+    'a loader failure must NOT be reported as "standard has no board" -- that would be a claim we cannot back up'
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('proposeBrandImagery: an undefined-resolving loader (standard not found) behaves the same as a throw -- the ordinary generic 400', async () => {
+  const { client } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const loadVisualStandard = async () => undefined;
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_missing' }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.errorCode, 'brand_imagery_propose_missing_input');
+});
+
+test('proposeBrandImagery: no loader supplied at all is byte-identical to pre-fix behavior (regression guard for every existing caller)', async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie' }),
+    baseDeps(client) // no loadVisualStandard at all -- e.g. every caller/stub that predates this fix
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.status, 400);
+  assert.equal(!result.ok && result.errorCode, 'brand_imagery_propose_missing_input');
+  assert.equal(calls.length, 0);
+});
+
+test('proposeBrandImagery: the reference cap still holds after hydration -- a standard carrying more than the cap is truncated, not refused', async () => {
+  const { client, calls } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
+  const tooMany = standardReferences(BRAND_IMAGERY_MAX_REFERENCES + 3);
+  const loadVisualStandard = async () => ({ references: tooMany });
+
+  const result = await proposeBrandImagery(
+    baseInput({ brief: undefined, visualStandardId: 'vis_drlurie' }),
+    baseDeps(client, { loadVisualStandard })
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const writerInput = calls[0]?.args as Record<string, unknown>;
+  const references = writerInput.references as unknown[];
+  assert.equal(references.length, BRAND_IMAGERY_MAX_REFERENCES, 'truncated to the cap, not refused');
+  assert.deepEqual(references, tooMany.slice(0, BRAND_IMAGERY_MAX_REFERENCES));
+});
