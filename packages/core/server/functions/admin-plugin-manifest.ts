@@ -31,9 +31,9 @@ import {
   promoteDraft,
   recordRenderedDraft,
 } from '../lib/plugin/manifest-store.js';
-import { buildManifestBundle, manifestStaleReasons } from '../lib/plugin/build-manifest.js';
+import { buildManifestBundle, manifestStaleReasons, skillFingerprint } from '../lib/plugin/build-manifest.js';
 import { toolSurfaceDigest, buildPluginTools } from '../lib/plugin/build-tools.js';
-import { pluginPlatforms, type PluginPlatform } from '../lib/plugin/manifest-types.js';
+import { platformForActor, pluginPlatforms, type PluginPlatform } from '../lib/plugin/manifest-types.js';
 import { buildSkillZip, buildCoworkPlugin } from '../lib/plugin/export-claude.js';
 import { buildGptConfigZip, GptInstructionsTooLongError } from '../lib/plugin/export-openai.js';
 import { buildGemInstructions } from '../lib/plugin/export-gemini.js';
@@ -260,10 +260,38 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       const voice = await readVoiceRecord(event, binding, getSiteObjectsBlobStore).catch(() => null);
 
       stage = 'summary';
+      /**
+       * W7.7: what the skill WOULD render as right now, for the same platform
+       * the active bundle was rendered for.
+       *
+       * Rendered through `buildManifestBundle` rather than by calling the
+       * renderer directly, so the live side and the stored side can never drift
+       * apart — a comparison whose two halves are built differently reports
+       * staleness forever. It is pure and synchronous (voice and approval are
+       * already in hand), so this costs no extra I/O.
+       *
+       * Skipped for a bundle with no `actor_id`: those predate the field, the
+       * platform cannot be known, and rendering against the wrong one would
+       * report a healthy bundle as stale.
+       */
+      const activeActor = doc.active?.actor_id;
+      const liveSkillDigest = activeActor
+        ? skillFingerprint(
+            buildManifestBundle({
+              origin,
+              definitions: visibleToolDefinitions(),
+              voice,
+              platform: platformForActor(activeActor),
+              approval,
+            }).skill_md
+          )
+        : undefined;
+
       const live = {
         voiceRecordVersion: voice?.record_version ?? null,
         toolSurfaceDigest: liveDigest,
         approvalPosture: approval.master,
+        ...(liveSkillDigest ? { skillDigest: liveSkillDigest } : {}),
       };
       return jsonResponse(200, {
         active: doc.active ?? null,

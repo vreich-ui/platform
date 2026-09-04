@@ -6,6 +6,7 @@ import {
   buildManifestBundle,
   buildConnection,
   manifestStaleReasons,
+  skillFingerprint,
 } from '../../packages/core/server/lib/plugin/build-manifest.js';
 import {
   buildPluginTools,
@@ -13,6 +14,7 @@ import {
   PLUGIN_TOOL_DENYLIST,
 } from '../../packages/core/server/lib/plugin/build-tools.js';
 import { manifestBundleSchema } from '../../packages/core/server/lib/plugin/manifest-types.js';
+import { renderSkillMarkdown } from '../../packages/core/server/lib/plugin/render-skill.js';
 import { visibleToolDefinitions } from '../../netlify/functions/mcp.js';
 
 const ORIGIN = 'https://drluriescience.netlify.app';
@@ -294,4 +296,103 @@ test('staleness reports a moved voice, a changed tool surface and a changed post
     manifestStaleReasons(bundle, { voiceRecordVersion: 99, toolSurfaceDigest: 'x', approvalPosture: 'y' }).length,
     3
   );
+});
+
+// ─── W7.7 — the two ways the skill went stale silently ──────────────────────
+
+/**
+ * Both of these shipped for real on 2026-09-04: a direct-to-main commit rewrote
+ * the drafting instructions in `render-skill.ts`, and every promoted bundle kept
+ * serving the old text while /admin/plugins reported "Current". The four input
+ * checks above cannot see either case — the renderer is code, and the ceiling
+ * was recorded but never compared.
+ */
+test('a changed RENDERER marks the bundle stale, though no input moved', () => {
+  const bundle = render();
+  const fresh = {
+    voiceRecordVersion: bundle.sources.voice_record_version,
+    toolSurfaceDigest: bundle.sources.tool_surface_digest,
+    approvalPosture: bundle.sources.approval_posture,
+    skillDigest: bundle.sources.skill_digest,
+  };
+  assert.deepEqual(manifestStaleReasons(bundle, fresh), [], 'nothing moved');
+
+  // The renderer emitted different prose from identical inputs.
+  const reasons = manifestStaleReasons(bundle, { ...fresh, skillDigest: 'v00000000' });
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /rendered skill text changed/);
+  assert.match(reasons[0], /re-render and promote/);
+});
+
+test('a changed CEILING marks it stale — recorded since W1.1, never compared until now', () => {
+  const bundle = render();
+  const louder = renderSkillMarkdown({
+    tenant: 'dr-lurie',
+    siteId: 'site_drlurie',
+    origin: ORIGIN,
+    platform: 'claude',
+    actorId: 'plugin:claude',
+    voice: null,
+    // The one input change; everything else identical.
+    aggressionCeiling: { claim_strength: 0.9, urgency: 0.8, emotional_agitation: 0.8, cta_density: 0.7 },
+    approvalPosture: bundle.sources.approval_posture,
+    approvalOverrides: {},
+    tools: bundle.tools,
+    manifestVersion: bundle.manifest_version,
+  });
+
+  const reasons = manifestStaleReasons(bundle, {
+    voiceRecordVersion: bundle.sources.voice_record_version,
+    toolSurfaceDigest: bundle.sources.tool_surface_digest,
+    approvalPosture: bundle.sources.approval_posture,
+    skillDigest: skillFingerprint(louder),
+  });
+  assert.equal(reasons.length, 1, 'a ceiling change must not read as "Current"');
+  assert.match(reasons[0], /aggression ceiling/);
+});
+
+test('the fingerprint ignores the version line — a check that cries wolf daily is worse than none', () => {
+  const bundle = render();
+  // `manifest_version` embeds the render DATE, so tomorrow's identical render
+  // carries a different one. The digest must not move for that.
+  const tomorrow = bundle.skill_md.replace(
+    /^manifest_version: .*$/m,
+    'manifest_version: dr-lurie-claude-29991231-ffffffff'
+  );
+  assert.notEqual(tomorrow, bundle.skill_md, 'the fixture must actually differ');
+  assert.equal(skillFingerprint(tomorrow), skillFingerprint(bundle.skill_md));
+
+  // …but any other line does move it.
+  assert.notEqual(skillFingerprint(`${bundle.skill_md}\nOne more instruction.`), skillFingerprint(bundle.skill_md));
+});
+
+test('a bundle promoted before this field existed is never called stale on no evidence', () => {
+  const bundle = render();
+  const legacy = { ...bundle, sources: { ...bundle.sources, skill_digest: undefined } };
+  const live = {
+    voiceRecordVersion: bundle.sources.voice_record_version,
+    toolSurfaceDigest: bundle.sources.tool_surface_digest,
+    approvalPosture: bundle.sources.approval_posture,
+    skillDigest: 'v99999999',
+  };
+  assert.deepEqual(manifestStaleReasons(legacy, live), [], 'no stored digest = not checked, not stale');
+
+  // And the mirror: the caller could not render a live skill (no actor_id).
+  const { skillDigest: _omitted, ...noLive } = live;
+  void _omitted;
+  assert.deepEqual(manifestStaleReasons(bundle, noLive), []);
+});
+
+test('the catch-all stays quiet when a specific reason already explains it', () => {
+  const bundle = render();
+  const reasons = manifestStaleReasons(bundle, {
+    voiceRecordVersion: 15,
+    toolSurfaceDigest: bundle.sources.tool_surface_digest,
+    approvalPosture: bundle.sources.approval_posture,
+    skillDigest: 'v00000000',
+  });
+  // The voice moved, which is WHY the text differs. One precise sentence beats
+  // two, the second of which only says "and the text is different".
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /editorial voice moved/);
 });

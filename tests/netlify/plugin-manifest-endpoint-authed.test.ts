@@ -105,3 +105,38 @@ test('a store that cannot be written answers 200 with the failing stage, never a
     setLocalBlobsRootForTesting(LOCAL_BLOBS_ROOT);
   }
 });
+
+// ─── W7.7 — the skill digest, through the real endpoint ─────────────────────
+
+/**
+ * The pure comparison is unit-tested in plugin-manifest.test.ts. What THIS pins
+ * is the wiring, where the dangerous mistake lives: the live skill has to be
+ * rendered for the SAME platform the active bundle was, or a freshly promoted,
+ * perfectly current bundle reports as stale forever — and an operator who is
+ * told to re-promote a healthy bundle every day stops believing the flag.
+ */
+test('a bundle promoted seconds ago reports NO staleness — including the skill digest', async (t) => {
+  for (const platform of ['claude', 'openai'] as const) {
+    const rendered = await handler(
+      { httpMethod: 'POST', headers: HEADERS, body: JSON.stringify({ action: 'render', platform }) },
+      ADMIN
+    );
+    assert.equal(parseBody(rendered).ok, true, rendered.body);
+    const promoted = await handler(
+      { httpMethod: 'POST', headers: HEADERS, body: JSON.stringify({ action: 'promote' }) },
+      ADMIN
+    );
+    assert.equal(parseBody(promoted).ok, true, promoted.body);
+
+    const summary = parseBody(await handler({ httpMethod: 'GET', headers: HEADERS }, ADMIN));
+    const active = summary.active as { sources?: Record<string, unknown> } | null;
+
+    await t.test(`${platform}: the digest is recorded on promote`, () => {
+      assert.match(String(active?.sources?.skill_digest), /^[0-9a-f]{8}$/);
+    });
+
+    await t.test(`${platform}: and the summary does not cry wolf`, () => {
+      assert.deepEqual(summary.stale, [], `a just-promoted ${platform} bundle must not read as stale`);
+    });
+  }
+});

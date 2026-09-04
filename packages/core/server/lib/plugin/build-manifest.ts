@@ -12,7 +12,7 @@
  */
 import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { activeApprovalPolicy } from '../../../lib/approval-policy.js';
-import { buildPluginTools, toolSurfaceDigest } from './build-tools.js';
+import { buildPluginTools, fnv1a, toolSurfaceDigest } from './build-tools.js';
 import { renderSkillMarkdown, type VoiceForSkill } from './render-skill.js';
 import { primaryActorFor } from './manifest-types.js';
 import type { ManifestBundle, ManifestConnection, PluginPlatform } from './manifest-types.js';
@@ -61,6 +61,21 @@ export const buildConnection = (origin: string, tenant: string, siteId: string):
     protected_resource_metadata_url: `${origin}/.well-known/oauth-protected-resource`,
   },
 });
+
+/**
+ * A fingerprint of the rendered skill, with the version line NEUTRALISED.
+ *
+ * The skill's own frontmatter carries `manifest_version`, and that version
+ * embeds the render DATE (`<tenant>-<platform>-<yyyymmdd>-<digest>`). Hashing
+ * `skill_md` as-is would therefore change at every midnight and report every
+ * bundle on the fleet as stale the next morning — a check that cries wolf daily
+ * is worse than no check, because operators learn to re-promote reflexively.
+ *
+ * Normalising that one line leaves a hash over what actually matters: the
+ * instructions, the ceiling table, the tool list, the publish procedure.
+ */
+export const skillFingerprint = (skillMd: string): string =>
+  fnv1a(skillMd.replace(/^manifest_version: .*$/m, 'manifest_version: <normalised>'));
 
 /** `<tenant>-<platform>-<yyyymmdd>-<toolDigest>` — stable for identical inputs. */
 export const manifestVersionFor = (tenant: string, platform: string, at: Date, digest: string): string => {
@@ -123,6 +138,7 @@ export const buildManifestBundle = (input: BuildManifestInput): ManifestBundle =
       aggression_ceiling: { ...(identity.aggressionCeiling ?? {}) },
       approval_posture: approval.master,
       tool_surface_digest: digest,
+      skill_digest: skillFingerprint(skillMd),
     },
     warnings,
   };
@@ -149,7 +165,18 @@ const committedApprovalPosture = (warnings: string[]): { master: string; overrid
  */
 export const manifestStaleReasons = (
   bundle: ManifestBundle,
-  live: { voiceRecordVersion: number | null; toolSurfaceDigest: string; approvalPosture: string }
+  live: {
+    voiceRecordVersion: number | null;
+    toolSurfaceDigest: string;
+    approvalPosture: string;
+    /**
+     * `skillFingerprint` of a skill rendered NOW, for the same platform this
+     * bundle was rendered for. Omit it when that cannot be produced (no active
+     * bundle, or a bundle with no `actor_id` to render against) — omission
+     * means "not checked", never "unchanged".
+     */
+    skillDigest?: string;
+  }
 ): string[] => {
   const reasons: string[] = [];
   if (bundle.sources.voice_record_version !== live.voiceRecordVersion) {
@@ -165,5 +192,31 @@ export const manifestStaleReasons = (
       `The approval posture changed (rendered against "${bundle.sources.approval_posture}", live is "${live.approvalPosture}").`
     );
   }
+
+  /**
+   * The catch-all, and deliberately LAST and CONDITIONAL.
+   *
+   * Every reason above names a specific input and what it moved from and to —
+   * that is what makes them actionable. This one can only say "the text is
+   * different", so it is worth showing exactly when none of the others fired:
+   * then it means "something changed that none of the above explains", which is
+   * real information. Firing it alongside a voice change would just be a second,
+   * vaguer sentence about the same event.
+   *
+   * Skipped entirely when either side is missing: a bundle promoted before this
+   * field existed has nothing to compare, and reporting it as stale would send
+   * an operator to re-promote on no evidence.
+   */
+  if (
+    reasons.length === 0 &&
+    bundle.sources.skill_digest &&
+    live.skillDigest &&
+    bundle.sources.skill_digest !== live.skillDigest
+  ) {
+    reasons.push(
+      'The rendered skill text changed — the aggression ceiling, or the skill renderer itself, moved since this bundle was built. Installed copies are running the older instructions until you re-render and promote.'
+    );
+  }
+
   return reasons;
 };
