@@ -96,8 +96,69 @@ const toolLines = (tools: readonly ManifestTool[]): string =>
     .map((t) => `| \`${t.name}\` | ${t.tool_class}${t.autonomy_floor ? ' (ask-floored)' : ''} | ${t.summary} |`)
     .join('\n');
 
+/**
+ * `render_article_pdf` is the one call that maps an article to render data,
+ * resolves template + brand, renders, polls, reads the quality gate and attaches
+ * the document node. Whether it is REACHABLE is a tool-surface fact, not
+ * something this prose can assert: it reaches a deploy on its own schedule, and
+ * a skill that named it unconditionally would send a desk on a deploy without it
+ * at a tool the server answers with "unknown tool" — the same class of failure
+ * W1.3 built the tool list to prevent.
+ *
+ * So the PDF path is rendered FROM `tools`. On a deploy that has the call, the
+ * skill teaches it and demotes `create_agent_artifact_job` to the fallback; on a
+ * deploy that does not, the skill keeps the hand-built path and never mentions a
+ * tool that is not there. The good path switches itself on when the tool lands.
+ */
+const hasArticlePdfCall = (tools: readonly ManifestTool[]): boolean =>
+  tools.some((t) => t.name === 'render_article_pdf');
+
 export const renderSkillMarkdown = (input: RenderSkillInput): string => {
   const { voice, aggressionCeiling: ceiling, tools } = input;
+  const articlePdf = hasArticlePdfCall(tools);
+
+  const pdfPath = articlePdf
+    ? `**PDFs — call \`render_article_pdf\`.** It is THE ONE CALL that turns this article into an
+   attached PDF, and it replaces the sequence a desk would otherwise hand-build call by call:
+   \`render_article_pdf {site_id:"${input.siteId}", content_item_id}\` builds the render data with
+   Platform's deterministic article → render-data mapper (**never hand-author \`data\`**), resolves the
+   template and this site's brand, creates the render job, POLLS it to completion, reads the content
+   quality gate, and attaches the finished PDF to the article as a \`document\` media node. Omit
+   \`template_id\` and the site's own article template is resolved for you; omit \`filename\` and it is
+   derived from the article's slug — never pass a placeholder like \`document\` or \`output\`. Pass
+   \`attach:false\` to render without touching the article.
+
+   **The receipt is the deliverable.** It carries \`status\`, \`jobId\`, \`rendered\`, \`public_path\` (where
+   the PDF lives — present on every completed render, \`attach:false\` included), \`attached\` with
+   \`attachment.nodeId\`/\`href\`, \`pageCount\`, \`qualityGate {passed, findings[]}\`, \`warnings[]\`,
+   \`unfilled[]\` (stable codes for everything the article carried nothing for — the answer to "why is
+   this PDF thin"), and a one-sentence \`summary\`. Report from the receipt; do not re-derive it.
+
+   - **Quality-gate findings WARN, they never block.** A job that completes WITH findings
+     (\`BLANK_PAGE\` / \`UNRESOLVED_IMAGE\` / \`UNRENDERED_TOKEN\`) still attaches, and the findings ride
+     the receipt. Report them plainly. **Do not describe such a render as failed**, and do not
+     re-render it to try to clear them.
+   - **A real failure is a real failure.** pdf-tool's own typed codes (\`RENDER_DATA_INVALID\`,
+     \`ASSET_MISSING\`, \`DATA_BINDING_ERROR\`, …) come back as themselves in \`error.code\`, \`status\` is
+     \`"failed"\`, and nothing is attached.
+   - **\`status:"pending"\` means STILL RENDERING — never a silent success.** The render outlived this
+     call's budget. Poll \`get_agent_artifact_job_status\` with the receipt's \`jobId\`. **Never
+     re-render**: a second job is a second charge for the same PDF.
+
+   \`create_agent_artifact_job {artifact_kind:"pdf", template_id, data}\` is the FALLBACK, and it is for
+   a PDF that is not this article — a standalone lead magnet, a one-off handout. Reaching for it to
+   make an article's PDF means hand-authoring \`data\`, hand-polling and hand-attaching, and it throws
+   away the mapper's work.`
+    : `**PDFs.** \`create_agent_artifact_job\` again, with \`artifact_kind:"pdf"\` + \`template_id\` +
+   \`data\`, referenced as \`/pdf/…\`. Poll it the same way. You are assembling \`data\` yourself, so
+   read the template with \`get_pdf_template\` before you fill it rather than guessing its fields,
+   and attach the result as a \`document\` media node.`;
+
+  const templateIntro = articlePdf
+    ? `\`render_article_pdf\` resolves this site's own article template, and that is the right answer
+almost every time. Go looking only when the human asks for something else.`
+    : `You name the template yourself on every PDF render, so it is worth knowing which one you are
+pointing at.`;
   const publicationName = voice?.name ?? input.tenant;
   const gated = Object.entries(input.approvalOverrides)
     .filter(([, rule]) => rule !== 'autonomous')
@@ -134,8 +195,12 @@ through the CMS tools below. A human drives you: you never publish without an ex
    - \`aggression_ceiling\` and \`publish_policy\` are the rules the rest of this document is written against.
 2. \`object_get {object_type:"editorial_voice", object_id:"${voice ? `${input.siteId.replace(/^site_/, 'voice_')}` : '<the site voice id>'}"}\` — the live voice governs. Obey it over anything summarised below.
 3. \`object_contract {object_type:"content_item"}\` — read \`aggression_ceiling\`, \`media_policy\`, the allowed patch ops and \`publish_policy\`.
+4. \`object_get {object_type:"taxonomy", object_id:"tax_${input.siteId.replace(/^site_/, '')}", projection:"summary"}\`
+   — the live category and tag slugs. **An unknown slug is a WRITE BLOCKER**, not a warning: a \`taxonomy\`
+   naming a category or tag this site has not declared fails the write, and the vocabulary is not guessable
+   from the article's subject. Read it once, here, and pick only from what it returns.
 
-If any of the three fails, say so and stop. Never write from memory of the voice.
+If any of the four fails, say so and stop. Never write from memory of the voice.
 
 ## 1. Voice
 
@@ -258,17 +323,41 @@ That is how this publish is attributed in the ledger.`
    this request id and is refused outright if the content_item does not exist yet. Keep the body
    small on this call: create the article with its text, then attach media by patch.
 4. \`object_checkout\` → keep \`lockToken\` and \`record_version\`.
-5. **Media now, and fail closed.** \`create_agent_artifact_job\` for the hero image (\`prompt\` =
-   subject only), poll \`get_agent_artifact_job_status\`, and use the returned \`public_path\`
-   (\`/img/…\`). Never a raw storage key, never an external URL. A PDF is the same call with
-   \`artifact_kind:"pdf"\` + \`template_id\` + \`data\`, referenced as \`/pdf/…\`; a PDF is never the
-   hero. **If media fails, stop and report — do not publish a degraded article.** Fail-closed means
-   no publish without the media you promised, not that media is produced first.
+5. **Media now, and fail closed.** **If media fails, stop and report —
+   do not publish a degraded article.** Fail-closed means no publish without the media you
+   promised, not that media is produced first.
+
+   **Images.** \`create_agent_artifact_job\` with
+   \`{artifact_kind:"image", prompt, requirements:{image:{usageContext}}}\`, then poll
+   \`get_agent_artifact_job_status\` and use the returned \`public_path\` (\`/img/…\`). Never a raw
+   storage key, never an external URL. \`prompt\` is the SUBJECT ONLY — this site's brand imagery
+   supplies style, palette, lighting and mood server-side, and anything you write about style is
+   stripped and replaced.
+
+   **\`requirements.image.usageContext\` is mandatory on every image job.** It is not decoration: it is
+   what routes the job to a generation model. Omit it and the job routes to the most expensive model
+   available; \`usageContext:"article_body"\` routes to the cheap one (~$0.009/image). A value this
+   project does not recognise is coerced to \`article_body\` and reported in \`warnings\`, never an
+   error — so a wrong value is cheap and a MISSING value costs everything. This is the single
+   biggest cost lever in this document; a ten-image article with the field left off is the most
+   expensive mistake available to you.
+
+   **Hero and in-body media are different mechanisms.** The hero is the article's cover image, set
+   with \`set_article_meta\` into \`body.image\`. In-body media is a media node's \`node.public.media\`.
+   They are not interchangeable: **a PDF put in \`body.image\` fails the whole build**, and an image
+   meant as the cover does nothing sitting on a node. A PDF is never the hero.
+
+   ${pdfPath}
 6. \`object_patch\` with \`lock_token\` + \`expected_record_version\` — the remaining nodes and the
    hero via \`set_article_meta\`. Take the new \`record_version\` from every response. Split a long
    article across two or three patches rather than one huge one. If more than ~10 minutes pass
    before you publish, call \`object_refresh_lock\` — the lease is 900 s and expires mid-session.
-7. \`object_validate {object_type:"content_item", object_id}\` — must come back clean.
+7. **Validate only if you still need to.** Every \`object_patch\` response already carries
+   \`validation_summary {level, eligible, blockers}\` — the same verdict, already paid for. Read the
+   last patch's summary: no blockers and \`eligible\` means you are clear, and a separate
+   \`object_validate\` adds nothing but a round trip. Call
+   \`object_validate {object_type:"content_item", object_id}\` when the summary shows blockers, when
+   you patched around one, or when you did not read it — and then it must come back clean.
 8. \`object_publish\` → a dark commit (\`[skip netlify]\`). **This is not live.** Keep \`commit_sha\`
    and \`production.article_path\`.
 9. \`object_checkin\`.
@@ -276,19 +365,45 @@ That is how this publish is attributed in the ledger.`
     \`release_to_production {idempotency_key: request_id}\`, then poll \`deploy_status {commit}\` every
     ~15 s until \`deployStatus:"ready"\` **and** \`productionConfirmed:true\`. \`build_not_confirmed_live\`
     on the first call is normal — poll, do not re-release.
+
+    **If \`release_to_production\` itself 502s, do NOT retry it.** This is the one exception to the
+    502 rule in §6. The build hook fires BEFORE the response, so the release has almost certainly
+    landed already, and \`idempotency_key\` does not suppress a second build — observed: two
+    production builds for one release. Call \`deploy_status {commit}\` instead. A build already
+    \`building\` for that commit IS the release; you are simply in the polling loop above.
 11. \`verify_article_images {url, expectedImages:["/img/…"], expectedDocuments:["/pdf/…"], commit}\`.
     \`inconclusive\` means the deploy is not live yet — retry. Only \`deployReady:true\` is final.
 12. Report: live URL, request_id, commit, and what was verified.
+
+### Choosing or building a PDF template
+
+${templateIntro}
+
+- \`list_pdf_templates\` returns **ids only** — no label, no field list. You cannot choose from it.
+  \`get_pdf_template\` each candidate to see what it actually is.
+- **Several existing templates are topic-locked**, with section kickers hard-coded into the template.
+  Pointed at another subject they render confident headings about the wrong topic.
+- The generic reusable one is \`bef0d7b0-a042-4221-aa03-7870f1deb879\` —
+  "Generic Evidence Guide (5-page, illustrated)".
+- To build a new one: \`create_pdf_template\` (renderer \`chromium\`) → \`validate_pdf_template\` → poll
+  \`get_pdf_template_validation\` to a terminal \`PASSED\` report → \`publish_pdf_template\`. Without a
+  PASSED report for that exact version \`publish_pdf_template\` refuses with
+  \`409 TEMPLATE_VALIDATION_REQUIRED\`; it does not run validation for you.
+- **Known bug:** passing \`validation_id\` to \`get_pdf_template_validation\` comes back \`Invalid input\`.
+  Omit it and poll on \`template_id\` + \`version\`.
 
 ## 5. Body shape
 
 \`{slug, title, deck, description, nodes:[…], sources:[…], taxonomy?, seo?, editorial:{framework, writer_notes}}\`
 — the last content node is the Sources block.
 
-- Content node: \`{kind:"content", visibility:"public", public:{title, body}, private:{strategy, intent}}\`.
+- Content node: \`{id, kind:"content", visibility:"public", public:{title, body}, private:{strategy, intent}}\`.
   \`public.title\` renders as the section heading — do not repeat it as a \`heading-2\` inside the body.
 - Media node: the same shape with \`public.media\` in place of \`public.body\`.
-- CTA node: \`{kind:"action", public:{title, body, ctaText, ctaLink}, private:{intent:"convert"}}\`.
+- CTA node: \`{id, kind:"action", public:{title, body, ctaText, ctaLink}, private:{intent:"convert"}}\`.
+- **\`id\` is REQUIRED on every node you pass to \`object_create\`** — \`^n_[a-z0-9]+$\`, unique within the
+  article, and you mint it yourself. Nothing mints it for you here: the server only mints an id for an
+  \`upsert_node\` op inside a patch. A node without one fails the create.
 - Never put strategy words in visible text. Never use hook / agitation / cta / advert / offer in any id.
 
 ### Formatting is not optional
@@ -367,7 +482,8 @@ live link.
   endpoint answers in 250–650 ms and 502s hit calls of every size, \`ping\` included — so do not
   read a 502 as "the payload was too big" and do not back off 60 s. **Retry immediately.** Then
   treat the outcome as "unknown" and check state (\`object_inventory\`) before assuming anything;
-  for a write, the \`idempotency_key\` rule above makes the retry safe.
+  for a write, the \`idempotency_key\` rule above makes the retry safe. **The one exception is
+  \`release_to_production\`: never retry that one — see §4 step 10.**
 - Ask for the read you need. \`object_get {projection:"nodes"}\` is the read before revising an
   article — the full body without the history ledger, which grows by one entry per verb forever.
   \`projection:"summary"\` answers "what is this and how is it shaped" without the body.
@@ -381,7 +497,9 @@ live link.
 
 ## 7. Tools you may call
 
-Advisory list — the server will answer others; these are the ones this job needs.
+Advisory list — the server will answer others; these are the ones this job needs. \`create_pdf_template\`
+and \`publish_pdf_template\` are callable too, whether or not the table below happens to name them — §4
+gives the sequence they belong to and when building a template is warranted at all.
 
 | tool | class | what it is for |
 |---|---|---|
