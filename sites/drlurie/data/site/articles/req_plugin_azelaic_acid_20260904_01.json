@@ -1,6 +1,7 @@
 {
   "__generated": {
-    "at": "2026-09-04T10:46:43.748Z",
+    "at": "2026-09-04T12:06:27.128Z",
+    "attribution": "oauth",
     "from": "objects/content_item/by-id/req_plugin_azelaic_acid_20260904_01.json",
     "producer": {
       "model": "claude-opus-5",
@@ -8,7 +9,8 @@
       "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
       "run_id": "plugin_claude_req_plugin_azelaic_acid_20260904_01"
     },
-    "record_version": 11
+    "record_version": 15,
+    "surface": "plugin:claude"
   },
   "author": "Dr. Lurie",
   "deck": "A quieter active than a retinoid or benzoyl peroxide, with a decent evidence base for acne, rosacea, and the brown marks a spot leaves behind. Here is who it suits.",
@@ -475,14 +477,14 @@
       "id": "n_x1z5",
       "kind": "action",
       "public": {
-        "body": "A four-page guide covering the strengths, what the evidence supports, the twelve-week timeline, and the four mistakes that make people stop early. Laid out to save or print.",
-        "ctaLink": "/pdf/req_plugin_azelaic_acid_20260904_01/5d9550e5cb5376c54f3ee66f3f2d01f17d5906583c3a6c6c82b55df92b2d6831.pdf",
+        "body": "A five-page illustrated guide: what it is, where the evidence is clearest, what happens inside the follicle, the twelve-week timeline, and the four mistakes that make people stop early. Laid out to save or print.",
+        "ctaLink": "/pdf/req_plugin_azelaic_acid_20260904_01/dab9647ef6fcbce8370d976946d80483b4104c4a2742ec6541da23773b1627b2.pdf",
         "ctaText": "Download the azelaic acid guide (PDF)",
         "media": {
-          "caption": "A four-page evidence guide to azelaic acid — strengths, timeline, and the four mistakes.",
+          "caption": "A five-page illustrated evidence guide — mechanism, timeline, and the four mistakes.",
           "contentType": "application/pdf",
-          "sizeBytes": 49089,
-          "src": "/pdf/req_plugin_azelaic_acid_20260904_01/5d9550e5cb5376c54f3ee66f3f2d01f17d5906583c3a6c6c82b55df92b2d6831.pdf",
+          "sizeBytes": 81778,
+          "src": "/pdf/req_plugin_azelaic_acid_20260904_01/dab9647ef6fcbce8370d976946d80483b4104c4a2742ec6541da23773b1627b2.pdf",
           "title": "Azelaic Acid, Plainly",
           "type": "document"
         },
