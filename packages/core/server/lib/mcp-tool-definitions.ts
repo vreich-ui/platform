@@ -494,12 +494,14 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         slot: stringSchema('Stable request-scoped slot such as article_image_1.'),
         model: stringSchema('Optional explicit model; omit to use the registered project policy.'),
         requirements: anyObjectSchema(
-          'pdf-tool requirements, e.g. {maxBytes, image:{outputFormat:"webp", size:"1536x1024", usageContext:"article_body"}}.'
+          'pdf-tool requirements, e.g. {maxBytes, image:{outputFormat:"webp", size:"1536x1024", usageContext:"article_body"}}. For an image job, `image.usageContext` is what ROUTES the job to a generation model: omit it and the job routes to the most expensive model available, while usageContext:"article_body" routes to the cheap one. An unrecognised context is coerced to article_body and reported in `warnings` (never an error) — so a wrong value is cheap and a MISSING value is not.'
         ),
         template_id: stringSchema('A published pdf_template id to render from, in place of prompt.'),
-        data: anyObjectSchema('Template data payload for a template_id-driven PDF render.'),
+        data: anyObjectSchema(
+          'Template data payload for a template_id-driven PDF render. To bind an image supplied in `assets.images`, the slot value must be that asset\'s virtual URL, "https://render.assets.invalid/<assetId>". When a slot the template uses as an image source holds something the renderer cannot resolve, the render fails the referenced-asset precheck with ASSET_MISSING naming the SLOT, not the assetId — which is what to read when an asset you did supply looks missing. A raw data: URI written straight into a slot value also renders, but inlines the bytes into the render payload.'
+        ),
         assets: anyObjectSchema(
-          'Optional supporting assets (e.g. {images: [...]}) for a template_id-driven PDF render.'
+          'Optional supporting assets for a template_id-driven PDF render: {images: [{assetId, dataUri} | {assetId, blobKey}]}. BOTH entry shapes resolve — a blobKey is fetched from this site\'s artifact store server-side, a dataUri is inlined — and each is addressed from the template (or from a `data` slot value) as "https://render.assets.invalid/<assetId>", which the renderer serves off its virtual host. An assetId the template references but that is not declared here fails the render with ASSET_MISSING before any page is drawn.'
         ),
         negative_prompt: stringSchema(
           "Image generation only: what the output must avoid. On a site with brandImagery this is MERGED with (not replacing) the site's negative list — it never lets you remove a brand negative, only add to it."

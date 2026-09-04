@@ -407,3 +407,132 @@ test('the catch-all stays quiet when a specific reason already explains it', () 
   assert.equal(reasons.length, 1);
   assert.match(reasons[0], /editorial voice moved/);
 });
+
+/**
+ * A stand-in for the `render_article_pdf` definition, so both sides of the
+ * tool-surface conditional are covered on a deploy that has the call and on one
+ * that does not — the branch that ships it is not always the branch under test.
+ */
+const RENDER_ARTICLE_PDF_DEF = {
+  name: 'render_article_pdf',
+  description: 'THE ONE CALL that turns an article into an attached PDF. Renders, polls and attaches.',
+  inputSchema: { type: 'object', properties: {}, required: [] },
+  governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+} as unknown as ReturnType<typeof visibleToolDefinitions>[number];
+
+const withArticlePdf = () =>
+  render({ definitions: [...visibleToolDefinitions(), RENDER_ARTICLE_PDF_DEF] });
+
+test('the skill teaches render_article_pdf when the deploy has it (2026-09-04 live run)', () => {
+  // Found by the 2026-09-04 plugin acceptance run. `render_article_pdf` maps the
+  // article to render data, resolves template + brand, renders, polls, reads the
+  // quality gate and attaches the document node. The skill never named it, so the
+  // desk hand-built that sequence in ~8 calls and hand-authored the `data` the
+  // deterministic mapper exists to produce. Naming it is not enough on its own:
+  // the same run read a findings-carrying success as a failure and re-rendered a
+  // pending job, so the receipt rules are part of the fix, not commentary.
+  const { skill_md: skill, tools } = withArticlePdf();
+  assert.ok(
+    tools.some((t) => t.name === 'render_article_pdf'),
+    'the fixture must put the call on the tool surface, or this asserts nothing'
+  );
+  assert.match(skill, /render_article_pdf/);
+  assert.ok(skill.includes('THE ONE CALL'), 'render_article_pdf must be presented as the single call');
+  assert.ok(skill.includes('content_item_id'), 'the skill must name the argument the tool actually takes');
+  assert.ok(skill.includes('never hand-author'), 'the skill must forbid hand-authoring render data');
+  // The receipt is what the desk reports from.
+  assert.ok(skill.includes('The receipt is the deliverable'), 'the receipt shape must be documented');
+  assert.match(skill, /qualityGate/);
+  assert.match(skill, /unfilled/);
+  assert.match(skill, /public_path/);
+  // The three misreadings this run actually made.
+  assert.ok(skill.includes('findings WARN, they never block'), 'findings must be stated as non-blocking');
+  assert.ok(
+    skill.includes('Do not describe such a render as failed'),
+    'a completed render carrying findings must not be reported as a failure'
+  );
+  assert.ok(skill.includes('STILL RENDERING'), 'a pending status must be stated as still rendering');
+  assert.match(skill, /re-render/);
+  // create_agent_artifact_job survives as the fallback, not the default.
+  assert.ok(skill.includes('is the FALLBACK'), 'create_agent_artifact_job must be demoted to the fallback');
+});
+
+test('the skill never names render_article_pdf on a deploy without it', () => {
+  // The tool reaches a deploy on its own schedule. A skill that named it
+  // unconditionally would send the desk at a tool the server answers with
+  // "unknown tool" — the failure the generated tool list exists to prevent. So
+  // the PDF path is rendered FROM the tool surface, and this is the other side.
+  const { skill_md: skill, tools } = render();
+  assert.ok(
+    !tools.some((t) => t.name === 'render_article_pdf'),
+    'this case only means something while the call is absent from the default surface'
+  );
+  assert.ok(!skill.includes('render_article_pdf'), 'the skill must not name a tool this deploy cannot call');
+  // The hand-built path survives, and is still told to read the template first.
+  assert.ok(skill.includes('artifact_kind:"pdf"'), 'the fallback PDF call must still be taught');
+  assert.match(skill, /get_pdf_template/);
+});
+
+test('the skill carries the corrections the 2026-09-04 live run cost us', () => {
+  // Every rule below was paid for once already on 2026-09-04: each is a place the
+  // skill was silent or wrong and the desk did the expensive thing instead. None
+  // of them depends on the PDF tool surface.
+  const { skill_md: skill } = render();
+
+  // Taxonomy is a WRITE BLOCKER, and the slugs are not guessable from the subject.
+  assert.match(skill, /object_type:"taxonomy"/);
+  assert.match(skill, /WRITE BLOCKER/);
+  assert.ok(skill.includes('If any of the four fails'), 'the taxonomy read joins the session-start reads');
+
+  // usageContext is the single biggest cost lever in the document.
+  assert.ok(
+    skill.includes('is mandatory on every image job'),
+    'requirements.image.usageContext must be stated as mandatory'
+  );
+  assert.match(skill, /usageContext/);
+  assert.match(skill, /article_body/);
+  assert.ok(
+    skill.includes('a MISSING value costs everything'),
+    'the skill must say that omitting usageContext routes to the most expensive model'
+  );
+
+  // A PDF in body.image fails the build; hero and in-body media are not interchangeable.
+  assert.ok(
+    skill.includes('Hero and in-body media are different mechanisms'),
+    'hero vs in-body media must be distinguished'
+  );
+  assert.ok(skill.includes('fails the whole build'), 'the PDF-as-hero trap must be stated');
+  assert.match(skill, /set_article_meta/);
+  assert.match(skill, /node\.public\.media/);
+
+  // Node ids are minted by the caller on create, by the server only inside a patch.
+  assert.ok(skill.includes('is REQUIRED on every node you pass to'), 'the caller mints node ids on create');
+  assert.match(skill, /\^n_\[a-z0-9\]\+\$/);
+  assert.ok(skill.includes('only mints an id for an'), 'minting must be scoped to upsert_node inside a patch');
+  assert.match(skill, /upsert_node/);
+
+  // object_patch already returns the verdict; a second validate is a wasted round trip.
+  assert.ok(skill.includes('validation_summary'), 'the patch response already carries the verdict');
+  assert.ok(skill.includes('Validate only if you still need to'), 'the pre-publish validate must be conditional');
+
+  // release_to_production is the ONE tool that must not be retried on a 502.
+  assert.ok(skill.includes('502s, do NOT retry it'), 'the release 502 exception must be stated at the release step');
+  assert.ok(/two\s+production builds for one release/.test(skill), 'the observed double build is why it exists');
+  assert.ok(
+    /The one exception is\s+`release_to_production`/.test(skill),
+    'the general 502 rule in section 6 must name its exception'
+  );
+
+  // Template selection: list_pdf_templates is not choosable, and the poll has a known bug.
+  assert.ok(skill.includes('returns **ids only**'), 'list_pdf_templates returns ids only');
+  assert.match(skill, /topic-locked/);
+  assert.match(skill, /bef0d7b0-a042-4221-aa03-7870f1deb879/);
+  assert.ok(
+    skill.includes('comes back `Invalid input`'),
+    'the get_pdf_template_validation validation_id bug must be documented'
+  );
+
+  // The section 7 table is generated from the manifest, so these two live in prose.
+  assert.match(skill, /create_pdf_template/);
+  assert.ok(skill.includes('are callable too'), 'the template tools must be named in prose, not only the table');
+});
