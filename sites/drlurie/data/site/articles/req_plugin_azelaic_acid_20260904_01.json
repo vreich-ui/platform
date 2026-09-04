@@ -1,6 +1,6 @@
 {
   "__generated": {
-    "at": "2026-09-04T10:29:11.336Z",
+    "at": "2026-09-04T10:46:43.748Z",
     "from": "objects/content_item/by-id/req_plugin_azelaic_acid_20260904_01.json",
     "producer": {
       "model": "claude-opus-5",
@@ -8,7 +8,7 @@
       "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
       "run_id": "plugin_claude_req_plugin_azelaic_acid_20260904_01"
     },
-    "record_version": 4
+    "record_version": 11
   },
   "author": "Dr. Lurie",
   "deck": "A quieter active than a retinoid or benzoyl peroxide, with a decent evidence base for acne, rosacea, and the brown marks a spot leaves behind. Here is who it suits.",
@@ -43,7 +43,142 @@
       "id": "n_u3f8",
       "kind": "content",
       "public": {
-        "body": "Acne. Topical azelaic acid appears in the 2024 American Academy of Dermatology acne guideline among the topical treatments it recommends. It acts on both blocked pores and inflamed spots, which is unusual for a single ingredient. Its evidence base in acne is smaller than the one behind benzoyl peroxide or a topical retinoid.\n\nRosacea. The 15% gel is one of the better-supported topical options for the papules and pustules of rosacea. It does less for flushing and visible vessels, which are a different problem with different answers.\n\nMarks left behind. Because it acts on pigment production as well as on inflammation, DermNet notes it is particularly useful for people with deeper skin tones whose spots leave persistent brown marks.\n\nA 2023 systematic review in the Journal of Cosmetic Dermatology looked across acne, rosacea, melasma and skin ageing. Support was clearest in acne and rosacea; results in melasma were less consistent.\n\nStudies suggest a reliable mid-tier active: better evidenced than most of what is marketed beside it, and not a replacement for a treatment your clinician has prescribed.",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Acne."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Topical azelaic acid appears in the 2024 American Academy of Dermatology acne guideline among the topical treatments it recommends. It acts on both blocked pores and inflamed spots, which is unusual for a single ingredient. Its evidence base in acne is smaller than the one behind benzoyl peroxide or a topical retinoid."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Rosacea."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " The 15% gel is one of the better-supported topical options for the papules and pustules of rosacea. It does less for flushing and visible vessels, which are a different problem with different answers."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Marks left behind."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Because it acts on pigment production as well as on inflammation, DermNet notes it is particularly useful for people with deeper skin tones whose spots leave persistent brown marks."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Melasma."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A 2023 systematic review in the Journal of Cosmetic Dermatology looked across acne, rosacea, melasma and skin ageing. Support was clearest in acne and rosacea; results in melasma were less consistent."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Studies suggest a reliable mid-tier active: better evidenced than most of what is marketed beside it, and not a replacement for a treatment your clinician has prescribed."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "What the evidence shows"
       },
       "visibility": "public"
@@ -52,7 +187,136 @@
       "id": "n_k7v1",
       "kind": "content",
       "public": {
-        "body": "It tends to suit:\n\nskin that reacts badly to benzoyl peroxide or a retinoid, since irritation from azelaic acid is usually milder\n\nacne that leaves brown marks rather than red ones\n\nmild to moderate papulopustular rosacea\n\npeople who would rather have one product doing two jobs than a stacked routine\n\nIt also does not bleach fabric, which benzoyl peroxide does, and in most people it is well tolerated.\n\nOn pregnancy: azelaic acid is often mentioned among the acne options considered acceptable during pregnancy. That is exactly the kind of decision to make with the clinician looking after your pregnancy, not from an article. Do not start, stop, or continue any active on the strength of a web page while you are pregnant or breastfeeding.",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "It tends to suit:"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "skin that reacts badly to benzoyl peroxide or a retinoid, since irritation from azelaic acid is usually milder"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "acne that leaves brown marks rather than red ones"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "mild to moderate papulopustular rosacea"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "people who would rather have one product doing two jobs than a stacked routine"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "It also does not bleach fabric, which benzoyl peroxide does, and in most people it is well tolerated."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "On pregnancy:"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " azelaic acid is often mentioned among the acne options considered acceptable during pregnancy. That is exactly the kind of decision to make with the clinician looking after your pregnancy, not from an article. Do not start, stop, or continue any active on the strength of a web page while you are pregnant or breastfeeding."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "Who it suits"
       },
       "visibility": "public"
@@ -61,7 +325,130 @@
       "id": "n_o5t9",
       "kind": "content",
       "public": {
-        "body": "Stopping too early. DermNet's guidance is that some improvement should be seen after about a month, with maximum results after around six months of continuous use, and that rosacea may need up to twelve weeks before it is fair to judge. Most people who say it did nothing stopped at four.\n\nExpecting an exfoliant. It is called an acid and it does not behave like one. No tingle, no peel, no overnight difference. The change is slow and cumulative, which makes before-and-after comparison over weeks more useful than checking the mirror daily.\n\nUsing too much. A thin layer over the whole affected area, once or twice daily, is the pattern the studies used. More does not speed it up; it mostly increases the chance of stinging.\n\nAdding it to everything at once. Layered onto a retinoid, an acid toner and a foaming cleanser in the same week, it will get the blame for irritation the routine as a whole caused.",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Stopping too early."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " DermNet's guidance is that some improvement should be seen after about a month, with maximum results after around six months of continuous use, and that rosacea may need up to twelve weeks before it is fair to judge. Most people who say it did nothing stopped at four."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Expecting an exfoliant."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " It is called an acid and it does not behave like one. No tingle, no peel, no overnight difference. The change is slow and cumulative, which makes comparison over weeks more useful than checking the mirror daily."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Using too much."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A thin layer over the whole affected area, once or twice daily, is the pattern the studies used. More does not speed it up; it mostly increases the chance of stinging."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Adding it to everything at once."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Layered onto a retinoid, an acid toner and a foaming cleanser in the same week, it will get the blame for irritation the routine as a whole caused."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "How people get it wrong"
       },
       "visibility": "public"
@@ -107,7 +494,156 @@
       "id": "n_w6c2",
       "kind": "content",
       "public": {
-        "body": "DermNet. Azelaic acid: uses, application and more. https://dermnetnz.org/topics/azelaic-acid\n\nA systematic review to evaluate the efficacy of azelaic acid in the management of acne, rosacea, melasma and skin aging. Journal of Cosmetic Dermatology. 2023. https://onlinelibrary.wiley.com/doi/10.1111/jocd.15923\n\nGuidelines of care for the management of acne vulgaris. Journal of the American Academy of Dermatology. 2024. https://www.jaad.org/article/S0190-9622(23)03389-3/fulltext\n\nAzelaic Acid: Evidence-based Update on Mechanism of Action and Clinical Application. 2015. https://pubmed.ncbi.nlm.nih.gov/26355614/",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Azelaic acid: uses, application and more."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/azelaic-acid"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/azelaic-acid"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "A systematic review to evaluate the efficacy of azelaic acid in the management of acne, rosacea, melasma and skin aging."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " Journal of Cosmetic Dermatology. 2023. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "onlinelibrary.wiley.com/doi/10.1111/jocd.15923"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://onlinelibrary.wiley.com/doi/10.1111/jocd.15923"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Guidelines of care for the management of acne vulgaris."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " Journal of the American Academy of Dermatology. 2024. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "jaad.org/article/S0190-9622(23)03389-3/fulltext"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.jaad.org/article/S0190-9622(23)03389-3/fulltext"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Azelaic Acid: Evidence-based Update on Mechanism of Action and Clinical Application."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " 2015. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/26355614"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/26355614/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "Sources"
       },
       "visibility": "public"
