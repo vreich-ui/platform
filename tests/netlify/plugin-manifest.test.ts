@@ -229,6 +229,30 @@ test('a missing voice degrades to a warning and a placeholder skill, never a thr
   assert.match(bundle.skill_md, /read the live object at session start/);
 });
 
+test('the skill makes rich_text.v1 the rule, not an option (2026-09-04 live run)', () => {
+  // Found by the 2026-09-04 plugin acceptance run. `public.body` takes a plain
+  // string OR a rich_text.v1 document and BOTH validate clean, so a body typed
+  // as blank-line-separated lines passes every gate and reaches readers as an
+  // undifferentiated wall: no list, no bold, no link. Two articles shipped to
+  // production that way. The skill is the only place this is catchable, so it
+  // must state the rule, show the shapes, and say what a plain string costs.
+  const { skill_md: skill } = render();
+  assert.match(skill, /Formatting is not optional/);
+  assert.match(skill, /A plain string is plain text/);
+  assert.ok(
+    skill.includes('the moment a body carries a list, a bold lead-in, a heading or a link'),
+    'the skill must state when rich text is mandatory'
+  );
+  // The three shapes a model cannot reconstruct from memory.
+  assert.match(skill, /"nodeType": "unordered-list"/);
+  assert.match(skill, /"nodeType": "list-item"/);
+  assert.match(skill, /"nodeType": "hyperlink"/);
+  assert.ok(skill.includes('"marks": [{ "type": "bold" }]'), 'the bold-mark shape must be shown');
+  // Bold lead-ins and the Sources shape are house style, not decoration.
+  assert.match(skill, /Bold lead-ins are house style/);
+  assert.ok(skill.includes('**bold title**'), 'the Sources shape must require a bold title');
+});
+
 test('the render is deterministic for identical inputs', () => {
   assert.equal(render().skill_md, render().skill_md);
   assert.equal(render().manifest_version, render().manifest_version);
