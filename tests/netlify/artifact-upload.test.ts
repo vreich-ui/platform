@@ -731,3 +731,171 @@ test('artifact-upload function returns stable JSON errors for token and integrit
     }
   });
 });
+
+const createLargeJpeg = (width: number, height: number) =>
+  sharp({
+    create: {
+      width,
+      height,
+      channels: 3,
+      background: { r: 30, g: 90, b: 180 },
+    },
+  })
+    .jpeg()
+    .toBuffer();
+
+test('artifact-upload function bounds an oversized image longest edge before storing, preserving aspect ratio', async () => {
+  await withBlobStores(async ({ artifactValues }) => {
+    const previousSecret = process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
+    const previousDimensionPx = process.env.ARTIFACT_UPLOAD_MAX_IMAGE_DIMENSION_PX;
+    // Uploaded bytes are what the client actually sent — the token and headers
+    // must match THESE (headersMatchClaims validates the upload as received),
+    // not the bounded bytes the endpoint goes on to store.
+    const bytes = await createLargeJpeg(3000, 1500);
+    const expectedSha256 = sha256Hex(bytes);
+    process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = 'direct-function-secret';
+    delete process.env.ARTIFACT_UPLOAD_MAX_IMAGE_DIMENSION_PX; // exercise the 2048px default
+
+    try {
+      const token = createArtifactUploadToken({
+        requestId: 'req_function_oversized_image_20260630_01',
+        artifactKind: ArtifactKind.Image,
+        contentType: 'image/jpeg',
+        filename: 'huge.jpg',
+        expectedSizeBytes: bytes.byteLength,
+        expectedSha256,
+        expiresAt: Date.now() + 60_000,
+      });
+
+      const response = await parseJsonResponse(
+        await artifactUploadHandler(
+          makeDirectUploadRequest({
+            bytes,
+            token,
+            headers: {
+              'x-artifact-request-id': 'req_function_oversized_image_20260630_01',
+              'x-artifact-kind': 'image',
+              'x-artifact-content-type': 'image/jpeg',
+              'x-artifact-size': String(bytes.byteLength),
+              'x-artifact-sha256': expectedSha256,
+              'x-artifact-filename': 'huge.jpg',
+            },
+          })
+        )
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.ok, true);
+      const artifact = response.body.artifact as { blobKey: string; sha256: string; sizeBytes: number };
+
+      // Stored artifact is NOT the uploaded bytes' own hash/size — proof the
+      // endpoint actually bounded it rather than storing the original.
+      assert.notEqual(artifact.sha256, expectedSha256);
+      assert.ok(artifact.sizeBytes < bytes.byteLength);
+
+      const storedBytes = artifactValues.get(artifact.blobKey) as Buffer;
+      assert.ok(Buffer.isBuffer(storedBytes));
+      const storedMetadata = await sharp(storedBytes).metadata();
+      assert.equal(storedMetadata.width, 2048);
+      assert.equal(storedMetadata.height, 1024); // 3000x1500 (2:1) bounded to 2048x1024 — aspect ratio preserved
+      assert.equal(storedMetadata.format, 'jpeg'); // format unchanged, never converted
+      assert.equal(Math.max(storedMetadata.width!, storedMetadata.height!), 2048);
+    } finally {
+      if (previousSecret === undefined) delete process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
+      else process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = previousSecret;
+      if (previousDimensionPx === undefined) delete process.env.ARTIFACT_UPLOAD_MAX_IMAGE_DIMENSION_PX;
+      else process.env.ARTIFACT_UPLOAD_MAX_IMAGE_DIMENSION_PX = previousDimensionPx;
+    }
+  });
+});
+
+test('artifact-upload function still rejects an oversize payload with the same 413 status once the dimension bound sits next to the byte cap', async () => {
+  const previousSecret = process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
+  const previousMaxBytes = process.env.ARTIFACT_UPLOAD_MAX_BYTES;
+  // A small-dimension image (so the new resize step would be a no-op) whose
+  // byte count alone must still trip the pre-existing byte cap — regression
+  // guard for T-dimension-bound landing right next to that check.
+  const bytes = await createTinyPng();
+  const expectedSha256 = sha256Hex(bytes);
+  process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = 'direct-function-secret';
+  process.env.ARTIFACT_UPLOAD_MAX_BYTES = String(bytes.byteLength - 1);
+
+  try {
+    const token = createArtifactUploadToken({
+      requestId: 'req_function_bytecap_regression_20260630_01',
+      artifactKind: ArtifactKind.Image,
+      contentType: 'image/png',
+      expectedSizeBytes: bytes.byteLength,
+      expectedSha256,
+      expiresAt: Date.now() + 60_000,
+    });
+
+    assert.deepEqual(
+      await parseJsonResponse(
+        await artifactUploadHandler(
+          makeDirectUploadRequest({
+            bytes,
+            token,
+            headers: {
+              'x-artifact-request-id': 'req_function_bytecap_regression_20260630_01',
+              'x-artifact-kind': 'image',
+              'x-artifact-content-type': 'image/png',
+              'x-artifact-size': String(bytes.byteLength),
+              'x-artifact-sha256': expectedSha256,
+            },
+          })
+        )
+      ),
+      { status: 413, body: { ok: false, error: 'Payload too large.', maxBytes: bytes.byteLength - 1 } }
+    );
+  } finally {
+    if (previousSecret === undefined) delete process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
+    else process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = previousSecret;
+    if (previousMaxBytes === undefined) delete process.env.ARTIFACT_UPLOAD_MAX_BYTES;
+    else process.env.ARTIFACT_UPLOAD_MAX_BYTES = previousMaxBytes;
+  }
+});
+
+test('artifact-upload function stores a small PDF byte-identical, unaffected by the image dimension bound', async () => {
+  await withBlobStores(async ({ artifactValues }) => {
+    const previousSecret = process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
+    const bytes = Buffer.from('%PDF-1.7\ndimension-bound must never touch a pdf');
+    const expectedSha256 = sha256Hex(bytes);
+    process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = 'direct-function-secret';
+
+    try {
+      const token = createArtifactUploadToken({
+        requestId: 'req_function_pdf_passthrough_20260630_01',
+        artifactKind: ArtifactKind.Pdf,
+        contentType: 'application/pdf',
+        expectedSizeBytes: bytes.byteLength,
+        expectedSha256,
+        expiresAt: Date.now() + 60_000,
+      });
+
+      const response = await parseJsonResponse(
+        await artifactUploadHandler(
+          makeDirectUploadRequest({
+            bytes,
+            token,
+            headers: {
+              'x-artifact-request-id': 'req_function_pdf_passthrough_20260630_01',
+              'x-artifact-kind': 'pdf',
+              'x-artifact-content-type': 'application/pdf',
+              'x-artifact-size': String(bytes.byteLength),
+              'x-artifact-sha256': expectedSha256,
+            },
+          })
+        )
+      );
+
+      assert.equal(response.status, 200);
+      const artifact = response.body.artifact as { blobKey: string; sha256: string };
+      assert.equal(artifact.sha256, expectedSha256); // byte-identical: hash of what was uploaded, untouched
+      assert.deepEqual(artifactValues.get(artifact.blobKey), bytes);
+    } finally {
+      if (previousSecret === undefined) delete process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
+      else process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = previousSecret;
+    }
+  });
+});

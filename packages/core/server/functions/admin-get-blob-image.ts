@@ -18,8 +18,67 @@ import {
   getCoreBlobStoreSourceDiagnostics,
 } from '../lib/blob-store.js';
 import { ImageValidationError, validatePublishImageBytes } from '../lib/image-validation.js';
+import type sharpType from 'sharp';
 
 const allowedImageBlobKeyPattern = /^image\/[a-z0-9._-]+\/[a-f0-9]{64}(?:\.[a-z0-9]+)?$/i;
+
+// D-preview-rendition: a card-sized `<img>` (mood board, examples strip, the
+// library picker) never needs the ORIGINAL bytes — it was the bulk of "24
+// authenticated full-size downloads at once" being slow/often-failing. `w`
+// bounds the longest edge of a resize done here, server-side, over the SAME
+// authenticated read path and the SAME validated bytes — never a second,
+// unauthenticated way to reach an artifact. Clamped well below what any
+// legitimate card size asks for; a resize that fails for any reason (a
+// format sharp can't touch, a corrupt install) falls back to the original
+// bytes rather than failing the request.
+const MIN_RENDITION_WIDTH = 16;
+const MAX_RENDITION_WIDTH = 1024;
+const RENDITION_FORMATS = new Set(['jpeg', 'png', 'webp']);
+
+const parseRenditionWidth = (value: unknown): number | undefined => {
+  const parsed = Number(typeof value === 'string' ? value.trim() : value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) return undefined;
+  return Math.min(MAX_RENDITION_WIDTH, Math.max(MIN_RENDITION_WIDTH, parsed));
+};
+
+// Loaded lazily, same reasoning as image-validation.ts's own loadSharp: sharp's
+// native binding is expensive at module-evaluation time for every function
+// that bundles this file, so it is only paid for on an actual rendition
+// request, cached per runtime instance.
+let cachedSharp: typeof sharpType | undefined;
+const loadSharp = async (): Promise<typeof sharpType> => {
+  if (!cachedSharp) cachedSharp = (await import('sharp')).default;
+  return cachedSharp;
+};
+
+/**
+ * Best-effort width-bounded rendition of already-validated image bytes.
+ * Returns undefined (never throws) on anything that isn't a clean resize —
+ * an unsupported decoded format, a broken sharp install, a corrupt-but-passed
+ * decode — so the caller's fallback is always "serve the original bytes",
+ * never a broken response.
+ */
+const renderBoundedRendition = async (
+  bytes: Buffer,
+  decodedFormat: string | undefined,
+  width: number
+): Promise<Buffer | undefined> => {
+  if (!decodedFormat || !RENDITION_FORMATS.has(decodedFormat)) return undefined;
+  try {
+    const sharp = await loadSharp();
+    const pipeline = sharp(bytes, { failOn: 'error' }).resize({
+      width,
+      height: width,
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
+    const format = decodedFormat as 'jpeg' | 'png' | 'webp';
+    return await pipeline.toFormat(format).toBuffer();
+  } catch (error) {
+    console.warn('Preview rendition failed; falling back to the original image bytes.', { width, decodedFormat, error });
+    return undefined;
+  }
+};
 const contentTypeByExtension: Record<string, string> = {
   gif: 'image/gif',
   jpeg: 'image/jpeg',
@@ -214,13 +273,15 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
     const buffer = reconciliation.bytes;
     const filename = blobKey.split('/').pop() || blobKey;
 
+    let decodedFormat: string | undefined;
     try {
-      await validatePublishImageBytes({
+      const metadata = await validatePublishImageBytes({
         bytes: buffer,
         contentType,
         filename,
         path: blobKey,
       });
+      decodedFormat = metadata.format;
     } catch (error) {
       if (error instanceof ImageValidationError) {
         return jsonResponse(422, {
@@ -236,13 +297,24 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
       throw error;
     }
 
+    // D-preview-rendition: `w` is optional and additive. Absent (every
+    // full-size view and every download path — neither passes it), behavior
+    // is byte-for-byte what it always was. Present, this is still the SAME
+    // authenticated read of the SAME validated bytes above — only the body
+    // written to the response differs.
+    const renditionWidth = parseRenditionWidth(event.queryStringParameters?.w);
+    const renditionBytes = renditionWidth
+      ? await renderBoundedRendition(buffer, decodedFormat, renditionWidth)
+      : undefined;
+    const responseBytes = renditionBytes ?? buffer;
+
     return {
       statusCode: 200,
       headers: {
         'Content-Type': contentType,
         'Cache-Control': 'private, max-age=300',
       },
-      body: buffer.toString('base64'),
+      body: responseBytes.toString('base64'),
       isBase64Encoded: true,
     };
   } catch (error) {
