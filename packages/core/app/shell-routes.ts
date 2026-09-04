@@ -79,6 +79,11 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   // install cards). Core-owned — every tenant gets the same one, because the
   // bundle it renders is tenant-generic.
   { pattern: '/admin/plugins', entry: 'admin/plugins.astro' },
+  // W7.1: the PUBLIC per-tenant install page an invited member opens from the
+  // invitation e-mail. Outside /admin on purpose — the reader has no session
+  // yet, and only the downloads behind it are gated (on membership, not on
+  // admin; see server/functions/plugin-install.ts).
+  { pattern: '/plugin/install', entry: 'plugin/install.astro' },
   { pattern: '/admin/profile', entry: 'admin/profile.astro' },
   { pattern: '/admin/settings/admins', entry: 'admin/settings/admins.astro' },
   { pattern: '/admin/settings/guardrails', entry: 'admin/settings/guardrails.astro' },

@@ -126,9 +126,21 @@ test('the rendered skill states the two rules that block or bind a hand-authored
     'the skill must say a claims array blocks the publish'
   );
 
-  // The ceiling is enforced only on the workflow path, so the skill must say
-  // that the plugin is its own enforcement.
-  assert.match(skill, /Nothing on the server enforces this ceiling for you/);
+  /**
+   * W7.3 REPLACES what this assertion used to check. The skill used to say
+   * "Nothing on the server enforces this ceiling for you" — true until the
+   * ceiling moved into `object_validate`, and dangerous the moment it stopped
+   * being true: a model told it is the only enforcement will not read the
+   * score the server now returns. The skill must now say the opposite, name
+   * the gate, and say how to lower a dial.
+   */
+  assert.ok(
+    !skill.includes('Nothing on the server enforces this ceiling'),
+    'the skill must not claim the server ignores the ceiling — W7.3 enforces it'
+  );
+  assert.match(skill, /The server scores this/);
+  assert.match(skill, /GATE-CEIL-1/);
+  assert.match(skill, /How to lower a dial/);
 });
 
 test('the rendered skill writes the live aggression ceiling in as a hard bound', () => {

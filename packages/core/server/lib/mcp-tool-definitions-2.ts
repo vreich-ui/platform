@@ -25,6 +25,26 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     inputSchema: objectSchema({}),
     governance: { toolClass: 'read' },
   },
+  {
+    // W7.2. `ping` proves the SERVER is reachable; this proves the INSTALL is
+    // correct — which human this credential is bound to, what they may do
+    // here, which chat surface the tenant thinks you are, whether the tool
+    // schema your client cached is still current, and the two rules (ceiling,
+    // approval posture) that decide whether anything you write can publish.
+    name: 'whoami',
+    description:
+      'Report who this connection is and what it may do, before writing anything. Returns the tenant member ' +
+      'this credential is bound to and their role, the chat surface the tenant attributes your calls to, ' +
+      'whether you may write at all (and why not, if not), the promoted plugin manifest version and its tool ' +
+      'charter, a digest of the live tool surface to compare against the schema your client cached, this ' +
+      "site's aggression ceiling, and its publish-approval posture. Call it at the start of every session: " +
+      'every value it returns is one an install can get silently wrong, and none of them is visible from ' +
+      'inside a chat app. If `can_write` is false, stop and tell the human what `refuse_reason` says instead ' +
+      'of attempting a write that the gate will refuse at the end of a long session. If `tools_digest_matches` ' +
+      'is false, the connector was added against an older tool surface — tell the human to re-add it.',
+    inputSchema: objectSchema({}),
+    governance: { toolClass: 'read' },
+  },
 
   // ── Object verbs (T0.9): the generic CMS object store. Each proxies to
   //    netlify/functions/object-store.ts with the publish key injected
@@ -158,17 +178,22 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
   {
     name: 'site_apply_brand_imagery',
     description:
-      'Apply a visual_standard\'s (or a theme\'s) brandImagery to the site singleton (brand-imagery wave §3.3): computes ONE exact-replace set_site_brand_imagery op (the privileged imagery writer — brandImagery is not patchable via set_site_fields). Whole-block replace: after the apply, site.brandImagery EQUALS the source\'s brandImagery — no stale sub-field survives, and (unlike site_apply_theme) there is no totality check to satisfy, since visual_standard.brandImagery is always a fully-populated schema-required object. Pass EXACTLY ONE of visual_standard_id (house OR template — promoting a template look to the live site is a normal use) or theme_id (a theme MAY carry a brandImagery preset alongside its brandTokens; a theme with none is refused with a clear error naming it); both or neither is a 400. Applies through the standard patch path under YOUR site checkout (lock_token + expected_record_version from object_checkout on the site object; the verb never auto-checkouts). One op = one atomic content_revision; history records the source; the exact inverse makes reverting a standard discard. The site COPIES the imagery (nothing live-binds to the source), and going live still requires the separate object_publish + release_to_production steps. Pass dry_run: true to preview {before, after, changedFields} plus the computed op and full validation without persisting — dry_run needs neither lock_token nor expected_record_version. Read object_contract("visual_standard") first.',
+      "Apply a visual_standard's (or a theme's) brandImagery to the site singleton (brand-imagery wave §3.3): computes ONE exact-replace set_site_brand_imagery op (the privileged imagery writer — brandImagery is not patchable via set_site_fields). Whole-block replace: after the apply, site.brandImagery EQUALS the source's brandImagery — no stale sub-field survives, and (unlike site_apply_theme) there is no totality check to satisfy, since visual_standard.brandImagery is always a fully-populated schema-required object. Pass EXACTLY ONE of visual_standard_id (house OR template — promoting a template look to the live site is a normal use) or theme_id (a theme MAY carry a brandImagery preset alongside its brandTokens; a theme with none is refused with a clear error naming it); both or neither is a 400. Applies through the standard patch path under YOUR site checkout (lock_token + expected_record_version from object_checkout on the site object; the verb never auto-checkouts). One op = one atomic content_revision; history records the source; the exact inverse makes reverting a standard discard. The site COPIES the imagery (nothing live-binds to the source), and going live still requires the separate object_publish + release_to_production steps. Pass dry_run: true to preview {before, after, changedFields} plus the computed op and full validation without persisting — dry_run needs neither lock_token nor expected_record_version. Read object_contract(\"visual_standard\") first.",
     inputSchema: objectSchema(
       {
-        visual_standard_id: stringSchema('The visual_standard object id (house vis_<site> or template vis_<site>_<slug>); exactly one of this or theme_id.'),
-        theme_id: stringSchema('The theme object id whose brandImagery preset to apply; exactly one of this or visual_standard_id.'),
+        visual_standard_id: stringSchema(
+          'The visual_standard object id (house vis_<site> or template vis_<site>_<slug>); exactly one of this or theme_id.'
+        ),
+        theme_id: stringSchema(
+          'The theme object id whose brandImagery preset to apply; exactly one of this or visual_standard_id.'
+        ),
         site_id: stringSchema('The site singleton object id, e.g. site_acme.'),
         lock_token: stringSchema('Your held site lock (from object_checkout on the site object); dry_run needs none.'),
         expected_record_version: intSchema('The record_version your checkout returned; dry_run needs none.'),
         dry_run: {
           type: 'boolean',
-          description: 'true → return {before, after, changedFields}, the computed op, and validation; persist nothing (no lock).',
+          description:
+            'true → return {before, after, changedFields}, the computed op, and validation; persist nothing (no lock).',
         },
         agent_name: stringSchema('Optional self-declared agent name recorded on history (attribution only).'),
       },
@@ -182,8 +207,14 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
       "Propose a brandImagery contract from a mood board and/or a brief (brand-imagery wave §3.5). A THIN proxy: Platform makes NO model call itself — it forwards to CMS-Agent's vision-capable `brand_imagery_writer` node and returns the proposal for review; nothing is written anywhere (not the site, not a visual_standard). Pass mode:'house' to propose the site's single house standard, or 'template' (with template_slug) for a named alternate look; pass visual_standard_id to revise an existing standard rather than start fresh. references[] is the mood board (max 8 — the node runner's image cap): each item needs a blob_key (an existing image artifact) or a url, an optional 0..1 region {x,y,w,h} to crop to just the swatch that matters (\"the palette, not the subject\"), an optional note, and an optional weight (0..1, default 1, a Midjourney --sw analogue). Provide brief when there is no mood board yet, or alongside references to steer the reading of them. Returns brand_imagery_proposal.v1: {brandImagery, rationale, sampleSubjects, confidence, label, whenToUse?}. To apply a proposal: run visual_standard_materializer (creates/patches the visual_standard) then site_apply_brand_imagery (or object_create for a brand-new template) — never write brandImagery directly.",
     inputSchema: objectSchema(
       {
-        mode: { type: 'string', enum: ['house', 'template'], description: "'house' for the site's one standard; 'template' for a named alternate look." },
-        visual_standard_id: stringSchema('Revise this existing visual_standard (house or template) instead of proposing from scratch.'),
+        mode: {
+          type: 'string',
+          enum: ['house', 'template'],
+          description: "'house' for the site's one standard; 'template' for a named alternate look.",
+        },
+        visual_standard_id: stringSchema(
+          'Revise this existing visual_standard (house or template) instead of proposing from scratch.'
+        ),
         references: arraySchema(
           {
             type: 'object',
@@ -192,7 +223,8 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
               url: stringSchema('A directly fetchable image URL, when there is no blob_key.'),
               region: {
                 type: 'object',
-                description: '0..1 fractions of the source image to crop to — "the palette, not the subject". Omit for the whole image.',
+                description:
+                  '0..1 fractions of the source image to crop to — "the palette, not the subject". Omit for the whole image.',
                 properties: {
                   x: { type: 'number', minimum: 0, maximum: 1 },
                   y: { type: 'number', minimum: 0, maximum: 1 },
@@ -203,7 +235,12 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
                 additionalProperties: false,
               },
               note: stringSchema('What this reference is FOR, e.g. "the palette, not the subject" (<=200 chars).'),
-              weight: { type: 'number', minimum: 0, maximum: 1, description: 'Influence weight, default 1 (a Midjourney --sw analogue).' },
+              weight: {
+                type: 'number',
+                minimum: 0,
+                maximum: 1,
+                description: 'Influence weight, default 1 (a Midjourney --sw analogue).',
+              },
             },
             required: [],
             additionalProperties: false,
@@ -211,8 +248,12 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
           'The mood board — at most 8 references; at least one of references or brief is required.'
         ),
         brief: stringSchema('A free-text style brief, used alone or to steer the reading of references.'),
-        existing_brand_imagery: anyObjectSchema('The current brandImagery contract, when refining one that already exists.'),
-        template_slug: stringSchema("Required with mode:'template' when visual_standard_id is omitted — names the new template standard."),
+        existing_brand_imagery: anyObjectSchema(
+          'The current brandImagery contract, when refining one that already exists.'
+        ),
+        template_slug: stringSchema(
+          "Required with mode:'template' when visual_standard_id is omitted — names the new template standard."
+        ),
         agent_name: stringSchema('Optional self-declared agent name recorded on usage telemetry (attribution only).'),
       },
       ['mode']

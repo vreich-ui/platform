@@ -14,10 +14,15 @@
  *      `article_claim_verification` is `blocks_publish` and, in its own words,
  *      "bites a hand-authored body only" — which is exactly what this plugin
  *      produces. `sources` is safe: `article_claim_substrate` only warns.
- *   2. The aggression ceiling is enforced ONLY on the CMS-Agent workflow path.
- *      A plugin publishing over /mcp clamps itself or not at all, so the
- *      ceiling is written into the skill as an explicit bound.
+ *   2. The aggression ceiling used to be enforced ONLY on the CMS-Agent
+ *      workflow path, so the skill carried it as prose and hoped. W7.3 moved
+ *      enforcement into `object_validate` — every actor, every write — so the
+ *      skill now states the bound AND tells the model that the server scores
+ *      it, what the refusal looks like, and how to lower each dial. The prose
+ *      is still worth having: a model that only learns the ceiling from a
+ *      blocker has already written the wrong article.
  */
+import { AGGRESSION_GATE_ID } from '../object-validate.js';
 import type { AggressionCeiling } from '../../../lib/site-identity.js';
 import type { ManifestTool } from './manifest-types.js';
 
@@ -112,10 +117,25 @@ through the CMS tools below. A human drives you: you never publish without an ex
 
 ## 0. Session start — do this once, before writing a word
 
-1. \`object_get {object_type:"editorial_voice", object_id:"${voice ? `${input.siteId.replace(/^site_/, 'voice_')}` : '<the site voice id>'}"}\` — the live voice governs. Obey it over anything summarised below.
-2. \`object_contract {object_type:"content_item"}\` — read \`aggression_ceiling\`, \`media_policy\`, the allowed patch ops and \`publish_policy\`.
+1. \`whoami {}\` — proves this install. It answers five things you cannot see from in here and must not guess:
+   - **\`can_write\` is false → STOP.** Do not create, patch or publish anything. Tell the human exactly what
+     \`refuse_reason\` says. A write attempted anyway is refused at the publish gate, at the end of the session,
+     after the article is written — which is the most expensive place to find out.
+   - **\`surface\` is \`unknown\` → STOP** and tell the human to re-add the connector from this tenant's install
+     page. The tenant cannot attribute a write it cannot place, and an unattributable article is worse than none.
+   - **\`tools_digest_matches\` is false** → this client cached an older tool surface. Tell the human to remove and
+     re-add the connector. Tool calls will fail in ways that look like tenant faults and are not. The same digest is on
+     \`initialize.serverInfo.tools_digest\` and on \`GET ${input.origin}/mcp?health=auth\`, which needs no credential —
+     that URL is what an operator checks when you cannot.
+   - **\`surface_blocked\` is true → STOP.** An owner has switched this chat app off for this tenant. Nothing you do
+     fixes it and no other tool will answer; say so and stop, rather than retrying into a wall of tool errors.
+   - \`member.email\` and \`member.role\` are who this session writes AS. If the human expected someone else, that is
+     the wrong account signed in — say so before writing.
+   - \`aggression_ceiling\` and \`publish_policy\` are the rules the rest of this document is written against.
+2. \`object_get {object_type:"editorial_voice", object_id:"${voice ? `${input.siteId.replace(/^site_/, 'voice_')}` : '<the site voice id>'}"}\` — the live voice governs. Obey it over anything summarised below.
+3. \`object_contract {object_type:"content_item"}\` — read \`aggression_ceiling\`, \`media_policy\`, the allowed patch ops and \`publish_policy\`.
 
-If either call fails, say so and stop. Never write from memory of the voice.
+If any of the three fails, say so and stop. Never write from memory of the voice.
 
 ## 1. Voice
 
@@ -154,8 +174,31 @@ the funnel stage sets the dial. Ask the human which stage the piece is for.
 
 ${stageTable(ceiling)}
 
-⚠️ **Nothing on the server enforces this ceiling for you.** It is applied automatically only on the
-autonomous workflow path; on this path you are the enforcement. Stay under it.
+**The server scores this, and will refuse a publish that is far over it (W7.3).** Every
+\`object_validate\` on an article returns an \`aggression\` group:
+
+- \`aggression_score\` — an \`info\` line reading \`dial score/ceiling (percent)\` for all four dials.
+  Read it before you publish. It costs nothing and it is the only way to see where you actually are.
+- \`aggression_over_ceiling\` — a **warning** above 100% of a dial's ceiling, and a **blocker**
+  (\`${AGGRESSION_GATE_ID}\`) above the site's block tolerance. A blocker stops \`object_publish\` with
+  \`validation_failed\`, and the message quotes the exact phrases that drove the score.
+
+**How to lower a dial**, in order of what actually works:
+
+- \`claim_strength\` — qualify. "Clinically proven to eliminate" → "has been shown to help many
+  people". Hedges genuinely reduce the score, because the scorer damps the dial when the copy
+  qualifies itself.
+- \`urgency\` — delete the scarcity phrasing outright. "Limited time", "act now", "only N left",
+  "before it's too late" are counted literally. Imply timing through consequence instead.
+- \`emotional_agitation\` — remove shame and FOMO aimed at the reader ("embarrassing", "everyone
+  else", "you'll regret"), and cut exclamation marks. Naming the reader's worry is not agitation;
+  telling them they should feel bad about it is.
+- \`cta_density\` — this dial is a SHARE: calls to action ÷ public nodes. One ask per article is the
+  rule anyway, so if it is over, you have more than one. Remove the extra rather than lengthening
+  the article to dilute it.
+
+The scorer reads only what a reader sees. Your \`private\` strategy annotations are never scored —
+naming a beat is not performing it, so annotate honestly.
 
 Rules at every stage:
 

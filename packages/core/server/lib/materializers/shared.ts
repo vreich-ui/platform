@@ -29,6 +29,18 @@ export interface MaterializeMeta {
   record_version: number;
   /** Optional execution context responsible for this published revision. */
   producer?: ProducerContext;
+  /**
+   * W7.4 — which chat surface published this revision (`plugin:claude`,
+   * `plugin:openai-gpt`, `plugin:openai-agent`), and how that identity was
+   * established. Derived from the publishing actor, never from a tool argument.
+   *
+   * It goes in the EXPORT, not only the store, because the export is what the
+   * owner DB ingests: the tracking dimensions are built by reading these files
+   * (see the strategy-join recipe in the sink reference kit), and a dimension
+   * the ingest cannot see is a dimension nobody can group by.
+   */
+  surface?: string;
+  attribution?: string;
   /** The site's export root (from its SiteBinding.dataRoot), e.g. `sites/drlurie/data/site`. */
   exportRoot: string;
 }
@@ -42,6 +54,9 @@ export interface GeneratedMarker {
   at: string;
   record_version: number;
   producer?: ProducerContext;
+  /** W7.4: the publishing surface and how its identity was established. */
+  surface?: string;
+  attribution?: string;
 }
 
 export interface MaterializedFile {
@@ -84,6 +99,8 @@ const generatedMarker = (objectType: ObjectType, objectId: string, meta: Materia
     at: meta.at,
     record_version: meta.record_version,
     ...(meta.producer ? { producer: meta.producer } : {}),
+    ...(meta.surface ? { surface: meta.surface } : {}),
+    ...(meta.attribution ? { attribution: meta.attribution } : {}),
   };
 };
 

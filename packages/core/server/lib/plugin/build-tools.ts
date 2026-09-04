@@ -14,6 +14,7 @@
  * For a human-driven plugin that is the correct trade (the editor is the gate);
  * it must never be described as a permission boundary.
  */
+import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import type { ManifestTool } from './manifest-types.js';
 
@@ -67,6 +68,23 @@ export const PLUGIN_TOOL_DENYLIST: Record<string, string> = {
   object_retire: 'Retiring a live article is an admin decision, not a drafting-session one.',
 };
 
+/**
+ * Tools that are in charter on EVERY surface regardless of what the promoted
+ * manifest happens to list (W7.2).
+ *
+ * `whoami` is the only member and the reason is circular in exactly the way
+ * that matters: the situation it diagnoses — a manifest promoted before this
+ * tool existed, or an export cached against an older tool surface — is
+ * precisely the situation in which the charter would refuse it. A diagnostic
+ * that is unavailable whenever it is needed is not a diagnostic. It is
+ * read-only and reports only the caller's own grant plus public tenant policy,
+ * so admitting it costs nothing (see lib/whoami.ts).
+ *
+ * Adding anything else here would be re-opening the charter, which is real
+ * enforcement on the façade. Don't.
+ */
+export const PLUGIN_ALWAYS_IN_CHARTER: ReadonlySet<string> = new Set(['whoami']);
+
 const firstSentence = (description: string): string => {
   const trimmed = description.trim();
   const cut = trimmed.search(/\.\s/);
@@ -78,6 +96,18 @@ export const buildPluginTools = (definitions: readonly ToolDefinition[]): Manife
   definitions
     .filter((tool) => PLUGIN_TOOL_CLASSES.has(tool.governance.toolClass) || PLUGIN_PRIVILEGED_ALLOWLIST.has(tool.name))
     .filter((tool) => !(tool.name in PLUGIN_TOOL_DENYLIST))
+    /**
+     * W7.2: the membership family is out of the charter by NAME, not by class.
+     * Six of its tools (`member_list`, `member_get`, `member_audit`,
+     * `membership_contract`, `membership_policy_get`, `member_export`) are
+     * `read` class and would pass the class filter above. They never had,
+     * because the only caller passed `visibleToolDefinitions()` with no event
+     * and membership tools are listed only to an OAuth principal — so the
+     * exclusion was an accident of the caller, not a rule. Passing a
+     * request-scoped surface here (as `whoami` does) would have quietly put
+     * the tenant's member roster in a publishing plugin's charter.
+     */
+    .filter((tool) => !isMembershipTool(tool.name))
     .map((tool) => ({
       name: tool.name,
       tool_class: tool.governance.toolClass as ManifestTool['tool_class'],
@@ -88,16 +118,24 @@ export const buildPluginTools = (definitions: readonly ToolDefinition[]): Manife
     .sort((a, b) => a.name.localeCompare(b.name));
 
 /**
- * A stable fingerprint of the tool surface a bundle was rendered against.
- * Feeds `sources.tool_surface_digest`, which is how W4.2 notices that the
- * server grew or lost a tool and marks installed exports stale.
+ * FNV-1a over a canonical string. Deliberately not a cryptographic hash: this
+ * detects DRIFT between two copies of a schema, and nothing here is a secret or
+ * an integrity claim. Short, stable across runtimes, and cheap enough to
+ * compute on every `tools/list`.
  */
-export const toolSurfaceDigest = (tools: readonly ManifestTool[]): string => {
-  const canonical = tools.map((t) => `${t.name}:${t.tool_class}`).join('|');
+export const fnv1a = (canonical: string): string => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < canonical.length; i += 1) {
     hash ^= canonical.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  return `sha_${hash.toString(16).padStart(8, '0')}_${tools.length}`;
+  return hash.toString(16).padStart(8, '0');
 };
+
+/**
+ * A stable fingerprint of the tool surface a bundle was rendered against.
+ * Feeds `sources.tool_surface_digest`, which is how W4.2 notices that the
+ * server grew or lost a tool and marks installed exports stale.
+ */
+export const toolSurfaceDigest = (tools: readonly ManifestTool[]): string =>
+  `sha_${fnv1a(tools.map((t) => `${t.name}:${t.tool_class}`).join('|'))}_${tools.length}`;

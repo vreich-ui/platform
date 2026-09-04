@@ -159,6 +159,23 @@ export const publishReceiptSchema = z.object({
   content_revision: z.number(),
   /** The __generated marker's `at` — the effective published_time. */
   exported_at: z.string(),
+  /**
+   * W7.4 — the learning join, stamped where it cannot be lost.
+   *
+   * "Do plugin-written articles perform differently from workflow-written
+   * ones?" is unanswerable unless the answer is recorded AT PUBLISH, on the
+   * revision that went live. The history ledger has an actor per entry, but a
+   * receipt is the one record that maps 1:1 to a published revision and to the
+   * export commit that carries it — which is the grain the analytics join needs.
+   *
+   * All three are optional: receipts written before this field existed are
+   * still valid, and a publish over the shared key legitimately has no surface.
+   */
+  surface: z.string().optional(),
+  /** How the publishing identity was established (oauth | verified_agent_token | …). */
+  attribution: z.string().optional(),
+  /** `producer.prompt_version` — which rendered manifest/prompt wrote this revision. */
+  prompt_version: z.string().optional(),
 });
 export type PublishReceipt = z.infer<typeof publishReceiptSchema>;
 

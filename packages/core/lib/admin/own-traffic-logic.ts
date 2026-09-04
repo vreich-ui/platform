@@ -49,6 +49,54 @@ export interface OwnTrackerTotals {
   member_links: number;
 }
 
+/**
+ * W7.4 — engagement split by the surface that PUBLISHED each object.
+ *
+ * The question this exists for: "do plugin-written articles perform differently
+ * from workflow-written ones?" It is the whole reason the surface is stamped on
+ * the publish receipt and the export.
+ *
+ * The join is done HERE, in the CMS, rather than waiting on the sink to grow a
+ * dimension: the tenant already knows which surface published every object (the
+ * publish receipt says so), and `top_objects` already carries object ids. No
+ * external contract has to move for this to work, which is why it works today.
+ */
+export interface SurfaceSplitRow {
+  /** `plugin:claude` … or `workflow` for the autonomous path, or `unknown`. */
+  surface: string;
+  objects: number;
+  pageviews: number;
+}
+
+/** Objects published before W7.4, or by the workflow, carry no surface. */
+export const WORKFLOW_SURFACE = 'workflow';
+
+/**
+ * Group `top_objects` by publishing surface.
+ *
+ * An object the map does not know is `unknown` rather than silently folded into
+ * `workflow`: "we did not record this" and "the autonomous path published it"
+ * are different facts, and merging them would quietly overstate the workflow's
+ * share for every article published before the surface was stamped.
+ */
+export function surfaceSplit(
+  stats: Pick<OwnTrackerStatsPayload, 'top_objects'>,
+  surfaceByObjectId: Readonly<Record<string, string | null>>
+): SurfaceSplitRow[] {
+  const totals = new Map<string, SurfaceSplitRow>();
+  for (const row of stats.top_objects ?? []) {
+    const objectId = typeof row?.object_id === 'string' ? row.object_id : '';
+    if (!objectId) continue;
+    const known = Object.hasOwn(surfaceByObjectId, objectId);
+    const surface = known ? (surfaceByObjectId[objectId] ?? WORKFLOW_SURFACE) : 'unknown';
+    const existing = totals.get(surface) ?? { surface, objects: 0, pageviews: 0 };
+    existing.objects += 1;
+    existing.pageviews += typeof row?.pageviews === 'number' && Number.isFinite(row.pageviews) ? row.pageviews : 0;
+    totals.set(surface, existing);
+  }
+  return [...totals.values()].sort((a, b) => b.pageviews - a.pageviews || a.surface.localeCompare(b.surface));
+}
+
 export interface OwnTrackerDims {
   object_version?: string;
   producer?: string;

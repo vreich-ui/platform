@@ -50,7 +50,8 @@ import type { ToolContext } from './tools.js';
 // cycle risk even though mcp.ts is (indirectly, via mcp-tool-handlers.ts) a
 // two-hop neighbor of this module).
 import type { LambdaEvent } from '../../functions/mcp.js';
-import { callPing } from '../../functions/mcp.js';
+import { callPing, toolResult, visibleToolDefinitions } from '../../functions/mcp.js';
+import { buildWhoami } from '../whoami.js';
 import {
   callBrandImageryPropose,
   callCommerceOrders,
@@ -215,6 +216,22 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   list_artifacts_by_request: listArtifactsByRequest,
   search_artifacts: searchArtifactsAdmin,
   ping: () => Promise.resolve(callPing()),
+  /**
+   * W7.2. Wired here so no registry member answers "no operational handler".
+   * Note what it correctly reports on THIS surface: the admin chat carries an
+   * Identity-JWT human, not an OAuth plugin grant, so `surface` is `unknown`
+   * and `can_write` is false. That is the true answer to "which chat-app
+   * install is this", not a defect — chat writes go through the chat's own
+   * captured principal, which is a different path with its own gates.
+   */
+  whoami: async (event) =>
+    toolResult(
+      await buildWhoami({
+        definitions: visibleToolDefinitions(),
+        event,
+        auth: { oauthPrincipal: event.oauthPrincipal, verifiedAgentName: event.verifiedAgentName },
+      })
+    ),
   marginalia_create: (event, args) =>
     callObjectAction(event, {
       action: 'marginalia_create',

@@ -42,3 +42,49 @@ export const requestMail = (input: RequestMailInput): { subject: string; text: s
   ].filter((line, index, all) => !(line === '' && all[index - 1] === ''));
   return { subject, text: lines.join('\n').trim() };
 };
+
+export interface InstallInviteMailInput {
+  brandName: string;
+  /** The tier the invitation granted — the fact GoTrue's own template cannot carry. */
+  role: string;
+  /** The site's public origin, for the install link. */
+  origin: string;
+  /** Who invited them, so the message is from a person rather than from a system. */
+  invitedBy: string;
+}
+
+/**
+ * W7.1 — the half of an invitation Netlify Identity cannot send.
+ *
+ * GoTrue's invitation template can interpolate exactly three values:
+ * `{{ .SiteURL }}`, `{{ .Token }}`, `{{ .Email }}`. The ROLE is not among
+ * them, and the role is the single most useful thing to tell an invitee: it
+ * decides whether they can publish, whether they will be stopped at a review
+ * gate, and — via `whoami.can_write` — whether their chat app can write at all.
+ * An invitee who does not know their role finds out at the publish gate.
+ *
+ * So this is a SECOND message, sent by us, carrying the role and the install
+ * link. It deliberately does not carry an accept token: GoTrue's mail owns the
+ * credential half, this one owns the orientation half, and a token in two
+ * places is a token twice as easy to leak. If a tenant has no mail configured,
+ * `resolveMailSender` returns the null sender and the invitation still works —
+ * the invitee just gets the GoTrue mail's generic install link instead.
+ */
+export const installInviteMail = (input: InstallInviteMailInput): { subject: string; text: string } => {
+  const origin = input.origin.replace(/\/$/, '');
+  return {
+    subject: `You can publish to ${input.brandName}`,
+    text: [
+      `${input.invitedBy} invited you to ${input.brandName} as ${input.role}.`,
+      '',
+      'Accept the invitation in the e-mail from Netlify Identity first — that is the one that creates your account and sets your password.',
+      '',
+      'Then set up publishing from your own ChatGPT or Claude:',
+      `${origin}/plugin/install`,
+      '',
+      `Your role is ${input.role}. Editor and above can write and publish; viewer is read-only, and a read-only account can attach the tools and then be refused on every write.`,
+      '',
+      'The install page ends with a check that proves it worked. Run it — a connector that authenticates but cannot write looks exactly like one that works, until you try to publish.',
+    ].join('\n'),
+  };
+};

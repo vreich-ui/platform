@@ -6,7 +6,7 @@
  * feeds are fetched and displayed independently.
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
-import type { OwnTrackerDays, OwnTrackerStatsPayload } from './own-traffic-logic.js';
+import type { OwnTrackerDays, OwnTrackerStatsPayload, SurfaceSplitRow } from './own-traffic-logic.js';
 
 const ENDPOINT = '/.netlify/functions/admin-traffic';
 
@@ -19,6 +19,12 @@ export interface OwnTrafficOverview {
   message?: string;
   days: OwnTrackerDays;
   stats?: OwnTrackerStatsPayload;
+  /**
+   * W7.4 — engagement grouped by the surface that PUBLISHED each object.
+   * Computed server-side (admin-traffic joins the top objects against their
+   * publish receipts), so it needs nothing from the sink and works today.
+   */
+  surfaces?: SurfaceSplitRow[];
 }
 
 export interface FetchOwnTrafficOptions {

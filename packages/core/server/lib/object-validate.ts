@@ -43,6 +43,13 @@
  * touches the blob store.
  */
 import { assertReaderSafe } from '../../lib/article-content/assert-reader-safe.js';
+import {
+  DEFAULT_AGGRESSION_TOLERANCE,
+  evaluateAggression,
+  formatRatio,
+  type AggressionTolerance,
+} from './aggression-score.js';
+import { AGGRESSION_CEILING_DIALS, getSiteIdentity, type AggressionCeiling } from '../../lib/site-identity.js';
 import type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
 import { validateObjectIdForType, validateSectionInstanceId } from '../../lib/object-ids.js';
 import { applyPatchOps, PatchApplyError } from '../../lib/object-patch-apply.js';
@@ -224,6 +231,16 @@ export type ObjectValidationContext = {
   resolvePageType?: (pageTypeId: string) => PageTypeConstraint | undefined;
   /** True when validating a publish (or the record is already published). */
   publishIntent?: boolean;
+  /**
+   * W7.3: the site's aggression ceiling. Absent → resolved from the site
+   * identity at check time. Injectable because the ceiling is per-site policy
+   * and a unit test must be able to state it without registering a whole site
+   * config; the LIVE path never passes it, so a deploy always enforces its own
+   * committed ceiling and can never be handed a laxer one by a caller.
+   */
+  aggressionCeiling?: AggressionCeiling;
+  /** W7.3: slack around that ceiling. Absent → the site's, else the fleet default. */
+  aggressionTolerance?: AggressionTolerance;
 };
 
 export type ObjectValidationInput = {
@@ -2995,6 +3012,127 @@ export const checkDeploySafety = (
   ];
 };
 
+// ─── aggression ceiling (W7.3) ───────────────────────────────────────────────
+
+/**
+ * The gate id a blocked publish carries. A gate that refuses without a name
+ * makes an operator read code to find out what stopped them; every refusal in
+ * this system that a human will meet gets one.
+ */
+export const AGGRESSION_GATE_ID = 'GATE-CEIL-1';
+
+/**
+ * Resolve the ceiling to enforce. The context wins (tests, and any future
+ * per-request override); otherwise the deploy's own committed site identity.
+ *
+ * A site that declares NO ceiling is not silently treated as unlimited — that
+ * would make the safest-looking config the most permissive one. It reports the
+ * omission and enforces nothing, which is the same stance `buildManifestBundle`
+ * takes ("the config should be fixed"), and the fleet-parity obligation that
+ * every committed site config carries a ceiling still stands.
+ */
+const resolveCeiling = (context: ObjectValidationContext): AggressionCeiling | undefined => {
+  if (context.aggressionCeiling) return context.aggressionCeiling;
+  try {
+    return getSiteIdentity().aggressionCeiling;
+  } catch {
+    // No site-identity provider registered (a pure unit test). Nothing to
+    // enforce, and throwing here would fail validation for an unrelated reason.
+    return undefined;
+  }
+};
+
+const resolveTolerance = (context: ObjectValidationContext): AggressionTolerance => {
+  if (context.aggressionTolerance) return context.aggressionTolerance;
+  try {
+    return getSiteIdentity().aggressionTolerance ?? DEFAULT_AGGRESSION_TOLERANCE;
+  } catch {
+    return DEFAULT_AGGRESSION_TOLERANCE;
+  }
+};
+
+/**
+ * Score a content_item against its site's ceiling (W7.3).
+ *
+ * Two criteria, deliberately separate:
+ *
+ *   `aggression_score` is `info` — a true statement about the article that is
+ *   not an ask (the W6 D4 tier). It is always present so a writer can see the
+ *   four numbers WITHOUT having to trip a threshold to learn them, which is
+ *   the difference between a dial and a trap.
+ *
+ *   `aggression_over_ceiling` appears only when something exceeds the ceiling:
+ *   `warning` past the warn tolerance, `missing` past the block tolerance. A
+ *   `missing` criterion is what the publish gate refuses on (object-publish.ts
+ *   step 2), so the block band and the publish gate are the same mechanism
+ *   every other invariant uses — no second enforcement path to drift.
+ */
+export const checkAggressionCeiling = (body: unknown, context: ObjectValidationContext): ReadinessCriterion[] => {
+  const ceiling = resolveCeiling(context);
+  if (!ceiling) {
+    return [
+      crit(
+        'aggression_ceiling_declared',
+        'Aggression ceiling',
+        'warning',
+        'This site declares no aggressionCeiling, so how hard published copy may push is not enforced. Add one to the committed site-identity config.'
+      ),
+    ];
+  }
+
+  const tolerance = resolveTolerance(context);
+  const evaluation = evaluateAggression(body, ceiling);
+
+  const readout = AGGRESSION_CEILING_DIALS.map(
+    (dial) =>
+      `${dial} ${evaluation.score[dial].toFixed(2)}/${ceiling[dial].toFixed(2)} (${formatRatio(evaluation.ratio[dial])})`
+  ).join(', ');
+
+  const criteria: ReadinessCriterion[] = [
+    crit(
+      'aggression_score',
+      'Aggression vs ceiling',
+      'info',
+      `${readout}. Scored over ${evaluation.basis.words} words.`
+    ),
+  ];
+
+  const worst = evaluation.worst;
+  if (!worst || worst.ratio <= tolerance.warn) return criteria;
+
+  // The phrases that put the worst dial over — this is what "lower it" means
+  // in practice, and without them the criterion is an accusation with no
+  // evidence.
+  const offending = evaluation.hits
+    .filter((hit) => hit.dial === worst.dial)
+    .slice(0, 6)
+    .map((hit) => `"${hit.term}" (${hit.node_id})`)
+    .join(', ');
+  const evidence = offending ? ` Phrases driving it: ${offending}.` : '';
+
+  if (worst.ratio > tolerance.block) {
+    criteria.push(
+      crit(
+        'aggression_over_ceiling',
+        'Aggression ceiling',
+        'missing',
+        `${AGGRESSION_GATE_ID}: ${worst.dial} scores ${formatRatio(worst.ratio)} of this site's ceiling, past the ${formatRatio(tolerance.block)} limit. Lower it before publishing.${evidence}`
+      )
+    );
+    return criteria;
+  }
+
+  criteria.push(
+    crit(
+      'aggression_over_ceiling',
+      'Aggression ceiling',
+      'warning',
+      `${worst.dial} scores ${formatRatio(worst.ratio)} of this site's ceiling. It will block above ${formatRatio(tolerance.block)}.${evidence}`
+    )
+  );
+  return criteria;
+};
+
 // ─── pipeline composition ────────────────────────────────────────────────────
 
 export const validateObject = (
@@ -3039,6 +3177,22 @@ export const validateObject = (
       label: 'Structural invariants',
       criteria: checkStructuralInvariants(input.objectType, input.objectId, input.body, context, atPublish),
     },
+    /**
+     * W7.3. Only articles carry a ceiling — it is a property of published
+     * READER copy, and a navigation object or a theme has no register to
+     * measure. Appending the group conditionally (rather than emitting an
+     * "optional, does not apply" criterion on every page write) keeps the
+     * readout out of surfaces it means nothing on.
+     */
+    ...(input.objectType === 'content_item'
+      ? [
+          {
+            id: 'aggression',
+            label: 'Aggression ceiling',
+            criteria: checkAggressionCeiling(input.body, context),
+          },
+        ]
+      : []),
   ];
 };
 

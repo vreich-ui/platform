@@ -96,6 +96,30 @@ export const renderPluginDraft = (getToken: GetToken, platform: PluginPlatformId
 export const promotePluginDraft = (getToken: GetToken) =>
   request<{ active: ManifestBundleView }>(getToken, { method: 'POST', body: JSON.stringify({ action: 'promote' }) });
 
+export type InviteRole = 'admin' | 'publisher' | 'editor' | 'viewer';
+
+export interface InviteAndSendResult {
+  invited: Record<string, unknown>;
+  install_url: string;
+  /**
+   * Whether the SECOND message went out — the one carrying the role, which
+   * GoTrue's own template cannot interpolate. `sent: false` is a normal state
+   * on a tenant with no mail configured, not a failed invitation: the member
+   * is invited either way and the operator copies `install_url` by hand.
+   */
+  mail: { sent: boolean; code?: string; error?: string };
+}
+
+/**
+ * W7.1 — "Invite & send link". One request, because two ("go invite them, then
+ * come back for the link") is where an install stops happening.
+ */
+export const inviteAndSendInstallLink = (getToken: GetToken, email: string, role: InviteRole) =>
+  request<InviteAndSendResult>(getToken, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'invite', email, role }),
+  });
+
 /**
  * The filename the server chose, from `Content-Disposition`.
  *
@@ -178,6 +202,91 @@ export const fetchPluginExport = async (
   };
 };
 
+/* ── W7.6: the installers board ───────────────────────────────────────────── */
+
+export interface InstallSignalView {
+  last_whoami_at: string;
+  manifest_version: string | null;
+  tools_digest: string;
+  can_write: boolean;
+  count: number;
+}
+
+export interface PublishRow {
+  object_id: string;
+  surface: string | null;
+  attribution: string | null;
+  published_at: string;
+}
+
+export interface InstallersBoard {
+  /** email → surface → signal. */
+  signals: Record<string, Record<string, InstallSignalView>>;
+  publishes: PublishRow[];
+  live: { tools_digest: string; manifest_version: string | null };
+}
+
+/**
+ * Its own request: the board costs a bounded object scan, and the page's main
+ * job must not pay for a section the operator has not opened.
+ */
+export const fetchInstallersBoard = (getToken: GetToken) =>
+  request<InstallersBoard>(getToken, { query: '?view=installers' });
+
+export interface InstallerRow {
+  email: string;
+  surface: string;
+  lastSeen: string;
+  canWrite: boolean;
+  /** The bundle that install is running, and whether it is the promoted one. */
+  manifestVersion: string | null;
+  stale: boolean;
+  /** Their most recent publish FROM THIS SURFACE, when there is one. */
+  lastPublishedAt: string | null;
+  sessions: number;
+}
+
+/**
+ * Fold the board into one row per member+surface.
+ *
+ * The three columns are the three questions an owner actually asks, in order:
+ * did it work (a signal exists at all), can they write (the role took effect),
+ * and are they current (their install's manifest matches the promoted one).
+ *
+ * `stale` is computed against the LIVE manifest version rather than trusted
+ * from the stored signal: a re-promote makes every previously-current install
+ * stale without any of them calling again, and a board that only noticed on the
+ * installer's next session would be reassuring at exactly the wrong moment.
+ *
+ * The last publish is matched by SURFACE, not by member: the receipt records
+ * which chat app published, not which human, so "editor@x last published from
+ * their Custom GPT" is the honest reading and "editor@x published" is not.
+ */
+export const installerRows = (board: InstallersBoard | null): InstallerRow[] => {
+  if (!board) return [];
+  const lastPublishBySurface = new Map<string, string>();
+  for (const row of board.publishes) {
+    if (!row.surface) continue;
+    const current = lastPublishBySurface.get(row.surface);
+    if (!current || row.published_at > current) lastPublishBySurface.set(row.surface, row.published_at);
+  }
+
+  return Object.entries(board.signals)
+    .flatMap(([email, bySurface]) =>
+      Object.entries(bySurface).map(([surface, signal]) => ({
+        email,
+        surface,
+        lastSeen: signal.last_whoami_at,
+        canWrite: signal.can_write,
+        manifestVersion: signal.manifest_version,
+        stale: Boolean(board.live.manifest_version) && signal.manifest_version !== board.live.manifest_version,
+        lastPublishedAt: lastPublishBySurface.get(surface) ?? null,
+        sessions: signal.count,
+      }))
+    )
+    .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+};
+
 /* ── presentation ─────────────────────────────────────────────────────────── */
 
 export interface PlatformCard {
@@ -235,9 +344,10 @@ export const platformCards = (active: ManifestBundleView | null): PlatformCard[]
       copyLabel: 'Connector URL',
       steps: [
         'Install the .plugin file — it carries the skill and the connector together.',
-        'Or: upload the skill zip to org skills and add the connector URL by hand.',
+        'Or: upload the skill zip to org skills and add the connector URL by hand. The zip is a SKILL, not a plugin: one folder with SKILL.md at its root — uploading the .plugin here instead fails with an unhelpful error.',
         'Sign in when the first tool runs. OAuth is required; there is no anonymous mode.',
-        'Set the publishing tools to Ask for the first week.',
+        'Delete any older connector for this tenant first. Duplicates authenticate independently, and nothing in the chat tells you which one answered — the usual cause of "it worked yesterday".',
+        'Set the publishing tools to Ask for the first week, and have them run whoami once to prove the install.',
       ],
       limitation: null,
     },
@@ -253,7 +363,8 @@ export const platformCards = (active: ManifestBundleView | null): PlatformCard[]
         'Two shapes ship together — read the bundle README first. Custom GPT (charter-enforced through the Actions façade, installs on the installer own plan) or Agent Studio (tenant /mcp attached directly, invite-only, better for long runs).',
         'Custom GPT: paste gpt/instructions.md, upload gpt/knowledge/*.md, then Actions → Import from URL using the schema URL above.',
         'Custom GPT OAuth: register a client once, paste the id and secret, leave the scope EMPTY.',
-        'Agent: attach the tenant /mcp as an App, add agent/skill/SKILL.md as the skill, paste agent/operational-instructions.md. Remove any direct PDF-Tool app.',
+        'Agent: attach the tenant /mcp as an App, add agent/skill/SKILL.md as the skill, paste agent/operational-instructions.md. Remove any direct PDF-Tool app — this endpoint already carries those tools.',
+        'UPDATE IS A STEP on Agent Studio. It caches what it imported and will not notice a re-promote: after every promote, re-attach the App and re-paste the instructions. whoami reports tools_digest_matches false when that is due, and the Installers board flags the member as stale.',
       ],
       limitation: null,
     },

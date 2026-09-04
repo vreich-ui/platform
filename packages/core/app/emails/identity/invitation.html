@@ -28,6 +28,18 @@
                 </p>
                 <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#5b6470;">If the button does not work, copy this link into your browser:</p>
                 <p style="margin:0 0 20px;font-size:12px;line-height:1.5;word-break:break-all;color:#5b6470;">{{ .SiteURL }}/admin/accept/#invite_token={{ .Token }}</p>
+                <!--
+                  W7.1: the second half of an invitation. Accepting creates the
+                  account; this is what the account is FOR. Identity templates can
+                  read only {{ .SiteURL }}, {{ .Token }} and {{ .Email }} — the role
+                  cannot travel here, so the "Invite & send link" action on the admin
+                  plugins page sends a second message that names it. This link is the
+                  one that survives in every invitation, including the ones GoTrue
+                  sends on its own.
+                -->
+                <hr style="border:none;border-top:1px solid #e3e7ec;margin:24px 0;" />
+                <p style="margin:0 0 8px;font-size:15px;line-height:1.55;"><strong>After you accept:</strong> you can publish to this site from your own ChatGPT or Claude. The install page has one card per app, three steps each, and one call at the end that proves the install worked.</p>
+                <p style="margin:0 0 20px;font-size:13px;line-height:1.5;"><a href="{{ .SiteURL }}/plugin/install" style="color:#1f2933;">{{ .SiteURL }}/plugin/install</a></p>
                 <p style="margin:0;font-size:12px;line-height:1.5;color:#8a939e;">If you were not expecting this, you can ignore this e-mail — nothing happens until the invitation is accepted.</p>
               </td>
             </tr>

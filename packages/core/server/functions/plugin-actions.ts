@@ -22,6 +22,7 @@ import { handler as mcpHandler } from './mcp.js';
 import { visibleToolDefinitions } from './mcp.js';
 import { getPluginManifestBlobStore, getPluginManifestDoc } from '../lib/plugin/manifest-store.js';
 import { buildOpenApiDocument, PLUGIN_ACTION_PATH_PREFIX } from '../lib/plugin/build-openapi.js';
+import { PLUGIN_ALWAYS_IN_CHARTER } from '../lib/plugin/build-tools.js';
 import { ensureMcpSiblings } from '../lib/agent/mcp-siblings.js';
 
 type LambdaEvent = {
@@ -154,7 +155,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   if (!active) {
     return refusal(409, 'No active plugin manifest, so no tool is in charter yet.');
   }
-  if (!active.tools.some((tool) => tool.name === toolName)) {
+  if (!active.tools.some((tool) => tool.name === toolName) && !PLUGIN_ALWAYS_IN_CHARTER.has(toolName)) {
     // The charter refusal. Deliberately BEFORE auth resolution: whether a tool
     // is in charter is a public fact about this plugin, and answering it early
     // keeps the message useful instead of masking it behind a 401.

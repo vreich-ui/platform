@@ -135,6 +135,37 @@ export const siteIdentityConfigSchema = z.strictObject({
    * blocker by design). Validated 0..1 per dial at resolve time.
    */
   aggressionCeiling: aggressionCeilingSchema.optional(),
+  /**
+   * W7.3: how much slack the server-side ceiling check allows before it warns
+   * and before it blocks, as a multiple of the ceiling. Optional: omitted means
+   * the fleet default (warn at 1.00, block at 1.15). A site whose voice is
+   * deliberately louder than its dials suggest raises `block`; a site that
+   * wants the ceiling to be exactly a ceiling sets both to 1.
+   */
+  aggressionTolerance: z
+    .strictObject({
+      warn: z.number().finite().min(0.5).max(3),
+      block: z.number().finite().min(0.5).max(5),
+    })
+    .refine((value) => value.block >= value.warn, {
+      message: 'aggressionTolerance.block must be >= warn — a ceiling that blocks before it warns is a typo.',
+    })
+    .optional(),
+  /**
+   * W7.1: links an OWNER published outside this system, which the public
+   * install page shows when they exist. Optional everywhere and absent by
+   * default: a tenant with no shared GPT still gets a complete install card
+   * (build it once from the Actions schema URL), so this can never become a
+   * scaffold obligation for a new site.
+   */
+  pluginInstall: z
+    .strictObject({
+      /** A shared Custom GPT link (chatgpt.com/g/…), when the owner published one. */
+      customGptUrl: nonEmpty.regex(/^https:\/\//).optional(),
+      /** An Agent Studio agent the owner shares with invitees. */
+      agentStudioUrl: nonEmpty.regex(/^https:\/\//).optional(),
+    })
+    .optional(),
 });
 
 export type SiteIdentityConfig = z.infer<typeof siteIdentityConfigSchema>;
@@ -155,6 +186,10 @@ export type SiteIdentity = SiteIdentityConfig & {
   committerEmail: string;
   /** The committed ceiling (undefined only for a config that omits it). */
   aggressionCeiling?: AggressionCeiling;
+  /** W7.1: owner-published install links, when this site declares any. */
+  pluginInstall?: { customGptUrl?: string; agentStudioUrl?: string };
+  /** W7.3: per-site slack around the ceiling; undefined means the fleet default. */
+  aggressionTolerance?: { warn: number; block: number };
 };
 
 type EnvSource = Record<string, string | undefined>;
@@ -207,6 +242,8 @@ export const resolveSiteIdentity = (
     committerName: parsed.data.committerName ?? `${parsed.data.brandName} Publisher`,
     committerEmail: parsed.data.committerEmail ?? `publisher@${siteSlug}.local`,
     ...(parsed.data.aggressionCeiling ? { aggressionCeiling: parsed.data.aggressionCeiling } : {}),
+    ...(parsed.data.pluginInstall ? { pluginInstall: parsed.data.pluginInstall } : {}),
+    ...(parsed.data.aggressionTolerance ? { aggressionTolerance: parsed.data.aggressionTolerance } : {}),
   };
 };
 

@@ -3,6 +3,11 @@
 /**
  * Push the published object/producer/strategy dimensions to the owner DB.
  *
+ * W7.4 added `surface` and `attribution` to the `object_version` family — the
+ * columns that let `/admin/traffic` (and any owner-side query) separate
+ * plugin-written articles from workflow-written ones. Both are nullable and
+ * additive.
+ *
  * This is deliberately a post-build best-effort sync: missing configuration,
  * malformed individual exports, network failures, and non-2xx responses are
  * reported without throwing. A dimensions outage must never fail a site build.
@@ -57,6 +62,20 @@ export const dimensionRowsForExport = (raw, objectType) => {
         published_at: stringOrNull(marker.at),
         route,
         variant_of: variantOf,
+        /**
+         * W7.4 — the learning join. Which chat surface published this revision
+         * (`plugin:claude` / `plugin:openai-gpt` / `plugin:openai-agent`, or
+         * null for the autonomous workflow path) and how that identity was
+         * established. Stamped into `__generated` at publish from the
+         * auth-derived actor, so grouping engagement by surface is a plain
+         * column and not an inference from run ids.
+         *
+         * SINK CONTRACT: two additional columns on `object_version`, both
+         * nullable. A sink that ignores unknown keys is unaffected; a sink that
+         * validates strictly needs the migration before this deploys.
+         */
+        surface: stringOrNull(marker.surface),
+        attribution: stringOrNull(marker.attribution),
       },
     ],
     producer: [],

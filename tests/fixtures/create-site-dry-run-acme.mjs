@@ -16,7 +16,7 @@ create-site plan for 'acme' (Acme)
   theme id:       thm_acme_default
   canonical host: https://acme.netlify.app
 
-Files to create under sites/acme/ (92):
+Files to create under sites/acme/ (93):
   + sites/acme/config/site-identity.ts
   + sites/acme/config/site-binding.ts
   + sites/acme/config/approval-policy.ts
@@ -96,6 +96,7 @@ Files to create under sites/acme/ (92):
   + sites/acme/netlify/functions/membership-sweep.ts
   + sites/acme/netlify/functions/object-store.ts
   + sites/acme/netlify/functions/plugin-actions.ts
+  + sites/acme/netlify/functions/plugin-install.ts
   + sites/acme/netlify/functions/run-publisher-agent.ts
   + sites/acme/netlify/functions/save-artifact.ts
   + sites/acme/netlify/functions/save-commerce-event.ts

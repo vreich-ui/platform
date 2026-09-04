@@ -20,6 +20,7 @@
  * `governance` remains on the in-process definition — `build-tools.ts` and the
  * chat registry read it directly — it simply stops travelling over the wire.
  */
+import { fnv1a } from './plugin/build-tools.js';
 import type { ToolDefinition } from '../functions/mcp.js';
 
 /** The MCP `ToolAnnotations` subset this server asserts. */
@@ -35,7 +36,29 @@ export type McpWireTool = {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: McpToolAnnotations;
+  /**
+   * MCP's sanctioned extension slot. W7.5 puts a per-tool `schema_version`
+   * here — a short digest of the tool's own input schema — so a client that
+   * cached a tool list can be compared against the live one PER TOOL rather
+   * than only in aggregate. `tools_digest` on the server info says "something
+   * moved"; this says which tool moved, which is the difference between "re-add
+   * the connector" and knowing why.
+   *
+   * `_meta` rather than a top-level field on purpose: unknown top-level keys on
+   * a protocol object are a client's prerogative to reject, and this must never
+   * be the reason a tool list fails to parse.
+   */
+  _meta: { schema_version: string };
 };
+
+/**
+ * A tool's own schema fingerprint. Over the NAME plus the serialized input
+ * schema, so a renamed field, a new required argument or a changed enum all
+ * move it — and a reordered description does not, because a description is
+ * prose for the model, not a contract with the client.
+ */
+export const toolSchemaVersion = (tool: ToolDefinition): string =>
+  `v${fnv1a(`${tool.name}|${JSON.stringify(tool.inputSchema)}`)}`;
 
 /**
  * Tools that genuinely remove or overwrite something a human would miss.
@@ -97,4 +120,5 @@ export const toWireTool = (tool: ToolDefinition): McpWireTool => ({
   description: tool.description,
   inputSchema: tool.inputSchema,
   annotations: annotationsFor(tool),
+  _meta: { schema_version: toolSchemaVersion(tool) },
 });

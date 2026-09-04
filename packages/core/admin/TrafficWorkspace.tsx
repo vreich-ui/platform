@@ -21,6 +21,7 @@ import {
   ownTrackerStatRow,
   captureRate,
   type OwnTrackerDays,
+  type SurfaceSplitRow,
 } from '@core/lib/admin/own-traffic-logic';
 import {
   TRAFFIC_RANGE_OPTIONS,
@@ -32,6 +33,7 @@ import {
   serializeStoredTrafficRange,
   type TrafficRangeKey,
   type CustomRangeInput,
+  type TrafficRankingRowWithShare,
 } from '@core/lib/admin/traffic-logic';
 
 async function getToken(): Promise<string> {
@@ -110,6 +112,22 @@ function RangePicker({
     </div>
   );
 }
+
+/**
+ * W7.4 — the surface split as bar-list rows.
+ *
+ * `share` is relative to the LARGEST surface, matching every other bar list on
+ * this page (`withShare` in traffic-logic). A bar list whose fills meant
+ * something different from the one beside it would be read wrong at a glance.
+ */
+const surfaceBarRows = (rows: readonly SurfaceSplitRow[]): TrafficRankingRowWithShare[] => {
+  const max = rows.reduce((most, row) => Math.max(most, row.pageviews), 0);
+  return rows.map((row) => ({
+    label: `${row.surface} (${row.objects} object${row.objects === 1 ? '' : 's'})`,
+    visits: row.pageviews,
+    share: max > 0 ? row.pageviews / max : 0,
+  }));
+};
 
 // ─── own-tracker section (T21.2b — a second, first-party data source) ──────
 
@@ -240,6 +258,28 @@ function OwnTrackerSection({
             />
           </div>
         </div>
+
+        {/*
+          W7.4 — the whole reason the publishing surface is stamped on a receipt:
+          "do plugin-written articles perform differently from workflow-written
+          ones?" Rendered only when there is more than one surface in the window,
+          because a single-surface bar chart is a bar chart of one fact.
+        */}
+        {(overview.surfaces?.length ?? 0) > 1 ? (
+          <div>
+            <SubsectionLabel>Pageviews by publishing surface</SubsectionLabel>
+            <BarList
+              rows={surfaceBarRows(overview.surfaces ?? [])}
+              caption="Which chat app — or the autonomous workflow — published the objects being read"
+              emptyMessage="No published-surface data for this range."
+            />
+            <p className="mt-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+              <code>workflow</code> is the autonomous path. <code>unknown</code> means the object could not be read, or
+              was published before the surface was recorded — deliberately not folded into <code>workflow</code>, which
+              would overstate its share.
+            </p>
+          </div>
+        ) : null}
       </div>
     );
   }
