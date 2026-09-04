@@ -1,13 +1,17 @@
 import type { SiteBinding } from '../lib/site-binding.js';
 import { artifactKindSet, type ArtifactKind } from '../lib/artifacts.js';
 import { validateFilename, validateRequestId } from '../../lib/agents-naming.js';
+import { boundArtifactImageDimensions } from '../../lib/artifact-image-bound.js';
 import {
+  getArtifactUploadMaxImageDimensionPx,
   getDirectArtifactUploadMaxBytes,
   normalizeArtifactContentType,
   saveArtifactBytes,
+  validateBytesAgainstIntent,
   verifyArtifactUploadToken,
   type ArtifactUploadTokenClaims,
 } from '../lib/artifact-upload.js';
+import { sha256Hex } from '../lib/crypto.js';
 
 export const config = {
   path: '/api/artifacts/upload',
@@ -199,10 +203,39 @@ async function handlerImpl(req: Request) {
     return jsonResponse(413, { ok: false, error: 'Payload too large.', maxBytes });
   }
 
+  // headersMatchClaims verified the request's headers against the signed
+  // token; this verifies the UPLOADED BYTES themselves against what that
+  // token promised (a client lying about size/sha256 must still be
+  // rejected) — run here, on the original bytes, because the dimension
+  // bound below replaces `bytes` with a different buffer before
+  // saveArtifactBytes ever sees it, and saveArtifactBytes's own copy of
+  // this check only ever validates bytes against themselves once we've
+  // recomputed expectedSizeBytes/expectedSha256 for the bounded buffer.
+  const intentError = validateBytesAgainstIntent({ ...parsedHeaders.value, bytes }, bytes);
+  if (intentError && !intentError.ok) {
+    return jsonResponse(intentError.statusCode, { ok: false, error: intentError.error, maxBytes });
+  }
+
+  // Dimension-bound: only ever shrinks a raster image (fit: "inside" +
+  // withoutEnlargement: true), never crops, never upscales, and never
+  // touches a PDF or other non-image artifact — see
+  // boundArtifactImageDimensions' doc comment. Bytes actually changing means
+  // the size/sha256 handed to saveArtifactBytes below must describe the
+  // bytes being stored, not the originally uploaded ones (whose integrity
+  // was just proven above against the signed token).
+  const bounded = await boundArtifactImageDimensions({
+    bytes,
+    artifactKind: parsedHeaders.value.artifactKind,
+    contentType: parsedHeaders.value.contentType,
+    maxDimensionPx: getArtifactUploadMaxImageDimensionPx(),
+  });
+
   const result = await saveArtifactBytes({
     ...parsedHeaders.value,
     label: validation.claims.label,
-    bytes,
+    bytes: bounded.bytes,
+    expectedSizeBytes: bounded.bytes.byteLength,
+    expectedSha256: sha256Hex(bounded.bytes),
   });
 
   if (!result.ok) return jsonResponse(result.statusCode, { ok: false, error: result.error, maxBytes });

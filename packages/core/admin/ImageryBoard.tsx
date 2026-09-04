@@ -251,7 +251,7 @@ function ExamplesStrip({ items }: { items: readonly VisualStandardExampleView[] 
           <div key={example.usageContext} className="flex w-40 flex-col gap-1.5">
             <div className="overflow-hidden rounded-[var(--adm-radius-md)] border border-[var(--adm-border)]">
               {artifact ? (
-                <ArtifactStagePreview artifact={artifact} />
+                <ArtifactStagePreview artifact={artifact} size="thumbnail" />
               ) : (
                 <EmptyState
                   title="No preview"
@@ -458,7 +458,7 @@ function MoodBoard({
               >
                 <div className="max-h-64 overflow-hidden rounded-[var(--adm-radius-sm)]">
                   {artifact ? (
-                    <ArtifactStagePreview artifact={artifact} />
+                    <ArtifactStagePreview artifact={artifact} size="thumbnail" />
                   ) : (
                     <EmptyState
                       title="No preview"
@@ -557,7 +557,7 @@ function LibraryPicker({
             className="adm-focusable flex flex-col gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] p-2 text-left hover:bg-[var(--adm-surface-sunken)]"
           >
             <div className="max-h-40 overflow-hidden rounded-[var(--adm-radius-sm)]">
-              <ArtifactStagePreview artifact={artifact} />
+              <ArtifactStagePreview artifact={artifact} size="thumbnail" />
             </div>
             <span className="truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text)]">{artifact.label}</span>
           </button>
