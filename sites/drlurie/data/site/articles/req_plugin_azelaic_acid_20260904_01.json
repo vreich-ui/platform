@@ -1,0 +1,163 @@
+{
+  "__generated": {
+    "at": "2026-09-04T10:29:11.336Z",
+    "from": "objects/content_item/by-id/req_plugin_azelaic_acid_20260904_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_azelaic_acid_20260904_01"
+    },
+    "record_version": 4
+  },
+  "author": "Dr. Lurie",
+  "deck": "A quieter active than a retinoid or benzoyl peroxide, with a decent evidence base for acne, rosacea, and the brown marks a spot leaves behind. Here is who it suits.",
+  "description": "What azelaic acid is, what the evidence supports it for, who it suits, how people get it wrong, and how it interacts with the rest of a routine.",
+  "editorial": {
+    "framework": "fw_ingredient",
+    "writer_notes": "MID-stage ingredient review. Dials under the site ceiling: claim_strength ~0.27, urgency 0.05, emotional_agitation ~0.09, cta_density ~0.12. One ask only: the PDF lead magnet. Pregnancy is named as a see-your-clinician boundary in the body, not a footer."
+  },
+  "image": {
+    "alt": "A plain white tube of cream on a pale linen cloth beside a few loose grains of wheat.",
+    "src": "/img/req_plugin_azelaic_acid_20260904_01/9536e55610cea902c3f92d8fc68f3f245c2ff12a2311bfb4ac1e280b180e406a.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_a2g7",
+      "kind": "content",
+      "public": {
+        "body": "Azelaic acid keeps turning up in recommendations. For acne. For the redness and bumps of rosacea. For the brown marks a spot leaves behind long after the spot has gone.\n\nIt is rarely the loudest product on a shelf, and part of the reason people hesitate is that nothing about it sounds impressive. There is no tingle, no visible peeling, no immediate glow.\n\nIt does have a real evidence base, a genuinely useful profile for skin that reacts to everything else, and one very specific way of disappointing people."
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_e9l4",
+      "kind": "content",
+      "public": {
+        "body": "Azelaic acid is a dicarboxylic acid produced by a yeast that lives on normal skin. It is used topically, not taken by mouth.\n\nPrescription strengths in most countries are a 15% gel or a 20% cream, depending on the licensed indication. Lower concentrations, commonly around 10%, are sold without a prescription. Availability and licensing differ from country to country, so what sits on a pharmacy shelf where you live may not match what a study used.\n\nDermNet describes three mechanisms at work. It reduces the growth of bacteria in the follicle by interfering with protein synthesis. It improves the abnormal way cells build up inside the follicle. And it damps inflammation by scavenging free radicals in immune cells.\n\nThat combination is why one ingredient turns up against several different-looking problems.",
+        "title": "What it is"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_u3f8",
+      "kind": "content",
+      "public": {
+        "body": "Acne. Topical azelaic acid appears in the 2024 American Academy of Dermatology acne guideline among the topical treatments it recommends. It acts on both blocked pores and inflamed spots, which is unusual for a single ingredient. Its evidence base in acne is smaller than the one behind benzoyl peroxide or a topical retinoid.\n\nRosacea. The 15% gel is one of the better-supported topical options for the papules and pustules of rosacea. It does less for flushing and visible vessels, which are a different problem with different answers.\n\nMarks left behind. Because it acts on pigment production as well as on inflammation, DermNet notes it is particularly useful for people with deeper skin tones whose spots leave persistent brown marks.\n\nA 2023 systematic review in the Journal of Cosmetic Dermatology looked across acne, rosacea, melasma and skin ageing. Support was clearest in acne and rosacea; results in melasma were less consistent.\n\nStudies suggest a reliable mid-tier active: better evidenced than most of what is marketed beside it, and not a replacement for a treatment your clinician has prescribed.",
+        "title": "What the evidence shows"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_k7v1",
+      "kind": "content",
+      "public": {
+        "body": "It tends to suit:\n\nskin that reacts badly to benzoyl peroxide or a retinoid, since irritation from azelaic acid is usually milder\n\nacne that leaves brown marks rather than red ones\n\nmild to moderate papulopustular rosacea\n\npeople who would rather have one product doing two jobs than a stacked routine\n\nIt also does not bleach fabric, which benzoyl peroxide does, and in most people it is well tolerated.\n\nOn pregnancy: azelaic acid is often mentioned among the acne options considered acceptable during pregnancy. That is exactly the kind of decision to make with the clinician looking after your pregnancy, not from an article. Do not start, stop, or continue any active on the strength of a web page while you are pregnant or breastfeeding.",
+        "title": "Who it suits"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_o5t9",
+      "kind": "content",
+      "public": {
+        "body": "Stopping too early. DermNet's guidance is that some improvement should be seen after about a month, with maximum results after around six months of continuous use, and that rosacea may need up to twelve weeks before it is fair to judge. Most people who say it did nothing stopped at four.\n\nExpecting an exfoliant. It is called an acid and it does not behave like one. No tingle, no peel, no overnight difference. The change is slow and cumulative, which makes before-and-after comparison over weeks more useful than checking the mirror daily.\n\nUsing too much. A thin layer over the whole affected area, once or twice daily, is the pattern the studies used. More does not speed it up; it mostly increases the chance of stinging.\n\nAdding it to everything at once. Layered onto a retinoid, an acid toner and a foaming cleanser in the same week, it will get the blame for irritation the routine as a whole caused.",
+        "title": "How people get it wrong"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_i8b3",
+      "kind": "content",
+      "public": {
+        "body": "Mild stinging, dryness, or a temporary itch in the first weeks is common and usually settles. DermNet advises stopping if you get severe redness, scaling, itching or burning.\n\nIt layers reasonably with niacinamide and with most moisturisers. Combining it with a retinoid is done, but introduce one thing at a time, a fortnight apart, so you can tell which one your skin is answering.\n\nWorsening of asthma has been reported with azelaic acid. If you have asthma, say so before you start.\n\nAnd if what you are treating is rosacea, acne that is leaving scars, or pigmentation you are not sure about, your dermatologist is the sensible first step rather than the last resort. Individual response varies more than any article can account for.",
+        "title": "Interactions and side effects"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_r4m6",
+      "kind": "content",
+      "public": {
+        "body": "Azelaic acid is an unglamorous, reasonably well-evidenced ingredient that suits reactive skin and post-spot marks better than most of the alternatives. It asks for about three months of patience and a boring routine around it.\n\nIf that sounds like an anticlimax, it is meant to. Most of what works on skin works slowly.",
+        "title": "The short version"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_x1z5",
+      "kind": "action",
+      "public": {
+        "body": "A four-page guide covering the strengths, what the evidence supports, the twelve-week timeline, and the four mistakes that make people stop early. Laid out to save or print.",
+        "ctaLink": "/pdf/req_plugin_azelaic_acid_20260904_01/5d9550e5cb5376c54f3ee66f3f2d01f17d5906583c3a6c6c82b55df92b2d6831.pdf",
+        "ctaText": "Download the azelaic acid guide (PDF)",
+        "media": {
+          "caption": "A four-page evidence guide to azelaic acid — strengths, timeline, and the four mistakes.",
+          "contentType": "application/pdf",
+          "sizeBytes": 49089,
+          "src": "/pdf/req_plugin_azelaic_acid_20260904_01/5d9550e5cb5376c54f3ee66f3f2d01f17d5906583c3a6c6c82b55df92b2d6831.pdf",
+          "title": "Azelaic Acid, Plainly",
+          "type": "document"
+        },
+        "title": "Take the guide with you"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_w6c2",
+      "kind": "content",
+      "public": {
+        "body": "DermNet. Azelaic acid: uses, application and more. https://dermnetnz.org/topics/azelaic-acid\n\nA systematic review to evaluate the efficacy of azelaic acid in the management of acne, rosacea, melasma and skin aging. Journal of Cosmetic Dermatology. 2023. https://onlinelibrary.wiley.com/doi/10.1111/jocd.15923\n\nGuidelines of care for the management of acne vulgaris. Journal of the American Academy of Dermatology. 2024. https://www.jaad.org/article/S0190-9622(23)03389-3/fulltext\n\nAzelaic Acid: Evidence-based Update on Mechanism of Action and Clinical Application. 2015. https://pubmed.ncbi.nlm.nih.gov/26355614/",
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "An evidence-led guide to azelaic acid for acne, rosacea, and post-spot marks: strengths, who it suits, side effects, and the twelve-week timeline.",
+    "meta_title": "Azelaic Acid: What the Evidence Actually Shows"
+  },
+  "slug": "azelaic-acid-what-the-evidence-shows",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-04",
+        "name": "Azelaic acid: uses, application and more",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_azelaic",
+        "url": "https://dermnetnz.org/topics/azelaic-acid"
+      },
+      {
+        "accessed_at": "2026-09-04",
+        "name": "A systematic review to evaluate the efficacy of azelaic acid in the management of acne, rosacea, melasma and skin aging",
+        "publisher": "Journal of Cosmetic Dermatology",
+        "source_id": "src_king_2023_systematic_review",
+        "url": "https://onlinelibrary.wiley.com/doi/10.1111/jocd.15923"
+      },
+      {
+        "accessed_at": "2026-09-04",
+        "name": "Guidelines of care for the management of acne vulgaris",
+        "publisher": "Journal of the American Academy of Dermatology",
+        "source_id": "src_aad_acne_guideline_2024",
+        "url": "https://www.jaad.org/article/S0190-9622(23)03389-3/fulltext"
+      },
+      {
+        "accessed_at": "2026-09-04",
+        "name": "Azelaic Acid: Evidence-based Update on Mechanism of Action and Clinical Application",
+        "source_id": "src_azelaic_mechanism_2015",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/26355614/"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "ingredients",
+    "tags": [
+      "ingredients",
+      "acne",
+      "sensitive-skin",
+      "pigmentation",
+      "guides"
+    ]
+  },
+  "title": "Azelaic Acid: What the Evidence Actually Shows"
+}
