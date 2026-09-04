@@ -219,13 +219,22 @@ Rules at every stage:
    private strategy tag ∈ {hook, agitation, context, explanation, proof, example, comparison, myth,
    step, recommendation, resolution, summary} and an intent ∈ {educate, persuade, reassure, convert,
    navigate}. The CTA is a separate **action** block (intent \`convert\`), never a strategy tag.
-3. Also draft: title, slug (kebab-case), deck (1–2 lines), description (meta), hero image **subject**
+3. **Draft each block as marked-up structure, never as a paragraph blob.** Decide, per block, where
+   the reader needs a real bullet list, a bold lead-in term, or a link, then write that block as a
+   \`rich_text.v1\` document — §5 has the shapes. A body handed over as a plain string is plain text:
+   blank lines become paragraphs and nothing else survives, so an enumerated set typed as
+   blank-line-separated lines reads as a list in your draft and ships as a wall of prose.
+4. Also draft: title, slug (kebab-case), deck (1–2 lines), description (meta), hero image **subject**
    (subject only — the site adds its own style), and any PDF lead magnet (check
    \`list_pdf_templates\` first — a PDF needs a published template).
-4. End the article with a **Sources** block: the evidence behind each claim, author/journal/year plus
-   an https link. If a claim has no source, **warn the human and name the unsourced claims**. Sourcing
-   is the editor's call — never block on it, and never invent a source.
-5. Show the draft. Iterate until the human says "publish". Nothing in §4 runs before that.
+5. End the article with a **Sources** block: the evidence behind each claim. One paragraph per
+   source: the source **title in bold**, then publisher and/or year in plain text, then the URL as a
+   real \`hyperlink\` — never a bare URL as text, never a bullet list. Write the envelope
+   \`sources.source_list\` from the same list, so the reader-facing block and the machine record
+   agree. If a claim has no source, **warn the human and name the unsourced claims**. Sourcing is the
+   editor's call — never block on it, and never invent a source, including an author list you have
+   not verified: title, publisher, year and link are enough.
+6. Show the draft. Iterate until the human says "publish". Nothing in §4 runs before that.
 
 ## 4. Publishing
 
@@ -277,10 +286,68 @@ That is how this publish is attributed in the ledger.`
 — the last content node is the Sources block.
 
 - Content node: \`{kind:"content", visibility:"public", public:{title, body}, private:{strategy, intent}}\`.
-  Omit \`id\` — the server mints it. \`body\` is rich_text.v1: paragraph, heading-2, heading-3, lists,
-  blockquote; bold and italic marks; https links only.
+  \`public.title\` renders as the section heading — do not repeat it as a \`heading-2\` inside the body.
+- Media node: the same shape with \`public.media\` in place of \`public.body\`.
 - CTA node: \`{kind:"action", public:{title, body, ctaText, ctaLink}, private:{intent:"convert"}}\`.
 - Never put strategy words in visible text. Never use hook / agitation / cta / advert / offer in any id.
+
+### Formatting is not optional
+
+\`public.body\` accepts **either** a plain string **or** a \`rich_text.v1\` document, and both validate
+clean — nothing warns you. A plain string is plain text: blank lines split paragraphs, and there is
+no bold, no list, no link, no heading. A body that needs any of those and is written as a string
+reaches readers as an undifferentiated wall.
+
+**So: the moment a body carries a list, a bold lead-in, a heading or a link, it is a \`rich_text.v1\`
+document.** In practice that is most bodies. A plain string is only for one to three paragraphs of
+continuous unformatted prose.
+
+Blocks: \`paragraph\`, \`heading-2\`, \`heading-3\`, \`unordered-list\`, \`ordered-list\`, \`blockquote\`.
+Marks: \`bold\`, \`italic\`, \`code\`. Links are https only. Envelope:
+\`{nodeType:"document", data:{}, content:[…]}\`.
+
+Every text run carries all four keys, \`marks\` and \`data\` included even when empty:
+
+\`\`\`json
+{ "nodeType": "text", "value": "plain words", "marks": [], "data": {} }
+\`\`\`
+
+A list item wraps **paragraphs**, never bare text:
+
+\`\`\`json
+{ "nodeType": "unordered-list", "data": {}, "content": [
+  { "nodeType": "list-item", "data": {}, "content": [
+    { "nodeType": "paragraph", "data": {}, "content": [
+      { "nodeType": "text", "value": "Stopping too early.", "marks": [{ "type": "bold" }], "data": {} },
+      { "nodeType": "text", "value": " Most people who say it did nothing stopped at four weeks.", "marks": [], "data": {} }
+    ] }
+  ] }
+] }
+\`\`\`
+
+Use \`ordered-list\` where sequence is the point — the steps of a routine. A link:
+
+\`\`\`json
+{ "nodeType": "hyperlink", "data": { "uri": "https://example.org/paper" },
+  "content": [ { "nodeType": "text", "value": "example.org/paper", "marks": [], "data": {} } ] }
+\`\`\`
+
+**Bold lead-ins are house style, not decoration.** Wherever a paragraph or list item opens with a
+term the reader scans for — a category (\`Pigmentary.\`), an indication (\`Acne.\`), a named mistake
+(\`Using too much.\`), a boundary (\`On pregnancy:\`) — that term is bold, in its own text run,
+followed by a second run that begins with a space. It is what makes a long explainer survivable for
+a worried reader.
+
+The **Sources** block is one \`paragraph\` per source: **bold title**, then publisher and/or year,
+then the URL as a \`hyperlink\` whose visible text is the URL without its scheme.
+
+Revising a body: \`update_node\` deep-merges, so
+\`{op:"update_node", node_id, fields:{public:{body: <document>}}}\` replaces the body and leaves
+\`title\`, \`media\` and \`private\` untouched.
+
+Before you publish, reread your own draft as the reader will see it: every enumerated set is a real
+list, every scannable lead-in term is bold, every source title is bold and every source URL is a
+live link.
 
 ## 6. Hard rules
 
