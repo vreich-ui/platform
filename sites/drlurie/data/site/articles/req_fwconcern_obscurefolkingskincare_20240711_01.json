@@ -1,8 +1,9 @@
 {
   "__generated": {
-    "at": "2026-09-01T09:10:09.640Z",
+    "at": "2026-09-04T17:58:22.556Z",
+    "attribution": "inherited_lock",
     "from": "objects/content_item/by-id/req_fwconcern_obscurefolkingskincare_20240711_01.json",
-    "record_version": 14
+    "record_version": 31
   },
   "author": "Dr. Lurie Dermatology",
   "deck": "Traditional and natural skincare ingredients can be meaningful, but meaning is not the same as evidence. Here is a practical way to judge the claim, the product, and your own skin context before you try something new.",
@@ -15,19 +16,8 @@
     {
       "id": "n_a1",
       "kind": "content",
-      "private": {
-        "agentNotes": "Opens with the reader’s familiar dilemma and introduces the article’s central evidence question without dismissing tradition or curiosity.",
-        "intent": "educate",
-        "strategy": "hook"
-      },
       "public": {
         "body": "If you have ever heard about a skincare ingredient from a relative, a cultural practice, a creator, a product review, or a natural-product brand, you are not alone. Skincare advice often travels through personal stories long before it reaches a study.\n\nThat does not make the story meaningless. It also does not make the claim reliable.\n\nA better question is not simply, “Is this ingredient good or bad?” The more useful question is: what evidence supports this exact use, in this exact product, for this exact skin situation?\n\nThat framing leaves room for curiosity. It also protects you from treating tradition, marketing, or a single positive review as more certain than it is.",
-        "media": {
-          "alt": "A flat lay of botanical skincare ingredients: dried herbs, a small amber glass bottle of oil, and a shallow ceramic dish on a pale surface.",
-          "caption": "Traditional and botanical ingredients are worth curiosity — and the same evidence questions you would ask of anything else.",
-          "src": "/img/req_fwconcern_obscurefolkingskincare_20240711_01/e5c9396703c1b076da5aa427f62281d3985ea83997c51731cbbf7aad09170fcb.webp",
-          "type": "image"
-        },
         "title": "Why unusual skincare ingredients are so compelling"
       },
       "rendering": {
@@ -40,11 +30,6 @@
     {
       "id": "n_a2",
       "kind": "content",
-      "private": {
-        "agentNotes": "Separates cultural value from clinical certainty, matching the approved respectful-skepticism angle.",
-        "intent": "reassure",
-        "strategy": "context"
-      },
       "public": {
         "body": "Traditional use can tell you that an ingredient has mattered to people over time. It may reflect cultural knowledge, access to local plants or minerals, family routines, or observations passed from one generation to another.\n\nThat history deserves respect. Controlled human evidence is not a measure of cultural worth.\n\nBut a long history of use is different from knowing how well an ingredient works on skin in controlled human studies. It does not, by itself, establish the ideal concentration, the safest product form, or whether the ingredient helps with a specific concern such as acne, eczema, pigmentation, infection, or inflammation.\n\nTraditional use can be a starting point for a question. It is not the final answer for every person’s skin.",
         "title": "What traditional use can—and cannot—tell you"
@@ -59,11 +44,6 @@
     {
       "id": "n_a3",
       "kind": "content",
-      "private": {
-        "agentNotes": "Builds the core evidence hierarchy and incorporates the review-requested wording about human studies matching the concern, product type, and use.",
-        "intent": "educate",
-        "strategy": "explanation"
-      },
       "public": {
         "body": "When you are trying to judge an unfamiliar ingredient, it helps to sort the evidence by how close it is to real-world use on human skin.\n\nFor a skincare decision, confidence is generally stronger when the evidence comes from well-designed human studies or reviews that match the concern, product type, and way the ingredient is used. Even then, results may vary, and one study rarely answers every safety or effectiveness question.\n\nModerate confidence may come from smaller human studies. These can be useful, but they may include too few people, short follow-up, narrow populations, or product formulas that are not the same as what you can buy.\n\nLower confidence comes from lab studies, animal studies, traditional use, influencer posts, product reviews, and single-person anecdotes. These can suggest a reason to study an ingredient, but they cannot prove that it will visibly improve your skin.\n\nThis is especially important with lab language. Terms such as antioxidant, antimicrobial, or anti-inflammatory may describe what researchers observed under specific conditions. They do not automatically mean that a finished skincare product will calm redness, clear breakouts, brighten uneven tone, or repair the skin barrier in most people.",
         "title": "The evidence ladder for skincare claims"
@@ -78,11 +58,6 @@
     {
       "id": "n_a4",
       "kind": "content",
-      "private": {
-        "agentNotes": "Moves from evidence level to product reality by comparing ingredient names with finished formulas and use contexts.",
-        "intent": "educate",
-        "strategy": "comparison"
-      },
       "public": {
         "body": "An ingredient’s reputation does not always predict what a product will do on your skin.\n\nA raw plant, an extract, an essential oil, a clay mask, a cleanser, a serum, and a cream can behave very differently. The same ingredient name on a label may represent different extraction methods, concentrations, or accompanying ingredients.\n\nFormulation details matter. Concentration, purity, preservatives, fragrance components, contaminants, delivery format, pH, and other actives can all change benefit and risk.\n\nThis is why a study on one form of an ingredient does not automatically support every product that uses the same name. If the research studied a specific extract at a specific concentration in a leave-on cream, that does not tell you much about a homemade mask, a rinse-off cleanser, or an essential oil blend.",
         "title": "Ingredient versus product: why formulation changes the answer"
@@ -97,11 +72,6 @@
     {
       "id": "n_a5",
       "kind": "content",
-      "private": {
-        "agentNotes": "Corrects the natural-equals-gentle misconception and uses the review-approved distinction between at-home small-area use and medical patch testing.",
-        "intent": "educate",
-        "strategy": "myth"
-      },
       "public": {
         "body": "Natural ingredients can still irritate skin. In some people, botanicals, oils, clays, spices, fermented ingredients, and essential oils can trigger stinging, redness, rash, or allergy.\n\nAllergic contact dermatitis is a type of eczema that can happen when skin comes into contact with an allergen. A dermatologist may use medical patch testing to help identify the trigger.\n\nTrying a product on a small area may help you notice obvious irritation before using it more widely, but it is not the same as medical patch testing and cannot prove that an ingredient is safe or rule out allergy.\n\nTingling or burning is not proof that a product is working. If you notice burning, swelling, blistering, hives, worsening rash, or irritation near the eyes, stop using the product and seek appropriate medical guidance.",
         "title": "Natural does not automatically mean gentle"
@@ -116,11 +86,6 @@
     {
       "id": "n_a6",
       "kind": "content",
-      "private": {
-        "agentNotes": "Establishes the cosmetic-versus-treatment claim boundary and uses conservative FDA wording requested by review.",
-        "intent": "educate",
-        "strategy": "context"
-      },
       "public": {
         "body": "Not every skincare claim carries the same evidence burden.\n\nA claim that a product makes skin feel softer or look more radiant is different from a claim that it treats acne, eczema, infection, hyperpigmentation, or an inflammatory skin disease. Claims about treating or preventing a skin disease carry a higher evidence burden and, in the United States, may be regulated differently from general cosmetic claims.\n\nIn the United States, FDA materials describe cosmetics as regulated, but generally not FDA-approved before they go on the market, with specific exceptions such as color additives. That distinction matters because a polished label or natural positioning is not the same as proof that a product treats a skin condition.\n\nIf a product, post, or video uses medical-sounding language, slow down. Ask whether the evidence actually matches the claim being made.",
         "title": "Cosmetic claims are different from treatment claims"
@@ -135,11 +100,6 @@
     {
       "id": "n_a7",
       "kind": "content",
-      "private": {
-        "agentNotes": "Turns the article’s evidence-literacy promise into a repeatable reader decision process.",
-        "intent": "navigate",
-        "strategy": "step"
-      },
       "public": {
         "body": "You do not need to become a researcher to make a more careful decision. You can use a simple filter.\n\nFirst, identify the exact ingredient and the product form. Is it a whole plant, an extract, an oil, an essential oil, a powder, a mask, a serum, a cleanser, or a cream? Is it meant to stay on the skin or be rinsed away?\n\nSecond, define the skin goal. Are you trying to address dryness, softness, redness, acne-prone skin, pigmentation concerns, barrier support, or general curiosity? A vague promise is harder to evaluate than a specific goal.\n\nThird, ask what evidence supports that exact use. Is the support mainly traditional use, lab research, animal data, small human studies, larger human studies, or reviews? Does the evidence match the product form and the concern you care about?\n\nFourth, look for formulation details when they are available. Concentration, fragrance, essential oils, other active ingredients, intended body area, and directions for use can all affect how your skin responds.\n\nFifth, screen your own risk factors. The same product may be low-risk for one person and a poor choice for another. Your skin history matters.",
         "title": "A practical filter before trying an unfamiliar ingredient"
@@ -154,11 +114,6 @@
     {
       "id": "n_a8",
       "kind": "content",
-      "private": {
-        "agentNotes": "Provides the high-risk-context safety boundary while keeping the tone calm and non-alarmist.",
-        "intent": "reassure",
-        "strategy": "recommendation"
-      },
       "public": {
         "body": "Be more cautious if your skin is broken, actively inflamed, infected, sunburned, or recovering from a procedure. Skin in that state may react differently than intact, calm skin.\n\nIt is also wise to be more cautious if you have eczema, rosacea, severe acne, known allergies, pigment-prone skin, irritation-prone skin, or a history of reacting to fragranced products. The eye area needs extra care because the skin is delicate and irritation can become more difficult to manage.\n\nPregnancy, childhood, and prescription-treated skin also deserve a clearer boundary. If you are pregnant, choosing products for a child, using retinoids, acids, steroids, acne medications, or other prescription actives, ask your dermatologist before adding unfamiliar ingredients widely.\n\nThis is not meant to make skincare feel frightening. It is meant to match the level of experimentation to the skin in front of you.",
         "title": "Who should be more cautious"
@@ -173,11 +128,6 @@
     {
       "id": "n_a9",
       "kind": "content",
-      "private": {
-        "agentNotes": "Acknowledges emotionally persuasive stories while clarifying why they are not proof for another person’s skin.",
-        "intent": "educate",
-        "strategy": "myth"
-      },
       "public": {
         "body": "A family story, a friend’s before-and-after description, or an enthusiastic review can be meaningful. It may reflect a real experience, and it may point toward something worth studying.\n\nBut anecdotes cannot separate the ingredient from everything else that changed at the same time. Skin may improve because of time, a simpler routine, stopping an irritating product, seasonal shifts, placebo effect, or the full formulation rather than the highlighted ingredient.\n\nAnecdotes also tend to travel when they are dramatic. Quiet non-results and mild reactions are less likely to be posted, remembered, or shared.\n\nYou do not have to dismiss other people’s experiences. You just do not have to treat them as proof that your skin will respond the same way.",
         "title": "What anecdotes can and cannot prove"
@@ -192,11 +142,6 @@
     {
       "id": "n_b1",
       "kind": "content",
-      "private": {
-        "agentNotes": "Adds the review-requested compact evidence-confidence aid without ranking named ingredients or making unsupported efficacy claims.",
-        "intent": "navigate",
-        "strategy": "summary"
-      },
       "public": {
         "body": "Use this as a quick way to calibrate your confidence before trying a new skincare ingredient.",
         "items": [
@@ -206,13 +151,6 @@
           "Well-designed human study or review — Generally stronger when it matches the concern, product type, ingredient form, concentration, and way the product is used.",
           "Use-with-caution context — Be more careful with broken or inflamed skin, eczema or rosacea, severe acne, known allergies, pigment-prone or irritation-prone skin, pregnancy, childhood, eye-area use, recent procedures, or prescription-treated skin."
         ],
-        "media": {
-          "caption": "A printable one-page worksheet for tracking one ingredient over seven days.",
-          "contentType": "application/pdf",
-          "src": "/pdf/req_fwconcern_obscurefolkingskincare_20240711_01/8e25412cc41d6993eb1306d7909b49acc9b434b1429031dcd6fdff674eeb6911.pdf",
-          "title": "Trying a new skincare ingredient: a 7-day record",
-          "type": "document"
-        },
         "title": "A quick confidence check"
       },
       "rendering": {
@@ -225,11 +163,6 @@
     {
       "id": "n_b2",
       "kind": "content",
-      "private": {
-        "agentNotes": "Lands the article on empowerment rather than fear, preserving the central promise that curiosity is reasonable but confidence should be earned.",
-        "intent": "reassure",
-        "strategy": "resolution"
-      },
       "public": {
         "body": "Natural, folk, and traditional skincare ingredients do not need to be accepted uncritically or dismissed automatically.\n\nTradition and personal experience can guide curiosity. Confidence should rise when human evidence, formulation quality, realistic claims, and your own safety factors line up.\n\nIf an ingredient has only tradition, lab plausibility, or scattered anecdotes behind it, that does not always mean it is useless. It means the level of confidence should stay modest.\n\nIf irritation occurs, stop. If your skin is irritated, eczema-prone, acne-prone, recovering from a procedure, pregnant, or already using prescription actives, bring the product or ingredient list to your dermatologist before trying it widely.",
         "title": "Bottom line: curiosity is reasonable, confidence should be earned"
@@ -244,11 +177,6 @@
     {
       "id": "n_b3",
       "kind": "action",
-      "private": {
-        "agentNotes": "Preserves the low-pressure clinician-boundary CTA from the approved draft without commercial urgency or product promotion.",
-        "intent": "navigate",
-        "strategy": "recommendation"
-      },
       "public": {
         "body": "If you are considering an unfamiliar ingredient and your skin is irritated, eczema-prone, acne-prone, recovering from a procedure, pregnant, or already using prescription actives, bring the product or ingredient list to your dermatologist before trying it widely.",
         "ctaText": "Ask your dermatologist before trying it widely",
@@ -264,11 +192,6 @@
     {
       "id": "n_b4",
       "kind": "content",
-      "private": {
-        "agentNotes": "Provides reader-safe source transparency for the regulatory and dermatology safety claims flagged during review.",
-        "intent": "educate",
-        "strategy": "proof"
-      },
       "public": {
         "body": "This article uses FDA materials on the cosmetic and drug distinction and cosmetic premarket approval limits, American Academy of Dermatology guidance on trying new skincare products, and DermNet NZ references on allergic contact dermatitis and medical patch testing.",
         "title": "Sources consulted"
