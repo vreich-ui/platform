@@ -4,7 +4,7 @@
  * whether a seed is needed or already present) as pure functions.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -21,9 +21,27 @@ import {
 // MIRRORS — a standalone (no relative imports of its own) .ts leaf module, so
 // Node's native type-stripping can import it directly here for a real,
 // executable parity check (not just a comment claiming the two match).
-import { pdfRenderBrandFromSiteBody as canonicalPdfRenderBrandFromSiteBody } from '../../packages/core/server/lib/pdf-render-brand.ts';
+import { pdfRenderBrandFromSiteBody as canonicalPdfRenderBrandFromSiteBody } from '../../packages/core/server/lib/pdf-render-brand.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * The repo root, walked up to rather than counted with `..`.
+ *
+ * This file moved from `tests/scripts/` (run raw) to `tests/netlify/` (compiled
+ * by `tsc -p tsconfig.test.json`), so at run time it lives under `.tmp/ci-test/`
+ * — and tsc emits `.js`, it does not copy `.json` fixtures. A path relative to
+ * this FILE would resolve inside the build output and find nothing; the seed
+ * template it reads is a repo file. Same walk-up the other compiled tests use.
+ */
+const findRepoRoot = (startDir: string): string => {
+  let dir = startDir;
+  for (;;) {
+    if (existsSync(path.join(dir, 'astro.config.ts'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error('repo root not found');
+    dir = parent;
+  }
+};
+const here = path.join(findRepoRoot(path.dirname(fileURLToPath(import.meta.url))), 'tests', 'scripts');
 const ARTICLE_BROCHURE_V1 = JSON.parse(
   readFileSync(path.join(here, '..', '..', 'scripts', 'lib', 'pdf-templates', 'article_brochure_v1.json'), 'utf8')
 );
