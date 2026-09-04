@@ -1,0 +1,166 @@
+{
+  "__generated": {
+    "at": "2026-09-04T10:28:09.445Z",
+    "from": "objects/content_item/by-id/req_plugin_dark_circles_20260904_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_dark_circles_20260904_01"
+    },
+    "record_version": 4
+  },
+  "author": "Dr. Lurie",
+  "deck": "Most under-eye darkness is not a sleep problem. Here is what is going on underneath, and what the evidence supports doing about it.",
+  "description": "Dark circles under the eyes usually come from three overlapping causes: pigment, blood vessels, and shadow. What each looks like, what the evidence supports, and when to see a clinician.",
+  "editorial": {
+    "framework": "fw_concern",
+    "writer_notes": "TOP-stage concern explainer. Dials held well under the site ceiling: claim_strength ~0.14, urgency 0.00, emotional_agitation ~0.04, cta_density ~0.06. One ask only, and it is the next article."
+  },
+  "image": {
+    "alt": "A bathroom mirror in early morning daylight, with a folded linen towel and a glass of water on the counter below.",
+    "src": "/img/req_plugin_dark_circles_20260904_01/224094aea5e2d1a94144bf8d84a454a993438f05bc02b378469278d099b42761.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_q3x7",
+      "kind": "content",
+      "public": {
+        "body": "You catch yourself in the bathroom mirror and the shadows under your eyes look darker than you remember. You have slept. You have drunk water. They are still there.\n\nUnder-eye darkness is one of the most common things people bring to a dermatologist, and one of the most misread. It is rarely a single problem. It is usually a combination of pigment, blood vessels, and the shape of the face around the eye, in proportions that differ from person to person.\n\nWorking out which of the three is doing most of the work in your face is what decides whether anything on a shelf is likely to help you."
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_v8k2",
+      "kind": "content",
+      "public": {
+        "body": "Dermatologists generally sort under-eye darkness into three overlapping groups.\n\nPigmentary. Extra melanin sits in the skin around the eye. It often follows inflammation, such as eczema, contact dermatitis, or months of rubbing itchy eyes, and it is more common in deeper skin tones. Sun exposure adds to it.\n\nVascular. The skin of the lower eyelid is among the thinnest on the body. Vessels sitting close to the surface, and blood pooling in them, can read as blue, purple, or grey rather than brown.\n\nStructural. Nothing is discoloured at all. The shape of the eye socket, a loss of fat under the eye, or a puffy lid casts a shadow, and the shadow is what you are seeing.\n\nGently stretching the skin under the eye is sometimes used as a rough guide: pigment tends to stay put, while vascular darkness may fade a little. It is a hint, not a diagnosis. Most people have some mixture of all three.",
+        "title": "What you are actually seeing"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_g8k4",
+      "kind": "content",
+      "public": {
+        "media": {
+          "alt": "Cross-section of the skin beneath the eye showing the thin outer layer, pigment within it, and a blood vessel close to the surface.",
+          "caption": "Pigment sits within the skin; vessels sit beneath it. Shadow is neither — it is the shape of the face around the eye.",
+          "contentType": "image/webp",
+          "sizeBytes": 26050,
+          "src": "/img/req_plugin_dark_circles_20260904_01/41e01eaacbb9ebe2431681e2c71f86256c8df7cf008796ae726bc379a157caa7.webp",
+          "type": "image"
+        }
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "section"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_h5r9",
+      "kind": "content",
+      "public": {
+        "body": "Fatigue does make under-eye darkness more noticeable. DermNet lists lack of sleep among the things that worsen the appearance, alongside dehydration and smoking.\n\nBut those factors change how visible the darkness is, not what is causing it. They amplify something that is already there.\n\nThat is why one good night does not clear it, and why people conclude that something must be wrong with them. In most people the underlying picture is anatomy and pigment, and both have a strong inherited component. It is not a report card on how you are living.",
+        "title": "Why sleep gets the blame"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_t2m6",
+      "kind": "content",
+      "public": {
+        "body": "There is no single treatment with strong evidence behind it, and the honest summary of the research is that it depends on which cause dominates.\n\nFor pigmentary darkness, daily sun protection around the eye and pigment-directed topicals are the reasonable first steps. Improvement tends to be gradual and partial rather than complete.\n\nFor vascular darkness, topical products do little. Published reviews of procedural options, including lasers, light-based treatment, chemical peels and fillers, report benefit in selected people alongside inconsistent study quality.\n\nFor structural shadow, no cream changes the shape of an eye socket. Fillers, fat grafting and surgery are what address it, and they carry the risks any procedure carries. That is a conversation for a clinician, not a shelf.\n\nA 2020 systematic review and a 2025 systematic review and meta-analysis reach broadly the same conclusion: several treatments show promise, and the evidence base remains thin and difficult to compare across studies.",
+        "title": "What the evidence supports"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_z7b4",
+      "kind": "content",
+      "public": {
+        "body": "DermNet puts it plainly: many of the remedies on the market lack evidence of efficacy. A few things to treat with scepticism.\n\nEye creams that promise to erase or eliminate dark circles. No topical does that, and the promise itself tells you how carefully the rest of the label was written.\n\nCaffeine gels sold as a fix. Caffeine may temporarily reduce puffiness in some people, which can soften a shadow for a few hours. That is a cosmetic effect, not a change to the cause.\n\nAnything sold on a before-and-after photograph. Lighting and camera angle move under-eye shadow far more than most products do.\n\nA well-matched concealer, by contrast, is not a failure. It is often the most effective and least expensive option available, and it makes no claim it cannot keep.",
+        "title": "What is not worth your money"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_c1n8",
+      "kind": "content",
+      "public": {
+        "body": "Book an appointment rather than experimenting if:\n\nthe darkness appeared suddenly, or is clearly worse on one side\n\nit comes with swelling of the eyelid, or swelling elsewhere\n\nyou are rubbing your eyes constantly, or the skin there is itchy or scaly, which may point to eczema or an allergy that can be treated\n\nyou have a thyroid condition and the appearance is changing\n\nyou are considering a filler, a laser, or any procedure around the eye\n\nYour dermatologist can separate pigment from vessels from shadow far more reliably than a mirror can, and that distinction is what decides whether anything is likely to work for you.",
+        "title": "When to see someone"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_j6w3",
+      "kind": "content",
+      "public": {
+        "body": "Under-eye darkness is usually inherited anatomy plus pigment, made more visible by tiredness. Sun protection and patience help the pigment part in most people. Nothing on a shelf changes the shape of an eye socket. And a good deal of what is sold for this is sold on hope rather than evidence.\n\nIf it bothers you enough to spend money on it, the first thing worth spending it on is finding out which kind you have.",
+        "title": "The short version"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_p9d5",
+      "kind": "action",
+      "public": {
+        "body": "Sun exposure adds to the pigmentary kind of under-eye darkness, and most people apply considerably less sunscreen than the number on the bottle assumes.",
+        "ctaLink": "/how-much-sunscreen-to-apply-spf",
+        "ctaText": "How much sunscreen you actually need",
+        "title": "Read this next"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_y4s2",
+      "kind": "content",
+      "public": {
+        "body": "DermNet. Dark circles under the eyes. https://dermnetnz.org/topics/dark-circles-under-the-eyes\n\nTreatments of Periorbital Hyperpigmentation: A Systematic Review. 2020. https://pubmed.ncbi.nlm.nih.gov/32740208/\n\nThe First Systematic Review and Meta-Analysis of Pharmacological and Nonpharmacological Procedural Treatments of Dark Eye Circles (Periorbital Hyperpigmentations). Dermatologic Therapy. 2025. https://onlinelibrary.wiley.com/doi/full/10.1155/dth/9155535",
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Pigment, blood vessels, or shadow? A calm, evidence-led guide to what causes dark circles under the eyes and what actually helps.",
+    "meta_title": "What Actually Causes Dark Circles Under Your Eyes"
+  },
+  "slug": "what-causes-dark-circles-under-eyes",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-04",
+        "name": "Dark circles under the eyes",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_dark_circles",
+        "url": "https://dermnetnz.org/topics/dark-circles-under-the-eyes"
+      },
+      {
+        "accessed_at": "2026-09-04",
+        "name": "Treatments of Periorbital Hyperpigmentation: A Systematic Review",
+        "source_id": "src_poh_systematic_review_2020",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/32740208/"
+      },
+      {
+        "accessed_at": "2026-09-04",
+        "name": "The First Systematic Review and Meta-Analysis of Pharmacological and Nonpharmacological Procedural Treatments of Dark Eye Circles (Periorbital Hyperpigmentations)",
+        "publisher": "Dermatologic Therapy",
+        "source_id": "src_poh_meta_analysis_2025",
+        "url": "https://onlinelibrary.wiley.com/doi/full/10.1155/dth/9155535"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skin-health",
+    "tags": [
+      "patient-education",
+      "skin-science",
+      "pigmentation"
+    ]
+  },
+  "title": "What Actually Causes Dark Circles Under Your Eyes"
+}
