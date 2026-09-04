@@ -1,6 +1,6 @@
 {
   "__generated": {
-    "at": "2026-09-04T10:28:09.445Z",
+    "at": "2026-09-04T10:46:33.682Z",
     "from": "objects/content_item/by-id/req_plugin_dark_circles_20260904_01.json",
     "producer": {
       "model": "claude-opus-5",
@@ -8,7 +8,7 @@
       "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
       "run_id": "plugin_claude_req_plugin_dark_circles_20260904_01"
     },
-    "record_version": 4
+    "record_version": 11
   },
   "author": "Dr. Lurie",
   "deck": "Most under-eye darkness is not a sleep problem. Here is what is going on underneath, and what the evidence supports doing about it.",
@@ -34,7 +34,126 @@
       "id": "n_v8k2",
       "kind": "content",
       "public": {
-        "body": "Dermatologists generally sort under-eye darkness into three overlapping groups.\n\nPigmentary. Extra melanin sits in the skin around the eye. It often follows inflammation, such as eczema, contact dermatitis, or months of rubbing itchy eyes, and it is more common in deeper skin tones. Sun exposure adds to it.\n\nVascular. The skin of the lower eyelid is among the thinnest on the body. Vessels sitting close to the surface, and blood pooling in them, can read as blue, purple, or grey rather than brown.\n\nStructural. Nothing is discoloured at all. The shape of the eye socket, a loss of fat under the eye, or a puffy lid casts a shadow, and the shadow is what you are seeing.\n\nGently stretching the skin under the eye is sometimes used as a rough guide: pigment tends to stay put, while vascular darkness may fade a little. It is a hint, not a diagnosis. Most people have some mixture of all three.",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Dermatologists generally sort under-eye darkness into three overlapping groups."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Pigmentary."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Extra melanin sits in the skin around the eye. It often follows inflammation, such as eczema, contact dermatitis, or months of rubbing itchy eyes, and it is more common in deeper skin tones. Sun exposure adds to it."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Vascular."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " The skin of the lower eyelid is among the thinnest on the body. Vessels sitting close to the surface, and blood pooling in them, can read as blue, purple, or grey rather than brown."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Structural."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Nothing is discoloured at all. The shape of the eye socket, a loss of fat under the eye, or a puffy lid casts a shadow, and the shadow is what you are seeing."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Gently stretching the skin under the eye is sometimes used as a rough guide: pigment tends to stay put, while vascular darkness may fade a little. It is a hint, not a diagnosis. Most people have some mixture of all three."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "What you are actually seeing"
       },
       "visibility": "public"
@@ -81,7 +200,126 @@
       "id": "n_z7b4",
       "kind": "content",
       "public": {
-        "body": "DermNet puts it plainly: many of the remedies on the market lack evidence of efficacy. A few things to treat with scepticism.\n\nEye creams that promise to erase or eliminate dark circles. No topical does that, and the promise itself tells you how carefully the rest of the label was written.\n\nCaffeine gels sold as a fix. Caffeine may temporarily reduce puffiness in some people, which can soften a shadow for a few hours. That is a cosmetic effect, not a change to the cause.\n\nAnything sold on a before-and-after photograph. Lighting and camera angle move under-eye shadow far more than most products do.\n\nA well-matched concealer, by contrast, is not a failure. It is often the most effective and least expensive option available, and it makes no claim it cannot keep.",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "DermNet puts it plainly: many of the remedies on the market lack evidence of efficacy. A few things to treat with scepticism."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Eye creams that promise to erase or eliminate dark circles."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " No topical does that, and the promise itself tells you how carefully the rest of the label was written."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Caffeine gels sold as a fix."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Caffeine may temporarily reduce puffiness in some people, which can soften a shadow for a few hours. That is a cosmetic effect, not a change to the cause."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Anything sold on a before-and-after photograph."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Lighting and camera angle move under-eye shadow far more than most products do."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "A well-matched concealer, by contrast, is not a failure. It is often the most effective and least expensive option available, and it makes no claim it cannot keep."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "What is not worth your money"
       },
       "visibility": "public"
@@ -90,7 +328,132 @@
       "id": "n_c1n8",
       "kind": "content",
       "public": {
-        "body": "Book an appointment rather than experimenting if:\n\nthe darkness appeared suddenly, or is clearly worse on one side\n\nit comes with swelling of the eyelid, or swelling elsewhere\n\nyou are rubbing your eyes constantly, or the skin there is itchy or scaly, which may point to eczema or an allergy that can be treated\n\nyou have a thyroid condition and the appearance is changing\n\nyou are considering a filler, a laser, or any procedure around the eye\n\nYour dermatologist can separate pigment from vessels from shadow far more reliably than a mirror can, and that distinction is what decides whether anything is likely to work for you.",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Book an appointment rather than experimenting if:"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "the darkness appeared suddenly, or is clearly worse on one side"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "it comes with swelling of the eyelid, or swelling elsewhere"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "you are rubbing your eyes constantly, or the skin there is itchy or scaly, which may point to eczema or an allergy that can be treated"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "you have a thyroid condition and the appearance is changing"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "you are considering a filler, a laser, or any procedure around the eye"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Your dermatologist can separate pigment from vessels from shadow far more reliably than a mirror can, and that distinction is what decides whether anything is likely to work for you."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "When to see someone"
       },
       "visibility": "public"
@@ -119,7 +482,120 @@
       "id": "n_y4s2",
       "kind": "content",
       "public": {
-        "body": "DermNet. Dark circles under the eyes. https://dermnetnz.org/topics/dark-circles-under-the-eyes\n\nTreatments of Periorbital Hyperpigmentation: A Systematic Review. 2020. https://pubmed.ncbi.nlm.nih.gov/32740208/\n\nThe First Systematic Review and Meta-Analysis of Pharmacological and Nonpharmacological Procedural Treatments of Dark Eye Circles (Periorbital Hyperpigmentations). Dermatologic Therapy. 2025. https://onlinelibrary.wiley.com/doi/full/10.1155/dth/9155535",
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Dark circles under the eyes."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/dark-circles-under-the-eyes"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/dark-circles-under-the-eyes"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Treatments of Periorbital Hyperpigmentation: A Systematic Review."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " 2020. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/32740208"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/32740208/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "The First Systematic Review and Meta-Analysis of Pharmacological and Nonpharmacological Procedural Treatments of Dark Eye Circles (Periorbital Hyperpigmentations)."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " Dermatologic Therapy. 2025. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "onlinelibrary.wiley.com/doi/full/10.1155/dth/9155535"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://onlinelibrary.wiley.com/doi/full/10.1155/dth/9155535"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
         "title": "Sources"
       },
       "visibility": "public"
