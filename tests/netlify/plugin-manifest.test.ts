@@ -412,6 +412,12 @@ test('the catch-all stays quiet when a specific reason already explains it', () 
  * A stand-in for the `render_article_pdf` definition, so both sides of the
  * tool-surface conditional are covered on a deploy that has the call and on one
  * that does not — the branch that ships it is not always the branch under test.
+ *
+ * W2 T2.3 put the real definition on the default surface, so today the "has it"
+ * side is the surface itself and the stand-in is the fallback for a surface that
+ * ever loses it again; the "does not have it" side is the surface with the call
+ * REMOVED. Neither case may read the default surface and assume which side it is
+ * on — that assumption is what broke when the call landed.
  */
 const RENDER_ARTICLE_PDF_DEF = {
   name: 'render_article_pdf',
@@ -420,8 +426,17 @@ const RENDER_ARTICLE_PDF_DEF = {
   governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
 } as unknown as ReturnType<typeof visibleToolDefinitions>[number];
 
-const withArticlePdf = () =>
-  render({ definitions: [...visibleToolDefinitions(), RENDER_ARTICLE_PDF_DEF] });
+const withArticlePdf = () => {
+  const definitions = visibleToolDefinitions();
+  return render({
+    definitions: definitions.some((d) => d.name === 'render_article_pdf')
+      ? definitions
+      : [...definitions, RENDER_ARTICLE_PDF_DEF],
+  });
+};
+
+const withoutArticlePdf = () =>
+  render({ definitions: visibleToolDefinitions().filter((d) => d.name !== 'render_article_pdf') });
 
 test('the skill teaches render_article_pdf when the deploy has it (2026-09-04 live run)', () => {
   // Found by the 2026-09-04 plugin acceptance run. `render_article_pdf` maps the
@@ -462,10 +477,10 @@ test('the skill never names render_article_pdf on a deploy without it', () => {
   // unconditionally would send the desk at a tool the server answers with
   // "unknown tool" — the failure the generated tool list exists to prevent. So
   // the PDF path is rendered FROM the tool surface, and this is the other side.
-  const { skill_md: skill, tools } = render();
+  const { skill_md: skill, tools } = withoutArticlePdf();
   assert.ok(
     !tools.some((t) => t.name === 'render_article_pdf'),
-    'this case only means something while the call is absent from the default surface'
+    'the fixture must take the call off the tool surface, or this asserts nothing'
   );
   assert.ok(!skill.includes('render_article_pdf'), 'the skill must not name a tool this deploy cannot call');
   // The hand-built path survives, and is still told to read the template first.
