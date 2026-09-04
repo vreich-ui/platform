@@ -41,6 +41,12 @@ test('admin editorial assets returns sanitized PDF templates and indexed media',
     },
   });
 
+  // D4 fix (task A5): tpl_evidence_guide carries the FULL new field set —
+  // kind/thumbnailKey/thumbnailError/renderDataSchema — proving the bridge
+  // forwards all of them end to end; tpl_legacy_no_thumbnail (right below)
+  // carries NONE of them, proving an older-shaped pdf-tool row still comes
+  // through with has_render_data_schema: false and no crash.
+  const renderDataSchema = { type: 'object', properties: { headline: { type: 'string' } }, required: ['headline'] };
   const originalFetch = globalThis.fetch;
   const { fetchImpl } = stubPdfToolMcp({
     list_pdf_templates: () => ({
@@ -52,7 +58,17 @@ test('admin editorial assets returns sanitized PDF templates and indexed media',
             latestActiveVersion: 1,
             status: 'active',
             renderer: 'pdfme',
+            kind: 'guide',
+            thumbnailKey: 'image/tpl_evidence_guide/thumb.png',
+            thumbnailError: 'thumbnail render timed out',
+            renderDataSchema,
             storage: { token: 'upstream-secret' },
+          },
+          {
+            templateId: 'tpl_legacy_no_thumbnail',
+            latestVersion: 1,
+            status: 'draft',
+            renderer: 'pdfme',
           },
         ],
       },
@@ -71,7 +87,23 @@ test('admin editorial assets returns sanitized PDF templates and indexed media',
       pdf_templates_available: boolean;
     };
     assert.equal(body.pdf_templates_available, true);
-    assert.equal(body.pdf_templates[0]?.id, 'tpl_evidence_guide');
+    const evidenceGuide = body.pdf_templates.find((template) => template.id === 'tpl_evidence_guide');
+    assert.equal(evidenceGuide?.kind, 'guide');
+    assert.equal(evidenceGuide?.thumbnail_key, 'image/tpl_evidence_guide/thumb.png');
+    assert.equal(evidenceGuide?.thumbnail_error, 'thumbnail render timed out');
+    assert.deepEqual(evidenceGuide?.render_data_schema, renderDataSchema);
+    assert.equal(evidenceGuide?.has_render_data_schema, true);
+
+    // The fixture without any D4/§3.6 fields must still project cleanly:
+    // has_render_data_schema defaults to false, and none of the optional
+    // fields are fabricated.
+    const legacy = body.pdf_templates.find((template) => template.id === 'tpl_legacy_no_thumbnail');
+    assert.equal(legacy?.has_render_data_schema, false);
+    assert.equal(legacy?.kind, undefined);
+    assert.equal(legacy?.thumbnail_key, undefined);
+    assert.equal(legacy?.thumbnail_error, undefined);
+    assert.equal(legacy?.render_data_schema, undefined);
+
     assert.equal(body.artifacts[0]?.label, 'Evidence guide');
     assert.match(String(body.artifacts[0]?.preview_url), /admin-get-blob-pdf/);
     const visible = JSON.stringify(body);

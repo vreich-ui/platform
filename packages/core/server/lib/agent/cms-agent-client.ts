@@ -64,7 +64,7 @@ export const AGENT_REF_TTL_MS = 5 * 60_000;
 
 // ─── errors ──────────────────────────────────────────────────────────────────
 
-/** The eight frozen CMS-Agent tool-error codes, read at `error.data.error.code`. */
+/** The frozen CMS-Agent tool-error codes, read at `error.data.error.code`. */
 export const CMS_AGENT_WIRE_ERROR_CODES = [
   'unknown_project',
   'project_disabled',
@@ -84,6 +84,25 @@ export const CMS_AGENT_WIRE_ERROR_CODES = [
    */
   'provider_quota',
   'provider_rate_limit',
+  /**
+   * D1 fix (task A2): `visual_identity_propose`'s own four refusal codes,
+   * beyond the `unknown_project`/`project_disabled` pair it shares with
+   * every other project-scoped tool. Thrown upstream as a typed error, they
+   * reach `callTool` through the SAME generic `data.error.code` envelope
+   * every workspace tool's thrown error uses (CMS-Agent's
+   * `mcp/workspace/toolKit.ts#toolError`/`server.ts`'s catch block) — not a
+   * bespoke shape for this tool. Without all four in the frozen list,
+   * `callTool` would degrade the missing ones to the opaque `cms_agent_error`
+   * bucket and `proposeBrandImagery`'s caller would lose the distinction the
+   * contract promises (BRIEF task A2: "refusal codes it can return" —
+   * unknown_project, project_disabled, visual_identity_kind_not_available,
+   * visual_identity_missing_input, visual_identity_missing_template_slug,
+   * visual_identity_no_proposal).
+   */
+  'visual_identity_kind_not_available',
+  'visual_identity_missing_input',
+  'visual_identity_missing_template_slug',
+  'visual_identity_no_proposal',
 ] as const;
 export type CmsAgentWireErrorCode = (typeof CMS_AGENT_WIRE_ERROR_CODES)[number];
 

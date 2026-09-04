@@ -28,6 +28,7 @@ describe('editorial asset projection', () => {
       version: 3,
       active_version: 2,
       created_at: '2026-08-07T10:00:00.000Z',
+      has_render_data_schema: false,
     });
     assert.doesNotMatch(JSON.stringify(projected), /never-expose|pdf-templates|templateJson/);
   });
@@ -37,7 +38,14 @@ describe('editorial asset projection', () => {
   // affordances permanently dark. They must now forward — while `storage`
   // (and anything else not named) still does not, so this stays a whitelist,
   // never a passthrough.
-  it('forwards kind/renderDataSchema/sampleData/thumbnailKey when the upstream row carries them, and still drops storage', () => {
+  //
+  // D4 fix (task A5): thumbnailError and has_render_data_schema join the
+  // forwarded set — pdf-tool's `list_pdf_templates` already returns both
+  // (thumbnailError alongside thumbnailKey, per pdf-tool's
+  // `pdf-template-store.ts`), but the bridge dropped them, so the admin PDF
+  // tab could never show WHY a thumbnail was missing, nor cheaply badge
+  // "has a render-data schema" without shipping the whole schema object.
+  it('forwards kind/renderDataSchema/sampleData/thumbnailKey/thumbnailError when the upstream row carries them, and still drops storage', () => {
     const schema = { type: 'object', properties: { headline: { type: 'string' } }, required: ['headline'] };
     const projected = projectPdfTemplate({
       templateId: 'tpl_article_brochure',
@@ -46,6 +54,7 @@ describe('editorial asset projection', () => {
       renderer: 'chromium',
       kind: 'article',
       thumbnailKey: 'image/tpl_article_brochure/thumb.png',
+      thumbnailError: 'render worker timed out after 30s',
       renderDataSchema: schema,
       sampleData: { headline: 'A sample headline' },
       storage: { token: 'never-expose' },
@@ -58,13 +67,42 @@ describe('editorial asset projection', () => {
       version: 1,
       kind: 'article',
       thumbnail_key: 'image/tpl_article_brochure/thumb.png',
+      thumbnail_error: 'render worker timed out after 30s',
       render_data_schema: schema,
+      has_render_data_schema: true,
       sample_data: { headline: 'A sample headline' },
     });
     assert.doesNotMatch(JSON.stringify(projected), /never-expose/);
   });
 
-  it('omits the four §3.6 fields entirely when the upstream row predates them, unchanged from before', () => {
+  // D4 fix (task A5): a template whose only thumbnail state is "not attempted
+  // yet" — thumbnailKey null, no thumbnailError — is not an error case; it
+  // must forward has_render_data_schema: false and nothing else new, same as
+  // the fully-legacy row below.
+  it('reports has_render_data_schema: false and no thumbnail_error when pdf-tool sends thumbnailKey: null with no error', () => {
+    const projected = projectPdfTemplate({
+      templateId: 'tpl_pending_thumbnail',
+      latestVersion: 1,
+      status: 'draft',
+      renderer: 'chromium',
+      thumbnailKey: null,
+    });
+    assert.deepStrictEqual(projected, {
+      id: 'tpl_pending_thumbnail',
+      label: 'Pending Thumbnail',
+      status: 'draft',
+      renderer: 'chromium',
+      version: 1,
+      has_render_data_schema: false,
+    });
+  });
+
+  // D4 fix (task A5): the defensiveness the field additions are FOR — an
+  // older pdf-tool deploy that predates label/kind/thumbnailKey/
+  // thumbnailError/renderDataSchema entirely must not crash and must not
+  // fabricate any of them; has_render_data_schema is the one field that is
+  // always present regardless, and must compute to false here.
+  it('omits every optional §3.6/D4 field when the upstream row predates them all, and still returns has_render_data_schema: false', () => {
     const projected = projectPdfTemplate({
       templateId: 'tpl_legacy',
       latestVersion: 1,
@@ -77,6 +115,7 @@ describe('editorial asset projection', () => {
       status: 'active',
       renderer: 'pdfme',
       version: 1,
+      has_render_data_schema: false,
     });
   });
 

@@ -103,7 +103,7 @@ const baseInput = (overrides: Partial<BrandImageryProposeInput> = {}): BrandImag
 
 test('proposeBrandImagery: happy path builds the writer input per §3.5 and returns the validated proposal', async () => {
   const { client, calls } = stubCmsAgent((name) =>
-    name === 'node_execute'
+    name === 'visual_identity_propose'
       ? { ok: true, data: nodeExecuteResult(validProposalBody()) }
       : { ok: false, code: 'unexpected', message: 'unexpected tool' }
   );
@@ -120,10 +120,10 @@ test('proposeBrandImagery: happy path builds the writer input per §3.5 and retu
   assert.deepEqual(result.ok && result.body.brandImagery, VALID_BRAND_IMAGERY);
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.name, 'node_execute');
-  assert.equal(calls[0]?.args.nodeId, 'brand_imagery_writer');
-  const writerInput = calls[0]?.args.input as Record<string, unknown>;
-  assert.equal(writerInput.projectId, 'proj_drlurie');
+  assert.equal(calls[0]?.name, 'visual_identity_propose');
+  const writerInput = calls[0]?.args as Record<string, unknown>;
+  assert.equal(writerInput.project_id, 'proj_drlurie');
+  assert.equal(writerInput.kind, 'brand_imagery');
   assert.equal(writerInput.mode, 'house');
   assert.equal(writerInput.brief, 'Clinical-clean skincare, warm neutrals.');
   // references[] forwarded verbatim (materializer needs the moodboard as declared).
@@ -255,7 +255,7 @@ test('proposeBrandImagery: imageRefs carries base64 (not url) once a region is s
     baseDeps(client, { readBlobBytes: async () => bytes })
   );
 
-  const writerInput = calls[0]?.args.input as Record<string, unknown>;
+  const writerInput = calls[0]?.args as Record<string, unknown>;
   const imageRefs = writerInput.imageRefs as Array<Record<string, unknown>>;
   assert.equal(imageRefs.length, 1);
   assert.equal(typeof imageRefs[0]?.base64, 'string');
@@ -274,7 +274,7 @@ test('proposeBrandImagery: a region reference falls back to the whole-image URL 
   );
 
   assert.equal(result.ok, true);
-  const writerInput = calls[0]?.args.input as Record<string, unknown>;
+  const writerInput = calls[0]?.args as Record<string, unknown>;
   const imageRefs = writerInput.imageRefs as Array<Record<string, unknown>>;
   assert.deepEqual(imageRefs, [{ url: 'https://site.example/img/image/site/mood-crop.jpg', mediaType: 'image/jpeg' }]);
 });
@@ -288,7 +288,7 @@ test('proposeBrandImagery: an unresolvable reference (unsupported extension, no 
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.ok && result.body.unresolvedReferences, [0]);
-  const writerInput = calls[0]?.args.input as Record<string, unknown>;
+  const writerInput = calls[0]?.args as Record<string, unknown>;
   assert.equal(writerInput.imageRefs, undefined);
   // The raw reference is still forwarded verbatim for the materializer.
   assert.deepEqual(writerInput.references, [{ blobKey: 'image/site/mood.bmp' }]);
@@ -306,7 +306,7 @@ test('proposeBrandImagery: existingBrandImagery, visualStandardId, and templateS
     }),
     baseDeps(client)
   );
-  const writerInput = calls[0]?.args.input as Record<string, unknown>;
+  const writerInput = calls[0]?.args as Record<string, unknown>;
   assert.equal(writerInput.templateSlug, 'seasonal-launch');
   assert.equal(writerInput.visualStandardId, 'vis_drlurie_seasonal');
   assert.deepEqual(writerInput.existingBrandImagery, VALID_BRAND_IMAGERY);
@@ -356,4 +356,114 @@ test('REVIEW: a bare proposal (no execution record) is still accepted', async ()
   const { client } = stubCmsAgent(() => ({ ok: true, data: validProposalBody() }));
   const result = await proposeBrandImagery(baseInput(), baseDeps(client));
   assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+// ─── D1 fix (task A2): visual_identity_propose is the tool now, not node_execute ──
+
+test('D1: proposeBrandImagery calls visual_identity_propose (never node_execute), sending project_id snake_case + kind', async () => {
+  const { client, calls } = stubCmsAgent((name) =>
+    name === 'visual_identity_propose'
+      ? { ok: true, data: validProposalBody() }
+      : { ok: false, code: 'unexpected', message: `unexpected tool: ${name}` }
+  );
+  const result = await proposeBrandImagery(baseInput({ projectId: 'proj_zilberman' }), baseDeps(client));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.name, 'visual_identity_propose');
+  assert.equal(calls[0]?.args.project_id, 'proj_zilberman');
+  assert.equal(calls[0]?.args.projectId, undefined, 'project_id must be snake_case on the wire, not camelCase');
+  assert.equal(calls[0]?.args.kind, 'brand_imagery');
+  assert.equal(calls[0]?.args.nodeId, undefined, 'the new tool takes fields directly, no {nodeId, input} wrapping');
+  assert.equal(calls[0]?.args.input, undefined);
+});
+
+test("D1: visual_identity_propose's OWN envelope ({ proposal, executionId, nodeId }) is read directly, no execution record needed", async () => {
+  const { client } = stubCmsAgent(() => ({
+    ok: true,
+    data: { proposal: validProposalBody(), executionId: 'exec_vip_1', nodeId: 'brand_imagery_writer' },
+  }));
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.ok && result.body.brandImagery, VALID_BRAND_IMAGERY);
+});
+
+test('D1: an older CMS-Agent still answering with the retired node.execute envelope shape is still accepted (kept, additive)', async () => {
+  const { client, calls } = stubCmsAgent((name) =>
+    name === 'visual_identity_propose'
+      ? { ok: true, data: nodeExecuteResult(validProposalBody()) }
+      : { ok: false, code: 'unexpected', message: 'unexpected tool' }
+  );
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.ok && result.body.brandImagery, VALID_BRAND_IMAGERY);
+  assert.equal(calls[0]?.name, 'visual_identity_propose');
+});
+
+test('D1: an unrecognized-tool-name failure (CMS-Agent predates visual_identity_propose) gets its own errorCode', async () => {
+  const { client } = stubCmsAgent(() => ({
+    ok: false,
+    code: 'cms_agent_error',
+    message: 'Unknown tool: visual_identity_propose',
+    fromJsonBody: true,
+  }));
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.status, 502);
+  assert.equal(!result.ok && result.errorCode, 'brand_imagery_propose_tool_not_allowed');
+  assert.ok(!result.ok && result.error.includes('visual_identity_propose'), !result.ok ? result.error : '');
+});
+
+test('D1: a bad/expired credential (cms_agent_auth_failed, no fromJsonBody) stays on the generic path, never mislabeled tool_not_allowed', async () => {
+  const { client } = stubCmsAgent(() => ({
+    ok: false,
+    code: 'cms_agent_auth_failed',
+    message: 'CMS-Agent rejected the credential. The site token may be wrong, or scoped to a different project — the service returns the same response for both.',
+    statusCode: 401,
+  }));
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.status, 502);
+  // Genuinely indistinguishable on the wire from "tool not in this bearer's allowlist" (see
+  // looksLikeUnknownToolFailure's doc comment) — must NOT be relabeled brand_imagery_propose_tool_not_allowed.
+  assert.equal(!result.ok && result.errorCode, 'cms_agent_auth_failed');
+});
+
+test('D1: a message merely containing "unknown tool" without fromJsonBody is NOT reclassified (fromJsonBody is the real signal, not the text)', async () => {
+  const { client } = stubCmsAgent(() => ({
+    ok: false,
+    code: 'cms_agent_unreachable',
+    message: 'network error, cannot tell if the tool is unknown tool or not',
+  }));
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.errorCode, 'cms_agent_unreachable');
+});
+
+test("proposeBrandImagery: forwards CMS-Agent's prefetch warnings so a thin proposal is visibly thin", async () => {
+  // A degraded site prefetch means the writer never saw the site's palette or image-policy contexts.
+  // The proposal is schema-valid either way, so without this the approval card cannot tell the two
+  // apart. Non-string entries are dropped rather than trusted.
+  const { client } = stubCmsAgent(() => ({
+    ok: true,
+    data: {
+      proposal: validProposalBody(),
+      executionId: 'exec_9',
+      nodeId: 'brand_imagery_writer',
+      warnings: ['site_prefetch_degraded:site_object_unreachable', 'voice_prefetch_fallback:voice_prefetch_unreachable', 42],
+    },
+  }));
+
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && (result.body as { prefetchWarnings?: string[] }).prefetchWarnings, [
+    'site_prefetch_degraded:site_object_unreachable',
+    'voice_prefetch_fallback:voice_prefetch_unreachable',
+  ]);
+});
+
+test('proposeBrandImagery: omits prefetchWarnings entirely when CMS-Agent reports none', async () => {
+  const { client } = stubCmsAgent(() => ({ ok: true, data: { proposal: validProposalBody(), executionId: 'exec_10', nodeId: 'brand_imagery_writer' } }));
+  const result = await proposeBrandImagery(baseInput(), baseDeps(client));
+  assert.equal(result.ok, true);
+  assert.ok(result.ok && !('prefetchWarnings' in result.body), 'an older CMS-Agent deploy sends no warnings field');
 });
