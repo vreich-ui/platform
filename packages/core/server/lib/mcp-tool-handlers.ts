@@ -977,6 +977,44 @@ const toBrandImageryReference = (value: unknown): BrandImageryReferenceInput | u
   };
 };
 
+/**
+ * Same mapping as `toBrandImageryReference` above, but for a reference
+ * record read back off a STORED visual_standard body -- which carries
+ * `blobKey` (camelCase, the object store's own field name) rather than the
+ * wire's `blob_key` (snake_case MCP tool-call convention). Two functions
+ * rather than one parameterized helper because the two shapes are each
+ * exactly one field wide and this keeps both call sites obviously correct
+ * by inspection. Drops `id` (not part of `BrandImageryReferenceInput`) and
+ * any entry with neither `blobKey` nor `url`; never throws on a malformed
+ * record (`getRecordValue`/`toNonEmptyString`/`toFiniteNumber` are all
+ * total functions over `unknown`).
+ */
+const toBrandImageryReferenceFromStandardRecord = (value: unknown): BrandImageryReferenceInput | undefined => {
+  const record = getRecordValue(value);
+  if (!record) return undefined;
+  const blobKey = toNonEmptyString(record.blobKey);
+  const url = toNonEmptyString(record.url);
+  if (!blobKey && !url) return undefined;
+  const regionRecord = getRecordValue(record.region);
+  const rx = toFiniteNumber(regionRecord?.x);
+  const ry = toFiniteNumber(regionRecord?.y);
+  const rw = toFiniteNumber(regionRecord?.w);
+  const rh = toFiniteNumber(regionRecord?.h);
+  const region =
+    rx !== undefined && ry !== undefined && rw !== undefined && rh !== undefined
+      ? { x: rx, y: ry, w: rw, h: rh }
+      : undefined;
+  const note = toNonEmptyString(record.note);
+  const weight = toFiniteNumber(record.weight);
+  return {
+    ...(blobKey ? { blobKey } : {}),
+    ...(url ? { url } : {}),
+    ...(region ? { region } : {}),
+    ...(note ? { note } : {}),
+    ...(weight !== undefined ? { weight } : {}),
+  };
+};
+
 export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<string, unknown>) => {
   if (!isCmsAgentConfigured()) {
     return toolError('The workspace orchestration bridge is not configured for this site.', {
@@ -1026,6 +1064,35 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
       } catch {
         return undefined;
       }
+    },
+    // Live-defect fix: `visual_standard_id` used to be accepted and then
+    // silently ignored -- the standard's own mood board/brandImagery never
+    // got read, so "revise this standard" required the caller to
+    // reconstruct its board by hand. Reuses `getVisualStandardBodyForExamples`,
+    // the SAME `invokeObjectStore({action:'get', object_type:'visual_standard'})`
+    // read path `object_get` is itself served from (see that function) --
+    // deliberately NOT a second object-access path, and NOT an MCP round
+    // trip to CMS-Agent (it has no reach into Platform's own object store).
+    // Never throws: an unreadable/missing standard resolves to `undefined`,
+    // which `proposeBrandImagery` treats as "no hydration available".
+    loadVisualStandard: async (visualStandardId) => {
+      let body: Record<string, unknown> | undefined;
+      try {
+        body = await getVisualStandardBodyForExamples(event, visualStandardId);
+      } catch {
+        return undefined;
+      }
+      if (!body) return undefined;
+
+      const referencesRaw = Array.isArray(body.references) ? body.references : [];
+      const references = referencesRaw
+        .map(toBrandImageryReferenceFromStandardRecord)
+        .filter((reference): reference is BrandImageryReferenceInput => reference !== undefined);
+
+      return {
+        ...(references.length > 0 ? { references } : {}),
+        ...(body.brandImagery !== undefined ? { brandImagery: body.brandImagery } : {}),
+      };
     },
     log: event.log,
   });
