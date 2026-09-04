@@ -677,3 +677,93 @@ test('FIX-E: the same draft, once it gains a sample subject, applies exactly lik
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.deepEqual((loadSite(store).body as SiteBody).brandImagery, altBrandImagery());
 });
+
+// ═══ the op must never carry a key holding `undefined` ═════════════════════
+// Live incident (dr-lurie, 2026-09-03): every real apply failed with
+// `invalid_op: ops[0] is not a valid patch op: Invalid input`, and the op the
+// dry-run echoed looked perfectly valid — because JSON.stringify drops a key
+// whose value is undefined, and `fields` is validated by
+// z.record(z.string(), patchJsonValueSchema), which refuses exactly that.
+//
+// `exactReplaceSubObject` returns undefined when NEITHER side carries the
+// sub-object. Every fixture above populates composition AND lora on purpose
+// ("so the exact-replace arithmetic actually exercises"), which is precisely
+// why no test ever took that branch. LoRA is out of scope for this wave, so a
+// real standard never has one — the flagship verb could not apply at all.
+
+const imageryWithoutOptionalSubObjects = (): BrandImagery => ({
+  version: 1,
+  medium: 'digital_illustration',
+  styleSentence: 'Cool editorial illustration on a warm cream ground, restrained blue and teal accents.',
+  palette: ['#2E6F95', '#5E8C8A'],
+  negative: ['text, lettering, watermarks', 'photorealistic stock-photo gloss'],
+  aspectRatios: { article_header: '3:2', article_body: '1:1' },
+  seedBase: 1640599040,
+  // no `composition`, no `lora` — the shape a tokens-derived house standard has
+});
+
+test('a source carrying no lora/composition applies to a site with no brandImagery — the op omits them rather than sending undefined', async () => {
+  const store = createMemoryStore();
+  await seedSite(store);
+  await seedObject(store, 'visual_standard', 'vis_drlurie', {
+    ...altVisualStandard(),
+    brandImagery: imageryWithoutOptionalSubObjects(),
+  });
+
+  const res = await call(store, {
+    action: 'apply_brand_imagery',
+    visual_standard_id: 'vis_drlurie',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
+
+  assert.equal(res.status, 200);
+  const body = res.body as Record<string, unknown>;
+
+  // The failure this pins: validation refused the computed op.
+  assert.equal(body.apply_error, undefined, `apply_error: ${JSON.stringify(body.apply_error)}`);
+  assert.equal(body.eligible, true);
+
+  // Asserted on the in-memory op, NOT its JSON round-trip: stringify would
+  // hide the very key that broke it.
+  const op = (body.op ?? {}) as { fields?: { brandImagery?: Record<string, unknown> } };
+  const fields = op.fields?.brandImagery ?? {};
+  for (const key of Object.keys(fields)) {
+    assert.notEqual(fields[key], undefined, `op carries "${key}" holding undefined`);
+  }
+  assert.equal('lora' in fields, false, 'lora must be omitted, not present-and-undefined');
+  assert.equal('composition' in fields, false, 'composition must be omitted, not present-and-undefined');
+});
+
+test('a stale sub-object the site carries but the source does not is still explicitly unset with null', async () => {
+  const store = createMemoryStore();
+  await seedSite(store);
+  await seedObject(store, 'visual_standard', 'vis_drlurie', altVisualStandard());
+  // Give the site a full imagery block first, then apply a source with none of
+  // the optional sub-objects: null must still travel, only undefined is dropped.
+  const { lockToken, recordVersion } = await checkoutSite(store);
+  const seeded = await call(store, {
+    action: 'apply_brand_imagery',
+    visual_standard_id: 'vis_drlurie',
+    site_id: 'site_drlurie',
+    lock_token: lockToken,
+    expected_record_version: recordVersion,
+  });
+  assert.equal(seeded.status, 200);
+
+  await seedObject(store, 'visual_standard', 'vis_drlurie_plain', {
+    ...altVisualStandard('template'),
+    brandImagery: imageryWithoutOptionalSubObjects(),
+  });
+  const res = await call(store, {
+    action: 'apply_brand_imagery',
+    visual_standard_id: 'vis_drlurie_plain',
+    site_id: 'site_drlurie',
+    dry_run: true,
+  });
+  assert.equal(res.status, 200);
+  const fields = ((res.body as Record<string, unknown>).op as { fields: { brandImagery: Record<string, unknown> } }).fields
+    .brandImagery;
+  assert.equal(fields.lora, null, 'a stale lora must be unset with null, not omitted');
+  assert.equal(fields.composition, null, 'a stale composition must be unset with null, not omitted');
+});
