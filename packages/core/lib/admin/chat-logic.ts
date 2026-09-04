@@ -1,8 +1,15 @@
 import { classifyToolResult } from './activity-severity.js';
 import type { ChatEventView } from './chat-client.js';
 import { cmsAgentErrorCopy, type CmsAgentErrorCopy } from './cms-agent-error-copy.js';
-import { NODE_LABELS, nodeLabel, requestSeverityLevel, requestStatusLabel, type RequestStatusName } from './request-logic.js';
+import {
+  NODE_LABELS,
+  nodeLabel,
+  requestSeverityLevel,
+  requestStatusLabel,
+  type RequestStatusName,
+} from './request-logic.js';
 import type { AdminSeverity } from './severity.js';
+import { TOOL_GLOSSARY, describeTool } from './tool-glossary.js';
 
 export type ChatTimelineItem = { kind: 'event'; event: ChatEventView } | { kind: 'activity'; events: ChatEventView[] };
 
@@ -128,38 +135,20 @@ export function publishedObjectFromEvents(
   return undefined;
 }
 
-export const TOOL_LABELS: Record<string, string> = {
-  get_object: 'Read an object',
-  get_contract: 'Check what an object allows',
-  list_objects: 'Browse objects',
-  inventory: 'Browse the publication',
-  validate: 'Check readiness',
-  search_artifacts: 'Find media',
-  checkout: 'Start editing',
-  patch: 'Update an object',
-  checkin: 'Finish editing',
-  refresh_lock: 'Keep editing access',
-  create_object: 'Create an object',
-  create_variant: 'Create a variant',
-  instantiate_template: 'Create a page from a template',
-  instantiate_section_template: 'Create a section from a template',
-  submit_review: 'Send for review',
-  publish: 'Publish',
-  discard: 'Discard changes',
-  apply_theme: 'Apply a theme',
-  // U3 (brand-imagery wave, BRIEF §3.3/§3.5): the imagery siblings of
-  // apply_theme/the theme-preview flow — same wire names the chat event
-  // stream carries (`CHAT_TOOL_ALIASES`, mcp-tool-definitions.ts), not the
-  // privileged MCP tool names (`site_apply_brand_imagery`) those alias to.
-  apply_brand_imagery: 'Apply brand imagery',
-  brand_imagery_propose: 'Propose an image style',
-  // Legacy event names remain readable in persisted chat history.
-  object_get: 'Read an object',
-  object_validate: 'Check readiness',
-};
+export const TOOL_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(TOOL_GLOSSARY).map(([name, entry]) => [name, entry.label])
+);
 
-/** Shared human vocabulary for chat activity, guardrails, and tool controls. */
-export const toolLabelForName = (tool: string): string => TOOL_LABELS[tool] ?? 'Tool action';
+/**
+ * Shared human vocabulary for chat activity, guardrails, and tool controls.
+ *
+ * Single source is `tool-glossary.ts` (label + hover definition + modal
+ * detail). The old fallback here was the literal string 'Tool action', which
+ * made every uncatalogued tool render as an identical anonymous row on the
+ * guardrails page; `describeTool` humanizes the raw name instead, so an
+ * unwritten tool is at least readable and distinguishable.
+ */
+export const toolLabelForName = (tool: string): string => describeTool(tool).label;
 
 export function toolLabel(event: ChatEventView): string {
   const tool = String(event.detail?.tool ?? 'tool');
@@ -236,13 +225,18 @@ export interface RequestProgressCopy {
   stepLine?: string;
 }
 
-export function requestProgressCopy(detail: Record<string, unknown> | undefined, isOwner: boolean): RequestProgressCopy {
+export function requestProgressCopy(
+  detail: Record<string, unknown> | undefined,
+  isOwner: boolean
+): RequestProgressCopy {
   const status = (typeof detail?.status === 'string' ? detail.status : 'running') as RequestStatusName;
   const summary = typeof detail?.summary === 'string' ? detail.summary : undefined;
   const done = typeof detail?.done === 'number' ? detail.done : undefined;
   const total = typeof detail?.total === 'number' ? detail.total : undefined;
   const blockers = Array.isArray(detail?.blockers) ? detail.blockers : [];
-  const firstBlocker = blockers.find((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null);
+  const firstBlocker = blockers.find(
+    (entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null
+  );
   const blockerCode = typeof firstBlocker?.code === 'string' ? firstBlocker.code : undefined;
   const blockerMessage = typeof firstBlocker?.message === 'string' ? firstBlocker.message : undefined;
   const operatorAction = typeof firstBlocker?.operator_action === 'string' ? firstBlocker.operator_action : undefined;
@@ -269,7 +263,8 @@ export function requestProgressCopy(detail: Record<string, unknown> | undefined,
   // to stop on there would blur "what happened" with "where it was".
   const node = typeof detail?.node === 'string' ? detail.node : undefined;
   const stepLabel = status === 'running' ? knownNodeLabel(node) : undefined;
-  const stepLine = stepLabel && done !== undefined && total !== undefined ? `${stepLabel} — step ${done} of ${total}` : undefined;
+  const stepLine =
+    stepLabel && done !== undefined && total !== undefined ? `${stepLabel} — step ${done} of ${total}` : undefined;
   return {
     status,
     level: requestSeverityLevel(status),
@@ -378,7 +373,9 @@ export function brandImageryProposalPresentation(event: ChatEventView): BrandIma
  * no `visual_standard` for `site_apply_brand_imagery` to point at until
  * `visual_standard_materializer` has run.
  */
-export const brandImageryApplyPrompt = (presentation: Pick<BrandImageryProposalPresentation, 'mode' | 'label'>): string =>
+export const brandImageryApplyPrompt = (
+  presentation: Pick<BrandImageryProposalPresentation, 'mode' | 'label'>
+): string =>
   `Apply the "${presentation.label}" ${presentation.mode} proposal you just returned. First file it as a visual_standard: run visual_standard_materializer with apply: false if that node is available to you, and otherwise do it with the ordinary object tools — object_create a visual_standard (kind ${
     presentation.mode === 'house' ? '"house", id vis_<site>' : '"template", id vis_<site>_<slug>'
   }, derivedFrom.method "writer", status "draft") carrying this proposal's brandImagery and sampleSubjects, or check out the existing standard and patch it with set_visual_standard_fields. Then run site_apply_brand_imagery as a dry run so I can see before/after, and wait for my approval before applying.`;

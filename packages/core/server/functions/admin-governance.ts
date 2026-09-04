@@ -41,6 +41,7 @@ import {
 } from '../lib/agent-keys.js';
 import { CHAT_TOOLS, defaultAutonomyFor } from '../lib/agent/tools.js';
 import { migrateAutonomyKeys, generatedChatToolByName } from '../lib/agent/generated-tools.js';
+import { CHAT_TOOL_ALIASES } from '../lib/mcp-tool-definitions.js';
 import { MEMBERSHIP_TOOL_NAMES } from '../lib/mcp-tool-definitions-membership.js';
 import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-client.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -157,6 +158,14 @@ const chatToolsCatalog = [
     tool_class: tool.toolClass,
     default: defaultAutonomyFor(tool),
     description: tool.description,
+    // Save-round-trip fix: a `set` canonicalizes every chat_tools key it
+    // writes (migrateAutonomyKeys → CHAT_TOOL_ALIASES), so `patch` is STORED
+    // as `object_patch` while this catalog still serves the legacy name. The
+    // guardrails table was reading the stored map by catalog key and finding
+    // nothing, which read to an Owner as "Save changes doesn't save". Sending
+    // the stored name with the row lets the client read its own writes back
+    // without duplicating the alias table client-side.
+    ...(CHAT_TOOL_ALIASES[tool.name] ? { canonical_name: CHAT_TOOL_ALIASES[tool.name] } : {}),
     ...(tool.autonomyFloor ? { autonomy_floor: tool.autonomyFloor } : {}),
   })),
   // W18 T18.6b: the membership family lives only in the generated registry;

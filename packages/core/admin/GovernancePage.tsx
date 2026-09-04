@@ -13,10 +13,11 @@ import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
 import { Select, Switch } from './forms';
-import { useToast } from './overlays';
-import { IconAlertTriangle } from './icons';
+import { useToast, Popover, Dialog } from './overlays';
+import { IconAlertTriangle, IconInfo } from './icons';
 import { exportPreferences, listProfiles, type AgentProfileView } from '@core/lib/admin/chat-client';
 import { toolLabelForName } from '@core/lib/admin/chat-logic';
+import { describeTool } from '@core/lib/admin/tool-glossary';
 import { objectTypeLabel } from '@core/lib/admin/display-name';
 import { governedObjectTypes } from '@core/lib/approval-policy';
 import type { ObjectType } from '@core/schema/object-record-v1';
@@ -48,6 +49,7 @@ import {
   governanceProvenanceLabel,
   toolGroupLabel,
   describeBrandImageryGuardrail,
+  currentAutonomyForCatalog,
 } from '@core/lib/admin/governance-presentation';
 
 async function getToken(): Promise<string> {
@@ -292,7 +294,7 @@ function GovernanceBody({
 
       <ChatToolAutonomyCard
         catalog={gov.chat_tools_catalog ?? []}
-        current={gov.doc?.chat_tools ?? {}}
+        current={currentAutonomyForCatalog(gov.doc?.chat_tools, gov.chat_tools_catalog ?? [])}
         profiles={profiles}
         profilesLoaded={profilesLoaded}
         owner={owner}
@@ -430,7 +432,10 @@ function BrandImageryGuardrailCard({
       await setBrandImageryOverrides(getToken, draft);
       await onSaved();
       toast({
-        title: draft === 'allow' ? 'Agents may now override brand imagery per run' : 'Brand imagery locked to the site default',
+        title:
+          draft === 'allow'
+            ? 'Agents may now override brand imagery per run'
+            : 'Brand imagery locked to the site default',
         tone: 'success',
       });
     } catch (err) {
@@ -620,6 +625,95 @@ const TOOL_CLASS_ORDER: ChatToolCatalogEntry['tool_class'][] = [
 const sameOverride = (a: Record<string, ToolAutonomy>, b: Record<string, ToolAutonomy>) =>
   JSON.stringify(a) === JSON.stringify(b);
 
+// ─── per-tool explanation: hover definition + "what this does" modal ────────
+//
+// The row used to be titled `toolLabelForName(tool.name)`, whose fallback was
+// the literal 'Tool action' — 27 of the 46 catalogued tools rendered as that
+// identical anonymous row, with the agent-facing MCP description buried in a
+// `Technical` accordion as the only explanation on offer. The copy now comes
+// from `tool-glossary.ts` in three registers: the label titles the row, the
+// one-sentence definition arrives on HOVER (and on keyboard focus — the
+// trigger is a real button, so this is not mouse-only), and the consequences
+// live in a MODAL that also carries the technical facts. Nothing is hidden;
+// it is layered by how much the reader asked for.
+
+function ToolExplainer({
+  tool,
+  effective,
+  effectiveLabel,
+}: {
+  tool: ChatToolCatalogEntry;
+  effective: ToolAutonomy;
+  effectiveLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const copy = describeTool(tool.name);
+
+  return (
+    <>
+      <Popover
+        mode="hover"
+        placement="top"
+        content={copy.short}
+        trigger={(a11y) => (
+          <button
+            type="button"
+            {...a11y}
+            aria-haspopup="dialog"
+            onClick={() => setOpen(true)}
+            className="adm-focusable inline-flex items-center gap-1 rounded-[var(--adm-radius-sm)] text-left text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] underline decoration-dotted decoration-[var(--adm-text-muted)] underline-offset-4 hover:decoration-solid"
+          >
+            {copy.label}
+            <IconInfo size={14} aria-hidden="true" className="shrink-0 text-[var(--adm-text-muted)]" />
+            <span className="sr-only">— what this does</span>
+          </button>
+        )}
+      />
+      {/* Mounted only while open: this component renders once per catalog row
+          (46 of them), and a permanently-mounted <dialog> subtree each would
+          be pure weight on a page nobody opens 46 modals on. */}
+      {open ? (
+        <Dialog
+          open={open}
+          onClose={() => setOpen(false)}
+          title={copy.label}
+          description={copy.short}
+          size="md"
+          footer={
+            <Button variant="secondary" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-3 text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+            <p>{copy.detail}</p>
+            <div className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
+              <p className="text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
+                Right now
+              </p>
+              <p className="mt-1">
+                <strong>{effectiveLabel}</strong> — {autonomyEffect(effective)}
+              </p>
+              {tool.autonomy_floor === 'ask' ? (
+                <p className="mt-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                  This one always asks first. That floor is built in and cannot be lowered here or per agent.
+                </p>
+              ) : null}
+            </div>
+            <TechnicalDetails>
+              <p>Tool name: {tool.name}</p>
+              {tool.canonical_name ? <p>Stored as: {tool.canonical_name}</p> : null}
+              <p>Stored values: auto, ask, off.</p>
+              <p>Standard setting: {AUTONOMY_LABELS[tool.default]}.</p>
+              <p className="mt-2">{tool.description}</p>
+            </TechnicalDetails>
+          </div>
+        </Dialog>
+      ) : null}
+    </>
+  );
+}
+
 function ChatToolAutonomyCard({
   catalog,
   current,
@@ -748,9 +842,11 @@ function ChatToolAutonomyCard({
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                            {toolLabelForName(tool.name)}
-                          </span>
+                          <ToolExplainer
+                            tool={tool}
+                            effective={effective}
+                            effectiveLabel={AUTONOMY_LABELS[effective]}
+                          />
                           <Badge tone={AUTONOMY_TONE[effective]}>{AUTONOMY_LABELS[effective]}</Badge>
                         </div>
                         <p className="mt-0.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
@@ -772,11 +868,6 @@ function ChatToolAutonomyCard({
                             </p>
                           );
                         })}
-                        <TechnicalDetails>
-                          <p>Tool name: {tool.name}</p>
-                          <p>Stored values: auto, ask, off.</p>
-                          <p>{tool.description}</p>
-                        </TechnicalDetails>
                       </div>
                       <div className="w-56">
                         <Select

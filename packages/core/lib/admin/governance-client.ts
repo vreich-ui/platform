@@ -25,6 +25,19 @@ export interface ChatToolCatalogEntry {
   tool_class: 'read' | 'draft' | 'creation' | 'publication' | 'privileged' | 'membership';
   /** W18 T18.6b: 'ask' = a hard floor — no override (here or per agent) can make the tool run automatically. */
   autonomy_floor?: 'ask';
+  /**
+   * The name this tool is STORED under, when it differs from `name`.
+   *
+   * The catalog serves the legacy chat names (`patch`, `publish`, …) because
+   * that is what CHAT_TOOLS is keyed by, but admin-governance canonicalizes
+   * every written key through CHAT_TOOL_ALIASES (`patch` → `object_patch`).
+   * Without this, a saved override was written under one key and read back
+   * under another, so the row snapped straight back to "Use standard setting"
+   * and the change looked like it had never saved. The server sends the
+   * canonical name so the client can read its own writes back without
+   * importing the server's alias table.
+   */
+  canonical_name?: string;
   default: ToolAutonomy;
   description: string;
 }
