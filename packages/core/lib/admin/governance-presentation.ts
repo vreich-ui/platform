@@ -90,6 +90,45 @@ export const describeBrandImageryGuardrail = (
   };
 };
 
+// ─── stored-override ⇄ catalog key reconciliation (save-round-trip fix) ─────
+//
+// admin-governance canonicalizes every chat_tools key it writes
+// (CHAT_TOOL_ALIASES: `patch` → `object_patch`), but the catalog it serves is
+// keyed by CHAT_TOOLS' legacy names. Seeding the table straight from
+// `doc.chat_tools` therefore read the wrong key space for the 19 aliased
+// tools: the save succeeded, the run loop honoured it, and the row still
+// showed "Use standard setting" — indistinguishable from a save that failed.
+//
+// These two helpers are the whole fix, and they are pure so the test can pin
+// the round-trip: read through the canonical name, write back in the
+// catalog's key space (the server canonicalizes it again on the way in).
+
+/** Look up one catalog row's persisted override, whichever key it is under. */
+export const storedAutonomyFor = (
+  stored: Record<string, ToolAutonomy>,
+  tool: Pick<ChatToolCatalogEntry, 'name' | 'canonical_name'>
+): ToolAutonomy | undefined => stored[tool.name] ?? (tool.canonical_name ? stored[tool.canonical_name] : undefined);
+
+/**
+ * Re-key the persisted override map into the catalog's key space, so every
+ * row shows what is actually stored for it. Keys with no catalog row are
+ * dropped deliberately: the table cannot render them, and carrying them into
+ * the draft would silently re-save settings for tools this build no longer
+ * wires.
+ */
+export const currentAutonomyForCatalog = (
+  stored: Record<string, ToolAutonomy> | undefined,
+  catalog: readonly ChatToolCatalogEntry[]
+): Record<string, ToolAutonomy> => {
+  if (!stored) return {};
+  const out: Record<string, ToolAutonomy> = {};
+  for (const tool of catalog) {
+    const value = storedAutonomyFor(stored, tool);
+    if (value !== undefined) out[tool.name] = value;
+  }
+  return out;
+};
+
 export const toolGroupLabel = (toolClass: ChatToolCatalogEntry['tool_class']): string => {
   switch (toolClass) {
     case 'read':

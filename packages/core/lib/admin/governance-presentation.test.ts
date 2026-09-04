@@ -10,7 +10,10 @@ import {
   BRAND_IMAGERY_OVERRIDE_REVERT_TARGET,
   brandImageryOverrideEffect,
   describeBrandImageryGuardrail,
+  storedAutonomyFor,
+  currentAutonomyForCatalog,
 } from './governance-presentation.js';
+import type { ChatToolCatalogEntry } from './governance-client.js';
 
 describe('governance presentation', () => {
   it('uses human labels for every autonomy setting', () => {
@@ -80,5 +83,56 @@ describe('brand imagery override guardrail (U2)', () => {
 
   it('the one-click revert target is the exact key the store schema/admin-governance verb expects', () => {
     assert.equal(BRAND_IMAGERY_OVERRIDE_REVERT_TARGET, 'brandImageryOverrides');
+  });
+});
+
+// ─── the save-round-trip regression (Owner: "Save changes doesn't save") ────
+//
+// The server canonicalizes every chat_tools key it writes (`patch` is stored
+// as `object_patch`) while the catalog is served under the legacy chat names.
+// Reading the stored map by catalog key therefore found nothing for the 19
+// aliased tools: the setting WAS saved and WAS honoured by the run loop, but
+// the row snapped back to "Use standard setting", which is indistinguishable
+// from a failed save. These tests pin the read side of that round-trip.
+
+const catalogEntry = (name: string, canonical?: string): ChatToolCatalogEntry => ({
+  name,
+  tool_class: 'draft',
+  default: 'ask',
+  description: `${name} description`,
+  ...(canonical ? { canonical_name: canonical } : {}),
+});
+
+describe('chat-tool override round-trip', () => {
+  const catalog = [
+    catalogEntry('patch', 'object_patch'),
+    catalogEntry('publish', 'object_publish'),
+    catalogEntry('run_workspace_workflow'),
+  ];
+
+  it('reads an override back under the name the server stored it as', () => {
+    assert.equal(storedAutonomyFor({ object_patch: 'off' }, catalog[0]!), 'off');
+    assert.deepEqual(currentAutonomyForCatalog({ object_patch: 'off' }, catalog), { patch: 'off' });
+  });
+
+  it('still reads an override stored under the catalog name itself', () => {
+    assert.deepEqual(currentAutonomyForCatalog({ run_workspace_workflow: 'off' }, catalog), {
+      run_workspace_workflow: 'off',
+    });
+  });
+
+  it('prefers an exact key over the canonical one when both somehow exist', () => {
+    assert.equal(storedAutonomyFor({ patch: 'ask', object_patch: 'off' }, catalog[0]!), 'ask');
+  });
+
+  it('drops stored keys with no catalog row rather than re-saving dead settings', () => {
+    assert.deepEqual(currentAutonomyForCatalog({ retired_tool: 'off', object_publish: 'auto' }, catalog), {
+      publish: 'auto',
+    });
+  });
+
+  it('treats an absent override doc as no overrides', () => {
+    assert.deepEqual(currentAutonomyForCatalog(undefined, catalog), {});
+    assert.deepEqual(currentAutonomyForCatalog({}, catalog), {});
   });
 });
