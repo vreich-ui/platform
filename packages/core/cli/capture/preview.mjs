@@ -73,6 +73,7 @@ import {
   settleLazyContent,
 } from './browser.mjs';
 import { writeJson } from './snapshot-v1.mjs';
+import { withTestTrafficHeaders } from './test-traffic-header.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -370,10 +371,14 @@ export async function screenshotDraftPreview({
   const defects = [];
   const results = [];
   for (const page of pages) {
-    const context = await browser.newContext({
-      viewport: { width: viewports[0].width, height: viewports[0].height },
-      deviceScaleFactor: viewports[0].deviceScaleFactor,
-    });
+    const context = await browser.newContext(
+      // R7.3: this renders our own draft preview, loader and all — tag the
+      // navigation (and thus the loader's own beacon) as test traffic.
+      withTestTrafficHeaders({
+        viewport: { width: viewports[0].width, height: viewports[0].height },
+        deviceScaleFactor: viewports[0].deviceScaleFactor,
+      })
+    );
     const browserPage = await context.newPage();
     const pageScreenshots = [];
     const blocks = [];

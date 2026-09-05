@@ -28,6 +28,7 @@ import process from 'node:process';
 import { chromium } from 'playwright-core';
 
 import { GALLERY_MAX_ITEMS, GALLERY_MAX_TEXT_LENGTH, GALLERY_MIN_ITEMS, groupGalleryItems } from './gallery-items.mjs';
+import { withTestTrafficHeaders } from './test-traffic-header.mjs';
 
 /**
  * The capture viewports. Source and preview MUST be screenshotted at exactly
@@ -604,11 +605,15 @@ export async function capturePageSnapshot({
   sameOriginNavigationOnly,
   userAgent,
 }) {
-  const context = await browser.newContext({
-    ...(userAgent ? { userAgent } : {}),
-    viewport: { width: viewports[0].width, height: viewports[0].height },
-    deviceScaleFactor: viewports[0].deviceScaleFactor,
-  });
+  const context = await browser.newContext(
+    // R7.3: mark this navigation's traffic (including the tracking loader's
+    // own beacon, if the page carries one) as test traffic for the sink.
+    withTestTrafficHeaders({
+      ...(userAgent ? { userAgent } : {}),
+      viewport: { width: viewports[0].width, height: viewports[0].height },
+      deviceScaleFactor: viewports[0].deviceScaleFactor,
+    })
+  );
   const page = await context.newPage();
   if (sameOriginNavigationOnly) {
     await page.route('**/*', async (route) => {
