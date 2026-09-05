@@ -17,7 +17,7 @@
 
 ## Claude-session working notes
 
-- **Delivery:** branch + pull request on GitHub (the GitHub connector when the sandbox cannot push); merge only when the wave's brief or Wolf authorizes. The `land.command` patch-zip route is superseded (2026-09-05).
+- **Delivery:** branch + pull request on GitHub (the GitHub connector when the sandbox cannot push); merge only when the wave's brief or Wolf authorizes. The `land.command` patch-zip route is superseded (2026-09-05). When files go up through the connector, verify every pushed blob's SHA against the local commit (`git rev-parse <commit>:<path>` vs the connector's directory listing) before opening the PR — connector pushes re-type content and have corrupted long single-line files (SVGs) and long Markdown on first pass.
 - **Sub-agents:** file-disjoint tasks may run in parallel `git worktree`s off one work branch (symlink `node_modules` from the main clone so `tsc`/`eslint`/tests run there); same-file tasks serialize; merge back, then squash. One shared brief file beats repeating context per prompt. Brief them so refusal-with-reasons is an acceptable outcome.
 - **Adversarial review is a required stage**, not optional: review the squashed diff, and let the same reviewer apply the fixes.
 - **Cost:** prefer `rg` + targeted `Read` with offsets; do not cat large docs; reserve the most expensive model for architecture-level investigation.
