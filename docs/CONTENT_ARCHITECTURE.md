@@ -239,8 +239,8 @@ and, optionally, `request_id` / `artifact_set` / `release_build` (`review-state.
 humans with `admin`/`publisher` are not bound by the pin.
 
 **`publishObject`** (`server/lib/object-publish.ts`) is a five-step machine:
-① lock check (423) → ② validate with `publishIntent: true` (422) → ③ materialize (pure; `at` =
-the effective `published_time`, never wall-clock) → ④ commit the export to GitHub with `[skip netlify]` →
+① lock check (423) → ② validate with `publishIntent: true` (422) → ③ materialize (pure; `at` = the
+effective `published_time`, never wall-clock) → ④ commit the export to GitHub with `[skip netlify]` →
 ⑤ stamp `published_time` + receipt, bump `version`, leave `content_revision`.
 
 Failure semantics are asymmetric on purpose: failing at or before the commit leaves the record
