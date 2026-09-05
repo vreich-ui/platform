@@ -9,6 +9,16 @@
  * path authenticates a human via Netlify Identity and attributes writes to a
  * human Principal.
  *
+ * A6 — THE BROWSER TRIGGERS THE EXAMPLE GENERATOR TOO. X1 hooked the visual
+ * standard example generator onto the MCP verb dispatch only
+ * (`mcp-tool-handlers.ts`'s `callObjectAction`) and deliberately left THIS
+ * path unhooked, on the reasoning that a human would ask an agent to
+ * regenerate. The consequence was that the mood-board save and "Make this the
+ * site's imagery" — the surfaces the affordance actually lives on — generated
+ * nothing at all, silently. Both surfaces now open the same job record and
+ * hand the work to the same background function, and a `get` of a
+ * visual_standard carries that record's status back so the board can poll it.
+ *
  * SECURITY INVARIANT (A§1.2): the browser path must never see the publish key.
  * This file therefore does not import, read, or forward `PUBLISH_SECRET` /
  * `NETLIFY_PUBLISH_SECRET` or the `x-publish-key` header in any form — it has
@@ -25,6 +35,14 @@ import {
   getSiteObjectsBlobStore,
 } from '../lib/blob-store.js';
 import { getGovernanceBlobStore, resolveActivePolicies } from '../lib/governance-store.js';
+import {
+  examplesJobStatusView,
+  readExamplesJob,
+  resolveExamplesTriggerTarget,
+  triggerVisualStandardExamplesJob,
+  type ExamplesJobStore,
+} from '../lib/visual-standard-examples-jobs.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import {
   handleObjectVerb,
   objectVerbRequestSchema,
@@ -133,10 +151,52 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       agentLearningStore,
       marginaliaStore,
     });
+    if (result.status >= 200 && result.status < 300) {
+      // Both example-generation surfaces, one trigger and one job record: a
+      // browser write is no longer the silent one. Best-effort by construction
+      // — a successful object write is never downgraded because the examples
+      // side effect could not be started.
+      const target = resolveExamplesTriggerTarget(request.data as Record<string, unknown>, result.body);
+      if (target) {
+        const jobStore = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+          | ExamplesJobStore
+          | undefined;
+        if (jobStore) {
+          await triggerVisualStandardExamplesJob(jobStore, {
+            visualStandardId: target,
+            trigger: 'browser',
+            siteId: getSiteIdentity().siteId,
+          });
+        }
+      }
+      // A7 polls this while it says `pending`: the readable status of the round
+      // the write above (or an earlier one) started.
+      const examplesJob = await readVisualStandardExamplesJob(event, request.data);
+      if (examplesJob) return jsonResponse(result.status, { ...result.body, examples_job: examplesJob });
+    }
     return jsonResponse(result.status, result.body);
   } catch (error) {
     console.error('Admin_Object request failed.', error);
     return jsonResponse(500, { action: request.data.action, error: 'Object request could not be processed.' });
+  }
+};
+
+/**
+ * The job record for a `get` of a visual_standard — the status A7 polls while
+ * a round is `pending`. Read-only, best-effort, and only on the one verb a UI
+ * actually polls with; never fails the verb it decorates.
+ */
+const readVisualStandardExamplesJob = async (
+  event: LambdaEvent,
+  request: { action?: string; object_type?: string; object_id?: string }
+) => {
+  if (request.action !== 'get' || request.object_type !== 'visual_standard' || !request.object_id) return undefined;
+  try {
+    const jobStore = (await getArtifactIndexBlobStore(event)) as unknown as ExamplesJobStore;
+    const job = await readExamplesJob(jobStore, request.object_id);
+    return job ? examplesJobStatusView(job) : undefined;
+  } catch {
+    return undefined;
   }
 };
 

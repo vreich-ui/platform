@@ -109,6 +109,10 @@ test('object_contract("visual_standard") is reachable, NOT governed, and NOT pub
     'visual_standard_brand_imagery_reused',
     'visual_standard_house_singleton',
     'visual_standard_not_publishable',
+    // A2: mood-board reference id constraints (ref_<8> minted server-side,
+    // req_visref_<site>_<yyyymmdd>_<nn> minted by the import endpoint).
+    'reference_ids',
+    'reference_import_request_ids',
   ]) {
     assert.ok(
       contract.constraints.some((constraint) => constraint.id === id),
@@ -529,4 +533,171 @@ test('a create with no site to derive from is a readable refusal, never a body-s
   );
   assert.equal(withSite.status, 200, JSON.stringify(withSite.body));
   assert.equal(withSite.body.object_id, 'vis_drlurie');
+});
+
+// ─── A2: mood-board reference id normalizer ────────────────────────────────
+//
+// set_visual_standard_fields was a plain deep-merge with no id minting of its
+// own (object-patch-apply.ts's applyFieldsOp) and the contract said nothing
+// about the rule (object-contract.ts) — so agents invented or omitted
+// references[].id and patches either drifted or collided. The fix lives in
+// object-verbs.ts's mintOpsIds, the SAME pre-engine normalizer that already
+// mints term/section/nav/node ids: an id-less references[] entry is minted
+// ref_<8 lowercase hex> from its own payload (and reported in minted[]); a
+// resulting duplicate id — minted or caller-supplied — is refused (422)
+// before the engine ever runs.
+
+const createHouseForReferenceTests = async () => {
+  const store = createMemoryStore();
+  const verbStore = store as unknown as ObjectVerbStore;
+  const created = await handleObjectVerb(
+    verbStore,
+    { action: 'create', object_type: 'visual_standard', site: 'site_drlurie', body: INCIDENT_HOUSE_BODY },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const checkout = await handleObjectVerb(
+    verbStore,
+    { action: 'checkout', object_type: 'visual_standard', object_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+  assert.equal(checkout.status, 200, JSON.stringify(checkout.body));
+  return {
+    store,
+    verbStore,
+    lockToken: checkout.body.lockToken as string,
+    version: checkout.body.record_version as number,
+  };
+};
+
+test('a set_visual_standard_fields patch with no reference ids succeeds and returns the minted ids', async () => {
+  const { verbStore, lockToken, version } = await createHouseForReferenceTests();
+
+  const patch = await handleObjectVerb(
+    verbStore,
+    {
+      action: 'patch',
+      object_type: 'visual_standard',
+      object_id: 'vis_drlurie',
+      lock_token: lockToken,
+      expected_record_version: version,
+      ops: [
+        {
+          op: 'set_visual_standard_fields',
+          fields: {
+            references: [
+              { blobKey: 'img/mood/1.jpg', note: 'the palette, not the subject' }, // no id
+              { blobKey: 'img/mood/2.jpg' }, // no id
+            ],
+          },
+        },
+      ],
+    },
+    AGENT,
+    { nowMs: NOW }
+  );
+  assert.equal(patch.status, 200, JSON.stringify(patch.body));
+
+  const minted = patch.body.minted as { index: number; field: string; id: string }[];
+  assert.equal(minted.length, 2);
+  assert.equal(minted[0]!.field, 'fields.references[0].id');
+  assert.equal(minted[1]!.field, 'fields.references[1].id');
+  for (const entry of minted) assert.match(entry.id, /^ref_[a-f0-9]{8}$/);
+  assert.notEqual(minted[0]!.id, minted[1]!.id, 'distinct entries mint distinct ids');
+
+  const after = await handleObjectVerb(
+    verbStore,
+    { action: 'get', object_type: 'visual_standard', object_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW }
+  );
+  const body = (after.body.record as ObjectRecord).body as VisualStandardBody;
+  assert.equal(body.references.length, 2);
+  assert.equal(body.references[0]!.id, minted[0]!.id);
+  assert.equal(body.references[1]!.id, minted[1]!.id);
+});
+
+test('a set_visual_standard_fields patch that omits an id on ONE entry mints only that one, leaving a supplied id untouched', async () => {
+  const { verbStore, lockToken, version } = await createHouseForReferenceTests();
+
+  const patch = await handleObjectVerb(
+    verbStore,
+    {
+      action: 'patch',
+      object_type: 'visual_standard',
+      object_id: 'vis_drlurie',
+      lock_token: lockToken,
+      expected_record_version: version,
+      ops: [
+        {
+          op: 'set_visual_standard_fields',
+          fields: {
+            references: [
+              { id: 'ref_caller01', blobKey: 'img/mood/1.jpg' }, // caller-supplied — left alone
+              { blobKey: 'img/mood/2.jpg' }, // no id — minted
+            ],
+          },
+        },
+      ],
+    },
+    AGENT,
+    { nowMs: NOW }
+  );
+  assert.equal(patch.status, 200, JSON.stringify(patch.body));
+
+  const minted = patch.body.minted as { index: number; field: string; id: string }[];
+  assert.equal(minted.length, 1);
+  assert.equal(minted[0]!.field, 'fields.references[1].id');
+
+  const after = await handleObjectVerb(
+    verbStore,
+    { action: 'get', object_type: 'visual_standard', object_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW }
+  );
+  const body = (after.body.record as ObjectRecord).body as VisualStandardBody;
+  assert.equal(body.references[0]!.id, 'ref_caller01', 'the supplied id is never overwritten');
+  assert.equal(body.references[1]!.id, minted[0]!.id);
+});
+
+test('a set_visual_standard_fields patch with duplicate reference ids is refused (422) and never persists', async () => {
+  const { verbStore, lockToken, version } = await createHouseForReferenceTests();
+
+  const patch = await handleObjectVerb(
+    verbStore,
+    {
+      action: 'patch',
+      object_type: 'visual_standard',
+      object_id: 'vis_drlurie',
+      lock_token: lockToken,
+      expected_record_version: version,
+      ops: [
+        {
+          op: 'set_visual_standard_fields',
+          fields: {
+            references: [
+              { id: 'ref_dupe0001', blobKey: 'img/mood/1.jpg' },
+              { id: 'ref_dupe0001', blobKey: 'img/mood/2.jpg' },
+            ],
+          },
+        },
+      ],
+    },
+    AGENT,
+    { nowMs: NOW }
+  );
+  assert.equal(patch.status, 422, JSON.stringify(patch.body));
+  assert.equal(patch.body.code, 'invalid_body');
+  assert.match(String(patch.body.message), /duplicate reference id/i);
+
+  // Nothing persisted — the record is exactly as checkout left it.
+  const after = await handleObjectVerb(
+    verbStore,
+    { action: 'get', object_type: 'visual_standard', object_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW }
+  );
+  assert.equal((after.body.record as ObjectRecord).version, version);
 });

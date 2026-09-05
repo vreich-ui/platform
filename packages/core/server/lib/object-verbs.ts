@@ -628,6 +628,40 @@ const mintOpsIds = (rawOps: readonly unknown[]): { ops: unknown[]; minted: Minte
       const id = mintId({ kind: 'section_instance' }, stableStringify(op.blueprint));
       op.blueprint.id = id;
       note('blueprint.id', id);
+    } else if (op.op === 'set_visual_standard_fields' && isRecord(op.fields) && Array.isArray(op.fields.references)) {
+      // A2: the mood-board fix. references[] is a declared set that replaces
+      // wholesale on a partial merge (object-patch-ops.ts's comment on this
+      // op) — so every entry the caller sends here is the WHOLE next array,
+      // and every id-less entry in it needs a mint, same idempotent-on-
+      // resubmission idiom as section/nav ids above (an omitted id is seeded
+      // from the entry's own payload, so retries mint the same id). A caller
+      // that supplies an id is left untouched, exactly like every other
+      // branch — but a resulting duplicate id (two entries, one caller-
+      // supplied, one minted, or two caller-supplied) is a 422, not a silent
+      // collision: object-contract.ts's `reference_ids` constraint promises
+      // ids are unique, and the ordinary deep-merge apply has no id-integrity
+      // check of its own to catch it.
+      const fields = deepClone(op.fields) as Record<string, unknown>;
+      const references = (fields.references as unknown[]).map((raw, refIndex) => {
+        if (!isRecord(raw) || raw.id) return raw; // has an id already, or malformed — leave it for the engine/schema
+        const id = mintId({ kind: 'visual_standard_reference' }, stableStringify(raw));
+        note(`fields.references[${refIndex}].id`, id);
+        return { ...raw, id };
+      });
+      const seenIds = new Set<string>();
+      for (const ref of references) {
+        if (isRecord(ref) && typeof ref.id === 'string') {
+          if (seenIds.has(ref.id)) {
+            throw new PatchApplyError(
+              'invalid_body',
+              `set_visual_standard_fields: duplicate reference id "${ref.id}" in fields.references — reference ids must be unique.`
+            );
+          }
+          seenIds.add(ref.id);
+        }
+      }
+      fields.references = references;
+      op.fields = fields;
     }
     return op;
   });
@@ -2229,6 +2263,17 @@ const dispatchObjectVerb = async (
       } catch (error) {
         if (error instanceof MintIdError)
           return err(400, { error: 'Could not mint an id for a patch op', detail: error.message });
+        // A2: mintOpsIds' set_visual_standard_fields branch throws this on a
+        // duplicate reference id — a 422 (patchErrorStatus's invalid_body
+        // mapping), same as any other body-shaped rejection, even though the
+        // engine itself never ran.
+        if (error instanceof PatchApplyError)
+          return err(patchErrorStatus(error.code), {
+            error: 'Patch could not be applied',
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          });
         throw error;
       }
       // D3-sharedref: after ids are minted (so upsert_section always has a
@@ -2404,6 +2449,13 @@ const dispatchObjectVerb = async (
         } catch (error) {
           if (error instanceof MintIdError)
             return err(400, { error: 'Could not mint an id for a candidate op', detail: error.message });
+          if (error instanceof PatchApplyError)
+            return err(patchErrorStatus(error.code), {
+              error: 'Patch could not be applied',
+              code: error.code,
+              message: error.message,
+              details: error.details,
+            });
           throw error;
         }
         const validation = validateCandidatePatch(record, normalizedOps, context);
