@@ -257,3 +257,11 @@
   status = 301
   force = true
 
+# T21.9b: the traffic dashboard is renamed to Analytics (it now carries
+# engagement, conversions, producers, and experiments -- not just visits).
+[[redirects]]
+  from = "/admin/traffic"
+  to = "/admin/analytics"
+  status = 301
+  force = true
+

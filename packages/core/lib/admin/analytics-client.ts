@@ -1,5 +1,5 @@
 /**
- * Traffic dashboard client (T4.1) — browser wrapper over `admin-traffic`.
+ * Analytics dashboard client (T4.1; renamed from traffic-client, T21.9b) — browser wrapper over `admin-analytics`.
  * Same house pattern as `release-client.ts`: Identity bearer, typed result,
  * errors thrown with the server's human message.
  *
@@ -12,44 +12,34 @@
  * cost a request even on a 304.
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
-import type { TrafficChartSeries, TrafficRangeKey, TrafficDateWindow } from './traffic-logic.js';
+import type { AnalyticsRangeKey, AnalyticsOverview } from './analytics-logic.js';
 
-const ENDPOINT = '/.netlify/functions/admin-traffic';
+/** Re-exported for existing importers — the shape itself now lives in `analytics-logic.ts` (R6.1's panel resolver is pure and needs it without this module's I/O). */
+export type { AnalyticsErrorCode, AnalyticsOverview } from './analytics-logic.js';
 
-/** Mirrors the server's catalogued degrade states (`admin-traffic.ts`) — never a generic string the UI has to pattern-match. */
-export type TrafficErrorCode = 'analytics_lookup_unconfigured' | 'analytics_not_enabled';
+const ENDPOINT = '/.netlify/functions/admin-analytics';
 
-export interface TrafficOverview {
-  configured: boolean;
-  enabled: boolean;
-  error_code?: TrafficErrorCode;
-  message?: string;
-  range: TrafficRangeKey;
-  window?: TrafficDateWindow;
-  series?: TrafficChartSeries;
-}
-
-export interface FetchTrafficOptions {
-  range: TrafficRangeKey;
+export interface FetchAnalyticsOptions {
+  range: AnalyticsRangeKey;
   custom?: { from: string; to: string };
   force?: boolean;
 }
 
-/** Cache window: short — traffic pages are usually open-and-glance, not open-and-monitor. */
+/** Cache window: short — analytics pages are usually open-and-glance, not open-and-monitor. */
 const CACHE_TTL_MS = 60_000;
 
 interface CacheEntry {
-  overview: TrafficOverview;
+  overview: AnalyticsOverview;
   fetchedAt: number;
 }
 
 const cache = new Map<string, CacheEntry>();
-const inflight = new Map<string, Promise<TrafficOverview>>();
+const inflight = new Map<string, Promise<AnalyticsOverview>>();
 
-const cacheKeyFor = (opts: FetchTrafficOptions): string =>
+const cacheKeyFor = (opts: FetchAnalyticsOptions): string =>
   opts.range === 'custom' ? `custom:${opts.custom?.from ?? ''}:${opts.custom?.to ?? ''}` : opts.range;
 
-const buildQuery = (opts: FetchTrafficOptions): string => {
+const buildQuery = (opts: FetchAnalyticsOptions): string => {
   const params = new URLSearchParams({ range: opts.range });
   if (opts.range === 'custom' && opts.custom) {
     params.set('from', opts.custom.from);
@@ -58,17 +48,20 @@ const buildQuery = (opts: FetchTrafficOptions): string => {
   return params.toString();
 };
 
-async function requestTraffic(getToken: GetToken, opts: FetchTrafficOptions): Promise<TrafficOverview> {
+async function requestAnalytics(getToken: GetToken, opts: FetchAnalyticsOptions): Promise<AnalyticsOverview> {
   const token = await getToken();
   const response = await fetch(`${ENDPOINT}?${buildQuery(opts)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const body = (await response.json().catch(() => ({}))) as TrafficOverview & { error?: string };
-  if (!response.ok) throw new Error(body.error || `Traffic data request failed (${response.status}).`);
+  const body = (await response.json().catch(() => ({}))) as AnalyticsOverview & { error?: string };
+  if (!response.ok) throw new Error(body.error || `Analytics data request failed (${response.status}).`);
   return body;
 }
 
-export async function fetchTrafficOverview(getToken: GetToken, opts: FetchTrafficOptions): Promise<TrafficOverview> {
+export async function fetchAnalyticsOverview(
+  getToken: GetToken,
+  opts: FetchAnalyticsOptions
+): Promise<AnalyticsOverview> {
   const key = cacheKeyFor(opts);
 
   if (!opts.force) {
@@ -78,7 +71,7 @@ export async function fetchTrafficOverview(getToken: GetToken, opts: FetchTraffi
     if (existing) return existing;
   }
 
-  const thisFetch = requestTraffic(getToken, opts).then((overview) => {
+  const thisFetch = requestAnalytics(getToken, opts).then((overview) => {
     cache.set(key, { overview, fetchedAt: Date.now() });
     return overview;
   });
@@ -89,7 +82,7 @@ export async function fetchTrafficOverview(getToken: GetToken, opts: FetchTraffi
   return thisFetch;
 }
 
-export function invalidateTrafficCache(): void {
+export function invalidateAnalyticsCache(): void {
   cache.clear();
   inflight.clear();
 }

@@ -50,7 +50,7 @@
  * O(N) rows to a fixed handful.
  *
  * `ETag` + `If-None-Match` -> `304` and `Cache-Control: private, no-cache`,
- * following `admin-traffic.ts`'s precedent.
+ * following `admin-analytics.ts`'s precedent.
  */
 import { createHash } from 'node:crypto';
 

@@ -1,5 +1,5 @@
 /**
- * Traffic dashboard charts (T4.1) — inline SVG, no charting dependency.
+ * Analytics dashboard charts (T4.1; renamed from TrafficCharts, T21.9b) — inline SVG, no charting dependency.
  *
  * The plan named shadcn charts / Recharts; neither is installed (T0.1: no
  * shadcn, no Radix, no Recharts in this repo) and adding a charting
@@ -12,8 +12,8 @@
  * screen-reader user gets the real numbers, not just a shape).
  */
 import { cn } from './utils';
-import { buildLinePoints, pointsToPolyline, pointsToAreaPath, formatTrafficCount } from '@core/lib/admin/traffic-logic';
-import type { TrafficRankingRowWithShare, TrafficTrendPoint } from '@core/lib/admin/traffic-logic';
+import { buildLinePoints, pointsToPolyline, pointsToAreaPath, formatAnalyticsCount } from '@core/lib/admin/analytics-logic';
+import type { AnalyticsRankingRowWithShare, AnalyticsTrendPoint } from '@core/lib/admin/analytics-logic';
 
 // ─── shared: sr-only data table fallback ───────────────────────────────────
 
@@ -40,7 +40,7 @@ const TREND_HEIGHT = 200;
 const TREND_PADDING = 12;
 
 export interface TrendChartProps {
-  points: TrafficTrendPoint[];
+  points: AnalyticsTrendPoint[];
   className?: string;
   /** T21.2b: the own-tracker feed plots pageviews/sessions through this same
    *  chart — mislabeling those as "Visits"/"Unique visitors" would misdescribe
@@ -129,7 +129,7 @@ export function TrendChart({
 // ─── BarList: horizontal bar list (top content / top sources) ──────────────
 
 export interface BarListProps {
-  rows: TrafficRankingRowWithShare[];
+  rows: AnalyticsRankingRowWithShare[];
   caption: string;
   emptyMessage: string;
   className?: string;
@@ -169,7 +169,7 @@ export function BarList({ rows, caption, emptyMessage, className }: BarListProps
               />
             </span>
             <span className="w-12 shrink-0 text-right text-[length:var(--adm-text-xs)] tabular-nums text-[var(--adm-text-muted)]">
-              {formatTrafficCount(row.visits)}
+              {formatAnalyticsCount(row.visits)}
             </span>
           </li>
         ))}

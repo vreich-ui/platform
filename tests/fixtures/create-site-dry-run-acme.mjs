@@ -57,6 +57,7 @@ Files to create under sites/acme/ (93):
   + sites/acme/app/pages/[...blog]/[tag]/[...page].astro
   + sites/acme/netlify/functions/admin-agent-chat.ts
   + sites/acme/netlify/functions/admin-agent-chat-run-background.ts
+  + sites/acme/netlify/functions/admin-analytics.ts
   + sites/acme/netlify/functions/admin-artifact-upload-intent.ts
   + sites/acme/netlify/functions/admin-ask-ai-object.ts
   + sites/acme/netlify/functions/admin-audit.ts
@@ -78,7 +79,6 @@ Files to create under sites/acme/ (93):
   + sites/acme/netlify/functions/admin-requests.ts
   + sites/acme/netlify/functions/admin-requests-view.ts
   + sites/acme/netlify/functions/admin-taxonomy.ts
-  + sites/acme/netlify/functions/admin-traffic.ts
   + sites/acme/netlify/functions/admin-users.ts
   + sites/acme/netlify/functions/artifact-upload.ts
   + sites/acme/netlify/functions/checkout-session-status.ts

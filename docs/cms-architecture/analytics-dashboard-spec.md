@@ -1,8 +1,14 @@
-# `/admin/traffic` — dashboard specification (R6.0)
+# `/admin/analytics` — dashboard specification (R6.0)
 
 **Status:** APPROVED by Wolf 2026-09-03 — `GATE-TRK-5` passed. R6.1 may start.
 **Commissioned:** 2026-09-03/04 (runner plan §R6). **Written:** 2026-09-03.
 **Scope:** the `/admin/traffic` page on every tenant, both feeds, plus the `/stats` additions in `kugel-data` that the page needs.
+
+**T21.9b note (2026-09-05):** the surface this spec describes was renamed
+`/admin/traffic` → `/admin/analytics` (file renamed to match; `/admin/traffic`
+now 301s to the new path). This document is left as approved at `GATE-TRK-5`
+and still says `/admin/traffic` throughout — read every such reference as the
+current `/admin/analytics` route.
 
 Wolf's brief, verbatim intent: *better organized, compact boxes, every available data point, best UI/UX for the feature to be useful (research current practice online), traceable graphs with an optimal tech choice, and ignore `/admin/*` pages in the data.*
 

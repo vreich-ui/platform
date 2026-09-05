@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { materialize } from '../../packages/core/server/lib/materialize.js';
-import { surfaceSplit, WORKFLOW_SURFACE } from '../../packages/core/lib/admin/own-traffic-logic.js';
+import { surfaceSplit, WORKFLOW_SURFACE } from '../../packages/core/lib/admin/own-analytics-logic.js';
 import { dimensionRowsForExport } from '../../scripts/tracking-dims-push.mjs';
 import { publishReceiptSchema } from '../../packages/core/schema/object-record-v1.js';
 
@@ -149,7 +149,7 @@ test('the publish receipt schema accepts the provenance, and still accepts older
   assert.equal(publishReceiptSchema.parse(base).surface, undefined);
 });
 
-// ─── the split /admin/traffic renders ────────────────────────────────────────
+// ─── the split /admin/analytics renders ──────────────────────────────────────
 
 test('engagement splits by publishing surface', () => {
   const stats = {

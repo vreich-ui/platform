@@ -12,7 +12,7 @@
  * warm-instance memo shared with `admin-editorial-view`, so whichever endpoint
  * runs first pays and the other is free. This file is the HTTP skin over it:
  *
- *  - `ETag` + `If-None-Match` -> `304`, following `admin-traffic.ts`'s
+ *  - `ETag` + `If-None-Match` -> `304`, following `admin-analytics.ts`'s
  *    precedent (T0.2 found zero ETags anywhere in `server/functions/`);
  *  - `Cache-Control: private, no-cache` — always revalidate, but ALLOW
  *    revalidation, which the old blanket `no-store` forbade, so a poll

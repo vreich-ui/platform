@@ -6,4 +6,4 @@
  */
 import '@site/config/policy-bindings';
 
-export { default } from '@core/admin/TrafficWorkspace';
+export { default } from '@core/admin/AnalyticsWorkspace';

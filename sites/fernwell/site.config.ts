@@ -89,6 +89,8 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/admin/templates', to: '/admin/objects?type=template,section_template', status: 301 },
     { from: '/admin/studio', to: '/admin/objects?type=template,section_template', status: 301 },
     { from: '/admin/media', to: '/admin/objects?view=grid', status: 301 },
+    // T21.9b: the traffic dashboard is renamed to Analytics.
+    { from: '/admin/traffic', to: '/admin/analytics', status: 301 },
   ],
 });
 

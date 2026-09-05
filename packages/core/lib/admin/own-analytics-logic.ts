@@ -1,18 +1,28 @@
 /**
- * Own-tracker traffic (T21.2b) — pure transforms for the `admin-traffic`
+ * Own-tracker analytics (T21.2b; admin-traffic renamed admin-analytics, T21.9b) — pure transforms for the `admin-analytics`
  * `?source=own` feed, a first-party proxy over `${TRACKING_SINK_URL}/stats`
  * (contract: kugel-data's `/stats`, built in parallel — see
  * `server/lib/own-tracker-stats.ts` for the I/O half and this repo's
  * TRACKING_SINK_URL/TRACKING_PROJECT_ID env pair, already wired for
  * commerce-events/member-link forwarding).
  *
- * Same house split as `traffic-logic.ts`: I/O stays server-side, only pure
+ * Same house split as `analytics-logic.ts`: I/O stays server-side, only pure
  * shaping lives here so it is unit-testable without a live sink. The
  * trend/ranking shaping deliberately REUSES `mapAnalyticsToChartSeries` (no
  * new geometry/ranking math) so `TrendChart`/`BarList` render this feed
  * exactly like the Netlify one.
  */
-import { mapAnalyticsToChartSeries, type TrafficChartSeries, type RawTrafficAnalytics } from './traffic-logic.js';
+import {
+  mapAnalyticsToChartSeries,
+  formatAnalyticsCount,
+  type AnalyticsChartSeries,
+  type RawAnalyticsData,
+  type AnalyticsRankingRowWithShare,
+  type KpiDatum,
+  type RankingGroup,
+  type AnalyticsFooterItem,
+  type AnalyticsPanelState,
+} from './analytics-logic.js';
 
 export type OwnTrackerDays = 7 | 30;
 
@@ -118,6 +128,29 @@ export interface OwnTrackerStatsPayload {
   dims?: OwnTrackerDims;
 }
 
+export type OwnAnalyticsErrorCode = 'own_tracker_unconfigured';
+
+/**
+ * The `admin-analytics?source=own` response shape. Lives here, not in
+ * `own-analytics-client.ts` (which re-exports it) — the R6.1 panel resolver
+ * below is pure and needs this shape without importing the fetch wrapper's
+ * I/O.
+ */
+export interface OwnAnalyticsOverview {
+  configured: boolean;
+  enabled: boolean;
+  error_code?: OwnAnalyticsErrorCode;
+  message?: string;
+  days: OwnTrackerDays;
+  stats?: OwnTrackerStatsPayload;
+  /**
+   * W7.4 — engagement grouped by the surface that PUBLISHED each object.
+   * Computed server-side (admin-analytics joins the top objects against their
+   * publish receipts), so it needs nothing from the sink and works today.
+   */
+  surfaces?: SurfaceSplitRow[];
+}
+
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 const str = (value: unknown, fallback: string): string => (typeof value === 'string' && value ? value : fallback);
 
@@ -130,8 +163,8 @@ const str = (value: unknown, fallback: string): string => (typeof value === 'str
  * this as Netlify's "Visits"/"Unique visitors" (that would misdescribe the
  * numbers — see `TrendChart`'s seriesALabel/seriesBLabel).
  */
-export function ownTrackerChartSeries(stats: OwnTrackerStatsPayload): TrafficChartSeries {
-  const raw: RawTrafficAnalytics = {
+export function ownTrackerChartSeries(stats: OwnTrackerStatsPayload): AnalyticsChartSeries {
+  const raw: RawAnalyticsData = {
     trend: (stats.daily ?? []).map((row) => ({
       t: str(row?.date, ''),
       visits: num(row?.pageviews),
@@ -193,4 +226,141 @@ export function captureRate(
   if (netlifyRangeDays === null || netlifyRangeDays !== ownDays) return null;
   if (netlifyPageviews <= 0) return null;
   return Math.round((ownPageviews / netlifyPageviews) * 1000) / 10;
+}
+
+/**
+ * W7.4 — the surface split as bar-list rows.
+ *
+ * `share` is relative to the LARGEST surface, matching every other bar list
+ * on this page (`withShare` in `analytics-logic.ts`). A bar list whose fills
+ * meant something different from the one beside it would be read wrong at a
+ * glance.
+ */
+export function surfaceBarRows(rows: readonly SurfaceSplitRow[]): AnalyticsRankingRowWithShare[] {
+  const max = rows.reduce((most, row) => Math.max(most, row.pageviews), 0);
+  return rows.map((row) => ({
+    label: `${row.surface} (${row.objects} object${row.objects === 1 ? '' : 's'})`,
+    visits: row.pageviews,
+    share: max > 0 ? row.pageviews / max : 0,
+  }));
+}
+
+// ─── R6.1: the own tab's panel state ─────────────────────────────────────────
+
+export interface OwnPanelInput {
+  loading: boolean;
+  error: string | null;
+  overview: OwnAnalyticsOverview | null;
+  /** Netlify's window total, when that feed is loaded/enabled — `null` while unknown/unavailable. */
+  netlifyPageviews: number | null;
+  /** The day-count Netlify's CURRENT range actually covers (7/30), or `null` for 90d/custom — no matching own-tracker window to compare. */
+  netlifyRangeDays: number | null;
+  days: OwnTrackerDays;
+}
+
+/**
+ * The own tab's panel state — `AnalyticsPanelState`, shared with the Netlify
+ * tab's `resolveNetlifyAnalyticsPanel` (D1: same components, different
+ * data). Capture rate and last-event live in `footer`, never `kpis` (R6.1:
+ * "a health timestamp is not a metric").
+ */
+export function resolveOwnAnalyticsPanel(input: OwnPanelInput): AnalyticsPanelState {
+  const { loading, error, overview, netlifyPageviews, netlifyRangeDays, days } = input;
+  if (loading) return { kind: 'loading' };
+  if (error) return { kind: 'error', message: error };
+  if (!overview) return { kind: 'loading' };
+
+  if (!overview.configured || !overview.stats) {
+    return {
+      kind: 'not_configured',
+      message:
+        overview.message ??
+        'The own-tracker sink is not configured for this site. Set TRACKING_SINK_URL and TRACKING_PROJECT_ID to see first-party analytics here.',
+    };
+  }
+
+  const stats = overview.stats;
+  const series = ownTrackerChartSeries(stats);
+  const stat = ownTrackerStatRow(stats);
+  const rate =
+    netlifyPageviews === null ? null : captureRate(series.totals.visits, netlifyPageviews, days, netlifyRangeDays);
+
+  const kpis: KpiDatum[] = [
+    { id: 'pageviews', label: 'Pageviews', value: formatAnalyticsCount(series.totals.visits) },
+    { id: 'sessions', label: 'Sessions', value: formatAnalyticsCount(stat.sessions) },
+    { id: 'visitors', label: 'Visitors', value: formatAnalyticsCount(stat.visitors) },
+    {
+      id: 'consented',
+      label: 'Consented',
+      value: stat.consentedPct === null ? '—' : `${stat.consentedPct}%`,
+      hint: 'Share of sessions with tracking consent',
+    },
+    { id: 'purchases', label: 'Purchases', value: formatAnalyticsCount(stat.purchases) },
+  ];
+
+  const rankings: RankingGroup[] = [
+    {
+      id: 'objects',
+      title: 'Top objects',
+      caption: 'Most-visited objects',
+      rows: series.topPaths,
+      emptyMessage: 'No object views recorded in this range.',
+    },
+    {
+      id: 'sources',
+      title: 'Top sources',
+      caption: 'Where visits came from',
+      rows: series.topSources,
+      emptyMessage: 'No referrer/UTM data recorded in this range.',
+    },
+  ];
+
+  // W7.4: the whole reason the publishing surface is stamped on a receipt —
+  // rendered only when there is more than one surface in the window, because
+  // a single-surface bar chart is a bar chart of one fact.
+  if ((overview.surfaces?.length ?? 0) > 1) {
+    rankings.push({
+      id: 'surfaces',
+      title: 'Publishing surface',
+      caption: 'Which chat app — or the autonomous workflow — published the objects being read',
+      rows: surfaceBarRows(overview.surfaces ?? []),
+      emptyMessage: 'No published-surface data for this range.',
+      footnote:
+        'workflow is the autonomous path. unknown means the object could not be read, or was published before the surface was recorded — deliberately not folded into workflow, which would overstate its share.',
+    });
+  }
+
+  const footer: AnalyticsFooterItem[] = [
+    {
+      id: 'last_event',
+      label: 'Last event',
+      value: stat.lastEventAt ? new Date(stat.lastEventAt).toLocaleString() : 'None yet',
+    },
+    rate !== null
+      ? {
+          id: 'capture_rate',
+          label: 'Capture rate',
+          value: `${rate}%`,
+          hint: 'Own-tracker pageviews ÷ Netlify pageviews (server-side, not blockable) over the same range — a lower bound on client-side visibility, not a completeness score.',
+        }
+      : {
+          id: 'capture_rate',
+          label: 'Capture rate',
+          value: 'Not available',
+          hint: 'Only 7d/30d ranges have a matching Netlify window to compare against today.',
+        },
+  ];
+
+  return {
+    kind: 'ready',
+    kpis,
+    chart: {
+      points: series.trend,
+      seriesALabel: 'Pageviews',
+      seriesBLabel: 'Sessions',
+      emptyMessage: 'No events recorded in this range.',
+    },
+    rankings,
+    footer,
+  };
 }
