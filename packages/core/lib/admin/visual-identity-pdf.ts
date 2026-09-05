@@ -31,7 +31,6 @@
  */
 import { getAdminBlobImageEndpoint } from './artifact-preview.js';
 import type { EditorialArtifact } from './editorial-assets.js';
-import type { VisualIdentityChatIntent } from './visual-identity-imagery.js';
 
 type Bag = Record<string, unknown>;
 
@@ -356,46 +355,44 @@ export function buildPinKindDefaultOp(kind: string, templateId: string | null): 
   return { op: 'set_site_fields', fields: { pdf: { byKind: { [key]: id } } } };
 }
 
-// ─── Render sample ──────────────────────────────────────────────────────────
+// ─── Render sample ─────────────────────────────────────────────────────────────────────
+//
+// A5 replaced the two chat-intent builders that used to live here
+// (`buildRenderSampleIntent`, `create_agent_artifact_job`; `buildPreviewSampleIntent`,
+// T2.6's direct `preview_pdf_template` chip) with two real endpoints —
+// `admin-visual-identity-render-sample` and `admin-visual-identity-preview-sample`
+// (packages/core/server/functions/) — so the panel now calls their browser
+// clients (`visual-identity-render-sample-client.ts`,
+// `visual-identity-preview-sample-client.ts`) directly. Nothing about EITHER
+// button's payload needs a pure decision function of its own: both send just
+// `{ templateId: row.id }`, which the panel builds inline.
 
 /**
- * "Render sample" needs `create_agent_artifact_job`, an MCP tool with no
- * browser-reachable admin endpoint — the same seam the imagery tab's
- * import/propose buttons use, and the same one `TemplatesWorkspace` has always
- * used for exactly this action ("Ask the Publishing Agent to render a
- * sample"). The intent names the template and tells the agent to use the
- * template's OWN `sampleData`, so the browser never has to carry it.
- */
-export function buildRenderSampleIntent(row: Pick<PdfTemplateRow, 'id' | 'label'>): VisualIdentityChatIntent {
-  return {
-    starter: 'visual-identity',
-    tool: 'create_agent_artifact_job',
-    label: 'Render sample',
-    prompt: `Render a sample PDF from template ${row.id} ("${row.label}"): read its sampleData with get_pdf_template, then create_agent_artifact_job with artifact_kind 'pdf', that template, and that sample data as the render data. Poll the existing job rather than creating a second one, and tell me the artifact id when it lands.`,
-  };
-}
-
-/**
- * The DIRECT chip (T2.6). W1 landed `preview_pdf_template` — first page
- * only, no job to poll — a much shorter path than the full
- * `create_agent_artifact_job` above (which produces a complete, multi-page
- * artifact and needs a poll loop). Labeled honestly: this is a first-page
- * preview, not the rendered sample `buildRenderSampleIntent` produces, and
- * the button copy must say so rather than implying a finished document.
+ * W5 F7 — waiting for a sample that is still rendering.
  *
- * ASSUMED SHAPE — flagged for verification once `preview_pdf_template`
- * actually reaches this admin surface (it is a pdf-tool MCP tool with no
- * browser-reachable endpoint today, same seam as `buildRenderSampleIntent`):
- * this only asserts the tool's NAME and that it takes the template id plus
- * its own sampleData, which is everything the brief documents about it.
+ * `create_agent_artifact_job`'s inline wait has a budget bounded by the
+ * function's own invocation deadline; when it runs out the endpoint answers
+ * 202 with the job id and no artifact. The panel then WAITS instead of
+ * claiming a rendered sample: it re-reads the artifact index (the same
+ * `onChanged()` refresh every other action here runs) until the sample shows
+ * up, or until this ceiling says to stop and tell the operator plainly.
+ *
+ * The decision is a pure function for the same reason A7's poll predicates
+ * are: `PdfTemplatesPanel.tsx` is a `.tsx` file and `tsconfig.test.json`
+ * excludes those, so this is the only place the rule can be tested at all.
  */
-export function buildPreviewSampleIntent(row: Pick<PdfTemplateRow, 'id' | 'label'>): VisualIdentityChatIntent {
-  return {
-    starter: 'visual-identity',
-    tool: 'preview_pdf_template',
-    label: 'Render sample (first page only)',
-    prompt: `Render a first-page-only preview of template ${row.id} ("${row.label}") with preview_pdf_template, reading its sampleData with get_pdf_template first. Tell me the artifact id when it lands — say plainly that this is a first-page preview, not the complete document.`,
-  };
+export const SAMPLE_RENDER_POLL_INTERVAL_MS = 5000;
+export const SAMPLE_RENDER_MAX_POLLS = 24;
+
+export type SampleRenderWait = 'landed' | 'waiting' | 'gave_up';
+
+export function sampleRenderWaitState(
+  hasArtifact: boolean,
+  attempts: number,
+  maxAttempts: number = SAMPLE_RENDER_MAX_POLLS
+): SampleRenderWait {
+  if (hasArtifact) return 'landed';
+  return attempts < maxAttempts ? 'waiting' : 'gave_up';
 }
 
 /**

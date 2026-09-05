@@ -866,8 +866,10 @@ const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 
             'Bulk mood-board imports (import_images_from_url against a mood board) are tracked under a request id ' +
             'shaped req_visref_<site>_<yyyymmdd>_<nn> — the same req_<flow>_<topic>_<yyyymmdd>_<nn> convention every ' +
             'other agent-facing request id uses (docs/agents/naming-convention.md). It is minted SERVER-SIDE by the ' +
-            'import endpoint, deterministic per (site, day, sequence) so a same-day retry is idempotent; agents ' +
-            'must never invent or hand-author one, only read back the one the import call returns.',
+            'import endpoint: <nn> is the first sequence of that day nothing is indexed under, so every import gets ' +
+            'its OWN id and a retry gets a NEW one (it is not idempotent — re-importing an address that is already ' +
+            'on the board dedupes by image bytes, not by request id). Agents must never invent or hand-author one, ' +
+            'only read back the one the import call returns.',
         },
       ];
     default:

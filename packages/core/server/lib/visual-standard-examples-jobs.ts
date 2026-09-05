@@ -68,6 +68,18 @@ export const visualStandardExamplesJobSchema = z
     examples_status: examplesJobStatusSchema,
     contexts: z.array(examplesJobContextSchema).max(24),
     trigger: examplesJobTriggerSchema,
+    /**
+     * W5 F5 — which ROUND this record is. Every trigger opens a new one, and
+     * the worker carries it from `consumeExamplesJobToken` through to
+     * `finishExamplesJob`, which refuses to write a round that is no longer
+     * the current one. Without it two triggers seconds apart raced: the first
+     * worker's finish landed its contexts on the SECOND round's record and
+     * deleted that round's token, so the second worker was refused 409 and
+     * never ran — while the tab showed round one's result as if it were round
+     * two's. Optional only so a record written before this field existed still
+     * parses (it is then treated as a round nothing can claim to own).
+     */
+    round_id: z.string().min(1).max(64).optional(),
     /** Why the job as a whole ended where it did, when the contexts do not say
      *  it on their own (`hash_unchanged`, `no_sample_subjects`, `not_dispatched`). */
     reason: z.string().max(120).optional(),
@@ -144,7 +156,14 @@ export const writeExamplesJob = async (store: ExamplesJobStore, job: VisualStand
  *  (the worker plans them — only it has read the standard's sampleSubjects). */
 export const startExamplesJob = async (
   store: ExamplesJobStore,
-  input: { visualStandardId: string; siteId?: string; trigger: ExamplesJobTrigger; nowMs: number; token?: string }
+  input: {
+    visualStandardId: string;
+    siteId?: string;
+    trigger: ExamplesJobTrigger;
+    nowMs: number;
+    token?: string;
+    roundId?: string;
+  }
 ): Promise<VisualStandardExamplesJob> => {
   const iso = new Date(input.nowMs).toISOString();
   const job: VisualStandardExamplesJob = {
@@ -155,6 +174,7 @@ export const startExamplesJob = async (
     contexts: [],
     trigger: input.trigger,
     trigger_token: input.token ?? randomUUID(),
+    round_id: input.roundId ?? randomUUID(),
     started_at: iso,
     updated_at: iso,
   };
@@ -177,15 +197,30 @@ export const consumeExamplesJobToken = async (
   return claimed;
 };
 
-/** Closes a round. The worker owns the status it reports (a skip is `ready`
- *  with a reason, not a lie about generated images). */
+/**
+ * Closes a round. The worker owns the status it reports (a skip is `ready`
+ * with a reason, not a lie about generated images).
+ *
+ * W5 F5: `roundId` is the round the caller CLAIMED (what
+ * `consumeExamplesJobToken` handed it). A record that has since moved on to a
+ * newer round is left alone and `undefined` comes back — writing round one's
+ * contexts over round two both reported the wrong answer and deleted round
+ * two's unspent token, which then refused its own worker with a 409.
+ */
 export const finishExamplesJob = async (
   store: ExamplesJobStore,
   visualStandardId: string,
-  outcome: { status: ExamplesJobStatus; contexts: ExamplesJobContext[]; reason?: string; nowMs: number }
+  outcome: {
+    status: ExamplesJobStatus;
+    contexts: ExamplesJobContext[];
+    reason?: string;
+    nowMs: number;
+    roundId?: string;
+  }
 ): Promise<VisualStandardExamplesJob | undefined> => {
   const job = await readExamplesJob(store, visualStandardId);
   if (!job) return undefined;
+  if (outcome.roundId !== undefined && job.round_id !== outcome.roundId) return undefined;
   const next: VisualStandardExamplesJob = {
     ...job,
     examples_status: outcome.status,
@@ -307,10 +342,32 @@ export const triggerVisualStandardExamplesJob = async (
     });
     const dispatch = input.dispatch ?? fetchExamplesJobDispatch;
     const dispatched = await dispatch({ visualStandardId: input.visualStandardId, token: job.trigger_token! });
+
+    // W5 F3 — READ BACK BEFORE ANNOTATING. This second write used to be
+    // `{ ...job, dispatched }` built from the in-memory record minted before
+    // the dispatch, which still carried the one-shot `trigger_token` and a
+    // `pending`/no-contexts body. A worker that had already claimed the round
+    // (a background function is invoked as soon as the POST is accepted, and
+    // the `hash_unchanged` skip finishes in a couple of blob reads) therefore
+    // had its claim UNDONE: the spent token came back, so the round could be
+    // bought a second time, and the finished result was reset to `pending`
+    // for ever — which is exactly what A7 then polled to its ceiling and gave
+    // up on. Annotate whatever is actually stored now, and only while it is
+    // still OUR round.
+    const current = (await readExamplesJob(store, input.visualStandardId)) ?? job;
+    if (current.round_id !== job.round_id) {
+      input.log?.({
+        event: 'visual_standard_examples_job_superseded',
+        visualStandardId: input.visualStandardId,
+        trigger: input.trigger,
+        dispatched,
+      });
+      return job;
+    }
     const recorded: VisualStandardExamplesJob = {
-      ...job,
+      ...current,
       dispatched,
-      ...(dispatched ? {} : { reason: 'not_dispatched' }),
+      ...(dispatched ? {} : { reason: current.reason ?? 'not_dispatched' }),
     };
     await writeExamplesJob(store, recorded);
     input.log?.({

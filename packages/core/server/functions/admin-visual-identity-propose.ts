@@ -36,12 +36,20 @@
  * WHAT THIS ENDPOINT DOES, deterministically:
  *   1. look up the standard (`standardId` only ever names an existing
  *      `visual_standard` — never trusted for anything else);
- *   2. read its OWN `references[]` (the mood board) and `kind` (house vs
- *      template, the writer's `mode`) directly off the record — never
- *      through CMS-Agent's `visual_standard_id` hydration path, because that
- *      hydration (mcp-tool-handlers.ts's `toBrandImageryReferenceFromStandardRecord`)
+ *   2. read its OWN `references[]` (the mood board), its current
+ *      `brandImagery` (so the writer REVISES the contract in force rather
+ *      than starting fresh) and its `kind` (house vs template, the writer's
+ *      `mode`) directly off the record — never through CMS-Agent's
+ *      `visual_standard_id` hydration path, because that hydration
+ *      (mcp-tool-handlers.ts's `toBrandImageryReferenceFromStandardRecord`)
  *      deliberately drops each reference's `id`, and this endpoint needs it
  *      to name a dropped image in `warnings`;
+ *   2b. TRUNCATE that board to `BRAND_IMAGERY_MAX_REFERENCES` (8, the node
+ *      runner's own imageRefs ceiling) and say so in `warnings`. Supplying
+ *      `references` ourselves means skipping the truncation the hydration
+ *      path does, and `validateBrandImageryProposeInput` refuses a longer
+ *      list outright — so before W5 F1 every board over 8 references (a
+ *      board holds up to 24) got a flat 400 instead of a proposal;
  *   3. call `proposeBrandImagery` (brand-imagery-proxy.ts — the SAME module
  *      the `brand_imagery_propose` MCP tool calls, never a second copy of
  *      its validation/CMS-Agent/schema logic) with those references and
@@ -57,6 +65,16 @@
  * mood board of entirely-unreadable images never spends a model call
  * producing a proposal from nothing. Supplying a `brief` bypasses this: the
  * writer can still work from words alone.
+ *
+ * IT PROPOSES; IT DOES NOT WRITE. `visual_identity_propose` is read-only by
+ * contract ("no object is created, patched, applied or published") and so is
+ * this endpoint. ACCEPTING the proposal — writing `brandImagery`,
+ * `sampleSubjects` and `label` onto the standard — is an ordinary
+ * `set_visual_standard_fields` patch the tab makes through `admin-object.ts`
+ * under a checkout (`buildAcceptProposalOp`,
+ * visual-identity-propose-client.ts), the same governed browser write path the
+ * mood board itself saves through. Until W5 F2 nothing performed that step at
+ * all, so the proposal was rendered on a card and thrown away.
  */
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
@@ -71,6 +89,7 @@ import {
 } from '../lib/object-verbs.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import {
+  BRAND_IMAGERY_MAX_REFERENCES,
   proposeBrandImagery,
   type BrandImageryProposeInput,
   type BrandImageryReferenceInput,
@@ -200,8 +219,22 @@ const buildHandlerImpl =
         });
       }
       const recordBody = (read.body.record as Record<string, unknown>).body;
-      const stored = readStoredReferences(recordBody);
+      const board = readStoredReferences(recordBody);
       const mode = readMode(recordBody) ?? 'template';
+
+      // W5 F1: a mood board holds up to MOOD_BOARD_MAX_REFERENCES (24) but the
+      // node runner's imageRefs cap — and therefore
+      // `validateBrandImageryProposeInput` — is BRAND_IMAGERY_MAX_REFERENCES
+      // (8), a hard 400. Passing `references` OURSELVES (which this endpoint
+      // must, to keep each entry's `ref_` id for the warnings below) skips the
+      // truncation `hydrateFromVisualStandard` does for the
+      // `visual_standard_id`-only path, so a 9-reference board was refused
+      // outright instead of proposing from its first 8. Truncate here, on the
+      // SAME slice `ids` is taken from, and say so in `warnings` — a silent
+      // truncation would be the other half of the bug this endpoint exists to
+      // close.
+      const stored = board.slice(0, BRAND_IMAGERY_MAX_REFERENCES);
+      const truncated = board.length - stored.length;
 
       // Order matters: proposeBrandImagery resolves `references` in the
       // order it is given, and its `unresolvedReferences` are positions into
@@ -215,12 +248,21 @@ const buildHandlerImpl =
         ...(reference.weight !== undefined ? { weight: reference.weight } : {}),
       }));
 
+      // W5 F2: the standard's CURRENT contract, so the writer revises it
+      // rather than starting fresh every time. The `visual_standard_id`
+      // hydration path supplies this itself; a caller that passes its own
+      // `references` (as this endpoint must) gets no hydration at all, so
+      // every propose on a standard that already had a contract silently
+      // ignored it.
+      const existingBrandImagery = isRecord(recordBody) ? recordBody.brandImagery : undefined;
+
       const proposeInput: BrandImageryProposeInput = {
         projectId: getSiteIdentity().cmsAgentProjectId,
         mode,
         visualStandardId: standardId,
         ...(references.length > 0 ? { references } : {}),
         ...(brief ? { brief } : {}),
+        ...(existingBrandImagery !== undefined ? { existingBrandImagery } : {}),
       };
 
       const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
@@ -254,25 +296,34 @@ const buildHandlerImpl =
       const { unresolvedReferences: droppedIndexes, ...proposal } = result.body as Record<string, unknown> & {
         unresolvedReferences?: number[];
       };
-      const warnings = Array.isArray(droppedIndexes)
-        ? droppedIndexes.map((index) => `image_dropped:${ids[index] ?? `index_${index}`}`)
-        : [];
+      const dropped = Array.isArray(droppedIndexes) ? droppedIndexes : [];
+      const warnings = [
+        ...dropped.map((index) => `image_dropped:${ids[index] ?? `index_${index}`}`),
+        // W5 F1: machine-shaped like `image_dropped:<id>` so the card can read
+        // both the same way — "the writer saw the first 8 of your 12".
+        ...(truncated > 0 ? [`references_truncated:${stored.length}_of_${board.length}`] : []),
+      ];
 
-      const resolvedCount = references.length - warnings.length;
+      const resolvedCount = references.length - dropped.length;
       event.log?.({
         event: 'visual_standard_proposed',
         siteId: getSiteIdentity().siteId,
         standardId,
         mode,
-        referencesTotal: references.length,
+        referencesTotal: board.length,
+        referencesSent: references.length,
         referencesResolved: resolvedCount,
+        ...(truncated > 0 ? { referencesTruncated: truncated } : {}),
         ...(warnings.length > 0 ? { warnings } : {}),
       });
 
       return jsonResponse(200, {
         standard_id: standardId,
         mode,
-        references_total: references.length,
+        // The WHOLE board is the honest denominator: `references_resolved` of
+        // `references_total` is what "reached the writer", truncation included.
+        references_total: board.length,
+        references_sent: references.length,
         references_resolved: resolvedCount,
         warnings,
         proposal,

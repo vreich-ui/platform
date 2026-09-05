@@ -28,8 +28,14 @@
  *
  * APPEND, NEVER REPLACE. `set_visual_standard_fields` replaces `references[]`
  * wholesale (buildReferencesOp's note), so the op carries the standard's
- * CURRENT references read back inside this request, plus the new ones — and
- * the 24-reference schema cap is checked before anything is fetched.
+ * CURRENT references plus the new ones — and the 24-reference schema cap is
+ * checked before anything is fetched.
+ *
+ * W5 F4: "current" means read again UNDER THE CHECKOUT, not the snapshot taken
+ * before the import ran. The import takes seconds; anything another writer
+ * appended in that window used to be replaced by the stale array and lost
+ * without a word (the `expected_record_version` guard cannot catch it — the
+ * checkout bumps the version itself). See `appendReferences` below.
  */
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
@@ -236,30 +242,40 @@ const buildHandlerImpl =
         { siteId: identity.siteId, requestId, urls, existingBySha, ...(note ? { note } : {}) },
         options.import ?? {}
       );
-      if (!imported.ok) return jsonResponse(imported.statusCode, { error: imported.error, request_id: requestId });
+      if (!imported.ok) {
+        return jsonResponse(imported.statusCode, {
+          error: imported.error,
+          request_id: requestId,
+          ...(imported.failures ? { failures: imported.failures } : {}),
+        });
+      }
 
       // Same blobKey ⇒ same image: a re-import of a URL already on the board
       // dedupes to the reference that is already there rather than adding a
       // second card for identical bytes.
       const byBlobKey = new Map(existing.map((reference) => [reference.blobKey, reference]));
       const usedIds = new Set(existing.map((reference) => reference.id));
-      const added: ImportedReferenceView[] = [];
+      const sourceUrls = new Map<string, string>();
+      const additions: StoredReference[] = [];
       const duplicates: ImportedReferenceView[] = [];
-      const references: StoredReference[] = [...existing];
+
+      const viewOf = (reference: StoredReference): ImportedReferenceView => {
+        const previewUrl = getAdminBlobImageEndpoint(reference.blobKey);
+        const sourceUrl = sourceUrls.get(reference.blobKey);
+        return {
+          id: reference.id,
+          blobKey: reference.blobKey,
+          ...(previewUrl ? { previewUrl } : {}),
+          ...(sourceUrl ? { sourceUrl } : {}),
+          ...(reference.note ? { note: reference.note } : {}),
+        };
+      };
 
       for (const mirrored of imported.mirrored as MirroredReference[]) {
-        const view = (id: string): ImportedReferenceView => ({
-          id,
-          blobKey: mirrored.blobKey,
-          ...(getAdminBlobImageEndpoint(mirrored.blobKey)
-            ? { previewUrl: getAdminBlobImageEndpoint(mirrored.blobKey) }
-            : {}),
-          ...(mirrored.sourceUrl ? { sourceUrl: mirrored.sourceUrl } : {}),
-          ...(note ? { note } : {}),
-        });
+        if (mirrored.sourceUrl) sourceUrls.set(mirrored.blobKey, mirrored.sourceUrl);
         const already = byBlobKey.get(mirrored.blobKey);
         if (already) {
-          duplicates.push(view(already.id));
+          duplicates.push(viewOf(already));
           continue;
         }
         const reference: StoredReference = {
@@ -268,21 +284,25 @@ const buildHandlerImpl =
           ...(note ? { note } : {}),
           weight: 1,
         };
-        references.push(reference);
+        additions.push(reference);
         byBlobKey.set(reference.blobKey, reference);
-        added.push(view(reference.id));
       }
 
-      if (added.length > 0) {
+      let added: ImportedReferenceView[] = [];
+      let referenceCount = existing.length + additions.length;
+      if (additions.length > 0) {
         const saved = await appendReferences({
           store,
           principal,
           roles,
           event,
           standardId,
-          references,
+          additions,
         });
         if (!saved.ok) return jsonResponse(saved.status, { error: saved.error, request_id: requestId });
+        added = saved.added.map(viewOf);
+        duplicates.push(...saved.duplicates.map(viewOf));
+        referenceCount = saved.total;
       }
 
       event.log?.({
@@ -302,7 +322,7 @@ const buildHandlerImpl =
         duplicates,
         failures: imported.failures,
         rejected,
-        reference_count: references.length,
+        reference_count: referenceCount,
       });
     } catch (error) {
       console.error('Visual identity reference import failed.', error);
@@ -311,9 +331,27 @@ const buildHandlerImpl =
   };
 
 /**
- * checkout → patch → checkin, the same lifecycle the browser's EditSession
- * runs for a mood-board save; the check-in always happens, even when the
- * patch fails, so a failed import never leaves the standard locked.
+ * checkout → re-read → patch → checkin, the same lifecycle the browser's
+ * EditSession runs for a mood-board save; the check-in always happens, even
+ * when the patch fails, so a failed import never leaves the standard locked.
+ *
+ * W5 F4 — THE RE-READ IS THE FIX. The endpoint reads `references[]` BEFORE it
+ * calls pdf-tool, and that import takes seconds. This function used to patch
+ * with that pre-import snapshot plus the new entries, under an
+ * `expected_record_version` taken from its OWN checkout — which is always
+ * current, so the version guard could never fire. Anything another writer
+ * appended (or removed) in that window was replaced by the stale array and
+ * vanished silently. So the board is read again HERE, under the lock nobody
+ * else can hold, and the new entries are appended to whatever is actually
+ * there now — which is what "append, never replace" says on the tin.
+ *
+ * Carrying the pre-import version into `expected_record_version` instead would
+ * not work: `checkoutObjectLock` bumps the record version itself
+ * (object-lock.ts), so the expected version is never the version the read saw,
+ * and it would in any case refuse harmless writes to OTHER fields —
+ * `set_visual_standard_fields` deep-merges only the fields it names, so the
+ * background examples job persisting `examples[]` mid-import is not a conflict
+ * with this append and must not be reported as one.
  */
 const appendReferences = async (input: {
   store: ObjectVerbStore;
@@ -321,25 +359,20 @@ const appendReferences = async (input: {
   roles: Role[];
   event: unknown;
   standardId: string;
-  references: StoredReference[];
-}): Promise<{ ok: true } | { ok: false; status: number; error: string }> => {
-  const ops = [{ op: 'set_visual_standard_fields', fields: { references: input.references } }];
-  const artifactIndexStore = (await getArtifactIndexBlobStore(input.event).catch(() => undefined)) as unknown as
-    | ArtifactIndexStore
-    | undefined;
-  const validationContext = await buildStoreValidationContext(input.store, {
-    selfObjectId: input.standardId,
-    selfObjectType: 'visual_standard',
-    ...(artifactIndexStore ? { artifactIndexStore } : {}),
-    artifactRefSources: [{ ops }],
-  });
-
-  const run = async (request: Record<string, unknown>, withContext = false): Promise<ObjectVerbResult> => {
+  additions: StoredReference[];
+}): Promise<
+  | { ok: true; added: StoredReference[]; duplicates: StoredReference[]; total: number }
+  | { ok: false; status: number; error: string }
+> => {
+  const run = async (
+    request: Record<string, unknown>,
+    validationContext?: Awaited<ReturnType<typeof buildStoreValidationContext>>
+  ): Promise<ObjectVerbResult> => {
     const parsed = objectVerbRequestSchema.safeParse(request);
     if (!parsed.success) return { status: 400, body: { error: 'Invalid object request.' } };
     return handleObjectVerb(input.store, parsed.data, input.principal, {
       roles: input.roles,
-      ...(withContext ? { validationContext } : {}),
+      ...(validationContext ? { validationContext } : {}),
     });
   };
 
@@ -365,6 +398,59 @@ const appendReferences = async (input: {
   }
 
   try {
+    // The board as it stands RIGHT NOW, under our own lease — not the snapshot
+    // taken before the import ran.
+    const reread = await run({ action: 'get', object_type: 'visual_standard', object_id: input.standardId });
+    if (reread.status !== 200 || !isRecord(reread.body.record)) {
+      return {
+        ok: false,
+        status: reread.status === 200 ? 404 : reread.status,
+        error: text(reread.body.error) ?? `No visual standard ${input.standardId} exists on this publication.`,
+      };
+    }
+    const current = readStoredReferences((reread.body.record as Record<string, unknown>).body);
+    const currentByBlobKey = new Map(current.map((reference) => [reference.blobKey, reference]));
+    const currentIds = new Set(current.map((reference) => reference.id));
+
+    const added: StoredReference[] = [];
+    const duplicates: StoredReference[] = [];
+    for (const addition of input.additions) {
+      // Someone else added these exact bytes while the import was running:
+      // that is a duplicate now, not a second card.
+      const already = currentByBlobKey.get(addition.blobKey);
+      if (already) {
+        duplicates.push(already);
+        continue;
+      }
+      const reference = currentIds.has(addition.id)
+        ? { ...addition, id: mintUnusedReferenceId(currentIds) }
+        : addition;
+      currentIds.add(reference.id);
+      currentByBlobKey.set(reference.blobKey, reference);
+      added.push(reference);
+    }
+
+    const references = [...current, ...added];
+    if (references.length > MOOD_BOARD_MAX_REFERENCES) {
+      return {
+        ok: false,
+        status: 409,
+        error: `This mood board filled up while the import was running: it now holds ${current.length} of ${MOOD_BOARD_MAX_REFERENCES} references, so the ${added.length} just imported do not fit. Remove some and import again.`,
+      };
+    }
+    if (added.length === 0) return { ok: true, added, duplicates, total: current.length };
+
+    const ops = [{ op: 'set_visual_standard_fields', fields: { references } }];
+    const artifactIndexStore = (await getArtifactIndexBlobStore(input.event).catch(() => undefined)) as unknown as
+      | ArtifactIndexStore
+      | undefined;
+    const validationContext = await buildStoreValidationContext(input.store, {
+      selfObjectId: input.standardId,
+      selfObjectType: 'visual_standard',
+      ...(artifactIndexStore ? { artifactIndexStore } : {}),
+      artifactRefSources: [{ ops }],
+    });
+
     const patched = await run(
       {
         action: 'patch',
@@ -374,7 +460,7 @@ const appendReferences = async (input: {
         expected_record_version: recordVersion,
         ops,
       },
-      true
+      validationContext
     );
     if (patched.status !== 200) {
       return {
@@ -383,7 +469,7 @@ const appendReferences = async (input: {
         error: text(patched.body.error) ?? 'The mood board could not be saved with the imported references.',
       };
     }
-    return { ok: true };
+    return { ok: true, added, duplicates, total: references.length };
   } finally {
     await run({
       action: 'checkin',

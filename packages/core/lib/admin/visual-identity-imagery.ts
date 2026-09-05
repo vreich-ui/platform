@@ -470,7 +470,8 @@ export function moodBoardArtifact(reference: MoodBoardReferenceView): EditorialA
 // same `admin-get-blob-image` preview idiom `buildMoodBoardReference` and
 // `moodBoardArtifact` already use for mood-board references, applied here
 // instead to a GENERATED example. Nothing here writes; "Regenerate examples"
-// is a chat intent (`buildRegenerateExamplesIntent`, below), not a verb this
+// is A5's `admin-visual-identity-regenerate-examples` endpoint (a plain
+// checkout → patch → checkin, plus the A6 job trigger), not a verb this
 // module calls directly — R9's example generator is server-side-only.
 
 const EXAMPLE_USAGE_CONTEXT_LABELS: Record<string, string> = {
@@ -1106,28 +1107,6 @@ export function buildApplyProposalIntent(standard: VisualStandardView): VisualId
     'site_apply_brand_imagery',
     "Make this the site's imagery",
     `Run site_apply_brand_imagery with visual_standard_id: '${standard.objectId}' as a dry run first so I can see before/after, then wait for my approval before applying.`
-  );
-}
-
-/**
- * R9/X1: there is no browser-reachable "regenerate" verb (the generator is
- * server-side only, gated on the standard's brandImagery hash — BRIEF §3.1)
- * — same posture as `buildProposeContractIntent`/`buildImportReferencesIntent`,
- * a precise instruction naming the exact tool + args for the approval card.
- * Clearing `examples[]` (rather than asking for generation directly) is
- * deliberate: it reuses the SAME `set_visual_standard_fields` op the mood
- * board already writes with and needs no new tool. Platform's object_patch
- * handler runs the example generator right after EVERY successful patch to
- * a visual_standard (mcp-tool-handlers.ts), so this one patch both clears
- * the stale examples AND is itself the trigger that regenerates them — an
- * empty `examples[]` is never "up to date" for any hash.
- */
-export function buildRegenerateExamplesIntent(standard: VisualStandardView | undefined): VisualIdentityChatIntent | undefined {
-  if (!standard) return undefined;
-  return intent(
-    'set_visual_standard_fields',
-    'Regenerate examples',
-    `Regenerate the rendered examples for visual standard ${standard.objectId}. Check it out, patch it with set_visual_standard_fields and fields: { examples: [] } to clear out the examples generated from its previous contract, then check it back in — do not change anything else on the standard. That one patch is also what triggers the example generator: it creates up to 3 image jobs (one per sample subject, for article_header/article_body/category_page) on flux and writes back whichever succeed.`
   );
 }
 

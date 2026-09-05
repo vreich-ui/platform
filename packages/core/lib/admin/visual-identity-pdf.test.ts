@@ -8,16 +8,16 @@ import test from 'node:test';
 
 import type { EditorialArtifact } from './editorial-assets.js';
 import {
+  SAMPLE_RENDER_MAX_POLLS,
   buildPdfTemplatesViewModel,
   buildPinKindDefaultOp,
-  buildPreviewSampleIntent,
-  buildRenderSampleIntent,
   buildSetSiteDefaultOp,
   latestSampleArtifact,
   pdfDefaultBadges,
   pdfKindLabel,
   pdfKindOptions,
   pdfValidationView,
+  sampleRenderWaitState,
   type PdfTemplateInput,
 } from './visual-identity-pdf.js';
 
@@ -227,25 +227,6 @@ test('kind labels humanize an open key set', () => {
   assert.equal(pdfKindLabel(undefined), 'Unclassified');
 });
 
-// ─── render sample ──────────────────────────────────────────────────────────
-
-test('the render-sample intent names the tool and lets the agent read sampleData itself', () => {
-  const intent = buildRenderSampleIntent({ id: 'tpl_article', label: 'Article brochure' });
-  assert.equal(intent.tool, 'create_agent_artifact_job');
-  assert.equal(intent.starter, 'visual-identity');
-  assert.match(intent.prompt, /tpl_article/);
-  assert.match(intent.prompt, /get_pdf_template/);
-});
-
-test('T2.6: the direct preview chip names preview_pdf_template and is honest about first-page-only', () => {
-  const intent = buildPreviewSampleIntent({ id: 'tpl_article', label: 'Article brochure' });
-  assert.equal(intent.tool, 'preview_pdf_template');
-  assert.match(intent.label, /first page only/);
-  assert.match(intent.prompt, /preview_pdf_template/);
-  assert.match(intent.prompt, /tpl_article/);
-  assert.match(intent.prompt, /first-page preview, not the complete document/);
-});
-
 test('the newest rendered PDF for a template is what the stage previews', () => {
   const artifact = (id: string, templateId: string | undefined, createdAt: string): EditorialArtifact => ({
     id,
@@ -267,4 +248,20 @@ test('the newest rendered PDF for a template is what the stage previews', () => 
   ];
   assert.equal(latestSampleArtifact('tpl_article', artifacts)?.id, 'new');
   assert.equal(latestSampleArtifact('tpl_missing', artifacts), undefined);
+});
+
+/**
+ * W5 F7: `create_agent_artifact_job`'s inline wait has a budget, and the
+ * endpoint answers 202 with a job id when it runs out. The panel used to
+ * announce "a sample of X was rendered" for exactly that case — no artifact,
+ * nothing to poll, and clicking again paid for a second render.
+ */
+test('a render that outlived the inline wait is waited on, then given up on out loud', () => {
+  assert.equal(sampleRenderWaitState(true, 0), 'landed');
+  assert.equal(sampleRenderWaitState(true, SAMPLE_RENDER_MAX_POLLS + 10), 'landed');
+  assert.equal(sampleRenderWaitState(false, 0), 'waiting');
+  assert.equal(sampleRenderWaitState(false, SAMPLE_RENDER_MAX_POLLS - 1), 'waiting');
+  assert.equal(sampleRenderWaitState(false, SAMPLE_RENDER_MAX_POLLS), 'gave_up');
+  assert.equal(sampleRenderWaitState(false, 2, 3), 'waiting');
+  assert.equal(sampleRenderWaitState(false, 3, 3), 'gave_up');
 });

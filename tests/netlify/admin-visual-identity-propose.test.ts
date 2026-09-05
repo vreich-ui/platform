@@ -187,6 +187,7 @@ type ProposeResponseBody = {
   standard_id?: string;
   mode?: string;
   references_total?: number;
+  references_sent?: number;
   references_resolved?: number;
   warnings?: string[];
   proposal?: Record<string, unknown>;
@@ -278,4 +279,59 @@ test('an editor may propose; a viewer may not, and an unauthenticated caller get
   const editor = await run({ standardId: 'vis_drlurie_propose_roles' });
   assert.equal(editor.status, 200, JSON.stringify(editor.body));
   assert.equal(editor.body.references_resolved, 1);
+});
+
+// ─── W5 review fixes ─────────────────────────────────────────────────────────
+
+test('W5 F1: a board over the writer ceiling proposes from its first 8 and says so, instead of a flat 400', async () => {
+  await rm(ROOT, { recursive: true, force: true });
+  calls = [];
+  stubPropose();
+
+  // A mood board holds up to 24; the node runner's imageRefs ceiling is 8.
+  // A1's import will happily fill a board past 8, so this is an ordinary board.
+  const references: Array<{ id: string; blobKey: string }> = [];
+  for (let index = 0; index < 12; index += 1) {
+    references.push(await seedReadableReference(`ref_cap${String(index).padStart(2, '0')}`, 10 + index * 10));
+  }
+  await seedStandard('vis_drlurie_propose_cap', references);
+
+  const { status, body } = await run({ standardId: 'vis_drlurie_propose_cap' });
+
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.references_total, 12, 'the whole board is the honest denominator');
+  assert.equal(body.references_sent, 8);
+  assert.equal(body.references_resolved, 8);
+  assert.deepEqual(body.warnings, ['references_truncated:8_of_12']);
+  assert.equal(body.proposal?.artifact, 'brand_imagery_proposal.v1');
+
+  const proposeCall = calls.find((call) => call.name === 'visual_identity_propose');
+  assert.ok(proposeCall, 'visual_identity_propose must have been called at all');
+  assert.equal((proposeCall!.args.references as unknown[]).length, 8);
+  assert.equal((proposeCall!.args.imageRefs as unknown[]).length, 8);
+  // The first 8 in board order — the same slice the `ref_` ids in `warnings`
+  // are taken from, so a dropped image is still named by its own id.
+  assert.deepEqual(
+    (proposeCall!.args.references as Array<{ blobKey: string }>).map((reference) => reference.blobKey),
+    references.slice(0, 8).map((reference) => reference.blobKey)
+  );
+});
+
+test('W5 F2: the standard’s current contract is sent so the writer revises it rather than starting fresh', async () => {
+  await rm(ROOT, { recursive: true, force: true });
+  calls = [];
+  stubPropose();
+
+  await seedStandard('vis_drlurie_propose_revise', [await seedReadableReference('ref_rev1', 55)]);
+
+  const { status, body } = await run({ standardId: 'vis_drlurie_propose_revise' });
+  assert.equal(status, 200, JSON.stringify(body));
+
+  const proposeCall = calls.find((call) => call.name === 'visual_identity_propose');
+  assert.ok(proposeCall);
+  assert.deepEqual(
+    proposeCall!.args.existingBrandImagery,
+    VALID_BRAND_IMAGERY,
+    'the contract in force must reach the writer — supplying references ourselves skips the hydration that used to carry it'
+  );
 });

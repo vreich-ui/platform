@@ -111,6 +111,7 @@ import {
   importPlatformImageFromUrl,
   importPlatformImagesFromUrl,
   listPlatformPdfTemplates,
+  previewPlatformPdfTemplate,
   publishPlatformPdfTemplate,
   resumePlatformArtifactJob,
   searchPlatformImages,
@@ -2083,6 +2084,45 @@ export const callGetPdfTemplate = async (event: LambdaEvent, input: Record<strin
   const found = await getPlatformPdfTemplate(built.grant, { templateId, ...(version ? { version } : {}) });
   if (!found.ok) return pdfToolBridgeError(found);
   return toolResult({ ...found.body, siteId: scoped.siteId });
+};
+
+/**
+ * A5 — the "Preview sample (first page only)" chip's direct handler. Same
+ * scope/grant pattern as every other template call in this file
+ * (resolveTemplateBridgeScope + buildArtifactBridgeGrant), forwarding to
+ * pdf-tool's `preview_pdf_template` (W1: first page only, no job to poll —
+ * see visual-identity-pdf.ts's buildPreviewSampleIntent docstring, which
+ * this endpoint replaces). `data` is required, same as validate: a preview
+ * with no render data cannot render anything.
+ */
+export const callPreviewPdfTemplate = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const templateId = toNonEmptyString(input.template_id);
+  if (!templateId) return toolError('template_id is required.');
+  const data = input.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return toolError('data is required: provide the render data to preview as a JSON object.');
+  }
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const version = typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : undefined;
+  const previewed = await previewPlatformPdfTemplate(built.grant, {
+    templateId,
+    data: data as Record<string, unknown>,
+    ...(version ? { version } : {}),
+  });
+  if (!previewed.ok) return pdfToolBridgeError(previewed);
+
+  event.log?.({
+    event: 'template_bridge_preview_requested',
+    siteId: scoped.siteId,
+    projectId: built.grant.projectId,
+    templateId,
+    version: version ?? null,
+  });
+  return toolResult({ ...previewed.body, siteId: scoped.siteId });
 };
 
 export const callPublishPdfTemplate = async (event: LambdaEvent, input: Record<string, unknown>) => {
