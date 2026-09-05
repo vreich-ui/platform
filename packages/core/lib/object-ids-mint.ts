@@ -25,6 +25,7 @@
 import { createHash } from 'node:crypto';
 
 import { siteShortId, validateObjectIdForType, validateSectionInstanceId } from './object-ids.js';
+import { refIdSchema } from '../schema/bodies/visual-standard-v1.js';
 import type { ObjectType } from '../schema/object-record-v1.js';
 
 // Repeated from taxonomy-v1.ts / object-patch-ops.ts (term ids are body-internal
@@ -75,7 +76,8 @@ export type MintTarget =
   | { kind: 'taxonomy_term' }
   | { kind: 'nav_item' }
   | { kind: 'nav_group' }
-  | { kind: 'template_slot' };
+  | { kind: 'template_slot' }
+  | { kind: 'visual_standard_reference' };
 
 const OBJECT_PREFIX: Record<Exclude<ObjectType, 'content_item'>, string> = {
   page: 'page',
@@ -151,6 +153,17 @@ export const mintId = (target: MintTarget, seed: string): string => {
       return assertOpaque(`g_${shortHash(trimmed)}`);
     case 'template_slot':
       return assertOpaque(`slot_${shortHash(trimmed)}`);
+    case 'visual_standard_reference': {
+      // A2: mood-board reference ids (visual-standard-v1.ts's REF_ID_RE,
+      // `ref_<lowercase alphanumerics>`) — agents must never invent one
+      // (object-contract.ts's `reference_ids` constraint); the endpoint
+      // mints one per id-less `references[]` entry from the element's own
+      // payload, same idempotent-on-resubmission idiom as section/nav ids.
+      const id = `ref_${shortHash(trimmed, 8)}`;
+      const check = refIdSchema.safeParse(id);
+      if (!check.success) throw new MintIdError(`Minted reference id "${id}" is invalid.`);
+      return check.data;
+    }
   }
 };
 

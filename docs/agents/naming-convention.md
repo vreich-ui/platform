@@ -28,6 +28,15 @@ API:
 - Internal machine-authored JSON should prefer snake_case unless an authoritative downstream schema requires different field names.
 - Avoid maintaining both `requestId` and `request_id` in the same internal payload except at integration boundaries that already require the mapping.
 
+## Mood-board references
+
+`visual_standard` objects (BRIEF.md §3.1) carry a mood board — `references[]`, each pointing at one artifact — and both id forms it touches are minted server-side, never agent-authored:
+
+- **Reference ids** (`references[].id`) are shaped `ref_<8 lowercase alphanumerics>`. Submit a `set_visual_standard_fields` patch with a `references[]` entry that has no `id` at all and the endpoint mints one before the op reaches the engine — the response's `minted[]` names what it filled in. Supplying an id yourself is for re-addressing an existing entry, not for inventing a new one; a resulting duplicate id anywhere in `references[]` is refused (422).
+- **Reference import request ids** track a bulk `import_images_from_url` call against a mood board. They are shaped `req_visref_<site>_<yyyymmdd>_<nn>` — the ordinary `req_<flow>_<topic>_<yyyymmdd>_<nn>` request-id convention above, with `visref` as the flow segment — and are minted by the import endpoint, deterministic per (site, day, sequence) so a same-day retry is idempotent. Read the id back from the import call's own response; never construct one.
+
+See `object_contract('visual_standard')`'s `reference_ids` and `reference_import_request_ids` constraints for the enforced/documented split.
+
 ## Backend contract exceptions
 
 Existing MCP tool schemas use `requestId` for artifact tools and `request_id` for workflow JSON tools. Keep those public schema names stable, validate the values with the canonical utility, and map only at the boundary.

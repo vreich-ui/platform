@@ -151,13 +151,42 @@ export type BrandImageryProxyDeps = {
   loadVisualStandard?: (
     visualStandardId: string
   ) => Promise<{ references?: BrandImageryReferenceInput[]; brandImagery?: unknown } | undefined>;
+  /**
+   * A3 (admin visual-identity propose) — forces EVERY reference to resolve
+   * to base64 pixels the writer model can see directly, never a URL the
+   * CMS-Agent node runner would have to fetch itself. THE BUG THIS CLOSES: a
+   * photographic mood board produced a `digital_illustration` proposal — the
+   * writer received `imageRefs[].url`, the runner fetches unauthenticated
+   * http(s) only, an admin-gated blob URL 401s, and the image is silently
+   * dropped with no warning why. When true:
+   *   - a reference with no valid `region` is still read and re-encoded
+   *     (the region defaults to the whole frame, `{x:0,y:0,w:1,h:1}`)
+   *     rather than handed to the model as a fetchable URL;
+   *   - a reference whose bytes cannot be read, or whose crop/re-encode
+   *     fails, is DROPPED (reported in `unresolvedReferences`) rather than
+   *     falling back to a URL — the ordinary default behaviour a few lines
+   *     down exists precisely to avoid dropping a reference outright, which
+   *     is exactly wrong for this caller;
+   *   - a bare `url` reference (no `blobKey`) is resolved by fetching it
+   *     server-side instead of being handed to the model unfetched;
+   *   - a request that resolves ZERO images and carries no `brief` is
+   *     refused with `no_images_reached_writer` (422) before CMS-Agent is
+   *     ever called — nothing would reach the writer model either way, and
+   *     it is better to say so than to spend a model call producing a
+   *     proposal from nothing.
+   * Opt-in and default-false: the chat-tool `brand_imagery_propose` path
+   * (mcp-tool-handlers.ts's `callBrandImageryPropose`) keeps its existing,
+   * more forgiving URL-fallback behaviour unless/until it is moved onto this
+   * flag too.
+   */
+  requireResolvedImages?: boolean;
   /** Structured usage/telemetry logging — the existing `event.log?.(...)` convention. */
   log?: (event: Record<string, unknown>) => void;
 };
 
 export type BrandImageryProxyError = {
   ok: false;
-  status: 400 | 502;
+  status: 400 | 422 | 502;
   errorCode: string;
   error: string;
   detail?: Record<string, unknown>;
@@ -171,7 +200,7 @@ export type BrandImageryProxySuccess = {
 
 export type BrandImageryProxyResult = BrandImageryProxySuccess | BrandImageryProxyError;
 
-const err = (status: 400 | 502, errorCode: string, error: string, detail?: Record<string, unknown>): BrandImageryProxyError => ({
+const err = (status: 400 | 422 | 502, errorCode: string, error: string, detail?: Record<string, unknown>): BrandImageryProxyError => ({
   ok: false,
   status,
   errorCode,
@@ -317,6 +346,22 @@ const resolveImageRef = async (
 ): Promise<BrandImageryImageRef | undefined> => {
   const label = toNonEmptyString(reference.note);
   const blobKey = toNonEmptyString(reference.blobKey);
+
+  if (deps.requireResolvedImages) {
+    const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+    const bareUrl = !blobKey ? toNonEmptyString(reference.url) : undefined;
+    const bytes = blobKey
+      ? await deps.readBlobBytes?.(blobKey)
+      : bareUrl
+        ? await fetchBytes(bareUrl, fetchImpl)
+        : undefined;
+    if (!bytes) return undefined;
+    const region = isValidRegion(reference.region) ? reference.region! : { x: 0, y: 0, w: 1, h: 1 };
+    const encoded = await cropToImageRef(bytes, region);
+    if (!encoded) return undefined;
+    return { base64: encoded.base64, mediaType: encoded.mediaType, ...(label ? { label } : {}) };
+  }
+
   const url = blobKey ? deps.resolveBlobUrl(blobKey) : toNonEmptyString(reference.url);
   if (!url) return undefined;
 
@@ -668,6 +713,21 @@ export const proposeBrandImagery = async (
 
   const references = hydratedInput.references ?? [];
   const { imageRefs, unresolvedReferences } = await resolveImageRefs(references, deps);
+
+  // A3: with requireResolvedImages, validation above only guarantees
+  // references.length > 0 OR a brief was given (never both empty) — so
+  // reaching here with zero RESOLVED images and no brief means every
+  // reference on this board failed to read/crop. Refuse before spending a
+  // CMS-Agent call on a proposal built from nothing, rather than silently
+  // proceeding with an empty imageRefs[] the writer would never notice.
+  if (deps.requireResolvedImages && imageRefs.length === 0 && !toNonEmptyString(hydratedInput.brief)) {
+    return err(
+      422,
+      'no_images_reached_writer',
+      `None of the ${references.length} reference image${references.length === 1 ? '' : 's'} on this mood board could be read, so nothing would reach the writer model. Add a brief, or fix the unreadable references.`,
+      { referencesTotal: references.length, unresolvedReferences }
+    );
+  }
 
   const proposeArgs = buildVisualIdentityProposeArgs(hydratedInput, imageRefs);
 

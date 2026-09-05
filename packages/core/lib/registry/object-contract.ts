@@ -846,6 +846,29 @@ const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 
             'on it is refused (content_item_not_gated). The only way its imagery reaches something published is the ' +
             'separate, privileged site_apply_brand_imagery tool, which copies it onto the site.',
         },
+        {
+          id: 'reference_ids',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'Every mood-board entry in references[] carries an id shaped ref_<8 lowercase alphanumerics>. The ' +
+            'SERVER mints it — agents must never invent one: a set_visual_standard_fields patch may submit a ' +
+            'references[] entry with no id at all, and the endpoint fills it in before the op reaches the engine ' +
+            '(the response’s minted[] names what it filled). An id an agent DOES supply is trusted verbatim (it is ' +
+            'presumably re-addressing an existing entry), so a resulting duplicate — two entries sharing one id, ' +
+            'minted or caller-supplied — is refused (422) rather than silently colliding.',
+        },
+        {
+          id: 'reference_import_request_ids',
+          severity: 'blocks_write',
+          enforced_live: false,
+          description:
+            'Bulk mood-board imports (import_images_from_url against a mood board) are tracked under a request id ' +
+            'shaped req_visref_<site>_<yyyymmdd>_<nn> — the same req_<flow>_<topic>_<yyyymmdd>_<nn> convention every ' +
+            'other agent-facing request id uses (docs/agents/naming-convention.md). It is minted SERVER-SIDE by the ' +
+            'import endpoint, deterministic per (site, day, sequence) so a same-day retry is idempotent; agents ' +
+            'must never invent or hand-author one, only read back the one the import call returns.',
+        },
       ];
     default:
       return [];

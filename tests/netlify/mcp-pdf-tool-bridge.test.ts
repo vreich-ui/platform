@@ -8,6 +8,8 @@ import { handler } from '../../netlify/functions/mcp.js';
 import { createLocalBlobStore, setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
 import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import { stubPdfToolMcp } from './pdf-tool-mcp-fetch-stub.js';
+import { handler as examplesBackgroundHandler } from '../../netlify/functions/visual-standard-examples-background.js';
+import { readExamplesJob, type ExamplesJobStore } from '../../packages/core/server/lib/visual-standard-examples-jobs.js';
 
 const REQUEST_ID = 'req_agent_simple_skincare_routine_id_choose_20260802_01';
 const STORAGE_SECRET = 'storage-secret-never-expose';
@@ -1093,7 +1095,13 @@ test('a COMPLETING inline job still reports Platform’s styleSource and warning
 // checkout on an object whose lock the triggering `object_patch` was still
 // holding (423). Between them, not one example was ever written by any
 // trigger. This drives the whole path through the real MCP surface.
-test('an object_patch on a visual_standard writes the generated examples back, under the caller’s own lock', async () => {
+//
+// A6 moved the generation itself off the verb dispatch and into the
+// `visual-standard-examples-background` worker, so the shape of the proof
+// changes but not its subject: the patch OPENS a job record, the worker takes
+// its own lease once the caller has checked in, and the examples still land on
+// the standard — with the round's per-context outcome readable afterwards.
+test('an object_patch on a visual_standard opens an examples job, and the background worker writes the examples back', async () => {
   await resetAndSeedRequest();
   await seedSiteRecord({ name: 'Dr. Lurié', brandImagery: SEEDED_BRAND_IMAGERY });
   await clearGovernanceOverride();
@@ -1198,8 +1206,25 @@ test('an object_patch on a visual_standard writes the generated examples back, u
     });
     assert.ok(!patched.result.isError, JSON.stringify(patched.result.structuredContent));
 
-    // The lock is STILL held here — check-in is a separate call — which is
-    // exactly the state the generator has to write in.
+    // The verb no longer waits on flux: it opens the job and returns.
+    assert.equal(jobRequestIds.length, 0, 'the MCP verb dispatch must not create image jobs inline any more');
+    const jobStore = createLocalBlobStore('artifact-index') as unknown as ExamplesJobStore;
+    const pending = await readExamplesJob(jobStore, standardId);
+    assert.equal(pending?.examples_status, 'pending', 'the patch must leave a pending job record behind');
+    assert.equal(pending?.trigger, 'mcp');
+    const triggerToken = pending?.trigger_token;
+    assert.ok(triggerToken, 'the job record carries the worker’s one-shot token');
+
+    // The caller releases its lease; the worker takes its own.
+    await rpc('object_checkin', { object_type: 'visual_standard', object_id: standardId, lock_token: lockToken });
+
+    const ran = await examplesBackgroundHandler({
+      httpMethod: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ visual_standard_id: standardId, trigger_token: triggerToken }),
+    });
+    assert.equal(ran.statusCode, 200, ran.body);
+
     assert.equal(jobRequestIds.length, 1, 'one sampleSubject → one example job actually reached pdf-tool');
     assert.match(jobRequestIds[0]!, /^req_visimg_vis_drlurie_examples_article_header_\d{8}_\d{2}$/);
 
@@ -1211,7 +1236,10 @@ test('an object_patch on a visual_standard writes the generated examples back, u
     assert.match(examples[0]!.blobKey, /^image\/req_visimg_vis_drlurie_examples_article_header_/);
     assert.equal(examples[0]!.contractHash.length, 64);
 
-    await rpc('object_checkin', { object_type: 'visual_standard', object_id: standardId, lock_token: lockToken });
+    const finished = await readExamplesJob(jobStore, standardId);
+    assert.equal(finished?.examples_status, 'ready');
+    assert.deepEqual(finished?.contexts.map((context) => context.status), ['ready']);
+    assert.equal(finished?.trigger_token, undefined, 'the one-shot token is spent, not reusable');
   } finally {
     globalThis.fetch = originalFetch;
   }

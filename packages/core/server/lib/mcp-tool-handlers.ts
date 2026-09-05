@@ -67,6 +67,15 @@ import {
   type BrandImageryReferenceInput,
 } from './brand-imagery-proxy.js';
 import { generateVisualStandardExamplesWithDeps, type VisualStandardExampleRecord } from './brand-imagery-examples.js';
+import {
+  contextFailure,
+  deriveExamplesStatus,
+  resolveExamplesTriggerTarget,
+  triggerVisualStandardExamplesJob,
+  type ExamplesJobContext,
+  type ExamplesJobStatus,
+  type ExamplesJobStore,
+} from './visual-standard-examples-jobs.js';
 import { publicPathForArtifactRef, MAJOR_KEY_ARTIFACT_REF_RE } from './artifact-trust.js';
 import {
   failedContentCheckFromQualityGate,
@@ -3087,26 +3096,28 @@ export const callSetImageModelPolicy = async (event: LambdaEvent, input: Record<
   return toolResult({ ...saved.body, siteId: scoped.siteId });
 };
 
-// ── X1 (brand-imagery wave, BRIEF §3.1/R9, last/cosmetic): example images
-// per visual standard. Both trigger moments the brief names -- "apply" (an
-// agent's site_apply_brand_imagery) and "propose-accept" (the CMS-Agent
-// visual_standard_materializer's object_create/object_patch of a
-// visual_standard, BRIEF §3.5) -- reach Platform through this SAME MCP verb
-// dispatch (callObjectAction), since both are tool calls a workflow node
-// makes over CmsAgentClient's mirror, ProjectMcpAdapter. A human's browser
-// click on ImageryBoard.tsx's "Make this the site's imagery" or its mood-
-// board save goes through the SEPARATE admin-object.ts (Netlify-Identity)
-// endpoint, which shares object-verbs.ts's core but not this file -- out of
-// X1's file boundary, so it is deliberately NOT hooked here (see the task
-// report). The admin's "Regenerate examples" affordance closes that gap for
-// a human: it asks the agent to clear examples[] via the ordinary
-// set_visual_standard_fields op, which lands right back on this same path.
+// ── X1 (brand-imagery wave, BRIEF §3.1/R9): example images per visual
+// standard — MOVED TO A BACKGROUND JOB (A6).
 //
-// All DECISIONS (hash, plan, merge) live in brand-imagery-examples.ts; this
-// is the thin, best-effort integration layer -- it never throws out of
-// callObjectAction, and it never delays a failed object-store write (only a
-// SUCCESSFUL create/patch/apply can trigger it).
-const VISUAL_STANDARD_EXAMPLE_TRIGGER_ACTIONS = new Set(['create', 'patch', 'apply_brand_imagery']);
+// What X1 built here was an INLINE side effect of the MCP verb dispatch: up to
+// three flux jobs created and waited on (~10s) inside `callObjectAction`,
+// anything unfinished dropped by design, and no status anywhere. Three things
+// were wrong with that and all three are fixed by the same move:
+//
+//   1. flux needs far longer than an inline wait can give it, so the common
+//      case was "generated, paid for, discarded";
+//   2. the human's own surface — `admin-object.ts`'s browser writes, where the
+//      "Regenerate examples" affordance actually lives — never reached this
+//      file at all, so a browser click generated NOTHING;
+//   3. a caller (and a UI) had no way to learn any of that.
+//
+// Now: BOTH surfaces call `triggerVisualStandardExamplesJob`
+// (visual-standard-examples-jobs.ts), which writes a `pending` job record and
+// hands the work to `visual-standard-examples-background`. That worker calls
+// `runVisualStandardExamplesGeneration` below — the same generation this file
+// always did, with the same deps — and writes the per-context result back onto
+// the record. All DECISIONS (hash, plan, merge) still live in
+// brand-imagery-examples.ts.
 
 const getVisualStandardBodyForExamples = async (
   event: LambdaEvent,
@@ -3123,29 +3134,69 @@ const getVisualStandardBodyForExamples = async (
 };
 
 /**
- * The lease this write rides. REVIEW (brand-imagery wave): the generator used
- * to ALWAYS take its own checkout — which can never succeed when the trigger
- * is an `object_patch`, because `object_patch` REQUIRES a live lock and
- * check-in is a separate later call, so the caller is still holding it when
- * this runs. `checkoutObjectLock` refuses ANY active lock (423, regardless of
- * owner), so every regenerate-through-a-patch round generated up to three
- * real, paid image jobs and then dropped them on the floor in silence. When
- * the trigger already holds the lease, the write rides THAT lease and leaves
- * check-in to its owner.
+ * The write-back lease.
+ *
+ * REVIEW (brand-imagery wave), still the governing constraint: `object_patch`
+ * REQUIRES a live lock and check-in is a separate later call, and
+ * `checkoutObjectLock` refuses ANY active lock (423, regardless of owner). X1
+ * rode the TRIGGERING caller's own lease, because it ran inline while that
+ * caller still held it. A6 runs minutes later in another process and has no
+ * lease of its own to ride — so it takes one, and RETRIES while the triggering
+ * caller is still holding theirs (a browser EditSession or an agent checks in
+ * moments after its patch; the lease itself expires in 15 minutes). Giving up
+ * silently was the old failure mode; here it becomes `persist_refused` on the
+ * job record.
  */
-type HeldObjectLease = { lockToken: string; recordVersion?: number };
+export const EXAMPLES_PERSIST_RETRY_MS = 5_000;
+export const EXAMPLES_PERSIST_DEADLINE_MS = 120_000;
 
-/** Best-effort set_visual_standard_fields(examples), under the trigger's own
- * lease when it has one, and otherwise under a checkout → patch → checkin of
- * its own (the sequence the CMS-Agent materializer uses for this same object
- * type) -- own lease released in a `finally`, never left dangling. */
+const sleepMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export type ExamplesPersistOptions = {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  retryMs?: number;
+  deadlineMs?: number;
+};
+
+/** Best-effort `set_visual_standard_fields(examples)` under a checkout → patch
+ *  → checkin of its own — own lease released in a `finally`, never left
+ *  dangling. Answers whether the examples actually landed. */
 const persistVisualStandardExamples = async (
   event: LambdaEvent,
   visualStandardId: string,
   examples: VisualStandardExampleRecord[],
-  held?: HeldObjectLease
-): Promise<void> => {
-  const patchUnder = async (lockToken: string, recordVersion: number | undefined): Promise<void> => {
+  options: ExamplesPersistOptions = {}
+): Promise<{ ok: boolean; reason?: string }> => {
+  const now = options.now ?? (() => Date.now());
+  const sleep = options.sleep ?? sleepMs;
+  const retryMs = options.retryMs ?? EXAMPLES_PERSIST_RETRY_MS;
+  const deadline = now() + (options.deadlineMs ?? EXAMPLES_PERSIST_DEADLINE_MS);
+
+  let checkout = await invokeObjectStore(event, {
+    action: 'checkout',
+    object_type: 'visual_standard',
+    object_id: visualStandardId,
+    agent_name: 'brand_imagery_examples',
+  });
+  while ('isError' in checkout && now() < deadline) {
+    await sleep(retryMs);
+    checkout = await invokeObjectStore(event, {
+      action: 'checkout',
+      object_type: 'visual_standard',
+      object_id: visualStandardId,
+      agent_name: 'brand_imagery_examples',
+    });
+  }
+  if ('isError' in checkout) {
+    event.log?.({ event: 'visual_standard_examples_checkout_refused', visualStandardId });
+    return { ok: false, reason: 'checkout_refused' };
+  }
+  const lockToken = toNonEmptyString(checkout.lockToken);
+  if (!lockToken) return { ok: false, reason: 'checkout_refused' };
+  const recordVersion = typeof checkout.record_version === 'number' ? checkout.record_version : undefined;
+
+  try {
     const patched = await invokeObjectStore(event, {
       action: 'patch',
       object_type: 'visual_standard',
@@ -3163,26 +3214,9 @@ const persistVisualStandardExamples = async (
         visualStandardId,
         detail: patched.structuredContent,
       });
+      return { ok: false, reason: 'persist_refused' };
     }
-  };
-
-  if (held) {
-    await patchUnder(held.lockToken, held.recordVersion);
-    return;
-  }
-
-  const checkout = await invokeObjectStore(event, {
-    action: 'checkout',
-    object_type: 'visual_standard',
-    object_id: visualStandardId,
-    agent_name: 'brand_imagery_examples',
-  });
-  if ('isError' in checkout) return;
-  const lockToken = toNonEmptyString(checkout.lockToken);
-  if (!lockToken) return;
-  const recordVersion = typeof checkout.record_version === 'number' ? checkout.record_version : undefined;
-  try {
-    await patchUnder(lockToken, recordVersion);
+    return { ok: true };
   } finally {
     await invokeObjectStore(event, {
       action: 'checkin',
@@ -3202,7 +3236,7 @@ const persistVisualStandardExamples = async (
 const createVisualStandardExampleJob = async (
   event: LambdaEvent,
   input: Record<string, unknown>
-): Promise<{ ok: boolean; blobKey?: string }> => {
+): Promise<{ ok: boolean; blobKey?: string; reason?: string }> => {
   // The scope is this module's OWN (see callCreateAgentArtifactJob's
   // `presolvedScope`): an example belongs to a visual_standard, never to a
   // content_item, so there is no ownership claim to verify — and verifying
@@ -3211,95 +3245,119 @@ const createVisualStandardExampleJob = async (
     siteId: toNonEmptyString(input.site_id) ?? getSiteIdentity().siteId,
     requestId: toNonEmptyString(input.request_id) ?? '',
   });
-  if ('isError' in result) return { ok: false };
+  if ('isError' in result) {
+    const structured = getRecordValue((result as { structuredContent?: unknown }).structuredContent);
+    return {
+      ok: false,
+      reason: toNonEmptyString(structured?.error_code) ?? toNonEmptyString(structured?.error) ?? 'image_job_refused',
+    };
+  }
   const structured = getRecordValue((result as { structuredContent?: unknown }).structuredContent);
   const artifactReference = getRecordValue(structured?.artifactReference);
   const blobKey = toNonEmptyString(artifactReference?.blobKey);
-  return blobKey ? { ok: true, blobKey } : { ok: false };
+  return blobKey ? { ok: true, blobKey } : { ok: false, reason: 'no_artifact_returned' };
 };
 
-const maybeGenerateVisualStandardExamples = async (
+/**
+ * A6: the whole generation round for ONE standard, as the background worker
+ * runs it. Returns exactly what the job record needs — a job-level status and
+ * one row per usage context, where a context that failed says `failed:<reason>`
+ * and never fails the round on its own. Never throws.
+ */
+export const runVisualStandardExamplesGeneration = async (
   event: LambdaEvent,
   visualStandardId: string,
-  body: Record<string, unknown>,
-  held?: HeldObjectLease
-): Promise<void> => {
-  await generateVisualStandardExamplesWithDeps(
-    {
-      siteId: getSiteIdentity().siteId,
-      now: () => Date.now(),
-      createExampleJob: (input) => createVisualStandardExampleJob(event, input),
-      persistExamples: (id, examples) => persistVisualStandardExamples(event, id, examples, held),
-      log: (entry) => event.log?.(entry),
-    },
-    visualStandardId,
-    {
-      sampleSubjects: Array.isArray(body.sampleSubjects) ? body.sampleSubjects : [],
-      brandImagery: body.brandImagery,
-      examples: Array.isArray(body.examples) ? (body.examples as VisualStandardExampleRecord[]) : [],
+  options: ExamplesPersistOptions = {}
+): Promise<{ status: ExamplesJobStatus; contexts: ExamplesJobContext[]; reason?: string }> => {
+  try {
+    const body = await getVisualStandardBodyForExamples(event, visualStandardId);
+    if (!body) return { status: 'failed', contexts: [], reason: 'standard_unreadable' };
+
+    let persisted: { ok: boolean; reason?: string } = { ok: false, reason: 'nothing_to_persist' };
+    const outcome = await generateVisualStandardExamplesWithDeps(
+      {
+        siteId: getSiteIdentity().siteId,
+        now: () => Date.now(),
+        createExampleJob: (input) => createVisualStandardExampleJob(event, input),
+        persistExamples: async (id, examples) => {
+          persisted = await persistVisualStandardExamples(event, id, examples, options);
+        },
+        log: (entry) => event.log?.(entry),
+      },
+      visualStandardId,
+      {
+        sampleSubjects: Array.isArray(body.sampleSubjects) ? body.sampleSubjects : [],
+        brandImagery: body.brandImagery,
+        examples: Array.isArray(body.examples) ? (body.examples as VisualStandardExampleRecord[]) : [],
+      }
+    );
+
+    // A skip is not a failure: the standard's examples already match its
+    // contract hash, so the round is `ready` with the reason on the record.
+    // No sample subjects, though, means nothing CAN be generated — say so.
+    if (!outcome.generated) {
+      return outcome.reason === 'hash_unchanged'
+        ? { status: 'ready', contexts: [], reason: 'hash_unchanged' }
+        : { status: 'failed', contexts: [], reason: 'no_sample_subjects' };
     }
-  );
+
+    const contexts: ExamplesJobContext[] = outcome.attempts.map((attempt) =>
+      attempt.ok && attempt.blobKey
+        ? { usageContext: attempt.usageContext, status: 'ready', blobKey: attempt.blobKey }
+        : { usageContext: attempt.usageContext, status: contextFailure(attempt.reason ?? 'image_job_refused') }
+    );
+
+    // The images exist but could not be written onto the standard: every
+    // context that rendered is downgraded to the persist failure, because from
+    // the standard's point of view nothing landed.
+    if (outcome.examples.length > 0 && !persisted.ok) {
+      const reason = contextFailure(persisted.reason ?? 'persist_refused');
+      return {
+        status: 'failed',
+        contexts: contexts.map((context) =>
+          context.status === 'ready' ? { usageContext: context.usageContext, status: reason } : context
+        ),
+        reason: persisted.reason ?? 'persist_refused',
+      };
+    }
+
+    return { status: deriveExamplesStatus(contexts), contexts };
+  } catch (error) {
+    event.log?.({
+      event: 'visual_standard_examples_run_failed',
+      visualStandardId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { status: 'failed', contexts: [], reason: 'generation_error' };
+  }
 };
 
 /** Never throws -- a failure here must never turn a SUCCESSFUL object-store
  * write into a failed tool call for the caller (apply/propose-accept still
- * succeeded; only the examples side effect was best-effort). */
+ * succeeded; only the examples side effect is best-effort). */
 const triggerVisualStandardExamplesAfterObjectAction = async (
   event: LambdaEvent,
   payload: Record<string, unknown>,
   result: Record<string, unknown>
 ): Promise<void> => {
-  const action = toNonEmptyString(payload.action);
-  if (!action || !VISUAL_STANDARD_EXAMPLE_TRIGGER_ACTIONS.has(action)) return;
+  const visualStandardId = resolveExamplesTriggerTarget(payload, result);
+  if (!visualStandardId) return;
 
   try {
-    if (action === 'create') {
-      if (toNonEmptyString(payload.object_type) !== 'visual_standard') return;
-      const record = getRecordValue(result.record);
-      const visualStandardId = toNonEmptyString(record?.object_id);
-      const body = getRecordValue(record?.body);
-      if (visualStandardId && body) await maybeGenerateVisualStandardExamples(event, visualStandardId, body);
-      return;
-    }
-
-    if (action === 'patch') {
-      if (toNonEmptyString(payload.object_type) !== 'visual_standard') return;
-      const visualStandardId = toNonEmptyString(payload.object_id);
-      if (!visualStandardId) return;
-      const body = await getVisualStandardBodyForExamples(event, visualStandardId);
-      // REVIEW: `object_patch` requires a live lock and does NOT release it
-      // (check-in is a separate call), so the caller is still holding the
-      // lease right here. Ride it — a second checkout would be refused (423)
-      // and the freshly generated examples silently discarded. The record
-      // version to write against is the one THIS patch just produced
-      // (`result.version`), not the caller's now-stale expectation.
-      const lockToken = toNonEmptyString(payload.lock_token);
-      const held: HeldObjectLease | undefined = lockToken
-        ? {
-            lockToken,
-            ...(typeof result.version === 'number' ? { recordVersion: result.version } : {}),
-          }
-        : undefined;
-      if (body) await maybeGenerateVisualStandardExamples(event, visualStandardId, body, held);
-      return;
-    }
-
-    // apply_brand_imagery: only a REAL apply (dry_run previews and writes
-    // nothing) sourced from a visual_standard (never a theme_id apply, which
-    // has no standard to attach examples to). `result.applied_brand_imagery_
-    // source` reflects what object-verbs.ts actually resolved server-side --
-    // read from the RESULT, never re-derived from the caller's own input.
-    if (result.dry_run === true) return;
-    const source = getRecordValue(result.applied_brand_imagery_source);
-    if (source?.kind !== 'visual_standard') return;
-    const visualStandardId = toNonEmptyString(source.id);
-    if (!visualStandardId) return;
-    const body = await getVisualStandardBodyForExamples(event, visualStandardId);
-    if (body) await maybeGenerateVisualStandardExamples(event, visualStandardId, body);
+    const store = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+      | ExamplesJobStore
+      | undefined;
+    if (!store) return;
+    await triggerVisualStandardExamplesJob(store, {
+      visualStandardId,
+      trigger: 'mcp',
+      siteId: getSiteIdentity().siteId,
+      log: (entry) => event.log?.(entry),
+    });
   } catch (error) {
     event.log?.({
       event: 'visual_standard_examples_trigger_failed',
-      action,
+      action: toNonEmptyString(payload.action),
       error: error instanceof Error ? error.message : String(error),
     });
   }

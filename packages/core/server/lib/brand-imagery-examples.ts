@@ -114,7 +114,18 @@ export const planExampleGeneration = (input: {
   return { shouldGenerate: true, contractHash, jobs };
 };
 
-export type ExampleGenerationAttempt = { usageContext: ExampleUsageContext; ok: boolean; blobKey?: string };
+/**
+ * A6: a failed attempt now carries WHY. X1 discarded that (`mergeExampleResults`
+ * simply dropped the row), which is precisely why a context that never rendered
+ * was indistinguishable from a context nobody asked for. The job record turns
+ * this into `failed:<reason>` per usage context.
+ */
+export type ExampleGenerationAttempt = {
+  usageContext: ExampleUsageContext;
+  ok: boolean;
+  blobKey?: string;
+  reason?: string;
+};
 
 /**
  * "A partial failure keeps whatever examples succeeded; it is never an
@@ -196,7 +207,7 @@ export const buildExampleJobInput = (
 export type VisualStandardExampleDeps = {
   siteId: string;
   now: () => number;
-  createExampleJob: (input: Record<string, unknown>) => Promise<{ ok: boolean; blobKey?: string }>;
+  createExampleJob: (input: Record<string, unknown>) => Promise<{ ok: boolean; blobKey?: string; reason?: string }>;
   persistExamples: (visualStandardId: string, examples: VisualStandardExampleRecord[]) => Promise<void>;
   /** Shaped to drop straight into mcp.ts's `LambdaEvent['log']` (a structured
    * logger requiring `event: string`) with no cast at the call site. */
@@ -205,7 +216,14 @@ export type VisualStandardExampleDeps = {
 
 export type ExampleGenerationOutcome =
   | { generated: false; reason: 'hash_unchanged' | 'no_sample_subjects' }
-  | { generated: true; contractHash: string; examples: VisualStandardExampleRecord[] };
+  /** A6: `attempts` is the per-usage-context truth the job record reports —
+   *  `examples` alone can only say what SUCCEEDED. */
+  | {
+      generated: true;
+      contractHash: string;
+      examples: VisualStandardExampleRecord[];
+      attempts: ExampleGenerationAttempt[];
+    };
 
 /**
  * The full apply/propose-accept/regenerate flow for ONE standard: plan, run
@@ -233,7 +251,12 @@ export const generateVisualStandardExamplesWithDeps = async (
       const input = buildExampleJobInput(deps.siteId, visualStandardId, job, nowMs);
       try {
         const result = await deps.createExampleJob(input);
-        return { usageContext: job.usageContext, ok: result.ok, ...(result.blobKey ? { blobKey: result.blobKey } : {}) };
+        return {
+          usageContext: job.usageContext,
+          ok: result.ok,
+          ...(result.blobKey ? { blobKey: result.blobKey } : {}),
+          ...(result.ok ? {} : { reason: result.reason ?? 'image_job_refused' }),
+        };
       } catch (error) {
         deps.log?.({
           event: 'visual_standard_example_job_failed',
@@ -241,7 +264,11 @@ export const generateVisualStandardExamplesWithDeps = async (
           usageContext: job.usageContext,
           error: error instanceof Error ? error.message : String(error),
         });
-        return { usageContext: job.usageContext, ok: false };
+        return {
+          usageContext: job.usageContext,
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error),
+        };
       }
     })
   );
@@ -266,5 +293,5 @@ export const generateVisualStandardExamplesWithDeps = async (
     }
   }
 
-  return { generated: true, contractHash: plan.contractHash, examples };
+  return { generated: true, contractHash: plan.contractHash, examples, attempts };
 };

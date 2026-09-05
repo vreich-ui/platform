@@ -22,14 +22,20 @@
  *    `apply_brand_imagery` verb (dry run → diff card → confirm under a site
  *    checkout), and "New template" is an ordinary `create`. No endpoint was
  *    added for any of it.
- *  - `import_images_from_url` and `brand_imagery_propose` are MCP/chat tools
- *    with NO browser-reachable admin endpoint. They go through `onIntent` —
- *    the seam U3 wires to the docked rail (R8) — carrying a precise,
- *    deterministic instruction naming the tool and its arguments. That is the
- *    repo's existing answer for a tool-backed admin affordance
- *    (`TemplatesWorkspace`'s "Render a sample for review.", `ObjectWorkspace`'s
- *    `contextActions`), and it keeps the approval card in charge instead of
- *    inventing a client-side write path.
+ *  - Importing references is its OWN admin endpoint since A1:
+ *    `admin-visual-identity-import` mints the request id, calls the same
+ *    `import_images_from_url` server handler the MCP tool uses, mirrors the
+ *    bytes into this site's artifact store so the cards can render, and
+ *    appends `ref_` entries under a real checkout. The browser sends
+ *    addresses only — never an id — one address per call so the human sees
+ *    per-address progress.
+ *  - Proposing a contract from the mood board is its OWN admin endpoint
+ *    since A3: `admin-visual-identity-propose` resolves the SELECTED
+ *    standard's own references to base64 server-side (never a URL the
+ *    CMS-Agent node runner would have to fetch and 401 on) and calls
+ *    `visual_identity_propose` directly. The button only reaches `onIntent`
+ *    (the U3 chat-rail seam) for the "no standard yet" empty state, where
+ *    there is no standard id yet to propose against.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 
@@ -41,6 +47,12 @@ import { IconAlertTriangle, IconLock, IconPlus, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
+import { importVisualReferencesInOrder, type ImportProgressRow } from '@core/lib/admin/visual-identity-import-client';
+import {
+  proposeVisualIdentityContract,
+  referencesReachedWriterLabel,
+  type ProposeContractResponse,
+} from '@core/lib/admin/visual-identity-propose-client';
 import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { EditSession, callObjectVerb, type GetToken } from '@core/lib/edit-mode/verbs-client';
 import {
@@ -53,7 +65,6 @@ import {
   buildApplyImageryVerb,
   buildImageryDiff,
   buildImageryWorkspace,
-  buildImportReferencesIntent,
   buildNewTemplateDraft,
   buildProposeContractIntent,
   buildReferencesOp,
@@ -75,6 +86,22 @@ import {
 } from '@core/lib/admin/visual-identity-imagery';
 
 const MUTED = 'text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]';
+const IMPORT_STATE_LABEL: Record<ImportProgressRow['state'], string> = {
+  waiting: 'Queued',
+  importing: 'Importing…',
+  added: 'Added',
+  duplicate: 'Already on the board',
+  failed: 'Failed',
+};
+
+const IMPORT_STATE_CLASS: Record<ImportProgressRow['state'], string> = {
+  waiting: 'text-[var(--adm-text-muted)]',
+  importing: 'text-[var(--adm-text)]',
+  added: 'font-semibold text-[var(--adm-text-heading)]',
+  duplicate: 'text-[var(--adm-text-muted)]',
+  failed: 'font-semibold text-[var(--adm-warning-text)]',
+};
+
 const XS_LABEL = 'text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]';
 
 // ─── the applied / standard contract card ───────────────────────────────────
@@ -599,7 +626,13 @@ export function ImageryBoard({
   const [applyDiff, setApplyDiff] = useState<{ standardId: string; diff: ImageryDiffModel } | undefined>(undefined);
   const [importText, setImportText] = useState('');
   const [importNote, setImportNote] = useState('');
+  const [importProgress, setImportProgress] = useState<ImportProgressRow[]>([]);
+  const [importing, setImporting] = useState(false);
   const [brief, setBrief] = useState('');
+  const [proposing, setProposing] = useState(false);
+  const [proposeResult, setProposeResult] = useState<
+    { standardId: string; response: ProposeContractResponse } | undefined
+  >(undefined);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [library, setLibrary] = useState<EditorialArtifact[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -692,6 +725,70 @@ export function ImageryBoard({
     },
     [saveReferences, selected]
   );
+
+  /**
+   * A3: proposing runs against `admin-visual-identity-propose` directly —
+   * the endpoint resolves THIS standard's own mood board to base64
+   * server-side (crop/region applied via sharp) and calls
+   * `visual_identity_propose` itself, so the browser sends only the
+   * standard id and the brief. Nothing here writes the standard; a proposal
+   * is read-only until "Make this the site's imagery" applies it.
+   */
+  const runPropose = useCallback(async () => {
+    if (!selected) return;
+    setProposing(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const response = await proposeVisualIdentityContract(getToken, { standardId: selected.objectId, brief });
+      setProposeResult({ standardId: selected.objectId, response });
+      setNotice(referencesReachedWriterLabel(response));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The contract could not be proposed.');
+    } finally {
+      setProposing(false);
+    }
+  }, [brief, getToken, selected]);
+
+  /**
+   * A1: the import runs against `admin-visual-identity-import`, one address
+   * at a time so each row reports for itself. The endpoint owns the whole
+   * write — request id, pdf-tool call, byte mirror, `ref_` ids and the
+   * `set_visual_standard_fields` append — so there is nothing to save here
+   * afterwards beyond reloading what the tab reads.
+   */
+  const runImport = useCallback(async () => {
+    if (!selected || importPreview.urls.length === 0) return;
+    setImporting(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const outcome = await importVisualReferencesInOrder(
+        getToken,
+        {
+          standardId: selected.objectId,
+          urls: importPreview.urls,
+          ...(importNote.trim() ? { note: importNote.trim() } : {}),
+        },
+        setImportProgress
+      );
+      const failed = outcome.rows.filter((row) => row.state === 'failed');
+      if (outcome.added.length > 0) {
+        setImportText('');
+        setNotice(
+          `Imported ${outcome.added.length} reference${outcome.added.length === 1 ? '' : 's'} onto the mood board.`
+        );
+        await onChanged();
+      }
+      if (failed.length > 0) {
+        setError(failed[0]?.error ?? 'Some addresses could not be imported.');
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The references could not be imported.');
+    } finally {
+      setImporting(false);
+    }
+  }, [getToken, importNote, importPreview.urls, onChanged, selected]);
 
   const previewApply = useCallback(async () => {
     if (!selected) return;
@@ -917,17 +1014,10 @@ export function ImageryBoard({
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() =>
-                    onIntent(
-                      buildProposeContractIntent({
-                        standard: selected,
-                        mode: selected.isHouse ? 'house' : 'template',
-                        brief,
-                      })
-                    )
-                  }
+                  onClick={() => void runPropose()}
+                  disabled={busy || proposing}
                 >
-                  <IconSparkles size={15} /> Write contract from mood board
+                  <IconSparkles size={15} /> {proposing ? 'Proposing…' : 'Write contract from mood board'}
                 </Button>
                 <Button size="sm" onClick={() => void previewApply()} disabled={busy || !model.canApply}>
                   Make this the site&rsquo;s imagery
@@ -958,6 +1048,31 @@ export function ImageryBoard({
               />
             </div>
           </Card>
+
+          {proposeResult && proposeResult.standardId === selected.objectId ? (
+            <Card
+              kicker="Proposed contract"
+              title={typeof proposeResult.response.proposal.label === 'string' ? proposeResult.response.proposal.label : 'Untitled proposal'}
+            >
+              <div className="flex flex-col gap-3">
+                <Badge tone={proposeResult.response.warnings.length > 0 ? 'warning' : 'accent'}>
+                  {referencesReachedWriterLabel(proposeResult.response)}
+                </Badge>
+                {proposeResult.response.warnings.length > 0 ? (
+                  <div className="flex items-start gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] p-2 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+                    <IconAlertTriangle size={15} />
+                    <span>
+                      Some references never reached the writer, so this proposal may not reflect the whole mood
+                      board: {proposeResult.response.warnings.join(', ')}
+                    </span>
+                  </div>
+                ) : null}
+                {typeof proposeResult.response.proposal.rationale === 'string' ? (
+                  <p className={MUTED}>{proposeResult.response.proposal.rationale}</p>
+                ) : null}
+              </div>
+            </Card>
+          ) : null}
 
           {applyDiff && applyDiff.standardId === selected.objectId ? (
             <div className="flex flex-col gap-3">
@@ -1016,26 +1131,31 @@ export function ImageryBoard({
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  disabled={importPreview.urls.length === 0}
-                  onClick={() => {
-                    const intent = buildImportReferencesIntent({
-                      standard: selected,
-                      urls: importPreview.urls,
-                      note: importNote,
-                    });
-                    if (intent) onIntent(intent);
-                    setImportText('');
-                  }}
+                  disabled={importPreview.urls.length === 0 || importing || !model.canEditBoard}
+                  onClick={() => void runImport()}
                 >
-                  Import {importPreview.urls.length || ''} reference{importPreview.urls.length === 1 ? '' : 's'}
+                  {importing
+                    ? 'Importing…'
+                    : `Import ${importPreview.urls.length || ''} reference${importPreview.urls.length === 1 ? '' : 's'}`}
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => void openLibrary()} disabled={busy}>
+                <Button variant="secondary" size="sm" onClick={() => void openLibrary()} disabled={busy || importing}>
                   Pick from library
                 </Button>
               </div>
+              {importProgress.length ? (
+                <ul className="flex flex-col gap-1">
+                  {importProgress.map((row) => (
+                    <li key={row.url} className="flex items-start gap-2 text-[length:var(--adm-text-xs)]">
+                      <span className={IMPORT_STATE_CLASS[row.state]}>{IMPORT_STATE_LABEL[row.state]}</span>
+                      <span className="truncate text-[var(--adm-text-muted)]">{row.url}</span>
+                      {row.error ? <span className="text-[var(--adm-warning-text)]">{row.error}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               <p className={MUTED}>
-                Importing runs through the agent so the fetch, the licence check and the store write stay on the
-                governed path — the approval card shows you the exact call before anything is fetched.
+                Each address is fetched server-side into this publication&rsquo;s own image store, one at a time, and
+                added to this mood board as it lands — at most {MOOD_BOARD_MAX_REFERENCES} references in total.
               </p>
             </div>
           </Card>
