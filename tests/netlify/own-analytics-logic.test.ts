@@ -3,8 +3,8 @@
  * fixture → chart series / stat row / capture rate — the "renders correctly
  * with a fixture stats payload" half) plus the sink module's env-presence
  * predicate and URL/auth construction (the "not connected when the sink env
- * is absent" half; `admin-traffic.ts`'s `?source=own` branch is exercised
- * only at the shallow auth-wall level in `admin-traffic.test.ts`, matching
+ * is absent" half; `admin-analytics.ts`'s `?source=own` branch is exercised
+ * only at the shallow auth-wall level in `admin-analytics.test.ts`, matching
  * this file's existing house pattern — no deep HTTP-handler mocking exists
  * for this suite).
  */
@@ -16,8 +16,11 @@ import {
   ownTrackerStatRow,
   captureRate,
   isOwnTrackerDays,
+  surfaceBarRows,
+  resolveOwnAnalyticsPanel,
   type OwnTrackerStatsPayload,
-} from '../../packages/core/lib/admin/own-traffic-logic.js';
+  type OwnAnalyticsOverview,
+} from '../../packages/core/lib/admin/own-analytics-logic.js';
 import {
   ownTrackerMissingEnvVars,
   isOwnTrackerConfigured,
@@ -222,5 +225,163 @@ test('fetchOwnTrackerStats: a non-2xx sink response throws (a real fault, not a 
       env: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_PROJECT_ID: 'drlurie' },
       fetchImpl,
     })
+  );
+});
+
+// ─── surfaceBarRows ─────────────────────────────────────────────────────────
+
+test('surfaceBarRows: shares are relative to the largest surface, labels carry the object count', () => {
+  const rows = surfaceBarRows([
+    { surface: 'workflow', objects: 3, pageviews: 100 },
+    { surface: 'plugin:claude', objects: 1, pageviews: 50 },
+  ]);
+  assert.deepEqual(rows, [
+    { label: 'workflow (3 objects)', visits: 100, share: 1 },
+    { label: 'plugin:claude (1 object)', visits: 50, share: 0.5 },
+  ]);
+});
+
+test('surfaceBarRows: an all-zero split never divides by zero', () => {
+  const rows = surfaceBarRows([{ surface: 'unknown', objects: 1, pageviews: 0 }]);
+  assert.equal(rows[0]!.share, 0);
+});
+
+// ─── R6.1: resolveOwnAnalyticsPanel — one state per fixture ────────────────
+
+test('resolveOwnAnalyticsPanel: loading, then no overview yet, are both "loading"', () => {
+  assert.deepEqual(
+    resolveOwnAnalyticsPanel({
+      loading: true,
+      error: null,
+      overview: null,
+      netlifyPageviews: null,
+      netlifyRangeDays: null,
+      days: 7,
+    }),
+    { kind: 'loading' }
+  );
+  assert.deepEqual(
+    resolveOwnAnalyticsPanel({
+      loading: false,
+      error: null,
+      overview: null,
+      netlifyPageviews: null,
+      netlifyRangeDays: null,
+      days: 7,
+    }),
+    { kind: 'loading' }
+  );
+});
+
+test('resolveOwnAnalyticsPanel: a fetch error surfaces as "error" with the human message', () => {
+  const panel = resolveOwnAnalyticsPanel({
+    loading: false,
+    error: 'Could not load analytics data.',
+    overview: null,
+    netlifyPageviews: null,
+    netlifyRangeDays: null,
+    days: 7,
+  });
+  assert.deepEqual(panel, { kind: 'error', message: 'Could not load analytics data.' });
+});
+
+test('resolveOwnAnalyticsPanel: sink not configured — the "not connected" partial state (own present, Netlify off case starts here)', () => {
+  const overview: OwnAnalyticsOverview = { configured: false, enabled: false, days: 7 };
+  const panel = resolveOwnAnalyticsPanel({
+    loading: false,
+    error: null,
+    overview,
+    netlifyPageviews: null,
+    netlifyRangeDays: null,
+    days: 7,
+  });
+  assert.equal(panel.kind, 'not_configured');
+});
+
+test('resolveOwnAnalyticsPanel: ready — capture rate lands in the FOOTER, never the KPI strip', () => {
+  const overview: OwnAnalyticsOverview = { configured: true, enabled: true, days: 7, stats: FIXTURE };
+  const panel = resolveOwnAnalyticsPanel({
+    loading: false,
+    error: null,
+    overview,
+    netlifyPageviews: 1200,
+    netlifyRangeDays: 7,
+    days: 7,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.deepEqual(
+    panel.kpis.map((k) => k.id),
+    ['pageviews', 'sessions', 'visitors', 'consented', 'purchases']
+  );
+  assert.equal(
+    panel.kpis.some((k) => k.id === 'capture_rate' || k.id === 'last_event'),
+    false,
+    'health/meta must not be in the KPI strip'
+  );
+  const footerIds = panel.footer.map((f) => f.id);
+  assert.deepEqual(footerIds, ['last_event', 'capture_rate']);
+  assert.equal(panel.footer.find((f) => f.id === 'capture_rate')!.value, '75%', '900/1200 pageviews = 75.0%');
+});
+
+test('resolveOwnAnalyticsPanel: capture rate is honestly "Not available" when the ranges do not match — never a fabricated number', () => {
+  const overview: OwnAnalyticsOverview = { configured: true, enabled: true, days: 7, stats: FIXTURE };
+  const panel = resolveOwnAnalyticsPanel({
+    loading: false,
+    error: null,
+    overview,
+    netlifyPageviews: 1200,
+    netlifyRangeDays: null, // Netlify is on 90d/custom — no matching own-tracker window
+    days: 7,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.equal(panel.footer.find((f) => f.id === 'capture_rate')!.value, 'Not available');
+});
+
+test('resolveOwnAnalyticsPanel: a single publishing surface does not get its own ranking card (one fact is not a chart)', () => {
+  const overview: OwnAnalyticsOverview = {
+    configured: true,
+    enabled: true,
+    days: 7,
+    stats: FIXTURE,
+    surfaces: [{ surface: 'workflow', objects: 2, pageviews: 500 }],
+  };
+  const panel = resolveOwnAnalyticsPanel({
+    loading: false,
+    error: null,
+    overview,
+    netlifyPageviews: null,
+    netlifyRangeDays: null,
+    days: 7,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.deepEqual(
+    panel.rankings.map((r) => r.id),
+    ['objects', 'sources']
+  );
+});
+
+test('resolveOwnAnalyticsPanel: two+ publishing surfaces add the third ranking card', () => {
+  const overview: OwnAnalyticsOverview = {
+    configured: true,
+    enabled: true,
+    days: 7,
+    stats: FIXTURE,
+    surfaces: [
+      { surface: 'workflow', objects: 2, pageviews: 500 },
+      { surface: 'plugin:claude', objects: 1, pageviews: 200 },
+    ],
+  };
+  const panel = resolveOwnAnalyticsPanel({
+    loading: false,
+    error: null,
+    overview,
+    netlifyPageviews: null,
+    netlifyRangeDays: null,
+    days: 7,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.deepEqual(
+    panel.rankings.map((r) => r.id),
+    ['objects', 'sources', 'surfaces']
   );
 });

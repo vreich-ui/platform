@@ -1,5 +1,5 @@
 /**
- * Netlify Analytics (T4.1, rewritten T21.2c / R1.4) — the traffic dashboard's
+ * Netlify Analytics (T4.1, rewritten T21.2c / R1.4) — the analytics dashboard's
  * data source, per Wolf's gate answer G1 (Netlify Analytics, not
  * GA4/Plausible/Supermetrics).
  *
@@ -9,7 +9,7 @@
  * `https://api.netlify.com/api/v1/sites/{site_id}/analytics/*` surface.
  * Every path under it now returns 404, which this module's 401/403/404 →
  * "not enabled" mapping (correctly) treats as "no Analytics add-on" — so
- * `/admin/traffic` showed the empty state for `drluriescience` even though
+ * `/admin/analytics` (then `/admin/traffic`) showed the empty state for `drluriescience` even though
  * the Analytics add-on IS active (`analytics_instance_id` set on the site
  * object). The old host is gone/renamed; it was never the real contract.
  *
@@ -38,7 +38,7 @@
  *    it's a distinct path plus `limit` per dimension now. Only `pages` and
  *    `sources` are wired into `fetchTrafficAnalytics` (the two dimensions
  *    the dashboard renders, `topPaths`/`topSources` on
- *    `RawTrafficAnalytics`) — `not_found`/`countries` are documented above
+ *    `RawAnalyticsData`) — `not_found`/`countries` are documented above
  *    because they were verified live in the same pass, but there is no
  *    consuming UI for them yet; wiring them in is future scope, not this
  *    fix. `parseRankingRowsV2` below is dimension-agnostic, so adding either
@@ -66,7 +66,7 @@
  * exact shapes verified above (`tests/netlify/netlify-analytics.test.ts`),
  * which the pre-T21.2c version had no coverage for at all. The pure
  * last-mile transform this module hands off to —
- * `mapAnalyticsToChartSeries` in `lib/admin/traffic-logic.ts` — is
+ * `mapAnalyticsToChartSeries` in `lib/admin/analytics-logic.ts` — is
  * separately unit-tested against the normalized intermediate shape this
  * module produces.
  */
@@ -75,10 +75,10 @@ import { netlifyDeployLookupMissingEnvVars } from './netlify-deploys.js';
 import {
   normalizePathLabel,
   normalizeSourceLabel,
-  type RawTrafficAnalytics,
-  type TrafficRankingRow,
-  type TrafficTrendPoint,
-} from '../../lib/admin/traffic-logic.js';
+  type RawAnalyticsData,
+  type AnalyticsRankingRow,
+  type AnalyticsTrendPoint,
+} from '../../lib/admin/analytics-logic.js';
 
 /** v2 host — see the module doc comment for the live diagnosis behind this. */
 const NETLIFY_ANALYTICS_BASE_URL = 'https://analytics.services.netlify.com/v2';
@@ -177,13 +177,13 @@ const parseTuplePoint = (row: unknown): { t: string; count: number } | undefined
 
 /**
  * Zips the pageviews tuple series (visits) and the visitors tuple series
- * (uniques) by bucket timestamp into one `TrafficTrendPoint[]`. A bucket
+ * (uniques) by bucket timestamp into one `AnalyticsTrendPoint[]`. A bucket
  * present in only one series still produces a point, with the missing side
  * defaulting to 0, rather than being dropped — a plan tier or transient
  * failure that loses the uniques call shouldn't also blank the visits bar
  * for that bucket.
  */
-const buildTrend = (pageviewRows: unknown[], visitorRows: unknown[]): TrafficTrendPoint[] => {
+const buildTrend = (pageviewRows: unknown[], visitorRows: unknown[]): AnalyticsTrendPoint[] => {
   const visitsByT = new Map<string, number>();
   for (const row of pageviewRows) {
     const point = parseTuplePoint(row);
@@ -236,7 +236,7 @@ const rankingQuery = (window: NetlifyAnalyticsWindow): string =>
  * of these, or a transient error on one of the three) rather than failing
  * the whole dashboard for a partial result.
  */
-export const fetchTrafficAnalytics = async (window: NetlifyAnalyticsWindow): Promise<RawTrafficAnalytics> => {
+export const fetchTrafficAnalytics = async (window: NetlifyAnalyticsWindow): Promise<RawAnalyticsData> => {
   const trendQs = windowQuery(window);
   const rankingQs = rankingQuery(window);
 
@@ -250,7 +250,7 @@ export const fetchTrafficAnalytics = async (window: NetlifyAnalyticsWindow): Pro
 
   const trend = buildTrend(extractDataArray(pageviewsPayload), extractDataArray(visitorsPayload));
 
-  const toRankingRow = (row: RankingRowV2, label: (resource: string) => string): TrafficRankingRow => ({
+  const toRankingRow = (row: RankingRowV2, label: (resource: string) => string): AnalyticsRankingRow => ({
     label: label(row.resource),
     visits: row.count,
   });

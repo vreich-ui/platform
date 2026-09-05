@@ -63,7 +63,9 @@ export const NAV_ITEMS: NavGroupData[] = [
       // labelled "A/B tests" — nothing serves a traffic split today, so the
       // route never uses that phrase (see docs 12-object-tracking §15.4).
       { label: 'Variants', href: '/admin/variants', icon: 'layoutGrid' },
-      { label: 'Traffic', href: '/admin/traffic', icon: 'chartBar' },
+      // T21.9b: renamed from "Traffic" — the section now carries engagement,
+      // conversions, producers, and experiments, not just visits.
+      { label: 'Analytics', href: '/admin/analytics', icon: 'chartBar' },
       { label: 'Release', href: '/admin/release', icon: 'rocket' },
     ],
   },

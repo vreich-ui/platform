@@ -4,9 +4,9 @@
  * Push the published object/producer/strategy dimensions to the owner DB.
  *
  * W7.4 added `surface` and `attribution` to the `object_version` family — the
- * columns that let `/admin/traffic` (and any owner-side query) separate
- * plugin-written articles from workflow-written ones. Both are nullable and
- * additive.
+ * columns that let `/admin/analytics` (T21.9b; formerly `/admin/traffic`) and
+ * any owner-side query separate plugin-written articles from workflow-written
+ * ones. Both are nullable and additive.
  *
  * This is deliberately a post-build best-effort sync: missing configuration,
  * malformed individual exports, network failures, and non-2xx responses are

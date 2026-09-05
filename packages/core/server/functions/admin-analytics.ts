@@ -1,16 +1,17 @@
 /**
- * admin-traffic (T4.1) — traffic dashboard data: visits/sources/top content
- * over a range, from Netlify Analytics (gate G1). GET-only, admin auth wall
- * matching `admin-release-state.ts`.
+ * admin-analytics (T4.1; renamed from admin-traffic, T21.9b) — analytics
+ * dashboard data: visits/sources/top content over a range, from Netlify
+ * Analytics (gate G1). GET-only, admin auth wall matching
+ * `admin-release-state.ts`.
  *
  * Caching (D8 + T0.2's "zero ETags anywhere in server/functions/" finding):
- * traffic data is not live-critical, so this sets BOTH a short
- * `Cache-Control` and — the better precedent T0.2 asked for — a real `ETag`,
- * honoring `If-None-Match` with a `304`. A module-scope memo backs the same
- * cache for the lifetime of the warm function instance, so a burst of
- * requests for the same window (e.g. the range picker firing on mount, then
- * a tab regaining focus) never re-hits Netlify's undocumented, presumably
- * rate-limited Analytics API more than once per TTL.
+ * this data is not live-critical, so this sets BOTH a short `Cache-Control`
+ * and — the better precedent T0.2 asked for — a real `ETag`, honoring
+ * `If-None-Match` with a `304`. A module-scope memo backs the same cache for
+ * the lifetime of the warm function instance, so a burst of requests for the
+ * same window (e.g. the range picker firing on mount, then a tab regaining
+ * focus) never re-hits Netlify's undocumented, presumably rate-limited
+ * Analytics API more than once per TTL.
  */
 import { createHash } from 'node:crypto';
 
@@ -25,10 +26,10 @@ import {
 import {
   resolveDateWindow,
   mapAnalyticsToChartSeries,
-  DEFAULT_TRAFFIC_RANGE,
-  type TrafficRangeKey,
-} from '../../lib/admin/traffic-logic.js';
-import { isOwnTrackerDays, surfaceSplit, type OwnTrackerDays } from '../../lib/admin/own-traffic-logic.js';
+  DEFAULT_ANALYTICS_RANGE,
+  type AnalyticsRangeKey,
+} from '../../lib/admin/analytics-logic.js';
+import { isOwnTrackerDays, surfaceSplit, type OwnTrackerDays } from '../../lib/admin/own-analytics-logic.js';
 import { fetchOwnTrackerStats, ownTrackerMissingEnvVars } from '../lib/own-tracker-stats.js';
 import { getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import { objectRecordKey } from '../lib/object-store-keys.js';
@@ -50,7 +51,7 @@ const jsonResponse = (
   body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
 });
 
-const isRangeKey = (value: string | undefined): value is TrafficRangeKey =>
+const isRangeKey = (value: string | undefined): value is AnalyticsRangeKey =>
   value === '7d' || value === '30d' || value === '90d' || value === 'custom';
 
 /** Function-instance-lifetime memo — good enough for "stale by a few minutes is fine", no shared store needed. */
@@ -96,7 +97,7 @@ const DEFAULT_OWN_TRACKER_DAYS: OwnTrackerDays = 7;
  *
  * Bounded by construction: `top_objects` is a top-N list (tens, not thousands),
  * so this is a handful of point reads on an admin dashboard load, not a scan.
- * Individual read failures are skipped rather than failing the page — a traffic
+ * Individual read failures are skipped rather than failing the page — an analytics
  * dashboard that 500s because one object is unreadable is worse than one that
  * says "unknown" for that row.
  */
@@ -134,7 +135,7 @@ const publishingSurfaces = async (
   return Object.fromEntries(entries.filter((entry): entry is readonly [string, string | null] => entry !== null));
 };
 
-const ownTrafficResponse = async (binding: SiteBinding, rawDays: number, ifNoneMatch: string | undefined) => {
+const ownAnalyticsResponse = async (binding: SiteBinding, rawDays: number, ifNoneMatch: string | undefined) => {
   const days: OwnTrackerDays = isOwnTrackerDays(rawDays) ? rawDays : DEFAULT_OWN_TRACKER_DAYS;
 
   const missing = ownTrackerMissingEnvVars();
@@ -185,10 +186,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.source === 'own') {
     const ifNoneMatchOwn = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-    return ownTrafficResponse(binding, Number(params.days), ifNoneMatchOwn);
+    return ownAnalyticsResponse(binding, Number(params.days), ifNoneMatchOwn);
   }
 
-  const range = isRangeKey(params.range) ? params.range : DEFAULT_TRAFFIC_RANGE;
+  const range = isRangeKey(params.range) ? params.range : DEFAULT_ANALYTICS_RANGE;
   const custom = range === 'custom' && params.from && params.to ? { from: params.from, to: params.to } : undefined;
 
   const windowResult = resolveDateWindow(range, new Date(), custom);
@@ -234,15 +235,15 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         enabled: false,
         error_code: 'analytics_not_enabled',
         message:
-          'Analytics is not enabled for this site. Turn on the Netlify Analytics add-on for this site in Netlify to see traffic data here.',
+          'Analytics is not enabled for this site. Turn on the Netlify Analytics add-on for this site in Netlify to see analytics data here.',
         range,
       };
       const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
       memo.set(cacheKey, entry);
       return cachedResponse(entry, ifNoneMatch);
     }
-    console.error('Failed to load traffic analytics.', error);
-    return jsonResponse(500, { error: 'Traffic data could not be loaded.' });
+    console.error('Failed to load analytics.', error);
+    return jsonResponse(500, { error: 'Analytics data could not be loaded.' });
   }
 };
 

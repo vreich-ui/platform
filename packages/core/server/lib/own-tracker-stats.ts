@@ -1,5 +1,5 @@
 /**
- * Own-tracker stats fetch (T21.2b) — `admin-traffic`'s second data source,
+ * Own-tracker stats fetch (T21.2b) — `admin-analytics`'s second data source,
  * a first-party proxy over the same TRACKING_SINK_URL/TRACKING_PROJECT_ID
  * pair `commerce-events.ts`/`member-link.ts` already forward events to
  * (fleet-shared + per-site env, already in the T11.7 table and
@@ -7,7 +7,7 @@
  *
  * The `/stats` endpoint itself is being built in parallel in the kugel-data
  * repo; this module codes against the pinned contract
- * (`OwnTrackerStatsPayload`, `lib/admin/own-traffic-logic.ts`) but does not
+ * (`OwnTrackerStatsPayload`, `lib/admin/own-analytics-logic.ts`) but does not
  * validate it strictly, matching `netlify-analytics.ts`'s posture toward a
  * still-moving, externally-owned response shape: degrade a missing field to
  * a safe default rather than throw.
@@ -15,7 +15,7 @@
  * Env NAMES only ever appear in code/logs/tests here — never a literal
  * TRACKING_SINK_URL value or TRACKING_SINK_TOKEN.
  */
-import type { OwnTrackerDays, OwnTrackerStatsPayload } from '../../lib/admin/own-traffic-logic.js';
+import type { OwnTrackerDays, OwnTrackerStatsPayload } from '../../lib/admin/own-analytics-logic.js';
 
 /** An admin dashboard read, not a fire-and-forget event write — longer than
  *  the 2s used for best-effort sends elsewhere, still bounded. */
@@ -50,7 +50,7 @@ export interface FetchOwnTrackerStatsOptions {
 
 /**
  * Throws when the sink cannot be reached or returns a non-2xx — the caller
- * (`admin-traffic.ts`) treats that as a real 500, the same posture the
+ * (`admin-analytics.ts`) treats that as a real 500, the same posture the
  * Netlify branch takes for an unexpected failure (this proxy has no
  * per-tenant "not enabled" gap to distinguish, unlike the paid Analytics
  * add-on — configured or not is the only two-state split here).

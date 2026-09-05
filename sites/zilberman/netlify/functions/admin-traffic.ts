@@ -1,14 +1,9 @@
 /**
- * Site shim for 'site_zilberman': instantiates the core `admin-traffic` handler with
- * this site's SiteBinding. The implementation is fleet law in
- * packages/core/server/functions/admin-traffic.ts; this file is the per-site wire.
- *
- * Functions-1.0: the handler is a named `handler` export.
+ * T21.9b — compatibility shim. The dashboard is now `admin-analytics`
+ * (`/admin/analytics`, `.netlify/functions/admin-analytics`); this file keeps
+ * the OLD function URL (`/.netlify/functions/admin-traffic`) answering for one
+ * wave so nothing that already bookmarked or cached the old path breaks
+ * mid-rollout. New callers should use `admin-analytics`. Remove this file
+ * once the old path has had a full deploy cycle with no traffic.
  */
-import '../../config/policy-bindings.js';
-import { createHandler } from '../../../../packages/core/server/functions/admin-traffic.js';
-import { siteBinding } from '../../config/site-binding.js';
-
-export * from '../../../../packages/core/server/functions/admin-traffic.js';
-
-export const handler = createHandler(siteBinding);
+export { handler } from './admin-analytics.js';
