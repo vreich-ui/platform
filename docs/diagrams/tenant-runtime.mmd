@@ -1,0 +1,15 @@
+flowchart TB
+  subgraph edge["Netlify project for one tenant (base directory = sites/&lt;client&gt; or repo root)"]
+    cdn["Static HTML + /_astro/*<br/>(dist/, immutable 1y)"]
+    fn["Netlify Functions (esbuild)<br/>sites/&lt;client&gt;/netlify/functions/*.ts → packages/core/server/functions/*.ts<br/>48 core handlers · 49 shims per tenant (50 on drlurie), each bound to SiteBinding"]
+    sched["Scheduled: mcp-keepalive */5 · editorial-request-sweep */5 · membership-sweep daily"]
+    blobs[("Netlify Blobs (21 namespaces)<br/>site-objects · artifacts · artifact-index · users · governance<br/>agent-chats · editorial-requests · tracking-events · commerce · …")]
+  end
+  reader["Reader"] --> cdn
+  reader -->|"/img/*, /pdf/*"| fn
+  reader -->|"/api/t"| fn
+  agent["MCP client"] -->|"/mcp, /oauth/*"| fn
+  editor["Admin UI (Netlify Identity JWT)"] -->|"/admin/* pages"| cdn
+  editor -->|"admin-* functions"| fn
+  fn --> blobs
+  sched --> fn

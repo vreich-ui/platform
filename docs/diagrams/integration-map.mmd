@@ -1,0 +1,59 @@
+flowchart TB
+  subgraph clients["MCP / chat clients"]
+    claude["Claude connector<br/>(claude.ai)"]
+    gpt["ChatGPT Custom GPT<br/>(Actions facade)"]
+    scripts["scripts/*.mjs<br/>(publish key)"]
+    browser["Admin UI<br/>(React islands)"]
+  end
+
+  subgraph tenant["Tenant Netlify site (one per client)"]
+    mcp["/mcp<br/>functions/mcp.ts"]
+    oauth["/oauth/*, /.well-known/*<br/>functions/mcp-oauth.ts"]
+    plug["/api/plugin/*<br/>plugin-actions.ts"]
+    objstore["/.netlify/functions/object-store<br/>publish key"]
+    adminfn["admin-* functions<br/>Netlify Identity JWT"]
+    chat["admin-agent-chat<br/>+ -run-background"]
+    sched["scheduled:<br/>mcp-keepalive · membership-sweep<br/>editorial-request-sweep"]
+    blobs[("Netlify Blobs<br/>site-objects · artifacts · governance<br/>users · agent-chats · editorial-requests<br/>+ 10 more")]
+    astro["Astro build<br/>reads committed exports"]
+  end
+
+  subgraph ext["External systems (separate repos)"]
+    gh[("GitHub<br/>the content repo<br/>Git Data API")]
+    nlapi["Netlify API<br/>deploys + build hook"]
+    cdn["Netlify CDN<br/>public site"]
+    cmsagent["CMS-Agent<br/>Streamable-HTTP MCP"]
+    pdftool["pdf-tool<br/>pdf-x.netlify.app /mcp"]
+    kugeldata["kugel-data<br/>/api/tracking-sink"]
+    nlanalytics["Netlify Analytics<br/>analytics.services.netlify.com"]
+    stripe["Stripe<br/>Checkout + webhook"]
+  end
+
+  claude -->|"OAuth 2.1 bearer"| mcp
+  gpt -->|"OAuth 2.1 bearer"| plug --> mcp
+  claude -.->|"discovery"| oauth
+  scripts -->|"x-publish-key"| objstore
+  scripts -->|"MCP_HTTP_AUTH_TOKEN"| mcp
+  browser -->|"Identity JWT"| adminfn
+  browser -->|"Identity JWT"| chat
+
+  mcp -->|"in-process, x-publish-key<br/>+ x-cms-caller-actor"| objstore
+  adminfn --> blobs
+  objstore --> blobs
+  chat --> blobs
+  chat -->|"agent_converse"| cmsagent
+  sched -->|"workflow_get_run"| cmsagent
+  sched --> blobs
+
+  objstore -->|"materialize + Git Data API<br/>[skip netlify]"| gh
+  mcp -->|"release_to_production<br/>POST build hook"| nlapi
+  nlapi -->|"build"| astro
+  gh -->|"checkout"| astro
+  astro --> cdn
+
+  mcp -->|"tools/call + storage grant"| pdftool
+  pdftool -->|"writes bytes via grant"| blobs
+  cdn -->|"/api/t NDJSON"| kugeldata
+  adminfn -->|"Bearer PAT"| nlanalytics
+  cdn -->|"checkout"| stripe
+  stripe -->|"webhook (signed)"| adminfn

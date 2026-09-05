@@ -1,192 +1,71 @@
-# AGENTS (Project rules)
+# AGENTS.md — rules for any agent working in the `platform` repo
 
-## Definition of "converted" — NO HALF MEASURES (Wolf, 2026-07-10, GOVERNING)
+> Rewritten 2026-09-05 from the accumulated rule files; the previous versions are archived verbatim at `docs/history/AGENTS-2026-09-05.md` and `docs/history/CLAUDE-2026-09-05.md` (history, not law). **Map first, rules second:** read [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md) before touching anything. `CLAUDE.md` points here; this file is canonical.
 
-The project goal is: **agents edit objects on every page through the MCP.** "Convert
-an object" means exactly that and nothing less. An object is converted ONLY when ALL
-five hold (full definition + recipe: `docs/cms-architecture/conversion-playbook.md`):
+## 1. What you are working on
 
-1. **Renders** in Astro from the object (the four build gates).
-2. **Store-backed** — a real record in the **production object store** (`object_inventory`
-   returns it), not merely a committed git export. A rendered export with no store
-   record is a **rendered stub, not a converted object**.
-3. **Round-trips** — an agent can perform **every permitted action** end-to-end via MCP
-   (checkout → each patch op → publish → release → re-render), proven not assumed.
-4. **Contract-complete** — every permitted action is in `object_contract` AND backed by
-   a real MCP server tool. A permitted action with no tool/contract entry is itself part
-   of the conversion — build it.
-5. **Recorded** — `object-inventory.md` row + `state-of-play.md` entry, same change.
-   **No record = not converted.**
+A white-label, multi-tenant, **agent-first publishing engine**. `packages/core/**` is fleet law (one implementation, every tenant); `sites/<client>/**` is per-tenant data and bindings; the root `netlify.toml` / `netlify/functions/**` / `astro.config.ts` belong to the **drlurie** tenant. Content truth is the per-tenant Netlify Blobs object store; `sites/<client>/data/site/**` is a **generated** export. Architecture and evidence: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the documents it links.
 
-Hard rules: no half measures / no unfinished work (a "convert X" task is done only when
-X passes all five); **after every session, update the documentation** (no written record
-= not converted). Reality as of 2026-07-13: **forty-one objects converted** (the 37 below
-+ the 3 W5 pages + the first article object, both credentialed 2026-07-13) — the 3 nav
-objects, all 12 page objects (home + about + 8 W1 interior/system pages + page_contact +
-page_thank_you), the 12 shared sections under home/about, the 3 templates, the
-`tax_drlurie` taxonomy registry (curated agent-editable vocabulary; resolveTaxonomyTerm is
-live), and the `site_drlurie` site singleton (W4, credentialed run 2026-07-11: the layout
-renders brandTokens/logo/chrome/metadataDefaults/defaultNavigation from its export via
-`set_site_fields`; urls/blog carried, config.yaml authoritative for routing — Wolf B2).
-All proven by credentialed runs on 2026-07-11; no page renders from an unbacked
-export anymore. The section-type palette is fully generic (`about`/`contact` decomposed,
-`thank_you`→`form_confirmation`). W3 step 2 SHIPPED (2026-07-11): the bounded
-publish-article enforcement hook (registry-gated, skips when no registry) + one-time
-frontmatter normalization (93 posts) + registry display labels. The 28-invisible-posts
-caveat is CLOSED (2026-07-11: 10 junk posts deleted, 18 stamped with `published_time`).
-Agent-CREATED pages are live end-to-end (2026-07-11, B1 closed): the object-page
-catch-all serves any published Page object whose route no file owns — create →
-publish → release → live, zero code. Write-time guardrails (2026-07-11, traps
-5+14 closed): validateObject blocks, at patch/create/publish, content that would
-break the deploy (protected env values in any encoding; repo-file hotlink URLs)
-or the build (per-component rich-text vocabulary via the real splitters).
-W6 CONVERTED (2026-07-12, credentialed run same day): `listing`/`content_detail`
-PageTypes are defined law (all five implemented; content_detail publishes with
-zero sections) and six page objects (library, topics ×2, category, tag, article)
-make listing headings/copy/SEO agent-editable — first lede = header block, extra
-sections render after the list/article, per-term objects carry `%term%` pattern
-copy — while query machinery stays the audited build-time derivation.
-Byte-identical cutover; all six store-backed, round-tripped, published, released
-(store === seed === export). Hidden sections are filtered at the resolver on
-every render path (never-render-private). W5 was RE-GROUNDED in the shop module
-(`docs/cms-architecture/06-shop-module-plan.md`; the shop build runs in its own
-session; /services awaits a copy-or-delete call). **W7 CONVERTED (2026-07-13:
-W7.3+W7.8 built, W7.9 credentialed run same day — demo article live at
-/object-model-demo; seed taxonomy fixed to registry terms)**: `content_item` is the ninth
-governed type — annotated-node articles (per-block `private.strategy`
-hook/agitation/…/resolution + `intent`; envelope claims/scores/lineage;
-plain-text or rich_text.v1 bodies), six node ops with exact inverses,
-`create_variant`, one slug space with the committed posts, the
-reader-projection leak rule, and per-node canvas chips on the standard
-EditSession → `update_node` → publish path. The 83 committed .md posts were
-WIPED (Wolf 2026-07-13: "mostly junk … needs rewriting") and replaced by a
-ten-article corpus (content_item objects, two per registry category;
-`scripts/lib/articles-corpus-seed-data.mjs`) — the `post` collection is now
-permanently empty. Wolf 2026-07-13 (resolves
-OQ-W7-1): reverse support NOT required — no alias layer; legacy article
-tools/functions may be updated or retired as W7.2/W7.5/W7.7 land, preserving
-functionality on the object substrate.
+## 2. Governing rulings still in force (Wolf)
 
-## Core structure — read `docs/cms-architecture/core-structure.md` FIRST
+| Ruling | Meaning in practice | Record |
+|---|---|---|
+| **Agents edit objects on every page through MCP** — "converted" has five criteria: renders from the object · store-backed · round-trips every permitted action via MCP · contract-complete (`object_contract` + real tool) · recorded (`docs/cms-architecture/object-inventory.md` + `conversion-map.md`) | No half measures: a "convert X" task is done only when all five hold. Rendering-only work is "rendered, not converted" | `docs/cms-architecture/conversion-playbook.md` (2026-07-10) |
+| **Flexible objects, not a site replica** | Prefer reusable, agent-configurable components (a `content_grid` an agent can repoint) over bespoke per-page types. If an agent cannot repoint it without a code change, generalize it | `docs/cms-architecture/design-principles.md` |
+| **Contentful content model** | Typed entries + `rich_text.v1` for rich fields; no HTML strings | `docs/cms-architecture/core-structure.md` |
+| **R8 finish-line directive** | Make reasonable decisions, record them, keep moving; halt only on genuine account-authority gates | `docs/cms-architecture/decisions/2026-07-26-platform-site-ruling.md` |
+| **Parity laws P1–P5** | P1: a `packages/core` change that alters what a tenant's tree / `netlify.toml` / env / seeds must contain is incomplete until applied to every `sites/<client>` in the same change. P2: a new env var lands in the env table + `ENV_CHECKLIST` + every site (or degrades with a catalogued `error_code`) and is covered by the capability probe. Tool surfaces are uniform except via `OPTIONAL_HANDLER_TOOLS` with a recorded ruling | `docs/cms-architecture/16-genesis-parity-plan.md` |
+| **Membership verbs are human-only** (reads included); every Netlify Identity token lands on `/admin/accept` | `handleMembershipVerb`'s first line 403s `membership_requires_human` for any agent principal — for `list` as much as for `purge`; never consume an Identity token elsewhere | `docs/cms-architecture/18-membership-plan.md`; gate at `packages/core/server/lib/membership/verbs.ts:332` |
+| **A request is a record, not a chat** | `req_<flow>_<topic>_<yyyymmdd>_<nn>` is the correlation key; only the sweep writes a running request's status; red means a step *died*, a held gate is amber | `docs/cms-architecture/19-editorial-requests-plan.md` |
+| **PDF: one-call render, warn-only quality** | Use `render_article_pdf`; quality findings never block; only typed pdf-tool failures are failures | `docs/cms-architecture/decisions/2026-09-03-pdf-fortification-rulings.md` |
+| **Autonomous publishing is the default**; every gate has an id; per-tenant policy may set a type to require approval | `sites/<client>/config/approval-policy.ts`; `content_item` is autonomous on drlurie | `docs/agents/publishing-policy.md` |
+| **The publishing-plugin charter is never widened** | The charter is *derived*, not hand-kept: tool classes `read`/`draft`/`creation`/`publication`, plus `release_to_production` by name, minus `PLUGIN_TOOL_DENYLIST`. Adding a class, adding a name to the privileged allow-list or removing a denylist entry needs a ruling. It is a **charter, not a permission boundary** — enforced (403 `tool_not_in_plugin_charter`) only on `/api/plugin/*`; on `/mcp` the same list is advisory | `packages/core/server/lib/plugin/build-tools.ts` (constraint restated at `docs/plugin/recon-genesis.md:86`) |
+| **Article sourcing** | Every `content_item` carries sources for its claims; the system warns on missing sources, never blocks (`article_claim_substrate`) | `packages/core/server/lib/object-validate.ts:45,2366-2378`; procedure in `docs/agents/publishing-policy.md` |
 
-The system standardizes on **Contentful's content model**: typed entry objects
-(pages/sections — already built) + **Contentful Rich Text** JSON for all rich
-content fields (replaces HTML strings). That doc has the canonical example for each
-level and the ordered task list to finish the CMS. It is the entry point.
+## 3. Hard constraints — every task
 
-## Design north star — flexible objects, not a site replica (READ FIRST)
+1. **Never hand-edit `sites/<client>/data/site/**`** or treat it as canonical; never "fix" content by editing JSON in git. Content changes go through the object verbs.
+2. **Additive, minimal diffs.** The public site must remain fully functional after every commit. One task, one commit (or one squashed commit per wave), minimal diff; flag unrelated cleanup separately.
+3. **Do not change functional architecture to make documentation simpler.** Document reality; open a `KNOWN_ISSUES.md` entry for what should change.
+4. **Deleting a file requires verifying every importer first** (`rg`), not a task's say-so.
+5. **`version` and `content_revision` are independent**; lock and publish writes bump `version` only.
+6. **`route`-kind navigation targets are deliberate** — do not "fix" them to `page`-kind before the page object exists.
+7. **Never commit the literal value of `GITHUB_REPOSITORY`** (this repo's `owner/name`) or any full `https://github.com/<owner>/<repo>/…` URL: Netlify's secrets scanner fails the build. Reference PRs as `#NNN`. `SECRETS_SCAN_OMIT_KEYS` is a backstop, not permission.
+8. **Tool count, tool tiers and plugin allow-lists are test-pinned** (`packages/core/server/lib/mcp-tool-definitions.test.ts`, `tests/netlify/plugin-manifest.test.ts`). Extend those tests; never add a parallel test file.
+9. **Enabling a tracking provider ships its CSP hosts in every `netlify.toml` in the same change** (`tests/netlify/csp-drift.test.ts`).
+10. **Core never contains a site literal** (`tests/scripts/core-no-site-literals.test.mjs`); env is read through `SiteBinding` names.
+11. **Retired mechanisms stay retired.** `publish-article.ts`, `save_json_blob_*`, per-stage workflow tools, Clerk auth, `admin-workflow-lock.ts` and `/admin/publish` are deleted with no successor. `/admin/traffic` is retired behind a 301 to `/admin/analytics`, and its function URL keeps a one-line re-export shim marked for deletion. The unbuilt ChatKit widget JSON under `src/chatkit/` is dead residue, not a live path. A doc or comment naming any of them describes history — do not resurrect or pattern-match against one.
+12. **`content_item` creation from admin chat is refused (ART-1)**; the plugin and CMS-Agent create articles directly over the tenant `/mcp` object verbs.
 
-We are building a **flexible content backbone, not reproducing today's pages
-one-for-one.** Prefer **reusable, agent-configurable components** (a `content_grid`
-an agent can point at any content and set to N cells) over **bespoke per-page types**
-(a section that renders exactly one page). Byte-identical cutover was migration
-_safety_, not the goal — "an agent can now reconfigure this to play a different role"
-is. **Litmus test:** if an agent can't repoint or reuse a thing without a code
-change, it's a replica, not backbone — generalize it. Full rule + consequences:
-`docs/cms-architecture/design-principles.md`. This **governs** where the phased-plan's
-"faithful reproduction" / "new component type per page" framing conflicts.
+## 4. Testing conventions
 
-## Rule summary
+- `npm test` runs three stages: `tsc -p tsconfig.test.json` + `node --test` over `tests/netlify/**`, then `tests/scripts/*.test.mjs`, then `packages/core/cli/capture/*.test.mjs`. 5,188 tests at `6789644`, offline.
+- **Logic-first, no new deps.** There is no DOM/component test stack and `tsconfig.test.json` excludes `packages/core/admin/**/*.tsx`. Extract each UI decision into a pure module under `packages/core/lib/admin/` and test it with `node:test`. Never add jsdom / testing-library. ESLint's `react-hooks/rules-of-hooks` is the *only* gate on hook-order bugs in `.tsx`.
+- Every task ships its own acceptance test. Repo-wide invariants go in `tests/scripts/*.test.mjs`.
+- `npm run check:astro` and the CI `fleet` matrix only exercise drlurie's config; build another tenant explicitly with `npx astro build --config sites/<client>/astro.config.ts` when you touch it.
+- An **adversarial review pass over the final diff is mandatory before delivery** — green tests do not cover `.tsx`, and the review has caught crash-level bugs in every wave so far. The reviewer applies its own fixes.
 
-- Preserve the repository, remote MCP, and artifact workflow rules below unless a task explicitly changes them.
-- Before starting Codex work, identify the correct base branch and dependency chain.
-- For related or multi-step work, prefer an integration branch or the latest dependent branch instead of assuming `main`.
-- Keep page-specific guidance in focused docs under `docs/agents/`.
-- Before publishing any `content_item` article, read `docs/agents/publishing-policy.md` — the authoritative agent publishing policy (object path, functional blocks, media/`/img` rules, publish→release batching, gates, error recovery). It supersedes the legacy tool sequences in the older `docs/agents/*.md`.
+## 5. Delivery and git
 
-## Repository Notes
+- Work on a branch named for the task/wave; **never push to `main` directly**.
+- **Delivery = branch + pull request on GitHub** (via the GitHub connector when the sandbox cannot push). Merge only when the wave's brief or Wolf authorizes it. The former `land.command` patch-zip delivery is superseded (2026-09-05) and must not be reintroduced.
+- Per-milestone commits with the task id first (`T21.9b: …`), not one end-of-session commit. PR bodies state what landed and what needs Wolf's hands.
+- Content exports commit with `[skip netlify]`; a code push builds every tenant whose `ignore` rule matches. Never fire a production release as a side effect of a code task.
 
-- Site image assets live under `https://kugelmedia.netlify.app/drlurieblog/`; assume they are always available for this site.
-- Use `https://kugelmedia.netlify.app/favicon.png` for the favicon.
+## 6. Where the procedures live
 
-## Codex task sequencing / base branch
+| Need | Read |
+|---|---|
+| Publishing an article as an agent (tool sequence, media rules, gates, recovery) | `docs/agents/publishing-policy.md` (authoritative; supersedes older `docs/agents/*.md` sequences) |
+| Converting a surface to an object | `docs/cms-architecture/conversion-playbook.md` (recipe + trap table) |
+| Provisioning a tenant | `docs/cms-architecture/new-client-acceptance.md`, `site-provisioning-runbook.md`, `secrets-runbook.md` |
+| Object catalogue (hand-maintained, drifts) | `docs/cms-architecture/object-inventory.md`; prefer the `object_inventory` / `object_contract` MCP tools for live truth |
+| Task briefs and queue | `docs/cms-architecture/cms-pipeline/T<phase>.<n>-*.md`, `queue.tsv` — check `depends_on` and `mode` (`checkpoint` waits for Wolf; `human_gate` needs a human action) |
+| What is known broken | `docs/KNOWN_ISSUES.md` |
 
-- For multi-task plans, do NOT assume `main` as the base branch.
-- Prefer an integration branch like `codex/<feature>` for the plan, or explicitly base from the most recent dependent branch.
-- Include PR dependency note lines like `Depends on: #<PR_NUMBER>` when a PR depends on another PR, and clearly mention the required merge order.
-- Warn before creating parallel PRs that touch the same files, because they are likely to create sequencing conflicts or duplicate work.
+## 7. Tenant notes
 
-## CMS architecture project — mandatory context
-
-If any task touches the object store, Pages, Sections, Navigation, Taxonomy,
-Site config, Templates, or anything under `docs/cms-architecture/`, read these
-files in full before writing any code, in this order:
-
-1. The task's standalone brief: `docs/cms-architecture/cms-pipeline/T<phase>.<n>-*.md`
-   — its header carries the task's `depends_on`, `mode`, and recommended
-   model/effort. **Check `depends_on` before starting — if a dependency isn't
-   built and merged yet, stop and say so.**
-2. `docs/cms-architecture/cms-pipeline/queue.tsv` — task ordering and per-task
-   mode/model/effort (the runner config; see `README.md` alongside it).
-3. For full schema/type detail: `docs/cms-architecture/02-architecture-and-schema.md`
-4. For permission/action rules: `docs/cms-architecture/03-mapping-and-agent-contract.md`
-5. For the full per-task spec: `docs/cms-architecture/05-task-breakdown-and-open-questions.md`.
-   (A consolidated master reference, `cms-architecture-consolidated.md`, is named
-   by some briefs but has not been committed — the numbered source docs are
-   ground truth where anything conflicts.)
-6. `docs/cms-architecture/conversion-map.md` — the FULL tree of actual + potential
-   objects (attributes, dependencies, dependents, Wolf's conversion priority).
-   **Pick conversion targets and their boundaries from here.** Then
-   `docs/cms-architecture/object-inventory.md` — the current catalog of content
-   objects (each marked LIVE / SHELL / TODO), every object type's use + boundaries,
-   and the MVP todo list. Read it to see what is already an editable object vs. still
-   hardcoded. Both are hand-maintained and drift easily: **update the matching row/
-   status mark in the SAME change** when you cut over a surface or publish/retire an
-   object. For always-current machine truth, prefer the `object_contract` /
-   `object_inventory` MCP tools over any doc.
-7. **Converting a surface to an object? `docs/cms-architecture/conversion-playbook.md`
-   is mandatory** — the exact lifecycle recipe, the call/response field names (do
-   not guess them), and the trap table (deep-merge patch semantics, reference
-   seeding, rich-text vocabularies, the expected sandbox publish block).
-
-## CMS hard constraints — every task, no exceptions
-
-- ~~`admin-workflow-lock.ts`, `publish-article.ts`, and existing article MCP
-  tools are **off-limits**.~~ **VOID since 2026-07-29** — those files and the
-  `save_json_blob_*` / per-stage tools were DELETED when the legacy article
-  pipeline was retired (ruling OQ-W11-6). There is nothing left to protect and
-  no successor alias; a doc or comment still naming them describes history.
-  Articles are `content_item` objects on the governed object verbs.
-- Every new file is additive. The public site must remain fully functional
-  after every commit.
-- One task, one commit. Do not bundle cleanup or unrelated fixes.
-- Commit message must begin with the task ID, e.g. `T0.1: envelope schema module`.
-- Do not open a PR unless the task brief explicitly says to.
-- Do not push to `main`. Work on the task's integration branch.
-- `route`-kind nav targets are intentional — do not "fix" them to `page`-kind.
-- The `content_revision` counter and the `version` counter are independent —
-  never conflate them. Lock writes bump `version` only, never `content_revision`.
-
-## CMS amendment log — bake these in, do not miss them
-
-When implementing body schemas (T0.2), all of the following must be present:
-
-- M-1: `NavItem.description`
-- M-2: `groups[].slot`
-- M-5: `groups[].target` (stored, not rendered as a link)
-- M-7: `NavItem.icon` and `NavItem.ariaLabel`
-- Transitional `NavTarget {kind:'route', href}` union variant (deliberate, not a placeholder)
-- `shared_ref` union member in section schema
-- Transitional `content_grid` static-cards variant
-
-M-8 (grid manual+fallback) is deliberately NOT in T0.2 — it lands in T3.3.
-
-## Remote MCP / ChatGPT connector notes
-
-- Production ChatGPT/Atlas connects to `https://drluriescience.netlify.app/mcp` and should see the connector name `Dr_Lurie_MCP_Server`.
-- Keep `/mcp` routed through Netlify (`netlify.toml`) to the site function in `netlify/functions/mcp.ts` — the per-site shim over the core server in `packages/core/server/functions/mcp.ts`. (The `mcp/save-json-blob-mcp/` package that used to serve local stdio/standalone HTTP tests was deleted with the legacy pipeline on 2026-07-29.)
-- If ChatGPT reports `No tool was defined under the given paths`, verify the deployed `/mcp` route first with `initialize` and `tools/list` JSON-RPC requests before changing tool names or schemas.
-- Do not expose `NETLIFY_PUBLISH_SECRET` or `PUBLISH_SECRET` to browser code, tool schemas, prompts, or checked-in client configuration. MCP tool calls must use server-side environment variables only.
-
-## Agent artifact workflow rules
-
-- When an agent generates artifacts (images, audio, video, binary files, or markdown files), it must upload them immediately and store the returned `ArtifactReference`/`blobKey` in MCP request state or the relevant agent output. For generated binary files and images, use `create_artifact_upload_intent` plus raw HTTP `POST /api/artifacts/upload` as the default upload path. `save_artifact` remains available only for legacy small-artifact MCP compatibility.
-- Agents must never attempt to generate deterministic artifact blob keys themselves. Let the artifact tool return `blobKey`, `sha256`, size, content type, and timestamp.
-- Treat every `ArtifactReference` as immutable. If an artifact must be regenerated, upload it again and use the newly returned reference.
-- If an artifact upload tool call or direct HTTP upload fails or times out, retry the same upload flow when safe and rely on server-side idempotency/checksum deduplication instead of inventing a new handle.
-- Before publishing, re-fetch the workflow/request state and use the current `artifactReferences` returned from MCP. Publishing payloads may include `mediaEntries` (existing base64) and/or `artifactReferences`; do not publish until artifact references are present and resolvable by the server-side publishing path.
-- Do not ask users for, display, or pass Netlify/GitHub publishing credentials. Artifact upload, artifact resolution, and publication use server-side environment variables only.
-
-## Page-specific rules
-
-- See `docs/agents/shop-layout.md` for `/shop` mobile rules.
+- MCP connector names are per tenant (`sites/<client>/config/site-identity.ts:mcpServerName`): `Dr_Lurie_MCP_Server`, `Platform_MCP_Server`, `Zilberman_MCP_Server`, `Fernwell_MCP_Server`. Production ChatGPT/Claude connect to `https://<host>/mcp`.
+- drlurie's shared asset host `https://kugelmedia.netlify.app` is for favicon/editor hints only; article media must be `/img/{id}/{sha256}.ext` artifacts.
+- If a client reports `No tool was defined under the given paths`, verify the deployed `/mcp` with `initialize` + `tools/list` before touching tool names or schemas.
+- `/shop` mobile rules: `docs/agents/shop-layout.md` (drlurie only).

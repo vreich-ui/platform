@@ -1,0 +1,51 @@
+sequenceDiagram
+  autonumber
+  participant A as Agent (Claude/ChatGPT)
+  participant AS as OAuth AS (mcp-oauth.ts)
+  participant M as /mcp (functions/mcp.ts)
+  participant OS as object-store.ts (in-process)
+  participant V as object-verbs + publish-gate
+  participant GH as GitHub Git Data API
+  participant NL as Netlify API / build hook
+
+  A->>M: POST /mcp (no token)
+  M-->>A: 401 + WWW-Authenticate (RFC 9728 resource metadata URL)
+  A->>AS: GET /.well-known/oauth-authorization-server
+  AS-->>A: RFC 8414 metadata (S256 PKCE, scopes mcp offline_access)
+  A->>AS: POST /oauth/register (RFC 7591)
+  A->>AS: GET /oauth/authorize -> /admin/authorize (Netlify Identity login)
+  AS-->>A: code -> POST /oauth/token -> access + refresh token
+
+  A->>M: tools/call object_create {object_type, body, agent_name, idempotency_key}
+  M->>M: getAuthResult: agent key? -> OAuth? -> shared token?
+  M->>M: preflightToolCall: surface kill-switch, per-member write budget
+  M->>OS: POST (in-process) x-publish-key + x-cms-caller-actor(derived)
+  OS->>V: handleObjectVerb create
+  V-->>A: {object_id, record_version}
+
+  A->>M: object_checkout -> lock_token
+  A->>M: object_patch {ops, lock_token, expected_record_version}
+  A->>M: object_validate
+  M-->>A: {valid, errors[], warnings[]}
+
+  A->>M: object_publish {object_id, lock_token, producer}
+  OS->>V: publish_by_time
+  V->>V: checkPublishGate (approval-policy.ts per type)
+  V->>V: materialize -> MaterializedFile[]
+  V->>GH: ref -> commit -> blobs -> tree -> commit -> PATCH ref (force:false)
+  GH-->>V: commit_sha  (message carries "[skip netlify]")
+  V->>V: stamp published_time + publish_receipt
+  M-->>A: {receipt, production:{committed:true, live:false}}
+
+  A->>M: release_to_production {idempotency_key}
+  M->>NL: POST NETLIFY_BUILD_HOOK_URL
+  M->>GH: GET git/ref/heads/main -> target commit
+  loop until terminal or budget exhausted
+    M->>NL: GET /sites/{id}/deploys
+  end
+  M-->>A: {released, productionConfirmed, deploy}
+
+  A->>M: deploy_status {commit}
+  M-->>A: {deployStatus:"ready", productionConfirmed:true}
+  A->>M: verify_article_images {url, expectedImages, commit}
+  Note over M: drlurie only - OPTIONAL_HANDLER_TOOLS
