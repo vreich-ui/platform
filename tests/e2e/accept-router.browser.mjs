@@ -24,6 +24,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { withTestTrafficHeaders } from '../../packages/core/cli/capture/test-traffic-header.mjs';
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const args = process.argv.slice(2);
 const argOf = (flag, fallback) => {
@@ -78,7 +80,10 @@ const main = async () => {
   const executablePath = argOf('--chromium', process.env.CHROMIUM_PATH);
   const { server, origin } = await serve();
   const browser = await chromium.launch(executablePath ? { executablePath } : {});
-  const page = await browser.newPage();
+  // R7.3: this loads a real built page (loader and all) — tag the navigation
+  // (and thus the loader's own beacon) as test traffic for the sink.
+  const context = await browser.newContext(withTestTrafficHeaders());
+  const page = await context.newPage();
   let failed = 0;
   const check = async (label, from, expectPath, expectHash) => {
     await page.goto(`${origin}${from}`, { waitUntil: 'load' });
