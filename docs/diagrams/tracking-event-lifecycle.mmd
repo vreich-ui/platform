@@ -1,0 +1,38 @@
+sequenceDiagram
+  autonumber
+  participant B as Browser (loader)
+  participant T as /api/t (track-ingest.ts)
+  participant M as Blobs 'tracking-events'
+  participant S as kugel-data sink
+  participant P as Postgres
+  participant A as admin-analytics.ts
+  participant U as /admin/analytics
+
+  B->>B: pageLoad() → push() builds ClientTrackingEvent
+  B->>B: queue, flush at max_events or max_wait_ms
+  B->>T: POST tracking_batch.v1 (sendBeacon, falling back to fetch keepalive)
+  T->>T: reject foreign Origin, token bucket (60 cap, 10/s)
+  T->>T: parse batch (content-type agnostic), ≤25 events, ≤64KB
+  T->>T: readGeo(x-nf-geo) → country+subdivision, read UA, read IP
+  T->>T: computeVisitorHashes(salt,date,ip,ua,project) → vhash/shash, IP discarded
+  loop per event
+    T->>T: clientTrackingEventSchema.safeParse, drop /admin paths
+    T->>T: sanitizeObjectRef + sanitizeTrackingProps
+    T->>T: buildTrackingEvent → trackingEventSchema.parse
+  end
+  T->>S: POST NDJSON, Bearer, AbortSignal.timeout(2000)
+  alt sink 2xx
+    S->>P: INSERT … ON CONFLICT (event_id) DO NOTHING
+    P-->>P: AFTER INSERT trigger → pg_notify('tracking_events', {ids})
+  else sink absent / non-2xx / timeout
+    T->>M: appendTrackingEvent (create-if-absent) — at-most-once loss window closes here
+  end
+  T-->>B: 202 {ok, accepted, dropped, country}
+  Note over M,S: manual replay only — scripts/tracking-mirror-replay.mjs --execute
+  U->>A: GET admin-analytics?source=own&days=7|30
+  A->>S: GET /stats?project_id&days (8s timeout)
+  S->>P: 7 queries, aggregate in JS (_shared/stats.ts)
+  S->>S: findIdentifierLeaks(response) — 500 if anything leaks
+  S-->>A: OwnTrackerStatsPayload
+  A->>A: surfaceSplit() joins top_objects to local publish receipts
+  A-->>U: {configured,enabled,days,stats,surfaces} + ETag, 5-min memo

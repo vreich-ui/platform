@@ -1,0 +1,63 @@
+flowchart TB
+  subgraph BROWSER["Reader browser"]
+    LOADER["own-tracker loader<br/>lib/tracking/loader/{index,core,dom,bridge,persistent-id}.ts<br/>hashed same-origin asset"]
+    CONSENT["consent runtime (inline)<br/>lib/tracking/consent/runtime.ts"]
+    ADAPTERS["vendor heads (all disabled today)<br/>lib/tracking/adapters/*.ts"]
+    CFG["#trk-config JSON<br/>lib/tracking/assemble.ts"]
+  end
+
+  subgraph BUILD["Astro build (per tenant)"]
+    EXPORT["sites/&lt;t&gt;/data/site/tracking.json<br/>(GENERATED export of trk_&lt;site&gt;)"]
+    TS["TrackingScripts.astro / ConsentBanner.astro"]
+    DIMS["scripts/tracking-dims-push.mjs<br/>postbuild / netlify.toml build cmd"]
+  end
+
+  subgraph TENANT["Tenant Netlify site"]
+    T["/api/t → track-ingest.ts<br/>validate · enrich · relay · mirror"]
+    MIRROR[("Blobs store 'tracking-events'<br/>events/&lt;date&gt;/&lt;ts&gt;-&lt;uuid&gt;.json")]
+    CE["save-commerce-event.ts · stripe-webhook.ts<br/>claim-free.ts · get-purchase.ts · order-reissue.ts"]
+    CEB[("Blobs store commerce events")]
+    OPTIN["save-opt-in.ts → member-link.ts"]
+    ADM["admin-analytics.ts (GET, admin-gated)"]
+  end
+
+  subgraph SINK["kugel-data (separate repo/site)"]
+    ING["POST /api/tracking-sink (bearer, NDJSON)"]
+    COM["POST /api/tracking-sink/commerce"]
+    LNK["POST /api/tracking-sink/link"]
+    DMS["POST /api/tracking-sink/dims"]
+    PG[("Postgres: tracking_events · commerce_events<br/>member_link · object_version · producer<br/>node_strategy · experiment_weights")]
+    ST["GET /api/tracking-sink/stats (NO AUTH)"]
+    RU["GET /api/tracking-sink/rollups (bearer)"]
+    WT["GET /api/tracking-sink/weights (NO AUTH)"]
+    EW["experiment-weights (scheduled @daily)"]
+  end
+
+  NA["Netlify Analytics v2 API<br/>server/lib/netlify-analytics.ts"]
+  UI["/admin/analytics<br/>admin/AnalyticsWorkspace.tsx"]
+  OPS["operator scripts (manual)<br/>tracking-mirror-replay.mjs · tracking-mirror-prune.mjs"]
+
+  EXPORT --> TS --> CFG --> LOADER
+  TS --> CONSENT --> ADAPTERS
+  LOADER -->|"sendBeacon / fetch keepalive<br/>tracking_batch.v1 ≤25"| T
+  CONSENT -->|"GET /api/t?mode=region"| T
+  T -->|"NDJSON, 2s, at-most-once"| ING
+  T -.->|"on sink absent/failure, or blob_mirror:always"| MIRROR
+  MIRROR -.->|manual| OPS -.-> ING
+  CE --> CEB
+  CE -->|best-effort| COM
+  OPTIN --> LNK
+  DIMS -->|postbuild| DMS
+  ING --> PG
+  COM --> PG
+  LNK --> PG
+  DMS --> PG
+  PG --> ST
+  PG --> RU
+  PG --> WT
+  PG --> EW --> PG
+  ST -->|"own-tracker-stats.ts"| ADM
+  NA --> ADM
+  ADM --> UI
+  RU -.->|"no consumer in this repo"| UI
+  WT -.->|"no consumer in this repo"| UI

@@ -1,0 +1,52 @@
+flowchart TB
+  subgraph humans["Humans"]
+    wolf["Owner / editors<br/>(admin UI, admin chat)"]
+    chatapps["Chat apps with the<br/>publishing plugin<br/>(Claude, ChatGPT, Gemini)"]
+  end
+
+  subgraph platform["platform repo (THIS REPO)"]
+    direction TB
+    mcp["/mcp + /oauth per tenant<br/>packages/core/server/functions/mcp.ts"]
+    verbs["Object verbs + publish gate<br/>server/lib/object-verbs.ts"]
+    store[("Netlify Blobs per tenant<br/>site-objects · artifacts · users · …")]
+    exports["Committed exports<br/>sites/&lt;client&gt;/data/site/**"]
+    build["Astro build → static HTML<br/>packages/core/app/**"]
+    admin["/admin/* React app<br/>packages/core/admin/**"]
+    tracker["/api/t tracking relay<br/>server/functions/track-ingest.ts"]
+  end
+
+  subgraph cmsagent["vreich-ui/cms-agent  (autonomous plane)"]
+    wf["Workflows · nodes · runs<br/>client_manager reasoning"]
+  end
+
+  subgraph pdftool["vreich-ui/pdf-tool  (artifact foundry)"]
+    art["Images · PDFs · templates<br/>image search/import"]
+  end
+
+  subgraph data["vreich-ui/kugel-data  (analytics plane)"]
+    sink[("Postgres sink<br/>events · dims · rollups")]
+  end
+
+  gh[("GitHub<br/>content branch main")]
+  nl["Netlify<br/>build hook · deploys · CDN"]
+  na["Netlify Analytics"]
+
+  chatapps -->|"OAuth 2.1"| mcp
+  wolf --> admin
+  admin --> verbs
+  mcp --> verbs
+  verbs --> store
+  verbs -->|"materialize + commit<br/>[skip netlify]"| gh
+  gh -->|"branch main"| exports
+  exports -->|"content collections"| build
+  mcp -->|"release_to_production"| nl
+  nl --> build
+  build --> nl
+  wf -->|"publishes through<br/>each tenant's /mcp"| mcp
+  admin -->|"agent_converse<br/>(reasoning only)"| wf
+  mcp -->|"tools/call + storage grant"| art
+  art -->|"writes bytes<br/>into tenant blobs"| store
+  tracker -->|"NDJSON"| sink
+  build -.->|"postbuild dims push"| sink
+  admin -->|"stats proxy"| sink
+  admin --> na
