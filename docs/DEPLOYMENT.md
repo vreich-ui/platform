@@ -1,6 +1,6 @@
 # Deployment, Configuration & Scripts
 
-> **Status:** verified against the `platform` repo commit `6789644` (2026-09-05). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md).
 
 ## Purpose
@@ -34,7 +34,7 @@ flowchart TB
     N4 --> Edge4["CDN (dist/) + Functions + Blobs + /mcp"]
 
     Agent["Agent / MCP client\n(CMS-Agent, ChatGPT Actions, human admin)"] -- "object_publish over /mcp" --> Edge1
-    Edge1 -- "GitHub Contents API commit,\n[skip netlify] (no rebuild)" --> Exports
+    Edge1 -- "GitHub Git Data API commit\n(blobs → tree → commit → ref),\n[skip netlify] (no rebuild)" --> Exports
     Agent -- "release_to_production tool /\nadmin Release button" --> Hook["Netlify build hook (per project, 1 URL each)"]
     Hook --> N1
 
@@ -120,9 +120,10 @@ Root `tsconfig.json` (`extends: astro/tsconfigs/base`) hardwires `paths`:
 
 ## Function shims
 
-Root `netlify/functions/*` (50 files) is drlurie's function set. Each `sites/{platform,zilberman,fernwell}/netlify/functions/*` directory carries **49** files — an exact diff (`diff <(ls netlify/functions/) <(ls sites/platform/netlify/functions/)`) shows the root has exactly one extra file, `verify-article-images.ts`, which the other three do not carry.
+**Counts are generated, not hand-kept.** The authoritative names and per-tenant counts of core handler modules and shims are in [`generated/INVENTORY.md`](generated/INVENTORY.md) §1 (`node scripts/docs/inventory.mjs --write`; `tests/scripts/docs-inventory-fresh.test.mjs` fails when it is stale). The invariants that matter architecturally are:
 
-**Pattern** (confirmed against `netlify/functions/object-store.ts` and `sites/platform/netlify/functions/mcp.ts`): every shim is a thin, mechanical wire —
+- **One core module per function**: `packages/core/server/functions/<name>.ts` (non-test files) is fleet law; `packages/core/cli/create-site.mjs:coreFunctionNames()` enumerates that directory as the "expected" shim set and `packages/core/cli/admin-parity.mjs`'s `function-shims` / `shim-wiring` checks assert every tenant carries a correctly wired shim for each (`npm run fleet:parity`).
+- **One shim per core module per tenant**: root `netlify/functions/*` is drlurie's set; `sites/{platform,zilberman,fernwell}/netlify/functions/*` are the others'. Every shim is a thin, mechanical wire —
 ```ts
 import '../../sites/drlurie/config/policy-bindings.js';           // side-effect: registers policy providers
 import { createHandler } from '../../packages/core/server/functions/object-store.js';
@@ -130,16 +131,8 @@ import { drlurieSiteBinding } from '../../sites/drlurie/config/site-binding.js';
 export * from '../../packages/core/server/functions/object-store.js';
 export const handler = createHandler(drlurieSiteBinding);          // or `export default` for Functions-2.0 fns
 ```
-`packages/core/server/functions/*.{ts}` (52 files, 4 are `*.test.ts`, so **48** deployable core functions) is fleet law; `packages/core/cli/create-site.mjs:coreFunctionNames()` (line 1889) enumerates that directory as the "expected" shim set, and `admin-parity.mjs`'s `function-shims`/`shim-wiring` checks (lines 456-506) assert every expected name has a same-named shim in each tenant's `netlify/functions/`, importing `server/functions/<name>.js`, the `policy-bindings.js` side-effect import, and the correct export form (`export default` for a Functions-2.0 core fn detected via `export const config`, else a named `handler`).
-
-`verify-article-images.ts` is **not** one of the 48 core functions (`packages/core/server/functions/` has no such file) — it is a drlurie-only, fully self-contained function (669 lines, reads `PUBLISH_SECRET`/`NETLIFY_PUBLISH_SECRET` directly) that the parity audit therefore never flags as "missing" on the other tenants. `netlify/functions/mcp.ts:1-16` documents the asymmetry explicitly: "`verify-article-images` stays at the repo root and is still INJECTED rather than imported by core: it is a per-site function, and it serves the object path..., not just the retired legacy one." `sites/platform/netlify/functions/mcp.ts:4-7` states the converse: "This site has no legacy article path, so the legacy trio is not injected and the tools that need it are absent from this site's tool list — the correct outcome, not a gap." Net effect: only drlurie's `/mcp` advertises a `verify_article_images` tool.
-
-One further asymmetry, unrelated to parity tooling: `netlify/functions/admin-traffic.ts` (present in all four shim sets) is a **one-line compatibility re-export** — `export { handler } from './admin-analytics.js';` — with a comment marking it for deletion "once the old path has had a full deploy cycle with no traffic" (T21.9b). It has not been removed; see `## Defects / drift found` #7.
-
-| Tenant | Function count | Notes |
-|---|---|---|
-| drlurie (root `netlify/functions/`) | 50 | 48 core shims, +`verify-article-images.ts` (site-only), +`admin-traffic.ts` (deprecated shim) |
-| platform / zilberman / fernwell | 49 each | 48 core shims + `admin-traffic.ts`; missing `verify-article-images.ts` by design (no legacy article path) |
+- **Two shims have no core module** (`INVENTORY.md` §1 lists them): `verify-article-images.ts` is drlurie-only and self-contained (669 lines, reads `PUBLISH_SECRET`/`NETLIFY_PUBLISH_SECRET` directly; the sanctioned `OPTIONAL_HANDLER_TOOLS` exception, so the parity audit never flags it as missing elsewhere), and `admin-traffic.ts` (present in all four sets) is a one-line compatibility re-export of `admin-analytics` marked for deletion "once the old path has had a full deploy cycle with no traffic" (T21.9b, `netlify.toml` 301 `/admin/traffic → /admin/analytics`).
+- **Parity held at every audited commit**: at `420afbd` the six visual-identity functions added by #690/#692 (`admin-visual-identity-{import,propose,preview-sample,render-sample,regenerate-examples}`, `visual-standard-examples-background`) have shims on all four tenants and were added to `create-site.mjs`'s scaffold in the same change (`tests/fixtures/create-site-dry-run-acme.mjs`).
 
 ### Scheduled functions (identical schedules on all four `netlify.toml`)
 
@@ -239,8 +232,8 @@ So: a `packages/core` change rebuilds **every** tenant; a `sites/drlurie`-only c
 
 ### Content change (object publish + release)
 
-1. An agent or human calls `object_publish` over a tenant's `/mcp`. `packages/core/server/lib/object-publish.ts` materializes the record to its committed export path (`materializers/*`) and commits it via the GitHub Contents API with the commit message carrying `[skip netlify]` (`object-publish.ts:87` `NETLIFY_SKIP_MARKER`) — this **does not** trigger a Netlify build. The verb then stamps `published_time` + `publish_receipt` on the object record. A publish receipt proves the export landed in git; it proves nothing about what is live.
-2. Separately, `release_to_production` (`packages/core/server/lib/production-release.ts`, 345 lines) — called by the `release_to_production` MCP tool (agents) or the admin "Release to Production" button (humans), "shared by BOTH surfaces so there is one release path, never two" — resolves the target commit (defaults to the content branch HEAD via the GitHub ref API), POSTs the tenant's `NETLIFY_BUILD_HOOK_URL` exactly once via `triggerNetlifyBuild` ("the only thing here that can start a production build... there is deliberately no second env var and no other trigger path"), then polls Netlify deploy receipts until that commit's deploy reaches a terminal state, and reports whether production is confirmed to actually serve it (`ReleaseToProductionResult.released`/`productionConfirmed`).
+1. An agent or human calls `object_publish` over a tenant's `/mcp`. `packages/core/server/lib/object-publish.ts` materializes the record to its committed export path (`materializers/*`) and commits it via the GitHub **Git Data API** (`object-git-committer.ts`: blobs → tree → commit → `PATCH refs/heads/<branch>`, never the Contents API — that one is used only by `content-item-index.ts` to list `src/data/post/`) with the commit message carrying `[skip netlify]` (`object-publish.ts:87` `NETLIFY_SKIP_MARKER`) — this **does not** trigger a Netlify build. The verb then stamps `published_time` + `publish_receipt` on the object record. A publish receipt proves the export landed in git; it proves nothing about what is live.
+2. Separately, `release_to_production` (`packages/core/server/lib/production-release.ts`, 345 lines) — called by the `release_to_production` MCP tool (agents) or the admin "Release to Production" button (humans), "shared by BOTH surfaces so there is one release path, never two" — runs in this order (`production-release.ts:223-278`): refuse if `NETLIFY_BUILD_HOOK_URL` is unset (`build_hook_not_configured`) → **resolve the target commit first** (an explicit `commit` option, else the content branch HEAD via the GitHub Git refs API, `resolveBranchHeadCommit`; unresolvable → `commit_unresolved`, no build fires) → POST the tenant's `NETLIFY_BUILD_HOOK_URL` exactly once via `triggerNetlifyBuild` ("the only thing here that can start a production build... there is deliberately no second env var and no other trigger path"), then polls Netlify deploy receipts until that commit's deploy reaches a terminal state, and reports whether production is confirmed to actually serve it (`ReleaseToProductionResult.released`/`productionConfirmed`).
 3. `deploy-status.ts` (core function, root shim: `netlify/functions/deploy-status.ts`) and `netlify-deploys.ts` expose the same deploy-receipt polling as a standalone read (`deploy_status` MCP tool) so an agent can check progress without re-triggering a build.
 4. Caveat documented in `production-release.ts:22-25`: the build hook only helps if the project's Netlify builds are active and "Auto Publishing" is unlocked — under a locked deploy, Netlify still builds but does not publish, and `released:false`/`productionConfirmed:false` is the only symptom.
 
@@ -369,7 +362,7 @@ So: a `packages/core` change rebuilds **every** tenant; a `sites/drlurie`-only c
 
 6. **Root `postbuild` and `@site`/`~/assets` aliases are hardwired to drlurie.** `package.json:18` (`"postbuild": "node scripts/tracking-dims-push.mjs --export-root sites/drlurie/data/site"`) and `tsconfig.json`'s `paths` (`@site/*` → `sites/drlurie/*`, `~/assets/*` → `sites/drlurie/assets/*`) both name drlurie literally at the repo root. The per-tenant `netlify.toml` build commands correctly pass a site-relative `--export-root data/site` (folded into their one-line build command), so the *deployed* behavior is correct per tenant — but a root-level `npm run build && npm run postbuild` (exactly what CI's `build` job runs) always pushes drlurie's tracking dims, never a matrix site's, compounding defect #3's blind spot.
 
-7. **`admin-traffic.ts` compatibility shim was never removed.** `netlify/functions/admin-traffic.ts` (present in all four tenants' shim sets) is a one-line re-export of `admin-analytics.ts`, explicitly commented "keeps the OLD function URL... for one wave... Remove this file once the old path has had a full deploy cycle with no traffic" (T21.9b). The renaming PR (#688, this repo's current HEAD, "Analytics: rename the Traffic admin surface...") is the very commit this clone is pinned to, so the shim is at most one release old — noted here so it isn't missed at the next cleanup pass, not urgent.
+7. **`admin-traffic.ts` compatibility shim was never removed.** `netlify/functions/admin-traffic.ts` (present in all four tenants' shim sets) is a one-line re-export of `admin-analytics.ts`, explicitly commented "keeps the OLD function URL... for one wave... Remove this file once the old path has had a full deploy cycle with no traffic" (T21.9b). The renaming PR (#688 = `6789644`; three code pushes back at `420afbd`, so the shim has now had a full deploy cycle and is due for deletion rather than deferral — "Analytics: rename the Traffic admin surface...") is the very commit this clone is pinned to, so the shim is at most one release old — noted here so it isn't missed at the next cleanup pass, not urgent.
 
 8. **Three-way Node version disagreement.** `.nvmrc` pins `24`; `package.json engines.node` allows `>=20.9.0`; every `netlify.toml`'s `NODE_VERSION` is `"20"` (production); CI's `build` job matrix tests `[20, 22, 24]` while `check`/`discover-fleet`/`fleet`/`fleet-build-diff` all pin `22`. A contributor running plain `nvm use` gets Node 24 locally — two majors ahead of what Netlify actually deploys — though CI does cover 20 in the `build` job, so a Node-20-only failure would still be caught before merge (this is a workflow/DX rough edge, not a proven live bug).
 
@@ -381,13 +374,29 @@ So: a `packages/core` change rebuilds **every** tenant; a `sites/drlurie`-only c
 - Live values of `CACHED_COMMIT_REF`/`$COMMIT_REF` behavior under Netlify's actual build-skip evaluation (the `ignore` command) could not be exercised in this sandbox (no live Netlify project) — the skip logic was read from the `netlify.toml` comment and command text only, not observed live.
 - Whether `SKIP_RELEASE` and `MCP_ENABLE_ADMIN_TOOLS` (both grepped as read somewhere) are still load-bearing in a current code path or are stale flags from an earlier wave — not traced to a specific call site in this pass.
 - Live Netlify project settings (actual base directories, actual scheduled-function enablement, actual Auto Publishing lock state per tenant) — this task verified only what the *committed config* declares, not the live Netlify dashboard state for any of the four projects.
-- Whether the "49 vs 48" function-shim count nuance reconciles exactly per `admin-parity.mjs`'s live `--all` run — the audit script was read but not executed in this pass (it needs `--site`/`--root`/`--all` and touches only the repo, so it *could* be run in a future pass at low cost). By file listing the delta is fully accounted for: 48 deployable core functions vs 49 files per non-drlurie tenant shim dir, the extra being the deprecated `admin-traffic.ts` re-export.
+- Whether the generated shim inventory reconciles exactly per `admin-parity.mjs`'s live `--all` run — the audit script was read but not executed in this pass (it needs `--site`/`--root`/`--all` and touches only the repo, so it *could* be run in a future pass at low cost). By file listing the delta is fully accounted for (`generated/INVENTORY.md` §1): one shim per core function per tenant, plus the deprecated `admin-traffic.ts` re-export on every tenant and `verify-article-images.ts` on drlurie only.
 - Whether `docs/cms-architecture/cms-pipeline/T11.7-provisioning-cli.md`'s env checklist has since been updated to add `PURCHASE_TOKEN_SECRET` (the in-code comment at `fleet-capability-probe.mjs:248-251` flags it as missing as of the code version in this clone) — not independently confirmed against that doc's current text in this pass (docs are hints; the code-side gap is the verified fact).
 - Whether any external CI (Netlify's own build logs, a GitHub branch-protection rule) requires the `check`/`build`/`fleet` jobs to pass before merge — `.github/workflows/actions.yaml` defines the jobs but branch-protection settings live in GitHub repo settings, not in this clone.
 
 ## Verification run log
 
-All commands run in `/root/platform` on 2026-09-05 (commit `6789644`). No tracked file was modified by any step (`git status --short` was empty both before per-site builds and after the full sequence — confirmed twice). `node_modules/`, `dist/`, `sites/platform/dist/`, and `.tmp/` were created as build/install artifacts (all gitignored) and are not part of the deliverable.
+### Run 2 — 2026-09-06, correction pass at `420afbd` (main after #689/#690/#692 and the merged docs #691) plus this branch's documentation-only changes
+
+| Step | Command | Result |
+|---|---|---|
+| 1 | `npm ci` | already installed from run 1; lockfile unchanged |
+| 2 | `npm run check:eslint` | clean, 27.7 s (includes `scripts/docs/inventory.mjs` and the two new `tests/scripts/docs-*.test.mjs`) |
+| 3 | `npm run check:astro` | **0 errors, 0 warnings, 52 hints** across 1531 files (run with stale `dist/` and `sites/platform/dist/` removed first — leftover build output makes the scan pick up minified bundles) |
+| 4 | `npm test` | **5,266 / 5,266 passing**: stage 1 (`tsc -p tsconfig.test.json` + `node --test` in `.tmp/ci-test`) 4,807 tests / 534 suites; stage 2 (`tests/scripts/*.test.mjs`) 239 — includes the new `docs-invariants` (5) and `docs-inventory-fresh` (2); stage 3 (`packages/core/cli/capture/*.test.mjs`) 220 |
+| 5 | `npm run build` (drlurie, root) | 107 pages, 46.7 s; prebuild image gate "0 images checked"; postbuild `tracking-dims-push` `skipped: missing_configuration` (no sink env); the same two expected warnings as run 1 (empty `post` collection; `page_skincare_is_not_self_worth` blog-slug collision) |
+| 6 | `npx astro build --config sites/platform/astro.config.ts` | 76 pages, 38.0 s, to `sites/platform/dist` |
+| 7 | `node scripts/docs/inventory.mjs --write` + `node --test tests/scripts/docs-invariants.test.mjs tests/scripts/docs-inventory-fresh.test.mjs` | 7/7 — links resolve, no sandbox paths, no repository slug outside `docs/history/`, Mermaid blocks match `docs/diagrams/*.mmd`, no duplicate issue ids, inventory fresh |
+| 8 | `git status` | only `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/**`, `scripts/docs/**` and the two new test files differ from `420afbd` — no product code, export or config changed |
+
+### Run 1 — 2026-09-05 at `6789644`
+
+
+All commands run in a clean clone on 2026-09-05 (commit `6789644`). No tracked file was modified by any step (`git status --short` was empty both before per-site builds and after the full sequence — confirmed twice). `node_modules/`, `dist/`, `sites/platform/dist/`, and `.tmp/` were created as build/install artifacts (all gitignored) and are not part of the deliverable.
 
 | Step | Command | Duration | Result |
 |---|---|---|---|
