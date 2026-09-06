@@ -1,7 +1,9 @@
 # Tracking & Analytics Architecture
 
-> **Status:** first verified against commit `6789644` (2026-09-05), correction pass at `420afbd` (2026-09-06), and `vreich-ui/kugel-data` commit `6c9c712` (read through the GitHub API; that repo is not vendored here). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05), correction pass at `420afbd` (2026-09-06; rebased onto `99fb369` without auditing #694 — see the banner below), and `vreich-ui/kugel-data` commit `6c9c712` (read through the GitHub API; that repo is not vendored here). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md).
+
+> **⚠ Not yet audited for #694 (W21 tracking pipeline, merged to `main` as `99fb369` on 2026-09-06 while this correction pass was in review).** W21 adds the `exposure` event kind and `experiment_id`/`variant_id` on events, edge-served variants (`netlify/edge-functions/variant-serve.ts`, `[[edge_functions]]` on every tenant, `scripts/tracking-experiments-build.mjs` in `npm run build`), three MCP analytics tools (`server/lib/mcp-tool-definitions-analytics.ts`; 100 tools total), analytics views/insights/annotations/export and a per-object drill-down, and `npm run env:audit`. Counts in [`generated/INVENTORY.md`](generated/INVENTORY.md) are current at `99fb369`; the prose below describes `420afbd` and is stale wherever it touches experiments, event kinds, the analytics read side or the tool surface (tracked as `KNOWN_ISSUES.md` #67).
 
 ## 1. Purpose & scope
 
