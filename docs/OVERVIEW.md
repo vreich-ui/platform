@@ -102,7 +102,7 @@ Install, type-check, lint, the full test suite and the drlurie build all pass; a
 | KI-11 | Node strategy dimension is empty for new content | Decide where strategy may live outside `private` (it is a neutral slug) |
 | — | 139 orphaned upload images, two demo articles live in production, 19 dead widgets | Cleanup wave; no product risk |
 
-The full list with severity is [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) (entries 7–66).
+The full list with severity is [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) (entries 7–67). Note: a large tracking/experiments wave (#694) merged after this pass — the tracking section above is accurate for the code as of `420afbd` and is flagged for re-audit (KI-67).
 
 **Single next action:** rule on KI-7 (indexing) and KI-8/9 (revenue keys) — the two blockers that silently zero out the business signals everything else is meant to optimize.
 
