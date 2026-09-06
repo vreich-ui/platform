@@ -1268,7 +1268,10 @@ const publishWorkspaceRun: ChatTool = {
     // like every other workflow_get_run call site in this file (see
     // `runRowFrom`, used the same way by list_workspace_nodes et al.);
     // `callTool` unwraps only the outer {ok,data} envelope.
-    const got = await cmsAgent.callTool<Record<string, unknown>>('workflow_get_run', { runId: input.runId });
+    const got = await cmsAgent.callTool<Record<string, unknown>>('workflow_get_run', {
+      runId: input.runId,
+      projectId: cmsAgent.projectId,
+    });
     if (!got.ok) return { content: json({ error: got.message, code: got.code }), is_error: true };
     const currentRun = runRowFrom(got.data);
     if (currentRun.operatorPublishDecision === 'withheld') {
@@ -1346,6 +1349,7 @@ const publishWorkspaceRun: ChatTool = {
     if (ctx.humanApprovedCall) {
       const decided = await cmsAgent.callTool<Record<string, unknown>>('workflow_set_operator_publish_decision', {
         runId: input.runId,
+        projectId: cmsAgent.projectId,
         decision: 'approved',
       });
       if (!decided.ok) {
