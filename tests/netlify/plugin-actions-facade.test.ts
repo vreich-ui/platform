@@ -8,7 +8,7 @@ import {
   PLUGIN_ACTION_PATH_PREFIX,
 } from '../../packages/core/server/lib/plugin/build-openapi.js';
 import { buildManifestBundle } from '../../packages/core/server/lib/plugin/build-manifest.js';
-import { visibleToolDefinitions } from '../../netlify/functions/mcp.js';
+import { visibleToolDefinitions } from '../../packages/core/server/functions/mcp.js';
 
 const bundle = buildManifestBundle({
   origin: 'https://drluriescience.netlify.app',

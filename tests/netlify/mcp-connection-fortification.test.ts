@@ -1,7 +1,9 @@
 import '../../sites/drlurie/config/policy-bindings.js';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { handler, liveToolsDigest, guardToolResultSize, MAX_TOOL_RESULT_BYTES } from '../../netlify/functions/mcp.js';
@@ -47,6 +49,8 @@ process.env.ADMIN_EMAILS = 'owner@example.com';
 
 const LOCAL_BLOBS_ROOT = join(process.cwd(), '.netlify', 'local-blobs-test', 'mcp-connection-fortification');
 setLocalBlobsRootForTesting(LOCAL_BLOBS_ROOT);
+
+const COMPILED_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 const HOST = 'drluriescience.netlify.app';
 const HEADERS = { host: HOST, 'x-forwarded-proto': 'https', 'content-type': 'application/json' };
@@ -110,6 +114,38 @@ test('whoami, the health probe and the manifest builder agree on ONE digest', as
   await mintToken('tok-digest');
   const who = resultOf(await rpc('tools/call', { name: 'whoami', arguments: {} }, 'Bearer tok-digest'));
   assert.equal(who.structuredContent?.tools_digest, liveToolsDigest());
+});
+
+test('every Dr. Lurie tool-surface entry point boots with verify_article_images', () => {
+  const entryPoints = [
+    'netlify/functions/mcp.js',
+    'netlify/functions/admin-plugin-manifest.js',
+    'netlify/functions/plugin-actions.js',
+    'netlify/functions/admin-agent-chat.js',
+    'netlify/functions/admin-agent-chat-run-background.js',
+  ];
+  const observed = entryPoints.map((entryPoint) => {
+    const entryUrl = pathToFileURL(join(COMPILED_ROOT, entryPoint)).href;
+    const mcpUrl = pathToFileURL(join(COMPILED_ROOT, 'packages/core/server/functions/mcp.js')).href;
+    const script = `
+      await import(${JSON.stringify(entryUrl)});
+      const { liveToolsDigest, visibleToolDefinitions } = await import(${JSON.stringify(mcpUrl)});
+      const names = visibleToolDefinitions().map((tool) => tool.name);
+      process.stdout.write(JSON.stringify({ digest: liveToolsDigest(), names }));
+    `;
+    const child = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd: COMPILED_ROOT,
+      encoding: 'utf8',
+    });
+    assert.equal(child.status, 0, `${entryPoint} failed to initialize:\n${child.stderr}`);
+    return { entryPoint, ...(JSON.parse(child.stdout) as { digest: string; names: string[] }) };
+  });
+
+  const expectedDigest = observed[0].digest;
+  for (const surface of observed) {
+    assert.ok(surface.names.includes('verify_article_images'), `${surface.entryPoint} omitted verify_article_images`);
+    assert.equal(surface.digest, expectedDigest, `${surface.entryPoint} computed a different tool digest`);
+  }
 });
 
 // ─── the payload guard ───────────────────────────────────────────────────────
