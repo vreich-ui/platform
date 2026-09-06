@@ -53,6 +53,23 @@ function listDirNames(relPath) {
     .sort();
 }
 
+// `npm test` runs `node --test tests/scripts/*.test.mjs`, which executes test
+// FILES concurrently in separate processes against the repo's real `sites/`
+// dir. admin-parity.test.mjs scaffolds a real, transient tenant under
+// `sites/parity-scratch-<slug>` for the duration of one of its tests (see
+// tests/scripts/scratch-sites.mjs for the full history of this race). A
+// content-hash-agnostic scanner like this one that enumerates `sites/*`
+// mid-run can observe that tenant and produce a nondeterministic inventory.
+// Kept as a local literal (not imported from tests/scratch-sites.mjs) so this
+// production script has no dependency on test-only code; the prefix is
+// test-pinned there and must stay in sync with SCRATCH_SITE_PREFIX.
+const SCRATCH_SITE_PREFIX = 'parity-scratch-';
+
+/** Every real tenant under sites/, excluding a scratch tenant a concurrently-running test may have on disk. */
+function listTenantNames() {
+  return listDirNames('sites').filter((name) => !name.startsWith(SCRATCH_SITE_PREFIX));
+}
+
 /** Non-recursive: *.ts files directly in a dir, optionally excluding *.test.ts. */
 function listTsFiles(relPath, { excludeTest = true } = {}) {
   if (!dirExists(relPath)) return [];
@@ -197,7 +214,7 @@ function tenantFunctionDirs() {
   // (task spec) root netlify/functions/*.ts IS the drlurie shim set; sites/drlurie
   // itself carries no netlify/functions dir (verified against the working tree).
   const dirs = [{ tenant: 'drlurie', dir: 'netlify/functions' }];
-  for (const site of listDirNames('sites')) {
+  for (const site of listTenantNames()) {
     const candidate = `sites/${site}/netlify/functions`;
     if (dirExists(candidate)) dirs.push({ tenant: site, dir: candidate });
   }
@@ -282,7 +299,7 @@ function buildScheduledFunctions() {
   const lines = [];
   const tomlSources = [
     { tenant: 'drlurie', path: 'netlify.toml' },
-    ...listDirNames('sites')
+    ...listTenantNames()
       .map((site) => ({ tenant: site, path: `sites/${site}/netlify.toml` }))
       .filter((s) => dirExists(s.path) || existsSync(abs(s.path))),
   ].filter((s) => existsSync(abs(s.path)));
@@ -422,7 +439,7 @@ function envScanFileList() {
   for (const root of ENV_SCAN_ROOTS) {
     files.push(...walkFiles(root, ['.ts', '.mjs', '.js']));
   }
-  for (const site of listDirNames('sites')) {
+  for (const site of listTenantNames()) {
     files.push(...walkFiles(`sites/${site}/netlify`, ['.ts', '.mjs', '.js']));
   }
   // Exclude this generator itself (scripts/docs/inventory.mjs): its own doc
@@ -484,7 +501,7 @@ function buildTenants() {
   const lines = [];
   lines.push('| Tenant dir | siteId | siteSlug | mcpServerName | canonicalHost |');
   lines.push('|---|---|---|---|---|');
-  for (const site of listDirNames('sites')) {
+  for (const site of listTenantNames()) {
     const identityText = readText(`sites/${site}/config/site-identity.ts`);
     const configText = readText(`sites/${site}/site.config.ts`);
     const pick = (text, key) => {
