@@ -1,0 +1,1187 @@
+{
+  "__generated": {
+    "at": "2026-09-06T13:55:51.454Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_plugin_skin_after_50_20260906_01.json",
+    "producer": {
+      "model": "gpt-5",
+      "node_id": "plugin:openai-agent",
+      "prompt_version": "dr-lurie-claude-20260906-861e0a25",
+      "run_id": "plugin_openai-agent_req_plugin_skin_after_50_20260906_01"
+    },
+    "record_version": 5,
+    "surface": "plugin:openai-agent"
+  },
+  "author": "Dr. Lurie",
+  "claims": {
+    "claim_list": [
+      {
+        "claim_id": "clm_skin_changes",
+        "node_ids": [
+          "n_intro"
+        ],
+        "risk": "low",
+        "source_ids": [
+          "src_aad_older_skin",
+          "src_aad_menopause"
+        ],
+        "status": "verified",
+        "text": "Skin commonly becomes drier, thinner, and more easily irritated with age and menopause."
+      },
+      {
+        "claim_id": "clm_sunscreen",
+        "node_ids": [
+          "n_morning"
+        ],
+        "risk": "medium",
+        "source_ids": [
+          "src_sunscreen_rct"
+        ],
+        "status": "verified",
+        "text": "Regular sunscreen use can slow progression of visible photoaging."
+      },
+      {
+        "claim_id": "clm_retinoid",
+        "node_ids": [
+          "n_evening"
+        ],
+        "risk": "medium",
+        "source_ids": [
+          "src_tretinoin_2022",
+          "src_tretinoin_2024",
+          "src_aad_retinoid"
+        ],
+        "status": "verified",
+        "text": "Topical retinoids can improve some signs of photoaging but may irritate skin."
+      },
+      {
+        "claim_id": "clm_pregnancy",
+        "node_ids": [
+          "n_evening"
+        ],
+        "risk": "high",
+        "source_ids": [
+          "src_aad_retinoid"
+        ],
+        "status": "verified",
+        "text": "Retinoids should not be used during pregnancy."
+      },
+      {
+        "claim_id": "clm_skin_check",
+        "node_ids": [
+          "n_changes",
+          "n_action"
+        ],
+        "risk": "high",
+        "source_ids": [
+          "src_aad_older_skin"
+        ],
+        "status": "verified",
+        "text": "A new or changing mole, non-healing sore, unexplained bleeding, persistent itching, or rapidly changing patch warrants medical assessment."
+      }
+    ]
+  },
+  "compliance": {
+    "requirements": [
+      {
+        "kind": "clinical_boundary",
+        "node_ids": [
+          "n_changes",
+          "n_action"
+        ],
+        "notes": "Explicit clinician boundary provided for suspicious or persistent changes.",
+        "requirement_id": "req_reader_safety",
+        "satisfied": true,
+        "text": "Do not imply diagnosis or substitute skincare for clinical assessment."
+      },
+      {
+        "kind": "prescription_active",
+        "node_ids": [
+          "n_evening"
+        ],
+        "notes": "Dermatologist guidance and pregnancy exclusion stated in the body.",
+        "requirement_id": "req_retinoid_safety",
+        "satisfied": true,
+        "text": "Include a professional-care boundary for prescription actives and pregnancy."
+      }
+    ]
+  },
+  "deck": "Skin may become drier, thinner, or more easily irritated with age. A shorter routine built around moisture, sun protection, and one carefully chosen active is often enough.",
+  "description": "A dermatologist-informed skincare routine for people over 50, including gentle cleansing, moisturizer, sunscreen, retinoids, and signs that deserve medical attention.",
+  "editorial": {
+    "framework": "fw_routine",
+    "writer_notes": "TOP-stage search article for readers asking what skincare actually matters after 50. Per analytics_top_content: page_home led on pageviews over 30d with 247 pageviews; completion_rate was 0 across all returned objects and could not meaningfully differentiate an angle."
+  },
+  "emotional_strategy": {
+    "lines_to_preserve": [
+      "Your skin is not failing. Its needs may simply have changed.",
+      "Comfort is a valid skincare goal."
+    ],
+    "opportunities_for_specificity": [],
+    "overall_texture_assessment": "Calm, practical, and reassuring; normalizes changing skin without treating age as a defect.",
+    "overly_polished_moments": [],
+    "rhythm_adjustments": [],
+    "sensory_detail_additions": []
+  },
+  "image": {
+    "alt": "A woman in her 50s applying facial moisturizer beside a bathroom mirror",
+    "src": "/img/req_plugin_skin_after_50_20260906_01/3a800dc753c9557393dfead52c26dd346f4c810de7f24a8757bb74cf63f884d8.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_intro",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If the routine you used for years suddenly leaves your face tight, flaky, or irritated, your skin is not failing. Its needs may simply have changed."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "After 50, skin commonly holds less water and produces less oil. It may feel thinner, heal more slowly, and react to products that once seemed harmless. Menopause can make these changes more noticeable, although every person’s skin follows its own timeline."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "This does not mean you need a shelf full of products labeled for mature skin. For most people, a useful routine has three priorities: protect against ultraviolet light, support the skin barrier, and address one specific concern at a time."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_morning",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The morning routine"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-2"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "1. Cleanse gently, if you need to"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-3"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "A morning cleanser is optional. If your skin feels comfortable when you wake up, rinsing with lukewarm water may be enough."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "When you do cleanse, choose a mild, fragrance-free cream or lotion cleanser. Hot water, traditional soap, cleansing brushes, and gritty scrubs can remove oils that dry skin is already struggling to retain."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Your face should not feel tight or “squeaky clean” afterward. That sensation usually means the cleanser is taking more than makeup and dirt with it."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "2. Apply a moisturizer"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-3"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "A moisturizer helps trap water in the outer layer of the skin and can soften the appearance of fine dehydration lines. Creams and ointments generally hold in more moisture than lightweight gels."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Useful ingredients may include:"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Glycerin or hyaluronic acid, which attract water"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Ceramides, which help support the skin barrier"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Petrolatum or other occlusive ingredients, which reduce water loss"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Squalane or similar emollients, which help the skin feel smoother"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Apply moisturizer while the skin is still slightly damp. Fragrance-free products are a sensible starting point if your skin has become sensitive or itchy."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "3. Use broad-spectrum sunscreen"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-3"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Sun protection remains the most consequential step in the routine. UV exposure contributes to uneven pigmentation, wrinkles, fragile skin, and skin cancer risk."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Choose a broad-spectrum, water-resistant sunscreen with SPF 30 or higher. Apply it to exposed skin, including the face, ears, neck, chest, and hands."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Daily use still matters if you already have visible sun damage. In a randomized trial, regular sunscreen use slowed the progression of visible skin aging compared with discretionary use. Sunscreen cannot erase every existing change, but it can reduce continued UV damage."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Clothing, shade, and a wide-brimmed hat add protection without asking more of sensitive skin."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_evening",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The evening routine"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-2"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "1. Remove sunscreen and makeup without scrubbing"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-3"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Use the same gentle cleanser from your morning routine. If one cleanse removes the day comfortably, a second cleanse is not automatically better."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Pat the skin dry rather than rubbing it. Mechanical friction can be surprisingly irritating when the barrier is dry or fragile."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "2. Choose one targeted active"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-3"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "You do not need an active ingredient simply because you are over 50. Add one only if you have a concern you would genuinely like to address."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Retinoids have some of the strongest evidence for improving signs of sun-related skin aging, including fine wrinkling and uneven pigmentation. Prescription tretinoin has been studied most extensively, while retinol is available without a prescription."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The tradeoff is irritation. Retinoids can cause dryness, redness, and peeling, particularly when the skin barrier is already unsettled. Introduce them gradually according to the product label, use moisturizer, and avoid combining several irritating products at once. A dermatologist can help determine whether a retinoid is appropriate, particularly if you have rosacea, eczema, marked sensitivity, or use prescription treatments. Retinoids should not be used during pregnancy."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If your main problem is dryness rather than pigmentation or fine lines, moisturizer may be the better treatment priority. Comfort is a valid skincare goal."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "3. Moisturize again"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-3"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Finish with a cream that leaves your skin comfortable through the night. Very dry areas may benefit from a thin layer of ointment over moisturizer."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "You do not necessarily need separate creams for the face, neck, and eye area. A bland moisturizer can often serve all three if it does not sting or cause swelling around the eyes."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_irritation",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "What to drop first if your skin becomes irritated"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-2"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "When a routine starts to burn, peel, or itch, pause the newest active product first. This is often a retinoid, exfoliating acid, scrub, or strongly fragranced formula."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Return temporarily to a simple cleanser, moisturizer, and sunscreen routine. Once the skin feels settled, reintroduce only one product at a time."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Persistent irritation is not something to push through for the sake of results. More inflammation does not mean a product is working better."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_spend",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "What is probably not worth the expense"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-2"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Price is not a reliable measure of effectiveness. Elaborate product names, age-specific packaging, and claims about dramatically restoring youth do not tell you whether a formula suits your skin."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Be cautious about:"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Using several active ingredients for the same concern"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Frequent exfoliation intended to “speed up” renewal"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Products that promise dramatic changes within days"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Assuming every wrinkle or dark spot needs treatment"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "Replacing sunscreen with antioxidant serums or supplements"
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "A routine you can use consistently is usually more useful than a complicated one that repeatedly causes irritation."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_changes",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "When a skin change needs more than skincare"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-2"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Not every change after 50 is part of ordinary skin aging. A new or changing mole, a sore that does not heal, unexplained bleeding, persistent itching, or a rapidly changing patch deserves medical assessment."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_action",
+      "kind": "action",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Arrange a dermatology appointment if you notice one of these changes rather than trying to treat it with another cosmetic product."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "ctaText": "Raise a persistent skin change with your clinician"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Sources"
+                }
+              ],
+              "data": {},
+              "nodeType": "heading-2"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "How to care for your skin in your 60s and 70s"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " — American Academy of Dermatology. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "Read the guidance"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.aad.org/public/everyday-care/skin-care-basics/care/skin-care-in-your-60s-and-70s"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Caring for your skin in menopause"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " — American Academy of Dermatology. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "Read the guidance"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/skin-care-during-menopause"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Sunscreen and prevention of skin aging: a randomized trial"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " — Annals of Internal Medicine, 2013. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "View on PubMed"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/23732711/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Topical tretinoin for treating photoaging: A systematic review of randomized controlled trials"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " — International Journal of Women’s Dermatology, 2022. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "View on PubMed"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/35620028/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Comparing Tretinoin to Other Topical Therapies in the Treatment of Skin Photoaging: A Systematic Review"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " — American Journal of Clinical Dermatology, 2024. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "View on PubMed"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/39348007/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Retinoid or retinol?"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " — American Academy of Dermatology, 2021. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "Read the guidance"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/retinoid-retinol"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        }
+      },
+      "visibility": "public"
+    }
+  ],
+  "publication_context": {
+    "domain": "drluriescience.netlify.app",
+    "publication_name": "Dr. Lurie",
+    "topic_scope": "Evidence-led skincare after 50"
+  },
+  "seo": {
+    "meta_description": "A dermatologist-informed skincare routine for people over 50, including gentle cleansing, moisturizer, sunscreen, retinoids, and signs that deserve medical attention.",
+    "meta_title": "Skincare After 50: A Simple Routine for Changing Skin"
+  },
+  "slug": "skincare-after-50-simple-routine",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-06",
+        "name": "How to care for your skin in your 60s and 70s",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_older_skin",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-basics/care/skin-care-in-your-60s-and-70s"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Caring for your skin in menopause",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_menopause",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/skin-care-during-menopause"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Sunscreen and prevention of skin aging: a randomized trial",
+        "publisher": "Annals of Internal Medicine",
+        "source_id": "src_sunscreen_rct",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/23732711/"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Topical tretinoin for treating photoaging: A systematic review of randomized controlled trials",
+        "publisher": "International Journal of Women’s Dermatology",
+        "source_id": "src_tretinoin_2022",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/35620028/"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Comparing Tretinoin to Other Topical Therapies in the Treatment of Skin Photoaging: A Systematic Review",
+        "publisher": "American Journal of Clinical Dermatology",
+        "source_id": "src_tretinoin_2024",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39348007/"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Retinoid or retinol?",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_retinoid",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/retinoid-retinol"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skin-after-40",
+    "tags": [
+      "skincare-routine",
+      "skin-barrier",
+      "dry-skin",
+      "sun-protection",
+      "retinoids",
+      "menopause"
+    ]
+  },
+  "title": "Skincare After 50: A Simple Routine for Changing Skin"
+}
