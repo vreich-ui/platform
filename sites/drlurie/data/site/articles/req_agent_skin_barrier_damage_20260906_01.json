@@ -1,15 +1,15 @@
 {
   "__generated": {
-    "at": "2026-09-06T15:47:15.258Z",
+    "at": "2026-09-06T16:11:38.842Z",
     "attribution": "oauth",
     "from": "objects/content_item/by-id/req_agent_skin_barrier_damage_20260906_01.json",
     "producer": {
       "model": "GPT-5.6 Sol",
       "node_id": "plugin:openai-gpt",
       "prompt_version": "dr-lurie-openai-20260906",
-      "run_id": "plugin_openai-gpt_req_agent_skin_barrier_damage_20260906_01"
+      "run_id": "plugin_openai-gpt_req_agent_skin_barrier_damage_20260906_01_media_revision"
     },
-    "record_version": 13,
+    "record_version": 19,
     "surface": "plugin:openai-agent"
   },
   "deck": "What the skin barrier does, what can temporarily disrupt it, and what evidence supports a gentler approach.",
@@ -48,6 +48,20 @@
       }
     },
     {
+      "id": "n_anatomy",
+      "kind": "content",
+      "public": {
+        "body": "This existing public-web diagram is included as a visual reference. It simplifies skin anatomy and should be read alongside the evidence-based explanation above, not as a diagnostic tool.",
+        "media": {
+          "alt": "Diagram illustrating layers and components of the skin barrier.",
+          "caption": "An anatomy diagram sourced from the public web for this temporary test.",
+          "src": "/img/req_agent_skin_barrier_damage_20260906_01/9811d7d00c860d2a60b5e98423f71a5113e7712fdb45eecf5ef81a0a0e7470c6.png",
+          "type": "image"
+        },
+        "title": "A second view of the barrier"
+      }
+    },
+    {
       "id": "n_disrupt",
       "kind": "content",
       "public": {
@@ -80,16 +94,30 @@
       }
     },
     {
+      "id": "n_clinical",
+      "kind": "content",
+      "public": {
+        "body": "This clinical photograph shows redness, scaling and fissuring. Those visible changes are not specific to one cause, so the image cannot tell you whether your own skin has a barrier problem.",
+        "media": {
+          "alt": "Clinical photograph of hands showing redness, scaling and fissuring.",
+          "caption": "A clinical example of visible irritation; appearance alone does not establish the cause.",
+          "src": "/img/req_agent_skin_barrier_damage_20260906_01/77dfa569046001347cfc7aad07731818b5b0f69caa248cced3238ba9c4589a97.jpg",
+          "type": "image"
+        },
+        "title": "An example of visible irritation"
+      }
+    },
+    {
       "id": "n_download",
       "kind": "action",
       "public": {
         "body": "Save the illustrated PDF version for a calm reference when your routine needs simplifying.",
-        "ctaLink": "/pdf/req_agent_skin_barrier_damage_20260906_01/a7fa0647fc665aa63ec38302b5bd844d152e6ac30ada60551f0cd06468f077d9.pdf",
+        "ctaLink": "/pdf/req_agent_skin_barrier_damage_20260906_01/82635589f2acb042b690c2081da3ee9c3fcf3a682d3f8bedd57bfa106e509fec.pdf",
         "ctaText": "Download the article PDF",
         "media": {
           "contentType": "application/pdf",
-          "src": "/pdf/req_agent_skin_barrier_damage_20260906_01/a7fa0647fc665aa63ec38302b5bd844d152e6ac30ada60551f0cd06468f077d9.pdf",
-          "title": "Skin-barrier damage article PDF",
+          "src": "/pdf/req_agent_skin_barrier_damage_20260906_01/82635589f2acb042b690c2081da3ee9c3fcf3a682d3f8bedd57bfa106e509fec.pdf",
+          "title": "Skin-barrier damage article PDF with existing images",
           "type": "document"
         },
         "title": "Keep the guide"
