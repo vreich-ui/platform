@@ -1,6 +1,6 @@
 # Architecture — the `platform` repo
 
-> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692). Code is truth; every claim cites a file path. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692); rebased onto `99fb369` (#694, W21 tracking) with `generated/INVENTORY.md`, tests and builds refreshed there — W21 content itself is not yet audited (`KNOWN_ISSUES.md` #67). Code is truth; every claim cites a file path. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > This is the map. Detail lives in [`CONTENT_ARCHITECTURE.md`](CONTENT_ARCHITECTURE.md) · [`CMS_INTEGRATION.md`](CMS_INTEGRATION.md) · [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md) · [`DEPLOYMENT.md`](DEPLOYMENT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md). Agents start at [`AI_CONTEXT.md`](AI_CONTEXT.md). Humans start at [`OVERVIEW.md`](OVERVIEW.md).
 
 ## 1. What this repository is
@@ -149,7 +149,7 @@ Full catalogue with producer · consumer · contract · transport · authority �
 
 | Surface | Path | Direction |
 |---|---|---|
-| MCP server (97 tools) | `server/functions/mcp.ts`, `server/lib/mcp-tool-definitions{,-2,-membership}.ts`, `mcp-tool-handlers.ts` | in |
+| MCP server (tool names and count: `generated/INVENTORY.md` §3) | `server/functions/mcp.ts`, `server/lib/mcp-tool-definitions{,-2,-membership}.ts`, `mcp-tool-handlers.ts` | in |
 | OAuth 2.1 AS/RS | `server/functions/mcp-oauth.ts`, `server/lib/oauth-{server,store}.ts` | in |
 | Object verbs REST | `server/functions/object-store.ts` (publish key), `admin-object.ts` (JWT) | in |
 | Publish → GitHub | `server/lib/object-publish.ts`, `object-git-committer.ts` | out |
@@ -172,6 +172,9 @@ Full catalogue with producer · consumer · contract · transport · authority �
 - Policy seams are per tenant and committed: `sites/<client>/config/{approval,creation,media,membership}-policy.ts`, `policy-bindings.ts`; `publishing-policy.ts` (autonomyMode) is defined in core but registered by no tenant, so it is always the fail-closed default.
 
 ## 9. Tracking (summary)
+
+> **⚠ Not yet audited for #694 (W21 tracking pipeline, merged to `main` as `99fb369` on 2026-09-06 while this correction pass was in review).** W21 adds the `exposure` event kind and `experiment_id`/`variant_id` on events, edge-served variants (`netlify/edge-functions/variant-serve.ts`, `[[edge_functions]]` on every tenant, `scripts/tracking-experiments-build.mjs` in `npm run build`), three MCP analytics tools (`server/lib/mcp-tool-definitions-analytics.ts`; 100 tools total), analytics views/insights/annotations/export and a per-object drill-down, and `npm run env:audit`. Counts in [`generated/INVENTORY.md`](generated/INVENTORY.md) are current at `99fb369`; this summary describes `420afbd` and is stale wherever it touches experiments, event kinds, the analytics read side or the tool surface (tracked as `KNOWN_ISSUES.md` #67).
+
 
 Full treatment: [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md). Own tracker: `tracking_event.v1` (`packages/core/schema/tracking-event-v1.ts`), 18 closed event kinds, cookieless by default (daily `vhash`, 30-min `shash`; persistent `vid` only under consent), same-origin `/api/t` relay with props allowlist, at-most-once NDJSON to kugel-data, blob mirror on failure. Postbuild pushes `object_version`/`producer`/`node_strategy` dimensions from exports. Read side: `/admin/analytics` = proxy over kugel-data `/stats` + Netlify Analytics. **No feedback path into objects or CMS-Agent exists yet**; §15 of the tracking doc lists the identifiers that would close the content → publication → exposure → engagement → conversion → revenue → agent-decision chain.
 

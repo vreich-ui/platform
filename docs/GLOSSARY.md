@@ -1,6 +1,6 @@
 # Glossary
 
-> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692). Code is truth; every claim cites a file path. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692); rebased onto `99fb369` (#694, W21 tracking) with `generated/INVENTORY.md`, tests and builds refreshed there — W21 content itself is not yet audited (`KNOWN_ISSUES.md` #67). Code is truth; every claim cites a file path. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`CONTENT_ARCHITECTURE.md`](CONTENT_ARCHITECTURE.md) · [`CMS_INTEGRATION.md`](CMS_INTEGRATION.md) · [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md) · [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 Terms sorted alphabetically; symbol-leading entries first. "Where it lives" is the file that
