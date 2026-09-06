@@ -14,7 +14,7 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "node scripts/validate-upload-images.mjs && astro build",
+    "build": "node scripts/validate-upload-images.mjs && node scripts/tracking-experiments-build.mjs && astro build",
     "postbuild": "node scripts/tracking-dims-push.mjs --export-root sites/drlurie/data/site",
     "preview": "astro preview",
     "astro": "astro",
@@ -27,8 +27,10 @@
     "fix:prettier": "prettier -w .",
     "test": "rm -rf .tmp/ci-test && tsc -p tsconfig.test.json && (cd .tmp/ci-test && node --test); s1=$?; node --test tests/scripts/*.test.mjs; s2=$?; node --test packages/core/cli/capture/*.test.mjs; s3=$?; rm -rf .tmp/ci-test; [ \"$s1\" = 0 ] && [ \"$s2\" = 0 ] && [ \"$s3\" = 0 ]",
     "test:e2e:browser": "E2E_BROWSER=1 node tests/e2e/accept-router.browser.mjs",
+    "drill:experiments:dist": "node tests/scripts/experiments-dist.drill.mjs",
     "test:opt-in": "rm -rf .tmp/save-opt-in-test; tsc -p tests/netlify/tsconfig.json && node --test .tmp/save-opt-in-test/tests/netlify/*.test.js; status=$?; rm -rf .tmp/save-opt-in-test; exit $status",
     "site:create": "node packages/core/cli/create-site.mjs",
+  "env:audit": "node packages/core/cli/env-audit.mjs",
     "capture:spike": "node packages/core/cli/capture/capture.mjs",
     "capture:map": "node packages/core/cli/capture/map.mjs",
     "capture:theme": "node packages/core/cli/capture/theme.mjs",
@@ -66,6 +68,7 @@
     "remark-gfm": "^4.0.1",
     "stripe": "^22.3.1",
     "unpic": "^4.1.3",
+    "uplot": "1.6.32",
     "zod": "^4.0.0"
   },
   "devDependencies": {

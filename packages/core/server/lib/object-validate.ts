@@ -59,6 +59,7 @@ import {
 import { AGGRESSION_CEILING_DIALS, getSiteIdentity, type AggressionCeiling } from '../../lib/site-identity.js';
 import type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
 import { validateObjectIdForType, validateSectionInstanceId } from '../../lib/object-ids.js';
+import { contentItemRoute, DEFAULT_POST_PERMALINK_PATTERN } from '../../lib/tracking/experiments/arms.js';
 import { applyPatchOps, PatchApplyError } from '../../lib/object-patch-apply.js';
 import { navigationBodySchema, type NavigationBody } from '../../schema/bodies/navigation-v1.js';
 import { navActionCapacity, type CapacityRule } from '../../lib/registry/structural-capacity.js';
@@ -119,6 +120,15 @@ export type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../
 // ─── injected context ──────────────────────────────────────────────────────
 
 export type ObjectResolution = { exists: boolean; published?: boolean };
+/** T21.5: what an experiment-arm check needs about one content_item. */
+export type ExperimentArmResolution = {
+  exists: boolean;
+  published: boolean;
+  /** `lineage.parent_content_id`, or null when the item is not a variant. */
+  parentContentId: string | null;
+  /** The item's own slug — the route is derived from it, never stored twice. */
+  slug: string | null;
+};
 export type TaxonomyResolution = { active: boolean };
 export type TaxonomyUsage = { inUse: boolean };
 /** Resolution of one Major-Key blobKey against the artifact index. */
@@ -241,6 +251,20 @@ export type ObjectValidationContext = {
    * when set directly (tests). Absent → PageType rules not verified.
    */
   resolvePageType?: (pageTypeId: string) => PageTypeConstraint | undefined;
+  /**
+   * T21.5 — resolve one `content_item` referenced as an experiment ARM: does it
+   * exist, is it published, whose variant is it, and what is its slug. Kept
+   * separate from `resolveObject` because that resolver answers for every type
+   * and must not grow content_item-shaped fields. Absent (or `undefined` for a
+   * given id) → the arm's parentage/route are NOT verified, and the criterion
+   * says so rather than failing an arm it could not check.
+   */
+  resolveExperimentArm?: (contentItemId: string) => ExperimentArmResolution | undefined;
+  /**
+   * The site's `apps.blog.post.permalink` pattern, for deriving an arm's
+   * expected route from its slug. Absent → the fleet default (`/%slug%`).
+   */
+  articlePermalinkPattern?: string;
   /** True when validating a publish (or the record is already published). */
   publishIntent?: boolean;
   /**
@@ -2539,7 +2563,97 @@ const checkTrackingAttribute = (objectType: ObjectType, body: unknown, atPublish
  * be enabled (permanently OUT, OQ-W13-3). Publish-gating rules warn while
  * drafting. Store-independent — reads only the body.
  */
-const checkTrackingConfig = (body: unknown, atPublish: boolean): ReadinessCriterion[] => {
+/**
+ * T21.5 — the experiment reference rules. These are HARD (write-blocking, not
+ * publish-gated) because a bad arm is not an incomplete draft: it is a route
+ * the edge function would rewrite live readers to.
+ *
+ * 1. Exactly one arm is the CONTROL — an arm whose `variant_id` equals the
+ *    experiment's `object_id`. That is what makes the control's traffic share
+ *    weightable alongside the variants instead of implicit.
+ * 2. Every OTHER arm is a `content_item` whose `lineage.parent_content_id`
+ *    equals `object_id`. Sibling variants of a different parent, unrelated
+ *    articles, and a variant pointed at its grandparent all fail here.
+ * 3. Every arm's `route` equals the route derived from that item's OWN slug —
+ *    the registry may not carry a route the article does not serve.
+ * 4. Arm ids are unique within an experiment, and an `active` experiment's
+ *    arms are all PUBLISHED (an unpublished arm has no route to rewrite to).
+ *    A `draft` experiment is exempt from the published rule: drafting an
+ *    experiment before its variants ship is the normal order of work.
+ * 5. `winner`, when set, is one of the arms.
+ *
+ * An arm the resolver cannot answer for is NOT failed — the criterion reports
+ * what it could not verify, matching this module's standing "absent resolver =
+ * optional, never missing" rule.
+ */
+const experimentProblems = (value: unknown, context: ObjectValidationContext): string[] => {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  const pattern = context.articlePermalinkPattern ?? DEFAULT_POST_PERMALINK_PATTERN;
+  const problems: string[] = [];
+  const seenExperiments = new Set<string>();
+
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.object_id !== 'string' || !Array.isArray(raw.arms)) continue;
+    const experimentId = raw.object_id;
+    const at = `experiments[${experimentId}]`;
+    if (seenExperiments.has(experimentId)) {
+      problems.push(`${at}: two experiments share the same control object_id.`);
+      continue;
+    }
+    seenExperiments.add(experimentId);
+
+    const armIds: string[] = [];
+    let controlArms = 0;
+    for (const arm of raw.arms) {
+      if (!isRecord(arm) || typeof arm.variant_id !== 'string' || typeof arm.route !== 'string') continue;
+      const armId = arm.variant_id;
+      if (armIds.includes(armId)) problems.push(`${at}: arm ${armId} is listed twice.`);
+      armIds.push(armId);
+      const isControl = armId === experimentId;
+      if (isControl) controlArms += 1;
+
+      const resolved = context.resolveExperimentArm?.(armId);
+      if (!resolved) continue; // cannot answer → not verified (never a failure)
+      if (!resolved.exists) {
+        problems.push(`${at}: arm ${armId} is not a content_item that exists.`);
+        continue;
+      }
+      if (!isControl && resolved.parentContentId !== experimentId) {
+        problems.push(
+          `${at}: arm ${armId} has lineage.parent_content_id ` +
+            `${resolved.parentContentId === null ? '(unset)' : resolved.parentContentId} — every non-control arm ` +
+            `must be a variant of ${experimentId} (create it with object_create_variant).`
+        );
+      }
+      if (resolved.slug !== null) {
+        const expected = contentItemRoute(resolved.slug, pattern);
+        if (arm.route !== expected) {
+          problems.push(`${at}: arm ${armId} route "${arm.route}" is not its published route "${expected}".`);
+        }
+      }
+      if (raw.status === 'active' && !resolved.published) {
+        problems.push(`${at}: arm ${armId} is not published — an active experiment cannot serve an unpublished arm.`);
+      }
+    }
+
+    if (controlArms !== 1) {
+      problems.push(
+        `${at}: the arms must include the control (${experimentId}) exactly once — it is the parent article, ` +
+          `and listing it is what gives the control a weightable traffic share.`
+      );
+    }
+    if (typeof raw.winner === 'string' && !armIds.includes(raw.winner)) {
+      problems.push(`${at}: winner ${raw.winner} is not one of the arms.`);
+    }
+  }
+  return problems;
+};
+
+const checkTrackingConfig = (
+  body: unknown,
+  context: ObjectValidationContext,
+  atPublish: boolean
+): ReadinessCriterion[] => {
   const label = 'Tracking config readiness';
   if (!isRecord(body) || !isRecord(body.providers) || !isRecord(body.consent)) {
     return [crit('tracking_config_ready', label, 'optional', 'Body shape not recognized (see schema check).')];
@@ -2597,6 +2711,8 @@ const checkTrackingConfig = (body: unknown, atPublish: boolean): ReadinessCriter
     );
   }
 
+  hard.push(...experimentProblems(body.experiments, context));
+
   if (hard.length > 0) {
     return [crit('tracking_config_ready', label, 'missing', hard.slice(0, 3).join(' '))];
   }
@@ -2631,7 +2747,7 @@ const checkStructuralInvariantsByType = (
   // content_item carry their own rules (dispatched here so the pipeline keeps
   // its single 'structure' group).
   if (objectType === 'taxonomy') return checkTaxonomyRegistry(body, context);
-  if (objectType === 'tracking_config') return checkTrackingConfig(body, atPublish);
+  if (objectType === 'tracking_config') return checkTrackingConfig(body, context, atPublish);
   if (objectType === 'template') return checkTemplate(body, context, atPublish);
   if (objectType === 'section_template') return checkSectionTemplate(body, atPublish);
   if (objectType === 'theme') return checkTheme(body, atPublish);

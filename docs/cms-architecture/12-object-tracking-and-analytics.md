@@ -802,3 +802,145 @@ Explicitly NOT commissioned even by a YES: automatic writers (§15.2c),
 traffic splitting (OQ-W7-2), rendering scores anywhere public.
 
 **OQ-W13-5b — ANSWER (Wolf): ruling on §15 (adopt / adopt-with-changes / reject):** **\*\***\_\_\_**\*\***
+
+## 16. Variant experiments — edge serving + exposure (T21.5, BUILT)
+
+§15.4 designed the create_variant judging loop under a standing honesty rule:
+traffic splitting (OQ-W7-2) stayed deferred, so parent/variant windows were
+sequential or organic and comparisons were "directional evidence, not
+experiments". **T21.5 commissions the split itself.** That rule now scopes
+exactly to comparisons made WITHOUT an experiment entry; a family covered by an
+`active` experiment below IS a concurrent randomized test, and may be described
+as one.
+
+### 16.1 The registry entry
+
+`tracking_config.v1` gains `experiments[]` (≤20), patchable through
+`set_tracking_config_fields` like every other block. Each entry is IDs only —
+no URL an agent can author:
+
+```
+{ object_id, arms: [{ variant_id, route }] (2..6), status, winner? }
+```
+
+- `object_id` is the CONTROL: the family parent `content_item`.
+- `arms` is the COMPLETE served set. **Exactly one arm must be the control
+  itself** — listing it is what makes the control's traffic share weightable
+  rather than implicit.
+- Every other arm is a `content_item` whose `lineage.parent_content_id` equals
+  `object_id` (i.e. an `object_create_variant` child), and its `route` must
+  equal the route derived from its own slug. Validation refuses anything else,
+  hard (write-blocking, not publish-gated): a bad arm is not an incomplete
+  draft, it is a route the edge would rewrite live readers to.
+- `status`: `draft` (authoring), `active` (serving), `concluded` (history).
+  Only `active` serves; concluding reverts every reader to the control on the
+  next build with no second switch to remember.
+
+### 16.2 Build → two artifacts
+
+`scripts/tracking-experiments-build.mjs` runs before `astro build` on every
+site and writes:
+
+| File                                             | Consumer                    |
+| ------------------------------------------------ | --------------------------- |
+| `<publicDir>/_trk/experiments.json`               | the loader and the tests    |
+| `<edgeDir>/_experiments.generated.json`           | the edge function's bundle  |
+
+Both carry `{object_id: {route, arms: [{variant_id, route, weight}]}}` — `{}`
+when nothing is active. Two copies because **edge bundles cannot import from
+`public/`**; the edge copy also carries `{restricted_regions, honor_gpc}`
+because the edge cannot read `data/site/tracking.json` either.
+
+Weights come from `GET ${TRACKING_SINK_URL}/weights?project_id=<id>`, 2s
+timeout. Absent config, timeout, non-2xx, or an unusable row → **equal
+weights**. A weight outage may change how traffic splits; it may never change
+WHICH arms are served, and it may never fail a build.
+
+### 16.3 The edge function
+
+`netlify/edge-functions/variant-serve.ts`, declared `path = "/*"` in the root
+`netlify.toml` and every `sites/*/netlify.toml`. Decision order (asserted by
+name in `tests/netlify/tracking-experiments-edge.test.ts`):
+
+1. **empty map → `context.next()`** — before a cookie, a geo read, or an RNG
+   call. This is the zero-experiment guarantee, and it is the path every
+   request on the fleet takes today.
+2. **path is not a served CONTROL route → `next()`** — including a direct hit
+   on a variant's own route, which is already an arm and must not be
+   re-randomized.
+3. **consent gate → serve the CONTROL, no cookie written:** `Sec-GPC: 1` (when
+   `honor_gpc`), or `context.geo.country` ∈ `restricted_regions` without a
+   `_dlconsent` cookie carrying `analytics:true`.
+4. **sticky `_dlab` cookie** naming a still-served arm → that arm, not re-set.
+5. **weighted pick** over the arms, and set `_dlab`
+   (`{object_id: variant_id}`, 30d, `SameSite=Lax; Secure; Path=/`).
+
+Every served branch is a `context.rewrite` — **the URL never changes**. The
+response carries `x-trk-variant: <variant_id>` and appends `Vary: Cookie`.
+
+Every decision lives in `packages/core/lib/tracking/experiments/edge-core.ts`,
+which is type-checked and unit-tested; the four deployed `variant-serve.ts`
+files are Deno wiring only and are excluded from `tsconfig` (Deno `.ts`
+specifiers). A test asserts they stay that thin.
+
+**Known gap, deliberate and fail-safe:** the consent runtime (§8) stores
+`_dlconsent` in **localStorage**, which no edge function can read. Step 3 reads
+a `_dlconsent` COOKIE of the same shape, so until something mirrors the choice
+into a cookie, a restricted-region visitor always reads as "no analytics
+consent" and is served the control — the conservative direction, identical to
+the pre-experiment site. Closing it means writing a consent cookie, which is
+itself a consent decision and is deliberately NOT taken here.
+
+Unknown/unresolved `country` is NOT treated as restricted at this gate. §8's
+"unknown = restricted" governs whether an advertising SCRIPT executes; which
+ARTICLE a reader sees is not a tracking decision, and pinning it to the control
+would make the split depend on Netlify's geo coverage.
+
+### 16.4 Render + exposure
+
+Every arm's article wrapper carries `data-cms-experiment="<control id>"` and
+`data-cms-variant="<this arm's id>"` — both already-public object ids, no new
+identifier in reader HTML. A NON-control arm additionally renders
+`<meta name="robots" content="noindex" data-cms-experiment-arm="…">` and
+canonicalizes to the control route (the arm's canonical REPLACES the page's own
+— two conflicting canonicals are ignored wholesale, which would leave both arms
+indexable).
+
+The loader emits one `exposure` per page-load when the marker is present —
+a new `TRACKING_EVENT_KINDS` member with `props: {experiment_id, variant_id}`,
+both pinned to the content_item id grammar and allowlisted in
+`server/lib/tracking-events.ts`. It is neither sampled nor gated by the §6
+matrix: an exposure is the experiment's denominator, and a half-counted
+denominator makes every arm comparison wrong rather than merely noisy. The sink
+needs no change (`event` is free text, `props` is jsonb).
+
+View Transitions are covered: the emit rides `bindPage`, which the
+`astro:page-load` listener drives, so a client-side navigation between arms
+counts the new one and a repeated bind of the same page counts nothing.
+
+### 16.5 Turning one on
+
+1. `object_create_variant` on the parent article; edit and publish the variant.
+2. `set_tracking_config_fields` on `trk_<site>` with the `experiments` entry
+   (`status: 'active'`, control listed among the arms), publish + release.
+3. The next build materializes the map; the edge starts splitting.
+4. To stop: set `status: 'concluded'` (and `winner`), publish, rebuild.
+
+### 16.6 Proving it
+
+`npm test` covers the schema, the reference rules, the materializer, the build
+step (map + weights + the zero-experiment artifacts), every edge decision
+branch including a ±2%-over-10,000-draws distribution check, and the loader's
+one-exposure-per-page-load rule across a View Transitions navigation.
+
+The dist half needs an ACTIVE experiment, which the committed fleet state does
+not have — so it is a drill, not a test: `npm run drill:experiments:dist`
+plants one over the real `object-model-demo` parent/variant pair, builds, checks
+the built HTML (arm markers, the variant's noindex + canonical-to-control, the
+control carrying neither), and restores the tree in a `finally`.
+
+`node scripts/build-diff.mjs` is the standing guarantee: with `experiments: []`
+it must stay EMPTY. Note that a spread of arm attributes onto the article
+wrapper does NOT stay empty — Astro emits the scoped component class at runtime
+for a spread, changing every article page. The attributes are written
+explicitly for exactly this reason.

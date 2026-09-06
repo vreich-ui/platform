@@ -20,12 +20,34 @@ import BackToTop from '~/components/common/BackToTop.astro';
 import { ClientRouter } from 'astro:transitions';
 
 import type { MetaData as MetaDataType } from '~/types';
+import { getCanonical } from '~/utils/permalinks';
+import { armNeedsCanonicalToControl, type ArmAssignment } from '~/utils/experiment-arm';
 
 export interface Props {
   metadata?: MetaDataType;
+  /**
+   * T21.5 — set on a page that renders an experiment ARM. Only the NON-control
+   * arms change anything: they must not compete with the control in the index,
+   * so they carry `<meta name="robots" content="noindex">` and canonicalize to
+   * the control's URL. The control arm renders exactly as it always did.
+   *
+   * The `data-cms-experiment-arm` attribute is what distinguishes this pair
+   * from the site-wide SEO defaults `<Metadata />` already emits (which today
+   * include an unconditional noindex while the fleet is pre-launch) — for the
+   * dist test, and for anyone reading the head wondering why two robots metas
+   * are present.
+   */
+  experimentArm?: ArmAssignment | null;
 }
 
-const { metadata = {} } = Astro.props;
+const { metadata = {}, experimentArm = null } = Astro.props;
+const deIndexArm = armNeedsCanonicalToControl(experimentArm);
+// One canonical, never two: the arm's canonical REPLACES the page's own rather
+// than being appended next to it (conflicting canonicals are ignored wholesale
+// by search engines, which would leave both arms indexable).
+const effectiveMetadata = deIndexArm
+  ? { ...metadata, canonical: String(getCanonical(experimentArm.control_route)) }
+  : metadata;
 const { language, textDirection } = I18N;
 ---
 
@@ -36,7 +58,8 @@ const { language, textDirection } = I18N;
     <Favicons />
     <CustomStyles />
     <ApplyColorMode />
-    <Metadata {...metadata} />
+    <Metadata {...effectiveMetadata} />
+    {deIndexArm && <meta name="robots" content="noindex" data-cms-experiment-arm={experimentArm.variant_id} />}
     <SiteVerification />
     <TrackingScripts />
 

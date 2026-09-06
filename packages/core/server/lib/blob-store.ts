@@ -338,3 +338,16 @@ export const getMarginaliaBlobStore = async (event: unknown, binding?: SiteBindi
 export const getEditorialRequestsBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
   return getNetlifyBlobStore({ name: 'editorial-requests', consistency: 'strong' }, event, binding);
 };
+
+/**
+ * R11.1/R11.3 (runner W21) — saved analytics views (`views/index.json`) and
+ * operator notes (`notes/index.json`), one small store per tenant. Both are
+ * OPERATOR PREFERENCES over the `/admin/analytics` page, not editorial
+ * content or governed objects — see `lib/admin/analytics-views-logic.ts`'s
+ * header for why this deliberately does not go through the object substrate.
+ * Strong consistency: a "Save current view" or "Add note" click reads its own
+ * write back on the very next render (the Views menu re-lists immediately).
+ */
+export const getAnalyticsViewsBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
+  return getNetlifyBlobStore({ name: 'analytics-views', consistency: 'strong' }, event, binding);
+};

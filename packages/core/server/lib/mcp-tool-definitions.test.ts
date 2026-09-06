@@ -3,17 +3,19 @@ import assert from 'node:assert';
 import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS, CHAT_TOOL_ALIASES } from './mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from './mcp-tool-definitions-2.js';
 import { TOOL_DEFINITIONS_MEMBERSHIP } from './mcp-tool-definitions-membership.js';
+import { TOOL_DEFINITIONS_ANALYTICS } from './mcp-tool-definitions-analytics.js';
 import type { ToolDefinition } from '../functions/mcp.js';
 
 const TOOL_DEFINITIONS: ToolDefinition[] = [
   ...TOOL_DEFINITIONS_PART1,
   ...TOOL_DEFINITIONS_PART2,
   ...TOOL_DEFINITIONS_MEMBERSHIP,
+  ...TOOL_DEFINITIONS_ANALYTICS,
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 97 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 97, `Expected 97 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 100 definitions (70 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 100, `Expected 100 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -235,7 +237,12 @@ describe('Tool definitions', () => {
     assert.strictEqual(renderArticlePdf.governance.preview?.kind, 'input_echo');
     assert.strictEqual(renderArticlePdf.governance.autonomyFloor, undefined);
     // None of the four reads carry a floor or a preview binding — reads never do.
-    for (const name of ['verify_pdf_content', 'validate_pdf_render_data', 'get_pdf_render_brand', 'validate_content_item']) {
+    for (const name of [
+      'verify_pdf_content',
+      'validate_pdf_render_data',
+      'get_pdf_render_brand',
+      'validate_content_item',
+    ]) {
       const tool = TOOL_DEFINITIONS.find((t) => t.name === name)!;
       assert.strictEqual(tool.governance.autonomyFloor, undefined, `${name} is a read; it needs no autonomy floor`);
       assert.strictEqual(tool.governance.preview, undefined, `${name} is a read; it needs no approval preview`);
@@ -306,6 +313,26 @@ describe('Tool definitions', () => {
       expectedVerbDryRun,
       `Tools with verb_dry_run preview do not match expected list`
     );
+  });
+
+  /**
+   * R12.3 / T21.20 — the tenant-analytics family. All three are read-only
+   * (no write, no job, no external side effect beyond a GET against the
+   * sink), so none may carry a floor or an approval preview, matching every
+   * other read tool in this suite.
+   */
+  it('the three analytics tools are read-class, unfloored, and carry no approval preview', () => {
+    for (const name of ['analytics_summary', 'analytics_top_content', 'analytics_object']) {
+      const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
+      assert.ok(tool, `${name} must be registered`);
+      assert.strictEqual(tool!.governance.toolClass, 'read', `${name} must be a read tool`);
+      assert.strictEqual(tool!.governance.autonomyFloor, undefined, `${name} is a read; it needs no autonomy floor`);
+      assert.strictEqual(tool!.governance.preview, undefined, `${name} is a read; it needs no approval preview`);
+    }
+    const topContent = TOOL_DEFINITIONS.find((t) => t.name === 'analytics_top_content')!;
+    const properties = (topContent.inputSchema as { properties?: Record<string, unknown> }).properties;
+    assert.ok(properties && 'range' in properties && 'sort' in properties && 'limit' in properties);
+    assert.strictEqual((properties!.limit as { maximum?: number }).maximum, 20, 'limit must be capped at 20');
   });
 
   it('INTERNAL_ONLY_TOOLS members are all definition names', () => {

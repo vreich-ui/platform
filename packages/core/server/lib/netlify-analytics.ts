@@ -75,8 +75,12 @@ import { netlifyDeployLookupMissingEnvVars } from './netlify-deploys.js';
 import {
   normalizePathLabel,
   normalizeSourceLabel,
+  withShareLimit,
+  isExcludedAdminPath,
+  isInternalReferrerHost,
   type RawAnalyticsData,
   type AnalyticsRankingRow,
+  type AnalyticsRankingRowWithShare,
   type AnalyticsTrendPoint,
 } from '../../lib/admin/analytics-logic.js';
 
@@ -220,6 +224,28 @@ const parseRankingRowsV2 = (payload: unknown): RankingRowV2[] =>
     })
     .filter((row): row is RankingRowV2 => Boolean(row));
 
+/**
+ * R6.4/D8 — splits a raw ranking response by a predicate against its
+ * `resource` field (the pre-label-normalization value — `isExcludedAdminPath`
+ * and `isInternalReferrerHost` both work on the raw path/host, not the
+ * display label), summing the excluded rows' `count` for the caller to
+ * report as a labelled, approximate exclusion total (D8: computed from
+ * visible ranking rows only, since Netlify's aggregate totals can't be
+ * filtered directly).
+ */
+const splitRankingRows = (
+  rows: RankingRowV2[],
+  isExcluded: (resource: string) => boolean
+): { kept: RankingRowV2[]; excludedVisits: number } => {
+  let excludedVisits = 0;
+  const kept: RankingRowV2[] = [];
+  for (const row of rows) {
+    if (isExcluded(row.resource)) excludedVisits += row.count;
+    else kept.push(row);
+  }
+  return { kept, excludedVisits };
+};
+
 const windowQuery = (window: NetlifyAnalyticsWindow): string =>
   `from=${Math.round(window.from)}&to=${Math.round(window.to)}&timezone=${encodeURIComponent(ANALYTICS_TIMEZONE_OFFSET)}&resolution=${window.resolution}`;
 
@@ -235,8 +261,18 @@ const rankingQuery = (window: NetlifyAnalyticsWindow): string =>
  * result on their own failure (a plan tier that has pageviews but not one
  * of these, or a transient error on one of the three) rather than failing
  * the whole dashboard for a partial result.
+ *
+ * `siteHost` (R6.4/D8) — this site's own hostname, read server-side from
+ * `process.env.URL` by the caller (`admin-analytics.ts`) and passed in as a
+ * plain string; never derived here or on the client. Used only to bucket a
+ * same-host `/ranking/sources` row out of `topSources` as internal
+ * navigation (D8) — absent/unresolvable degrades to "nothing is internal",
+ * never a guess.
  */
-export const fetchTrafficAnalytics = async (window: NetlifyAnalyticsWindow): Promise<RawAnalyticsData> => {
+export const fetchTrafficAnalytics = async (
+  window: NetlifyAnalyticsWindow,
+  siteHost?: string | null
+): Promise<RawAnalyticsData> => {
   const trendQs = windowQuery(window);
   const rankingQs = rankingQuery(window);
 
@@ -254,8 +290,113 @@ export const fetchTrafficAnalytics = async (window: NetlifyAnalyticsWindow): Pro
     label: label(row.resource),
     visits: row.count,
   });
-  const topPaths = parseRankingRowsV2(pagesPayload).map((row) => toRankingRow(row, normalizePathLabel));
-  const topSources = parseRankingRowsV2(sourcesPayload).map((row) => toRankingRow(row, normalizeSourceLabel));
 
-  return { trend, topPaths, topSources };
+  // R6.4/D8 — `/admin`/`/.netlify` paths never rank, and their swept-up
+  // visits are reported as an approximate "excl. admin" total (from visible
+  // ranking rows only — see `splitRankingRows`'s doc comment).
+  const { kept: keptPathRows, excludedVisits: excludedAdminPathVisits } = splitRankingRows(
+    parseRankingRowsV2(pagesPayload),
+    isExcludedAdminPath
+  );
+  const topPaths = keptPathRows.map((row) => toRankingRow(row, normalizePathLabel));
+
+  // R6.4/D8 — a same-host referrer is internal navigation, never a ranked
+  // source; its visits are reported separately as `internalReferrerVisits`.
+  const { kept: keptSourceRows, excludedVisits: internalReferrerVisits } = splitRankingRows(
+    parseRankingRowsV2(sourcesPayload),
+    (resource) => isInternalReferrerHost(resource, siteHost)
+  );
+  const topSources = keptSourceRows.map((row) => toRankingRow(row, normalizeSourceLabel));
+
+  return { trend, topPaths, topSources, excludedAdminPathVisits, internalReferrerVisits };
+};
+
+// ─── R6.2/D5: `/ranking/not_found` and `/ranking/countries` — documented since T21.2c but never called until now ──
+
+/** A country ranking row's label is its name when Netlify sends one, else the bare code (`resource`) — never a blank cell. */
+const countryLabel = (row: RankingRowV2): string => row.countryName || row.resource || '(unknown)';
+
+export interface NotFoundAndCountries {
+  topNotFound: AnalyticsRankingRowWithShare[];
+  topCountries: AnalyticsRankingRowWithShare[];
+  /** R6.4/D8 — `/ranking/not_found` rows swept out as `/admin`/`/.netlify` — countries aren't path-shaped, so no exclusion applies there. Combine with `fetchTrafficAnalytics`'s `excludedAdminPathVisits` for the full "excl. admin" total. */
+  excludedAdminNotFoundVisits: number;
+}
+
+/**
+ * Both rankings degrade independently to an empty list on failure (a plan
+ * tier without one of the two, or a transient error) — never fails the
+ * caller, matching `fetchTrafficAnalytics`'s posture for its own two
+ * ranking calls above.
+ */
+export const fetchNotFoundAndCountries = async (window: NetlifyAnalyticsWindow): Promise<NotFoundAndCountries> => {
+  const rankingQs = rankingQuery(window);
+  const [notFoundPayload, countriesPayload] = await Promise.all([
+    fetchNetlifyAnalyticsApi(`/ranking/not_found?${rankingQs}`).catch(() => null),
+    fetchNetlifyAnalyticsApi(`/ranking/countries?${rankingQs}`).catch(() => null),
+  ]);
+
+  // R6.4/D8 — a 404 under `/admin` or `/.netlify` (a stale bookmark, a bot
+  // probing for either) is admin/function traffic like any other; excluded
+  // from the ranking and its visits folded into the same "excl. admin" total.
+  const { kept: keptNotFoundRows, excludedVisits: excludedAdminNotFoundVisits } = splitRankingRows(
+    parseRankingRowsV2(notFoundPayload),
+    isExcludedAdminPath
+  );
+  const notFoundRows: AnalyticsRankingRow[] = keptNotFoundRows.map((row) => ({
+    label: normalizePathLabel(row.resource),
+    visits: row.count,
+  }));
+  const countryRows: AnalyticsRankingRow[] = parseRankingRowsV2(countriesPayload).map((row) => ({
+    label: countryLabel(row),
+    visits: row.count,
+  }));
+
+  return {
+    topNotFound: withShareLimit(notFoundRows, 20),
+    topCountries: withShareLimit(countryRows, 20),
+    excludedAdminNotFoundVisits,
+  };
+};
+
+// ─── R6.2/D2: `/bandwidth` — a one-shot probe, omitted (not zeroed) on any failure ──
+
+/** The undocumented shape is guessed defensively (never verified live, unlike the rest of this module) — either a `{data:[[t,bytes],...]}` trend the probe sums, or a flat `{total: bytes}`/`{bytes: n}`. Anything else, or any error (401/403/404/network), returns `null` — "probe once, omit the card if it 404s" (spec §6.2), not "throw and break the dashboard". */
+export const fetchBandwidth = async (window: NetlifyAnalyticsWindow): Promise<number | null> => {
+  try {
+    const payload = await fetchNetlifyAnalyticsApi(`/bandwidth?${windowQuery(window)}`);
+    if (payload && typeof payload === 'object') {
+      const record = payload as Record<string, unknown>;
+      if (typeof record.total === 'number' && Number.isFinite(record.total)) return record.total;
+      if (typeof record.bytes === 'number' && Number.isFinite(record.bytes)) return record.bytes;
+    }
+    const rows = extractDataArray(payload);
+    if (rows.length > 0) {
+      const total = rows.reduce<number>((sum, row) => sum + (parseTuplePoint(row)?.count ?? 0), 0);
+      return total;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+// ─── R6.2/D3: the immediately-preceding, same-length window — for KPI deltas ──
+
+/** `[previousFrom, previousTo]` — the window of equal length ending exactly where `window` begins, never overlapping it. */
+export const previousWindowOf = (window: NetlifyAnalyticsWindow): NetlifyAnalyticsWindow => {
+  const span = window.to - window.from;
+  return { from: window.from - span, to: window.from, resolution: window.resolution };
+};
+
+/** Best-effort — a failed previous-window fetch degrades to `null` (the caller hides comparison deltas), never blocks the primary series. `siteHost` (R6.4/D8) threads through so the previous period's `topSources` excludes internal referrers the same way the current period's does. */
+export const fetchPreviousTrafficAnalytics = async (
+  window: NetlifyAnalyticsWindow,
+  siteHost?: string | null
+): Promise<RawAnalyticsData | null> => {
+  try {
+    return await fetchTrafficAnalytics(previousWindowOf(window), siteHost);
+  } catch {
+    return null;
+  }
 };

@@ -298,6 +298,14 @@ test('a freshly scaffolded site passes the admin-parity audit with ZERO gaps', (
   }
 });
 
+test('the real Dr. Lurie root passes parity through its complete site MCP bootstrap', () => {
+  const checks = computeAdminParity(resolveAuditTarget('--root'));
+  assert.deepEqual(
+    checks.filter((check) => check.status === 'GAP').map((check) => `${check.id}: ${check.detail}`),
+    []
+  );
+});
+
 // ─── 3. the repair loop (migrate-site --admin-parity) ───────────────────────
 
 test('planAdminParityFixes repairs a degraded older-scaffold site, idempotently', () => {

@@ -118,6 +118,9 @@ export const CANONICAL_INFRA_REDIRECTS = [
   // W19 T19.4: the same single-segment, UNFORCED form for the request detail
   // page — /admin/requests must keep serving its own static list index.
   { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200, force: false },
+  // R11.4 (T21.30): the same single-segment, UNFORCED form for the object
+  // analytics drill-down — /admin/analytics must keep serving its own page.
+  { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200, force: false },
 ];
 
 /**
@@ -487,7 +490,14 @@ export const computeAdminParity = (target) => {
       continue;
     }
     if (name === 'mcp') {
-      if (!src.includes('configureMcp(')) wiringProblems.push('mcp: shim does not call configureMcp');
+      const configuresInline = src.includes('configureMcp(');
+      const siteBootstrapName = src.match(
+        /import\s+\{\s*(configure[A-Za-z0-9]*McpSiblings)\s*\}\s+from\s+'[^']+'/
+      )?.[1];
+      const configuresThroughSiteBootstrap = Boolean(siteBootstrapName && src.includes(`${siteBootstrapName}();`));
+      if (!configuresInline && !configuresThroughSiteBootstrap) {
+        wiringProblems.push('mcp: shim does not configure its MCP siblings');
+      }
       continue;
     }
     const isV2 = coreFunctionIsV2(name);

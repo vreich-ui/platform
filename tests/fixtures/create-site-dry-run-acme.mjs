@@ -170,9 +170,9 @@ Env checklist:
     TRACKING_SALT                    [per-site]  ☐ human-supplied — see the provisioning runbook
       Hashing salt — MUST differ per site for cross-client privacy isolation.
     TRACKING_SINK_URL                [fleet-shared]  reuse the fleet value — do not create a new one
-      Inherited automatically from the operator provisioning env and stored as a Functions-only secret. One shared owner DB is allowed with TRACKING_PROJECT_ID as the partition.
+      Set ONCE as a team-level Netlify environment variable (Team → Environment variables; scope Functions, all contexts, all projects) — every site inherits it natively. create-site never copies a value into this site's own env for it; it only checks team-level presence (names only) and reports the result. One shared owner DB is allowed with TRACKING_PROJECT_ID as the partition.
     TRACKING_SINK_TOKEN              [fleet-shared]  reuse the fleet value — do not create a new one
-      Inherited automatically from the operator provisioning env and stored as a Functions-only secret; pairs with TRACKING_SINK_URL.
+      Set ONCE as a team-level Netlify environment variable, same as TRACKING_SINK_URL above; pairs with it. create-site never copies a value into this site's own env for it — checked for team-level presence only.
   AI + integrations:
     ANTHROPIC_API_KEY                [fleet-shared]  reuse the fleet value — do not create a new one
       AI provider key for legacy non-chat AI surfaces; admin chat itself is Client Manager-only.
@@ -227,6 +227,6 @@ ADMIN WORKSPACE BOOTSTRAP (human gate — runbook site-provisioning-runbook.md �
   4. Membership policy (T18.7): the fleet defaults apply; narrow them per site in
      config/membership-policy.ts (committed) or at runtime as an Owner (membership_policy_set).
      Fleet check: node scripts/fleet-capability-probe.mjs --all --repo-only
-  Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency, editorial-requests, plugin-manifest.
+  Blob stores backing the workspace (probed automatically when a token is supplied): site-objects, workflows, artifacts, artifact-index, commerce, agent-chats, agent-profiles, governance, users, opt-ins, commerce-events, tracking-events, agent-learning, marginalia, idempotency, editorial-requests, plugin-manifest, analytics-views.
   Verify any tenant any time:  node scripts/audit-site-admin-parity.mjs --site sites/<client>
 `;

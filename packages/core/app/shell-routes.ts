@@ -73,6 +73,10 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   // T21.9b: renamed /admin/traffic -> /admin/analytics (netlify.toml carries
   // a 301 for the old path; the old function URL stays as a compat shim).
   { pattern: '/admin/analytics', entry: 'admin/analytics.astro' },
+  // T21.30: the object drill-down. Same `[objectId]` placeholder pattern as
+  // `/admin/content/[objectId]` above (netlify.toml rewrites any real id to
+  // the `__object` placeholder; the island reads the id client-side).
+  { pattern: '/admin/analytics/object/[objectId]', entry: 'admin/analytics/object/[objectId].astro' },
   { pattern: '/admin/media', entry: 'admin/media.astro' },
   { pattern: '/admin/release', entry: 'admin/release.astro' },
   { pattern: '/admin/kit', entry: 'admin/kit.astro' },

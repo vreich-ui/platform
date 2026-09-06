@@ -34,6 +34,11 @@
     "packages/core/admin/**/*.tsx",
     "packages/core/admin/index.ts",
     "packages/core/components/**",
-    "packages/core/lib/registry/components/index.ts"
+    "packages/core/lib/registry/components/index.ts",
+    // T21.5: Deno edge functions — see tsconfig.json's note. Their
+    // decision core (packages/core/lib/tracking/experiments/) is
+    // included and tested; the wrappers are not compilable by tsc.
+    "netlify/edge-functions/**",
+    "sites/*/netlify/edge-functions/**"
   ]
 }

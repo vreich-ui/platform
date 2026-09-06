@@ -684,23 +684,24 @@ is deleted; `docs/admin-redesign/cms-agent-chat-plan.md:234` still records the d
 maintenance debt at once.
 **Direction:** retire the function and its shims — **decision needed by Wolf**.
 
-### 29. `verify_article_images` breaks fleet parity and permanently falsifies the stale-export signal
+### 29. `verify_article_images` breaks fleet parity and permanently falsifies the stale-export signal — RESOLVED
 
-**Category:** parity · **Severity:** high · **Sources:** CI#2, CI#16
-**Evidence:** only `netlify/functions/mcp.ts:31` injects `verifyArticleImagesHandler` and only the
-root (drlurie) deploy ships `netlify/functions/verify-article-images.ts`, but
-`plugin-actions.ts:106` and `admin-plugin-manifest.ts:155` call `ensureMcpSiblings`
-(`agent/mcp-siblings.ts:44-50`), which injects only the governed trio. So on drlurie
-`/api/plugin/verify_article_images` is refused 403 `tool_not_in_plugin_charter` even though `/mcp`
-advertises the tool, and `liveToolsDigest()` computed in the `/mcp` lambda differs from the one
-`admin-plugin-manifest.ts:172` computes. Existing tests miss it because they import the shim that
-*does* inject (`tests/netlify/plugin-actions-facade.test.ts:5,11`). The `OPTIONAL_HANDLER_TOOLS`
-exception is sanctioned (`16-genesis-parity-plan.md:155-158`) but half-built — nothing copies the
-function into `sites/*/netlify/functions/`.
-**Impact:** "your installed export is stale" is permanently and falsely true on drlurie, and the
-fleet's `tools/list` genuinely differs.
-**Direction:** make `ensureMcpSiblings` aware of optional handlers, and either ship the function
-fleet-wide or exclude it from the digest.
+**Status:** RESOLVED 2026-09-06 on branch `fix/drlurie-verify-images-surface-parity`.
+`netlify/lib/mcp-siblings.ts` now owns Dr. Lurie's complete sibling set, including
+`verifyArticleImagesHandler`. Every Dr. Lurie entry point that exposes or executes the tool surface
+calls that bootstrap: direct MCP, plugin-manifest generation, the Actions facade, admin chat, and
+its background execution hop. `tests/netlify/mcp-connection-fortification.test.ts` imports each
+entry point in an isolated process and requires all five to expose `verify_article_images` with the
+same aggregate digest; `plugin-actions-facade.test.ts` now obtains its surface from the Actions
+shim rather than accidentally preconfiguring it through the direct MCP shim.
+
+The original defect was that only `netlify/functions/mcp.ts` injected
+`verifyArticleImagesHandler`, while the other function processes reached `visibleToolDefinitions()`
+after injecting only the governed trio. Direct MCP therefore advertised 58 plugin tools while the
+promoted manifest and OpenAPI export carried 57. `whoami` compared those two server-side values and
+permanently misreported every healthy direct connector as stale. Other tenants still omit
+`verify_article_images` deliberately because they do not deploy its handler; the fix aligns every
+relevant surface within Dr. Lurie without widening the fleet exception.
 
 ### 30. `autonomyMode` is wired into the approval floor and configured nowhere
 
@@ -1205,7 +1206,6 @@ Sorted by severity, then by id.
 | 22 | high | publishing-race | Publish/release unordered; release deploys branch HEAD | CA#13, CI#3 |
 | 25 | high | security | Shared-token callers bypass the write rate limit | CI#7 |
 | 28 | high | security | `run-publisher-agent` deployed fleet-wide, no caller | A#4, CI#10 |
-| 29 | high | parity | `verify_article_images` breaks parity + falsifies the digest | CI#2, CI#16 |
 | 33 | high | build-deploy-mismatch | Fleet CI and typecheck only ever exercise drlurie | CA#16, DE#2/3/6 |
 | 41 | high | image-url-assumption | Absolute host-qualified media URLs in published bodies | CA#10, CA#11 |
 | 44 | high | stale-generated-files | `redirects.json` opts out of the export contract; silent truncation | CA#15 |

@@ -116,6 +116,11 @@ export const hostOf = (href: string): string | null => {
 
 const SCROLL_BUCKETS = [25, 50, 75, 90, 100] as const;
 
+/** The content_item id grammar (agents-naming.ts's REQUEST_ID_RE), restated
+ *  for the browser half — this file imports nothing from the server world. The
+ *  ingest sanitizer re-checks it authoritatively. */
+const CONTENT_ITEM_ID_RE = /^req_[a-z0-9]+(?:_[a-z0-9]+)*_\d{8}_\d{2}$/;
+
 type SetTimeoutLike = (callback: () => void, ms: number) => unknown;
 type ClearTimeoutLike = (handle: unknown) => void;
 
@@ -142,6 +147,9 @@ export const createTracker = (
   let engagementStart: number | null = null;
   let completionSent = false;
   let pageEnded = false;
+  /** T21.5: the arm already counted on THIS page — at most one exposure per
+   *  page-load, View-Transitions navigations included. */
+  let exposedArm: string | null = null;
 
   const consent = { analytics: false, ads: false, gpc: env.gpc };
   let visitorId: string | null = null;
@@ -307,6 +315,7 @@ export const createTracker = (
       engagementAcc = 0;
       engagementStart = env.now();
       completionSent = false;
+      exposedArm = null;
       if (page.path.startsWith('/admin')) return; // hard bail — never tracked
       if (collects(page.object?.object_type ?? 'page', 'pageview') || collects('page', 'pageview')) {
         push('pageview', null);
@@ -422,6 +431,28 @@ export const createTracker = (
       if (typeof commerceEventId === 'string') props[COMMERCE_EVENT_ID] = commerceEventId;
       push('goal', null, props);
       fanOutProviders(matchNamedGoals(config.goals, name));
+    },
+
+    /**
+     * T21.5 — the experiment exposure, emitted once per page-load when the
+     * rendered page carries an arm marker.
+     *
+     * NOT sampled and NOT gated by the §6 collection matrix, for the same
+     * reason a declared `goal` isn't: an exposure is the denominator of the
+     * experiment's own result, and a half-counted denominator makes every arm
+     * comparison wrong rather than merely noisy. It IS gated on the arm ids
+     * being real content_item ids, so a hand-edited DOM cannot inject props.
+     *
+     * The idempotence key is the ARM (a content_item id, unique across
+     * experiments), not a boolean: a View-Transitions navigation to a different
+     * arm must emit the second one — `pageLoad` has already cleared the key by
+     * then — while any repeated bind of the same page must not.
+     */
+    exposure(experimentId: string, variantId: string): void {
+      if (page.path.startsWith('/admin') || exposedArm === variantId) return;
+      if (!CONTENT_ITEM_ID_RE.test(experimentId) || !CONTENT_ITEM_ID_RE.test(variantId)) return;
+      exposedArm = variantId;
+      push('exposure', null, { experiment_id: experimentId, variant_id: variantId });
     },
 
     /** Consent flags on outgoing events (GPC beats grant — T13.6 wires this). */

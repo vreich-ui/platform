@@ -14,6 +14,7 @@ import type { MetaData } from '~/types';
 import RelatedPosts from '~/components/blog/RelatedPosts.astro';
 import ObjectSections from '~/components/cms/ObjectSections.astro';
 import { loadRoutePageObject } from '~/utils/route-page-object';
+import { resolveExperimentArm } from '~/utils/experiment-arm';
 
 export const prerender = true;
 
@@ -26,6 +27,12 @@ type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 const { post } = Astro.props as Props;
 
 const url = getCanonical(getPermalink(post.permalink, 'post'));
+// T21.5 — is THIS article an arm of an active experiment? `null` whenever the
+// tracking export carries no active experiment covering it, which is the fleet
+// default and renders exactly the pre-T21.5 page. The arm drives two things
+// and nothing else: the wrapper marker the loader reads to emit one `exposure`,
+// and (for a non-control arm) the noindex + canonical-to-control in the head.
+const experimentArm = await resolveExperimentArm(post.id);
 const image =
   typeof post.image === 'string' && isDocumentPath(post.image)
     ? undefined
@@ -58,8 +65,8 @@ const metadata = merge(
 ) as MetaData;
 ---
 
-<Layout metadata={metadata}>
-  <SinglePost post={{ ...post, image: image }} url={url}>
+<Layout metadata={metadata} experimentArm={experimentArm}>
+  <SinglePost post={{ ...post, image: image }} url={url} experimentArm={experimentArm}>
     {post.Content ? <post.Content /> : <Fragment set:html={post.content || ''} />}
   </SinglePost>
   <ToBlogLink />

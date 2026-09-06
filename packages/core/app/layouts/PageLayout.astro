@@ -8,12 +8,15 @@ import { buildSiteNavTargetResolver } from '~/utils/site-nav-targets';
 import { getSiteObject } from '~/utils/site-object';
 
 import type { MetaData } from '~/types';
+import type { ArmAssignment } from '~/utils/experiment-arm';
 
 export interface Props {
   metadata?: MetaData;
+  /** T21.5 — forwarded verbatim to Layout; see its Props doc. */
+  experimentArm?: ArmAssignment | null;
 }
 
-const { metadata } = Astro.props;
+const { metadata, experimentArm = null } = Astro.props;
 
 // W4: WHICH navigation objects feed the default header/footer, and the Header
 // chrome flags, come from the site object (defaultNavigation / chrome — D§5.4:
@@ -46,7 +49,7 @@ const headerData = navigationToHeaderProps(parseNavigationExport(headerEntry.dat
 const footerData = navigationToFooterProps(parseNavigationExport(footerEntry.data), resolveNavTarget);
 ---
 
-<Layout metadata={metadata}>
+<Layout metadata={metadata} experimentArm={experimentArm}>
   <slot name="header">
     {
       /* data-cms-nav-object: the edit-mode canvas reads this to offer chrome

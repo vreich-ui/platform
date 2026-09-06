@@ -51,6 +51,9 @@ export const TRACKING_EVENT_KINDS = [
   'read_progress',
   'completion',
   'goal',
+  // T21.5 (experiments): emitted once per page-load on any page rendering an
+  // experiment arm. Props carry experiment_id + variant_id only.
+  'exposure',
 ] as const;
 const eventKindSchema = z.enum(TRACKING_EVENT_KINDS);
 
@@ -167,10 +170,66 @@ const defaultsSchema = z.strictObject({
   utm_capture: z.boolean(),
 });
 
+/**
+ * T21.5 — variant experiments: concurrent randomized arms served at the edge
+ * (12-plan §15.4 designed the sequential/organic comparison and recorded
+ * traffic splitting as deferred under OQ-W7-2; this task commissions the
+ * split itself, so §15.4's "never concurrent randomized arms" honesty rule
+ * no longer describes an experiment that carries one of these entries — it
+ * still describes every score comparison made WITHOUT one).
+ *
+ * Shape law, so the served arm set is never implicit:
+ * - `object_id` is the CONTROL content_item — the parent of the family.
+ * - `arms` is the COMPLETE served set (2..6). Exactly one arm's `variant_id`
+ *   must be `object_id` itself: the parent IS the control arm, and listing it
+ *   is what makes its traffic share weightable alongside the variants.
+ * - Every OTHER arm's `variant_id` must be a `content_item` whose
+ *   `lineage.parent_content_id` equals `object_id`, and its `route` must be
+ *   that item's published route.
+ *
+ * IDs only — no free text and no URL an agent could author: `route` is
+ * re-derived from the referenced item's slug at validation and refused if it
+ * disagrees, so the field is a redundant, checkable copy rather than a routing
+ * input. Nothing here reaches reader HTML except the arm's own object ids
+ * (already public — the canvas stamps them).
+ */
+export const EXPERIMENT_STATUSES = ['draft', 'active', 'concluded'] as const;
+export const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES);
+
+const contentItemIdSchema = z
+  .string()
+  .regex(/^req_[a-z0-9]+(?:_[a-z0-9]+)*_\d{8}_\d{2}$/, {
+    message: 'must be a content_item id (req_<flow>_<topic>_<yyyymmdd>_<nn>).',
+  });
+
+const experimentArmSchema = z.strictObject({
+  variant_id: contentItemIdSchema,
+  /** The variant item's published route — re-derived and checked at validation. */
+  route: z.string().regex(/^\/[a-z0-9\-/]*$/, { message: 'must be a site-relative route like /my-article.' }),
+});
+
+export const experimentSchema = z.strictObject({
+  /** The CONTROL content_item — the family parent, and one of the arms. */
+  object_id: contentItemIdSchema,
+  /** The complete served set, control included. Weighted over as a whole. */
+  arms: z.array(experimentArmSchema).min(2).max(6),
+  status: experimentStatusSchema,
+  /** Set when concluded: which arm won — must be one of `arms`. */
+  winner: contentItemIdSchema.optional(),
+});
+export type Experiment = z.infer<typeof experimentSchema>;
+
 export const trackingConfigBodySchema = z.strictObject({
   providers: providersSchema,
   consent: consentSchema,
   defaults: defaultsSchema,
+  /**
+   * Default `[]` — the zero-experiment state is the fleet default and is a
+   * strict render/serve no-op (T21.5 acceptance): an absent or empty array
+   * produces an empty edge map, and the edge function returns `context.next()`
+   * before reading anything else.
+   */
+  experiments: z.array(experimentSchema).max(20).default([]),
 });
 export type TrackingConfigBody = z.infer<typeof trackingConfigBodySchema>;
 

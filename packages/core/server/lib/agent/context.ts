@@ -90,6 +90,7 @@ import {
   callValidatePdfTemplate,
   callVerifyArticleImages,
 } from '../mcp-tool-handlers.js';
+import { callAnalyticsSummary, callAnalyticsTopContent, callAnalyticsObject } from '../mcp-analytics-handlers.js';
 import {
   getArtifactMetadata,
   listArtifactsByKind,
@@ -210,9 +211,7 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   // W2 T2.3: the composite creates a paid render job and patches the article,
   // so it replicates create_agent_artifact_job's idempotency wrapping exactly.
   render_article_pdf: (event, args) =>
-    withIdempotentToolCall(event, 'render_article_pdf', args.idempotency_key, () =>
-      callRenderArticlePdf(event, args)
-    ),
+    withIdempotentToolCall(event, 'render_article_pdf', args.idempotency_key, () => callRenderArticlePdf(event, args)),
   validate_pdf_render_data: callValidatePdfRenderData,
   get_pdf_render_brand: callGetPdfRenderBrand,
   validate_pdf_template: callValidatePdfTemplate,
@@ -285,6 +284,11 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   order_reissue: callOrderReissue,
   commerce_orders: callCommerceOrders,
   registry_get: callRegistryGet,
+  // R12.3 / T21.20: read-only analytics — same operational-bridge posture as
+  // registry_get/commerce_orders above.
+  analytics_summary: callAnalyticsSummary,
+  analytics_top_content: callAnalyticsTopContent,
+  analytics_object: callAnalyticsObject,
   // P5 (brand-imagery wave, BRIEF §3.5): a plain read-class bridge tool like
   // every other entry above — it needs no ctx.cmsAgent/ctx.requests state of
   // its own (callBrandImageryPropose builds its own CmsAgentClient bridge,

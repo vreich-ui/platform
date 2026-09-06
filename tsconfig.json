@@ -14,5 +14,14 @@
     }
   },
   "include": [".astro/types.d.ts", "**/*"],
-  "exclude": ["dist/"]
+  "exclude": [
+    "dist/",
+    // T21.5: Netlify EDGE functions run on Deno and import their
+    // dependency with an explicit `.ts` specifier, which tsc rejects
+    // (TS5097). They are deliberately thin wrappers — every decision
+    // they make lives in packages/core/lib/tracking/experiments/, which
+    // IS type-checked and unit-tested.
+    "netlify/edge-functions/",
+    "sites/*/netlify/edge-functions/"
+  ]
 }
