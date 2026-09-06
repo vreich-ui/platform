@@ -1,6 +1,6 @@
 # Kugel Platform — plain-language overview
 
-> For humans. Written 2026-09-05 from the verified architecture documents (commit `6789644`). If you want evidence for any sentence here, the technical docs linked at the bottom cite the exact file. Diagrams: the boxes below render on GitHub; the publish-vs-release picture and nine more from the technical docs are in [`diagrams/`](diagrams/) as SVG.
+> For humans. Written 2026-09-05 from the verified architecture documents (commit `6789644`) and corrected 2026-09-06 against `420afbd`. If you want evidence for any sentence here, the technical docs linked at the bottom cite the exact file. Diagrams: the boxes below render on GitHub; the publish-vs-release picture and ten more from the technical docs are in [`diagrams/`](diagrams/) as SVG.
 
 ## 1. What this repository is, in one paragraph
 
@@ -78,7 +78,7 @@ What this is *for* is to let CMS-Agent learn which content and which agent decis
 
 | Gap | Plain meaning |
 |---|---|
-| Purchase join key never matches; purchase "kind" never matches | Revenue can never be attributed to a reader session — two separate bugs, both must be fixed |
+| Purchase join key never matches; purchase "kind" never matches | Revenue can never be attributed to a reader session — two separate bugs, both must be fixed. Verified in this repo and in kugel-data's code at pinned commits; whether the live database has the same migrations applied is not provable from git, so the kugel-data audit should confirm before anyone acts on production numbers |
 | No object *version* on events | We know an event hit article X, not which revision of X |
 | Node strategy is empty for all new content | The "which persuasion block worked" join has been blank since the private-field strip on 2026-08-31 |
 | Experiment/exposure events do not exist | kugel-data has an A/B machinery that nothing can feed |
@@ -88,20 +88,21 @@ The good news: the measurement stack is deterministic and model-free, and kugel-
 
 ## 7. Health check (run 2026-09-05)
 
-Install, type-check, lint, 5,188 tests and the drlurie build all pass; a second tenant (platform) builds independently. Caveat: the type-check and the CI "fleet" job only ever exercise drlurie's configuration.
+Install, type-check, lint, the full test suite and the drlurie build all pass; a second tenant (platform) builds independently (exact counts: `DEPLOYMENT.md` §Verification run log). Caveat: the type-check and the CI "fleet" job only ever exercise drlurie's configuration.
 
 ## 8. The decisions that need you
 
 | # | Decision | Recommendation |
 |---|---|---|
 | KI-7 | `SITE_NOT_YET_LIVE` forces *noindex* on every page of every site — drlurie's articles are published and listed in the sitemap, but every page also tells Google not to index it | Flip it to a per-site setting and switch drlurie on, or accept that nothing is indexed |
-| KI-8/9 | Revenue attribution is structurally dead (two key mismatches) | Fix both before any "which content sells" analysis is trusted |
+| KI-8/9 | Revenue attribution is structurally dead (two key mismatches, verified in both repos' code) | Fix both before any "which content sells" analysis is trusted; confirm the live DB state in the kugel-data audit |
+| KI-63 | Test drills tag their traffic with a header nothing server-side reads, so drill runs pollute the analytics | Decide which side (relay or sink) owns the tag |
 | KI-28 | `run-publisher-agent` is deployed on all four sites with no caller | Retire it |
 | KI-22 | Anyone's release ships everyone's pending exports; a retry can double-build | Accept for now (single operator) or add a server-side guard |
 | KI-11 | Node strategy dimension is empty for new content | Decide where strategy may live outside `private` (it is a neutral slug) |
 | — | 139 orphaned upload images, two demo articles live in production, 19 dead widgets | Cleanup wave; no product risk |
 
-The full list with severity is [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) (entries 7–62).
+The full list with severity is [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) (entries 7–66).
 
 **Single next action:** rule on KI-7 (indexing) and KI-8/9 (revenue keys) — the two blockers that silently zero out the business signals everything else is meant to optimize.
 

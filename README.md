@@ -1,6 +1,6 @@
 # Kugel Platform — agent-first publishing engine (`platform` repo)
 
-> **Not the AstroWind template any more.** This repository started as [AstroWind](https://github.com/arthelokyo/astrowind) (Astro 5 + Tailwind) and has been rebuilt in place into a **white-label, multi-tenant, agent-first CMS and publishing fleet**. The original template README is preserved at [`docs/history/README-astrowind-template.md`](docs/history/README-astrowind-template.md); nothing in it describes the current architecture. `package.json` still carries the template's name — that is residue, not identity.
+> **Not the AstroWind template any more.** This repository started as AstroWind (the `arthelokyo/astrowind` Astro 5 + Tailwind template) and has been rebuilt in place into a **white-label, multi-tenant, agent-first CMS and publishing fleet**. The original template README is preserved at [`docs/history/README-astrowind-template.md`](docs/history/README-astrowind-template.md); nothing in it describes the current architecture. `package.json` still carries the template's name — that is residue, not identity.
 >
 > **AI agents:** read [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md) first, then [`AGENTS.md`](AGENTS.md). **Humans:** read [`docs/OVERVIEW.md`](docs/OVERVIEW.md).
 
@@ -49,7 +49,8 @@ vendor/integration/      inherited AstroWind config integration (live)
 | `npm run build` | drlurie: prebuild image gate → `astro build` → postbuild tracking dims push (no-ops without env) |
 | `npx astro build --config sites/<client>/astro.config.ts` | any other tenant → `sites/<client>/dist` |
 | `npm run check` | `astro check` (drlurie config only) + eslint + prettier |
-| `npm test` | 5,188 tests at `6789644`, offline, ~3 min |
+| `npm test` | the full node:test suite (offline, ~3 min; latest counts in `docs/DEPLOYMENT.md` §Verification run log) — includes the docs invariants and inventory-freshness tests |
+| `node scripts/docs/inventory.mjs --write` | regenerate `docs/generated/INVENTORY.md` (functions, tools, schemas, env names, tenants, namespaces, diagrams) — `npm test` fails when it is stale |
 | `npm run site:create` / `site:genesis` / `site:verify` | scaffold and seed a new tenant |
 | `npm run fleet:parity` / `fleet:capability` | cross-tenant parity audit / live capability probe |
 
@@ -67,6 +68,7 @@ vendor/integration/      inherited AstroWind config integration (live)
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Netlify projects, env vars, CI, scripts, release protocol, verification log |
 | [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Defects and drift with severity |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | Vocabulary |
+| [`docs/generated/INVENTORY.md`](docs/generated/INVENTORY.md) | Generated counts and names (functions, MCP tools, object types, event kinds, env vars, tenants, blob namespaces, diagrams) — never hand-edit |
 | [`docs/diagrams/`](docs/diagrams/) | Mermaid sources + rendered SVGs |
 | [`docs/agents/publishing-policy.md`](docs/agents/publishing-policy.md) | The agent-facing publishing procedure |
 | `docs/cms-architecture/` | Plans, briefs, decisions and session logs — history and intent, **not** implementation |
