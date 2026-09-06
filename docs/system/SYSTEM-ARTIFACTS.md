@@ -1,6 +1,6 @@
 # System artifact semantics — bytes, indexes, references, proofs, paths
 
-> Pins: `CMS_AGENT_SHA=0d1dfa43f827aae3b5b9ffdfaf71868a8076ffd3` · `PLATFORM_SHA=99fb36993f156fbdc6a91cb717e890ca2c2adfef` · `PDF_TOOL_SHA=2c28a4b6430a9589b384dd634f08e9ace5c4e84b` · `KUGEL_DATA_SHA=6c9c7129467bdb947ce76c0f52876b135aa24a61`.
+> Pins: `CMS_AGENT_SHA=44acb04a1f54281761ab3c34219913198d117950` · `PLATFORM_SHA=d5845dd6e855b434547430d6b0bb4d60b9f60a3c` · `PDF_TOOL_SHA=2c28a4b6430a9589b384dd634f08e9ace5c4e84b` · `KUGEL_DATA_SHA=d9723664521c97be87934874927e9e4603da68ba`.
 > Both producer and consumer implementations were read for every transformation below. Nothing named "ArtifactReference" is collapsed into anything else.
 
 ## 1. The nine things and where each lives

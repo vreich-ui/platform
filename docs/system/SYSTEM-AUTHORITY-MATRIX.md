@@ -1,6 +1,6 @@
 # System authority matrix
 
-> Pins: `CMS_AGENT_SHA=0d1dfa43f827aae3b5b9ffdfaf71868a8076ffd3` · `PLATFORM_SHA=99fb36993f156fbdc6a91cb717e890ca2c2adfef` · `PDF_TOOL_SHA=2c28a4b6430a9589b384dd634f08e9ace5c4e84b` · `KUGEL_DATA_SHA=6c9c7129467bdb947ce76c0f52876b135aa24a61`.
+> Pins: `CMS_AGENT_SHA=44acb04a1f54281761ab3c34219913198d117950` · `PLATFORM_SHA=d5845dd6e855b434547430d6b0bb4d60b9f60a3c` · `PDF_TOOL_SHA=2c28a4b6430a9589b384dd634f08e9ace5c4e84b` · `KUGEL_DATA_SHA=d9723664521c97be87934874927e9e4603da68ba`.
 > "Canonical owner" = the one system whose write is the truth. Everything in "Derived copies" is a cache, mirror, projection or receipt and must never be edited to change the fact. Where two systems can write the same fact, the row says **AMBIGUOUS** and names both — that is a finding, not a description. Paths are repo-relative to the owner unless prefixed.
 
 | Domain | Canonical owner | Canonical store | Mutation API | Readers | Derived copies | Contract / schema | Evidence |

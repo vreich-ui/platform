@@ -1,0 +1,15 @@
+flowchart LR
+  BYTES["1 bytes<br/>(tenant artifacts store)"] -- "saveArtifactBytes: sha256 recomputed,<br/>%PDF- check, collision suffix" --> A["4 layer A ArtifactReference"]
+  A -- "setJSON blobKey+.json" --> SIDE["2 sidecar"]
+  A -- "writeArtifactReferenceIndexes (7 keys)" --> IDX["3 index records"]
+  A -- "attestArtifactReference (HMAC)" --> PROOF["7 proof"]
+  A -- "spread + proof" --> B["5 wrapper (per call)"]
+  B -- "platform: parseArtifactReference<br/>13-key allowlist, rejects extra keys;<br/>verifyBridgeArtifact → verified:true;<br/>sanitizePdfToolPayload strips storage/token/proof;<br/>+ public_path = publicPathForArtifactRef(blobKey)" --> P["6 platform reference<br/>{artifactReference, public_path, verified}"]
+  P -- "CMS-Agent: readReference {...ref, blobKey};<br/>readPublicPath; verification{}<br/>(credential-shaped keys stripped)" --> W["8 workflow reference<br/>SlotJobState / artifact_plan.v1"]
+  W -- "article_body MODEL turn:<br/>{src: publicPath, alt} into the body;<br/>raw ref into the contract's reference field" --> NODE["10 content-node media field"]
+  NODE -- "object_validate: /img|/pdf grammar,<br/>existence via request-artifacts index,<br/>media budget; raw Major Key in a rendered field = block" --> REC[("object record")]
+  REC -- "materialize (src verbatim)" --> EXPORT["export JSON"]
+  EXPORT -- "render-nodes.ts: <img src> / document figure (verbatim)" --> HTML["page HTML"]
+  HTML -- "/img/* → get-public-image?blobKey=image/:splat" --> BYTES
+  PATH["9 public path"] -. "pdf-tool parsePublicArtifactPath → request-artifacts key<br/>(no shipped caller)" .-> IDX
+  CAP["11 capture artifact (pdf-x own site)"] -. "get_capture_snapshot JSON only" .-> CMSC["CMS-Agent capture engine"]

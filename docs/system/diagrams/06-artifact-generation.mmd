@@ -1,0 +1,30 @@
+sequenceDiagram
+  autonumber
+  participant M as CMS-Agent artifact_materializer
+  participant T as Tenant /mcp bridge
+  participant G as pdf-tool-storage-grant.ts
+  participant X as pdf-tool /mcp
+  participant W as pdf-tool worker (background)
+  participant B as Tenant Blobs (artifacts, artifact-index, pdf-tool-jobs)
+  M->>T: get_agent_artifact_by_slot {site_id, request_id, slot}
+  T->>G: mint grant {siteId, token (PAT), projectId, stores, limits, expiresAt+60min}
+  T->>X: get_agent_artifact_by_slot {projectId, requestId, slot, storage}
+  X->>B: read by-slot/{projectId}/{enc(requestId)}/{slot}.json (+ legacy key)
+  X-->>T: {artifactReference, materializationProof} or empty
+  T-->>M: {artifactReference, public_path, verified:true} / not found
+  M->>T: create_agent_artifact_job {site_id, request_id, artifact_kind, filename, slot, wait:false, idempotency_key, prompt | template_id+data}
+  T->>T: resolveArtifactBridgeScope (request must be an existing content_item on this site)
+  T->>X: create_agent_artifact_job {…camelCase, storage: grant}
+  X->>B: write job record projects/{projectId}/jobs/{jobId}.json
+  X->>W: POST worker {projectId, jobId, storage: forwardableGrant}
+  X-->>T: 202 {jobId, polling}
+  T-->>M: {jobId, polling}
+  W->>B: bytes {kind}/{safeRequestId}/{sha256}{ext} + sidecar + 7 index keys · job → complete
+  loop ≤ 40 dispatches
+    M->>T: get_agent_artifact_job_status {site_id, request_id, job_id}
+    T->>X: get_agent_artifact_job_status {projectId, jobId, storage}
+    X-->>T: {status, artifactReference, materializationProof}
+    T->>X: verify_agent_artifact {…, materializationProof, storage} (on complete)
+    T-->>M: {status, artifactReference, public_path, verified} (proof stripped)
+  end
+  M->>M: slot → has_trusted_artifact · artifact_plan.v1 {media_slots[], artifactReferences[]}

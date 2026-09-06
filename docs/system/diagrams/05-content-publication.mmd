@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph CMSA["CMS-Agent run"]
+    PP["publish_payload<br/>dry_run_publish_payload.v1"] --> PC["publication_controller<br/>decision: go"] --> PE["publish_executor<br/>engine path (store flag) or model turn"]
+    PE --> G{"five gates<br/>operator_enabled · publish_authorized ·<br/>explicit_live · operator_not_withheld ·<br/>controller_decision_go"}
+    G -- pass --> HK["tenant hook (dr-lurie / platform only)"]
+    G -- fail --> BL["blocked / dry_run receipt"]
+    HK --> RE["release_executor"]
+  end
+  subgraph Tenant["Tenant /mcp"]
+    OC["object_create (or adopt shell)"] --> CO["object_checkout → lock_token"] --> OV["object_validate"] --> OP["object_patch"] --> PUB["object_publish"] --> CI["object_checkin"]
+    PUB --> PG["publish-gate.ts<br/>approval policy per type"] --> MAT["materialize + renderExport<br/>(private.* stripped)"] --> GIT["Git Data API commit<br/>[skip netlify]"] --> RCPT["stamp publish_receipt<br/>production:{committed:true, live:false}"]
+    REL["release_to_production<br/>POST build hook · poll deploys"] --> DS["deploy_status<br/>productionConfirmed"]
+  end
+  HK --> OC
+  RE --> REL
+  GIT --> GH[("GitHub main")]
+  REL --> NL["Netlify build → CDN"]
+  Plugin["Publishing plugin / connector"] --> OC
+  Plugin --> REL
+  Admin["/admin Release button"] --> REL

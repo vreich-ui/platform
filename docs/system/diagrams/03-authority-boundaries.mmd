@@ -1,0 +1,43 @@
+flowchart LR
+  subgraph A1["CMS-Agent owns"]
+    a1["workspace document<br/>(nodes, prompts, schemas, grants)"]
+    a2["run record: nodes, stageOutputs,<br/>receipts, approvals, releaseLedger"]
+    a3["project registry + tool policies +<br/>publishingPolicy.autonomyMode"]
+    a4["evaluation, playbooks,<br/>learning observations"]
+    a5["managed scoped bearers (digests)"]
+  end
+  subgraph A2["Tenant (platform) owns"]
+    b1["object records (site-objects)<br/>version / content_revision / review / lock"]
+    b2["publish receipt (export commit)"]
+    b3["approval + creation + media + membership policy;<br/>governance overrides"]
+    b4["artifact bytes + indexes (its Blobs)<br/>public /img /pdf paths"]
+    b5["editorial requests (status DERIVED from run)"]
+    b6["commerce orders + commerce events"]
+    b7["tracking normalization + relay"]
+  end
+  subgraph A3["pdf-tool owns"]
+    c1["artifact layout + index key shapes"]
+    c2["job records (in the tenant store)"]
+    c3["templates + versioning (in the tenant store)"]
+    c4["materializationProof (mint only)"]
+    c5["capture jobs + output (own site)"]
+  end
+  subgraph A4["kugel-data owns"]
+    d1["tracking_events (append-only)"]
+    d2["commerce_events copy, member_link, dims"]
+    d3["views, /stats, /rollups, weights"]
+  end
+  subgraph A5["External authorities"]
+    e1["GitHub: the export commit"]
+    e2["Netlify: deploy state, go-live"]
+    e3["Stripe: payment truth"]
+  end
+  a2 -- "publish sequence (six verbs)" --> b1
+  b1 -- "materialize + commit" --> e1
+  b2 -. "proves export, never deploy" .-> e2
+  b4 -- "grant" --> c1
+  c2 -- "lives in" --> b4
+  b7 --> d1
+  b6 --> d2
+  e3 --> b6
+  b5 -. "derived from" .-> a2

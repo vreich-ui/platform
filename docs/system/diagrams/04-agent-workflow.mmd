@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  participant H as Human (tenant admin chat)
+  participant P as Tenant admin-agent-chat (platform)
+  participant C as CMS-Agent agent_converse (client_manager)
+  participant W as CMS-Agent workflow_* (executor)
+  participant N as Node runner (OpenAI Agents SDK / Anthropic)
+  participant T as Tenant /mcp (object verbs, bridge)
+  participant X as pdf-tool
+  H->>P: message
+  P->>C: agent_converse {client_manager.turn.v1, ≤96 tools, context}
+  C-->>P: assistant_text + tool_calls PROPOSALS (never executed by CMS-Agent)
+  P->>P: loop.ts approval protocol (read=auto, others=ask · autonomyMode always operator-gated)
+  P->>T: executes every non-workspace tool LOCALLY (same handler bodies as tools/call)
+  P->>W: run_workspace_workflow → workflow_start_dry_run {projectId, input, requestId}
+  W->>W: advanceRun: claim → node dispatch (25 nodes, 4 drivers compete via CAS)
+  W->>N: prompt = instructions + JSON{input, dependencyOutputs, playbook, outputSchema}
+  N->>T: controlled tools (project.call_tool → tenant verbs: object_contract, object_validate…)
+  W->>T: deterministic routes: contract prefetch, content-item shell (object_create), artifact_materializer
+  T->>X: create_agent_artifact_job {+storage grant} / get_agent_artifact_by_slot
+  X-->>T: {artifactReference, materializationProof}
+  T-->>W: {artifactReference, public_path, verified:true} (proof stripped)
+  N->>N: article_body binds publicPath into the body (model turn, prompt-governed)
+  W->>W: publish_payload → publication_controller → publish_executor (gates) 
+  W->>T: object_create/checkout/validate/patch/publish/checkin
+  W->>T: release_to_production {idempotency_key} → deploy_status
+  W->>W: learning_recorder → observations (not injected into prompts)
+  P->>W: sweep: workflow_get_run (+ node_get_latest_output · admin: workflow_retry_node, budget overrides — all outside the 11-tool scope, S-07)
