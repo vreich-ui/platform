@@ -1,0 +1,148 @@
+{
+  "__generated": {
+    "at": "2026-09-06T15:47:15.258Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_agent_skin_barrier_damage_20260906_01.json",
+    "producer": {
+      "model": "GPT-5.6 Sol",
+      "node_id": "plugin:openai-gpt",
+      "prompt_version": "dr-lurie-openai-20260906",
+      "run_id": "plugin_openai-gpt_req_agent_skin_barrier_damage_20260906_01"
+    },
+    "record_version": 13,
+    "surface": "plugin:openai-agent"
+  },
+  "deck": "What the skin barrier does, what can temporarily disrupt it, and what evidence supports a gentler approach.",
+  "description": "An evidence-led guide to skin-barrier disruption, common signs, and practical ways to support recovery without alarmist claims.",
+  "editorial": {
+    "framework": "fw_concern",
+    "writer_notes": "TOP funnel: trust-first explainer for readers worried about skin-barrier damage. Single ask: downloadable article PDF."
+  },
+  "nodes": [
+    {
+      "id": "n_intro",
+      "kind": "content",
+      "public": {
+        "body": "The phrase “damaged skin barrier” can sound permanent. In everyday skincare conversations, it usually describes a change in how well the outermost skin layer is holding water in and limiting exposure to irritants—not a diagnosis and not necessarily lasting damage.\n\nThe barrier sits mainly in the stratum corneum. Research describes this layer as central to limiting water loss. When barrier function is disrupted, skin may feel dry, tight, rough, itchy or sting more easily, but those sensations can have several causes and vary from person to person.\n\nA new, persistent, painful, blistering, oozing or spreading rash deserves assessment by your dermatologist rather than being assumed to be a skincare barrier problem.",
+        "title": "When “damaged” sounds worse than it usually is"
+      }
+    },
+    {
+      "id": "n_barrier",
+      "kind": "content",
+      "public": {
+        "body": "A useful mental model is a wall: corneocytes provide much of the structure, while lipids—including ceramides, cholesterol and free fatty acids—occupy the spaces between them. A 2024 review describes ceramides as the largest lipid fraction by weight in this extracellular matrix.\n\nOne common research measure is transepidermal water loss (TEWL): the amount of water moving outward through skin. Higher TEWL can accompany impaired barrier function, although TEWL is a physiological measurement rather than a home diagnostic test.\n\nThe illustration below is a simplified educational rendering, not a microscopic image.",
+        "title": "What the barrier is actually doing"
+      }
+    },
+    {
+      "id": "n_visual",
+      "kind": "content",
+      "public": {
+        "media": {
+          "alt": "Simplified educational cross-section of the outer skin barrier with layered skin cells and lipids between them.",
+          "caption": "A simplified view of the stratum corneum. Real skin is more complex.",
+          "src": "/img/req_agent_skin_barrier_damage_20260906_01/9201660c92324d931c5a87f9270535cca9b516eb4cd40144c6ceb30bbd8f7a78.webp",
+          "type": "image"
+        }
+      }
+    },
+    {
+      "id": "n_disrupt",
+      "kind": "content",
+      "public": {
+        "body": "Barrier disruption can follow ordinary exposures. The American Academy of Dermatology notes that harsh soaps or cleaning products, long hot showers, dry environments and some skincare ingredients can contribute to dryness or irritation. Acne ingredients such as benzoyl peroxide, salicylic acid and topical retinoids can also make skin feel dry or irritated in some people.\n\nThat does not mean every tingle, breakout or patch of redness proves the barrier is impaired. Similar symptoms can occur with irritant or allergic contact dermatitis, eczema and other skin conditions. A photograph cannot reliably tell these apart on its own.",
+        "title": "What can temporarily disrupt it"
+      }
+    },
+    {
+      "id": "n_signs",
+      "kind": "content",
+      "public": {
+        "body": "Common clues include dryness, flaking or a rougher texture; tightness or itching; increased sensitivity; stinging with products that previously felt comfortable; and visible redness or small cracks when dryness is more pronounced.\n\nThese are clues, not a checklist that establishes a diagnosis. Skin tone, baseline sensitivity, environment, medications and underlying skin conditions all affect how disruption looks and feels.",
+        "title": "What you might notice"
+      }
+    },
+    {
+      "id": "n_reset",
+      "kind": "content",
+      "public": {
+        "body": "1. Simplify temporarily. Consider pausing optional exfoliating acids, scrubs and other products that sting or seem to worsen irritation.\n2. Cleanse gently. Use lukewarm rather than hot water and a gentle, fragrance-free cleanser where needed.\n3. Moisturize consistently. Creams and ointments generally reduce water loss more effectively than thinner lotions for dry skin; applying moisturizer to slightly damp skin can help hold water in.\n4. Protect exposed skin from the sun with shade, clothing and a broad-spectrum SPF 30+ sunscreen that your skin tolerates.\n\nEvidence supports moisturization as a practical part of managing dry or barrier-impaired skin, but no single ingredient is required for everyone. Randomized studies have reported improvements in hydration and TEWL with ceramide-containing moisturizers; some trials are small or industry-linked, and other controlled research suggests regular moisturizer use itself may matter more than a particular formulation.\n\nIf you use a prescription topical, are pregnant, are caring for a child, or have significant dermatitis, ask your dermatologist or other qualified clinician before changing active treatment. Individual responses to ingredients and routines vary.",
+        "title": "A lower-friction routine while skin feels reactive"
+      }
+    },
+    {
+      "id": "n_photos",
+      "kind": "content",
+      "public": {
+        "body": "Clinical photographs can make scaling, redness and fissuring easier to recognize, but those appearances are shared by multiple skin conditions. They are useful as examples, not as a way to diagnose the cause of your own symptoms from a screen.",
+        "title": "What clinical photos can—and cannot—show"
+      }
+    },
+    {
+      "id": "n_download",
+      "kind": "action",
+      "public": {
+        "body": "Save the illustrated PDF version for a calm reference when your routine needs simplifying.",
+        "ctaLink": "/pdf/req_agent_skin_barrier_damage_20260906_01/a7fa0647fc665aa63ec38302b5bd844d152e6ac30ada60551f0cd06468f077d9.pdf",
+        "ctaText": "Download the article PDF",
+        "media": {
+          "contentType": "application/pdf",
+          "src": "/pdf/req_agent_skin_barrier_damage_20260906_01/a7fa0647fc665aa63ec38302b5bd844d152e6ac30ada60551f0cd06468f077d9.pdf",
+          "title": "Skin-barrier damage article PDF",
+          "type": "document"
+        },
+        "title": "Keep the guide"
+      }
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": "The role of ceramides in the disruption of the cutaneous permeability barrier — Frontiers in Physiology / PubMed Central, 2024 — https://pmc.ncbi.nlm.nih.gov/articles/PMC11348431/\n\nDirectional assessment of the skin barrier function in vivo — Skin Research and Technology / PubMed Central, 2023 — https://pmc.ncbi.nlm.nih.gov/articles/PMC10182387/\n\nDermatologists' top tips for relieving dry skin — American Academy of Dermatology, accessed 2026 — https://www.aad.org/public/everyday-care/skin-care-basics/dry/dermatologists-tips-relieve-dry-skin\n\nA daily regimen of a ceramide-dominant moisturizing cream and cleanser — Dermatologic Therapy / PubMed, 2021 — https://pubmed.ncbi.nlm.nih.gov/33984185/\n\nMoisturizers are effective in the treatment of xerosis irrespectively from their particular formulation — JEADV / PubMed, 2015 — https://pubmed.ncbi.nlm.nih.gov/26563519/",
+        "title": "Sources"
+      }
+    }
+  ],
+  "slug": "skin-barrier-damage",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-06",
+        "name": "The role of ceramides in the disruption of the cutaneous permeability barrier",
+        "publisher": "Frontiers in Physiology / PubMed Central",
+        "source_id": "src_ceramides",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11348431/"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Directional assessment of the skin barrier function in vivo",
+        "publisher": "Skin Research and Technology / PubMed Central",
+        "source_id": "src_tewl",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10182387/"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Dermatologists' top tips for relieving dry skin",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-basics/dry/dermatologists-tips-relieve-dry-skin"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "A daily regimen of a ceramide-dominant moisturizing cream and cleanser restores the skin permeability barrier in adults with moderate eczema: A randomized trial",
+        "publisher": "Dermatologic Therapy / PubMed",
+        "source_id": "src_trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33984185/"
+      },
+      {
+        "accessed_at": "2026-09-06",
+        "name": "Moisturizers are effective in the treatment of xerosis irrespectively from their particular formulation",
+        "publisher": "JEADV / PubMed",
+        "source_id": "src_xerosis",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/26563519/"
+      }
+    ]
+  },
+  "title": "Skin-barrier damage, explained without the scare language"
+}
