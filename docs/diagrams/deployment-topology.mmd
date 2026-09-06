@@ -20,7 +20,7 @@ flowchart TB
     N4 --> Edge4["CDN (dist/) + Functions + Blobs + /mcp"]
 
     Agent["Agent / MCP client\n(CMS-Agent, ChatGPT Actions, human admin)"] -- "object_publish over /mcp" --> Edge1
-    Edge1 -- "GitHub Contents API commit,\n[skip netlify] (no rebuild)" --> Exports
+    Edge1 -- "GitHub Git Data API commit\n(blobs → tree → commit → ref),\n[skip netlify] (no rebuild)" --> Exports
     Agent -- "release_to_production tool /\nadmin Release button" --> Hook["Netlify build hook (per project, 1 URL each)"]
     Hook --> N1
 
