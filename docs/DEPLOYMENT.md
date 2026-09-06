@@ -1,6 +1,6 @@
 # Deployment, Configuration & Scripts
 
-> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692); rebased onto `99fb369` (#694, W21 tracking) with `generated/INVENTORY.md`, tests and builds refreshed there — W21 content itself is not yet audited (`KNOWN_ISSUES.md` #67). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md).
 
 ## Purpose
@@ -380,18 +380,20 @@ So: a `packages/core` change rebuilds **every** tenant; a `sites/drlurie`-only c
 
 ## Verification run log
 
-### Run 2 — 2026-09-06, correction pass at `420afbd` (main after #689/#690/#692 and the merged docs #691) plus this branch's documentation-only changes
+### Run 2 — 2026-09-06, correction pass, final tree = `main` @ `99fb369` (after #689/#690/#692/#691 and #694 W21) + this branch's documentation-only changes
 
 | Step | Command | Result |
 |---|---|---|
-| 1 | `npm ci` | already installed from run 1; lockfile unchanged |
-| 2 | `npm run check:eslint` | clean, 27.7 s (includes `scripts/docs/inventory.mjs` and the two new `tests/scripts/docs-*.test.mjs`) |
-| 3 | `npm run check:astro` | **0 errors, 0 warnings, 52 hints** across 1531 files (run with stale `dist/` and `sites/platform/dist/` removed first — leftover build output makes the scan pick up minified bundles) |
-| 4 | `npm test` | **5,266 / 5,266 passing**: stage 1 (`tsc -p tsconfig.test.json` + `node --test` in `.tmp/ci-test`) 4,807 tests / 534 suites; stage 2 (`tests/scripts/*.test.mjs`) 239 — includes the new `docs-invariants` (5) and `docs-inventory-fresh` (2); stage 3 (`packages/core/cli/capture/*.test.mjs`) 220 |
-| 5 | `npm run build` (drlurie, root) | 107 pages, 46.7 s; prebuild image gate "0 images checked"; postbuild `tracking-dims-push` `skipped: missing_configuration` (no sink env); the same two expected warnings as run 1 (empty `post` collection; `page_skincare_is_not_self_worth` blog-slug collision) |
-| 6 | `npx astro build --config sites/platform/astro.config.ts` | 76 pages, 38.0 s, to `sites/platform/dist` |
-| 7 | `node scripts/docs/inventory.mjs --write` + `node --test tests/scripts/docs-invariants.test.mjs tests/scripts/docs-inventory-fresh.test.mjs` | 7/7 — links resolve, no sandbox paths, no repository slug outside `docs/history/`, Mermaid blocks match `docs/diagrams/*.mmd`, no duplicate issue ids, inventory fresh |
-| 8 | `git status` | only `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/**`, `scripts/docs/**` and the two new test files differ from `420afbd` — no product code, export or config changed |
+| 1 | `npm ci` | 1,060 packages (W21 adds `uplot`) |
+| 2 | `npm run check:eslint` | clean (includes `scripts/docs/inventory.mjs` and the two new `tests/scripts/docs-*.test.mjs`) |
+| 3 | `npm run check:astro` | **0 errors, 0 warnings, 53 hints** across 1,578 files (run with stale `dist/` / `sites/platform/dist/` removed first — leftover build output makes the scan pick up minified bundles) |
+| 4 | `npm test` | **5,535 / 5,535 passing**: stage 1 (`tsc -p tsconfig.test.json` + `node --test` in `.tmp/ci-test`) 5,056; stage 2 (`tests/scripts/*.test.mjs`) 259 — includes the new `docs-invariants` (5) and `docs-inventory-fresh` (2); stage 3 (`packages/core/cli/capture/*.test.mjs`) 220 |
+| 5 | `npm run build` (drlurie, root) | 108 pages (W21 adds `/admin/analytics/object/__object`); prebuild image gate "0 images checked", `tracking-experiments-build` "0 active experiment(s) materialized", postbuild `tracking-dims-push` `skipped: missing_configuration` |
+| 6 | `npx astro build --config sites/platform/astro.config.ts` | 77 pages to `sites/platform/dist` |
+| 7 | `node scripts/docs/inventory.mjs --write` + `GITHUB_REPOSITORY=<slug> node --test tests/scripts/docs-invariants.test.mjs tests/scripts/docs-inventory-fresh.test.mjs` | 7/7 with the CI env var set — links resolve, no sandbox paths, no repository slug outside `docs/history/`, Mermaid blocks match `docs/diagrams/*.mmd`, no duplicate issue ids, inventory fresh at `99fb369` (54 core functions, 100 MCP tools, 19 event kinds) |
+| 8 | `git status` | only `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/**`, `scripts/docs/**` and the two new test files differ from `main` — no product code, export or config changed |
+
+Why the first CI run of #695 failed: `main` moved from `420afbd` to `99fb369` (#694) while the PR was open, so GitHub's merge ref contained W21's new functions/tools/event kinds while the committed `docs/generated/INVENTORY.md` still described `420afbd` — exactly the drift `docs-inventory-fresh.test.mjs` exists to catch. The fix was to rebase and regenerate, not to loosen the test.
 
 ### Run 1 — 2026-09-05 at `6789644`
 
