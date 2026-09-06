@@ -10,8 +10,7 @@
     "S-07 platform calls CMS-Agent tools outside the tenant bearer scope (documented in docs/system/SYSTEM-KNOWN-ISSUES.md)",
     "S-04 CMS-Agent requests /rollups grains the sink rejects (documented)",
     "S-02 sink filters commerce kinds platform never sends (documented)",
-    "S-23 platform /stats parameters and /export reader the deployed sink does not serve (documented)",
-    "S-24 /weights envelope key mismatch (documented)"
+    "S-23 platform /stats parameters and /export reader the deployed sink does not serve (documented)"
   ],
   "platform": {
     "cmsAgentBounds": {
@@ -129,7 +128,7 @@
       "amount_mismatch"
     ],
     "commerceSinkKindSource": "event.type",
-    "checkoutEventIdGenerator": "randomUUID",
+    "checkoutEventIdGenerator": "deterministicUuid(session.id:checkout_completed)",
     "webhookEventIdGenerator": "deterministicUuid(session.id:type)",
     "allowedArtifactReferenceKeys": [
       "blobKey",
@@ -196,8 +195,8 @@
       "source",
       "to"
     ],
-    "rawExportPath": "/api/tracking-sink/export",
-    "weightsEnvelopeKey": "weights",
+    "rawExportPath": "/export",
+    "weightsEnvelopeKey": "experiments",
     "mcpToolCount": 100
   },
   "cmsAgent": {
@@ -206,7 +205,9 @@
     "siteClientManagerTools": [
       "agent_converse",
       "agent_resolve",
+      "node_get_latest_output",
       "visual_identity_propose",
+      "workflow_cancel_run",
       "workflow_get_run",
       "workflow_get_run_cost",
       "workflow_publish_readiness",
@@ -216,7 +217,7 @@
       "workflow_start_dry_run",
       "workspace_get_nodes"
     ],
-    "siteClientManagerToolCount": 11,
+    "siteClientManagerToolCount": 13,
     "rollupsByValues": [
       "producer",
       "object",
@@ -243,7 +244,7 @@
       "materializationProof"
     ],
     "mcpToolCount": 151,
-    "drLuriePublishSendsProducer": false,
+    "drLuriePublishSendsProducer": true,
     "platformPublishSendsProducer": true
   },
   "pdfTool": {
@@ -320,6 +321,7 @@
     ],
     "trackingEventsHasVersionColumn": false,
     "dimsReadKeys": [
+      "attribution",
       "intent",
       "model",
       "node_id",
@@ -335,13 +337,16 @@
       "route",
       "run_id",
       "strategy",
+      "surface",
       "variant_of",
       "version"
     ],
     "statsDaysParam": true,
     "statsParamsRead": [
       "days",
-      "project_id"
+      "from",
+      "project_id",
+      "to"
     ],
     "weightsEnvelopeKeys": [
       "experiments",
