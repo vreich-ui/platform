@@ -1,6 +1,6 @@
 # CMS Integration Interfaces
 
-> **Status:** verified against the `platform` repo commit `6789644` (2026-09-05). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md).
 
 ## Purpose
@@ -83,7 +83,8 @@ flowchart TB
 
   mcp -->|"tools/call + storage grant"| pdftool
   pdftool -->|"writes bytes via grant"| blobs
-  cdn -->|"/api/t NDJSON"| kugeldata
+  cdn -->|"tracking_batch.v1 JSON<br/>sendBeacon → /api/t"| trackfn["track-ingest.ts<br/>(tenant relay)"]
+  trackfn -->|"NDJSON, bearer,<br/>at-most-once"| kugeldata
   adminfn -->|"Bearer PAT"| nlanalytics
   cdn -->|"checkout"| stripe
   stripe -->|"webhook (signed)"| adminfn
@@ -125,14 +126,17 @@ agent → /mcp object_publish
    ⟹ export is on main. NOTHING IS LIVE.
 
 agent/human → release_to_production | /admin "Release to Production"
-   → production-release.ts → triggerNetlifyBuild() → POST NETLIFY_BUILD_HOOK_URL
+   → production-release.ts: refuse unless NETLIFY_BUILD_HOOK_URL is set
+   → resolve target (explicit commit, else branch HEAD via GET /git/ref/heads/<branch>; unresolvable ⇒ no build)
+   → triggerNetlifyBuild() → POST NETLIFY_BUILD_HOOK_URL (once)
    → poll Netlify deploys API until the target commit is terminal
+   → read published_deploy; equal, else ancestry via GET /compare/{target}...{published}
    ⟹ one deploy carries every accumulated export. NOW it is live.
 ```
 
 A **`publish_receipt` proves the export, never the deploy.** `callObjectPublish` explicitly stamps
 `production: { committed: true, live: false, deploy_deferred: true }` on every successful publish
-result so an agent cannot misread it (`packages/core/server/lib/mcp-tool-handlers.ts:3324-3359`).
+result so an agent cannot misread it (`packages/core/server/lib/mcp-tool-handlers.ts:callObjectPublish`, `OBJECT_PUBLISH_LIVE_NOTE` — line ranges into this 3.5k-line file drift with every wave; cite symbols).
 
 ---
 
@@ -173,18 +177,21 @@ sequenceDiagram
   OS->>V: publish_by_time
   V->>V: checkPublishGate (approval-policy.ts per type)
   V->>V: materialize -> MaterializedFile[]
-  V->>GH: ref -> commit -> blobs -> tree -> commit -> PATCH ref (force:false)
+  V->>GH: blobs (once) -> ref -> base commit -> tree -> commit -> PATCH ref (force:false, ref..PATCH retried on non-fast-forward)
   GH-->>V: commit_sha  (message carries "[skip netlify]")
   V->>V: stamp published_time + publish_receipt
   M-->>A: {receipt, production:{committed:true, live:false}}
 
-  A->>M: release_to_production {idempotency_key}
-  M->>NL: POST NETLIFY_BUILD_HOOK_URL
-  M->>GH: GET git/ref/heads/main -> target commit
-  loop until terminal or budget exhausted
+  A->>M: release_to_production {idempotency_key, commit?}
+  M->>M: refuse unless NETLIFY_BUILD_HOOK_URL is configured
+  M->>GH: GET /repos/{repo}/git/ref/heads/{branch} -> target commit (unless commit given)
+  M->>NL: POST NETLIFY_BUILD_HOOK_URL (once)
+  loop poll deploy receipt for target until terminal or budget exhausted
     M->>NL: GET /sites/{id}/deploys
   end
-  M-->>A: {released, productionConfirmed, deploy}
+  M->>NL: GET site published_deploy
+  M->>GH: GET /repos/{repo}/compare/{target}...{published} (ancestry, only if not equal)
+  M-->>A: {released, status, productionConfirmed, deploy}
 
   A->>M: deploy_status {commit}
   M-->>A: {deployStatus:"ready", productionConfirmed:true}
@@ -250,18 +257,18 @@ wraps `object_create`, `object_publish`, `release_to_production`,
 | Field | Value |
 |---|---|
 | **Producer** | `packages/core/server/functions/object-store.ts` (`createHandler(binding)`) |
-| **Consumer** | (a) `/mcp` **in-process** via `invokeObjectStore` (`mcp-tool-handlers.ts:629-664`) — *not* over HTTP; (b) `scripts/lib/object-store-client.mjs` over HTTPS at `<base>/.netlify/functions/object-store`; (c) CMS-Agent, when it publishes into a tenant, does so through that tenant's `/mcp`, not this endpoint |
+| **Consumer** | (a) `/mcp` **in-process** via `invokeObjectStore` (`mcp-tool-handlers.ts:invokeObjectStore`) — *not* over HTTP; (b) `scripts/lib/object-store-client.mjs` over HTTPS at `<base>/.netlify/functions/object-store`; (c) CMS-Agent, when it publishes into a tenant, does so through that tenant's `/mcp`, not this endpoint |
 | **Contract** | `objectVerbRequestSchema` (`object-verbs.ts`). 24 actions: `get list inventory create create_variant instantiate instantiate_section apply_theme apply_brand_imagery checkout refresh_lock checkin patch validate submit_review review_decide discard purge_archived retire publish_by_time marginalia_create marginalia_reply marginalia_list marginalia_resolve`. Records are `object-record-v1.ts` |
 | **Transport** | REST function, `POST` only (405 otherwise), JSON body |
 | **Authority** | The `site-objects` Netlify Blob store — **the source of truth for CMS content** |
 | **Auth** | `x-publish-key` == `PUBLISH_SECRET`/`NETLIFY_PUBLISH_SECRET`, constant-time compare (`object-store.ts:63-76`). Actor derivation: `x-cms-caller-actor` header (set only by `/mcp`, from OAuth grant or verified agent token) wins over the model-supplied `agent_name` (`caller-actor.ts`; `object-store.ts:88-104`) |
 | **Direction** | Read + write |
-| **Failure** | Missing/mismatched key → 401. Conflicts surface as 404/409/422/423 with the endpoint's payload (lock holder, expected/actual version, blockers) so an agent can react (`mcp-tool-handlers.ts:653-661`). Missing publish secret on the MCP side → tool error "Server-side object storage credentials are not configured" (no silent write). Validation context is skipped for verbs that never read it (`verbNeedsValidationContext`) — a perf choice, not a correctness one |
+| **Failure** | Missing/mismatched key → 401. Conflicts surface as 404/409/422/423 with the endpoint's payload (lock holder, expected/actual version, blockers) so an agent can react (`mcp-tool-handlers.ts:invokeObjectStore`, the 404/409/422/423 branch). Missing publish secret on the MCP side → tool error "Server-side object storage credentials are not configured" (no silent write). Validation context is skipped for verbs that never read it (`verbNeedsValidationContext`) — a perf choice, not a correctness one |
 
 **The browser mirror.** `admin-object.ts` runs the *same* `handleObjectVerb` core under **Netlify
 Identity**, and the invariant `A§1.2` is that the browser path **never sees the publish key**
 (`admin-object.ts` header comment). Both wire `publishDeps: { exportRoot: binding.dataRoot }`
-(`object-store.ts:160`, `admin-object.ts:132`).
+(`object-store.ts:160`, `admin-object.ts:150`).
 
 ### 5. Publish → GitHub
 
@@ -287,7 +294,7 @@ Identity**, and the invariant `A§1.2` is that the browser path **never sees the
 | **Authority** | Netlify owns deploy state; this repo only reports it |
 | **Auth** | Build hook URL **is** the credential (env `NETLIFY_BUILD_HOOK_URL` — note: *not* `NETLIFY_BUILD_HOOK`). Deploy lookup uses `NETLIFY_AUTH_TOKEN`/`NETLIFY_BLOBS_TOKEN` + `NETLIFY_SITE_ID`/`SITE_ID` |
 | **Direction** | Write (trigger) + read (poll) |
-| **Failure** | Unconfigured hook or lookup → returned as a **tool error** with `error_code`, not a `released:false` success an agent could misread (`mcp-tool-handlers.ts:436-440`). Poll defaults: 120 s timeout, 5 s interval (`netlify-deploys.ts:28-30`); the MCP wrapper clamps the wait to the remaining Lambda budget (`resolveReleaseWaitBudgetSeconds`). `productionConfirmed:false` with `released:true` means "ready-by-commit only, not independently confirmed live". A **locked deploy** (Auto Publishing off) produces exactly that result — documented at `production-release.ts:21-25`, not detectable in code |
+| **Failure** | Unconfigured hook or lookup → returned as a **tool error** with `error_code`, not a `released:false` success an agent could misread (`mcp-tool-handlers.ts`, the `build_hook_not_configured || deploy_lookup_not_configured → toolError` branch in the release handler). Poll defaults: 120 s timeout, 5 s interval (`netlify-deploys.ts:28-30`); the MCP wrapper clamps the wait to the remaining Lambda budget (`resolveReleaseWaitBudgetSeconds`). `productionConfirmed:false` with `released:true` means "ready-by-commit only, not independently confirmed live". A **locked deploy** (Auto Publishing off) produces exactly that result — documented at `production-release.ts:21-25`, not detectable in code |
 
 ### 7. Committed-article index → GitHub contents API
 
@@ -303,7 +310,7 @@ Identity**, and the invariant `A§1.2` is that the browser path **never sees the
 | **Failure** | **Degrades, never bricks**: unconfigured or erroring → `undefined`, which the resolver reports as "cannot verify" rather than "missing" (`object-validation-context.ts:249-256`). A transient error after a successful fetch serves the stale cache. 60 s TTL, in-flight calls deduplicated, cache scoped to the warm function instance |
 
 This is a **third, distinct GitHub integration edge** — the contents API, not the Git Data API the
-committer uses and not the ref API the release resolver uses. See defect #19: the directory it
+committer uses (the release resolver's `GET /git/ref/heads/<branch>` is that same Git Data API; its ancestry check is the REST compare endpoint). See defect #19: the directory it
 lists is now empty.
 
 ### 8. Deploy status — `deploy-status.ts`
@@ -320,6 +327,8 @@ lists is now empty.
 | **Failure** | Lookup unconfigured → reported, not thrown. `isCommitAncestorOrEqual` (`production-release.ts`) lets a newer production deploy still confirm an older commit |
 
 ### 9. CMS-Agent — the reasoning plane
+
+> **Evidence class: EXTERNAL UNVERIFIED** for everything about CMS-Agent's own behaviour (`client_manager.turn.v1`, run states, tool allow-lists). Described from this repo's client code (`server/lib/agent/cms-agent-client.ts`, `brand-imagery-proxy.ts`) and its comments; `vreich-ui/cms-agent` was not read. See `ARCHITECTURE.md` §13.
 
 | Field | Value |
 |---|---|
@@ -361,6 +370,8 @@ lambdas construct `cmsAgentEngine` alone.
 | **Failure** | Three non-erodable rules (`requests/sweep.ts:9-16`): only the sweep writes a running request's status; an unreachable or unconfigured CMS-Agent leaves the status **untouched** and never invents `failed`; a human gate is never nudged. `deriveRequestStatus` is pure and **must never throw** — an unparseable shape yields `running` with a `status_reason`. Stall threshold 10 min, `MAX_NUDGES = 3`. Minting a fresh token invalidates the previous one, so two passes can never overlap |
 
 ### 11. pdf-tool bridge
+
+> **Evidence class: EXTERNAL UNVERIFIED** for pdf-tool's side (job/status shapes, `preview_pdf_template`, capture policy limits). Described from `server/lib/pdf-tool-client.ts`, `packages/core/lib/pdf/*` and their tests; `vreich-ui/pdf-tool` was not read. See `ARCHITECTURE.md` §13.
 
 | Field | Value |
 |---|---|
@@ -463,6 +474,12 @@ out). Agents resolve to **no roles**.
 | `admin-artifact-upload-intent` | Mints the canvas image-upload token |
 | `admin-analytics` | Netlify Analytics dashboard data (gate G1) |
 | `admin-traffic` | `[DEPRECATED]` compatibility shim; `/admin/traffic` 301s to `/admin/analytics` |
+| `admin-visual-identity-import` (#690) | Bulk mood-board import: fetches the given addresses, mirrors bytes into the tenant `artifacts` store, appends `references[]` with server-minted `ref_<8 hex>` ids under one `req_visref_<site>_<yyyymmdd>_<nn>` request id; re-import of the same address is idempotent on `blobKey`; refuses beyond the schema's 24-reference cap before fetching (`tests/netlify/admin-visual-identity-import.test.ts`) |
+| `admin-visual-identity-propose` (#690) | Browser entry to the brand-imagery writer with `requireResolvedImages: true` (`brand-imagery-proxy.ts:182`): every reference is read and re-encoded server-side, unreadable ones are dropped and reported (`warnings: ['image_dropped:<ref_id>']`); no resolvable image and no `brief` → `422 no_images_reached_writer` before CMS-Agent is called |
+| `admin-visual-identity-preview-sample` (#692) | One call, no job: reads a PDF template's own `sampleData` (`get_pdf_template`) and forwards it to pdf-tool's `preview_pdf_template` (`pdf-tool-client.ts:previewPlatformPdfTemplate`, not an MCP tool); viewer → 403, unknown template → 404 |
+| `admin-visual-identity-render-sample` (#692) | Renders a template's `sampleData` through `create_agent_artifact_job` (`artifact_kind: pdf`, server-minted `request_id`); `PDF_JOB_INLINE_WAIT_MS=0` skips the inline wait |
+| `admin-visual-identity-regenerate-examples` (#692) | Clears `visual_standard.examples[]` under an ordinary checkout/patch/checkin and re-triggers the examples job (`examples_job: {examples_status:'pending', trigger:'browser'}`) |
+| `visual-standard-examples-background` (#692) | Background worker for `visual_standard` example images: authorized by a **one-shot `trigger_token`** (consumed on success), POST `{visual_standard_id, trigger_token}`; job record `visual-standard-examples/<id>.json` lives in the **`artifact-index`** blob store (no new namespace); statuses `pending → ready | partial | failed` (`examplesJobStatusSchema`; one failed context = `partial`; all failed, zero contexts, `no_sample_subjects` or a persist refusal = `failed`; never a silent drop). Triggered from both write surfaces — MCP verbs (`trigger:'mcp'`) and `admin-object` (`trigger:'browser'`) — via `server/lib/visual-standard-examples-jobs.ts:triggerVisualStandardExamplesJob`; replaced the inline ~10 s image generation that only the MCP path used to run (`mcp-tool-handlers.ts`, X1 → A6) |
 
 Membership writes reached from **any** front door land in one core: `handleMembershipVerb`
 (`membership/verbs.ts`) refuses every non-human principal with `403 membership_requires_human`
@@ -499,6 +516,8 @@ to the object store on `x-cms-caller-actor`. Identity precedence, strongest firs
 `unattributed-agent`.
 
 ### 18. Tracking relay → kugel-data *(catalogued here; owned by the tracking task)*
+
+> **Evidence class: EXTERNAL VERIFIED @ kugel-data `6c9c712`** for the sink's endpoints and auth (files read through the GitHub API; that commit was still the repo tip on 2026-09-06). See `TRACKING_ARCHITECTURE.md` §13b.
 
 `/api/t` → `functions/track-ingest.ts`. Validates `tracking_batch.v1`, enriches (geo country +
 subdivision only — city is never read; daily-rotating `vhash`, 30-min `shash`; raw IP hashed and
@@ -723,7 +742,7 @@ Scheduled functions run only on the **published production deploy**.
    resolves its target as **branch HEAD** by default (`production-release.ts:98-118`), so a
    release fired by agent A publishes agent B's in-flight exports too. *Why it matters:* the
    only guard is the prose in `OBJECT_PUBLISH_LIVE_NOTE`
-   (`mcp-tool-handlers.ts:3324`), which is a sentence, not a mechanism.
+   (`mcp-tool-handlers.ts:OBJECT_PUBLISH_LIVE_NOTE`), which is a sentence, not a mechanism.
 
 4. **Two concurrent commit streams still race the same ref, and one of them does not retry.**
    `object-git-committer.ts:12-20` documents that this committer and the article publisher "form

@@ -1,6 +1,6 @@
 # AI_CONTEXT — read this before touching the `platform` repo
 
-> **Status:** verified against commit `6789644` (2026-09-05). This file is the entry point for an AI agent. It tells you where truth lives, what to ignore, and which document to open next. Root `AGENTS.md` / `CLAUDE.md` carry the *rules*; this file carries the *map*.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06); rebased onto `99fb369` (#694, W21 tracking) with inventory, tests and builds refreshed — W21 content not yet audited (`KNOWN_ISSUES.md` #67). This file is the entry point for an AI agent. It tells you where truth lives, what to ignore, and which document to open next. Root `AGENTS.md` / `CLAUDE.md` carry the *rules*; this file carries the *map*.
 
 ## 0. Thirty-second orientation
 
@@ -14,7 +14,7 @@
 
 | You need… | Go to | Notes |
 |---|---|---|
-| The object envelope | `packages/core/schema/object-record-v1.ts` (`objectRecordSchema`, `objectTypes`, `publishReceiptSchema`, `producerContextSchema`) | 13 governed types; `version` (every write) vs `content_revision` (body writes only) |
+| The object envelope | `packages/core/schema/object-record-v1.ts` (`objectRecordSchema`, `objectTypes`, `publishReceiptSchema`, `producerContextSchema`) | 13 object types, 12 governed by the publish gate (`lib/approval-policy.ts:governedObjectTypes`; `visual_standard` excluded); `version` (every write) vs `content_revision` (body writes only) |
 | Body schemas | `packages/core/schema/bodies/<type>-v1.ts` | Zod v4, `.strict()`; version literal `<type>.v1` inside each file |
 | Article model | `schema/bodies/content-item-v1.ts` (+ imports from `schema/article-content-v1.ts`), `packages/core/lib/richtext/rich-text-v1.ts` | node envelope outside, Rich Text inside; `private.*` never reaches export or page |
 | Patch grammar | `packages/core/schema/object-patch-ops.ts` | 44 ops, every op invertible |
@@ -23,7 +23,7 @@
 | Publish / release | `server/lib/object-publish.ts`, `publish-gate.ts`, `materializers/*.ts`, `object-git-committer.ts`, `production-release.ts`, `netlify-deploys.ts` | see `CONTENT_ARCHITECTURE.md` §5–6 |
 | Exports the build reads | `sites/<client>/data/site/**` via `packages/core/app/content/collections.ts` | `__generated.from` names the record; `redirects.json` is the one file without the marker |
 | Rendering | `packages/core/app/utils/blog.ts:fetchPosts`, `packages/core/lib/article-object/render-nodes.ts`, `packages/core/app/components/cms/PageObjectRenderer.astro`, `packages/core/lib/renderer/*`, `packages/core/components/sections/*.astro` + `lib/registry/components/index.ts` | one renderer for page and admin canvas |
-| MCP server + tools | `packages/core/server/functions/mcp.ts`, `server/lib/mcp-tool-definitions.ts` + `-2.ts` + `-membership.ts`, `mcp-tool-handlers.ts`, `mcp-tool-annotations.ts` | 97 tools, count and tiers are test-pinned |
+| MCP server + tools | `packages/core/server/functions/mcp.ts`, `server/lib/mcp-tool-definitions.ts` + `-2.ts` + `-membership.ts`, `mcp-tool-handlers.ts`, `mcp-tool-annotations.ts` | count and tiers are test-pinned (`mcp-tool-definitions.test.ts`); names in `generated/INVENTORY.md` §3 |
 | Auth | `server/functions/mcp-oauth.ts`, `server/lib/{oauth-server,oauth-store,agent-keys,admin-auth,roles,users-store,caller-actor}.ts` | OAuth 2.1 / agent keys / shared token / Identity JWT / publish key |
 | CMS-Agent bridge | `server/lib/agent/cms-agent-client.ts`, `server/lib/agent/{engine,loop,tools,generated-tools,registry}.ts`, `server/lib/requests/*`, `server/functions/editorial-request-sweep*.ts` | reasoning happens in CMS-Agent; tools execute here |
 | pdf-tool bridge | `server/lib/pdf-tool-client.ts`, `pdf-tool-storage-grant.ts`, `packages/core/lib/pdf/*`, `server/lib/artifacts.ts` | bytes never travel through MCP; bodies carry `/img/{id}/{sha256}.ext` |
@@ -60,7 +60,7 @@
 5. Every `process.env` read goes through `SiteBinding` env *names*; core never contains a site literal (`tests/scripts/core-no-site-literals.test.mjs`).
 6. Never write the literal value of `GITHUB_REPOSITORY` (the repo's `owner/name`) or any full `https://github.com/<owner>/<repo>/…` URL into committed content — Netlify's secrets scanner fails the build on it (`SECRETS_SCAN_OMIT_KEYS` mitigates, do not rely on it). Reference PRs as `#NNN`.
 7. Tool count, tool tiers and plugin allow-lists are test-pinned (`server/lib/mcp-tool-definitions.test.ts`, `tests/netlify/plugin-manifest.test.ts`) — extend those tests, never add a parallel file.
-8. Every membership verb — reads included — requires a human principal (`server/lib/membership/verbs.ts:332` 403s `membership_requires_human`); `/admin/accept` is the only consumer of Netlify Identity tokens.
+8. Every membership verb — reads included — requires a human principal (`server/lib/membership/verbs.ts:332` 403s `membership_requires_human`); `/admin/accept` is the only consumer of Netlify Identity **e-mail/hash tokens** (invite · recovery · confirmation · email-change); the session JWT is consumed by every `admin-*` function via `server/lib/admin-auth.ts`.
 9. Enabling any tracking provider requires its CSP hosts in every `netlify.toml` in the same change (`tests/netlify/csp-drift.test.ts`).
 
 ## 4. Verification you can run
@@ -68,7 +68,8 @@
 ```
 npm ci
 npm run check            # astro check (drlurie config) + eslint + prettier
-npm test                 # 5188 tests at 6789644, ~3 min, offline
+npm test                 # full suite, ~3 min, offline (includes docs invariants + inventory freshness)
+node scripts/docs/inventory.mjs --write   # after adding a function / tool / schema / env var / tenant
 npm run build            # drlurie, 107 pages; prebuild image gate; postbuild dims push no-ops without env
 npx astro build --config sites/<client>/astro.config.ts   # any other tenant → sites/<client>/dist
 npm run fleet:parity     # repo-only parity audit
@@ -86,6 +87,8 @@ npm run fleet:parity     # repo-only parity audit
 | Netlify projects, env vars, CI, scripts, release protocol | [`DEPLOYMENT.md`](DEPLOYMENT.md) |
 | What is broken or drifting, with severity | [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) |
 | Vocabulary | [`GLOSSARY.md`](GLOSSARY.md) |
+| Current counts and names (functions, tools, schemas, env vars, tenants, namespaces) | [`generated/INVENTORY.md`](generated/INVENTORY.md) — generated by `scripts/docs/inventory.mjs`, freshness-tested |
+| Which claims are verified against which repository/commit | [`ARCHITECTURE.md`](ARCHITECTURE.md) §13, [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md) §13b |
 | Diagrams (Mermaid sources + SVG) | [`diagrams/`](diagrams/) |
 | Agent publishing procedure (tool sequence, gates, recovery) | [`agents/publishing-policy.md`](agents/publishing-policy.md) |
 | Governing rulings and plans (history, not implementation) | `docs/cms-architecture/decisions/*`, `docs/cms-architecture/*.md`, `docs/history/*` |

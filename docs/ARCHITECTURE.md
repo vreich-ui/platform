@@ -1,6 +1,6 @@
 # Architecture — the `platform` repo
 
-> **Status:** verified against commit `6789644` (2026-09-05). Code is truth; every claim cites a file path. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692); rebased onto `99fb369` (#694, W21 tracking) with `generated/INVENTORY.md`, tests and builds refreshed there — W21 content itself is not yet audited (`KNOWN_ISSUES.md` #67). Code is truth; every claim cites a file path. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > This is the map. Detail lives in [`CONTENT_ARCHITECTURE.md`](CONTENT_ARCHITECTURE.md) · [`CMS_INTEGRATION.md`](CMS_INTEGRATION.md) · [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md) · [`DEPLOYMENT.md`](DEPLOYMENT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md). Agents start at [`AI_CONTEXT.md`](AI_CONTEXT.md). Humans start at [`OVERVIEW.md`](OVERVIEW.md).
 
 ## 1. What this repository is
@@ -86,9 +86,9 @@ Roles, in one line each (evidence in [`CMS_INTEGRATION.md`](CMS_INTEGRATION.md))
 flowchart TB
   subgraph edge["Netlify project for one tenant (base directory = sites/&lt;client&gt; or repo root)"]
     cdn["Static HTML + /_astro/*<br/>(dist/, immutable 1y)"]
-    fn["Netlify Functions (esbuild)<br/>sites/&lt;client&gt;/netlify/functions/*.ts → packages/core/server/functions/*.ts<br/>48 core handlers · 49 shims per tenant (50 on drlurie), each bound to SiteBinding"]
+    fn["Netlify Functions (esbuild)<br/>sites/&lt;client&gt;/netlify/functions/*.ts → packages/core/server/functions/*.ts<br/>one shim per core module, each bound to SiteBinding<br/>(names and counts: docs/generated/INVENTORY.md §1)"]
     sched["Scheduled: mcp-keepalive */5 · editorial-request-sweep */5 · membership-sweep daily"]
-    blobs[("Netlify Blobs (21 namespaces)<br/>site-objects · artifacts · artifact-index · users · governance<br/>agent-chats · editorial-requests · tracking-events · commerce · …")]
+    blobs[("Netlify Blobs (namespaces: INVENTORY.md §8)<br/>site-objects · artifacts · artifact-index · users · governance<br/>agent-chats · editorial-requests · tracking-events · commerce · …")]
   end
   reader["Reader"] --> cdn
   reader -->|"/img/*, /pdf/*"| fn
@@ -117,7 +117,7 @@ Full treatment: [`CONTENT_ARCHITECTURE.md`](CONTENT_ARCHITECTURE.md).
 | — | `sites/<client>/seeds/*.mjs` | genesis input, not authoritative afterwards | humans/drivers |
 | — | `src/data/post/*.md` | `[DEPRECATED]`, empty | nothing |
 
-Thirteen governed object types (`packages/core/schema/object-record-v1.ts:objectTypes`): `page, section, navigation, taxonomy, site, template, section_template, theme, product, content_item, tracking_config, editorial_voice, visual_standard`. Articles are `content_item` objects: envelope (`slug, title, image, taxonomy, seo, sources, claims, scores, lineage…`) + `nodes[]`, each node `{id, kind, public, private?, commercial?, rendering?, visibility?}` with `public.body` as plain text or `rich_text.v1` (a zod mirror of Contentful Rich Text, rendered by `@contentful/rich-text-html-renderer` — load-bearing, not vestigial). One renderer serves the public page and the admin canvas (`packages/core/lib/article-object/render-nodes.ts`). Reader-projection safety is enforced twice (renderer + validator `object-validate.ts:contentItemReaderProjection`).
+Thirteen object types (`packages/core/schema/object-record-v1.ts:objectTypes`), twelve of which are governed by the publish gate (`packages/core/lib/approval-policy.ts:governedObjectTypes` — `visual_standard` is deliberately excluded and never materialized): `page, section, navigation, taxonomy, site, template, section_template, theme, product, content_item, tracking_config, editorial_voice, visual_standard`. Articles are `content_item` objects: envelope (`slug, title, image, taxonomy, seo, sources, claims, scores, lineage…`) + `nodes[]`, each node `{id, kind, public, private?, commercial?, rendering?, visibility?}` with `public.body` as plain text or `rich_text.v1` (a zod mirror of Contentful Rich Text, rendered by `@contentful/rich-text-html-renderer` — load-bearing, not vestigial). One renderer serves the public page and the admin canvas (`packages/core/lib/article-object/render-nodes.ts`). Reader-projection safety is enforced twice (renderer + validator `object-validate.ts:contentItemReaderProjection`).
 
 ## 5. Publishing inputs
 
@@ -135,11 +135,13 @@ Every input converges on `handleObjectVerb`. **Only implemented mechanisms are c
 ```
 object_publish  → gate → validate → materialize → GitHub commit "[skip netlify]" → stamp receipt
                                                     (export on main; NOTHING LIVE)
-release_to_production → POST NETLIFY_BUILD_HOOK_URL once → poll deploys → ancestry check
+release_to_production → require build hook configured → resolve target (explicit commit, else branch HEAD via GitHub Git refs API)
+                      → POST NETLIFY_BUILD_HOOK_URL once → poll deploy receipts for the target → read published_deploy
+                      → equal, else ancestor via GitHub compare API → released | build_not_confirmed_live | …
                                                     (one build ships every accumulated export)
 ```
 
-A `publish_receipt` proves the export commit, never the deploy (`server/lib/mcp-tool-handlers.ts:3324`). Release targets branch HEAD, so whoever releases ships everyone's pending exports; retries can double-build ([`KNOWN_ISSUES.md`](KNOWN_ISSUES.md), publishing-race entries).
+A `publish_receipt` proves the export commit, never the deploy (`server/lib/mcp-tool-handlers.ts:OBJECT_PUBLISH_LIVE_NOTE`, the `production: {committed, live:false, deploy_deferred}` stamp in `callObjectPublish`). Release targets branch HEAD, so whoever releases ships everyone's pending exports; retries can double-build ([`KNOWN_ISSUES.md`](KNOWN_ISSUES.md), publishing-race entries).
 
 ## 7. CMS integration surfaces (summary)
 
@@ -147,7 +149,7 @@ Full catalogue with producer · consumer · contract · transport · authority �
 
 | Surface | Path | Direction |
 |---|---|---|
-| MCP server (97 tools) | `server/functions/mcp.ts`, `server/lib/mcp-tool-definitions{,-2,-membership}.ts`, `mcp-tool-handlers.ts` | in |
+| MCP server (tool names and count: `generated/INVENTORY.md` §3) | `server/functions/mcp.ts`, `server/lib/mcp-tool-definitions{,-2,-membership}.ts`, `mcp-tool-handlers.ts` | in |
 | OAuth 2.1 AS/RS | `server/functions/mcp-oauth.ts`, `server/lib/oauth-{server,store}.ts` | in |
 | Object verbs REST | `server/functions/object-store.ts` (publish key), `admin-object.ts` (JWT) | in |
 | Publish → GitHub | `server/lib/object-publish.ts`, `object-git-committer.ts` | out |
@@ -170,6 +172,9 @@ Full catalogue with producer · consumer · contract · transport · authority �
 - Policy seams are per tenant and committed: `sites/<client>/config/{approval,creation,media,membership}-policy.ts`, `policy-bindings.ts`; `publishing-policy.ts` (autonomyMode) is defined in core but registered by no tenant, so it is always the fail-closed default.
 
 ## 9. Tracking (summary)
+
+> **⚠ Not yet audited for #694 (W21 tracking pipeline, merged to `main` as `99fb369` on 2026-09-06 while this correction pass was in review).** W21 adds the `exposure` event kind and `experiment_id`/`variant_id` on events, edge-served variants (`netlify/edge-functions/variant-serve.ts`, `[[edge_functions]]` on every tenant, `scripts/tracking-experiments-build.mjs` in `npm run build`), three MCP analytics tools (`server/lib/mcp-tool-definitions-analytics.ts`; 100 tools total), analytics views/insights/annotations/export and a per-object drill-down, and `npm run env:audit`. Counts in [`generated/INVENTORY.md`](generated/INVENTORY.md) are current at `99fb369`; this summary describes `420afbd` and is stale wherever it touches experiments, event kinds, the analytics read side or the tool surface (tracked as `KNOWN_ISSUES.md` #67).
+
 
 Full treatment: [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md). Own tracker: `tracking_event.v1` (`packages/core/schema/tracking-event-v1.ts`), 18 closed event kinds, cookieless by default (daily `vhash`, 30-min `shash`; persistent `vid` only under consent), same-origin `/api/t` relay with props allowlist, at-most-once NDJSON to kugel-data, blob mirror on failure. Postbuild pushes `object_version`/`producer`/`node_strategy` dimensions from exports. Read side: `/admin/analytics` = proxy over kugel-data `/stats` + Netlify Analytics. **No feedback path into objects or CMS-Agent exists yet**; §15 of the tracking doc lists the identifiers that would close the content → publication → exposure → engagement → conversion → revenue → agent-decision chain.
 
@@ -208,4 +213,18 @@ Full treatment: [`TRACKING_ARCHITECTURE.md`](TRACKING_ARCHITECTURE.md). Own trac
 
 ## 12. Verification
 
-At commit `6789644`: `npm ci` ✓ · `astro check` 0 errors/0 warnings (50 hints) · `eslint` clean · `npm test` 5188/5188 · `npm run build` 107 pages (drlurie) · `astro build --config sites/platform/astro.config.ts` 76 pages to `sites/platform/dist`. Log: [`DEPLOYMENT.md`](DEPLOYMENT.md) §Verification run log. Known caveat: `check:astro` and the CI `fleet` matrix only ever exercise drlurie's config ([`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)).
+See [`DEPLOYMENT.md`](DEPLOYMENT.md) §Verification run log for the latest full run (commands, durations, counts) and [`generated/INVENTORY.md`](generated/INVENTORY.md) for the current names and counts; both are re-generated at every audited commit rather than restated here.
+
+## 13. Evidence classes for cross-repository claims
+
+Everything in this document set about a *sibling* repository is one of three things. Readers and agents must not upgrade an UNVERIFIED claim to a system fact.
+
+| System | Class | What that covers | How to upgrade |
+|---|---|---|---|
+| This repo | **LOCAL EVIDENCE @ `420afbd`** | every path-cited claim about `packages/core`, `sites/*`, `netlify/**`, `scripts/**`, `tests/**` | re-run the docs tests at a newer commit |
+| `vreich-ui/kugel-data` | **EXTERNAL VERIFIED @ `6c9c712`** | the sink endpoints, tables, migrations 002–005, `/stats` guard, rollups and experiment code read through the GitHub API (`TRACKING_ARCHITECTURE.md` §13b lists each claim); `6c9c712` was still that repo's tip on 2026-09-06 | re-read at its new tip; production migration state is never provable from git |
+| `vreich-ui/cms-agent` | **EXTERNAL UNVERIFIED** | `client_manager.turn.v1`, `agent_converse`, workflow-run semantics, `feedback_ingest_tracking`, `SITE_CLIENT_MANAGER_TOOLS` — all described from this repo's client code and comments (`server/lib/agent/cms-agent-client.ts`, `brand-imagery-proxy.ts:13-22`) or from the live MCP tool list, never from that repo's source | read `vreich-ui/cms-agent` at a pinned commit |
+| `vreich-ui/pdf-tool` | **EXTERNAL UNVERIFIED** | `ArtifactReference` semantics, job status shapes, `preview_pdf_template`, `HARD_MAX_CAPTURE_PAGES_PER_JOB`, `parseCapturePolicy` — described from `server/lib/pdf-tool-client.ts`, `packages/core/lib/pdf/*` and their tests | read `vreich-ui/pdf-tool` at a pinned commit |
+| Netlify, GitHub, Stripe APIs | **EXTERNAL UNVERIFIED** (vendor behaviour) | request shapes and precedence rules are described from this repo's calls (`netlify-deploys.ts`, `object-git-committer.ts`, `stripe-webhook.ts`) and comments, e.g. `netlify.toml` → `_redirects` precedence | vendor documentation |
+
+The revenue-attribution findings (`KNOWN_ISSUES.md` #8, #9) are LOCAL EVIDENCE plus EXTERNAL VERIFIED @ `6c9c712` on the sink side; what stays unverified is the production database's migration state and any ETL outside both repos.

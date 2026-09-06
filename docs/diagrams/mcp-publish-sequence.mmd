@@ -32,18 +32,21 @@ sequenceDiagram
   OS->>V: publish_by_time
   V->>V: checkPublishGate (approval-policy.ts per type)
   V->>V: materialize -> MaterializedFile[]
-  V->>GH: ref -> commit -> blobs -> tree -> commit -> PATCH ref (force:false)
+  V->>GH: blobs (once) -> ref -> base commit -> tree -> commit -> PATCH ref (force:false, ref..PATCH retried on non-fast-forward)
   GH-->>V: commit_sha  (message carries "[skip netlify]")
   V->>V: stamp published_time + publish_receipt
   M-->>A: {receipt, production:{committed:true, live:false}}
 
-  A->>M: release_to_production {idempotency_key}
-  M->>NL: POST NETLIFY_BUILD_HOOK_URL
-  M->>GH: GET git/ref/heads/main -> target commit
-  loop until terminal or budget exhausted
+  A->>M: release_to_production {idempotency_key, commit?}
+  M->>M: refuse unless NETLIFY_BUILD_HOOK_URL is configured
+  M->>GH: GET /repos/{repo}/git/ref/heads/{branch} -> target commit (unless commit given)
+  M->>NL: POST NETLIFY_BUILD_HOOK_URL (once)
+  loop poll deploy receipt for target until terminal or budget exhausted
     M->>NL: GET /sites/{id}/deploys
   end
-  M-->>A: {released, productionConfirmed, deploy}
+  M->>NL: GET site published_deploy
+  M->>GH: GET /repos/{repo}/compare/{target}...{published} (ancestry, only if not equal)
+  M-->>A: {released, status, productionConfirmed, deploy}
 
   A->>M: deploy_status {commit}
   M-->>A: {deployStatus:"ready", productionConfirmed:true}

@@ -440,9 +440,12 @@ Wolf** on which tenants flip to indexable and when.
 `X-CEID: session.metadata.event_id`, minted as a fresh `randomUUID()` at
 `create-checkout-session.ts:121`; every `commerce_event` the webhook writes uses
 `deterministicUuid(\`${session.id}:${type}\`)` (`stripe-webhook.ts:210,254`); kugel-data joins
-`ce.event_id::text = te.props->>'commerce_event_id'` (`004/005_*.sql`).
+`ce.event_id::text = te.props->>'commerce_event_id'` (`004_rollup_views.sql:133,175`).
+**Evidence class:** LOCAL EVIDENCE @ `420afbd` (platform side) + EXTERNAL VERIFIED @ kugel-data
+`6c9c712` (the join). Production migration state is unverified — treat as a hypothesis to confirm in
+the kugel-data audit before acting on production data.
 **Impact:** `purchase_rate`, `revenue_cents` and `v_sessions.purchased` are structurally always
-zero — the whole engagement→revenue link is dead.
+zero at those commits — the whole engagement→revenue link is dead.
 **Direction:** make one generator authoritative for the checkout's event id and echo that same id
 on both sides.
 
@@ -453,7 +456,9 @@ on both sides.
 `kind: event.type` from `commerceEventTypes` (`checkout_completed`, `fulfillment_issued`, …; no
 `purchase` member); kugel-data filters `kind = 'purchase'` in `tracking-sink-stats.ts`,
 `v_attributed_purchases` and `v_sessions`, and its own seed (`scripts/seed-rollups.mjs`) writes
-`purchase`, so its tests stay green.
+`purchase`, so its tests stay green; the sink stores `kind` verbatim (`tracking-sink-commerce.ts:53`).
+**Evidence class:** LOCAL EVIDENCE @ `420afbd` + EXTERNAL VERIFIED @ kugel-data `6c9c712`; any
+out-of-repo ETL that rewrites `kind` would be invisible here — confirm in the kugel-data audit.
 **Impact:** the admin "Purchases" KPI and `daily[].purchases` are always 0 even when orders exist.
 Independent of #8 — both must be fixed.
 **Direction:** agree one vocabulary across the boundary and pin it with a contract test on both
@@ -605,7 +610,7 @@ hook fired before `release_to_production` returned, `idempotency_key` did not su
 build, and a 502-then-retry produced two production builds for one release.
 **Impact:** an agent that publishes and stops leaves the export dark; the next agent's release ships
 it unreviewed; a retry can double-build. The only guard is prose in `OBJECT_PUBLISH_LIVE_NOTE`
-(`mcp-tool-handlers.ts:3324`).
+(`mcp-tool-handlers.ts:OBJECT_PUBLISH_LIVE_NOTE`).
 **Direction:** make the release target the caller's own commit and record an owed-release marker on
 the record, so the pairing is a mechanism rather than an instruction.
 
@@ -1139,6 +1144,51 @@ try `object_create` on it.
 **Direction:** already corrected in `DATA_CONTRACTS.md` §2 and `GLOSSARY.md`; propagate to any
 briefing text that still lists it.
 
+### 63. Drill traffic tag is dropped at the relay and unknown to the sink
+
+**Category:** data-quality · **Severity:** medium · **Sources:** correction pass 2026-09-06 (#689)
+**Evidence:** `packages/core/cli/capture/test-traffic-header.mjs` is applied to the Playwright contexts of `capture/browser.mjs`,
+`capture/preview.mjs` and `tests/e2e/accept-router.browser.mjs` (no direct-`fetch` drill sets it) and states that the sink drops such rows; `packages/core/server/functions/track-ingest.ts`
+never reads the header and `forwardToSink` (line 286) forwards only `Content-Type` + `Authorization`;
+kugel-data @ `6c9c712` (its current tip) has no `x-trk-test` handling (EXTERNAL VERIFIED @ SHA).
+**Impact:** drill and e2e traffic against production tenants lands in `tracking_events` untagged and
+inflates `/stats`, `/rollups` and the Thompson weights — the contract exists only in a comment.
+**Direction:** either stamp a tag into `context` at ingest and have the sink honour it, or drop
+tagged batches at `/api/t`; pin whichever with a relay test. Decision needed by Wolf on which side owns it.
+
+### 64. `docs/history/` verbatim archives contain repository-slug forms the current rule forbids
+
+**Category:** obsolete-docs · **Severity:** low · **Sources:** Codex review of #691 (P1), correction pass
+**Evidence:** `docs/history/CLAUDE-2026-09-05.md:3` names the current repository slug verbatim and `:366`
+carries a full URL of the *former* slug; `docs/history/README-astrowind-template.md` links the upstream
+template repository. `AGENTS.md` §3.7 forbids the current slug (the value of `GITHUB_REPOSITORY`) in
+committed content; all four `netlify.toml` files carry `SECRETS_SCAN_OMIT_KEYS = "GITHUB_REPOSITORY"`.
+**Impact:** "verbatim archive" and "no slug anywhere" cannot both hold. Builds pass today only because
+of the omit key — the same dependency `docs/cms-architecture/FLEET-STATUS.md` already has.
+**Direction:** the archives are excluded from `tests/scripts/docs-invariants.test.mjs` by design and
+`docs/history/README.md` records the conflict. Default if not ruled: keep the archives verbatim.
+Alternative: redact the slug in the archives with a visible `[redacted: repo slug]` marker.
+
+### 65. `reference_import_request_ids` is declared in the contract but not enforced
+
+**Category:** content-contract-drift · **Severity:** low · **Sources:** correction pass (#690)
+**Evidence:** `packages/core/lib/registry/object-contract.ts:862-865` — `severity: 'blocks_write'`,
+`enforced_live: false`, description says bulk imports are tracked under `req_visref_<site>_<yyyymmdd>_<nn>`;
+only `admin-visual-identity-import.ts` mints such ids, and no validator checks them.
+**Impact:** an agent reading `object_contract` sees a write-blocking constraint that nothing blocks on.
+**Direction:** enforce it in `object-validate.ts` or downgrade it to `info` in the contract.
+
+### 66. Visual-standard example jobs piggyback the `artifact-index` blob store
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** correction pass (#692)
+**Evidence:** `packages/core/server/lib/visual-standard-examples-jobs.ts` writes
+`visual-standard-examples/<id>.json` into `getArtifactIndexBlobStore()` cast to `ExamplesJobStore`
+(`admin-object.ts`, `tests/netlify/visual-standard-examples-job.test.ts`).
+**Impact:** job state lives beside artifact metadata under a namespace whose name says otherwise;
+`DATA_CONTRACTS.md` §8's namespace list stays at 21 only because no new store was declared.
+**Direction:** record the key prefix in the namespace table (done) and decide at the next store
+migration whether jobs deserve their own namespace.
+
 ## Summary table
 
 Sorted by severity, then by id.
@@ -1188,6 +1238,7 @@ Sorted by severity, then by id.
 | 54 | medium | obsolete-docs | `CLAUDE.md` self-contradicts and cites deleted paths | A#2/3, CI#11 |
 | 55 | medium | obsolete-docs | Agent instruction files carry superseded operational rules | CI#12/13/17 |
 | 56 | medium | obsolete-docs | README + `package.json` still describe AstroWind and a retired flow | A#6, DE#5 |
+| 63 | medium | data-quality | Drill traffic tag `x-trk-test` dropped at the relay, unknown to the sink | correction pass |
 | 20 | low | dead-code | `data-cms-buy-product` classified, never emitted | TR#7 |
 | 21 | low | security | `/stats` called with a write bearer it ignores | TR#13 |
 | 34 | low | build-deploy-mismatch | Root `postbuild` pushes drlurie's dims regardless of tenant | CA#17, TR#15, DE#6 |
@@ -1200,3 +1251,6 @@ Sorted by severity, then by id.
 | 60 | low | dead-code | Unreferenced Docker/nginx/Vercel/StackBlitz configs | DE#9 |
 | 61 | low | dead-code | `Social/` exists twice; the root copy is dead | CA#19 |
 | 62 | low | obsolete-docs | Vocabulary lists `tracking_attribute` as an object type | A#8 |
+| 64 | low | obsolete-docs | `docs/history/` archives contain repo-slug forms the rule forbids (owner decision) | Codex #691 |
+| 65 | low | content-contract-drift | `reference_import_request_ids` declared `blocks_write` but not enforced | correction pass |
+| 66 | low | ambiguous-canonical-source | Examples job records live in the `artifact-index` store | correction pass |

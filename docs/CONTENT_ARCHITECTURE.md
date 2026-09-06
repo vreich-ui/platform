@@ -1,6 +1,6 @@
 # Content Architecture
 
-> **Status:** verified against the `platform` repo commit `6789644` (2026-09-05). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05); correction pass verified against `420afbd` (2026-09-06, after PRs #689/#690/#692); rebased onto `99fb369` (#694, W21 tracking) with `generated/INVENTORY.md`, tests and builds refreshed there — W21 content itself is not yet audited (`KNOWN_ISSUES.md` #67). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md).
 
 ## 1. Purpose
@@ -110,7 +110,7 @@ Two shapes are spread into bodies rather than duplicated: `trackingAttributeShap
 `set_node_visibility` · `remove_node`. `set_article_meta` forbids `nodes` (use node ops) and `tracking`
 (one-writer funnel). `update_node` deep-merges over the whole node envelope, so "mark this block a hook" is
 one op: `{fields:{private:{strategy:'hook'}}}`. Every op is invertible; the inverse is what `object_discard`
-applies (`server/lib/review-state.ts:discardProposal`).
+applies (`server/lib/review-state.ts:discardProposal`). Before an op is applied, `object-verbs.ts:mintOpsIds` mints stable ids for id-less section/nav/node entries and — since #690 (`object-verbs.ts:631-663`) — for `set_visual_standard_fields.references[]` (`ref_<8 hex>`, `lib/object-ids-mint.ts:156`); a duplicate id, minted or supplied, is refused with `PatchApplyError('invalid_body')` → 422 on both the direct-patch and the candidate-patch path.
 
 ## 4. Article body schema — `content_item.v1`
 
@@ -287,7 +287,7 @@ trap (`recordVersion`) rather than emitting an export that dies later inside Ast
 **Stripping.** `stripPrivate` removes every `private` key at any depth, for every type. Nothing else is removed.
 
 **Git mechanics** (`server/lib/object-git-committer.ts:commitMaterializedFiles`):
-`GET ref/heads/<branch>` → `GET commits/<head>` → `POST git/blobs` (content-addressed, created once) →
+`POST git/blobs` for every file first (content-addressed, created once, outside the retry loop — `object-git-committer.ts:236`) → `GET git/ref/heads/<branch>` → `GET git/commits/<head>` →
 `POST git/trees` (`base_tree` = head tree; deletions as `{sha:null}`) → **if the new tree sha equals the
 base tree sha, return a no-op** → `POST git/commits` → `PATCH refs/heads/<branch>` with `force:false`.
 On a non-fast-forward rejection (422 "fast forward" / 409) it re-fetches head, rebuilds and retries with
@@ -298,12 +298,12 @@ Env: `GITHUB_CONTENT_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_BRANCH` (default `main
 which stays message-agnostic and is reused by retire.
 
 **Release** (`server/lib/production-release.ts`): resolve the target commit (content-branch HEAD via the
-GitHub ref API — exactly the accumulation point) → `POST NETLIFY_BUILD_HOOK_URL` **once**
+GitHub Git Data refs endpoint, `resolveBranchHeadCommit` — exactly the accumulation point) → `POST NETLIFY_BUILD_HOOK_URL` **once**
 (`netlify-deploys.ts:triggerNetlifyBuild`, the only production-build trigger in the codebase) → poll deploy
 receipts until terminal (`pollDeployReceipt`, default 120 s / 5 s) → confirm production serves it. Because
 one release build deploys *many* accumulated commits, an exact `deploy.commit === targetCommit` check is
 insufficient; on a mismatch it asks GitHub's compare API whether the target is an **ancestor** of the
-published commit (lines 122-140, QA-W16-4). Statuses: `released | build_not_confirmed_live |
+published commit (`isCommitAncestorOrEqual`, `production-release.ts:178-212`; rationale at `:123-145`, QA-W16-4). Statuses: `released | build_not_confirmed_live |
 build_ready_not_published | commit_unresolved | build_hook_not_configured | deploy_lookup_not_configured`.
 The `release_to_production` MCP tool and the admin button call this one function.
 

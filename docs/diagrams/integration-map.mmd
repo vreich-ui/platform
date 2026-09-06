@@ -53,7 +53,8 @@ flowchart TB
 
   mcp -->|"tools/call + storage grant"| pdftool
   pdftool -->|"writes bytes via grant"| blobs
-  cdn -->|"/api/t NDJSON"| kugeldata
+  cdn -->|"tracking_batch.v1 JSON<br/>sendBeacon → /api/t"| trackfn["track-ingest.ts<br/>(tenant relay)"]
+  trackfn -->|"NDJSON, bearer,<br/>at-most-once"| kugeldata
   adminfn -->|"Bearer PAT"| nlanalytics
   cdn -->|"checkout"| stripe
   stripe -->|"webhook (signed)"| adminfn
