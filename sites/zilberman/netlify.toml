@@ -28,7 +28,7 @@
 # site-relative (Netlify runs this command with sites/zilberman as cwd).
 [build]
   publish = "dist"
-  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts && (node ../../scripts/tracking-dims-push.mjs --export-root data/site || true)"
+  command = "(cmp -s ../../package-lock.json ../../node_modules/.lock-stamp 2>/dev/null || (npm ci --prefix ../.. --no-audit --no-fund && cp ../../package-lock.json ../../node_modules/.lock-stamp)) && node ../../scripts/validate-upload-images.mjs assets/images data/post && node ../../scripts/tracking-experiments-build.mjs --export-root data/site --public-dir public --edge-dir netlify/edge-functions --config-yaml config.yaml && npx --no-install astro build --config astro.config.ts && (node ../../scripts/tracking-dims-push.mjs --export-root data/site || true)"
   # Netlify skips a build when nothing under the base directory (sites/zilberman) changed.
   # Our MCP functions bundle the shared packages/core workspace, which lives OUTSIDE this
   # base dir — so a packages/core-only change was being skipped and shipped stale functions
@@ -76,6 +76,21 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+
+# T21.5 — variant serving at the edge. Declared on EVERY tenant with
+# `path = "/*"` because the function's own first act is to check whether this
+# site has any active experiment at all: with `experiments: []` the generated
+# map is `{}` and every request returns `context.next()` before a cookie, a geo
+# lookup, or an RNG call happens. Declaring it everywhere (rather than only on
+# a tenant currently running a test) is what makes turning an experiment on a
+# CONTENT change — publish `trk_<site>` and rebuild — instead of an infra one.
+#
+# It must stay the ONLY `/*` edge function: two of them on the same path is an
+# ordering question nobody should have to reason about per request.
+[[edge_functions]]
+  path = "/*"
+  function = "variant-serve"
 
 # Every site DEPLOYS `mcp-keepalive`, but a scheduled function only ever runs
 # if its schedule is DECLARED here. Shipping the function without this block is
@@ -226,6 +241,14 @@
 [[redirects]]
   from = "/admin/requests/:requestId"
   to = "/admin/requests/__request"
+  status = 200
+
+# R11.4 (T21.30): the object analytics drill-down — same one-path-segment,
+# unforced pattern as the two ids above (the placeholder page is never
+# shadowed; the island reads the id client-side).
+[[redirects]]
+  from = "/admin/analytics/object/:objectId"
+  to = "/admin/analytics/object/__object"
   status = 200
 
 # T2.1 D1(a): the objects plane is now canonical -- Templates/Media/Content

@@ -158,6 +158,8 @@ import {
   isMembershipTool,
 } from '../lib/mcp-tool-definitions-membership.js';
 import { handleMembershipVerb } from '../lib/membership/verbs.js';
+import { TOOL_DEFINITIONS_ANALYTICS } from '../lib/mcp-tool-definitions-analytics.js';
+import { callAnalyticsSummary, callAnalyticsTopContent, callAnalyticsObject } from '../lib/mcp-analytics-handlers.js';
 import { callerPrincipalFromMcpEvent } from '../lib/membership/caller-principal.js';
 import { getUsersBlobStore } from '../lib/users-store.js';
 import { buildWhoami } from '../lib/whoami.js';
@@ -508,6 +510,9 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   ...TOOL_DEFINITIONS_PART2,
   // W18 T18.6b: listed only to OAuth HUMAN principals (visibleToolDefinitions).
   ...TOOL_DEFINITIONS_MEMBERSHIP,
+  // R12.3 / T21.20: read-only analytics over the own-tracker sink + this
+  // tenant's object store — visible to every caller like PART1/PART2.
+  ...TOOL_DEFINITIONS_ANALYTICS,
 ];
 export const response = (statusCode: number, body: unknown, headers: Record<string, string> = jsonHeaders) => ({
   statusCode,
@@ -1445,6 +1450,13 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
     }
     case 'registry_get':
       return callRegistryGet(event, input);
+    // R12.3 / T21.20: read-only analytics, no idempotency wrapper needed.
+    case 'analytics_summary':
+      return callAnalyticsSummary(event, input);
+    case 'analytics_top_content':
+      return callAnalyticsTopContent(event, input);
+    case 'analytics_object':
+      return callAnalyticsObject(event, input);
 
     default:
       break;

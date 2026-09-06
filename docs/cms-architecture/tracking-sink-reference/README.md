@@ -41,6 +41,27 @@ parse JSON → validate/shape → batch INSERT … ON CONFLICT DO NOTHING →
 respond 202. (With Postgres, `COPY`/multi-row `INSERT` per batch is plenty;
 the AFTER INSERT trigger in `schema.sql` fans out `pg_notify` per row.)
 
+### 1a. `GET /weights` — the experiment split (T21.5, OPTIONAL)
+
+A site's BUILD asks the sink how to weight an experiment's arms:
+
+- `GET <TRACKING_SINK_URL>/weights?project_id=<TRACKING_PROJECT_ID>`
+- `Authorization: Bearer <TRACKING_SINK_TOKEN>` when the token env is set
+- 2s timeout, no retries, called at most once per build and only when the
+  site has at least one `active` experiment.
+
+Response: `{"<control object_id>": {"<arm object_id>": <number>, …}}`, or the
+same object under a top-level `weights` key. Values are relative shares, any
+scale — the build normalizes them to integer percentages summing to 100.
+
+**This endpoint is optional and the build treats it as advisory.** Absent
+configuration, a timeout, a non-2xx, a row missing an arm, a negative value, or
+a zero-sum row all fall back to EQUAL weights for that experiment. A weight
+outage can change how traffic splits; it can never change which arms are
+served, and it can never fail a build. A sink that does not implement
+`/weights` at all is a supported configuration — every experiment simply runs
+even.
+
 ## 2. Env contract (OQ-W13-6)
 
 Per-tenant **Netlify env vars on the site running the relay** — set by the

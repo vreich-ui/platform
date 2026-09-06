@@ -61,6 +61,19 @@
  * skipped entirely — it is additive, not required, so existing callers are
  * unaffected. See also the standalone scripts/audit-storage-grant-parity.mjs
  * for auditing an existing fleet without provisioning anything.
+ *
+ * R8.1 (2026-09-05): TRACKING_SINK_URL/TRACKING_SINK_TOKEN are now TEAM-level
+ * Netlify environment variables (Team → Environment variables; scope
+ * Functions, all contexts, all projects) — every current and future site
+ * inherits them natively, so this script NEVER copies a value for them into
+ * a site's own env, from the operator's process env or anywhere else. It
+ * only checks TEAM-LEVEL PRESENCE (names only, via `GET /api/v1/accounts/
+ * {account_slug}/env` — never reading or logging `.values`) and reports
+ * `✓ inherited from team` or `☐ missing` with the fix pointed at the team
+ * settings, not at this site. Contrast with PDF_TOOL_BASE_URL/
+ * PDF_TOOL_AGENT_RUN_TOKEN just above: those are inherited from a specific
+ * shared pdf-tool Netlify SERVICE (a different site), not from team-level
+ * config, and that mechanism is unchanged.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -261,18 +274,20 @@ export const ENV_CHECKLIST = [
       {
         name: 'TRACKING_SINK_URL',
         cls: 'fleet-shared',
-        inheritedEnvKey: 'TRACKING_SINK_URL',
+        teamInherited: true,
         note:
-          'Inherited automatically from the operator provisioning env and stored as a Functions-only secret. One ' +
-          'shared owner DB is allowed with TRACKING_PROJECT_ID as the partition.',
+          'Set ONCE as a team-level Netlify environment variable (Team → Environment variables; scope Functions, ' +
+          "all contexts, all projects) — every site inherits it natively. create-site never copies a value into " +
+          "this site's own env for it; it only checks team-level presence (names only) and reports the result. " +
+          'One shared owner DB is allowed with TRACKING_PROJECT_ID as the partition.',
       },
       {
         name: 'TRACKING_SINK_TOKEN',
         cls: 'fleet-shared',
-        inheritedEnvKey: 'TRACKING_SINK_TOKEN',
+        teamInherited: true,
         note:
-          'Inherited automatically from the operator provisioning env and stored as a Functions-only secret; pairs ' +
-          'with TRACKING_SINK_URL.',
+          'Set ONCE as a team-level Netlify environment variable, same as TRACKING_SINK_URL above; pairs with it. ' +
+          "create-site never copies a value into this site's own env for it — checked for team-level presence only.",
       },
     ],
   },
@@ -440,6 +455,11 @@ export const CORE_BLOB_STORES = [
   // server/lib/plugin/manifest-types.ts for why. Strongly consistent: the
   // admin renders and then immediately reads back to promote.
   'plugin-manifest',
+  // R11.1/R11.3 (runner W21, 2026-09-05): saved analytics views + operator
+  // notes over `/admin/analytics` — an operator preference, not a governed
+  // object (see lib/admin/analytics-views-logic.ts). Strongly consistent: a
+  // "Save view"/"Add note" click reads its own write back immediately.
+  'analytics-views',
 ];
 
 // T16.0: derived from the genesis manifest, the one staged source of truth
@@ -605,6 +625,7 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     // static content library (the splat form swallowed the library index).
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
     { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
+    { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200 },
   ],
 });
 
@@ -642,7 +663,7 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 # site-relative (Netlify runs this command with sites/${ids.clientSlug} as cwd).
 [build]
   publish = "dist"
-  command = "(npx --no-install astro --version > /dev/null 2>&1 || npm ci --prefix ../.. --no-audit --no-fund) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts && (node ../../scripts/tracking-dims-push.mjs --export-root data/site || true)"
+  command = "(cmp -s ../../package-lock.json ../../node_modules/.lock-stamp 2>/dev/null || (npm ci --prefix ../.. --no-audit --no-fund && cp ../../package-lock.json ../../node_modules/.lock-stamp)) && node ../../scripts/validate-upload-images.mjs assets/images data/post && npx --no-install astro build --config astro.config.ts && (node ../../scripts/tracking-dims-push.mjs --export-root data/site || true)"
   # Netlify skips a build when nothing under the base directory (sites/${ids.clientSlug}) changed.
   # Our MCP functions bundle the shared packages/core workspace, which lives OUTSIDE this
   # base dir — so a packages/core-only change was being skipped and shipped stale functions
@@ -810,6 +831,11 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [[redirects]]
   from = "/admin/requests/:requestId"
   to = "/admin/requests/__request"
+  status = 200
+
+[[redirects]]
+  from = "/admin/analytics/object/:objectId"
+  to = "/admin/analytics/object/__object"
   status = 200
 `;
 
@@ -1995,6 +2021,7 @@ const nonEmpty = (value) => (typeof value === 'string' && value.trim() ? value.t
  *   provisionResult?: {
  *     secretsSet?: string[],
  *     inheritedMissing?: string[],
+ *     teamInheritedOk?: string[],
  *     secretsFailed?: Array<{ name: string }>
  *   } | null,
  * }} EnvChecklistRenderOptions
@@ -2004,7 +2031,32 @@ const nonEmpty = (value) => (typeof value === 'string' && value.trim() ? value.t
  * @param {typeof ENV_CHECKLIST[number]['rows'][number]} row
  * @param {EnvChecklistRenderOptions} options
  */
-const inheritedEnvStatus = (row, { executed = false, netlifyToken = false, fleetEnv = process.env, provisionResult = null }) => {
+const inheritedEnvStatus = (
+  row,
+  { executed = false, netlifyToken = false, fleetEnv = process.env, provisionResult = null }
+) => {
+  // R8.1: TRACKING_SINK_URL/TRACKING_SINK_TOKEN are team-level Netlify env
+  // vars now — never copied into a site's own env. Status comes ONLY from a
+  // live team-level PRESENCE check (names only; see getAccountEnvVarNames /
+  // executeNetlifyProvisioning), never from the operator's process env —
+  // reading `fleetEnv` for these would be exactly the copy-from-operator-env
+  // pattern this change retires.
+  if (row.teamInherited) {
+    const okNames = new Set(provisionResult?.teamInheritedOk || []);
+    const missingNames = new Set(provisionResult?.inheritedMissing || []);
+    if (executed) {
+      if (okNames.has(row.name)) return '✓ inherited from team';
+      if (missingNames.has(row.name)) {
+        return `☐ missing — add ${row.name} as a TEAM-level env var (Team → Environment variables; scope Functions, all contexts, all projects), then re-run --provision-only`;
+      }
+      return `☐ could not verify team-level presence for ${row.name} — check manually`;
+    }
+    if (netlifyToken) {
+      return 'checked live at provisioning time via GET /api/v1/accounts/{account_slug}/env (names only) — no local override needed';
+    }
+    return 'reuse the fleet value — do not create a new one';
+  }
+
   const envKey = row.inheritedEnvKey;
   if (!envKey) return null;
   const hasValue = Boolean(nonEmpty(fleetEnv?.[envKey]));
@@ -2036,7 +2088,12 @@ const inheritedEnvStatus = (row, { executed = false, netlifyToken = false, fleet
 /**
  * @param {EnvChecklistRenderOptions} [options]
  */
-export const renderEnvChecklist = ({ executed = false, netlifyToken = false, fleetEnv = process.env, provisionResult = null } = {}) => {
+export const renderEnvChecklist = ({
+  executed = false,
+  netlifyToken = false,
+  fleetEnv = process.env,
+  provisionResult = null,
+} = {}) => {
   const lines = [];
   for (const { group, rows } of ENV_CHECKLIST) {
     lines.push(`  ${group}:`);
@@ -2115,7 +2172,7 @@ export const renderPlan = (plan, { netlifyToken = false, fleetEnv = process.env 
       '  - inherit PDF_TOOL_BASE_URL + PDF_TOOL_AGENT_RUN_TOKEN from the shared pdf-tool service; store the token as a Functions-only production secret'
     );
     lines.push(
-      '  - copy TRACKING_SINK_URL + TRACKING_SINK_TOKEN from the operator provisioning env into Functions-only secrets on the new site'
+      '  - check TRACKING_SINK_URL + TRACKING_SINK_TOKEN for TEAM-level presence (GET /api/v1/accounts/{account_slug}/env, names only) — never copied into this site\'s own env; add them once at the team level and every site inherits them'
     );
   } else {
     lines.push('Netlify actions: none (no --netlify-token supplied — scaffold only).');
@@ -2180,7 +2237,7 @@ const probeStore = async (getStore, { siteID, token }, storeName) => {
   await store.delete(probeKey);
 };
 
-const setNetlifyEnvVar = async (
+export const setNetlifyEnvVar = async (
   fetchImpl,
   token,
   accountId,
@@ -2228,6 +2285,30 @@ export const getNetlifyEnvVars = async (fetchImpl, token, accountId, siteId) => 
   }
   const variables = await response.json().catch(() => []);
   return Array.isArray(variables) ? variables : [];
+};
+
+/**
+ * R8.1 — the team-level presence check for `teamInherited` rows
+ * (TRACKING_SINK_URL/TRACKING_SINK_TOKEN). Hits the ACCOUNT-scoped env
+ * endpoint with no `site_id` filter, which returns team-level (shared
+ * across every project) variables only. Returns a Set of variable NAMES —
+ * this function never reads `.values` on any returned variable, by
+ * construction, so a secret's value can never reach a log line, the dry-run
+ * report, or the JSON result document through this path.
+ */
+export const getAccountEnvVarNames = async (fetchImpl, token, accountSlug) => {
+  const response = await fetchImpl(`https://api.netlify.com/api/v1/accounts/${encodeURIComponent(accountSlug)}/env`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Netlify team-env read failed: ${response.status}`);
+  }
+  const variables = await response.json().catch(() => []);
+  const names = new Set();
+  for (const variable of Array.isArray(variables) ? variables : []) {
+    if (variable && typeof variable.key === 'string') names.add(variable.key);
+  }
+  return names;
 };
 
 export const contextValue = (variable) => {
@@ -2409,6 +2490,7 @@ export const executeNetlifyProvisioning = async (
   const secretsSet = [];
   const secretsFailed = [];
   const inheritedMissing = [];
+  const teamInheritedOk = [];
   if (accountId) {
     // W14 T14.4: NETLIFY_SITE_ID is knowable HERE — it is the id of the site
     // this run just created — and leaving it to the by-hand checklist is what
@@ -2453,35 +2535,37 @@ export const executeNetlifyProvisioning = async (
       }
     }
 
-    for (const row of ENV_CHECKLIST.flatMap(({ rows }) => rows).filter((entry) =>
-      ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN'].includes(entry.name)
-    )) {
-      const value = nonEmpty(fleetEnv?.[row.inheritedEnvKey]);
-      if (!value) {
-        inheritedMissing.push(row.name);
-        continue;
-      }
+    // R8.1: TRACKING_SINK_URL/TRACKING_SINK_TOKEN are team-level Netlify env
+    // vars now (Team → Environment variables; scope Functions, all contexts,
+    // all projects) — every site inherits them natively. This NEVER writes a
+    // value into the new site's own env for them, from fleetEnv/process.env
+    // or anywhere else; it only PROVES team-level presence by name via the
+    // account-scoped env endpoint (no site_id filter → team-level only),
+    // reading keys and never values.
+    const teamInheritedRows = ENV_CHECKLIST.flatMap(({ rows }) => rows).filter((entry) => entry.teamInherited);
+    if (teamInheritedRows.length) {
+      const accountSlug = site.account_slug || accountId;
       try {
-        await setNetlifyEnvVar(fetchImpl, token, accountId, siteId, row.name, value, {
-          scopes: ['functions'],
-          context: 'all',
-          isSecret: true,
-        });
-        secretsSet.push(row.name);
-      } catch (error) {
-        secretsFailed.push({ name: row.name, message: error instanceof Error ? error.message : String(error) });
+        const teamEnvNames = await getAccountEnvVarNames(fetchImpl, token, accountSlug);
+        for (const row of teamInheritedRows) {
+          if (teamEnvNames.has(row.name)) teamInheritedOk.push(row.name);
+          else inheritedMissing.push(row.name);
+        }
+      } catch {
+        // Fail closed: a failed presence check is never treated as "present".
+        for (const row of teamInheritedRows) inheritedMissing.push(row.name);
       }
     }
   } else {
     for (const name of ['PDF_TOOL_BASE_URL', 'PDF_TOOL_AGENT_RUN_TOKEN']) {
       secretsFailed.push({ name, message: 'new Netlify site response has no account id' });
     }
-    for (const name of ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']) {
-      inheritedMissing.push(name);
+    for (const row of ENV_CHECKLIST.flatMap(({ rows }) => rows).filter((entry) => entry.teamInherited)) {
+      inheritedMissing.push(row.name);
     }
   }
 
-  return { site, siteId, accountId, storeFailures, secretsSet, secretsFailed, inheritedMissing, storageParity };
+  return { site, siteId, accountId, storeFailures, secretsSet, secretsFailed, inheritedMissing, teamInheritedOk, storageParity };
 };
 
 // ─── CLI entry ───
@@ -2547,6 +2631,7 @@ const flattenEnvChecklist = () =>
       autoGenerated: Boolean(row.generate),
       provisionedByGenesis: Boolean(row.provisionedByGenesis),
       inheritFromPdfTool: Boolean(row.inheritFromPdfTool),
+      teamInherited: Boolean(row.teamInherited),
       note: row.note,
     }))
   );
@@ -2577,6 +2662,7 @@ const safeNetlifyResult = (result) => ({
   storeFailures: result.storeFailures.map(({ storeName, message }) => ({ storeName, message })),
   secretsSet: result.secretsSet,
   inheritedMissing: result.inheritedMissing,
+  teamInheritedOk: result.teamInheritedOk,
   secretsFailed: result.secretsFailed.map(({ name, message }) => ({ name, message })),
   storageParity: result.storageParity ? result.storageParity.rows : null,
 });

@@ -195,6 +195,7 @@ test('CORE_BLOB_STORES matches the store-name literals in blob-store.ts/governan
       'agent-chats',
       'agent-learning', // S4x (2/2): the tagged canvas Ask-AI proposal trail a save carries
       'agent-profiles',
+      'analytics-views', // R11.1/R11.3 (runner W21): saved analytics views + operator notes, an operator preference not a governed object
       'artifact-index',
       'artifacts',
       'commerce',
@@ -256,7 +257,7 @@ test('renderEnvChecklist(executed=true) reports generated secrets as set, never 
   assert.equal(/\b[0-9a-f]{32,}\b/i.test(text), false);
 });
 
-test('dry-run with --netlify-token marks the four inherited fleet rows with tick or gap status from the operator env', () => {
+test('dry-run with --netlify-token marks the pdf-tool bridge rows with tick or gap status from the operator env, and tracking sink rows as checked live (never from local env)', () => {
   const text = renderPlan(buildPlan({ name: 'acme' }), {
     netlifyToken: true,
     fleetEnv: {},
@@ -269,14 +270,20 @@ test('dry-run with --netlify-token marks the four inherited fleet rows with tick
     text,
     /PDF_TOOL_AGENT_RUN_TOKEN\s+\[fleet-shared\]\s+☐ operator env override absent — provisioning will fall back to the shared pdf-tool service/s
   );
+  // R8.1: TRACKING_SINK_URL/TOKEN are team-level env vars now — the dry-run
+  // report must never claim a ✓/☐ status derived from fleetEnv/process.env
+  // for them (there is nothing to "set in the provisioning environment"
+  // any more); it can only say the real check happens live at provision time.
   assert.match(
     text,
-    /TRACKING_SINK_URL\s+\[fleet-shared\]\s+☐ set TRACKING_SINK_URL in the provisioning environment before running --netlify-token/s
+    /TRACKING_SINK_URL\s+\[fleet-shared\]\s+checked live at provisioning time via GET \/api\/v1\/accounts\/\{account_slug\}\/env \(names only\) — no local override needed/s
   );
   assert.match(
     text,
-    /TRACKING_SINK_TOKEN\s+\[fleet-shared\]\s+☐ set TRACKING_SINK_TOKEN in the provisioning environment before running --netlify-token/s
+    /TRACKING_SINK_TOKEN\s+\[fleet-shared\]\s+checked live at provisioning time via GET \/api\/v1\/accounts\/\{account_slug\}\/env \(names only\) — no local override needed/s
   );
+  assert.doesNotMatch(text, /TRACKING_SINK_URL.*provisioning environment before running/s);
+  assert.doesNotMatch(text, /TRACKING_SINK_TOKEN.*provisioning environment before running/s);
 });
 
 test('Netlify provisioning inherits the pdf-tool bridge env and stores the bearer as a Functions-only secret', async () => {
@@ -365,15 +372,16 @@ test('Netlify provisioning inherits the pdf-tool bridge env and stores the beare
   assert.equal(JSON.stringify(result).includes(inheritedToken), false);
 });
 
-test('Netlify provisioning copies tracking sink env from the operator env into Functions-only secrets', async () => {
+test('Netlify provisioning checks TRACKING_SINK_URL/TOKEN for team-level presence and NEVER writes a value into the new site\'s own env', async () => {
   const envPosts: Array<Record<string, unknown>> = [];
   const envMethods = new Map<string, string>();
+  let teamEnvReadCount = 0;
   const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input);
     const method = init.method || 'GET';
     if (method === 'GET' && url.endsWith('/sites?name=acme')) return Response.json([]);
     if (method === 'POST' && url.endsWith('/api/v1/sites')) {
-      return Response.json({ id: 'site-target', account_id: 'account-target', name: 'acme' });
+      return Response.json({ id: 'site-target', account_id: 'account-target', account_slug: 'team-target', name: 'acme' });
     }
     if (method === 'GET' && url.endsWith('/sites?name=pdf-x')) {
       return Response.json([
@@ -382,6 +390,17 @@ test('Netlify provisioning copies tracking sink env from the operator env into F
     }
     if (method === 'GET' && url.includes('/accounts/account-pdf-tool/env?site_id=site-pdf-tool')) {
       return Response.json([{ key: 'AGENT_RUN_TOKEN', values: [{ context: 'all', value: 'pdf-token' }] }]);
+    }
+    // The team-level presence check: account-scoped, NO site_id filter. Real
+    // secret VALUES are present in this fixture's response on purpose — the
+    // test proves getAccountEnvVarNames/executeNetlifyProvisioning never
+    // carry them into the result, not that the wire format lacks them.
+    if (method === 'GET' && url === 'https://api.netlify.com/api/v1/accounts/team-target/env') {
+      teamEnvReadCount += 1;
+      return Response.json([
+        { key: 'TRACKING_SINK_URL', values: [{ context: 'all', value: 'https://sink.example/must-never-surface' }] },
+        { key: 'TRACKING_SINK_TOKEN', values: [{ context: 'all', value: 'sink-token-must-never-surface' }] },
+      ]);
     }
     if (method === 'GET' && url.includes('/accounts/account-target/env/')) return new Response('', { status: 404 });
     if (method === 'POST' && url.includes('/accounts/account-target/env?site_id=site-target')) {
@@ -410,27 +429,26 @@ test('Netlify provisioning copies tracking sink env from the operator env into F
     token: 'netlify-test-token',
     fetchImpl,
     getStoreImpl,
+    // Deliberately populated — R8.1 must not read this for TRACKING_SINK_*
+    // at all; only the live team-level check may decide their status.
     fleetEnv: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_SINK_TOKEN: 'sink-token' },
   });
 
-  assert.deepEqual(envPosts.find((entry) => entry.key === 'TRACKING_SINK_URL'), {
-    key: 'TRACKING_SINK_URL',
-    scopes: ['functions'],
-    values: [{ value: 'https://sink.example', context: 'all' }],
-    is_secret: true,
-  });
-  assert.deepEqual(envPosts.find((entry) => entry.key === 'TRACKING_SINK_TOKEN'), {
-    key: 'TRACKING_SINK_TOKEN',
-    scopes: ['functions'],
-    values: [{ value: 'sink-token', context: 'all' }],
-    is_secret: true,
-  });
-  assert.equal(envMethods.get('TRACKING_SINK_URL'), 'POST');
-  assert.equal(envMethods.get('TRACKING_SINK_TOKEN'), 'POST');
-  assert.ok(result.secretsSet.includes('TRACKING_SINK_URL'));
-  assert.ok(result.secretsSet.includes('TRACKING_SINK_TOKEN'));
+  assert.equal(teamEnvReadCount, 1, 'expected exactly one team-level presence read');
+  assert.equal(envPosts.find((entry) => entry.key === 'TRACKING_SINK_URL'), undefined, 'must never write TRACKING_SINK_URL to site env');
+  assert.equal(envPosts.find((entry) => entry.key === 'TRACKING_SINK_TOKEN'), undefined, 'must never write TRACKING_SINK_TOKEN to site env');
+  assert.ok(!result.secretsSet.includes('TRACKING_SINK_URL'));
+  assert.ok(!result.secretsSet.includes('TRACKING_SINK_TOKEN'));
+  assert.deepEqual(result.teamInheritedOk, ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']);
   assert.equal(result.inheritedMissing.length, 0);
   assert.equal(JSON.stringify(result).includes('sink-token'), false);
+  assert.equal(JSON.stringify(result).includes('must-never-surface'), false);
+
+  const text = renderEnvChecklist({ executed: true, netlifyToken: true, provisionResult: result });
+  assert.match(text, /TRACKING_SINK_URL\s+\[fleet-shared\]\s+✓ inherited from team/);
+  assert.match(text, /TRACKING_SINK_TOKEN\s+\[fleet-shared\]\s+✓ inherited from team/);
+  assert.equal(text.includes('sink-token'), false);
+  assert.equal(text.includes('must-never-surface'), false);
 });
 
 test('Netlify provisioning reports both required bridge vars when inheritance is unavailable', async () => {
@@ -477,13 +495,13 @@ test('Netlify provisioning reports both required bridge vars when inheritance is
   assert.match(result.secretsFailed.at(-1)?.message || '', /set PDF_TOOL_BASE_URL and PDF_TOOL_AGENT_RUN_TOKEN/);
 });
 
-test('Netlify provisioning leaves tracking sink rows unchecked when the operator env is missing them', async () => {
+test('Netlify provisioning reports TRACKING_SINK_URL/TOKEN missing when the team-level check finds neither var, regardless of fleetEnv', async () => {
   const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input);
     const method = init.method || 'GET';
     if (method === 'GET' && url.endsWith('/sites?name=acme')) return Response.json([]);
     if (method === 'POST' && url.endsWith('/api/v1/sites')) {
-      return Response.json({ id: 'site-target', account_id: 'account-target', name: 'acme' });
+      return Response.json({ id: 'site-target', account_id: 'account-target', account_slug: 'team-target', name: 'acme' });
     }
     if (method === 'GET' && url.endsWith('/sites?name=pdf-x')) {
       return Response.json([
@@ -492,6 +510,70 @@ test('Netlify provisioning leaves tracking sink rows unchecked when the operator
     }
     if (method === 'GET' && url.includes('/accounts/account-pdf-tool/env?site_id=site-pdf-tool')) {
       return Response.json([{ key: 'AGENT_RUN_TOKEN', values: [{ context: 'all', value: 'pdf-token' }] }]);
+    }
+    // The team account has neither var set — genuinely missing, not merely unchecked.
+    if (method === 'GET' && url === 'https://api.netlify.com/api/v1/accounts/team-target/env') {
+      return Response.json([{ key: 'SOME_OTHER_TEAM_VAR', values: [{ context: 'all', value: 'irrelevant' }] }]);
+    }
+    if (method === 'GET' && url.includes('/accounts/account-target/env/')) return new Response('', { status: 404 });
+    if (method === 'POST' && url.includes('/accounts/account-target/env?site_id=site-target')) return Response.json({});
+    return new Response(`unexpected request: ${method} ${url}`, { status: 500 });
+  };
+  const getStoreImpl = () => {
+    let stored: unknown;
+    return {
+      async setJSON(_key: string, value: unknown) {
+        stored = value;
+      },
+      async get() {
+        return stored;
+      },
+      async delete() {},
+    };
+  };
+
+  const result = await executeNetlifyProvisioning(buildPlan({ name: 'acme' }), {
+    token: 'netlify-test-token',
+    fetchImpl,
+    getStoreImpl,
+    // Even a populated fleetEnv must have zero effect on the team-level rows now.
+    fleetEnv: { TRACKING_SINK_URL: 'https://sink.example', TRACKING_SINK_TOKEN: 'sink-token' },
+  });
+
+  assert.deepEqual(result.inheritedMissing, ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']);
+  assert.deepEqual(result.teamInheritedOk, []);
+  assert.equal(result.secretsFailed.some((failure) => failure.name.startsWith('TRACKING_SINK_')), false);
+  assert.ok(!result.secretsSet.includes('TRACKING_SINK_URL'));
+  assert.ok(!result.secretsSet.includes('TRACKING_SINK_TOKEN'));
+  const text = renderEnvChecklist({ executed: true, netlifyToken: true, provisionResult: result });
+  assert.match(
+    text,
+    /TRACKING_SINK_URL.*☐ missing — add TRACKING_SINK_URL as a TEAM-level env var \(Team → Environment variables; scope Functions, all contexts, all projects\), then re-run --provision-only/s
+  );
+  assert.match(
+    text,
+    /TRACKING_SINK_TOKEN.*☐ missing — add TRACKING_SINK_TOKEN as a TEAM-level env var \(Team → Environment variables; scope Functions, all contexts, all projects\), then re-run --provision-only/s
+  );
+});
+
+test('Netlify provisioning fails closed (reports missing, never inherited) when the team-level presence check itself errors', async () => {
+  const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = init.method || 'GET';
+    if (method === 'GET' && url.endsWith('/sites?name=acme')) return Response.json([]);
+    if (method === 'POST' && url.endsWith('/api/v1/sites')) {
+      return Response.json({ id: 'site-target', account_id: 'account-target', account_slug: 'team-target', name: 'acme' });
+    }
+    if (method === 'GET' && url.endsWith('/sites?name=pdf-x')) {
+      return Response.json([
+        { id: 'site-pdf-tool', account_id: 'account-pdf-tool', name: 'pdf-x', ssl_url: 'https://pdf-x.netlify.app/' },
+      ]);
+    }
+    if (method === 'GET' && url.includes('/accounts/account-pdf-tool/env?site_id=site-pdf-tool')) {
+      return Response.json([{ key: 'AGENT_RUN_TOKEN', values: [{ context: 'all', value: 'pdf-token' }] }]);
+    }
+    if (method === 'GET' && url === 'https://api.netlify.com/api/v1/accounts/team-target/env') {
+      return new Response('service unavailable', { status: 503 });
     }
     if (method === 'GET' && url.includes('/accounts/account-target/env/')) return new Response('', { status: 404 });
     if (method === 'POST' && url.includes('/accounts/account-target/env?site_id=site-target')) return Response.json({});
@@ -518,13 +600,7 @@ test('Netlify provisioning leaves tracking sink rows unchecked when the operator
   });
 
   assert.deepEqual(result.inheritedMissing, ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']);
-  assert.equal(result.secretsFailed.some((failure) => failure.name.startsWith('TRACKING_SINK_')), false);
-  const text = renderEnvChecklist({ executed: true, netlifyToken: true, provisionResult: result });
-  assert.match(text, /TRACKING_SINK_URL.*☐ set TRACKING_SINK_URL in the provisioning environment, then re-run --provision-only/s);
-  assert.match(
-    text,
-    /TRACKING_SINK_TOKEN.*☐ set TRACKING_SINK_TOKEN in the provisioning environment, then re-run --provision-only/s
-  );
+  assert.deepEqual(result.teamInheritedOk, []);
 });
 
 test('Netlify provisioning reports tracking sink rows unresolved when Netlify returns no account id', async () => {
@@ -563,10 +639,13 @@ test('Netlify provisioning reports tracking sink rows unresolved when Netlify re
   );
   assert.deepEqual(result.inheritedMissing, ['TRACKING_SINK_URL', 'TRACKING_SINK_TOKEN']);
   const text = renderEnvChecklist({ executed: true, netlifyToken: true, provisionResult: result });
-  assert.match(text, /TRACKING_SINK_URL.*☐ set TRACKING_SINK_URL in the provisioning environment, then re-run --provision-only/s);
   assert.match(
     text,
-    /TRACKING_SINK_TOKEN.*☐ set TRACKING_SINK_TOKEN in the provisioning environment, then re-run --provision-only/s
+    /TRACKING_SINK_URL.*☐ missing — add TRACKING_SINK_URL as a TEAM-level env var \(Team → Environment variables; scope Functions, all contexts, all projects\), then re-run --provision-only/s
+  );
+  assert.match(
+    text,
+    /TRACKING_SINK_TOKEN.*☐ missing — add TRACKING_SINK_TOKEN as a TEAM-level env var \(Team → Environment variables; scope Functions, all contexts, all projects\), then re-run --provision-only/s
   );
   assert.equal(text.includes('sink-token'), false);
   assert.equal(JSON.stringify(result).includes('sink-token'), false);

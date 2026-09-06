@@ -344,23 +344,37 @@ export interface EvidenceGap {
  * verbatim as the results-surface empty state: this is the "name exactly what
  * is missing and where it would come from" the task asks for, and it is the
  * reason there is no chart and no p-value anywhere in T4.4.
+ *
+ * T21.5 (edge variant serving) and T21.6b (arm metrics) closed the first two
+ * gaps CONDITIONALLY, not unconditionally — the text below says exactly what
+ * changed rather than pretending nothing did:
+ *
+ *  - `traffic_split` used to be an unqualified "nothing in this repo splits
+ *    traffic". T21.5 built exactly that (`edge-core.ts`), gated on an
+ *    `experiments[]` entry with `status: 'active'` naming this family. A
+ *    family with no such entry is still exactly as this gap describes.
+ *  - `per_variant_outcomes` used to say nothing in this repo reads tracking
+ *    events back. T21.6b does, via `${TRACKING_SINK_URL}/rollups?by=object`
+ *    — but into a SEPARATE arm-metrics panel (`variant-arm-metrics.ts`), not
+ *    blended into the agent-judgment table this component renders. That
+ *    table still shows judge scores only, which is what this gap is about.
  */
 export const EVIDENCE_GAPS: readonly EvidenceGap[] = [
   {
     id: 'traffic_split',
-    title: 'No traffic split exists',
+    title: 'No traffic split exists here — unless an active experiment covers this family',
     detail:
-      'A variant is a separate article with its own slug, so publishing it adds a second permalink rather than splitting traffic to the first. Nothing in this repo assigns a visitor to one of two articles.',
+      'A variant is a separate article with its own slug; publishing one on its own just adds a second permalink, nothing splits traffic to it. T21.5 built a real split (weighted, concurrent, sticky-cookied) for a family an ACTIVE experiments[] entry names — see this family’s arm-metrics panel for whether that applies here. Absent one, this gap is exactly as stated.',
     source:
-      'packages/core/lib/article-object/variant.ts:17 — "Serving/traffic-splitting is explicitly out of scope (OQ-W7-2)"',
+      'packages/core/lib/tracking/experiments/edge-core.ts (the split, active-experiment-gated) — absent an active entry, packages/core/lib/article-object/variant.ts:17 still applies.',
   },
   {
     id: 'per_variant_outcomes',
-    title: 'Per-variant outcomes are not readable here',
+    title: 'Per-variant outcomes are not blended into the table above',
     detail:
-      'Tracking events carry an object_id, so the numbers exist — but /api/t only forwards them to the owner sink and mirrors them to a blob store nothing in this repo reads back. The join lives in the owner database, outside the CMS boundary.',
+      'T21.6b reads tracking events back — see this family’s arm-metrics panel for exposures/sessions/completion/CTA/purchase/revenue per member, sourced from the sink’s /rollups endpoint (a member under 50 sessions shows "n too small" there, never a number). Those reader numbers are a SEPARATE panel; the judged-dimension table above still compares agent scores only.',
     source:
-      'packages/core/server/functions/track-ingest.ts (write-only) + docs/cms-architecture/tracking-sink-reference/schema.sql',
+      'packages/core/lib/admin/variant-arm-metrics.ts + packages/core/server/lib/own-tracker-rollups.ts (T21.6b) — read-only, still outside the write path.',
   },
   {
     id: 'metric_scores',

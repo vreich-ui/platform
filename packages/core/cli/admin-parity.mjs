@@ -118,6 +118,9 @@ export const CANONICAL_INFRA_REDIRECTS = [
   // W19 T19.4: the same single-segment, UNFORCED form for the request detail
   // page — /admin/requests must keep serving its own static list index.
   { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200, force: false },
+  // R11.4 (T21.30): the same single-segment, UNFORCED form for the object
+  // analytics drill-down — /admin/analytics must keep serving its own page.
+  { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200, force: false },
 ];
 
 /**

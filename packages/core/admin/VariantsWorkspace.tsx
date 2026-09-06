@@ -1,24 +1,30 @@
 /**
- * T4.4 — `/admin/variants`: article variant families, their judged evidence,
- * and one-click winner selection.
+ * T4.4 (+ T21.6b/R4b: per-arm reader metrics) — `/admin/variants`: article
+ * variant families, their judged evidence, reader metrics where the sink has
+ * them, and one-click winner selection.
  *
  * ## What this screen is, and what it deliberately is not
  *
- * It is NOT an A/B testing monitor, and none of its copy says it is. The
- * substrate for one is half-built: `object_create_variant` gives real variants,
- * but nothing splits traffic between them and no per-variant reader numbers
- * reach this app. Both facts are stated on the screen with the file that proves
- * them (`EVIDENCE_GAPS` in `@core/lib/admin/variant-experiments`), because a
- * results panel that quietly shows nothing teaches an editor less than one that
- * says exactly what is missing. 12-plan section 15.4 is explicit about this:
- * "the design refuses any UI/tooling copy that calls them A/B tests."
+ * It is NOT an unconditional A/B testing monitor, and its copy never calls a
+ * family a test unless that family has an ACTIVE `experiments[]` entry
+ * (`trk_<site>`, read server-side by `admin-analytics?source=arm_metrics`).
+ * `object_create_variant` gives real variants; T21.5 gave a real concurrent
+ * randomized split for a family an active entry names, and T21.6b gives real
+ * per-arm reader metrics (`${TRACKING_SINK_URL}/rollups?by=object`) for every
+ * family, split or not. What was true before both of those — no split, no
+ * reader numbers reaching this app — is still exactly true for a family with
+ * NO active entry, and the per-family `ArmMetricsPanel` below states which
+ * case applies rather than leaving it implicit. 12-plan §15.4 states the rule
+ * this screen obeys: "the design refuses any UI/tooling copy that calls them
+ * A/B tests" — scoped by §16 to a family with no active experiment.
  *
- * Consequently there is NO split control (it would change nothing), NO chart
- * (there is no series to draw), and NO significance figure (there is no sample
- * to compute one over). What there IS: the family graph, the D4 status of every
- * member, the agent judge scores that genuinely live on the records, variant
- * creation through the verb's own dry run, and a winner selection composed from
- * checkout/publish/retire.
+ * There is still NO chart and NO significance figure: `ArmMetricsPanel` shows
+ * the sink's own numbers (and the exact words `n too small` below the
+ * 50-session floor, never a zero), not a derived statistic this repo would
+ * have to justify. What there IS: the family graph, the D4 status of every
+ * member, the agent judge scores that genuinely live on the records, the
+ * arm-metrics panel, variant creation through the verb's own dry run, and a
+ * winner selection composed from checkout/publish/retire.
  *
  * Styling: Tailwind + `--adm-*` tokens only; every status colour comes from
  * D4 (`StatusBadge`, `SeverityIcon`), no hex, no new dependency.
@@ -51,6 +57,16 @@ import {
   previewVariant,
   type VariantPreview,
 } from '@core/lib/admin/variants-client';
+import { fetchArmMetricsOverview } from '@core/lib/admin/arm-metrics-client';
+import {
+  ARM_METRICS_SESSION_FLOOR,
+  HONESTY_COPY,
+  familyArmMetrics,
+  resolveArmMetricsPanel,
+  type ArmMetricCell,
+  type ArmMetricsOverview,
+  type ArmMetricsPanelState,
+} from '@core/lib/admin/variant-arm-metrics';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -221,16 +237,120 @@ function EvidencePanel({ family }: { family: VariantFamily }) {
   );
 }
 
+// ─── arm metrics panel (T21.6b / R4b) ──────────────────────────────────────
+
+/** One row of the arm-metrics table: a metric, and how to read it off a cell. */
+const ARM_METRIC_ROWS: ReadonlyArray<{
+  key: string;
+  label: string;
+  /** True for the four cells the 50-session floor gates (§15.3 rule 4 reasoning) — used only to caption the tooltip. */
+  floorGated?: boolean;
+  render: (cell: ArmMetricCell) => string;
+}> = [
+  { key: 'exposures', label: 'Exposures', render: (cell) => cell.exposures.toLocaleString() },
+  { key: 'sessions', label: 'Sessions', render: (cell) => cell.sessions.toLocaleString() },
+  { key: 'completion', label: 'Completion %', floorGated: true, render: (cell) => cell.completion },
+  { key: 'cta_ctr', label: 'CTA CTR', floorGated: true, render: (cell) => cell.ctaCtr },
+  { key: 'purchase', label: 'Purchase %', floorGated: true, render: (cell) => cell.purchase },
+  { key: 'revenue', label: 'Revenue', floorGated: true, render: (cell) => cell.revenue },
+  {
+    key: 'weight',
+    label: 'Sink weight',
+    render: (cell) =>
+      cell.weight.source === 'not_experiment'
+        ? '—'
+        : cell.weight.source === 'default_equal'
+          ? `${cell.weight.pct}% (equal — no sink weight)`
+          : `${cell.weight.pct}%`,
+  },
+];
+
+/**
+ * Per-family reader metrics, sourced once from the page-level `armPanel`
+ * (`resolveArmMetricsPanel`) via `familyArmMetrics`. Rendered only when that
+ * panel is `'ready'` — a `'not_configured'`/`'error'` state gets ONE banner
+ * above the whole family list (`VariantsBody`), never a repeated one per
+ * card, and never a table full of zeros standing in for "unknown".
+ */
+function ArmMetricsPanel({
+  family,
+  ready,
+}: {
+  family: VariantFamily;
+  ready: Extract<ArmMetricsPanelState, { kind: 'ready' }>;
+}) {
+  const { honesty, cells } = useMemo(() => familyArmMetrics(ready, family), [ready, family]);
+  const copy = HONESTY_COPY[honesty.kind];
+  const columns = family.members;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-start gap-2">
+        <Badge tone={honesty.kind === 'ab_test' ? 'accent' : 'neutral'}>{copy.badge}</Badge>
+        <p className="min-w-0 flex-1 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{copy.sentence}</p>
+      </div>
+      <div className="overflow-x-auto rounded-[var(--adm-radius-md)] border border-[var(--adm-border)]">
+        <table className="w-full min-w-[36rem] border-collapse text-[length:var(--adm-text-sm)]">
+          <thead>
+            <tr className="bg-[var(--adm-surface-sunken)] text-left">
+              <th scope="col" className="px-3 py-2 font-medium text-[var(--adm-text-muted)]">
+                Arm metric
+              </th>
+              {columns.map((view) => (
+                <th
+                  key={view.member.object_id}
+                  scope="col"
+                  className="px-3 py-2 font-medium text-[var(--adm-text-muted)]"
+                >
+                  {view.member.display_name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ARM_METRIC_ROWS.map((rowDef) => (
+              <tr key={rowDef.key} className="border-t border-[var(--adm-border)]">
+                <th scope="row" className="px-3 py-2 text-left font-normal text-[var(--adm-text)]">
+                  {rowDef.label}
+                </th>
+                {columns.map((view) => {
+                  const cell = cells.find((candidate) => candidate.objectId === view.member.object_id);
+                  const belowFloor = Boolean(rowDef.floorGated && cell?.belowFloor);
+                  return (
+                    <td
+                      key={view.member.object_id}
+                      className="px-3 py-2 text-[var(--adm-text)]"
+                      title={
+                        belowFloor && cell
+                          ? `${cell.sessions} session${cell.sessions === 1 ? '' : 's'} recorded — the floor is ${ARM_METRICS_SESSION_FLOOR}.`
+                          : undefined
+                      }
+                    >
+                      {cell ? rowDef.render(cell) : '—'}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── family card ────────────────────────────────────────────────────────────
 
 function FamilyCard({
   family,
   onSelectWinner,
   busy,
+  armPanel,
 }: {
   family: VariantFamily;
   onSelectWinner: (plan: WinnerPlan) => void;
   busy: boolean;
+  armPanel: ArmMetricsPanelState;
 }) {
   const selectable = family.members.filter((view) => view.member.status === 'active');
   const [winnerId, setWinnerId] = useState<string>(() => selectable[0]?.member.object_id ?? '');
@@ -259,6 +379,8 @@ function FamilyCard({
           />
         ))}
       </ul>
+
+      {armPanel.kind === 'ready' ? <ArmMetricsPanel family={family} ready={armPanel} /> : null}
 
       <EvidencePanel family={family} />
 
@@ -327,6 +449,13 @@ function VariantsBody() {
   const [preview, setPreview] = useState<(VariantPreview & { sourceId: string }) | undefined>();
   const { toast } = useToast();
 
+  // T21.6b/R4b — arm metrics, fetched once for the whole page (separately
+  // from the family/member sweep above: a metrics-feed failure must never
+  // block the family list from rendering, and vice versa).
+  const [armOverview, setArmOverview] = useState<ArmMetricsOverview | null>(null);
+  const [armLoading, setArmLoading] = useState(true);
+  const [armError, setArmError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(undefined);
@@ -342,6 +471,30 @@ function VariantsBody() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setArmLoading(true);
+    setArmError(null);
+    fetchArmMetricsOverview(getToken)
+      .then((overview) => {
+        if (!cancelled) setArmOverview(overview);
+      })
+      .catch((reason) => {
+        if (!cancelled) setArmError(reason instanceof Error ? reason.message : 'Arm metrics could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setArmLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const armPanel = useMemo(
+    () => resolveArmMetricsPanel({ loading: armLoading, error: armError, overview: armOverview }),
+    [armLoading, armError, armOverview]
+  );
 
   const families = useMemo(() => buildVariantFamilies(members), [members]);
   const sourceOptions = useMemo(
@@ -423,9 +576,10 @@ function VariantsBody() {
           Article variants
         </h1>
         <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-          Cloned articles, what has been judged about them, and which one you want live. This is not an A/B test:
-          nothing splits traffic between a source and its variant, so the two are read one after the other, never side
-          by side.
+          Cloned articles, what has been judged about them, reader metrics where the sink has them, and which one you
+          want live. Most families here are directional, not a test: with no active experiment, a source and its variant
+          are simply read one after the other, never side by side. A family with an active experiment is the exception —
+          its arm-metrics panel says so, and only there does &quot;A/B test&quot; wording appear.
         </p>
       </header>
 
@@ -498,8 +652,23 @@ function VariantsBody() {
         />
       ) : (
         <div className="flex flex-col gap-5">
+          {/* T21.6b/R4b: ONE named state for the whole page, never a table of
+              zeros — a metrics-feed problem is stated once here rather than
+              repeated per family, and it never blocks the family list above. */}
+          {armPanel.kind === 'not_configured' || armPanel.kind === 'error' ? (
+            <p className="flex items-start gap-2 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+              <SeverityIcon level="info" size={14} title="" className="mt-0.5 shrink-0" />
+              <span>Arm metrics unavailable: {armPanel.message}</span>
+            </p>
+          ) : null}
           {families.map((family) => (
-            <FamilyCard key={family.parentId} family={family} busy={busy} onSelectWinner={setPendingPlan} />
+            <FamilyCard
+              key={family.parentId}
+              family={family}
+              busy={busy}
+              onSelectWinner={setPendingPlan}
+              armPanel={armPanel}
+            />
           ))}
         </div>
       )}

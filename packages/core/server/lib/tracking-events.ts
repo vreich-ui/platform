@@ -50,6 +50,9 @@ export const TRACKING_PROPS_ALLOWLIST: Record<TrackingEventKind, readonly string
   read_progress: ['pct_read'],
   completion: [],
   goal: ['goal', 'value_cents', 'label_slug', 'commerce_event_id'],
+  // T21.5: the experiment exposure. Both values are content_item ids; the
+  // schema pins their grammar and nothing else about the arm is transmitted.
+  exposure: ['experiment_id', 'variant_id'],
 };
 
 /** Keep only the allowlisted keys for this event kind (drop the rest silently). */

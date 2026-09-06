@@ -259,6 +259,28 @@ export const buildStoreValidationContext = async (
     return { exists: true, published: record.publication?.published_time != null };
   };
 
+  /**
+   * T21.5 — the experiment-arm resolver. Reads the SAME preloaded `records`
+   * snapshot as every other resolver here (no extra store read): a
+   * content_item's publication state, its `lineage.parent_content_id`, and its
+   * slug, which is what the route is derived from. Returns undefined for an id
+   * with no store record so the checker reports "not verified" rather than
+   * failing an arm it never saw — including the committed-legacy-post case,
+   * which has no lineage and can never be an arm anyway.
+   */
+  const resolveExperimentArm: ObjectValidationContext['resolveExperimentArm'] = (contentItemId) => {
+    const record = records.get(`content_item:${contentItemId}`);
+    if (!record) return contentItemIds?.has(contentItemId) ? { exists: true, published: true, parentContentId: null, slug: null } : undefined;
+    const body = record.body;
+    const lineage = isRecord(body) && isRecord(body.lineage) ? body.lineage : undefined;
+    return {
+      exists: true,
+      published: record.publication?.published_time != null,
+      parentContentId: typeof lineage?.parent_content_id === 'string' ? lineage.parent_content_id : null,
+      slug: isRecord(body) && typeof body.slug === 'string' ? body.slug : null,
+    };
+  };
+
   const resolveSharedSectionType: ObjectValidationContext['resolveSharedSectionType'] = (objectId) => {
     const body = records.get(`section:${objectId}`)?.body;
     if (!isRecord(body) || !isRecord(body.section) || typeof body.section.type !== 'string') return undefined;
@@ -400,6 +422,7 @@ export const buildStoreValidationContext = async (
 
   return {
     resolveObject,
+    resolveExperimentArm,
     resolveSharedSectionType,
     resolveSharedSectionName,
     resolveSectionTemplateType,

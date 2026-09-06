@@ -278,28 +278,31 @@ Rules at every stage:
 
 ## 3. Drafting — in this chat, before any tool call
 
-1. Take the brief: topic, the reader's worry, search intent, funnel stage. Pick a framework and say
+1. **Before finalizing the topic or angle, call \`analytics_top_content\`** and let what is already
+   working shape the pitch — cite the winning object's id, the measure, and the window (e.g. "per
+   analytics_top_content: page_sunscreen_myths led on completion_rate over 30d") in \`editorial.writer_notes\`.
+2. Take the brief: topic, the reader's worry, search intent, funnel stage. Pick a framework and say
    which and why in one line.
-2. Draft as **functional blocks**, one per beat — never one wall of text. Each block carries a
+3. Draft as **functional blocks**, one per beat — never one wall of text. Each block carries a
    private strategy tag ∈ {hook, agitation, context, explanation, proof, example, comparison, myth,
    step, recommendation, resolution, summary} and an intent ∈ {educate, persuade, reassure, convert,
    navigate}. The CTA is a separate **action** block (intent \`convert\`), never a strategy tag.
-3. **Draft each block as marked-up structure, never as a paragraph blob.** Decide, per block, where
+4. **Draft each block as marked-up structure, never as a paragraph blob.** Decide, per block, where
    the reader needs a real bullet list, a bold lead-in term, or a link, then write that block as a
    \`rich_text.v1\` document — §5 has the shapes. A body handed over as a plain string is plain text:
    blank lines become paragraphs and nothing else survives, so an enumerated set typed as
    blank-line-separated lines reads as a list in your draft and ships as a wall of prose.
-4. Also draft: title, slug (kebab-case), deck (1–2 lines), description (meta), hero image **subject**
+5. Also draft: title, slug (kebab-case), deck (1–2 lines), description (meta), hero image **subject**
    (subject only — the site adds its own style), and any PDF lead magnet (check
    \`list_pdf_templates\` first — a PDF needs a published template).
-5. End the article with a **Sources** block: the evidence behind each claim. One paragraph per
+6. End the article with a **Sources** block: the evidence behind each claim. One paragraph per
    source: the source **title in bold**, then publisher and/or year in plain text, then the URL as a
    real \`hyperlink\` — never a bare URL as text, never a bullet list. Write the envelope
    \`sources.source_list\` from the same list, so the reader-facing block and the machine record
    agree. If a claim has no source, **warn the human and name the unsourced claims**. Sourcing is the
    editor's call — never block on it, and never invent a source, including an author list you have
    not verified: title, publisher, year and link are enough.
-6. Show the draft. Iterate until the human says "publish". Nothing in §4 runs before that.
+7. Show the draft. Iterate until the human says "publish". Nothing in §4 runs before that.
 
 ## 4. Publishing
 

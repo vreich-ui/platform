@@ -7,23 +7,29 @@ import {
   normalizePathLabel,
   normalizeSourceLabel,
   formatAnalyticsCount,
+  formatBytes,
   parseStoredAnalyticsRange,
   serializeStoredAnalyticsRange,
   analyticsRangeStorageKey,
-  buildLinePoints,
-  pointsToPolyline,
-  pointsToAreaPath,
+  withShareLimit,
   TOP_LIST_LIMIT,
   MAX_CUSTOM_RANGE_DAYS,
   isAnalyticsRangeKey,
   isRangeAvailableForSource,
   clampRangeForSource,
   isCompareAvailable,
+  defaultCompareForRange,
+  computeDelta,
+  analyticsFilterChips,
+  hasAnalyticsFilters,
   parseAnalyticsSearchParams,
   serializeAnalyticsSearchParams,
+  isAnalyticsSource,
   DEFAULT_ANALYTICS_SOURCE,
   DEFAULT_ANALYTICS_RANGE,
   resolveNetlifyAnalyticsPanel,
+  isExcludedAdminPath,
+  isInternalReferrerHost,
   type RawAnalyticsData,
   type AnalyticsSearchState,
   type AnalyticsOverview,
@@ -172,6 +178,49 @@ test('normalizeSourceLabel collapses every direct-traffic spelling to one label'
   assert.equal(normalizeSourceLabel('google.com'), 'google.com');
 });
 
+// ─── R6.4/D8: isExcludedAdminPath / isInternalReferrerHost ─────────────────────
+
+test('isExcludedAdminPath: /admin and /.netlify (and anything nested under either) are excluded', () => {
+  assert.equal(isExcludedAdminPath('/admin'), true);
+  assert.equal(isExcludedAdminPath('/admin/'), true);
+  assert.equal(isExcludedAdminPath('/admin/analytics'), true);
+  assert.equal(isExcludedAdminPath('/admin/content/abc123'), true);
+  assert.equal(isExcludedAdminPath('/.netlify'), true);
+  assert.equal(isExcludedAdminPath('/.netlify/functions/admin-analytics'), true);
+  // No leading slash on the raw resource — normalizePathLabel adds one before the check runs.
+  assert.equal(isExcludedAdminPath('admin/analytics'), true);
+});
+
+test('isExcludedAdminPath: a real public page never gets swept up by a prefix match', () => {
+  assert.equal(isExcludedAdminPath('/admin-portal'), false);
+  assert.equal(isExcludedAdminPath('/administration-guide'), false);
+  assert.equal(isExcludedAdminPath('/about'), false);
+  assert.equal(isExcludedAdminPath('/'), false);
+  assert.equal(isExcludedAdminPath(''), false);
+  assert.equal(isExcludedAdminPath(undefined), false);
+});
+
+test('isInternalReferrerHost: the exact site host matches, case-insensitively and ignoring a leading www.', () => {
+  assert.equal(isInternalReferrerHost('drluriescience.netlify.app', 'https://drluriescience.netlify.app'), true);
+  assert.equal(isInternalReferrerHost('DrLurieScience.netlify.app', 'https://drluriescience.netlify.app'), true);
+  assert.equal(isInternalReferrerHost('www.drluriescience.netlify.app', 'https://drluriescience.netlify.app'), true);
+  assert.equal(isInternalReferrerHost('drluriescience.netlify.app', 'https://www.drluriescience.netlify.app'), true);
+  // A full URL with a path/port on either side is stripped down to the host before comparing.
+  assert.equal(
+    isInternalReferrerHost('drluriescience.netlify.app', 'https://drluriescience.netlify.app:443/admin'),
+    true
+  );
+});
+
+test('isInternalReferrerHost: a different host, or a missing side, is never internal', () => {
+  assert.equal(isInternalReferrerHost('google.com', 'https://drluriescience.netlify.app'), false);
+  assert.equal(isInternalReferrerHost('Direct', 'https://drluriescience.netlify.app'), false);
+  assert.equal(isInternalReferrerHost('', 'https://drluriescience.netlify.app'), false);
+  // siteHost unset/unresolvable (e.g. process.env.URL absent) — degrade to "nothing is internal", never a guess.
+  assert.equal(isInternalReferrerHost('drluriescience.netlify.app', undefined), false);
+  assert.equal(isInternalReferrerHost('drluriescience.netlify.app', ''), false);
+});
+
 // ─── formatAnalyticsCount ───────────────────────────────────────────────────────
 
 test('formatAnalyticsCount compacts large numbers and leaves small ones alone', () => {
@@ -212,79 +261,82 @@ test('parseStoredAnalyticsRange never throws on garbage input', () => {
   assert.equal(parseStoredAnalyticsRange('"just a string"'), null);
 });
 
-// ─── chart geometry ───────────────────────────────────────────────────────────
+// ─── R6.2: withShareLimit — the generalized bar-list ranking transform ─────
 
-test('buildLinePoints: empty series produces no points', () => {
-  assert.deepEqual(buildLinePoints([], 100, 40), []);
+test('withShareLimit: a taller limit than TOP_LIST_LIMIT keeps more rows, same share math', () => {
+  const rows = Array.from({ length: 25 }, (_, i) => ({ label: `c${i}`, visits: i }));
+  const result = withShareLimit(rows, 20);
+  assert.equal(result.length, 20);
+  assert.equal(result[0]!.visits, 24);
+  assert.equal(result[0]!.share, 1);
 });
 
-test('buildLinePoints: a single value centers itself', () => {
-  const points = buildLinePoints([5], 100, 40);
-  assert.deepEqual(points, [{ x: 50, y: 20 }]);
+// ─── R6.2: comparison deltas ─────────────────────────────────────────────────
+
+test('computeDelta: a real, signed percent change with an arrow baked into the label', () => {
+  assert.deepEqual(computeDelta(120, 100), { pct: 20, direction: 'up', label: '▲ 20%' });
+  assert.deepEqual(computeDelta(80, 100), { pct: -20, direction: 'down', label: '▼ 20%' });
+  assert.deepEqual(computeDelta(100, 100), { pct: 0, direction: 'flat', label: '→ 0%' });
 });
 
-test('buildLinePoints: spans the full width and respects padding vertically', () => {
-  const points = buildLinePoints([0, 10], 100, 40, 4);
-  assert.equal(points.length, 2);
-  assert.equal(points[0].x, 4);
-  assert.equal(points[1].x, 96);
-  // min value sits at the bottom (y = height - padding), max at the top (y = padding)
-  assert.equal(points[0].y, 36);
-  assert.equal(points[1].y, 4);
+test('computeDelta: no previous value ⇒ null, never a fabricated delta', () => {
+  assert.equal(computeDelta(100, null), null);
+  assert.equal(computeDelta(100, undefined), null);
 });
 
-test('buildLinePoints: a flat series (no span) does not divide by zero', () => {
-  const points = buildLinePoints([7, 7, 7], 100, 40);
-  assert.ok(points.every((p) => Number.isFinite(p.y)));
+test('computeDelta: a zero/negative baseline is undefined or absurd, so it hides — except 0→0, a real flat', () => {
+  assert.equal(computeDelta(50, 0), null, 'previous of 0 with a nonzero current has no honest percent');
+  assert.deepEqual(computeDelta(0, 0), { pct: 0, direction: 'flat', label: '→ 0%' });
+  assert.equal(computeDelta(10, -5), null, 'a negative baseline should never occur, but is defensively hidden too');
 });
 
-test('pointsToPolyline formats an SVG points attribute', () => {
-  assert.equal(
-    pointsToPolyline([
-      { x: 1, y: 2 },
-      { x: 3.5, y: 4 },
-    ]),
-    '1,2 3.5,4'
-  );
+// ─── R6.2/D2: formatBytes ────────────────────────────────────────────────────
+
+test('formatBytes: compacts to the largest unit that keeps at least one whole digit', () => {
+  assert.equal(formatBytes(0), '0 B');
+  assert.equal(formatBytes(512), '512 B');
+  assert.equal(formatBytes(2048), '2 KB');
+  assert.equal(formatBytes(1_500_000), '1.4 MB');
+  assert.equal(formatBytes(-5), '0 B', 'a negative byte count never occurs but degrades safely');
 });
 
-test('pointsToAreaPath closes the shape down to the baseline', () => {
-  const path = pointsToAreaPath(
-    [
-      { x: 0, y: 10 },
-      { x: 10, y: 0 },
-    ],
-    20
-  );
-  assert.equal(path, 'M0,10 L10,0 L10,20 L0,20 Z');
+// ─── R6.2/D7: filters + chips ────────────────────────────────────────────────
+
+test('hasAnalyticsFilters / analyticsFilterChips: empty filters produce no chips', () => {
+  assert.equal(hasAnalyticsFilters({}), false);
+  assert.deepEqual(analyticsFilterChips({}), []);
 });
 
-test('pointsToAreaPath on an empty series returns an empty string, not a broken path', () => {
-  assert.equal(pointsToAreaPath([], 20), '');
+test('analyticsFilterChips: one chip per active filter, in a stable order', () => {
+  assert.deepEqual(analyticsFilterChips({ country: 'IL', source: 'newsletter', object_id: 'page_home' }), [
+    { key: 'country', label: 'country', value: 'IL' },
+    { key: 'source', label: 'source', value: 'newsletter' },
+    { key: 'object_id', label: 'object', value: 'page_home' },
+  ]);
+  assert.equal(hasAnalyticsFilters({ country: 'IL' }), true);
 });
 
-// ─── R6.1: tab/range/compare ↔ URL round-trip ───────────────────────────────
+// ─── R6.2: tab/range/compare/filters ↔ URL round-trip ──────────────────────
 
-test('isRangeAvailableForSource: the own tracker only serves 7d/30d today; Netlify serves all four', () => {
-  assert.equal(isRangeAvailableForSource('7d', 'own'), true);
-  assert.equal(isRangeAvailableForSource('30d', 'own'), true);
-  assert.equal(isRangeAvailableForSource('90d', 'own'), false);
-  assert.equal(isRangeAvailableForSource('custom', 'own'), false);
+test('isRangeAvailableForSource / clampRangeForSource: R6.2 lifted the own-tracker restriction — every range is available on every source', () => {
   for (const range of ['7d', '30d', '90d', 'custom'] as const) {
-    assert.equal(isRangeAvailableForSource(range, 'netlify'), true);
+    for (const source of ['own', 'netlify'] as const) {
+      assert.equal(isRangeAvailableForSource(range, source), true);
+      assert.equal(clampRangeForSource(range, source), range);
+    }
   }
 });
 
-test('clampRangeForSource: an unservable own-tracker range falls back to 30d; everything else is unchanged', () => {
-  assert.equal(clampRangeForSource('90d', 'own'), '30d');
-  assert.equal(clampRangeForSource('custom', 'own'), '30d');
-  assert.equal(clampRangeForSource('7d', 'own'), '7d');
-  assert.equal(clampRangeForSource('90d', 'netlify'), '90d');
+test('isCompareAvailable: the control is available on both feeds now (R6.2) — whether a delta RENDERS is a data question, decided per-KPI', () => {
+  assert.equal(isCompareAvailable('own'), true);
+  assert.equal(isCompareAvailable('netlify'), true);
 });
 
-test('isCompareAvailable: inert for every source in R6.1 — no feed has a previous-period figure yet', () => {
-  assert.equal(isCompareAvailable('own'), false);
-  assert.equal(isCompareAvailable('netlify'), false);
+test('defaultCompareForRange: on for every preset, off for custom (D3)', () => {
+  assert.equal(defaultCompareForRange('7d'), true);
+  assert.equal(defaultCompareForRange('30d'), true);
+  assert.equal(defaultCompareForRange('90d'), true);
+  assert.equal(defaultCompareForRange('custom'), false);
 });
 
 test('parseAnalyticsSearchParams: defaults when the query string is empty', () => {
@@ -293,17 +345,29 @@ test('parseAnalyticsSearchParams: defaults when the query string is empty', () =
     source: DEFAULT_ANALYTICS_SOURCE,
     range: DEFAULT_ANALYTICS_RANGE,
     custom: undefined,
-    compare: false,
+    compare: true, // 30d is a preset — D3 defaults comparison on
+    filters: {},
   });
 });
 
-test('parseAnalyticsSearchParams: reads source/range/custom/compare off a real query string', () => {
-  const state = parseAnalyticsSearchParams('?source=netlify&range=custom&from=2026-01-01&to=2026-01-31&compare=1');
+test('parseAnalyticsSearchParams: reads source/range/custom/compare/filters off a real query string', () => {
+  const state = parseAnalyticsSearchParams(
+    '?source=netlify&range=custom&from=2026-01-01&to=2026-01-31&compare=1&country=IL&fsource=newsletter&object=page_home'
+  );
   assert.equal(state.source, 'netlify');
   assert.equal(state.range, 'custom');
   assert.deepEqual(state.custom, { from: '2026-01-01', to: '2026-01-31' });
-  // compare=1 is requested, but isCompareAvailable is false for every source in R6.1 — never honoured yet.
-  assert.equal(state.compare, false);
+  assert.equal(state.compare, true);
+  assert.deepEqual(state.filters, { country: 'IL', source: 'newsletter', object_id: 'page_home' });
+});
+
+test('parseAnalyticsSearchParams: no explicit compare param falls back to the per-range D3 default, not "off"', () => {
+  assert.equal(parseAnalyticsSearchParams('?range=7d').compare, true);
+  assert.equal(parseAnalyticsSearchParams('?range=custom').compare, false);
+});
+
+test('parseAnalyticsSearchParams: compare=0 is honoured even on a preset range that defaults on', () => {
+  assert.equal(parseAnalyticsSearchParams('?range=7d&compare=0').compare, false);
 });
 
 test('parseAnalyticsSearchParams: an unknown source/range falls back to the default rather than throwing', () => {
@@ -311,10 +375,10 @@ test('parseAnalyticsSearchParams: an unknown source/range falls back to the defa
   assert.equal(parseAnalyticsSearchParams('?range=bogus').range, DEFAULT_ANALYTICS_RANGE);
 });
 
-test('parseAnalyticsSearchParams: a bookmarked own+90d combo clamps to 30d, same rule the picker enforces', () => {
+test('parseAnalyticsSearchParams: own+90d is no longer clamped (R6.2 lifted the restriction)', () => {
   const state = parseAnalyticsSearchParams('?source=own&range=90d');
   assert.equal(state.source, 'own');
-  assert.equal(state.range, '30d');
+  assert.equal(state.range, '90d');
 });
 
 test('parseAnalyticsSearchParams: custom range without both dates is not treated as custom-with-input', () => {
@@ -324,31 +388,48 @@ test('parseAnalyticsSearchParams: custom range without both dates is not treated
 });
 
 test('serializeAnalyticsSearchParams ↔ parseAnalyticsSearchParams round-trips a plain range', () => {
-  const state: AnalyticsSearchState = { source: 'netlify', range: '7d', compare: false };
+  const state: AnalyticsSearchState = { source: 'netlify', range: '7d', compare: true, filters: {} };
   assert.deepEqual(parseAnalyticsSearchParams(`?${serializeAnalyticsSearchParams(state)}`), {
     ...state,
     custom: undefined,
   });
 });
 
-test('serializeAnalyticsSearchParams ↔ parseAnalyticsSearchParams round-trips a custom range', () => {
+test('serializeAnalyticsSearchParams ↔ parseAnalyticsSearchParams round-trips a custom range with filters', () => {
   const state: AnalyticsSearchState = {
     source: 'own',
     range: 'custom',
     custom: { from: '2026-02-01', to: '2026-02-10' },
     compare: false,
+    filters: { country: 'IL', object_id: 'page_home' },
   };
-  // A custom range only round-trips through the own tab if it survives the source's own
-  // availability rule — it doesn't (own only serves 7d/30d) — so state the input honestly:
-  // this exercises the netlify tab instead, where custom really is available.
-  const netlifyState: AnalyticsSearchState = { ...state, source: 'netlify' };
-  assert.deepEqual(parseAnalyticsSearchParams(`?${serializeAnalyticsSearchParams(netlifyState)}`), netlifyState);
+  assert.deepEqual(parseAnalyticsSearchParams(`?${serializeAnalyticsSearchParams(state)}`), state);
 });
 
-test('serializeAnalyticsSearchParams never writes compare=1 — R6.1 has nothing honest to compare against', () => {
-  const withCompareRequested: AnalyticsSearchState = { source: 'own', range: '7d', compare: true };
-  const qs = serializeAnalyticsSearchParams(withCompareRequested);
-  assert.equal(qs.includes('compare'), false);
+test('isAnalyticsSource: accepts own/netlify/insights (R11.5) and rejects anything else', () => {
+  assert.equal(isAnalyticsSource('own'), true);
+  assert.equal(isAnalyticsSource('netlify'), true);
+  assert.equal(isAnalyticsSource('insights'), true);
+  assert.equal(isAnalyticsSource('bogus'), false);
+  assert.equal(isAnalyticsSource(undefined), false);
+});
+
+test('serializeAnalyticsSearchParams ↔ parseAnalyticsSearchParams round-trips the insights tab (R11.5 — the Insights tab uses the SAME ?source= mechanism)', () => {
+  const state: AnalyticsSearchState = { source: 'insights', range: '30d', compare: true, filters: {} };
+  const search = serializeAnalyticsSearchParams(state);
+  assert.match(search, /source=insights/);
+  assert.deepEqual(parseAnalyticsSearchParams(`?${search}`), { ...state, custom: undefined });
+});
+
+test('parseAnalyticsSearchParams: ?source=insights parses directly off a bookmarked URL', () => {
+  assert.equal(parseAnalyticsSearchParams('?source=insights').source, 'insights');
+});
+
+test('serializeAnalyticsSearchParams: always writes an explicit compare=0|1 — a bookmark must reproduce the SAME value even if the D3 default rule changes later', () => {
+  const on: AnalyticsSearchState = { source: 'own', range: '7d', compare: true, filters: {} };
+  const off: AnalyticsSearchState = { source: 'own', range: '7d', compare: false, filters: {} };
+  assert.match(serializeAnalyticsSearchParams(on), /compare=1/);
+  assert.match(serializeAnalyticsSearchParams(off), /compare=0/);
 });
 
 test('isAnalyticsRangeKey rejects anything outside the four known keys', () => {
@@ -358,7 +439,7 @@ test('isAnalyticsRangeKey rejects anything outside the four known keys', () => {
   assert.equal(isAnalyticsRangeKey(undefined), false);
 });
 
-// ─── R6.1: resolveNetlifyAnalyticsPanel — one state per fixture ─────────────
+// ─── R6.2: resolveNetlifyAnalyticsPanel — one state per fixture ─────────────
 
 const OK_WINDOW = resolveDateWindow('7d', NOW);
 if (!OK_WINDOW.ok) throw new Error('fixture window must resolve');
@@ -372,17 +453,35 @@ const READY_SERIES: AnalyticsChartSeries = {
 
 test('resolveNetlifyAnalyticsPanel: an invalid custom range is a range_error, checked before loading/overview', () => {
   const badWindow = resolveDateWindow('custom', NOW, undefined);
-  const panel = resolveNetlifyAnalyticsPanel({ loading: false, error: null, windowResult: badWindow, overview: null });
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: badWindow,
+    overview: null,
+    compare: false,
+  });
   assert.equal(panel.kind, 'range_error');
 });
 
 test('resolveNetlifyAnalyticsPanel: loading, then no overview yet, are both "loading"', () => {
   assert.deepEqual(
-    resolveNetlifyAnalyticsPanel({ loading: true, error: null, windowResult: OK_WINDOW, overview: null }),
+    resolveNetlifyAnalyticsPanel({
+      loading: true,
+      error: null,
+      windowResult: OK_WINDOW,
+      overview: null,
+      compare: false,
+    }),
     { kind: 'loading' }
   );
   assert.deepEqual(
-    resolveNetlifyAnalyticsPanel({ loading: false, error: null, windowResult: OK_WINDOW, overview: null }),
+    resolveNetlifyAnalyticsPanel({
+      loading: false,
+      error: null,
+      windowResult: OK_WINDOW,
+      overview: null,
+      compare: false,
+    }),
     { kind: 'loading' }
   );
 });
@@ -393,23 +492,36 @@ test('resolveNetlifyAnalyticsPanel: a fetch error surfaces as "error" with the h
     error: 'Could not load analytics data.',
     windowResult: OK_WINDOW,
     overview: null,
+    compare: false,
   });
   assert.deepEqual(panel, { kind: 'error', message: 'Could not load analytics data.' });
 });
 
 test('resolveNetlifyAnalyticsPanel: not configured — the "credentials missing" partial state', () => {
   const overview: AnalyticsOverview = { configured: false, enabled: false, range: '7d' };
-  const panel = resolveNetlifyAnalyticsPanel({ loading: false, error: null, windowResult: OK_WINDOW, overview });
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: false,
+  });
   assert.equal(panel.kind, 'not_configured');
 });
 
 test('resolveNetlifyAnalyticsPanel: configured but not enabled — the "add-on off" partial state', () => {
   const overview: AnalyticsOverview = { configured: true, enabled: false, range: '7d' };
-  const panel = resolveNetlifyAnalyticsPanel({ loading: false, error: null, windowResult: OK_WINDOW, overview });
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: false,
+  });
   assert.equal(panel.kind, 'not_enabled');
 });
 
-test('resolveNetlifyAnalyticsPanel: ready — KPI strip, chart, and ranking cards all trace to the fixture series', () => {
+test('resolveNetlifyAnalyticsPanel: ready — D2 KPI strip (pageviews/uniques only, pre-R6.2-endpoint payload)', () => {
   const overview: AnalyticsOverview = {
     configured: true,
     enabled: true,
@@ -417,24 +529,30 @@ test('resolveNetlifyAnalyticsPanel: ready — KPI strip, chart, and ranking card
     window: OK_WINDOW.window,
     series: READY_SERIES,
   };
-  const panel = resolveNetlifyAnalyticsPanel({ loading: false, error: null, windowResult: OK_WINDOW, overview });
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: false,
+  });
   if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  // top_page_share is derived from data already on hand (400/900), so it renders even
+  // without the R6.2 endpoints; not_found/bandwidth stay absent (no topNotFound/bandwidthBytes yet).
   assert.deepEqual(
-    panel.kpis.map((k) => [k.id, k.value]),
-    [
-      ['visits', '900'],
-      ['uniques', '400'],
-      ['avg', '128'],
-    ]
+    panel.kpis.map((k) => k.id),
+    ['visits', 'uniques', 'top_page_share']
   );
   assert.equal(panel.chart.points, READY_SERIES.trend);
   assert.deepEqual(
     panel.rankings.map((r) => r.id),
-    ['pages', 'sources']
+    ['pages', 'sources', 'locations', 'not_found']
   );
-  assert.equal(panel.rankings[1]!.rows, READY_SERIES.topSources);
+  assert.equal(panel.rankings[1]!.views[0]!.rows, READY_SERIES.topSources);
   // Netlify's ranking API takes no filter params (D7) — the tab says so, once.
-  assert.match(panel.rankings[1]!.footnote ?? '', /links, not filters/);
+  assert.match(panel.rankings[1]!.views[0]!.footnote ?? '', /links, not filters/);
+  // Locations/Not found are present as cards even before R6.2's endpoints are wired for this tenant — empty, not missing.
+  assert.deepEqual(panel.rankings[2]!.views[0]!.rows, []);
 });
 
 test('resolveNetlifyAnalyticsPanel: ready with an all-zero range renders real zeros, not an empty/loading state', () => {
@@ -451,8 +569,136 @@ test('resolveNetlifyAnalyticsPanel: ready with an all-zero range renders real ze
     window: OK_WINDOW.window,
     series: emptySeries,
   };
-  const panel = resolveNetlifyAnalyticsPanel({ loading: false, error: null, windowResult: OK_WINDOW, overview });
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: false,
+  });
   if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
   assert.equal(panel.kpis[0]!.value, '0');
   assert.deepEqual(panel.chart.points, []);
+  // No pageviews/rows at all ⇒ top_page_share has nothing to divide, so it's omitted.
+  assert.equal(
+    panel.kpis.some((k) => k.id === 'top_page_share'),
+    false
+  );
+});
+
+test('resolveNetlifyAnalyticsPanel: R6.2 fields present — deltas, not_found/bandwidth KPIs, wired rankings', () => {
+  const overview: AnalyticsOverview = {
+    configured: true,
+    enabled: true,
+    range: '7d',
+    window: OK_WINDOW.window,
+    series: READY_SERIES,
+    previousSeries: { ...READY_SERIES, totals: { visits: 750, uniques: 400, avgPerBucket: 107 } },
+    topNotFound: [{ label: '/dead-link', visits: 12, share: 1 }],
+    topCountries: [{ label: 'Israel', visits: 300, share: 1 }],
+    bandwidthBytes: 2_500_000,
+  };
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: true,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.deepEqual(
+    panel.kpis.map((k) => k.id),
+    ['visits', 'uniques', 'top_page_share', 'not_found', 'bandwidth']
+  );
+  assert.deepEqual(panel.kpis[0]!.delta, { pct: 20, direction: 'up', label: '▲ 20%' });
+  assert.equal(panel.kpis.find((k) => k.id === 'not_found')!.value, '12');
+  assert.equal(panel.kpis.find((k) => k.id === 'bandwidth')!.value, '2.4 MB');
+  assert.deepEqual(panel.chart.previousPoints, overview.previousSeries!.trend);
+  assert.deepEqual(panel.rankings.find((r) => r.id === 'locations')!.views[0]!.rows, overview.topCountries);
+  assert.deepEqual(panel.rankings.find((r) => r.id === 'not_found')!.views[0]!.rows, overview.topNotFound);
+});
+
+test('resolveNetlifyAnalyticsPanel: R6.4/D8 — excludedAdminVisits/internalReferrerVisits render as real footer numbers, including an honest zero', () => {
+  const overview: AnalyticsOverview = {
+    configured: true,
+    enabled: true,
+    range: '7d',
+    window: OK_WINDOW.window,
+    series: READY_SERIES,
+    excludedAdminVisits: 42,
+    internalReferrerVisits: 7,
+  };
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: false,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.deepEqual(
+    panel.footer.map((item) => [item.id, item.value]),
+    [
+      ['sink', 'Netlify Analytics — server-side, not blockable'],
+      ['excluded_admin', '42'],
+      ['internal', '7'],
+    ]
+  );
+
+  // A real, computed zero is still a number worth showing — it's the answer
+  // "nothing was excluded this window", not "we don't know" (never shown as 0).
+  const zeroOverview: AnalyticsOverview = { ...overview, excludedAdminVisits: 0, internalReferrerVisits: 0 };
+  const zeroPanel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview: zeroOverview,
+    compare: false,
+  });
+  if (zeroPanel.kind !== 'ready') throw new Error(`expected ready, got ${zeroPanel.kind}`);
+  assert.deepEqual(
+    zeroPanel.footer.map((item) => item.id),
+    ['sink', 'excluded_admin']
+  );
+  assert.equal(zeroPanel.footer.find((item) => item.id === 'excluded_admin')!.value, '0');
+
+  // Not yet computed at all (older cached payload, or the field never made it back) ⇒ absent, not a fabricated 0.
+  const absentOverview: AnalyticsOverview = {
+    ...overview,
+    excludedAdminVisits: undefined,
+    internalReferrerVisits: undefined,
+  };
+  const absentPanel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview: absentOverview,
+    compare: false,
+  });
+  if (absentPanel.kind !== 'ready') throw new Error(`expected ready, got ${absentPanel.kind}`);
+  assert.deepEqual(
+    absentPanel.footer.map((item) => item.id),
+    ['sink']
+  );
+});
+
+test('resolveNetlifyAnalyticsPanel: compare off ⇒ no deltas and no ghost series, even when `previous` is present', () => {
+  const overview: AnalyticsOverview = {
+    configured: true,
+    enabled: true,
+    range: '7d',
+    window: OK_WINDOW.window,
+    series: READY_SERIES,
+    previousSeries: { ...READY_SERIES, totals: { visits: 750, uniques: 400, avgPerBucket: 107 } },
+  };
+  const panel = resolveNetlifyAnalyticsPanel({
+    loading: false,
+    error: null,
+    windowResult: OK_WINDOW,
+    overview,
+    compare: false,
+  });
+  if (panel.kind !== 'ready') throw new Error(`expected ready, got ${panel.kind}`);
+  assert.equal(panel.kpis[0]!.delta, undefined);
+  assert.equal(panel.chart.previousPoints, undefined);
 });

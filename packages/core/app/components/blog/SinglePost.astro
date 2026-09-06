@@ -7,13 +7,31 @@ import { getFormattedMonthYear } from '~/utils/utils';
 import { getPermalink } from '~/utils/permalinks';
 
 import type { Post } from '~/types';
+import type { ArmAssignment } from '~/utils/experiment-arm';
 
 export interface Props {
   post: Post;
   url: string | URL;
+  /**
+   * T21.5 — the experiment arm this page IS, when an active experiment covers
+   * it. Resolved by the article route (which also owns the arm's SEO) and
+   * passed down so this component stays a pure renderer. Undefined for every
+   * page while no experiment is active, and the wrapper below then carries
+   * exactly the attributes it always did.
+   */
+  experimentArm?: ArmAssignment | null;
 }
 
-const { post, url } = Astro.props;
+const { post, url, experimentArm = null } = Astro.props;
+// Both values are content_item object ids, which the canvas already stamps on
+// this page — no new identifier reaches reader HTML. They are written as two
+// explicit attributes rather than an object spread on purpose: a spread makes
+// Astro emit this scoped component's class name onto the element at runtime,
+// which changes the rendered HTML of EVERY article page even when no
+// experiment exists. Explicit attributes with an `undefined` value render
+// nothing at all, which is what the zero-experiment guarantee requires.
+const experimentId = experimentArm?.experiment_id;
+const variantId = experimentArm?.variant_id;
 const heroImageAspect = (() => {
   if (post.image && typeof post.image === 'object' && 'width' in post.image && 'height' in post.image) {
     const ratio = post.image.width / post.image.height;
@@ -26,7 +44,7 @@ const heroImageAspect = (() => {
 ---
 
 <section class="dl-pt-s dl-pb-l sm:py-8 lg:py-10 mx-auto">
-  <article data-print-article>
+  <article data-print-article data-cms-experiment={experimentId} data-cms-variant={variantId}>
     <header
       class={post.image
         ? 'intersect-once intersect-quarter motion-safe:md:opacity-0 motion-safe:md:intersect:animate-fade'
