@@ -1,0 +1,14 @@
+flowchart LR
+  B["browser loader<br/>18 kinds, props allowlist, first-pageview context"] -->|"tracking_batch.v1 ≤25"| T["/api/t track-ingest<br/>origin check · token bucket · enrich (project_id, vhash, shash, geo, ua) · strict schema"]
+  T -->|"NDJSON · Bearer · 2 s · no retry"| S["kugel-data /api/tracking-sink<br/>8 required fields · any event string · props passthrough · schema dropped"]
+  T -.->|"failure or blob_mirror:always"| M[("tenant Blobs tracking-events<br/>replay-only")]
+  M -.->|"manual replay script"| S
+  S --> PG[("tracking_events")]
+  BUILD["tenant build postbuild<br/>tracking-dims-push.mjs"] -->|"/dims"| D[("object_version · producer · node_strategy")]
+  CE["commerce-events.ts"] -->|"/commerce (kind = event.type)"| CEt[("commerce_events")]
+  ML["member-link.ts"] -->|"/link"| MLt[("member_link")]
+  PG & D & CEt & MLt --> V["views v_sessions · v_object_window · v_producer_window<br/>(+ internal variant views, always 'control')"]
+  V --> ST["/stats (no auth, leak guard; reads days only — S-23)"] --> ADM["/admin/analytics own tab + analytics_* MCP tools"]
+  V --> RU["/rollups (bearer)"] --> CMSA["CMS-Agent W21 jobs (unscheduled)"]
+  V --> EW["experiment-weights @daily → experiment_weights → /weights<br/>read at tenant build; envelope + key mismatch — S-24/S-25"]
+  NA["Netlify Analytics v2"] --> ADM

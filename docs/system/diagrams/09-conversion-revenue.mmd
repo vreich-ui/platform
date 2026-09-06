@@ -1,0 +1,10 @@
+flowchart LR
+  BB["#buy-box [data-role=buy] click<br/>(drlurie shop page only)"] --> CC["create-checkout-session<br/>metadata.event_id = randomUUID() (A)"]
+  CC --> ST["Stripe Checkout"] --> WH["stripe-webhook<br/>commerce_event event_id = deterministicUuid(session.id:type) (B)<br/>type = checkout_completed"]
+  WH --> ORD[("commerce store: order record")]
+  WH --> CEV[("commerce-events store")] --> SINK["/commerce {kind: 'checkout_completed'}"]
+  CSS["checkout-session-status<br/>X-CEID = A"] --> GOAL["goal event props.commerce_event_id = A"] --> TS["/api/tracking-sink"]
+  SINK --> J{"kugel-data join<br/>ce.event_id = props.commerce_event_id<br/>AND ce.kind = 'purchase'"}
+  TS --> J
+  J -->|"A ≠ B, kind ≠ purchase"| ZERO["purchase_rate = 0 · revenue_cents = 0<br/>daily.purchases = 0"]
+  BC["buy_click"] -.->|"never carries commerce_event_id<br/>(no X-CEID on create-checkout)"| TS

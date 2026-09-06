@@ -1,0 +1,11 @@
+flowchart TD
+  A["executor publish-risk dispatch gate:<br/>publish_executor dispatches only if resolvePublishAuthority(run).authorized<br/>= operatorPublishDecision==='approved' OR publishingPolicySnapshot.autonomyMode==='autonomous'; 'withheld' always blocks"] --> B{"store row metadata.publishExecutorDeterministic"}
+  B -- "'execute'" --> C["publishRun: five closed gates<br/>operator_enabled (env <PREFIX>_PUBLISH_ENABLED / publishingPolicy.publishEnabled — forced true since 2026-07-31)<br/>publish_authorized · explicit_live · operator_not_withheld · controller_decision_go (body fingerprint match)"]
+  B -- "absent (canonical literal)" --> M["MODEL TURN with project.call_tool:<br/>the agent calls the six verbs itself; publishRun's gates NOT applied;<br/>bounded only by the project's tool policy"]
+  B -- "true ('gate')" --> C2["refusal receipt on gate failure, else model path"]
+  C --> D["media gates: raw_image_artifact_public_url · unverified_media;<br/>readiness hook (dr-lurie checklist) → blocked_for_publish_execution"]
+  D --> E["tenant hook: object_create → checkout → validate → patch → object_publish → checkin"]
+  M --> E
+  E --> F["platform publish-gate.ts: approval policy per object type<br/>(drlurie: product + editorial_voice require approval; content_item does not)<br/>lock, review pin, request_id/artifact_set/release_build pins"]
+  F --> G["materialize → commit → stamp receipt"]
+  G --> H["release_executor: release_to_production {idempotency_key} → deploy_status polls"]
