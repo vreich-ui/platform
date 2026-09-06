@@ -30,6 +30,12 @@ export type TrackingEventKind = z.infer<typeof trackingEventKindSchema>;
 
 const nullableString = (max: number) => z.string().max(max).nullable();
 
+/** The content_item id grammar (agents-naming.ts's REQUEST_ID_RE), restated
+ *  here because this schema module is imported by the edge/browser halves and
+ *  must stay free of server-lib imports. `sanitizeTrackingProps` +
+ *  `isObjectIdForType` are still the authoritative re-check at ingest. */
+const REQUEST_ID_RE = /^req_[a-z0-9]+(?:_[a-z0-9]+)*_\d{8}_\d{2}$/;
+
 // Object identity refs — nullable; ids are ADDITIONALLY re-validated against
 // the real id grammars at ingest (isObjectIdForType — schema keeps the shape
 // loose enough that a v2 type name doesn't break stored-event parsing).
@@ -60,6 +66,15 @@ export const trackingPropsSchema = z
     label_slug: z.string().regex(/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/),
     value_cents: z.number().int().min(0),
     commerce_event_id: z.uuid(),
+    /**
+     * T21.5 (experiments) — both are `content_item` object ids, bounded by the
+     * SAME grammar the ingest sanitizer re-checks with `isObjectIdForType`
+     * (lib/object-ids.ts → validateRequestId). `experiment_id` is the control
+     * (parent) id; `variant_id` is the arm actually served, which equals
+     * `experiment_id` when the visitor got the control.
+     */
+    experiment_id: z.string().regex(REQUEST_ID_RE),
+    variant_id: z.string().regex(REQUEST_ID_RE),
   })
   .partial();
 export type TrackingProps = z.infer<typeof trackingPropsSchema>;

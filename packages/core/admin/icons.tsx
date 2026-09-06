@@ -271,3 +271,19 @@ export const IconMail = (p: IconProps) => (
     <path d="M3.5 6.5l8 6.2a1 1 0 0 0 1 0l8-6.2" />
   </IconBase>
 );
+export const IconBookmark = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z" />
+  </IconBase>
+);
+export const IconDownload = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" />
+  </IconBase>
+);
+export const IconNote = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+    <path d="M14 3v5h5M8 12h8M8 16h5" />
+  </IconBase>
+);

@@ -107,6 +107,7 @@ const ADMIN_ROUTES_INTENTIONALLY_UNREACHED_FROM_NAV = new Set<string>([
   '/admin/studio', // T2.1 D1(a) — superseded by /admin/objects; kept only as a netlify.toml redirect target
   '/admin/requests/[requestId]', // W19 T19.4 — deep link only; /admin/requests is the nav entry
   '/admin/content/[objectId]', // deep link only; /admin/objects is the nav entry
+  '/admin/analytics/object/[objectId]', // T21.30 — deep link only, reached from a ranking row's drill-down icon; /admin/analytics is the nav entry
 ]);
 
 test('every registered /admin/* shell route is reached from AdminShell nav, or is a documented exception', () => {

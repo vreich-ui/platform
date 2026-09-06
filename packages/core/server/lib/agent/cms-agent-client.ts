@@ -44,8 +44,23 @@ export const CMS_AGENT_BOUNDS = {
    * bound that actually protects cost is `maxToolsChars`, which is unchanged.
    * `cmsAgentEngine` falls back to 64 once, automatically, if the other side
    * is still on the old bound — so the two repos can land in either order.
+   *
+   * R12.3 / T21.20: raised again, 96 → 99, for the same reason — the
+   * analytics family (3 read tools) took the non-membership registry from 78
+   * to 81, which would otherwise have put the FULL wire (81 + 16 membership
+   * = 97) one tool over the old ceiling and silently dropped the entire
+   * membership family from every admin-chat run via `trimToolsToCmsAgentBound`
+   * (that trim runs LOCALLY, before any network round trip — it is not
+   * conditional on what the live CMS-Agent deployment actually enforces).
+   * **CROSS-REPO COORDINATION REQUIRED**: CMS-Agent's own
+   * `MAX_CONVERSATION_TOOLS` must move to >= 99 in the same wave. Until it
+   * does, a 97+-tool wire is rejected there (`invalid_turn_request`) and the
+   * `legacyMaxTools` (64) fallback below engages instead — which drops BOTH
+   * the membership AND editorial-request families, a strictly worse interim
+   * outcome than the pre-R12.3 baseline. This is the same "two repos can
+   * land in either order" tradeoff T19.8 accepted, not a new risk class.
    */
-  maxTools: 96,
+  maxTools: 99,
   /** The previous ceiling, kept as the automatic fallback (see engine.ts). */
   legacyMaxTools: 64,
   maxToolsChars: 256_000,
@@ -790,9 +805,15 @@ export class CmsAgentClient {
     if (parsed.error) {
       // Machine codes live at error.data.error.code (as-built delta 6).
       const data = isRecord(parsed.error.data) ? parsed.error.data : undefined;
-      const inner = data && isRecord(data.error)
-        ? (data.error as { code?: unknown; operatorAction?: unknown; providerStatus?: unknown; providerMessage?: unknown })
-        : undefined;
+      const inner =
+        data && isRecord(data.error)
+          ? (data.error as {
+              code?: unknown;
+              operatorAction?: unknown;
+              providerStatus?: unknown;
+              providerMessage?: unknown;
+            })
+          : undefined;
       const wire = typeof inner?.code === 'string' && WIRE_ERROR_CODES.has(inner.code) ? inner.code : undefined;
       const message = safeMessage(parsed.error.message, secrets, 'CMS-Agent returned an error.');
       // Provider-error-details (Task B): CMS-Agent's own structured detail —
@@ -804,11 +825,21 @@ export class CmsAgentClient {
       // whether raw code/message detail is safe to show instead of the
       // generic "service unavailable" copy.
       const operatorAction =
-        typeof inner?.operatorAction === 'string' ? safeMessage(inner.operatorAction, secrets, '') || undefined : undefined;
+        typeof inner?.operatorAction === 'string'
+          ? safeMessage(inner.operatorAction, secrets, '') || undefined
+          : undefined;
       const providerStatus = typeof inner?.providerStatus === 'number' ? inner.providerStatus : undefined;
       const providerMessage =
-        typeof inner?.providerMessage === 'string' ? safeMessage(inner.providerMessage, secrets, '') || undefined : undefined;
-      const detailOptions = { statusCode: response.status, operatorAction, providerStatus, providerMessage, fromJsonBody: true };
+        typeof inner?.providerMessage === 'string'
+          ? safeMessage(inner.providerMessage, secrets, '') || undefined
+          : undefined;
+      const detailOptions = {
+        statusCode: response.status,
+        operatorAction,
+        providerStatus,
+        providerMessage,
+        fromJsonBody: true,
+      };
       return wire
         ? fail(wire as CmsAgentWireErrorCode, message, detailOptions)
         : fail('cms_agent_error', message, detailOptions);

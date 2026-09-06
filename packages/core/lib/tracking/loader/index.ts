@@ -91,6 +91,32 @@ const readPageContext = (): PageContext => {
 
 const pageKey = (): string => `${location.pathname}\n${location.search}`;
 
+/**
+ * T21.5 — exactly ONE exposure per page-load, including after a View
+ * Transitions navigation.
+ *
+ * This is called from `bindPage`, which the `astro:page-load` listener drives,
+ * so it inherits the whole VT lifecycle for free: a client-side navigation
+ * fires `astro:page-load` with the swapped-in DOM in place, `bindPage`'s
+ * `boundPageKey` guard makes a repeated bind of the SAME page a no-op, and
+ * `tracker.pageLoad` has already cleared the per-page exposure key so the new
+ * page's arm is counted. The tracker refuses a duplicate for the same arm pair
+ * either way — belt and braces, because losing or double-counting an exposure
+ * both corrupt the experiment's denominator.
+ *
+ * The marker is read from the DOM, not from any config, so the loader needs no
+ * per-page server assembly and the arm the reader ACTUALLY got is what gets
+ * counted (the edge decides the arm; the HTML records it).
+ */
+const emitExposure = (): void => {
+  const marker = document.querySelector('[data-cms-experiment]');
+  if (!marker) return;
+  const experimentId = marker.getAttribute('data-cms-experiment');
+  const variantId = marker.getAttribute('data-cms-variant');
+  if (!experimentId || !variantId) return;
+  tracker?.exposure(experimentId, variantId);
+};
+
 const deferBindUntilDomReady = (): void => {
   if (deferredBindQueued) return;
   deferredBindQueued = true;
@@ -198,6 +224,7 @@ const bindPage = (): void => {
   applyConsent(readConsentSnapshot());
   boundPageKey = key;
   tracker.pageLoad(readPageContext(), location.search);
+  emitExposure();
 
   observer?.disconnect();
   observer = new IntersectionObserver(

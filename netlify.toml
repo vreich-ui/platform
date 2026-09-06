@@ -37,6 +37,21 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+
+# T21.5 — variant serving at the edge. Declared on EVERY tenant with
+# `path = "/*"` because the function's own first act is to check whether this
+# site has any active experiment at all: with `experiments: []` the generated
+# map is `{}` and every request returns `context.next()` before a cookie, a geo
+# lookup, or an RNG call happens. Declaring it everywhere (rather than only on
+# a tenant currently running a test) is what makes turning an experiment on a
+# CONTENT change — publish `trk_<site>` and rebuild — instead of an infra one.
+#
+# It must stay the ONLY `/*` edge function: two of them on the same path is an
+# ordering question nobody should have to reason about per request.
+[[edge_functions]]
+  path = "/*"
+  function = "variant-serve"
+
 # Keep the /mcp function warm and log a latency probe every 5 minutes so
 # agents don't pay a cold start (and time out) on first connect. Scheduled
 # functions run only on the published production deploy.
@@ -189,6 +204,14 @@
 [[redirects]]
   from = "/admin/requests/:requestId"
   to = "/admin/requests/__request"
+  status = 200
+
+# R11.4 (T21.30): the object analytics drill-down — same one-path-segment,
+# unforced pattern as the two ids above (the placeholder page is never
+# shadowed; the island reads the id client-side).
+[[redirects]]
+  from = "/admin/analytics/object/:objectId"
+  to = "/admin/analytics/object/__object"
   status = 200
 
 # T2.1 D1(a): the objects plane is now canonical — Templates/Media/Content

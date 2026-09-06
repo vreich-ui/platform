@@ -8,10 +8,10 @@
  * read_progress/completion for articles, delegated click classification
  * (fake elements), goal bridge, batch/flush semantics (max_events,
  * max_wait_ms timer, page-end flush), sampling on impressions/dwell only,
- * /admin hard bail, and the ≤5KB min+gzip size budget on the real built
- * chunk (hard ceiling 6KB; the T13.4 target was 4KB — T13.6/T13.7/T13.8
+ * /admin hard bail, and the ≤5.375KB min+gzip size budget on the real built
+ * chunk (hard ceiling 6KB; the T13.4 target was 4KB — T13.6/T13.7/T13.8/T21.5
  * grew the chunk deliberately: consent/id wiring, the goal→conversion
- * bridge, and the native-platform fan-out).
+ * bridge, the native-platform fan-out, and the experiment exposure).
  */
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
@@ -1199,8 +1199,9 @@ test('SIZE BUDGET: the built loader chunk stays under the commerce-era soft targ
   const gzipped = gzipSync(code).byteLength;
   assert.ok(gzipped <= 6144, `HARD CEILING: loader is ${gzipped}B min+gzip (>6KB)`);
   // 4KB was the T13.4 pre-bridge target; T13.6 (consent/id wiring), T13.7
-  // (the goal→conversion bridge), T13.8 (native fan-out), and T20.4
-  // (checkout commerce-event correlation) grew the chunk deliberately — the
-  // 6KB ceiling is the hard line.
-  assert.ok(gzipped <= 5376, `BUDGET: loader is ${gzipped}B min+gzip (>5.25KB target)`);
+  // (the goal→conversion bridge), T13.8 (native fan-out), T20.4 (checkout
+  // commerce-event correlation), and T21.5 (+126B: the experiment exposure —
+  // one DOM read, one id-grammar guard, one per-page idempotence key) grew the
+  // chunk deliberately — the 6KB ceiling is the hard line.
+  assert.ok(gzipped <= 5504, `BUDGET: loader is ${gzipped}B min+gzip (>5.375KB target)`);
 });

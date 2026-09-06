@@ -34,6 +34,7 @@ import {
   TOOL_DEFINITIONS_MEMBERSHIP,
   isMembershipTool,
 } from '../mcp-tool-definitions-membership.js';
+import { TOOL_DEFINITIONS_ANALYTICS } from '../mcp-tool-definitions-analytics.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import { compileSchema, type CompiledSchema } from './json-schema-lite.js';
 import { chatToolByName, type ChatTool, type ToolContext, type ToolAutonomy, type ToolResult } from './tools.js';
@@ -65,6 +66,10 @@ const VISIBLE_DEFINITIONS: readonly ToolDefinition[] = [
   // (the T18.6a core with the run's captured HUMAN principal), never the verb
   // or operational bridges.
   ...TOOL_DEFINITIONS_MEMBERSHIP,
+  // R12.3 / T21.20: read-only analytics — routed to the operational bridge
+  // like registry_get/commerce_orders, so client_manager can answer "what
+  // should I write next?" with cited evidence.
+  ...TOOL_DEFINITIONS_ANALYTICS,
 ].filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name));
 
 const MEMBERSHIP_UNAVAILABLE = {
@@ -302,7 +307,8 @@ const DESCRIBE_OVERRIDES: Record<string, (args: Record<string, unknown>) => stri
   object_publish: (args) => `Publish ${args.object_type} ${args.object_id}`,
   object_discard: (args) => `Discard drafted changes on ${args.object_type} ${args.object_id}`,
   site_apply_theme: (args) => `Apply theme ${args.theme_id} to ${args.site_id}`,
-  site_apply_brand_imagery: (args) => `Apply brand imagery ${args.visual_standard_id ?? args.theme_id} to ${args.site_id}`,
+  site_apply_brand_imagery: (args) =>
+    `Apply brand imagery ${args.visual_standard_id ?? args.theme_id} to ${args.site_id}`,
 };
 
 const describeGenerated = (name: string, args: Record<string, unknown>): string => {

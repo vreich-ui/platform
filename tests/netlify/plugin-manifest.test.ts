@@ -185,6 +185,20 @@ test('the skill names the real voice object id the tenant actually stores', () =
   );
 });
 
+test('R12.3 / T21.20: the skill tells the desk to consult analytics before choosing a topic or angle', () => {
+  const { skill_md: skill } = render();
+  assert.match(skill, /`analytics_top_content`/);
+  assert.match(skill, /[Bb]efore finalizing the topic or angle/);
+  assert.match(skill, /writer_notes/, 'the evidence must land somewhere a human reviewing the article can see it');
+  // The step must actually be the first thing in §3 (Drafting) — before the
+  // brief is even taken — not a footnote after the article is already shaped.
+  const draftingAt = skill.indexOf('## 3. Drafting');
+  const analyticsAt = skill.indexOf('`analytics_top_content`');
+  const briefAt = skill.indexOf('Take the brief:');
+  assert.ok(draftingAt > 0 && analyticsAt > draftingAt, 'the instruction must live in §3');
+  assert.ok(analyticsAt < briefAt, 'analytics must be consulted before the brief is taken, not after');
+});
+
 test('the skill orders object_create BEFORE the media call', () => {
   // Found by the 2026-08-31 live acceptance run: create_agent_artifact_job is
   // scoped to an EXISTING content_item and refuses outright with
