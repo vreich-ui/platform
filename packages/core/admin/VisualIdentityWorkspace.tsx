@@ -25,7 +25,7 @@
  * and the "New chat" defect fix extended both shared chat components (the
  * control belongs wherever a chat lives, not on this one route).
  */
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import { AgentRail } from './AgentRail';
@@ -43,7 +43,7 @@ import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { fetchStudioData } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { fetchGovernance } from '@core/lib/admin/governance-client';
-import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { createFreeChat, sendChatMessage, type ChatStatus } from '@core/lib/admin/chat-client';
 import {
   VISUAL_IDENTITY_CHAT_SCOPE,
   browserDockedChatStorage,
@@ -58,6 +58,7 @@ import {
 } from '@core/lib/admin/docked-chat-session';
 import { callObjectVerb } from '@core/lib/edit-mode/verbs-client';
 import { buildVisualIdentityViewModel, type VisualIdentityViewModel } from '@core/lib/admin/visual-identity';
+import { chatRunJustFinished } from '@core/lib/admin/visual-identity-live-refresh';
 import {
   VISUAL_IDENTITY_STARTER_HREF,
   VISUAL_IDENTITY_TAB_LABELS,
@@ -364,6 +365,7 @@ function VisualIdentityBody({
   identity,
   rail,
   onOwnerChange,
+  onRefreshReady,
 }: {
   identity: SiteIdentity;
   rail?: VisualIdentityRailSeam;
@@ -375,6 +377,16 @@ function VisualIdentityBody({
    * business being live next to an "Owner-only" empty state.
    */
   onOwnerChange?: (owner: boolean) => void;
+  /**
+   * A7: hands the OUTER component (which owns the docked chat's `status`,
+   * not this body) a way to call THIS body's `load()` — the same refresh
+   * every mechanical action in `ImageryBoard`/`PdfTemplatesPanel` already
+   * runs as `onChanged`. Reported on every `load` identity change rather
+   * than once, so the outer always has the current closure to call; a
+   * completed chat run firing this stale would refetch with an old
+   * `identity`/`onOwnerChange` closure instead of the current one.
+   */
+  onRefreshReady?: (load: () => void) => void;
 }) {
   const [owner, setOwner] = useState<boolean | null>(null);
   const [model, setModel] = useState<VisualIdentityViewModel | null>(null);
@@ -426,6 +438,10 @@ function VisualIdentityBody({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    onRefreshReady?.(load);
+  }, [load, onRefreshReady]);
 
   // `?tab=` round-trip. Read once on mount (the URL is the entry point, not a
   // second source of truth for the session) and written back on every change,
@@ -499,7 +515,6 @@ function VisualIdentityBody({
             available={assets?.pdf_templates_available === true}
             isOwner={owner === true}
             getToken={getToken}
-            onIntent={runIntent}
             onChanged={load}
           />
         ),
@@ -645,6 +660,27 @@ export default function VisualIdentityWorkspace({
   const chat = useChat(getToken, chatSession.chatId);
   const [composerSeed, setComposerSeed] = useState<{ key: string; text: string } | undefined>(undefined);
 
+  // A7: the docked chat can run a tool that changes the standard, the site,
+  // or the mood board, but this component — not `VisualIdentityBody` — is
+  // the one that sees `chat.status`. `onRefreshReady` (below) hands back the
+  // body's current `load`; `refreshBodyRef` is where it is kept so the
+  // effect over `chat.status` can call it without becoming a dependency of
+  // this component's own render. `previousChatStatusRef` is fed through
+  // `chatRunJustFinished` so a completed run refetches exactly once, not on
+  // every status tick (queued → running → idle would otherwise refetch
+  // twice: nothing needs debouncing beyond feeding every tick through).
+  const refreshBodyRef = useRef<() => void>(() => {});
+  const onRefreshReady = useCallback((load: () => void) => {
+    refreshBodyRef.current = load;
+  }, []);
+  const previousChatStatusRef = useRef<ChatStatus | undefined>(undefined);
+  useEffect(() => {
+    if (chatRunJustFinished(previousChatStatusRef.current, chat.status)) {
+      refreshBodyRef.current();
+    }
+    previousChatStatusRef.current = chat.status;
+  }, [chat.status]);
+
   const dockedRail: VisualIdentityRailSeam = useMemo(
     () => ({
       open: (intent) => setComposerSeed({ key: `${intent.tool}:${Date.now()}`, text: intent.prompt }),
@@ -657,7 +693,11 @@ export default function VisualIdentityWorkspace({
     <AdminShell currentPath="/admin/settings/visual-identity" title="Visual identity" identity={identity} wide>
       <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0">
-          <VisualIdentityBody identity={identity} rail={rail} {...(dockNeeded ? { onOwnerChange } : {})} />
+          <VisualIdentityBody
+            identity={identity}
+            rail={rail}
+            {...(dockNeeded ? { onOwnerChange, onRefreshReady } : {})}
+          />
         </div>
         {dockActive ? (
           <div className="sticky top-4 self-start" aria-label="Visual identity agent dock">

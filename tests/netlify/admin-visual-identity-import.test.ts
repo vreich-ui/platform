@@ -331,3 +331,157 @@ test('an editor may import; a viewer may not, and an unauthenticated caller gets
   assert.equal(editor.status, 200, JSON.stringify(editor.body));
   assert.equal(editor.body.references?.length, 1);
 });
+
+// ─── W5 review fixes ─────────────────────────────────────────────────────────
+
+/** A writer that lands WHILE the import is in flight — a second tab saving the
+ *  mood board, or the agent doing it. checkout → patch → checkin, exactly what
+ *  the browser's EditSession does. */
+const appendReferenceConcurrently = async (objectId: string, reference: Record<string, unknown>) => {
+  const store = (await getSiteObjectsBlobStore({})) as unknown as ObjectVerbStore;
+  const before = await readStandardReferences(objectId);
+  const checkout = await handleObjectVerb(
+    store,
+    { action: 'checkout', object_type: 'visual_standard', object_id: objectId, lease_seconds: 300 },
+    HUMAN,
+    { roles: ['owner', 'admin', 'publisher'] }
+  );
+  assert.equal(checkout.status, 200, JSON.stringify(checkout.body));
+  const lockToken = checkout.body.lockToken as string;
+  const patch = await handleObjectVerb(
+    store,
+    {
+      action: 'patch',
+      object_type: 'visual_standard',
+      object_id: objectId,
+      lock_token: lockToken,
+      expected_record_version: checkout.body.record_version as number,
+      ops: [{ op: 'set_visual_standard_fields', fields: { references: [...before, reference] } }],
+    },
+    HUMAN,
+    { roles: ['owner', 'admin', 'publisher'], validationContext: await buildStoreValidationContext(store) }
+  );
+  assert.equal(patch.status, 200, JSON.stringify(patch.body));
+  await handleObjectVerb(
+    store,
+    { action: 'checkin', object_type: 'visual_standard', object_id: objectId, lock_token: lockToken },
+    HUMAN,
+    { roles: ['owner', 'admin', 'publisher'] }
+  );
+};
+
+const runImportWith = async (
+  fixtures: ImportFixture[],
+  body: Record<string, unknown>,
+  onFirstCall: () => Promise<void>
+): Promise<{ status: number; body: ImportResponseBody }> => {
+  const originalFetch = globalThis.fetch;
+  const { fetchImpl } = stubImport(fixtures);
+  let fired = false;
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    if (!fired) {
+      fired = true;
+      await onFirstCall();
+    }
+    return (fetchImpl as typeof fetch)(...args);
+  }) as typeof fetch;
+  try {
+    const response = await post(body);
+    return { status: response.statusCode, body: JSON.parse(response.body) as ImportResponseBody };
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+};
+
+test('W5 F4: a reference written while the import is in flight survives the append', async () => {
+  await rm(ROOT, { recursive: true, force: true });
+  prepareEnv();
+  await seedStandard('vis_drlurie_import_race', []);
+
+  const fixtures = [await seedPdfToolImport('https://images.example.com/race.jpg', 77)];
+  const meanwhile = {
+    id: 'ref_meanwhile',
+    blobKey: `image/req_visref_drlurie_20260101_09/${'a'.repeat(64)}.png`,
+    weight: 1,
+  };
+
+  // The endpoint reads references[] BEFORE it calls pdf-tool; this write lands
+  // in that window. Patching with the pre-import snapshot would erase it.
+  const { status, body } = await runImportWith(
+    fixtures,
+    { standardId: 'vis_drlurie_import_race', urls: [fixtures[0]!.url] },
+    () => appendReferenceConcurrently('vis_drlurie_import_race', meanwhile)
+  );
+
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.references?.length, 1);
+  assert.equal(body.reference_count, 2);
+
+  const stored = await readStandardReferences('vis_drlurie_import_race');
+  assert.deepEqual(
+    stored.map((reference) => reference.id).sort(),
+    ['ref_meanwhile', String(body.references?.[0]?.id)].sort(),
+    'the concurrent reference must still be on the board next to the imported one'
+  );
+});
+
+test('W5 F8: an oversized image is bounded to the upload ceiling before it is stored', async () => {
+  await rm(ROOT, { recursive: true, force: true });
+  prepareEnv();
+  await seedStandard('vis_drlurie_import_big', []);
+
+  const huge = await sharp({ create: { width: 4000, height: 1000, channels: 3, background: { r: 9, g: 9, b: 9 } } })
+    .png()
+    .toBuffer();
+  const digest = sha256(huge);
+  const sourceKey = `image/dr-lurie/url-import/${digest}.png`;
+  const artifacts = await getArtifactBlobStore({});
+  await artifacts.set(sourceKey, huge, { metadata: { contentType: 'image/png', sha256: digest } });
+
+  const { status, body } = await runImport(
+    [{ url: 'https://images.example.com/huge.png', blobKey: sourceKey, sha256: digest, sizeBytes: huge.byteLength }],
+    { standardId: 'vis_drlurie_import_big', urls: ['https://images.example.com/huge.png'] }
+  );
+
+  assert.equal(status, 200, JSON.stringify(body));
+  const blobKey = String(body.references?.[0]?.blobKey);
+  // The stored key is content-addressed on the BOUNDED bytes, so it cannot be
+  // the source digest any more.
+  assert.doesNotMatch(blobKey, new RegExp(digest), 'the mirror must not store the unbounded original');
+
+  const storedRaw = (await (
+    artifacts as unknown as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> }
+  ).get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+  assert.ok(storedRaw);
+  const metadata = await sharp(Buffer.from(storedRaw)).metadata();
+  assert.equal(metadata.width, 2048, 'the longest edge is bounded exactly as the upload endpoint bounds it');
+  assert.equal(metadata.height, 512);
+});
+
+test('W5 F9: an unreadable candidate names the store and key, and a batch that mirrors nothing is a 502', async () => {
+  await rm(ROOT, { recursive: true, force: true });
+  prepareEnv();
+  await seedStandard('vis_drlurie_import_missing', []);
+
+  // pdf-tool reports a key Platform cannot read out of its own artifacts store
+  // — the exact shape the "is the mirror even looking in the right store?"
+  // assumption fails in.
+  const missingKey = `image/dr-lurie/url-import/${'b'.repeat(64)}.png`;
+  const { status, body } = await runImport(
+    [
+      {
+        url: 'https://images.example.com/missing.png',
+        blobKey: missingKey,
+        sha256: 'b'.repeat(64),
+        sizeBytes: 1234,
+      },
+    ],
+    { standardId: 'vis_drlurie_import_missing', urls: ['https://images.example.com/missing.png'] }
+  );
+
+  assert.equal(status, 502, JSON.stringify(body));
+  assert.match(String(body.error), new RegExp(missingKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(String(body.error), /artifacts store/);
+  assert.equal(body.failures?.length, 1);
+  assert.equal((await readStandardReferences('vis_drlurie_import_missing')).length, 0);
+});

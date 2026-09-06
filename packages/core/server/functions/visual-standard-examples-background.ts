@@ -100,6 +100,12 @@ const buildHandlerImpl = (binding: SiteBinding) => {
       return { statusCode: 409, body: 'stale or unknown trigger token' };
     }
 
+    // W5 F5: the round this POST claimed. Every write-back below carries it,
+    // so a worker whose round has since been replaced by a newer trigger
+    // leaves that newer round alone instead of reporting its own contexts as
+    // the answer and deleting the newer round's unspent token.
+    const roundId = claimed.round_id;
+
     try {
       const outcome = await runVisualStandardExamplesGeneration(event as McpLambdaEvent, parsed.visualStandardId);
       await finishExamplesJob(store, parsed.visualStandardId, {
@@ -107,6 +113,7 @@ const buildHandlerImpl = (binding: SiteBinding) => {
         contexts: outcome.contexts,
         ...(outcome.reason ? { reason: outcome.reason } : {}),
         nowMs: Date.now(),
+        ...(roundId ? { roundId } : {}),
       });
       console.info('visual standard examples run', {
         visualStandardId: parsed.visualStandardId,
@@ -122,6 +129,7 @@ const buildHandlerImpl = (binding: SiteBinding) => {
         contexts: [],
         reason: 'run_failed',
         nowMs: Date.now(),
+        ...(roundId ? { roundId } : {}),
       }).catch(() => undefined);
       return { statusCode: 500, body: 'examples run failed' };
     }

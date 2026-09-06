@@ -397,6 +397,29 @@ export const validatePlatformPdfTemplate = (
     options
   );
 
+/**
+ * A5 — the direct "Preview sample (first page only)" chip's server call.
+ * Mirrors validatePlatformPdfTemplate exactly (same grant shape, same
+ * templateId + data + optional version), routed to pdf-tool's own
+ * `preview_pdf_template` tool (W1) through the same `/mcp` bridge as every
+ * other template call in this module — postPdfTool maps the kebab-case name
+ * below onto that snake_case tool 1:1 (see postPdfTool's header comment).
+ */
+export const previewPlatformPdfTemplate = (
+  grant: PdfToolStorageGrant,
+  input: { templateId: string; data: Record<string, unknown>; version?: number },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'preview-pdf-template',
+    projectPayload(grant, {
+      templateId: input.templateId,
+      data: input.data,
+      ...(input.version ? { version: input.version } : {}),
+    }),
+    options
+  );
+
 export const getPlatformPdfTemplateValidation = (
   grant: PdfToolStorageGrant,
   input: { templateId: string; version?: number; validationId?: string },

@@ -8,8 +8,10 @@ import { handler as adminObjectHandler } from '../../netlify/functions/admin-obj
 import { handler as examplesBackgroundHandler } from '../../netlify/functions/visual-standard-examples-background.js';
 import { createLocalBlobStore, setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
 import {
+  consumeExamplesJobToken,
   contextFailure,
   deriveExamplesStatus,
+  finishExamplesJob,
   isContextFailure,
   readExamplesJob,
   resolveExamplesTriggerTarget,
@@ -358,4 +360,111 @@ test('a failing context surfaces failed:<reason> while the job as a whole still 
     'whatever rendered is still written back — a partial failure is not a lost round'
   );
   assert.equal(examplesJob?.examples_status, 'partial');
+});
+
+// ═══ W5 review fixes ═════════════════════════════════════════════════════════
+
+/** A job store backed by a plain Map — enough for the record semantics, with
+ *  no blob-store timing in the way of the races these pin. */
+const memoryJobStore = () => {
+  const blobs = new Map<string, string>();
+  const store: ExamplesJobStore = {
+    get: async (key) => blobs.get(key) ?? null,
+    setJSON: async (key, value) => {
+      blobs.set(key, JSON.stringify(value));
+    },
+  };
+  return store;
+};
+
+test('W5 F3: a worker that claims the round during dispatch does not get its claim undone', async () => {
+  const store = memoryJobStore();
+  const id = 'vis_f3_claim';
+
+  // A background function is invoked as soon as the POST is accepted, and the
+  // `hash_unchanged` skip finishes in a couple of blob reads — so the worker
+  // can claim AND finish before the trigger's own follow-up write lands.
+  const job = await triggerVisualStandardExamplesJob(store, {
+    visualStandardId: id,
+    trigger: 'browser',
+    dispatch: async ({ token }) => {
+      const claimed = await consumeExamplesJobToken(store, id, token);
+      assert.ok(claimed, 'the worker must be able to claim the round it was handed');
+      await finishExamplesJob(store, id, {
+        status: 'ready',
+        contexts: [{ usageContext: 'article_header', status: 'ready', blobKey: 'image/x/y.png' }],
+        reason: 'hash_unchanged',
+        nowMs: Date.now(),
+        ...(claimed!.round_id ? { roundId: claimed!.round_id } : {}),
+      });
+      return true;
+    },
+  });
+
+  assert.equal(job?.dispatched, true);
+
+  const stored = await readExamplesJob(store, id);
+  assert.equal(stored?.trigger_token, undefined, 'a spent one-shot token must never come back');
+  assert.equal(stored?.examples_status, 'ready', 'the finished round must not be reset to pending');
+  assert.equal(stored?.contexts.length, 1);
+  assert.equal(stored?.reason, 'hash_unchanged');
+  assert.equal(stored?.dispatched, true, 'the dispatch annotation still lands, on the CURRENT record');
+
+  // ...and the spent token cannot buy a second round of paid image jobs.
+  assert.equal(await consumeExamplesJobToken(store, id, job!.trigger_token!), undefined);
+});
+
+test('W5 F5: a worker whose round has been superseded leaves the newer round alone', async () => {
+  const store = memoryJobStore();
+  const id = 'vis_f5_rounds';
+
+  const first = await triggerVisualStandardExamplesJob(store, {
+    visualStandardId: id,
+    trigger: 'mcp',
+    dispatch: async () => true,
+  });
+  const firstToken = first!.trigger_token!;
+  const firstClaim = await consumeExamplesJobToken(store, id, firstToken);
+  assert.ok(firstClaim, 'worker one claims round one');
+
+  // A second write lands while worker one is still generating: a new round,
+  // with its own unspent token.
+  const second = await triggerVisualStandardExamplesJob(store, {
+    visualStandardId: id,
+    trigger: 'browser',
+    dispatch: async () => true,
+  });
+  const secondToken = second!.trigger_token!;
+  assert.notEqual(second!.round_id, first!.round_id);
+
+  // Worker one finishes LAST. Its answer belongs to a round nobody is waiting
+  // for any more, so it must not be written — and, crucially, must not delete
+  // round two's token on the way past.
+  const stale = await finishExamplesJob(store, id, {
+    status: 'ready',
+    contexts: [{ usageContext: 'article_header', status: 'ready', blobKey: 'image/one/a.png' }],
+    nowMs: Date.now(),
+    ...(firstClaim!.round_id ? { roundId: firstClaim!.round_id } : {}),
+  });
+  assert.equal(stale, undefined, 'a stale round writes nothing');
+
+  const afterStale = await readExamplesJob(store, id);
+  assert.equal(afterStale?.examples_status, 'pending', 'round two is still the round in flight');
+  assert.equal(afterStale?.round_id, second!.round_id);
+  assert.equal(afterStale?.trigger_token, secondToken, 'round two’s token must still be spendable');
+
+  // Worker two runs normally and its answer is the one that lands.
+  const secondClaim = await consumeExamplesJobToken(store, id, secondToken);
+  assert.ok(secondClaim, 'worker two is not refused by a 409 the stale worker caused');
+  const finished = await finishExamplesJob(store, id, {
+    status: 'partial',
+    contexts: [
+      { usageContext: 'article_header', status: 'ready', blobKey: 'image/two/b.png' },
+      { usageContext: 'article_body', status: contextFailure('image model refused') },
+    ],
+    nowMs: Date.now(),
+    ...(secondClaim!.round_id ? { roundId: secondClaim!.round_id } : {}),
+  });
+  assert.equal(finished?.examples_status, 'partial');
+  assert.equal(finished?.contexts[0]?.blobKey, 'image/two/b.png', 'round two’s answer, not round one’s');
 });

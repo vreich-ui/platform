@@ -22,7 +22,6 @@ import {
   buildNewTemplateDraft,
   buildProposeContractIntent,
   buildReferencesOp,
-  buildRegenerateExamplesIntent,
   buildVisualStandardExample,
   clampReferenceWeight,
   exampleArtifact,
@@ -814,25 +813,4 @@ test('canRegenerate follows canEditBoard (isAdmin), independent of whether examp
   });
   const notAdmin = buildImageryWorkspace({ site: site({}), standards: [standard], isAdmin: false });
   assert.equal(notAdmin.examples.canRegenerate, false);
-});
-
-test('buildRegenerateExamplesIntent names the standard, the op, and never touches other fields', () => {
-  const standard = record('vis_demo', {
-    version: 1,
-    kind: 'house',
-    label: 'House',
-    status: 'active',
-    brandImagery: IMAGERY,
-    references: [],
-    sampleSubjects: ['a mug'],
-  });
-  const view = buildImageryWorkspace({ site: site({}), standards: [standard], isAdmin: true }).selected!;
-  const regenIntent = buildRegenerateExamplesIntent(view);
-  assert.equal(regenIntent?.tool, 'set_visual_standard_fields');
-  assert.equal(regenIntent?.starter, 'visual-identity');
-  assert.match(regenIntent?.prompt ?? '', /vis_demo/);
-  assert.match(regenIntent?.prompt ?? '', /examples: \[\] \}/);
-  assert.match(regenIntent?.prompt ?? '', /do not change anything else/i);
-
-  assert.equal(buildRegenerateExamplesIntent(undefined), undefined);
 });

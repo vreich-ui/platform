@@ -35,9 +35,20 @@
  *    CMS-Agent node runner would have to fetch and 401 on) and calls
  *    `visual_identity_propose` directly. The button only reaches `onIntent`
  *    (the U3 chat-rail seam) for the "no standard yet" empty state, where
- *    there is no standard id yet to propose against.
+ *    there is no standard id yet to propose against — genuinely conversational,
+ *    since the writer has nothing but a brief to work from. ACCEPTING the
+ *    proposal it returns (W5 F2) is an ordinary `set_visual_standard_fields`
+ *    patch under this file's own `EditSession`, exactly like a mood-board
+ *    save: the propose endpoint deliberately writes nothing, so without that
+ *    step the proposal was rendered on a card and thrown away.
+ *  - Regenerating examples is its OWN admin endpoint since A5:
+ *    `admin-visual-identity-regenerate-examples` clears the standard's
+ *    stale `examples[]` under an ordinary checkout and triggers A6's
+ *    background job itself — it never generates inline. That is the LAST
+ *    mechanical action this file used to hand to `onIntent`; every button
+ *    here now reaches a real endpoint except the one above.
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, Card, EmptyState } from './primitives';
@@ -49,12 +60,24 @@ import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { importVisualReferencesInOrder, type ImportProgressRow } from '@core/lib/admin/visual-identity-import-client';
 import {
+  buildAcceptProposalOp,
   proposeVisualIdentityContract,
   referencesReachedWriterLabel,
   type ProposeContractResponse,
 } from '@core/lib/admin/visual-identity-propose-client';
 import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { EditSession, callObjectVerb, type GetToken } from '@core/lib/edit-mode/verbs-client';
+import {
+  parseExamplesJobView,
+  regenerateVisualStandardExamples,
+  type ExamplesJobView,
+} from '@core/lib/admin/visual-identity-examples-client';
+import {
+  EXAMPLES_POLL_INTERVAL_MS,
+  examplesJobJustSettled,
+  examplesPollAttempt,
+  shouldContinuePollingExamples,
+} from '@core/lib/admin/visual-identity-live-refresh';
 import {
   MOOD_BOARD_MAX_REFERENCES,
   REFERENCE_WEIGHT_MAX,
@@ -68,7 +91,6 @@ import {
   buildNewTemplateDraft,
   buildProposeContractIntent,
   buildReferencesOp,
-  buildRegenerateExamplesIntent,
   clampReferenceWeight,
   exampleArtifact,
   moodBoardArtifact,
@@ -628,8 +650,10 @@ export function ImageryBoard({
   const [importNote, setImportNote] = useState('');
   const [importProgress, setImportProgress] = useState<ImportProgressRow[]>([]);
   const [importing, setImporting] = useState(false);
+  const [regeneratingExamples, setRegeneratingExamples] = useState(false);
   const [brief, setBrief] = useState('');
   const [proposing, setProposing] = useState(false);
+  const [accepting, setAccepting] = useState(false);
   const [proposeResult, setProposeResult] = useState<
     { standardId: string; response: ProposeContractResponse } | undefined
   >(undefined);
@@ -640,6 +664,15 @@ export function ImageryBoard({
   const [newTemplateOpen, setNewTemplateOpen] = useState(false);
   const [newTemplateLabel, setNewTemplateLabel] = useState('');
   const [newTemplateWhenToUse, setNewTemplateWhenToUse] = useState('');
+  /** A7 examples-job poll bookkeeping — see the effect below. Keyed by
+   *  standard id (not just the selected one) so switching standards and
+   *  back does not lose either side's last observed status or attempt
+   *  count. */
+  const examplesJobStatusRef = useRef<Record<string, ExamplesJobView['status'] | undefined>>({});
+  const examplesJobAttemptsRef = useRef<Record<string, number>>({});
+  /** W5 F6: which ROUND each standard's attempt count belongs to (`started_at`),
+   *  so a new round starts the poll ceiling over instead of inheriting a spent one. */
+  const examplesJobRoundRef = useRef<Record<string, string | undefined>>({});
 
   const model = useMemo(
     () =>
@@ -749,6 +782,53 @@ export function ImageryBoard({
       setProposing(false);
     }
   }, [brief, getToken, selected]);
+
+  /**
+   * W5 F2: accepting the proposal is what actually makes it the standard's
+   * contract — an ordinary `set_visual_standard_fields` patch under the same
+   * `EditSession` checkout `saveReferences` above uses, over fields that are
+   * ordinary human-writable on a visual_standard. Without this the endpoint's
+   * proposal was displayed and thrown away: nothing wrote it, so "Make this
+   * the site's imagery" went on applying the standard's OLD contract and a
+   * page reload lost the proposal entirely.
+   *
+   * Going through `admin-object.ts` (rather than a new endpoint) is the point:
+   * it is the same governed browser write path the mood board already uses,
+   * and A6's example generator triggers off that patch — a new contract is
+   * exactly when the rendered examples are stale.
+   */
+  const acceptProposal = useCallback(async () => {
+    if (!selected || !proposeResult || proposeResult.standardId !== selected.objectId) return;
+    const op = buildAcceptProposalOp(proposeResult.response.proposal);
+    if (!op) {
+      setError('That proposal carries no contract to accept.');
+      return;
+    }
+    setAccepting(true);
+    setError(undefined);
+    setNotice(undefined);
+    const session = new EditSession('visual_standard', selected.objectId, getToken);
+    try {
+      const checkout = await session.ensureCheckout();
+      if (!checkout.ok) {
+        setError(`The standard is checked out by ${checkout.heldBy ?? 'someone else'}.`);
+        return;
+      }
+      const result = await session.patch([op]);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setProposeResult(undefined);
+      setNotice('The proposed contract is now this standard\u2019s imagery. Examples regenerate in the background.');
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The proposed contract could not be accepted.');
+    } finally {
+      await session.checkin().catch(() => undefined);
+      setAccepting(false);
+    }
+  }, [getToken, onChanged, proposeResult, selected]);
 
   /**
    * A1: the import runs against `admin-visual-identity-import`, one address
@@ -910,6 +990,103 @@ export function ImageryBoard({
     selectedImagery,
   ]);
 
+  /**
+   * A5: regenerating runs against `admin-visual-identity-regenerate-examples`
+   * directly — the endpoint clears the standard's stale `examples[]` under
+   * its own checkout and triggers A6's background job itself; it never
+   * generates inline. The button therefore reports the job's status, not a
+   * finished result — the strip above still reads whatever `onChanged()`
+   * reloads once the background run lands.
+   */
+  const regenerateExamples = useCallback(async () => {
+    if (!selected) return;
+    setRegeneratingExamples(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const result = await regenerateVisualStandardExamples(getToken, { standardId: selected.objectId });
+      setNotice(
+        result.job?.dispatched === false
+          ? 'Examples could not be regenerated — the background worker could not be reached.'
+          : 'Regenerating examples in the background — this tab refreshes on its own once they are ready.'
+      );
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The examples could not be regenerated.');
+    } finally {
+      setRegeneratingExamples(false);
+    }
+  }, [getToken, onChanged, selected]);
+
+  /**
+   * A7 — poll the SAME `examples_job` A6 writes and this file's own
+   * `regenerateExamples` starts, so the strip above stops needing a manual
+   * reload. `examplesJobStatusRef`/`examplesJobAttemptsRef` are plain refs,
+   * not state: they exist purely so the transition predicates
+   * (`examplesJobJustSettled`, `shouldContinuePollingExamples`,
+   * `visual-identity-live-refresh.ts`) have a "previous tick" and an
+   * attempt count to compare against, across however many times this effect
+   * itself re-runs — they are never read for rendering.
+   *
+   * Re-runs whenever `standards` changes identity, which covers every case
+   * that can start a NEW round without this file having to special-case
+   * each one: `saveReferences`/`confirmApply` (patch/apply_brand_imagery,
+   * A6's other two trigger actions) and `regenerateExamples` above all end
+   * in `onChanged()`, which is `VisualIdentityBody`'s `load()` — the exact
+   * thing that refetches `standards` — and so does a docked-chat run
+   * finishing (A7's OTHER refresh path, `VisualIdentityWorkspace.tsx`). One
+   * `get` per re-run is cheap and, once a standard's last observed status is
+   * terminal, `shouldContinuePollingExamples` immediately declines to
+   * schedule a second one — so an unrelated refresh never turns into an
+   * ongoing poll.
+   */
+  useEffect(() => {
+    const standardId = selected?.objectId;
+    if (!standardId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async () => {
+      let view: ExamplesJobView | undefined;
+      try {
+        const result = await callObjectVerb(getToken, {
+          action: 'get',
+          object_type: 'visual_standard',
+          object_id: standardId,
+        });
+        view = parseExamplesJobView(result.body.examples_job);
+      } catch {
+        return; // best-effort — the next `standards` refresh tries again
+      }
+      if (cancelled) return;
+      const status = view?.status;
+      const previous = examplesJobStatusRef.current[standardId];
+      examplesJobStatusRef.current[standardId] = status;
+      // W5 F6: the ceiling is per ROUND (`started_at`), not per session — a
+      // round that outran it must not silently disable polling for the next.
+      const attempts = examplesPollAttempt(
+        examplesJobRoundRef.current[standardId],
+        view?.startedAt,
+        examplesJobAttemptsRef.current[standardId] ?? 0
+      );
+      examplesJobRoundRef.current[standardId] = view?.startedAt;
+      examplesJobAttemptsRef.current[standardId] = attempts;
+      if (examplesJobJustSettled(previous, status)) {
+        void onChanged();
+        return;
+      }
+      if (shouldContinuePollingExamples(status, attempts)) {
+        timer = setTimeout(() => void tick(), EXAMPLES_POLL_INTERVAL_MS);
+      }
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [selected?.objectId, standards, getToken, onChanged]);
+
   return (
     <div className="flex flex-col gap-5">
       {error ? <EmptyState severity="error" title="That did not go through" message={error} /> : null}
@@ -1070,6 +1247,22 @@ export function ImageryBoard({
                 {typeof proposeResult.response.proposal.rationale === 'string' ? (
                   <p className={MUTED}>{proposeResult.response.proposal.rationale}</p>
                 ) : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    disabled={busy || accepting || !model.canEditBoard || !buildAcceptProposalOp(proposeResult.response.proposal)}
+                    onClick={() => void acceptProposal()}
+                  >
+                    {accepting ? 'Accepting\u2026' : 'Accept this contract'}
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={accepting} onClick={() => setProposeResult(undefined)}>
+                    Discard
+                  </Button>
+                  <span className={MUTED}>
+                    Accepting writes it onto this standard. Making it the site&rsquo;s imagery stays a separate,
+                    owner-only step.
+                  </span>
+                </div>
               </div>
             </Card>
           ) : null}
@@ -1168,12 +1361,10 @@ export function ImageryBoard({
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    const regenIntent = buildRegenerateExamplesIntent(selected);
-                    if (regenIntent) onIntent(regenIntent);
-                  }}
+                  disabled={regeneratingExamples}
+                  onClick={() => void regenerateExamples()}
                 >
-                  <IconSparkles size={15} /> Regenerate examples
+                  <IconSparkles size={15} /> {regeneratingExamples ? 'Regenerating…' : 'Regenerate examples'}
                 </Button>
               ) : undefined
             }

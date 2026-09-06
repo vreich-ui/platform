@@ -17,8 +17,19 @@
  * the SAME bytes through `saveArtifactBytes` under a request id Platform
  * minted, which produces a canonical key and writes the artifact indexes
  * (`writeArtifactReferenceIndexes`, inside saveArtifactBytes — one write
- * path, never a second hand-rolled one). Images are already bounded to
- * ≤2048px on import (#77), so nothing is resized here.
+ * path, never a second hand-rolled one).
+ *
+ * W5 F8 — AND IT BOUNDS THEM. This used to claim "images are already bounded
+ * to ≤2048px on import, so nothing is resized here", which was not true of
+ * THIS path: `getArtifactUploadMaxImageDimensionPx` and
+ * `getDirectArtifactUploadMaxBytes` are applied by
+ * `functions/artifact-upload.ts` — the BROWSER's direct-upload endpoint — and
+ * nothing on the mirror path ever called either. `saveArtifactBytes` validates
+ * format but carries no byte ceiling, and the media budget is only a readiness
+ * warning, so a 40 MB 8000px JPEG behind a pasted address was mirrored
+ * verbatim and then served to every mood-board card. The mirror now applies
+ * the SAME dimension bound and the SAME byte ceiling that endpoint does,
+ * through the same helpers.
  *
  * THE ID. `req_visref_<site>_<yyyymmdd>_<nn>` — the repo's
  * `req_<flow>_<topic>_<yyyymmdd>_<nn>` shape (agents-naming.ts REQUEST_ID_RE)
@@ -27,8 +38,13 @@
  * mirror itself writes, exactly as `mintWorkspaceRequestId` probes the object
  * store for `req_agent_*`.
  */
+import { boundArtifactImageDimensions } from '../../lib/artifact-image-bound.js';
 import { listArtifactReferencesForRequest, type ArtifactIndexStore } from './artifact-index.js';
-import { saveArtifactBytes } from './artifact-upload.js';
+import {
+  getArtifactUploadMaxImageDimensionPx,
+  getDirectArtifactUploadMaxBytes,
+  saveArtifactBytes,
+} from './artifact-upload.js';
 import { getArtifactBlobStore, getArtifactIndexBlobStore } from './blob-store.js';
 import { sha256Hex } from './crypto.js';
 // LOAD ORDER, not decoration: mcp.ts and mcp-tool-handlers.ts are a module
@@ -58,6 +74,11 @@ const positiveInt = (value: unknown): number | undefined =>
 // ─── the deterministic request id ───────────────────────────────────────────
 
 export const VISUAL_REFERENCE_REQUEST_FLOW = 'visref';
+
+/** The store `getArtifactBlobStore` opens, named in the failure text so an
+ *  unreadable candidate says WHERE it was looked for (W5 F9). Matches
+ *  pdf-tool-storage-grant.ts's `pdfToolStorageStores.artifacts`. */
+export const PLATFORM_ARTIFACT_STORE_NAME = 'artifacts';
 
 /** UTC `yyyymmdd`, the same derivation the content_item minters use. */
 export const visualReferenceDay = (now: Date = new Date()): string =>
@@ -258,9 +279,17 @@ export const mirrorImportedImage = async (
   const artifactStore = await getArtifactBlobStore(event);
   const bytes = await readBlobBytes(artifactStore, candidate.blobKey);
   if (!bytes || bytes.byteLength === 0) {
+    // W5 F9 — SAY WHERE WE LOOKED. This read rests on an assumption nothing in
+    // this repo proves: that pdf-tool's storage grant puts an imported
+    // candidate's bytes in THIS site's `artifacts` store, under the key it
+    // reports. If that is ever wrong (a different grant store, a key shape
+    // that is not a store key at all) every import fails here, and an error
+    // that blamed the import for "writing no bytes" sent the reader to the
+    // wrong repo. Name the store and the key so the next person can check the
+    // assumption in one step instead of re-deriving it.
     return {
       ok: false,
-      error: `The import wrote no readable bytes for ${candidate.sourceUrl ?? candidate.blobKey}, so it cannot be added to the mood board.`,
+      error: `No bytes were readable at "${candidate.blobKey}" in this publication's ${PLATFORM_ARTIFACT_STORE_NAME} store for ${candidate.sourceUrl ?? 'this address'}, so it cannot be added to the mood board. That key is what pdf-tool reported storing the import under.`,
     };
   }
 
@@ -272,14 +301,26 @@ export const mirrorImportedImage = async (
     };
   }
 
-  const alreadyStored = input.existingBySha?.get(sha256);
+  // The dedupe key must be the sha of the bytes as STORED (the mood board's
+  // own blobKeys embed that one), so the bound below has to happen before the
+  // lookup — otherwise a resized re-import misses and lands a second card.
+  const bounded = await boundArtifactImageDimensions({
+    bytes,
+    artifactKind: 'image',
+    contentType: candidate.contentType ?? sniffImageBytes(bytes)?.contentType ?? 'image/png',
+    maxDimensionPx: getArtifactUploadMaxImageDimensionPx(),
+  });
+  const storedBytes = bounded.bytes;
+  const storedSha256 = bounded.resized ? sha256Hex(storedBytes) : sha256;
+
+  const alreadyStored = input.existingBySha?.get(storedSha256);
   if (alreadyStored) {
     return {
       ok: true,
       reference: {
         blobKey: alreadyStored,
-        sha256,
-        sizeBytes: bytes.byteLength,
+        sha256: storedSha256,
+        sizeBytes: storedBytes.byteLength,
         contentType: candidate.contentType ?? sniffImageBytes(bytes)?.contentType ?? 'image/png',
         sourceBlobKey: candidate.blobKey,
         alreadyStored: true,
@@ -288,19 +329,33 @@ export const mirrorImportedImage = async (
     };
   }
 
-  const sniffed = sniffImageBytes(bytes);
+  // Sniffed from the bytes being STORED, not the source: saveArtifactBytes
+  // re-decodes what it is given and refuses a declared type that disagrees.
+  const sniffed = sniffImageBytes(storedBytes);
   const contentType = sniffed?.contentType ?? candidate.contentType ?? 'image/png';
   const extension = sniffed?.extension ?? contentType.split('/').pop() ?? 'png';
+
+  // W5 F8: ...and the same byte ceiling that endpoint applies. A reference too
+  // big to serve is worse than one that never lands, and this is the last
+  // point at which saying so is still cheap.
+  const maxBytes = getDirectArtifactUploadMaxBytes();
+  if (storedBytes.byteLength > maxBytes) {
+    return {
+      ok: false,
+      error: `${candidate.sourceUrl ?? candidate.blobKey} is ${storedBytes.byteLength} bytes, over this publication's ${maxBytes}-byte ceiling for a stored image, so it was not added to the mood board.`,
+    };
+  }
+
   const saved = await saveArtifactBytes({
     requestId: input.requestId,
     artifactKind: 'image',
     contentType,
-    filename: `visual-reference-${sha256.slice(0, 8)}.${extension}`,
+    filename: `visual-reference-${storedSha256.slice(0, 8)}.${extension}`,
     label: input.note ?? 'Mood board reference',
     tags: ['visual-standard-reference'],
-    expectedSizeBytes: bytes.byteLength,
-    expectedSha256: sha256,
-    bytes,
+    expectedSizeBytes: storedBytes.byteLength,
+    expectedSha256: storedSha256,
+    bytes: storedBytes,
     metadata: {
       importedFrom: candidate.blobKey,
       ...(candidate.sourceUrl ? { sourceUrl: candidate.sourceUrl } : {}),
@@ -327,7 +382,7 @@ export const mirrorImportedImage = async (
 
 export type ImportImagesResult =
   | { ok: true; jobId?: string; mirrored: MirroredReference[]; failures: Array<{ source: string; error: string }> }
-  | { ok: false; statusCode: number; error: string };
+  | { ok: false; statusCode: number; error: string; failures?: Array<{ source: string; error: string }> };
 
 export type ImportImagesOptions = {
   /** Bounded so an import can never outlive the function invocation. */
@@ -430,6 +485,21 @@ export const importVisualReferenceImages = async (
     });
     if (outcome.ok) mirrored.push(outcome.reference);
     else failures.push({ source: candidate.sourceUrl ?? candidate.blobKey, error: outcome.error });
+  }
+
+  // W5 F9: nothing mirrored and everything failed is a FAILED import, not a
+  // 200 with an empty `references[]`. The tab renders the per-row failure
+  // either way, but a scripted caller reading `ok: true` off a batch where not
+  // one image landed was being told the opposite of what happened — and the
+  // "the mirror looked in the wrong store" case (above) is exactly the case
+  // that fails every candidate at once.
+  if (mirrored.length === 0 && failures.length > 0) {
+    return {
+      ok: false,
+      statusCode: 502,
+      error: failures[0]!.error,
+      failures,
+    };
   }
 
   return { ok: true, ...(jobId ? { jobId } : {}), mirrored, failures };

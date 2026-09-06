@@ -16,11 +16,14 @@
  * is a plain `set_site_fields` patch under a normal site checkout — no
  * privileged funnel, no apply verb.
  *
- * "Render sample" needs `create_agent_artifact_job`, an MCP tool with no
- * browser-reachable admin endpoint, so it goes through `onIntent` to the
- * docked rail — exactly what `TemplatesWorkspace` has always done for this
- * action. The rendered PDF then comes back as an ordinary indexed artifact and
- * is previewed with the shared `ArtifactStagePreview`.
+ * "Render sample" and "Render sample (first page only)" are, since A5, two
+ * DIRECT endpoints instead of chat instructions
+ * (`admin-visual-identity-render-sample`, `admin-visual-identity-preview-sample`
+ * — packages/core/server/functions/) — no `onIntent` reaches this panel at
+ * all any more. The full sample comes back as an ordinary indexed artifact
+ * and is previewed with the shared `ArtifactStagePreview`; the first-page-only
+ * chip renders inline (no job, nothing to poll) and is previewed directly
+ * from its own response, honestly labeled as first-page-only.
  *
  * T2.6 adds three things, all decided in `visual-identity-pdf.ts`:
  *  - a DIRECT "Render sample (first page only)" chip over W1's
@@ -31,7 +34,7 @@
  *  - thumbnails that can now say WHY one is missing (W1's `thumbnailError`),
  *    not just that it is.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, Card, EmptyState } from './primitives';
@@ -41,15 +44,16 @@ import type { SiteIdentity } from '@core/lib/site-identity';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
 import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { EditSession, type GetToken } from '@core/lib/edit-mode/verbs-client';
-import type { VisualIdentityChatIntent } from '@core/lib/admin/visual-identity-imagery';
+import { renderPdfTemplateSample } from '@core/lib/admin/visual-identity-render-sample-client';
+import { previewPdfTemplateSample } from '@core/lib/admin/visual-identity-preview-sample-client';
 import {
+  SAMPLE_RENDER_POLL_INTERVAL_MS,
   buildPdfTemplatesViewModel,
   buildPinKindDefaultOp,
-  buildPreviewSampleIntent,
-  buildRenderSampleIntent,
   buildSetSiteDefaultOp,
   latestSampleArtifact,
   pdfKindOptions,
+  sampleRenderWaitState,
   type PdfTemplateInput,
   type PdfTemplateRow,
 } from '@core/lib/admin/visual-identity-pdf';
@@ -95,7 +99,6 @@ export interface PdfTemplatesPanelProps {
   available: boolean;
   isOwner: boolean;
   getToken: GetToken;
-  onIntent: (intent: VisualIdentityChatIntent) => void;
   onChanged: () => void | Promise<void>;
 }
 
@@ -107,15 +110,22 @@ export function PdfTemplatesPanel({
   available,
   isOwner,
   getToken,
-  onIntent,
   onChanged,
 }: PdfTemplatesPanelProps) {
   const [busyId, setBusyId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [previewId, setPreviewId] = useState<string | undefined>(undefined);
+  /** A5: the first-page-only chip's own last result, shown instead of an
+   *  indexed artifact when the row has no rendered sample (or this is
+   *  newer) — `preview_pdf_template` produces no job, so nothing indexes it. */
+  const [directPreview, setDirectPreview] = useState<{ templateId: string; url?: string } | undefined>(undefined);
   /** T2.6: the kind each row's byKind selector currently has picked, keyed by template id. */
   const [kindChoice, setKindChoice] = useState<Record<string, string>>({});
+  /** W5 F7: a render whose job outlived the endpoint's inline wait (202). The
+   *  effect below re-reads the artifact index until the sample lands. */
+  const [pendingRender, setPendingRender] = useState<{ templateId: string; label: string } | undefined>(undefined);
+  const pendingRenderAttemptsRef = useRef(0);
 
   const model = useMemo(
     () =>
@@ -188,6 +198,101 @@ export function PdfTemplatesPanel({
     [getToken, identity.siteId, onChanged]
   );
 
+  /**
+   * A5: the full multi-page sample, via `create_agent_artifact_job`'s own
+   * inline wait — a single call usually comes back with the finished
+   * artifact already. `onChanged()` reloads the artifact index so
+   * `latestSampleArtifact` below picks the one this call just produced.
+   */
+  const renderSample = useCallback(
+    async (row: PdfTemplateRow) => {
+      setBusyId(row.id);
+      setError(undefined);
+      setNotice(undefined);
+      setDirectPreview(undefined);
+      setPreviewId(row.id);
+      try {
+        const result = await renderPdfTemplateSample(getToken, { templateId: row.id });
+        // W5 F7: only say "rendered" when something actually rendered. A 202
+        // means the job is still running — wait for it rather than announcing
+        // a sample that is not there and cannot be polled.
+        if (result.pending) {
+          pendingRenderAttemptsRef.current = 0;
+          setPendingRender({ templateId: row.id, label: row.label });
+          setNotice(`Still rendering ${row.label} — this panel updates when the sample lands.`);
+        } else {
+          setPendingRender(undefined);
+          setNotice(`A sample of ${row.label} was rendered.`);
+        }
+        await onChanged();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'The sample could not be rendered.');
+      } finally {
+        setBusyId(undefined);
+      }
+    },
+    [getToken, onChanged]
+  );
+
+  /**
+   * A5: the direct first-page-only chip — no job, nothing to poll, and
+   * nothing this produces is indexed as an artifact, so its result is shown
+   * from the response itself (`directPreview`) rather than from `artifacts`.
+   */
+  const previewSample = useCallback(
+    async (row: PdfTemplateRow) => {
+      setBusyId(row.id);
+      setError(undefined);
+      setNotice(undefined);
+      setPreviewId(row.id);
+      try {
+        const result = await previewPdfTemplateSample(getToken, { templateId: row.id });
+        setDirectPreview({ templateId: row.id, ...(result.previewUrl ? { url: result.previewUrl } : {}) });
+        setNotice(`First page of ${row.label} rendered — not the complete document.`);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'The preview could not be rendered.');
+      } finally {
+        setBusyId(undefined);
+      }
+    },
+    [getToken]
+  );
+
+  /**
+   * W5 F7: the wait for a 202'd render. The sample arrives as an ordinary
+   * indexed PDF artifact, so "has it landed?" is a question `artifacts`
+   * already answers — re-run the panel's own `onChanged()` refresh on a
+   * bounded cadence until `latestSampleArtifact` sees it, then say so. A
+   * ceiling is the whole point: a job that never finishes must stop the poll
+   * and TELL the operator, which is what the old flat "was rendered" notice
+   * never did.
+   */
+  useEffect(() => {
+    if (!pendingRender) return;
+    const state = sampleRenderWaitState(
+      Boolean(latestSampleArtifact(pendingRender.templateId, artifacts)),
+      pendingRenderAttemptsRef.current
+    );
+    if (state === 'landed') {
+      setPendingRender(undefined);
+      setNotice(`A sample of ${pendingRender.label} was rendered.`);
+      return;
+    }
+    if (state === 'gave_up') {
+      setPendingRender(undefined);
+      setNotice(undefined);
+      setError(
+        `${pendingRender.label} is taking longer than expected to render. The job is still running — reload this tab in a few minutes rather than rendering again.`
+      );
+      return;
+    }
+    const timer = setTimeout(() => {
+      pendingRenderAttemptsRef.current += 1;
+      void onChanged();
+    }, SAMPLE_RENDER_POLL_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [pendingRender, artifacts, onChanged]);
+
   const previewRow = model.rows.find((row) => row.id === previewId);
   const previewArtifact = previewRow ? latestSampleArtifact(previewRow.id, artifacts) : undefined;
 
@@ -252,31 +357,32 @@ export function PdfTemplatesPanel({
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={!row.canRenderSample}
-                    onClick={() => {
-                      onIntent(buildRenderSampleIntent(row));
-                      setPreviewId(row.id);
-                    }}
+                    disabled={!row.canRenderSample || busyId !== undefined || pendingRender !== undefined}
+                    onClick={() => void renderSample(row)}
                   >
-                    Render sample
+                    {busyId === row.id || pendingRender?.templateId === row.id ? 'Rendering…' : 'Render sample'}
                   </Button>
-                  {/* T2.6: the DIRECT chip — W1's preview_pdf_template, first
-                      page only. A shorter path than the full sample above
-                      (no job to poll), labeled so it is never mistaken for
-                      the complete rendered document. */}
+                  {/* T2.6/A5: the DIRECT chip — W1's preview_pdf_template,
+                      first page only. A shorter path than the full sample
+                      above (no job to poll), labeled so it is never mistaken
+                      for the complete rendered document. */}
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={!row.canRenderSample}
-                    onClick={() => {
-                      onIntent(buildPreviewSampleIntent(row));
-                      setPreviewId(row.id);
-                    }}
+                    disabled={!row.canRenderSample || busyId !== undefined}
+                    onClick={() => void previewSample(row)}
                   >
-                    Render sample (first page only)
+                    {busyId === row.id ? 'Rendering…' : 'Render sample (first page only)'}
                   </Button>
                   {latestSampleArtifact(row.id, artifacts) ? (
-                    <Button variant="ghost" size="sm" onClick={() => setPreviewId(row.id)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setDirectPreview(undefined);
+                        setPreviewId(row.id);
+                      }}
+                    >
                       Show latest sample
                     </Button>
                   ) : null}
@@ -339,10 +445,35 @@ export function PdfTemplatesPanel({
         <Card kicker="Sample" title={`Latest rendered sample — ${previewRow.label}`}>
           {previewArtifact ? (
             <ArtifactStagePreview artifact={previewArtifact} />
+          ) : directPreview?.templateId === previewRow.id ? (
+            directPreview.url ? (
+              <div className="flex flex-col gap-2">
+                {/* KNOWN LIMITATION (W5 F10, deliberately not fixed here):
+                    `preview_pdf_template`'s response shape is still unverified
+                    against a live pdf-tool, so what `preview_url` points at is
+                    unknown. If it resolves to a PDF Major Key the browser gets
+                    `/pdf/...`, and `get-public-pdf` serves every artifact with
+                    `Content-Disposition: attachment` — which no browser renders
+                    inside an iframe. Fixing that blind would mean guessing at
+                    both the shape AND a disposition change on a shared public
+                    endpoint; it waits for a real response to look at. */}
+                <p className={MUTED}>First page only — not the complete rendered document.</p>
+                <iframe
+                  src={directPreview.url}
+                  title={`${previewRow.label} first-page preview`}
+                  className="h-96 w-full rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)]"
+                />
+              </div>
+            ) : (
+              <EmptyState
+                title="Preview rendered"
+                message="pdf-tool did not return a servable preview address for this template."
+              />
+            )
           ) : (
             <EmptyState
               title="No sample rendered yet"
-              message="The agent is producing it. Reload this tab once the run finishes and the PDF will appear here."
+              message="Render one above, or wait for the agent's run to finish and reload this tab."
             />
           )}
         </Card>
