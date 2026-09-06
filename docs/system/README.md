@@ -6,12 +6,12 @@ Every document here is pinned to the same four commits and must be re-validated 
 
 | Repository | Pin | Date |
 |---|---|---|
-| `vreich-ui/CMS-Agent` `main` | `CMS_AGENT_SHA=0d1dfa43f827aae3b5b9ffdfaf71868a8076ffd3` | 2026-09-06 |
-| `platform` repository `main` | `PLATFORM_SHA=99fb36993f156fbdc6a91cb717e890ca2c2adfef` | 2026-09-06 |
+| `vreich-ui/CMS-Agent` `main` | `CMS_AGENT_SHA=44acb04a1f54281761ab3c34219913198d117950` | 2026-09-06 |
+| `platform` repository `main` | `PLATFORM_SHA=d5845dd6e855b434547430d6b0bb4d60b9f60a3c` | 2026-09-06 |
 | `vreich-ui/pdf-tool` `main` | `PDF_TOOL_SHA=2c28a4b6430a9589b384dd634f08e9ace5c4e84b` | 2026-09-06 |
-| `vreich-ui/kugel-data` `main` | `KUGEL_DATA_SHA=6c9c7129467bdb947ce76c0f52876b135aa24a61` | 2026-09-04 |
+| `vreich-ui/kugel-data` `main` | `KUGEL_DATA_SHA=d9723664521c97be87934874927e9e4603da68ba` | 2026-09-06 (runtime identical to `6c9c712`, 2026-09-04) |
 
-Three of the four `main`s moved while this set was being written (CMS-Agent `4b618b7`→`0d1dfa4` = PR #267 docs + `scripts/repro/knownIssues.ts`; platform `420afbd`→`99fb369` = PR #694 W21 tracking; pdf-tool `60bdb98`→`2c28a4b` = PR #78 descriptions/annotations). The set was re-pinned and every claim the drift gate or the diff touched was re-verified — the list is in [SYSTEM-OPERATIONS.md §6.1](SYSTEM-OPERATIONS.md#61-what-moved-during-the-audit-and-what-was-revalidated). Still pending, **not** part of the pinned system: platform PR #695 (docs corrections, `docs/architecture-corrections-2026-09-06`, 15cc28c); kugel-data PR #9 (`docs/data-audit-2026-09-06`, ee10bc7); and the kugel-data branch `runner/w21-r116` (migrations 006–008, `/export`, the `from`/`to` `/stats`) that platform `main` now codes against — it is not on GitHub.
+The four `main`s moved twice while this set was being written, and it was re-pinned both times. First move — CMS-Agent `4b618b7`→`0d1dfa4` (PR #267, docs + `scripts/repro/knownIssues.ts`), platform `420afbd`→`99fb369` (PR #694, W21 tracking), pdf-tool `60bdb98`→`2c28a4b` (PR #78, descriptions/annotations). Second move — CMS-Agent `0d1dfa4`→`44acb04` (PR #268, reconciler env contexts), platform `99fb369`→`d5845dd` (PR #695 docs corrections, PR #697 Dr. Lurie tool-surface parity, PR #696 = the first eight documents of this set, four content publishes), kugel-data `6c9c712`→`d972366` (PRs #9, #10, #11 — documentation only; every function, shared module and migration is byte-identical to `6c9c712`). Every claim the drift gate or the diffs touched was re-verified — the per-move list is in [SYSTEM-OPERATIONS.md §6.1](SYSTEM-OPERATIONS.md#61-what-moved-during-the-audit-and-what-was-revalidated). Still **not** part of the pinned system: the kugel-data branch `runner/w21-r116` (migrations 006–008, `/export`, the `from`/`to` `/stats`) that platform `main` codes against — it is not on GitHub.
 
 Evidence labels used throughout: **VERIFIED-BOTH-SIDES** (producer and consumer code read), **VERIFIED-PRODUCER-ONLY**, **VERIFIED-CONSUMER-ONLY**, **CONTRADICTED** (the two sides disagree), **UNKNOWN** (not decidable from the four repositories). A repository's README is never evidence of another repository's behaviour.
 
