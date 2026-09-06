@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    participant Agent as Publishing plugin (plugin:claude)
+    participant MCP as /mcp function
+    participant Store as Blobs site-objects
+    participant Art as Blobs artifacts
+    participant GH as GitHub Git Data API
+    participant NB as Netlify build
+    participant CDN as Netlify CDN + functions
+
+    Agent->>MCP: object_validate (candidate body)
+    MCP-->>Agent: validation groups, no blockers
+    Agent->>MCP: object_create content_item req_plugin_dark_circles_20260904_01
+    MCP->>Store: setJSON objects/content_item/by-id/req_plugin_dark_circles_20260904_01.json
+    MCP-->>Agent: object_id, version 1
+    Agent->>MCP: object_checkout (lease 900s)
+    MCP->>Store: write lock, bump version
+    MCP-->>Agent: lock_token
+    Agent->>MCP: create_agent_artifact_job (image)
+    MCP->>Art: store bytes at image/req_.../sha256.webp
+    MCP-->>Agent: public_path /img/req_.../sha256.webp
+    Agent->>MCP: object_patch upsert_node + set_article_meta(image)
+    MCP->>Store: apply ops, bump version and content_revision
+    MCP-->>Agent: validation_summary eligible
+    Agent->>MCP: object_publish (producer)
+    MCP->>MCP: checkPublishGate (content_item autonomous)
+    MCP->>MCP: validate with publishIntent
+    MCP->>MCP: materialize articles/req_....json
+    MCP->>GH: blobs, tree, commit, PATCH refs/heads/main
+    Note over GH: message ends with skip-netlify so no deploy fires
+    GH-->>MCP: commit_sha, tree_sha
+    MCP->>Store: stamp published_time and receipt (version++ only)
+    MCP-->>Agent: receipt, article_path /what-causes-dark-circles-under-eyes
+    Agent->>MCP: object_checkin
+    Agent->>MCP: release_to_production
+    MCP->>NB: POST build hook (once)
+    NB->>GH: clone main with all accumulated exports
+    NB->>NB: astro build, fetchPosts reads articleObject collection
+    NB->>CDN: publish dist
+    Agent->>MCP: deploy_status commit
+    MCP-->>Agent: ready, productionConfirmed
+    Agent->>CDN: verify_article_images (page URL)
+    CDN-->>Agent: img srcs resolve via get-public-image

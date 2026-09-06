@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph inherited["Inherited from AstroWind"]
+        IL["Still load-bearing<br/>vendor/integration · layouts · blog utils<br/>Header/Footer · config.yaml · tailwind.config.js"]
+        ID["Dead residue<br/>19 demo widgets · homes/* pages · MarkdownLayout<br/>decapcms · Dockerfile/nginx/vercel.json · root Social/"]
+    end
+    subgraph core["Kugel engine — packages/core (fleet law)"]
+        SCH["schema/  object envelope + 13 body types + patch ops + tracking event"]
+        SRV["server/  verbs · validate · materializers · publish · release<br/>MCP + OAuth · CMS-Agent client · pdf-tool bridge · tracking relay"]
+        APP["app/  Astro shell · admin routes · renderer · content collections"]
+        ADM["admin/ + lib/admin/  React admin app + pure logic"]
+        CLI["cli/  create-site · genesis · parity · capture spike (experimental)"]
+    end
+    subgraph tenants["Tenants — sites/<client>"]
+        T1["drlurie (root-deployed)"]
+        T2["platform"]
+        T3["zilberman"]
+        T4["fernwell"]
+        TD["config/ bindings & policies · seeds/ · app/pages/<br/>data/site/** GENERATED exports · netlify/functions shims"]
+    end
+    subgraph legacy["Deprecated but still wired"]
+        LG["run-publisher-agent · save-artifact · admin-traffic shim<br/>schema-v1 chain · taxonomy-enforcement · assets/**/uploads"]
+    end
+    IL --> APP
+    core --> tenants
+    style ID fill:#f8d7da,stroke:#842029
+    style LG fill:#fff3cd,stroke:#a67c00
+    style IL fill:#e2e3e5,stroke:#41464b

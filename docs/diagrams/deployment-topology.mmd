@@ -1,0 +1,30 @@
+flowchart TB
+    subgraph REPO["platform repo — main branch"]
+        direction TB
+        RootCfg["root netlify.toml + astro.config.ts\n(IS the drlurie config — root netlify/functions/*)"]
+        PlatCfg["sites/platform/netlify.toml + astro.config.ts"]
+        ZilCfg["sites/zilberman/netlify.toml + astro.config.ts"]
+        FerCfg["sites/fernwell/netlify.toml + astro.config.ts"]
+        Core["packages/core/** — engine, shared by every build"]
+        Exports["sites/&lt;client&gt;/data/site/** — committed exports"]
+    end
+
+    RootCfg -.base dir = repo root.-> N1["Netlify project: drlurie\n(drluriescience.netlify.app)"]
+    PlatCfg -.base dir = sites/platform.-> N2["Netlify project: kugel-platform"]
+    ZilCfg -.base dir = sites/zilberman.-> N3["Netlify project: zilbermanfilmfoundation"]
+    FerCfg -.base dir = sites/fernwell.-> N4["Netlify project: kugel-fernwell"]
+
+    N1 --> Edge1["CDN (dist/) + Functions + Blobs + /mcp"]
+    N2 --> Edge2["CDN (dist/) + Functions + Blobs + /mcp"]
+    N3 --> Edge3["CDN (dist/) + Functions + Blobs + /mcp"]
+    N4 --> Edge4["CDN (dist/) + Functions + Blobs + /mcp"]
+
+    Agent["Agent / MCP client\n(CMS-Agent, ChatGPT Actions, human admin)"] -- "object_publish over /mcp" --> Edge1
+    Edge1 -- "GitHub Contents API commit,\n[skip netlify] (no rebuild)" --> Exports
+    Agent -- "release_to_production tool /\nadmin Release button" --> Hook["Netlify build hook (per project, 1 URL each)"]
+    Hook --> N1
+
+    Core -.shared by.-> N1
+    Core -.shared by.-> N2
+    Core -.shared by.-> N3
+    Core -.shared by.-> N4

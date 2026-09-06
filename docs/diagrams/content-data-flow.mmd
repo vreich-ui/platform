@@ -1,0 +1,58 @@
+flowchart TB
+    subgraph Authoring["Authoring surfaces"]
+        P["Publishing plugin<br/>/mcp, /api/plugin/*"]
+        C["CMS-Agent run<br/>external repo"]
+        A["Admin UI + admin chat<br/>admin-object.ts"]
+        S["Seeds + drivers<br/>sites/*/seeds/*.mjs"]
+    end
+
+    subgraph Verbs["Object verb core"]
+        V["object-verbs.ts<br/>handleObjectVerb"]
+        G["publish-gate.ts"]
+        PUB["object-publish.ts"]
+    end
+
+    subgraph Blobs["Netlify Blobs (per tenant)"]
+        SO[("site-objects<br/>objects/type/by-id/id.json")]
+        AR[("artifacts<br/>image or pdf / reqId / sha256.ext")]
+    end
+
+    subgraph Git["Git repo, branch main"]
+        EX["sites/client/data/site/**<br/>articles, pages, sections, navigation,<br/>templates, themes, section-templates,<br/>voice, products, site.json,<br/>taxonomy.json, tracking.json, redirects.json"]
+    end
+
+    subgraph Build["Astro build"]
+        CC["content collections"]
+        BL["blog.ts fetchPosts"]
+        RN["render-nodes.ts"]
+        RS["renderer/resolve.ts"]
+        DIST["dist/"]
+    end
+
+    subgraph Serve["Netlify edge"]
+        HTML["static HTML + /_astro/*<br/>immutable 1y"]
+        FN["get-public-image.ts<br/>get-public-pdf.ts<br/>immutable 1y"]
+    end
+
+    P --> V
+    C --> V
+    A --> V
+    S --> V
+    V --> SO
+    V --> G
+    G --> PUB
+    PUB -->|materialize + GitHub API, skip netlify| EX
+    PUB -->|stamp receipt| SO
+    P -->|artifact jobs via pdf-tool| AR
+
+    EX --> CC
+    CC --> BL
+    BL --> RN
+    CC --> RS
+    RN --> DIST
+    RS --> DIST
+    DIST --> HTML
+
+    AR -->|/img/* and /pdf/* redirects| FN
+    HTML -.->|img src| FN
+    PUB -.->|release_to_production build hook| Build

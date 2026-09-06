@@ -1,0 +1,12 @@
+flowchart LR
+    subgraph edit["1 · Edit (any number of times)"]
+        A["Agent or editor<br/>checkout → patch → validate"] --> S[("Object store<br/>Netlify Blobs")]
+    end
+    subgraph publish["2 · Publish (per object)"]
+        S --> G["publish gate<br/>approval policy"] --> M["materialize<br/>strip private, add __generated"] --> C["git commit to main<br/>'[skip netlify]' — nothing goes live"]
+    end
+    subgraph release["3 · Release (per batch)"]
+        C --> R["release_to_production<br/>one build hook"] --> B["Astro build reads<br/>all committed exports"] --> L["Live on CDN<br/>deploy_status confirms"]
+    end
+    style C fill:#fff3cd,stroke:#a67c00
+    style L fill:#d4edda,stroke:#1e7e34
