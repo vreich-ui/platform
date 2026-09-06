@@ -1,0 +1,71 @@
+flowchart LR
+  subgraph People["Humans"]
+    Wolf["Operator"]
+    Editor["Tenant editors / owners<br/>(Netlify Identity)"]
+    Reader["Readers (browser)"]
+  end
+  subgraph Agents["LLM agents outside the repos"]
+    Conn["Claude / ChatGPT connectors<br/>(OAuth 2.1)"]
+    Plugin["Publishing plugins<br/>(ChatGPT Agent Studio, Claude skill)"]
+  end
+  subgraph CMS["CMS-Agent (Cloud Run + GCS)"]
+    WMCP["Workspace MCP /mcp<br/>151 tools"]
+    Cond["Publishing Conductor<br/>executor.ts + tick + conductor-run"]
+    Learn["W21 jobs: tracking-ingest,<br/>strategy-learning, strategy-review<br/>(no deploy artifact)"]
+  end
+  subgraph Tenant["One tenant Netlify site (×4: drlurie, platform, zilberman, fernwell)"]
+    TMCP["/mcp (100 tools) + /api/plugin/*"]
+    Admin["/admin (React) + admin-* functions"]
+    Chat["admin-agent-chat → client_manager"]
+    Store[("Netlify Blobs: site-objects,<br/>artifacts, artifact-index, …")]
+    Site["Astro site (CDN)"]
+    Ingest["/api/t track-ingest"]
+  end
+  subgraph PDF["pdf-tool (Netlify pdf-x + Cloud Run render)"]
+    PMCP["/mcp (32 tools)"]
+    Own[("pdf-x Blobs: sessions,<br/>OAuth, capture output")]
+  end
+  subgraph Data["kugel-data (Netlify + Netlify DB)"]
+    Sink["/api/tracking-sink{,/commerce,/dims,/link}"]
+    Read["/stats (no auth) · /rollups (bearer) · /weights (no auth)<br/>/export — does not exist"]
+    PG[("PostgreSQL")]
+  end
+  GH[("GitHub: platform repo, main<br/>sites/&lt;client&gt;/data/site/** [GENERATED]")]
+  NL["Netlify build hook + deploys API"]
+  Models["OpenAI · Anthropic · Google · fal.ai · Qwen"]
+  Media["Openverse · Pexels · Unsplash · Google CSE"]
+  Stripe["Stripe"]
+
+  Wolf --> WMCP
+  Conn --> WMCP
+  Conn --> TMCP
+  Plugin -- "object verbs + release" --> TMCP
+  Editor --> Admin
+  Editor --> Chat
+  Chat -- "agent_converse (scoped bearer, 11 tools)" --> WMCP
+  Admin -- "workflow_get_run(_cost) / cancel / node_get_latest_output / retry + budget (S-07)" --> WMCP
+  Admin -. "Insights: feedback_list / playbook_get / optimizer_status /<br/>learning_list_observations — refused on the 11-tool bearer (S-07)" .-> WMCP
+  Cond -- "object_* / artifact / capture / release tools<br/>(&lt;CLIENT&gt;_MCP_TOKEN)" --> TMCP
+  WMCP --> Cond
+  Cond --> Models
+  Chat --> Models
+  TMCP -- "tools/call + storage grant (tenant PAT)" --> PMCP
+  PMCP -- "writes bytes + indexes via grant" --> Store
+  PMCP --> Own
+  PMCP --> Models
+  PMCP --> Media
+  TMCP -- "publish: Git Data API [skip netlify]" --> GH
+  TMCP -- "release: POST build hook; poll deploys" --> NL
+  GH -- "build reads exports" --> Site
+  NL --> Site
+  Reader --> Site
+  Site -- "/api/t batches (same origin)" --> Ingest
+  Ingest -- "NDJSON, bearer, 2 s, at-most-once" --> Sink
+  Site -- "postbuild dims" --> Sink
+  Stripe -- "webhook" --> TMCP
+  TMCP -- "commerce_event copy" --> Sink
+  Sink --> PG
+  PG --> Read
+  Admin -- "/stats?from&to (sink reads days only — S-23) · /rollups?by=object · export (404)" --> Read
+  Site -. "build: /weights (envelope mismatch — S-24)" .-> Read
+  Learn -- "/rollups?by=producer|object|strategy" --> Read

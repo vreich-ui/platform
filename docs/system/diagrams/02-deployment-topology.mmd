@@ -1,0 +1,47 @@
+flowchart TB
+  subgraph GCP["Google Cloud"]
+    subgraph CR1["Cloud Run cms-agent-503015 / us-central1"]
+      SVC["service cms-agent-mcp<br/>mcpServerMainRun.ts · WORKSPACE_STORE=gcs"]
+      TICK["job continuation-tick (Scheduler */2)"]
+      CONDJ["job conductor-run (manual)"]
+      RECON["job site-credential-reconciler (daily 06:00 UTC)"]
+      NOJOB["job:tracking-ingest · job:strategy-learning · job:strategy-review<br/>package.json scripts only — NO Cloud Run job, NO schedule"]
+    end
+    GCS[("GCS cms-agent-503015-cms-agent-state")]
+    SM[("Secret Manager: tenant MCP tokens,<br/>NETLIFY_API_TOKEN, scoped tokens")]
+    subgraph CR2["Cloud Run pdf-tool-gc / europe-west1"]
+      RS["pdf-tool-render (typst, Chromium, poppler)<br/>x-render-secret"]
+    end
+  end
+  subgraph Netlify["Netlify"]
+    T1["site drluriescience (root deploy of platform repo)"]
+    T2["site kugel-platform (sites/platform)"]
+    T3["site zilbermanfilmfoundation (sites/zilberman)"]
+    T4["site kugel-fernwell (sites/fernwell)"]
+    EDGE["Edge Function variant-serve on every tenant (path /*)<br/>_experiments.generated.json — {} at the pins"]
+    PX["site pdf-x (pdf-tool functions + workers)"]
+    KD["site kugel-data (9 functions) + Netlify DB"]
+    CA["site cms-agent (ui/, workbench/ static; session function)"]
+    Blobs[("Netlify Blobs per site")]
+    DB[("Netlify DB PostgreSQL")]
+    Hooks["build hooks · deploys API · Identity · Analytics"]
+  end
+  GHR[("GitHub: platform repo, main")]
+  SVC --> GCS
+  TICK --> GCS
+  CONDJ --> GCS
+  RECON --> GCS
+  SVC --> SM
+  RECON -- "Netlify API: env vars, sites" --> Hooks
+  T1 & T2 & T3 & T4 --> Blobs
+  EDGE -. "rewrite to arm route" .-> T1 & T2 & T3 & T4
+  T1 & T2 & T3 & T4 -- "agent_converse / workflow_*" --> SVC
+  SVC -- "tenant /mcp" --> T1 & T2 & T3 & T4
+  T1 & T2 & T3 & T4 -- "pdf-tool bridge" --> PX
+  PX -- "grant" --> Blobs
+  PX --> RS
+  T1 & T2 & T3 & T4 -- "/api/t relay, dims, commerce, link;<br/>reads: stats, rollups, weights (build), export (absent)" --> KD
+  KD --> DB
+  T1 & T2 & T3 & T4 -- "Git Data API" --> GHR
+  GHR -- "build hook → build" --> Hooks
+  CA -- "pasted bearer" --> SVC
