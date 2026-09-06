@@ -1,0 +1,41 @@
+flowchart LR
+  subgraph Public["Untrusted"]
+    Browser["reader browser"]
+    Anyone["anyone on the internet"]
+  end
+  subgraph Human["Authenticated humans"]
+    IdU["tenant Identity user (owner/admin/publisher/editor/viewer)"]
+    OAuthU["OAuth 2.1 grant (connector / plugin) → human principal"]
+    Op["CMS-Agent operator (static token / OAuth)"]
+  end
+  subgraph Svc["Service credentials"]
+    SB["site-scoped bearer to CMS-Agent (11 tools, one project —<br/>run-addressed calls unbound: S-26)"]
+    TT["<CLIENT>_MCP_TOKEN (CMS-Agent → tenant)"]
+    AK["tenant agent key (per agent_name, site-scoped)"]
+    ST["tenant shared MCP_HTTP_AUTH_TOKEN"]
+    PK["x-publish-key (PUBLISH_SECRET)"]
+    RT["PDF_TOOL_AGENT_RUN_TOKEN = pdf-tool AGENT_RUN_TOKEN"]
+    GR["storage grant (tenant PAT, 60 min)"]
+    KT["TRACKING_SINK_TOKEN (fleet-wide)"]
+    GHT["GITHUB_CONTENT_TOKEN"]
+    NBH["NETLIFY_BUILD_HOOK_URL (URL is the credential)"]
+    RS["x-render-secret"]
+    NAPI["NETLIFY_API_TOKEN (CMS-Agent genesis)"]
+  end
+  Browser -- "/api/t same-origin, no auth" --> T["tenant"]
+  Anyone -- "/stats, /weights, /health: no auth" --> KD["kugel-data"]
+  Anyone -- "/img/*, /pdf/*: no auth, immutable cache" --> T
+  IdU --> T
+  OAuthU --> T
+  Op --> C["CMS-Agent"]
+  T -- SB --> C
+  C -- TT --> T
+  T -- "in-process" --> T2["object-store / save-artifact / deploy-status (PK)"]
+  T -- RT + GR --> P["pdf-tool"]
+  P -- GR --> TB[("tenant Blobs")]
+  P -- RS --> R["render service"]
+  T -- KT --> KD
+  C -- KT --> KD
+  T -- GHT --> GH["GitHub"]
+  T -- NBH --> NL["Netlify"]
+  C -- NAPI --> NL
