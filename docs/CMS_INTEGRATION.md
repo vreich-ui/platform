@@ -708,18 +708,12 @@ Scheduled functions run only on the **published production deploy**.
    the one filtered per-principal). *Why it matters:* the file name carries no meaning, so new
    tools land wherever, and the 97-tool count test is the only thing holding the set together.
 
-2. **`verify_article_images` is invisible to the plugin surface on the one tenant that has it.**
-   Only `netlify/functions/mcp.ts:31` injects `verifyArticleImagesHandler`, and only the root
-   (drlurie) deploy has `netlify/functions/verify-article-images.ts`. But `plugin-actions.ts:106`
-   and `admin-plugin-manifest.ts:155` call `ensureMcpSiblings` (`agent/mcp-siblings.ts:44-50`),
-   which injects **only the governed trio** — never the optional handler. Consequences on drlurie:
-   (a) the rendered plugin manifest omits `verify_article_images`, so `/api/plugin/verify_article_images`
-   is refused **403 `tool_not_in_plugin_charter`** even though `/mcp` advertises the tool;
-   (b) `liveToolsDigest()` computed in the `/mcp` lambda (with the handler) differs from the one
-   `admin-plugin-manifest.ts:172` computes (without it), so the "installed export is stale"
-   signal is permanently and falsely true. The existing tests miss this because they import
-   `netlify/functions/mcp.js` — the shim that *does* inject the handler
-   (`tests/netlify/plugin-actions-facade.test.ts:5,11`).
+2. **RESOLVED 2026-09-06 — `verify_article_images` is present on every relevant Dr. Lurie surface.**
+   The shared Dr. Lurie bootstrap in `netlify/lib/mcp-siblings.ts` injects the optional handler for
+   direct MCP, plugin-manifest generation, the Actions facade, admin chat, and the background chat
+   hop. An isolated-process regression test requires those five entry points to expose the same
+   digest and include `verify_article_images`. Platform, Fernwell, and Zilberman continue to omit
+   it because they do not deploy that optional handler.
 
 3. **Publish and release are unordered and unsynchronised, by design — but nothing enforces the
    pairing.** `object_publish` commits with `[skip netlify]` and returns
