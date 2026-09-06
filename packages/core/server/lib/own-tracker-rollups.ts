@@ -144,7 +144,11 @@ export const fetchOwnTrackerWeights = async (
     }
     const body = (await response.json()) as unknown;
     if (!isRecord(body)) return {};
-    const rows = isRecord(body.weights) ? body.weights : body;
+    // S-24: the sink's real envelope is `{project_id, experiments: {object_id: {variant_id:
+    // weight}}}` — `weights` never existed on the wire, so reading it and falling back to the
+    // WHOLE body (project_id included) is what `scripts/lib/tracking-experiments.mjs`'s
+    // `fetchWeights` fixed too. `weights` stays as a fallback for a future/alternate shape.
+    const rows = isRecord(body.experiments) ? body.experiments : isRecord(body.weights) ? body.weights : body;
     if (!isRecord(rows)) return {};
     const result: Record<string, Record<string, number>> = {};
     for (const [controlId, row] of Object.entries(rows)) {

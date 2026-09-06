@@ -116,7 +116,17 @@ describe('fetchOwnTrackerWeights', () => {
     assert.ok(!JSON.stringify(weights).includes(ENV.TRACKING_SINK_TOKEN));
   });
 
-  it('unwraps a {weights: {...}} envelope the same as a bare row map', async () => {
+  it('unwraps a {experiments: {...}} envelope — the sink\'s real shape (S-24)', async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        project_id: 'proj_1',
+        experiments: { parent: { parent: 50, child: 50 } },
+      })) as unknown as typeof fetch;
+    const weights = await fetchOwnTrackerWeights({ env: ENV, fetchImpl });
+    assert.deepEqual(weights, { parent: { parent: 50, child: 50 } });
+  });
+
+  it('unwraps a {weights: {...}} envelope as a fallback shape', async () => {
     const fetchImpl = (async () =>
       jsonResponse({ weights: { parent: { parent: 50, child: 50 } } })) as unknown as typeof fetch;
     const weights = await fetchOwnTrackerWeights({ env: ENV, fetchImpl });
