@@ -976,7 +976,7 @@ guarantee from the docs.
 `publication.v2` and admits its scans "have no subject"; `docs/agents/mcp-article-body-v1.md` is
 marked HISTORICAL yet still describes `save_json_blob_publish_by_time` and
 `input.publication.published_time` scheduling, both deleted.
-**Impact:** the real contract — `__generated.at` == `published_time` == `receipt.exported_at` —
+**Impact:** the real contract — `__generated.at` == `published_time` == `receipt.exported_at` — is
 untested, while a passing test suggests otherwise.
 **Direction:** rewrite the test against the object publish path; mark the doc superseded with a
 pointer to `CONTENT_ARCHITECTURE.md` §6.
