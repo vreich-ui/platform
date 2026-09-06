@@ -24,6 +24,12 @@ test('T21.2b: admin-analytics?source=own sits behind the SAME admin auth wall', 
   assert.equal(parseBody(response).ok, false);
 });
 
+test('T21.6b: admin-analytics?source=arm_metrics sits behind the SAME admin auth wall', async () => {
+  const response = await handler({ httpMethod: 'GET', queryStringParameters: { source: 'arm_metrics' } });
+  assert.ok(response.statusCode === 401 || response.statusCode === 403);
+  assert.equal(parseBody(response).ok, false);
+});
+
 // ─── T21.9b: the old `/.netlify/functions/admin-traffic` URL stays alive ────
 
 test('the admin-traffic compat shim is the SAME handler as admin-analytics, for one wave', () => {

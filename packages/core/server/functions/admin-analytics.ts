@@ -31,6 +31,12 @@ import {
 } from '../../lib/admin/analytics-logic.js';
 import { isOwnTrackerDays, surfaceSplit, type OwnTrackerDays } from '../../lib/admin/own-analytics-logic.js';
 import { fetchOwnTrackerStats, ownTrackerMissingEnvVars } from '../lib/own-tracker-stats.js';
+import {
+  armMetricsMissingEnvVars,
+  fetchOwnTrackerRollups,
+  fetchOwnTrackerWeights,
+} from '../lib/own-tracker-rollups.js';
+import { readTrackingExperiments } from '../lib/tracking-config-read.js';
 import { getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import { objectRecordKey } from '../lib/object-store-keys.js';
 import type { ObjectRecord } from '../../schema/object-record-v1.js';
@@ -176,6 +182,61 @@ const ownAnalyticsResponse = async (binding: SiteBinding, rawDays: number, ifNon
   }
 };
 
+/**
+ * `?source=arm_metrics` (T21.6b / R4b) — `/admin/variants`' per-arm reader
+ * metrics feed. Same shape law as `ownAnalyticsResponse` above (own env pair,
+ * same `own_tracker_unconfigured` degrade, same memo-Map TTL cache keyed
+ * separately — `arm:` prefix — so none of the three `?source=` feeds ever
+ * collide), fetched ONCE for the whole page rather than per family:
+ *
+ *  - `rows` — every object's rollup, from `${TRACKING_SINK_URL}/rollups?by=object`.
+ *  - `experiments` — `trk_<site>`'s `experiments[]` (every status; the pure
+ *    `honestyLabel` in `lib/admin/variant-arm-metrics.ts` filters to `active`
+ *    per family) — the server-side read the honesty rule requires (12-plan
+ *    §15.4 / §16): a family is never labelled from whether metrics exist.
+ *  - `weights` — the sink's CURRENT `/weights` row, un-normalized; the client
+ *    normalizes per family via `familyArmMetrics`.
+ *
+ * A `/rollups` failure is a real 500 (this is the page's primary data source,
+ * not an optional extra — same posture `ownAnalyticsResponse` takes toward a
+ * `/stats` failure). A `/weights` failure never reaches here at all:
+ * `fetchOwnTrackerWeights` already degrades to `{}` internally.
+ */
+const armMetricsResponse = async (binding: SiteBinding, ifNoneMatch: string | undefined) => {
+  const missing = armMetricsMissingEnvVars();
+  if (missing.length > 0) {
+    return jsonResponse(
+      200,
+      {
+        configured: false,
+        enabled: false,
+        error_code: 'own_tracker_unconfigured',
+        message: 'The tracking sink is not configured for this site.',
+      },
+      { 'Cache-Control': CACHE_CONTROL }
+    );
+  }
+
+  const cacheKey = `arm:${binding.siteId}`;
+  const cached = memo.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
+
+  try {
+    const [rows, experiments, weights] = await Promise.all([
+      fetchOwnTrackerRollups(),
+      readTrackingExperiments(binding),
+      fetchOwnTrackerWeights({ warn: (message) => console.warn(`[admin-analytics] ${message}`) }),
+    ]);
+    const body = { configured: true, enabled: true, rows, experiments, weights };
+    const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
+    memo.set(cacheKey, entry);
+    return cachedResponse(entry, ifNoneMatch);
+  } catch (error) {
+    console.error('Failed to load arm metrics.', error);
+    return jsonResponse(500, { error: 'Arm metrics could not be loaded.' });
+  }
+};
+
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
   const access = await resolveAdminAccessFromEvent(event, context);
@@ -187,6 +248,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   if (params.source === 'own') {
     const ifNoneMatchOwn = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
     return ownAnalyticsResponse(binding, Number(params.days), ifNoneMatchOwn);
+  }
+
+  if (params.source === 'arm_metrics') {
+    const ifNoneMatchArm = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+    return armMetricsResponse(binding, ifNoneMatchArm);
   }
 
   const range = isRangeKey(params.range) ? params.range : DEFAULT_ANALYTICS_RANGE;
