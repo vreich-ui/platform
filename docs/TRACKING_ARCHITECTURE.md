@@ -1,6 +1,6 @@
 # Tracking & Analytics Architecture
 
-> **Status:** verified against the `platform` repo commit `6789644` (2026-09-05) and `vreich-ui/kugel-data` commit `6c9c712` (read through the GitHub API; that repo is not vendored here). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
+> **Status:** first verified against commit `6789644` (2026-09-05), correction pass at `420afbd` (2026-09-06), and `vreich-ui/kugel-data` commit `6c9c712` (read through the GitHub API; that repo is not vendored here). Code is truth; every claim cites a file path. Claims that could not be verified from code are quarantined under **Unverified / open**. Status tags: `[CURRENT]` `[INHERITED]` `[DEPRECATED]` `[EXPERIMENTAL]` `[GENERATED]` `[CANONICAL]` `[DOC-ONLY]`.
 > Companion docs: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`AI_CONTEXT.md`](AI_CONTEXT.md) · [`DATA_CONTRACTS.md`](DATA_CONTRACTS.md) · [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) · [`GLOSSARY.md`](GLOSSARY.md).
 
 ## 1. Purpose & scope
@@ -99,7 +99,7 @@ flowchart TB
 
 Status of each edge: solid = live code path; dashed = fallback, manual, or
 **no implemented consumer**. `RU`/`WT` have no caller anywhere in
-`/root/platform` (grep for `rollups`, `weights`, `variant_id`, `experiment_weights`
+this repo (grep for `rollups`, `weights`, `variant_id`, `experiment_weights`
 returns nothing outside `packages/core/lib/admin/variant-experiments.ts`'s prose).
 
 ---
@@ -149,6 +149,14 @@ Notes that matter:
   `core.ts:333`); one scroll bucket each (`bucketsHit`); one `completion` per
   page (`completionSent`); one provider conversion per `provider:label`
   (`bridge.ts:111,148`).
+- **Drill traffic is tagged only at the browser.** Since #689 (T21.19b) every request made from a drill's Playwright browser context
+  (`capture/browser.mjs:611`, `capture/preview.mjs:377`, `tests/e2e/accept-router.browser.mjs:85`) carries
+  `x-trk-test: 1` (`packages/core/cli/capture/test-traffic-header.mjs`); no direct-`fetch` drill sets it,
+  contrary to the header module's own instruction.
+  Nothing server-side in this repo reads it, and `track-ingest.ts:forwardToSink` (line 286) forwards
+  only `Content-Type` + `Authorization` to the sink, so the tag never reaches kugel-data; the file's own
+  claim that the sink drops such rows is contradicted by the sink's code: the *absence* of any handling in
+  kugel-data @ `6c9c712` is **EXTERNAL VERIFIED @ SHA**; only the production deployment state stays unverified. See `KNOWN_ISSUES.md` #63.
 - **`exposure`** — the event kind kugel-data's experiment machinery is entirely
   built on (`004_rollup_views.sql` `v_variant_assignment`) — **is not in the
   platform's enum at all** and can never be emitted or accepted.
@@ -454,7 +462,7 @@ range/tab preference in `localStorage`. Wolf's "review, save, export" is
 
 `GET /api/tracking-sink/rollups?project_id&from&to&by=object|producer` (bearer,
 ≤366-day window, ≤5000 rows) and `GET /api/tracking-sink/weights?project_id`
-(no auth) exist and are implemented. **Nothing in `/root/platform` calls either.**
+(no auth) exist and are implemented. **Nothing in this repo calls either.**
 
 ---
 
@@ -526,7 +534,7 @@ site's enabled providers and its toml disagree — see §13.5 for the hole in it
 **CMS-Agent feedback — precise status.** The CMS-Agent MCP server exposes
 `feedback_ingest_tracking`, `feedback_ingest_monetizer`, `learning_record_observation`,
 `optimizer_*` and `dataset_*` tools (visible in this session's connector tool list).
-**No code path in `/root/platform` calls any of them.** Repo-wide grep for
+**No code path in this repo calls any of them.** Repo-wide grep for
 `feedback_ingest_tracking`, `agent-learning-patch`, `goal-bridge` as a runtime
 symbol, `learning-join` outside tests: nothing. `packages/core/server/lib/agent/cms-agent-client.ts`
 contains no feedback or tracking call. `tests/netlify/learning-join.test.ts` is an
@@ -821,7 +829,7 @@ drlurie's rows under that tenant's `project_id`.
     `v_variant_assignment` is empty in production and works around it with a
     synthetic `'control'` arm; `experiment-weights` filters
     `arms.some(a => a.exposures > 0)` and therefore decides nothing. Nothing in
-    `/root/platform` reads `/weights`. `packages/core/lib/admin/variant-experiments.ts:17-27`
+    this repo reads `/weights`. `packages/core/lib/admin/variant-experiments.ts:17-27`
     states the same conclusion from the CMS side.
 
 15. **Root `postbuild` is tenant-hardwired. `[CURRENT]`, low**
@@ -832,6 +840,18 @@ drlurie's rows under that tenant's `project_id`.
     under that tenant's `project_id`.
 
 ---
+
+## 13b. Evidence classes for the cross-repository claims in this document
+
+| Claim | Class | Evidence |
+|---|---|---|
+| Sink endpoints, tables, idempotency, `/stats` leak guard, rollup views, experiment machinery (§2, §7, §8, §13.14) | **EXTERNAL VERIFIED @ kugel-data `6c9c712`** | Files read through the GitHub API on 2026-09-05; `6c9c712` is still that repo's default-branch tip on 2026-09-06 |
+| Purchase join key can never match (§13.1) | **LOCAL EVIDENCE @ `420afbd`** (`create-checkout-session.ts:121`, `checkout-session-status.ts:33,40`, `stripe-webhook.ts:210,254`) + **EXTERNAL VERIFIED @ `6c9c712`** (`004_rollup_views.sql:133,175` joins `ce.event_id::text = te.props ->> 'commerce_event_id'`) | Production migration state (whether 003–005 are applied) is **UNVERIFIED** |
+| `commerce_events.kind` is never `'purchase'` (§13.2) | **LOCAL EVIDENCE @ `420afbd`** (`commerce-events.ts:187` `kind: event.type`; `commerceEventTypes` has no `purchase`) + **EXTERNAL VERIFIED @ `6c9c712`** (`tracking-sink-commerce.ts:53` stores `kind` verbatim; `tracking-sink-stats.ts:97`, `004:134,176`, `005:121` filter `kind = 'purchase'`) | Any out-of-repo ETL that rewrites `kind` would be invisible here — **UNVERIFIED** |
+| `object_version.surface` / `.attribution` dropped by the sink (§13.4) | **EXTERNAL VERIFIED @ `6c9c712`** (`002_*.sql`, `tracking-sink-dims.ts:normalizeObjectVersion`) | — |
+| Sink drops `x-trk-test` rows (comment in `test-traffic-header.mjs`) | **Contradicted — EXTERNAL VERIFIED @ `6c9c712`** that no such handling exists in the sink; LOCAL EVIDENCE that the relay does not forward the header | see §3 note, `KNOWN_ISSUES.md` #63 |
+| CMS-Agent's `feedback_ingest_tracking` tool and its contract (§10, §15) | **EXTERNAL UNVERIFIED** — the tool name was observed on the live CMS-Agent MCP surface on 2026-09-05; its contract and storage were not read from `vreich-ui/cms-agent` | zero call sites in this repo is LOCAL EVIDENCE |
+| Netlify Analytics v2 API shape (§8) | **EXTERNAL UNVERIFIED** — described from `server/lib/netlify-analytics.ts` and its tests, not from Netlify's documentation | — |
 
 ## 14. Unverified / open
 
