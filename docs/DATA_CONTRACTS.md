@@ -209,7 +209,7 @@ not a build failure (KNOWN_ISSUES #45).
 | **GitHub contents API** — listing of `src/data/post` | GitHub | `server/lib/content-item-index.ts:60`, called from `object-validation-context.ts:247` | HTTPS | Degrades, never bricks: `undefined` reads as "cannot verify", stale cache served on a transient error. All three GitHub edges share one env contract (KNOWN_ISSUES #36). |
 | **Netlify geo header** `x-nf-geo` (JSON, raw or base64) `{country:{code}, subdivision:{code}}`, `x-country` fallback | Netlify | `server/functions/track-ingest.ts:16-20,72` | request header | `city` is **never read** (OQ-W13-4). |
 | **Stripe Checkout + webhook** `checkout.session.completed`, signature-verified | Stripe | `create-checkout-session.ts`, `stripe-webhook.ts` | HTTPS + signed webhook | Mode-selected keys; `STRIPE_MODE` defaults to `test` so a missing flag never charges. No tenant is live on Stripe today. |
-| **Netlify Identity / GoTrue JWT** — `context.clientContext.user`, else `GET <IDENTITY_URL>/user` | Netlify | `server/lib/admin-auth.ts:62-119`, layered by `request-roles.ts` | injected context or HTTPS | Any failure → `{authenticated:false}`; never a 500. A suspended member's JWT stays valid ≤ 1 h; roles are re-resolved per call. |
+| **Netlify Identity / GoTrue JWT** — `context.clientContext.user`, else `GET <IDENTITY_URL>/user` | Netlify | `server/lib/admin-auth.ts:62-119`, layered by `request-roles.ts` | injected context or HTTPS | Any failure → `{authenticated:false}`; never a 500. A suspended member's JWT stays valid ≤1 h; roles are re-resolved per call. |
 
 ---
 
