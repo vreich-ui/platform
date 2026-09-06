@@ -444,7 +444,7 @@ the bytes unchanged rather than failing the upload.
 | `/img/{id}/{sha64}.{ext}`, `/pdf/{id}/{sha64}.pdf` | governed — existence-checked against the artifact index |
 | `https://…` | **warn** — "bypasses artifact governance and can rot" |
 | other root-relative `/…` | **warn** — existence unverifiable |
-| `data:` URI · `src/assets/…` · type⇝src disagreement · PDF in `body.image` | **block** |
+| `data:` URI · `src/assets/…` · type⇄src disagreement · PDF in `body.image` | **block** |
 
 At publish (`atPublish`) a failed existence check is upgraded from warning to blocker. When the artifact
 index could not be read at all, the check emits a warning naming the likely
