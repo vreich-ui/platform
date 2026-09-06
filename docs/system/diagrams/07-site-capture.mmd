@@ -1,0 +1,22 @@
+sequenceDiagram
+  autonumber
+  participant C as CMS-Agent capture_conductor (captureEngine.ts)
+  participant T as Tenant /mcp (capture bridge)
+  participant X as pdf-tool
+  participant R as pdf-tool-render (Cloud Run)
+  participant O as pdf-x own Blobs
+  C->>T: create_capture_job {site_id, url, policy (from CMS-Agent project registry)}
+  T->>T: capture-bridge-policy: never widen · clamp maxPages · derive projectId + requestId(siteId,url)
+  T->>X: create_capture_job {projectId, requestId, url, policy} (no grant)
+  X->>X: validateCapturePolicy: sameOriginOnly, respectRobots, authenticatedAccess=prohibited · min(maxPages, 50)
+  X->>O: capture job + frontier (by-request pointer = idempotency)
+  X->>R: POST /capture/page (x-render-secret), JS off, network closed
+  R-->>X: page model + screenshots
+  X->>O: snapshot.v1 + screenshots + assets as binary artifacts (tag capture)
+  C->>T: get_capture_job_status {site_id, job_id}
+  C->>T: get_capture_snapshot {site_id, job_id}
+  T->>X: get_capture_snapshot {projectId, jobId}
+  X-->>T: {snapshot (≤ 8 MiB inline), snapshotArtifact}
+  T-->>C: snapshot.v1 (credential-shaped fields stripped)
+  C->>C: quarantine gate · map/theme/emit · clone_conductor
+  C->>T: object_checkout → object_publish → object_checkin for page/navigation objects (objectPublishExecution.ts)
