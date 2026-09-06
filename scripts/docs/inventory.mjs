@@ -337,14 +337,13 @@ function buildScheduledFunctions() {
 
 function buildMcpToolSurface() {
   const lines = [];
-  const files = [
-    { label: 'mcp-tool-definitions.ts (PART1)', path: 'packages/core/server/lib/mcp-tool-definitions.ts' },
-    { label: 'mcp-tool-definitions-2.ts (PART2)', path: 'packages/core/server/lib/mcp-tool-definitions-2.ts' },
-    {
-      label: 'mcp-tool-definitions-membership.ts (MEMBERSHIP)',
-      path: 'packages/core/server/lib/mcp-tool-definitions-membership.ts',
-    },
-  ];
+  // Every `mcp-tool-definitions*.ts` module under server/lib (tests excluded) — the
+  // set `packages/core/server/functions/mcp.ts` concatenates. Discovered, not listed,
+  // so a new definitions file (e.g. the W21 analytics one) cannot be silently missed.
+  const files = readdirSync(abs('packages/core/server/lib'))
+    .filter((name) => /^mcp-tool-definitions.*\.ts$/.test(name) && !name.endsWith('.test.ts'))
+    .sort()
+    .map((name) => ({ label: name, path: `packages/core/server/lib/${name}` }));
   const perFile = files.map((f) => ({ ...f, names: toolNamesFromText(readText(f.path)) }));
   const total = perFile.reduce((sum, f) => sum + f.names.length, 0);
   const allNames = perFile.flatMap((f) => f.names);
