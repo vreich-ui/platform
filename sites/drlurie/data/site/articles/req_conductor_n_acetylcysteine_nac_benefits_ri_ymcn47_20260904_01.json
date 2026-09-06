@@ -1,8 +1,16 @@
 {
   "__generated": {
-    "at": "2026-09-06T16:34:33.086Z",
+    "at": "2026-09-06T16:48:37.442Z",
+    "attribution": "oauth",
     "from": "objects/content_item/by-id/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01.json",
-    "record_version": 55
+    "producer": {
+      "model": "GPT-5.5 Thinking",
+      "node_id": "plugin:openai-gpt",
+      "prompt_version": "dr-lurie-claude-20260906-7d8f89be",
+      "run_id": "plugin_openai-gpt_req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01_media_pdf_20260906"
+    },
+    "record_version": 65,
+    "surface": "plugin:openai-agent"
   },
   "deck": "NAC is often marketed around antioxidants, glutathione support, detox, clarity, and healthy aging. Here is what is actually known, what is still uncertain, and how to decide whether it belongs in your routine.",
   "description": "NAC is marketed for antioxidant and glutathione support, but its role in skin health is more limited and nuanced than many product claims suggest. This guide explains the evidence, risks, product types, marketing strategies, and decision points to consider before adding NAC to a skincare or supplement routine.",
@@ -40,6 +48,14 @@
       "kind": "content",
       "public": {
         "body": "NAC is linked to skin claims because oxidative stress and inflammation are relevant to many skin conversations. The skin is exposed to ultraviolet light, pollution, irritation, infection, hormones, immune signals, and wound-healing demands. Antioxidant pathways can matter in those processes.\n\nNAC is also discussed because it can contribute to cysteine availability, and cysteine is connected to glutathione.[1] In simple terms, brands often position NAC as a way to support an internal antioxidant system.\n\nThat is biologically plausible. It is not the same as proof that taking NAC will make your skin look better.\n\nThis is where marketing can get ahead of the evidence. A supplement can sound scientific because the pathway is real, even when the promised skin outcome has not been shown clearly in people like you, using the product you are considering, for the goal you actually care about.",
+        "media": {
+          "alt": "Simplified NAC to cysteine to glutathione pathway with antioxidant-support context",
+          "caption": "A simplified pathway view: NAC is relevant to cysteine and glutathione biology, but that mechanism does not by itself prove visible skin benefits.",
+          "contentType": "image/webp",
+          "sizeBytes": 66858,
+          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/291c9e7486797d7b62593bb24a5d959187944818d64730b81370a88270ddef29.webp",
+          "type": "image"
+        },
         "title": "Why NAC is linked to skin claims"
       }
     },
@@ -48,6 +64,14 @@
       "kind": "content",
       "public": {
         "body": "Before looking at specific claims, it helps to separate evidence strength from marketing appeal.\n\nMost specific, but still clinician-guided: NAC has been studied for body-focused repetitive behaviors such as excoriation disorder and trichotillomania. This is not the same as using NAC for general skincare, and benefits are not guaranteed.[2][3][4]\n\nBiologically plausible but not proven for most cosmetic goals: antioxidant and glutathione-support claims. NAC may be relevant to glutathione biology, but that does not prove visible improvements in glow, texture, wrinkles, firmness, acne, pigmentation, or barrier health.\n\nWeak or unsupported for routine beauty promises: broad claims around detoxifying the skin, radiance, anti-aging, complexion clarity, dark spots, or acne improvement should be treated cautiously unless the product provides direct human evidence for that exact outcome.",
+        "media": {
+          "alt": "Evidence-confidence snapshot for NAC skin claims",
+          "caption": "Evidence strength is uneven: more specific clinician-guided research is different from broad beauty or glow claims.",
+          "contentType": "image/webp",
+          "sizeBytes": 54306,
+          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/89177f862d71b97cea646c28e8e9f0479ecaa72197d39702c5a24bb3c3432a41.webp",
+          "type": "image"
+        },
         "title": "Evidence-confidence snapshot"
       }
     },
@@ -131,8 +155,8 @@
         "media": {
           "alt": "NAC for Skin Health: What the Evidence Says Before You Add It to Your Routine",
           "contentType": "application/pdf",
-          "sizeBytes": 36199,
-          "src": "/pdf/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/fd360cf7fb0f6e3a8bedf977e9c0c4ac5aafae2819b4b8b99526697162f42b0a.pdf",
+          "sizeBytes": 34067,
+          "src": "/pdf/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/f7b3d768c538aff331a1d21c2477673690392102eafda5082926016e2aee2cef.pdf",
           "type": "document"
         },
         "title": "References"
