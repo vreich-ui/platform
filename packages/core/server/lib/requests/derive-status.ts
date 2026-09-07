@@ -19,6 +19,7 @@
  */
 
 import { isAdvisoryApproval } from './publication-evidence.js';
+import { hasActionableRemedy, parseBlockage, type Blockage } from '../../../lib/admin/blockage.js';
 
 // ─── the derived status union ────────────────────────────────────────────────
 
@@ -98,6 +99,8 @@ export interface RunNodeSnapshot {
   errors?: unknown;
   warnings?: unknown;
   skip?: { reason?: string | null } | null;
+  /** blockage.v1, as CMS-Agent writes it on a failed/blocked node state. Validated by `parseBlockage`. */
+  blockage?: unknown;
   lastDispatch?: RunNodeDispatchSnapshot | null;
   /**
    * `executor.ts`'s structured failure detail (Task B / `activity.ts`'s own
@@ -188,6 +191,13 @@ export interface RequestBlocker {
    * as `activity.ts`'s `ActivityNode.failure.operatorAction`.
    */
   operator_action?: string;
+  /**
+   * blockage.v1 — the structured form of `operator_action` above: the same next
+   * step, as remedies a card can put buttons on rather than a sentence a human
+   * has to re-type into an MCP call. Present only when CMS-Agent minted one; a
+   * surface without it falls back to `blockageFromLegacyMessage` (D9).
+   */
+  blockage?: Blockage;
 }
 
 export interface DerivedRequestState {
@@ -322,6 +332,7 @@ const failedNodeBlockers = (run: RunSnapshot, nodes: RunNodeSnapshot[]): Request
     const structuredError = output && isRecord(output.error) ? output.error : undefined;
     const structuredCode = structuredError ? asString(structuredError.code) : undefined;
     const structuredMessage = structuredError ? asString(structuredError.message) : undefined;
+    const blockage = parseBlockage(node.blockage);
     if (structuredCode && structuredMessage) {
       const operatorAction = structuredError ? asString(structuredError.operatorAction) : undefined;
       blockers.push({
@@ -329,6 +340,7 @@ const failedNodeBlockers = (run: RunSnapshot, nodes: RunNodeSnapshot[]): Request
         code: structuredCode,
         message: structuredMessage,
         ...(operatorAction ? { operator_action: operatorAction } : {}),
+        ...(blockage ? { blockage } : {}),
         ...(at ? { at } : {}),
       });
       continue;
@@ -338,6 +350,7 @@ const failedNodeBlockers = (run: RunSnapshot, nodes: RunNodeSnapshot[]): Request
     blockers.push({
       ...(nodeId ? { node_id: nodeId } : {}),
       code: errors[0] ?? 'node_failed',
+      ...(blockage ? { blockage } : {}),
       message: errors.slice(1).join('; ') || errors[0] || 'The step failed without an error message.',
       ...(at ? { at } : {}),
     });
@@ -412,13 +425,15 @@ const derive = ({ run, chat, now, config }: DeriveInput): DerivedRequestState =>
   // §5.1 precedence rule 1: a chat waiting on the human outranks the run
   // state — it is the nearer gate.
   const chatStatus = asString(chat?.status);
-  if (chatStatus === 'awaiting_approval' || chatStatus === 'awaiting_candidate') {
+  if (chatStatus === 'awaiting_approval' || chatStatus === 'awaiting_candidate' || chatStatus === 'awaiting_blockage_resolution') {
     const gateBlockers = approvalBlockers(approvals);
     const chatAt = asString(chat?.updated_at);
     const fallbackReason =
       chatStatus === 'awaiting_approval'
         ? 'The assistant is waiting for your approval in the chat before the job can continue.'
-        : 'The assistant is waiting for you to choose a candidate in the chat.';
+        : chatStatus === 'awaiting_blockage_resolution'
+          ? 'Something stopped and is waiting for your decision in the chat before the job can continue.'
+          : 'The assistant is waiting for you to choose a candidate in the chat.';
     return result(
       'needs_you',
       // Where CMS-Agent already wrote the editor copy (an approval reason),
@@ -426,7 +441,12 @@ const derive = ({ run, chat, now, config }: DeriveInput): DerivedRequestState =>
       gateBlockers[0]?.message ?? fallbackReason,
       [
         {
-          code: chatStatus === 'awaiting_approval' ? 'chat_awaiting_approval' : 'chat_awaiting_candidate',
+          code:
+            chatStatus === 'awaiting_approval'
+              ? 'chat_awaiting_approval'
+              : chatStatus === 'awaiting_blockage_resolution'
+                ? 'chat_awaiting_blockage_resolution'
+                : 'chat_awaiting_candidate',
           message: fallbackReason,
           ...(chatAt ? { at: chatAt } : {}),
         },
@@ -532,6 +552,30 @@ const failedResult = (
     nodes.find((node) => asString(node.status) === 'failed');
   const failedId = failedNode ? nodeIdOf(failedNode) : blockers.find((b) => b.node_id)?.node_id;
   // The node named in words; the machine code stays in the blocker, not here.
+  // D7 — RESOLVABLE IS "NEEDS YOU", NOT "FAILED", and this is also what closes
+  // the open STALLED_VS_FAILED_SPLIT question for the failure side. A run that
+  // stopped on a ceiling, a gate or a limit has not failed in any sense an
+  // editor should read as over: there is a button that continues it. Red is
+  // reserved for the walls where nothing can be done — which is exactly the
+  // rule the cards already follow (`activity-severity.ts`).
+  //
+  // Keyed on the blockage having a NON-CANCEL remedy, not on the code: a code
+  // list here would be a second, drifting copy of the engine's own table.
+  const actionable = blockers.find((blocker) => hasActionableRemedy(blocker.blockage));
+  if (actionable) {
+    return result(
+      'needs_you',
+      // The blockage's own sentence first: it is the one minted alongside the
+      // remedies being offered, so the words and the buttons cannot disagree.
+      actionable.blockage?.operator_action ??
+        actionable.operator_action ??
+        (failedId
+          ? `The ${nodeWords(failedId)} step stopped and needs a decision from you before it can continue.`
+          : 'This job stopped and needs a decision from you before it can continue.'),
+      blockers
+    );
+  }
+
   const reason = failedId
     ? `The ${nodeWords(failedId)} step failed, so the job has stopped.`
     : 'The job failed before it could finish.';

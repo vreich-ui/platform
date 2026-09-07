@@ -83,7 +83,14 @@ const CACHE_CONTROL = 'private, no-cache';
 const etagFor = (body: unknown): string => `"${createHash('sha1').update(JSON.stringify(body)).digest('hex')}"`;
 
 /** The statuses `AdminHome` treats as "an agent is working on this right now". */
-const LIVE_CHAT_STATUSES = new Set(['queued', 'running', 'awaiting_approval', 'awaiting_candidate', 'error']);
+const LIVE_CHAT_STATUSES = new Set([
+  'queued',
+  'running',
+  'awaiting_approval',
+  'awaiting_candidate',
+  'awaiting_blockage_resolution',
+  'error',
+]);
 
 /**
  * The row as the publication map needs it — the seven fields `FoundationSlot`

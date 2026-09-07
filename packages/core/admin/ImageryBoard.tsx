@@ -52,6 +52,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, Card, EmptyState } from './primitives';
+import { BlockageCard } from './BlockageCard';
+import { resolveBlockage, type Blockage, type RemedyButton } from '@core/lib/admin/blockage';
+import { resolveBlockage as resolveChatBlockage } from '@core/lib/admin/chat-client';
 import { Input, Textarea } from './forms';
 import { Dialog } from './overlays';
 import { IconAlertTriangle, IconLock, IconPlus, IconSparkles } from './icons';
@@ -62,6 +65,8 @@ import { importVisualReferencesInOrder, type ImportProgressRow } from '@core/lib
 import {
   buildAcceptProposalOp,
   proposeVisualIdentityContract,
+  VisualIdentityProposeError,
+  type ProposeRemedyInput,
   referencesReachedWriterLabel,
   type ProposeContractResponse,
 } from '@core/lib/admin/visual-identity-propose-client';
@@ -625,6 +630,13 @@ export interface ImageryBoardProps {
   overridePolicy: BrandImageryOverridePolicy;
   isOwner: boolean;
   getToken: GetToken;
+  /**
+   * D6 — the Publishing Agent panel's chat id, when this tab is rendered beside
+   * one. Present, a propose started from THIS TAB'S button writes a note and
+   * (on a wall) the same blockage card into that transcript, and a resolution
+   * from either surface clears both. Absent, the tab behaves exactly as before.
+   */
+  chatId?: string;
   /** The U3 seam: hand a tool-backed action to the docked chat rail. */
   onIntent: (intent: VisualIdentityChatIntent) => void;
   /** Reload the records this tab reads after a successful write. */
@@ -638,12 +650,22 @@ export function ImageryBoard({
   overridePolicy,
   isOwner,
   getToken,
+  chatId,
   onIntent,
   onChanged,
 }: ImageryBoardProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  /**
+   * W3.1 — the SAME failure the red `error` line used to be the whole of, in
+   * the shape that can carry buttons. Held separately rather than widening
+   * `error` to `Blockage | string`: every other setError call site on this tab
+   * (import, apply, checkout, preview) genuinely has only a sentence, and a
+   * union would have made all of them read as "maybe a card".
+   */
+  const [blockage, setBlockage] = useState<Blockage | undefined>(undefined);
+  const [resolving, setResolving] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [applyDiff, setApplyDiff] = useState<{ standardId: string; diff: ImageryDiffModel } | undefined>(undefined);
   const [importText, setImportText] = useState('');
@@ -767,21 +789,115 @@ export function ImageryBoard({
    * standard id and the brief. Nothing here writes the standard; a proposal
    * is read-only until "Make this the site's imagery" applies it.
    */
-  const runPropose = useCallback(async () => {
-    if (!selected) return;
-    setProposing(true);
-    setError(undefined);
-    setNotice(undefined);
-    try {
-      const response = await proposeVisualIdentityContract(getToken, { standardId: selected.objectId, brief });
-      setProposeResult({ standardId: selected.objectId, response });
-      setNotice(referencesReachedWriterLabel(response));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'The contract could not be proposed.');
-    } finally {
-      setProposing(false);
-    }
-  }, [brief, getToken, selected]);
+  const runPropose = useCallback(
+    async (remedy?: ProposeRemedyInput) => {
+      if (!selected) return;
+      setProposing(true);
+      setError(undefined);
+      setBlockage(undefined);
+      setNotice(undefined);
+      try {
+        const response = await proposeVisualIdentityContract(getToken, {
+          standardId: selected.objectId,
+          brief,
+          // D3 — resolving a budget blockage IS this same call again, with the
+          // one-shot ceiling the engine's own remedy named. No page reload, no
+          // second endpoint: the proposal appears where the card was.
+          ...(remedy ? { remedy } : {}),
+          // D6 — so the Publishing Agent panel beside this tab shows the run
+          // and its wall, instead of sitting empty while the page shows a card.
+          ...(chatId ? { chatId } : {}),
+        });
+        setProposeResult({ standardId: selected.objectId, response });
+        setNotice(referencesReachedWriterLabel(response));
+      } catch (reason) {
+        // The remedy, when the engine sent one; the plain sentence otherwise —
+        // including for an older CMS-Agent, where `blockageFromLegacyMessage`
+        // reconstructs the budget case from CMS-Agent's own numbers (D9).
+        const proposeError = reason instanceof VisualIdentityProposeError ? reason : undefined;
+        const resolved = resolveBlockage(
+          proposeError?.blockage,
+          proposeError
+            ? {
+                // D9's reconstruction only ever handles `budget_exceeded`, and
+                // it decides that by CODE. The proxy's own wrapper code
+                // (`brand_imagery_propose_node_failed`) is what an old engine's
+                // budget failure arrives as, so it is translated — but ONLY when
+                // the message actually reads like a budget trip. Translating
+                // every node failure would hand a "raise the budget" card, with
+                // a number parsed out of whatever two dollar figures happened to
+                // be in the text, to failures that have nothing to do with money.
+                code:
+                  proposeError.code === 'brand_imagery_propose_node_failed' && /budget/i.test(proposeError.message)
+                    ? 'budget_exceeded'
+                    : proposeError.code,
+                message: proposeError.message,
+                ...(proposeError.operatorAction ? { operatorAction: proposeError.operatorAction } : {}),
+                // The literal, not an import: the constant lives in the server
+                // proxy and this file is browser code. It is the only node
+                // `visual_identity_propose` can reach (its map is a compile-time
+                // constant), so there is nothing to resolve at runtime.
+                nodeId: 'brand_imagery_writer',
+              }
+            : undefined,
+          // This surface runs a synchronous tool with no run behind it, so the
+          // raise it can honour is the one-shot attempt (D3) — and until
+          // cms-agent ships blockage.v1 the reconstruction is the ONLY thing
+          // that can offer it here.
+          'sync'
+        );
+        if (resolved) setBlockage(resolved);
+        else setError(reason instanceof Error ? reason.message : 'The contract could not be proposed.');
+      } finally {
+        setProposing(false);
+      }
+    },
+    [brief, chatId, getToken, selected]
+  );
+
+  /**
+   * The card's buttons, all of them. A budget raise is a RE-PROPOSE (D3 — this
+   * tool's run is synthetic, so there is nothing to retry); everything else
+   * goes to the shared resolver through the chat, which is the one place that
+   * holds the blockage and the idempotency ledger (D4).
+   */
+  const resolveBlockageButton = useCallback(
+    async (button: RemedyButton) => {
+      if (!blockage) return;
+      const remedy = blockage.remedies.find((entry) => entry.id === button.remedy_id);
+      if (!remedy) return;
+      if (remedy.type === 'cancel') {
+        setBlockage(undefined);
+        return;
+      }
+      setResolving(true);
+      try {
+        if (remedy.type === 'raise_node_budget') {
+          const budgetUsd = typeof remedy.args?.budgetUsd === 'number' ? remedy.args.budgetUsd : undefined;
+          if (budgetUsd === undefined) return;
+          await runPropose({
+            blockage_id: blockage.blockage_id,
+            remedy_id: remedy.id,
+            scope: remedy.args?.scope === 'default' ? 'default' : 'attempt',
+            budget_usd: budgetUsd,
+          });
+          return;
+        }
+        if (chatId) {
+          await resolveChatBlockage(getToken, chatId, blockage.blockage_id, remedy.id);
+          setBlockage(undefined);
+          setNotice('Done — the agent is picking it up.');
+          return;
+        }
+        setError('That can only be resolved from the agent panel.');
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'That could not be applied.');
+      } finally {
+        setResolving(false);
+      }
+    },
+    [blockage, chatId, getToken, runPropose]
+  );
 
   /**
    * W5 F2: accepting the proposal is what actually makes it the standard's
@@ -1089,6 +1205,19 @@ export function ImageryBoard({
 
   return (
     <div className="flex flex-col gap-5">
+      {/* W3.1 — a wall with a remedy is a CARD WITH BUTTONS, not a red X and a
+          sentence naming a raise nobody can click. The plain error line stays
+          for everything that genuinely has no remedy (an import that failed, a
+          checkout held by someone else). */}
+      {blockage ? (
+        <BlockageCard
+          blockage={blockage}
+          isOwner={isOwner}
+          busy={resolving || proposing}
+          onResolve={resolveBlockageButton}
+          {...(chatId ? { chatHint: 'Or just tell the agent in the panel — “raise it to $2 and try again” works too.' } : {})}
+        />
+      ) : null}
       {error ? <EmptyState severity="error" title="That did not go through" message={error} /> : null}
       {notice ? (
         <p className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-success-soft)] px-3 py-2 text-[length:var(--adm-text-sm)] text-[var(--adm-success-text)]">

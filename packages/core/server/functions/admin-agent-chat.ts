@@ -23,8 +23,12 @@ import {
   getAgentLearningBlobStore,
   getArtifactIndexBlobStore,
   getEditorialRequestsBlobStore,
+  getIdempotencyBlobStore,
   getSiteObjectsBlobStore,
 } from '../lib/blob-store.js';
+import { parseBlockage } from '../../lib/admin/blockage.js';
+import { matchBlockageAnswer } from '../../lib/admin/blockage-answer-matcher.js';
+import { applyRemedy, createBlobRemedyLedger, type RemedyLedgerStore } from '../lib/requests/remedy.js';
 import {
   getGovernanceBlobStore,
   getGovernanceDoc,
@@ -55,7 +59,9 @@ import {
   listChatDocs,
   loadChatDoc,
   mintFreeChatId,
+  appendChatEvent,
   objectChatId,
+  resolvePendingBlockage,
   saveChatDoc,
   type ChatDoc,
   type RegistryKind,
@@ -143,6 +149,20 @@ const requestSchema = z.discriminatedUnion('action', [
     reason: z.string().max(2000).optional(),
   }),
   z.object({ action: z.literal('cancel'), chat_id: z.string().min(1) }),
+  /**
+   * D4/D6 — clear a wall from the transcript. The SAME post-back the Imagery
+   * card and the Requests card make, so the three surfaces are one code path
+   * and one spend. `args` carries only what a human may override (an amount);
+   * `remedy.ts`'s `mergeRemedyArgs` is what enforces that — a typed amount can
+   * never re-target the remedy at another node, run or scope.
+   */
+  z.object({
+    action: z.literal('resolve_blockage'),
+    chat_id: z.string().min(1),
+    blockage_id: z.string().min(1),
+    remedy_id: z.string().min(1),
+    args: z.record(z.string(), z.unknown()).optional(),
+  }),
   z.object({
     action: z.literal('choose_candidate'),
     chat_id: z.string().min(1),
@@ -430,12 +450,86 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           ...(doc.status === 'awaiting_candidate' && doc.run?.candidate_selection
             ? { candidate_set: candidateSetView(doc.run.candidate_selection) }
             : {}),
+          // Not gated on status, unlike the two above: a blockage that landed
+          // while a run was in flight (a page-origin one, D6) is real and
+          // actionable even though the doc's status still belongs to that run.
+          ...(doc.pending_blockage ? { blockage: doc.pending_blockage.blockage, blockage_origin: doc.pending_blockage.origin } : {}),
         });
       }
 
       case 'send': {
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found — create_chat first.' });
+
+        // W4.2 — D5's FIRST HALF, BEFORE ANY MODEL TURN. With a wall pending,
+        // the human's next message is far more often an ANSWER to it ("yes",
+        // "$2", "1") than a new instruction. Matching those here resolves the
+        // blockage for zero provider cost; anything the matcher declines — a
+        // question, a condition, a new subject — falls straight through to the
+        // ordinary run below, which carries the blockage into its system prompt
+        // (buildAgentSystemPrompt) so the model answers about the right thing.
+        //
+        // GATED ON THE CHAT ACTUALLY WAITING FOR IT. `pending_blockage` is
+        // deliberately not status-gated for RENDERING (a wall raised by a page
+        // button is real while a chat run is going), but INTERCEPTING a message
+        // is a different question. Without this gate, a wall raised by the
+        // Imagery button sits pending while the human has an unrelated
+        // conversation, and their "ok" to the agent's own question ("shall I
+        // draft the intro?") is eaten here and spent on a budget raise — or, on
+        // an approval blockage, publishes. The status is what says "the last
+        // thing that happened is this wall, and your next message answers it".
+        const awaitingAnswer = doc.status === 'awaiting_blockage_resolution';
+        const pendingForAnswer = awaitingAnswer ? parseBlockage(doc.pending_blockage?.blockage) : undefined;
+        const answer = matchBlockageAnswer(request.data.text, pendingForAnswer);
+        if (pendingForAnswer && answer) {
+          const bridge = cmsAgentToolBridge();
+          if (!bridge) {
+            return jsonResponse(503, {
+              error: humanCopyForCmsAgentError({ code: 'cms_agent_not_configured', message: '' }).text,
+              code: 'cms_agent_not_configured',
+            });
+          }
+          const at = new Date().toISOString();
+          // The human's own words go in the transcript first, whatever happens
+          // next: this WAS a message they sent, and a receipt with no question
+          // above it reads as the system talking to itself.
+          appendChatEvent(doc, at, 'user_message', { text: request.data.text, by: caller.email });
+          const outcome = await applyRemedy(
+            bridge,
+            pendingForAnswer,
+            { remedy_id: answer.remedy_id, ...(answer.args ? { args: answer.args } : {}), by: caller.email },
+            createBlobRemedyLedger((await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore),
+            undefined,
+            { isOwner: isOwner(callerRoles), email: caller.email }
+          );
+          if (outcome.ok) {
+            resolvePendingBlockage(doc, at, {
+              blockage_id: pendingForAnswer.blockage_id,
+              remedy_id: answer.remedy_id,
+              by: caller.email,
+              outcome: outcome.status,
+            });
+          } else {
+            // A refusal is reported in the transcript rather than thrown away —
+            // the card STAYS, so the human can press the button or say
+            // something else, and they can see why the typed answer did not
+            // land. `caller_action` lands here too, deliberately: an
+            // attempt-scoped raise is a re-run only the page that started it
+            // can make, and clearing the wall here would be telling the human
+            // it was handled when nothing ran.
+            appendChatEvent(doc, at, 'run_error', {
+              message: outcome.message ?? 'That could not be applied.',
+              ...(outcome.code ? { code: outcome.code } : {}),
+            });
+          }
+          await saveChatDoc(chatStore, doc);
+          return jsonResponse(200, {
+            chat_id: doc.chat_id,
+            resolved: outcome.ok,
+            status: outcome.status,
+            ...(outcome.rerunWith ? { rerun_with: outcome.rerunWith } : {}),
+          });
+        }
 
         const boundRow = await requestRowForChat(await getEditorialRequestsBlobStore(event), doc.chat_id).catch(
           () => undefined
@@ -617,6 +711,56 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
                   );
         if (result.resume) await triggerBackground(request.data.chat_id, result.resume.triggerToken);
         return jsonResponse(result.status, result.body);
+      }
+
+      case 'resolve_blockage': {
+        const doc = await loadChatDoc(chatStore, request.data.chat_id);
+        if (!doc) return jsonResponse(404, { error: 'chat not found' });
+
+        // The blockage this resolves must be the one the SERVER is holding —
+        // never a shape the browser sent. A client-supplied blockage would let
+        // a caller name its own remedies (and their dollar amounts), which is
+        // the whole authority this contract exists to keep on the engine side.
+        const parsed = parseBlockage(doc.pending_blockage?.blockage);
+        if (!parsed || parsed.blockage_id !== request.data.blockage_id) {
+          // Not an error: the far more common cause is that the card resolved
+          // it a second ago and this chat is catching up. Say so, and let the
+          // client clear its own copy.
+          return jsonResponse(200, { resolved: false, status: 'already_resolved' });
+        }
+
+        const bridge = cmsAgentToolBridge();
+        if (!bridge) return jsonResponse(502, { error: 'The workspace orchestration bridge is not configured for this site.' });
+
+        const outcome = await applyRemedy(
+          bridge,
+          parsed,
+          { remedy_id: request.data.remedy_id, ...(request.data.args ? { args: request.data.args } : {}) , by: caller.email },
+          createBlobRemedyLedger((await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore),
+          undefined,
+          // D8 at the WRITE. This endpoint admits any `admin`; the Owner
+          // distinction the buttons draw has to be re-drawn here or a scripted
+          // POST writes a node's stored default budget with no gate at all.
+          { isOwner: isOwner(callerRoles), email: caller.email }
+        );
+
+        const at = new Date().toISOString();
+        if (outcome.ok) {
+          resolvePendingBlockage(doc, at, {
+            blockage_id: parsed.blockage_id,
+            remedy_id: request.data.remedy_id,
+            by: caller.email,
+            outcome: outcome.status,
+          });
+          await saveChatDoc(chatStore, doc);
+        }
+        return jsonResponse(outcome.ok ? 200 : 400, {
+          resolved: outcome.ok,
+          status: outcome.status,
+          ...(outcome.rerunWith ? { rerun_with: outcome.rerunWith } : {}),
+          ...(outcome.navigateTo ? { navigate_to: outcome.navigateTo } : {}),
+          ...(outcome.ok ? {} : { error: outcome.message ?? 'That could not be applied.', error_code: outcome.code }),
+        });
       }
 
       case 'cancel': {

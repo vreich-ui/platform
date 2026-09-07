@@ -43,6 +43,7 @@ import type sharpType from 'sharp';
 import { z } from 'zod';
 
 import { brandImagerySchema } from '../../schema/bodies/site-v1.js';
+import { parseBlockage, type Blockage } from '../../lib/admin/blockage.js';
 
 const toNonEmptyString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -73,6 +74,18 @@ export type BrandImageryProposeInput = {
   brief?: string;
   existingBrandImagery?: unknown;
   templateSlug?: string;
+  /**
+   * D3 — a ONE-SHOT ceiling for this call only, forwarded to
+   * `visual_identity_propose`'s `modelConfigOverride`. This is what resolving a
+   * `raise_node_budget{scope:"attempt"}` remedy re-calls with: the writer runs
+   * as a synthetic `independent_node` run, so a per-run override and a retry
+   * cannot address it — only the next call can (F4). Nothing is stored; the
+   * call after this one sees the node's own default again.
+   *
+   * Never caller-supplied raw: the propose handler builds it from a remedy the
+   * ENGINE offered, bounded there and again by the tool's own schema.
+   */
+  modelConfigOverride?: { budgetUsd?: number; maxTurns?: number; maxOutputTokens?: number };
 };
 
 export type BrandImageryImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp';
@@ -109,6 +122,14 @@ export type BrandImageryCmsAgentClient = {
          */
         statusCode?: number;
         fromJsonBody?: boolean;
+        /**
+         * blockage.v1 — the engine's structured remedy for this failure, when
+         * it minted one. Optional for the same reason the two above are: a test
+         * stub does not have to fake it, and a CMS-Agent deployed before
+         * blockage.v1 does not send one.
+         */
+        blockage?: Blockage;
+        operatorAction?: string;
       }
   >;
 };
@@ -448,7 +469,7 @@ const looksLikeProposal = (value: unknown): boolean =>
  */
 export const extractWriterProposal = (
   data: unknown
-): { ok: true; proposal: unknown } | { ok: false; reason: string } => {
+): { ok: true; proposal: unknown } | { ok: false; reason: string; blockage?: Blockage } => {
   if (looksLikeProposal(data)) return { ok: true, proposal: data };
   if (!isBag(data)) return { ok: false, reason: 'node_execute returned no object.' };
 
@@ -470,7 +491,20 @@ export const extractWriterProposal = (
   const nodes = Array.isArray(execution.nodes) ? execution.nodes.filter(isBag) : [];
   const writerState = nodes.find((node) => node.nodeId === BRAND_IMAGERY_WRITER_NODE_ID) ?? nodes[0];
 
-  if (writerState?.output !== undefined) return { ok: true, proposal: writerState.output };
+  // 2.3 — the blockage BEFORE the output reads, for the same two reasons it
+  // comes first in CMS-Agent's own extractNodeProposal: a failed node now
+  // carries `output = { error: … }` (so the read below would hand an error
+  // envelope back as a proposal), and this is where the remedy survives instead
+  // of being string-joined into the run's error list at the bottom of this
+  // function. Only reached on the legacy `node_execute` record shape — the live
+  // `visual_identity_propose` path refuses before this, and its blockage
+  // arrives on the CmsAgentError instead.
+  const nodeBlockage = parseBlockage(writerState?.blockage);
+  if (nodeBlockage) return { ok: false, reason: nodeBlockage.message, blockage: nodeBlockage };
+
+  if (writerState?.output !== undefined && !(isBag(writerState.output) && isBag(writerState.output.error))) {
+    return { ok: true, proposal: writerState.output };
+  }
 
   const stageOutputs = isBag(execution.stageOutputs) ? execution.stageOutputs : undefined;
   const staged = stageOutputs?.[BRAND_IMAGERY_WRITER_NODE_ID];
@@ -529,6 +563,7 @@ const buildVisualIdentityProposeArgs = (
     ...(input.existingBrandImagery !== undefined ? { existingBrandImagery: input.existingBrandImagery } : {}),
     ...(toNonEmptyString(input.templateSlug) ? { templateSlug: input.templateSlug } : {}),
     ...(imageRefs.length > 0 ? { imageRefs } : {}),
+    ...(input.modelConfigOverride ? { modelConfigOverride: input.modelConfigOverride } : {}),
   };
 };
 
@@ -741,7 +776,16 @@ export const proposeBrandImagery = async (
         { upstreamCode: executed.code }
       );
     }
-    return err(502, executed.code || 'cms_agent_error', executed.message);
+    // F5, first flattening: `err(502, code, message)` dropped everything else
+    // CMS-Agent said — including, after blockage.v1, the entire remedy. The
+    // blockage now rides in `detail`, which the handler forwards to the browser
+    // verbatim; `upstreamCode`/`operatorAction` ride with it so a card can still
+    // say something honest when there is no blockage (an older engine).
+    return err(502, executed.code || 'cms_agent_error', executed.message, {
+      upstreamCode: executed.code,
+      ...(executed.blockage ? { blockage: executed.blockage } : {}),
+      ...(executed.operatorAction ? { operatorAction: executed.operatorAction } : {}),
+    });
   }
 
   const extracted = extractWriterProposal(executed.data);
@@ -750,7 +794,7 @@ export const proposeBrandImagery = async (
       502,
       'brand_imagery_propose_node_failed',
       `CMS-Agent's brand_imagery_writer returned no proposal: ${extracted.reason}`,
-      { reason: extracted.reason }
+      { reason: extracted.reason, ...(extracted.blockage ? { blockage: extracted.blockage } : {}) }
     );
   }
 

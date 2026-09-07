@@ -57,6 +57,10 @@ const STATUS_TONE: Record<ChatStatus, 'success' | 'info' | 'warning' | 'neutral'
   running: 'info',
   awaiting_approval: 'warning',
   awaiting_candidate: 'warning',
+  // Amber, like the other two human gates — never red. Wolf's rule: red is for
+  // a wall where nothing can be done, and a blockage is by definition one where
+  // something can.
+  awaiting_blockage_resolution: 'warning',
   error: 'warning',
   cancelled: 'neutral',
 };
@@ -575,6 +579,8 @@ function HubBody() {
               events={chat.events}
               status={chat.status}
               pending={chat.pending}
+              {...(chat.blockage ? { blockage: chat.blockage } : {})}
+              onResolveBlockage={(remedyId, args) => void chat.resolveBlockage(remedyId, args)}
               busy={chat.busy}
               onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
               onReject={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}

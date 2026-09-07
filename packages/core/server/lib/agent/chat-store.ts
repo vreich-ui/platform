@@ -86,6 +86,18 @@ export const chatEventTypeSchema = z.enum([
    * current state. Schema-additive — pre-W19 docs never carry it.
    */
   'request_progress',
+  /**
+   * D6 — a wall a human can clear, in the transcript. Two things put one here:
+   * a run STARTED FROM THIS CHAT that hit a ceiling/gate, and a run started
+   * from a PAGE (the Imagery tab's button) that has no transcript of its own.
+   * The second is the point: before this, a button-triggered propose that
+   * failed left the chat panel beside it completely empty, so the surface that
+   * is meant to be the ledger of what happened knew nothing about it.
+   * `detail` carries `{blockage, origin}` — never a tenant path or a run SHA.
+   */
+  'blockage',
+  /** The same wall, cleared — from either surface. `detail`: {blockage_id, remedy_id, by, outcome}. */
+  'blockage_resolved',
   /** Historical PF3 event retained so pre-PF5 chat documents still parse. */
   'engine_fallback',
   'events_trimmed',
@@ -242,10 +254,45 @@ export const chatDocSchema = z.object({
   created_by: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
-  status: z.enum(['idle', 'queued', 'running', 'awaiting_approval', 'awaiting_candidate', 'error', 'cancelled']),
+  status: z.enum([
+    'idle',
+    'queued',
+    'running',
+    'awaiting_approval',
+    'awaiting_candidate',
+    /**
+     * D6 — the chat is waiting on a human to clear a blockage. A sibling of
+     * awaiting_approval/awaiting_candidate and written by the same single-writer
+     * rule: only a path that HOLDS the doc sets it, and only resolve/cancel
+     * clears it. Schema-additive; no pre-existing doc carries it.
+     */
+    'awaiting_blockage_resolution',
+    'error',
+    'cancelled',
+  ]),
   seq: z.number().int().nonnegative(),
   events: z.array(chatEventSchema),
   run: chatRunSchema.optional(),
+  /**
+   * The wall this chat is currently waiting on. ON THE DOC, not on `run`,
+   * deliberately: a page-origin blockage (the Imagery button, D6) has no chat
+   * run at all, and putting it on `run` would mean the panel could only ever
+   * show walls it had caused itself — which is the gap this closes.
+   *
+   * The blockage is stored as the engine minted it (`blockage.v1`), unvalidated
+   * by zod beyond "an object": the shape is CMS-Agent's contract, `parseBlockage`
+   * is where it is checked, and a schema copy here would be a second definition
+   * to drift.
+   */
+  pending_blockage: z
+    .object({
+      blockage: z.record(z.string(), z.unknown()),
+      origin: z.enum(['page', 'chat']),
+      at: z.string(),
+      /** The chat run that hit it, when a chat run did. */
+      run_id: z.string().optional(),
+    })
+    .optional(),
   runs: z.array(runSummarySchema),
 });
 export type ChatDoc = z.infer<typeof chatDocSchema>;
@@ -331,3 +378,63 @@ export const isRunStale = (doc: ChatDoc, nowMs: number): boolean =>
 
 export const getAgentChatBlobStore = (event: unknown): Promise<AgentChatStore> =>
   getNetlifyBlobStore({ name: 'agent-chats', consistency: 'strong' }, event) as unknown as Promise<AgentChatStore>;
+
+// ─── D6: blockages in the transcript ─────────────────────────────────────────
+
+/**
+ * Put a wall in front of the human, in this chat.
+ *
+ * THE STATUS RULE, and why it is conditional. A chat's status has exactly one
+ * legal writer per transition (see this module's header). A page-origin
+ * blockage arrives from a completely different code path — the Imagery tab's
+ * propose endpoint — which holds no claim on this doc and may well arrive while
+ * a chat run is mid-flight. So the EVENT is always appended (the transcript is
+ * the ledger, and a wall that happened is a fact), but the STATUS only moves
+ * when the doc is genuinely idle. A blockage that lands during a live run shows
+ * as a transcript entry with its buttons; it does not hijack the run's state.
+ *
+ * Returns whether the status moved, so a caller can say so honestly.
+ */
+export const setPendingBlockage = (
+  doc: ChatDoc,
+  at: string,
+  blockage: Record<string, unknown>,
+  origin: 'page' | 'chat',
+  runId?: string
+): { statusChanged: boolean } => {
+  doc.pending_blockage = { blockage, origin, at, ...(runId ? { run_id: runId } : {}) };
+  appendChatEvent(doc, at, 'blockage', {
+    blockage,
+    origin,
+    ...(runId ? { run_id: runId } : {}),
+  });
+  const idle = doc.status === 'idle' || doc.status === 'error';
+  if (idle) doc.status = 'awaiting_blockage_resolution';
+  return { statusChanged: idle };
+};
+
+/**
+ * The wall is cleared — from EITHER surface (D4). Idempotent by design: called
+ * with a blockage_id that is not the pending one (the card resolved it first,
+ * and this is the chat catching up) it still writes the receipt, because the
+ * transcript should record that it was resolved, and simply does not touch a
+ * DIFFERENT pending blockage.
+ */
+export const resolvePendingBlockage = (
+  doc: ChatDoc,
+  at: string,
+  detail: { blockage_id: string; remedy_id: string; by?: string; outcome: string }
+): void => {
+  const pendingId = doc.pending_blockage?.blockage?.blockage_id;
+  if (pendingId === detail.blockage_id) {
+    delete doc.pending_blockage;
+    if (doc.status === 'awaiting_blockage_resolution') doc.status = 'idle';
+  }
+  appendChatEvent(doc, at, 'blockage_resolved', { ...detail });
+};
+
+/** The pending wall's id, when there is one — the key every surface resolves by. */
+export const pendingBlockageId = (doc: ChatDoc): string | undefined => {
+  const id = doc.pending_blockage?.blockage?.blockage_id;
+  return typeof id === 'string' ? id : undefined;
+};

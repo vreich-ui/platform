@@ -308,6 +308,15 @@ function IdentityBoard({
  */
 export interface VisualIdentityRailSeam {
   open: (intent: VisualIdentityChatIntent) => void;
+  /**
+   * D6 — the docked chat's id, so a run started from a BUTTON on this page can
+   * write into the transcript sitting next to it (a note, and, on a wall, the
+   * same blockage card with the same remedies). The seam already exists for
+   * exactly this kind of page→chat hand-off; this is the second thing that
+   * crosses it. Optional: a host with no chat supplies none, and the page then
+   * behaves as it always has.
+   */
+  chatId?: string;
 }
 
 const RETHEME_INTENT: VisualIdentityChatIntent = {
@@ -498,6 +507,7 @@ function VisualIdentityBody({
             overridePolicy={overridePolicy}
             isOwner={owner === true}
             getToken={getToken}
+            {...(rail?.chatId ? { chatId: rail.chatId } : {})}
             onIntent={runIntent}
             onChanged={load}
           />
@@ -684,8 +694,13 @@ export default function VisualIdentityWorkspace({
   const dockedRail: VisualIdentityRailSeam = useMemo(
     () => ({
       open: (intent) => setComposerSeed({ key: `${intent.tool}:${Date.now()}`, text: intent.prompt }),
+      // D6: only while the dock is actually mounted. Handing the board a chat
+      // id for a panel nobody can see would write notes into a transcript with
+      // no reader — and the card's "or just tell the agent" hint would point at
+      // a composer that is not on screen.
+      ...(dockActive ? { chatId: chatSession.chatId } : {}),
     }),
-    []
+    [dockActive, chatSession.chatId]
   );
   const rail = externalRail ?? dockedRail;
 

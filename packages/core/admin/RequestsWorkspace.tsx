@@ -336,7 +336,7 @@ export interface RowActionHandlers {
    * "no live URL yet" into a live URL. Not per-object; see `rowActions`.
    */
   onRelease: (row: RequestRowView) => void;
-  /** Opens the run's detail, where the Owner-only budget-raise card (`budgetRaiseButtons` → `raiseNodeBudget`) already lives. */
+  /** Opens the run's detail, where the Owner-only budget-raise card (`remedyButtons` → `raiseNodeBudget`) already lives. */
   onRaiseBudget: (row: RequestRowView) => void;
 }
 
@@ -1169,7 +1169,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
    * that says "not wired yet" any more.
    *
    * `onRaiseBudget` opens the run's detail rather than raising anything here:
-   * the Owner-only raise card (`budgetRaiseButtons` → `raiseNodeBudget`)
+   * the Owner-only raise card (`remedyButtons` → `raiseNodeBudget`)
    * already exists in `RequestActivity`, and it needs the failed node's own
    * budget numbers — which an index row does not carry. Routing to it beats
    * a second, number-less copy of the same two buttons.

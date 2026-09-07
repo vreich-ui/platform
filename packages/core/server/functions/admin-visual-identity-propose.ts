@@ -80,7 +80,7 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import type { Role } from '../lib/roles.js';
-import { getSiteObjectsBlobStore, getArtifactBlobStore } from '../lib/blob-store.js';
+import { getSiteObjectsBlobStore, getArtifactBlobStore, getIdempotencyBlobStore } from '../lib/blob-store.js';
 import {
   handleObjectVerb,
   objectVerbRequestSchema,
@@ -90,11 +90,27 @@ import {
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
 import {
   BRAND_IMAGERY_MAX_REFERENCES,
+  BRAND_IMAGERY_WRITER_NODE_ID,
   proposeBrandImagery,
   type BrandImageryProposeInput,
   type BrandImageryReferenceInput,
   type BrandImageryRegion,
 } from '../lib/brand-imagery-proxy.js';
+import {
+  createBlobRemedyLedger,
+  planSyncToolRemedy,
+  type RemedyLedgerStore,
+  type SyncToolRemedyRequest,
+} from '../lib/requests/remedy.js';
+import { parseBlockage } from '../../lib/admin/blockage.js';
+import {
+  appendChatEvent,
+  getAgentChatBlobStore,
+  loadChatDoc,
+  resolvePendingBlockage,
+  saveChatDoc,
+  setPendingBlockage,
+} from '../lib/agent/chat-store.js';
 import { publicPathForArtifactRef } from '../lib/artifact-trust.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import type { Principal } from '../../schema/object-record-v1.js';
@@ -173,6 +189,103 @@ const readMode = (body: unknown): 'house' | 'template' | undefined => {
  */
 const cmsAgentClient = new CmsAgentClient();
 
+/**
+ * D6's chat bridge, both directions, in two small best-effort helpers.
+ *
+ * WHAT IS DELIBERATELY NOT WRITTEN HERE: no tenant blob path, no run SHA, no
+ * standard body — a chat transcript is read by editors and exported, and the
+ * blockage the engine minted already carries every figure a human needs
+ * (`operator_action`, `details.suggestedBudgetUsd`). The only local fact added
+ * is which standard was being written, by its id, which the editor is looking
+ * at anyway.
+ */
+/**
+ * TWO REFUSALS, both about writing into a document this function does not own.
+ *
+ * 1. OWNERSHIP. `chat_id` arrives from the browser. Without a check, a caller
+ *    can name someone else's conversation: write a blockage into it (flipping
+ *    it to awaiting_blockage_resolution, so the victim's next "ok" is eaten by
+ *    the answer matcher and spent), or — through the resolve path — clear a
+ *    wall they never saw and plant a false "resolved" receipt. The chat's own
+ *    author is the only person this may write for.
+ * 2. THE SINGLE-WRITER RULE. `chat-store.ts` is explicit: Netlify Blobs has no
+ *    compare-and-swap, so every transition has exactly one legal writer, and
+ *    `saveChatDoc` is an unconditional whole-document write. This function is a
+ *    completely different code path from the run loop. Loading at T0 and saving
+ *    at T2 would roll back anything the loop wrote at T1 — events lost, `seq`
+ *    moving backwards, and since clients poll `since_seq`, permanently skipped.
+ *    So: only when no run holds the doc. A note is worth having; it is not
+ *    worth eating a live run for.
+ */
+const openChatForPageWrite = async (
+  event: LambdaEvent,
+  chatId: string,
+  callerEmail: string
+): Promise<{ store: Awaited<ReturnType<typeof getAgentChatBlobStore>>; doc: NonNullable<Awaited<ReturnType<typeof loadChatDoc>>> } | undefined> => {
+  const store = await getAgentChatBlobStore(event);
+  const doc = await loadChatDoc(store, chatId);
+  if (!doc) return undefined;
+  if (doc.created_by !== callerEmail) return undefined;
+  if (doc.status !== 'idle' && doc.status !== 'error' && doc.status !== 'cancelled' && doc.status !== 'awaiting_blockage_resolution') {
+    return undefined;
+  }
+  return { store, doc };
+};
+
+const appendProposeBlockageToChat = async (
+  event: LambdaEvent,
+  chatId: string,
+  callerEmail: string,
+  standardId: string,
+  blockage: Record<string, unknown>
+): Promise<void> => {
+  const opened = await openChatForPageWrite(event, chatId, callerEmail);
+  if (!opened) return;
+  const { store, doc } = opened;
+  const at = new Date().toISOString();
+  // A one-line note first, so the transcript reads as a story rather than a
+  // card appearing out of nowhere: "the page did this, and it stopped here".
+  appendChatEvent(doc, at, 'run_started', {
+    origin: 'page',
+    action: 'visual_identity_propose',
+    standard_id: standardId,
+  });
+  setPendingBlockage(doc, at, blockage, 'page');
+  await saveChatDoc(store, doc);
+};
+
+const noteProposeFinishedInChat = async (
+  event: LambdaEvent,
+  chatId: string,
+  callerEmail: string,
+  standardId: string,
+  resolvedBlockageId?: string,
+  remedyId?: string
+): Promise<void> => {
+  const opened = await openChatForPageWrite(event, chatId, callerEmail);
+  if (!opened) return;
+  const { store, doc } = opened;
+  const at = new Date().toISOString();
+  // A successful re-propose IS the resolution of the wall it was retrying: the
+  // remedy was applied, the call was made, and it worked. Recording it here is
+  // what stops the chat still offering "Raise to $1.50" beside a proposal that
+  // has already been written.
+  if (resolvedBlockageId) {
+    resolvePendingBlockage(doc, at, {
+      blockage_id: resolvedBlockageId,
+      remedy_id: remedyId ?? 'unknown',
+      outcome: 'applied',
+    });
+  }
+  appendChatEvent(doc, at, 'run_finished', {
+    origin: 'page',
+    action: 'visual_identity_propose',
+    standard_id: standardId,
+    outcome: 'completed',
+  });
+  await saveChatDoc(store, doc);
+};
+
 export type AdminVisualIdentityProposeOptions = {
   /** Test seam: a stand-in CmsAgentClient. Production uses the real bridge. */
   cmsAgent?: { callTool: CmsAgentClient['callTool'] };
@@ -197,6 +310,48 @@ const buildHandlerImpl =
     const standardId = text(payload.standardId);
     if (!standardId) return jsonResponse(400, { error: 'standardId is required.' });
     const brief = text(payload.brief)?.slice(0, 4000);
+
+    // 2.4 — RESOLVING A BLOCKAGE IS A RE-PROPOSE, not a new endpoint. The card
+    // (or a chat answer) posts back the remedy the ENGINE offered on the failed
+    // call; this re-runs the same propose with the one-shot ceiling that remedy
+    // names (D3), optionally writing the node's stored default first when the
+    // operator chose that and is an Owner (D8). The narrow shape is deliberate:
+    // see `SyncToolRemedyRequest` for why a whole client-supplied blockage is
+    // not accepted here.
+    // D6 — WOLF'S ASK: a run started from a BUTTON must show up in the chat
+    // panel sitting next to that button. The propose endpoint is synchronous and
+    // creates no run record, so before this the panel stayed completely empty
+    // while the page showed a red X. `chat_id` is the panel's own chat; absent,
+    // everything below is skipped and the endpoint behaves exactly as it did.
+    const chatId = text(payload.chat_id);
+
+    const remedyPayload = isRecord(payload.remedy) ? payload.remedy : undefined;
+    const remedy: SyncToolRemedyRequest | undefined = remedyPayload
+      ? {
+          blockage_id: text(remedyPayload.blockage_id) ?? '',
+          remedy_id: text(remedyPayload.remedy_id) ?? '',
+          scope: remedyPayload.scope === 'default' ? 'default' : 'attempt',
+          budget_usd: typeof remedyPayload.budget_usd === 'number' ? remedyPayload.budget_usd : Number.NaN,
+        }
+      : undefined;
+    const plan = planSyncToolRemedy(remedy, BRAND_IMAGERY_WRITER_NODE_ID, {
+      isOwner: access.roles.includes('owner'),
+    });
+    if (plan && !plan.ok) return jsonResponse(plan.status, { error: plan.error });
+
+    // D4 — a wall already cleared is not cleared again. The ledger is the only
+    // thing standing between "the same blockage_id is on two surfaces" (D6, by
+    // design) and paying for the same writer turn twice.
+    if (remedy?.blockage_id) {
+      const alreadyResolved = await createBlobRemedyLedger(
+        (await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore
+      )
+        .get(remedy.blockage_id)
+        .catch(() => undefined);
+      if (alreadyResolved) {
+        return jsonResponse(200, { standard_id: standardId, already_resolved: true, resolved_by: alreadyResolved.by });
+      }
+    }
 
     if (!isCmsAgentConfigured() && !options.cmsAgent) {
       return jsonResponse(502, { error: 'The workspace orchestration bridge is not configured for this site.' });
@@ -256,6 +411,23 @@ const buildHandlerImpl =
       // ignored it.
       const existingBrandImagery = isRecord(recordBody) ? recordBody.brandImagery : undefined;
 
+      const bridge = options.cmsAgent ?? cmsAgentClient;
+
+      // The stored default goes FIRST and its failure is fatal, for the same
+      // reason `raiseNodeBudgetAndRetry` orders its two calls that way: a
+      // re-propose under the OLD ceiling would only fail the same way again,
+      // and an operator who pressed "raise the default" and got a proposal back
+      // would reasonably believe the default had moved.
+      if (plan?.ok && plan.configWrite) {
+        const written = await bridge.callTool<Record<string, unknown>>(plan.configWrite.tool, plan.configWrite.args);
+        if (!written.ok) {
+          return jsonResponse(502, {
+            error: `The default budget for ${BRAND_IMAGERY_WRITER_NODE_ID} could not be raised (${written.code}).`,
+            error_code: written.code,
+          });
+        }
+      }
+
       const proposeInput: BrandImageryProposeInput = {
         projectId: getSiteIdentity().cmsAgentProjectId,
         mode,
@@ -263,6 +435,11 @@ const buildHandlerImpl =
         ...(references.length > 0 ? { references } : {}),
         ...(brief ? { brief } : {}),
         ...(existingBrandImagery !== undefined ? { existingBrandImagery } : {}),
+        // Applied for BOTH scopes: a default raise that has just been written
+        // still needs this call to run under the new ceiling, and the workspace
+        // write above may not be visible to the node resolver within this same
+        // request.
+        ...(plan?.ok ? { modelConfigOverride: plan.modelConfigOverride } : {}),
       };
 
       const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
@@ -271,7 +448,7 @@ const buildHandlerImpl =
       };
 
       const result = await proposeBrandImagery(proposeInput, {
-        cmsAgent: options.cmsAgent ?? cmsAgentClient,
+        cmsAgent: bridge,
         resolveBlobUrl: (blobKey) => `${baseUrl}${publicPathForArtifactRef(blobKey)}`,
         readBlobBytes: async (blobKey) => {
           try {
@@ -286,11 +463,44 @@ const buildHandlerImpl =
       });
 
       if (!result.ok) {
+        const blockage = parseBlockage((result.detail as Record<string, unknown> | undefined)?.blockage);
+        // The chat gets the wall and its remedies — resolving from EITHER
+        // surface then clears both, because both post back the same
+        // blockage_id (D4). Best-effort: a chat write that fails must never
+        // turn a reportable propose failure into a 500.
+        if (chatId && blockage) {
+          await appendProposeBlockageToChat(event, chatId, access.email ?? '', standardId, blockage as unknown as Record<string, unknown>).catch(() => undefined);
+        }
         return jsonResponse(result.status, {
           error: result.error,
           error_code: result.errorCode,
           ...(result.detail ?? {}),
         });
+      }
+
+      // D4 — THE RE-PROPOSE IS THE SPEND, so this is where it gets ledgered.
+      // `applyRemedy`'s attempt branch deliberately does nothing and hands the
+      // re-run back to the caller; that caller is here. Without this write, the
+      // one path on this surface that actually costs a model turn was the one
+      // path with no idempotency at all: the same wall could be resolved from
+      // the chat card AND from the Imagery card, paying twice.
+      if (remedy?.blockage_id) {
+        await createBlobRemedyLedger((await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore)
+          .put(remedy.blockage_id, {
+            blockage_id: remedy.blockage_id,
+            remedy_id: remedy.remedy_id,
+            remedy_type: 'raise_node_budget',
+            resolved_at: new Date().toISOString(),
+            ...(access.email ? { by: access.email } : {}),
+            calls: ['visual_identity_propose'],
+          })
+          .catch(() => undefined);
+      }
+
+      // The other half of the ledger: a propose that WORKED says so in the
+      // transcript too, and clears any wall the previous attempt left there.
+      if (chatId) {
+        await noteProposeFinishedInChat(event, chatId, access.email ?? '', standardId, remedy?.blockage_id, remedy?.remedy_id).catch(() => undefined);
       }
 
       const { unresolvedReferences: droppedIndexes, ...proposal } = result.body as Record<string, unknown> & {

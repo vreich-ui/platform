@@ -69,7 +69,15 @@ export interface RunCardStatusInput {
  *      as `running`, the quiet bucket.
  */
 export function runCardStatus(input: RunCardStatusInput): RunCardStatus {
-  if (input.chatStatus === 'awaiting_approval' || input.chatStatus === 'awaiting_candidate') return 'needs_you';
+  if (
+    input.chatStatus === 'awaiting_approval' ||
+    input.chatStatus === 'awaiting_candidate' ||
+    // D6/D7 — a wall with a remedy is the third human gate, and reads exactly
+    // like the other two: nothing moves until a person answers.
+    input.chatStatus === 'awaiting_blockage_resolution'
+  ) {
+    return 'needs_you';
+  }
   if (input.status === 'cancelled') return 'cancelled';
   if (input.status === 'failed') return 'failed';
   if ((input.approvalCount ?? 0) > 0) return 'needs_you';

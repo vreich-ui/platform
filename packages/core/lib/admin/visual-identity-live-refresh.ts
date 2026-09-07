@@ -39,6 +39,7 @@ const ACTIVE_CHAT_STATUSES: ReadonlySet<ChatStatus> = new Set<ChatStatus>([
   'running',
   'awaiting_approval',
   'awaiting_candidate',
+  'awaiting_blockage_resolution',
 ]);
 
 /** A run is in flight — the docked chat is doing (or waiting on) something. */
