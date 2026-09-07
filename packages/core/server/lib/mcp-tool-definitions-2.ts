@@ -629,6 +629,54 @@ export const TOOL_DEFINITIONS_PART2: ToolDefinition[] = [
     governance: { toolClass: 'publication', autonomyFloor: 'ask' },
   },
   {
+    name: 'content_search',
+    description:
+      'Find a CMS object WITHOUT already knowing its id. This is the entry point for editing anything that ' +
+      'already exists: start here, then object_get / object_checkout / object_patch / object_publish with the ' +
+      'id it returns. Never enumerate object_list to hunt for a slug, and never ask a human for a req_* id — ' +
+      'that id is an internal minting detail you can derive from what you already hold. ' +
+      'Any ONE criterion is sufficient: slug ("nac-for-skin-health"), url (a full ' +
+      'https://…/nac-for-skin-health or a bare /nac-for-skin-health — both resolve to the same route), route, ' +
+      'title ("NAC for Skin Health"), free-text query ("NAC glutathione skin"), or request_id. Supplying more ' +
+      'than one does not narrow the search: each is scored independently and the best score wins, so a perfect ' +
+      'slug hit is never diluted by a title that does not match. ' +
+      'Matching is typo-tolerant by default (set fuzzy:false for exact/prefix only) and covers slug, title, SEO ' +
+      'title, meta description, route, taxonomy category, tags, section headings and aliases — NOT article body ' +
+      'prose, so search for what a piece is CALLED, not for a sentence inside it. ' +
+      'Returns results[] scored 0..1, best first, each carrying object_id, object_type, slug, title, description, ' +
+      'status, published, route, request_id and score. When exactly one result scores above 0.95 the response ' +
+      'also carries canonical_result — that is an unambiguous resolution and you may act on it directly; when it ' +
+      'is ABSENT the match is uncertain or contested, so read results[] and choose rather than assuming the first ' +
+      'row. Scope is content_item + page unless object_type narrows it. Backed by an etag-verified index, so a ' +
+      'repeat search over an unedited library reads no object records at all.',
+    inputSchema: objectSchema({
+      object_type: objectTypeEnumSchema(
+        'Optional: restrict to one object type. Omit to search content_item and page (the content surface).'
+      ),
+      query: stringSchema('Free-text search over titles, slugs, SEO fields, tags, taxonomy and headings.'),
+      slug: stringSchema('Exact or near-exact slug, e.g. "nac-for-skin-health". Scores 1.0 on an exact hit.'),
+      url: stringSchema('Full URL or origin-relative path; query string and fragment are ignored.'),
+      route: stringSchema('Public path, e.g. "/nac-for-skin-health" or "/about".'),
+      title: stringSchema('Headline or SEO title, exact or approximate.'),
+      request_id: stringSchema('The article request id (req_*) when you happen to have one.'),
+      status: {
+        type: 'string',
+        enum: ['active', 'archived'],
+        description: 'Optional status filter, applied before ranking.',
+      },
+      published: {
+        type: 'boolean',
+        description: 'Optional: true → only objects with a publish time; false → only unpublished ones.',
+      },
+      limit: intSchema('Max results (default 10, max 50).'),
+      fuzzy: {
+        type: 'boolean',
+        description: 'Typo tolerance. Defaults to true; set false for exact and prefix matching only.',
+      },
+    }),
+    governance: { toolClass: 'read' },
+  },
+  {
     name: 'object_inventory',
     description:
       'Read-only inventory of CMS objects: per object — id, type, status, requires_approval (whether the configured approval policy gates publishing this type behind a human approval), lock state (held/free, holder, expiry), review state, version, content_revision, last-published time, and an unpublished_changes flag (current content_revision vs the publish receipt). Recipe rows (template / section_template / theme) additionally carry a `recipe` summary — name, scope ("evergreen" = standing recipe, "one_off" = single-project), description, when_to_use, plus blueprint_type (section_template) or applies_to + slot_count (template) — so ONE cheap call answers "what recipes exist and which fits" without fetching bodies. REUSE FIRST: consult this before creating any new recipe. Omit object_type to sweep every type; pass object_type + object_id for a single-object detail view (adds site, timestamps, full review decisions, publish receipt, history length). Filters: status, requires_approval, review_state (none | open | changes_requested | approved), pending_changes.',

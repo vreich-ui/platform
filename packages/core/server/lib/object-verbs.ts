@@ -50,6 +50,9 @@ import {
   OBJECT_STORE_MARKER_VALUE,
 } from './object-store-keys.js';
 import { sweepInventoryRows } from './objects/index-store.js';
+import { sweepSearchDocs } from './objects/search-index-store.js';
+import { DEFAULT_LIMIT as SEARCH_DEFAULT_LIMIT, rankSearchDocs } from '../../lib/search/content-search.js';
+import { DEFAULT_SEARCH_TYPES } from '../../lib/search/search-doc.js';
 import {
   summarizeValidation,
   validateCandidatePatch,
@@ -160,6 +163,29 @@ export const objectVerbRequestSchema = z.discriminatedUnion('action', [
     requires_approval: z.boolean().optional(),
     review_state: z.enum(['none', 'open', 'changes_requested', 'approved']).optional(),
     pending_changes: z.boolean().optional(),
+  }),
+  /**
+   * W-CS: find an object without already knowing its id.
+   *
+   * Every criterion is independently sufficient — `slug`, `url`, `route`,
+   * `title`, `query` or `request_id` — because the caller's starting point is
+   * whatever they happen to hold (a pasted URL, a headline, a half-remembered
+   * phrase), never an internal minted id. At least one must be present; a
+   * bare `content_search({})` is a caller bug, not "return everything".
+   */
+  z.object({
+    action: z.literal('content_search'),
+    object_type: objectTypeSchema.optional(),
+    query: z.string().min(1).optional(),
+    slug: z.string().min(1).optional(),
+    url: z.string().min(1).optional(),
+    route: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    request_id: z.string().min(1).optional(),
+    status: z.enum(['active', 'archived']).optional(),
+    published: z.boolean().optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+    fuzzy: z.boolean().optional(),
   }),
   z.object({
     action: z.literal('create'),
@@ -442,6 +468,7 @@ export const verbNeedsValidationContext = (action: ObjectVerbRequest['action']):
     case 'get':
     case 'list':
     case 'inventory':
+    case 'content_search':
     case 'checkout':
     case 'refresh_lock':
     case 'checkin':
@@ -1273,6 +1300,61 @@ const dispatchObjectVerb = async (
       const rows = sweep.rows.filter((row) => matchesInventoryFilters(row, filters));
       rows.sort(compareInventoryRows(objectTypes));
       return ok({ objects: rows, generated_at: timestamp, index: sweep.stats });
+    }
+
+    /**
+     * W-CS: resolve content by what the caller actually holds.
+     *
+     * The failure this removes: an agent asked to fix a paragraph in
+     * `/nac-for-skin-health` had no way to turn that path into an object id
+     * short of `object_list` + `object_get` down the whole library, so in
+     * practice a human pasted the `req_*` id in. That made every edit
+     * conversation depend on a human knowing an internal minting detail.
+     *
+     * Scope is two object types by default, not thirteen: a CONTENT lookup has
+     * no business listing themes and templates. Naming `object_type` narrows it
+     * further, and the index write is careful to keep entries outside the swept
+     * types so a narrow search never forces a cold rebuild of the rest.
+     *
+     * Filters (`status`, `published`) are applied BEFORE ranking so a limit of
+     * 10 returns ten live articles rather than ten drafts and a truncated tail.
+     */
+    case 'content_search': {
+      const criteria = {
+        ...(request.query ? { query: request.query } : {}),
+        ...(request.slug ? { slug: request.slug } : {}),
+        ...(request.url ? { url: request.url } : {}),
+        ...(request.route ? { route: request.route } : {}),
+        ...(request.title ? { title: request.title } : {}),
+        ...(request.request_id ? { request_id: request.request_id } : {}),
+      };
+      if (Object.keys(criteria).length === 0) {
+        return err(400, {
+          error: 'content_search requires at least one of: query, slug, url, route, title, request_id.',
+        });
+      }
+
+      const objectTypesToSweep = request.object_type ? [request.object_type] : [...DEFAULT_SEARCH_TYPES];
+      const sweep = await sweepSearchDocs(store, { objectTypes: objectTypesToSweep });
+      const candidates = sweep.docs.filter((doc) => {
+        if (request.status && doc.status !== request.status) return false;
+        if (request.published !== undefined && doc.published !== request.published) return false;
+        return true;
+      });
+
+      const ranked = rankSearchDocs(
+        candidates,
+        { ...criteria, ...(request.fuzzy === undefined ? {} : { fuzzy: request.fuzzy }) },
+        request.limit ?? SEARCH_DEFAULT_LIMIT
+      );
+      return ok({
+        results: ranked.results,
+        ...(ranked.canonical_result ? { canonical_result: ranked.canonical_result } : {}),
+        result_count: ranked.results.length,
+        searched: objectTypesToSweep,
+        generated_at: timestamp,
+        index: sweep.stats,
+      });
     }
 
     case 'create': {

@@ -96,7 +96,7 @@ CMS-Agent: names/refs only in records; redaction on outputs; `.dockerignore` exc
 | Credential | Reaches |
 |---|---|
 | tenant chat bearer | 11 CMS-Agent tools; starts runs for its project — and reads, approves and publishes **any** run whose `runId` it learns (S-26) |
-| `<CLIENT>_MCP_TOKEN` | that tenant's full `/mcp` (66–100 tools) including publish and release |
+| `<CLIENT>_MCP_TOKEN` | that tenant's full `/mcp` (67–101 tools) including publish and release |
 | CMS-Agent full bearer / OAuth | the whole workspace, every tenant's runs, tool-grant widening |
 | `PDF_TOOL_AGENT_RUN_TOKEN` | pdf-tool compute for any grant a caller supplies; with the `AGENT_RUN_TOKEN` fallback also proof minting |
 | storage grant (within 60 min) | six stores of one tenant site |

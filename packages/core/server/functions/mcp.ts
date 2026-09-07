@@ -1323,6 +1323,21 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         review_state: input.review_state,
         pending_changes: input.pending_changes,
       });
+    case 'content_search':
+      return callObjectAction(event, {
+        action: 'content_search',
+        object_type: input.object_type,
+        query: input.query,
+        slug: input.slug,
+        url: input.url,
+        route: input.route,
+        title: input.title,
+        request_id: input.request_id,
+        status: input.status,
+        published: input.published,
+        limit: input.limit,
+        fuzzy: input.fuzzy,
+      });
 
     // ── Review + publish verbs (P1) → object-store.ts (publish key injected).
     //    Faithful passthrough: object-verbs.ts owns locks, the publish gate,
