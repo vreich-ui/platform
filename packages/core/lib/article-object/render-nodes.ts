@@ -92,11 +92,26 @@ const mediaFilename = (src: string): string => (src.split(/[?#]/)[0] ?? '').spli
 
 /**
  * `type:'document'` — a PDF attached to the article. Renders a download
- * block (filename + size when known) plus an inline <object> preview whose
- * fallback is the same link, so a browser without a PDF viewer still gets
- * the file. NEVER an <img>: that is the broken-image defect this exists to
- * close. The href is the artifact bridge's /pdf/{id}/{sha256}.pdf public path
- * verbatim, which is what verify_article_images' expectedDocuments asserts.
+ * block (filename + size when known) plus an inline preview. NEVER an <img>:
+ * that is the broken-image defect this exists to close. The href is the
+ * artifact bridge's /pdf/{id}/{sha256}.pdf public path verbatim, which is what
+ * verify_article_images' expectedDocuments asserts.
+ *
+ * <iframe>, NOT <object> (2026-09-07). The preview used to be an <object> for
+ * its fallback content, and it rendered as a blank bordered box on every
+ * article — but the fallback was never the reason: `get-public-pdf` sent
+ * `Content-Disposition: attachment`, which no browser will display in an
+ * embedded viewer, and the clean 200 meant the <object>'s own fallback never
+ * showed either. That header is fixed at the source (get-public-pdf.ts's
+ * `parseDisposition`), and the embed moved to <iframe> because the site's CSP
+ * carries `object-src 'none'` — Report-Only today, so it was not the cause,
+ * but promoting the header (T13.11 step 6) would have killed an <object>
+ * preview outright. <iframe> is covered by `frame-src`, which now carries
+ * 'self' in every tenant's netlify.toml for exactly this embed.
+ *
+ * The lost fallback content costs nothing here: the download card directly
+ * above IS the fallback, it renders unconditionally, and it carries the same
+ * href with a `download` attribute.
  */
 const documentMediaHtml = (
   node: ContentItemNode,
@@ -114,9 +129,7 @@ const documentMediaHtml = (
   const typeAttr = isPdf ? ' type="application/pdf"' : '';
   const caption = media.caption ? `<figcaption>${escapeHtml(media.caption)}</figcaption>` : '';
   const preview = isPdf
-    ? `<object class="article-document-preview w-full aspect-[3/4] max-h-[80vh] rounded-lg border border-gray-200 dark:border-slate-700" data="${href}" type="application/pdf" aria-label="${escapeHtml(title)}">` +
-      `<p class="text-sm text-muted">Your browser cannot preview this PDF — <a href="${href}"${relAttr(node)} download="${escapeHtml(filename)}">download ${escapeHtml(filename)}</a>.</p>` +
-      `</object>`
+    ? `<iframe class="article-document-preview w-full aspect-[3/4] max-h-[80vh] rounded-lg border border-gray-200 dark:border-slate-700" src="${href}" title="${escapeHtml(title)}" loading="lazy"></iframe>`
     : '';
   return (
     `<figure class="article-node-document not-prose my-6" data-media-type="document">` +

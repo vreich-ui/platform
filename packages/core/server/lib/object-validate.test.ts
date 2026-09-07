@@ -4,6 +4,7 @@ import assert from 'node:assert';
 import {
   checkArtifactTrust,
   checkPdfContentQuality,
+  checkVisualStandardAssetRefs,
   validateObject,
   summarizeValidation,
   type ArtifactRefResolution,
@@ -215,5 +216,134 @@ describe('checkPdfContentQuality (T2.5, ruling D-D) — warn-only, never blocks'
     assert.strictEqual(result.id, 'pdf_quality');
     assert.strictEqual(result.status, 'optional');
     assert.ok(result.message.includes('not verified'), result.message);
+  });
+});
+
+/**
+ * The "Preview unavailable" mood board (2026-09-07). Live on drlurie,
+ * `vis_drlurie` carried mood-board references whose "sha256" was the
+ * reference's own minted id padded out to 64 hex characters — `ref_abc27032`
+ * → `image/vis_drlurie/abc2703243a27a…` — under a request id (`vis_drlurie`,
+ * the OBJECT id) that is not even a valid `req_<flow>_<topic>_<yyyymmdd>_<nn>`
+ * and had nothing indexed against it. `set_visual_standard_fields` accepted
+ * all of it, because artifact existence was only ever checked for
+ * `*AssetRef`-suffixed keys and content_item media, and `visual_standard` is
+ * exempted from the renderable-ref guard on top of that.
+ */
+describe('checkVisualStandardAssetRefs — mood board / example blobKeys', () => {
+  const VS_REAL = `image/req_visref_drlurie_20260906_01/${SHA}.jpg`;
+  const VS_FABRICATED = `image/vis_drlurie/${'b'.repeat(64)}.jpg`;
+  const standard = (refs: unknown[], examples: unknown[] = []) => ({
+    version: 1,
+    kind: 'house',
+    label: 'House standard',
+    references: refs,
+    examples,
+  });
+  const resolving = (existing: Set<string>): ObjectValidationContext => ({
+    resolveArtifactRef: (blobKey): ArtifactRefResolution | undefined =>
+      existing.has(blobKey) ? { exists: true } : { exists: false },
+  });
+
+  it('tier 1 — blocks a key owned by an object id rather than a request id, with NO index resolver at all', () => {
+    // The exact live shape: the "sha256" is the ref id padded out to 64 hex
+    // characters, under `vis_drlurie` — the OBJECT id. This must block on the
+    // key alone, because tier 2 cannot be relied on: a MISS only proves
+    // absence under a strongly-consistent read, and most deployments do not
+    // get one (see the two-tier note in object-validate.ts).
+    const [result] = checkVisualStandardAssetRefs(
+      'visual_standard',
+      standard([{ id: 'ref_abc27032', blobKey: VS_FABRICATED, weight: 1 }]),
+      {} // no resolveArtifactRef — tier 1 stands entirely on its own
+    );
+    assert.strictEqual(result.status, 'missing');
+    assert.ok(result.message.includes('references[0].blobKey'), result.message);
+    assert.ok(result.message.includes('not a request id'), result.message);
+    // It must also say what to do instead, not just refuse.
+    assert.ok(/Import references|image library/.test(result.message), result.message);
+  });
+
+  it('tier 2 — blocks a properly-owned key the artifact index says is absent', () => {
+    const [result] = checkVisualStandardAssetRefs(
+      'visual_standard',
+      standard([{ id: 'ref_053u3o9t', blobKey: VS_REAL, weight: 1 }]),
+      resolving(new Set()) // resolver answers "absent" authoritatively
+    );
+    assert.strictEqual(result.status, 'missing');
+    assert.ok(result.message.includes('not in the artifact index'), result.message);
+  });
+
+  it('blocks at WRITE, not only at publish — a visual_standard never publishes, so publish-time is never', () => {
+    // Every other existence check in this file warns while drafting and blocks
+    // at publish. That posture is what let the fabricated keys land: a
+    // visual_standard has no materializer and is absent from
+    // approval-policy.ts's governedObjectTypes, so "block at publish" means
+    // "never block". This criterion takes no atPublish argument for exactly
+    // that reason — a blocking status with nothing publish-like set is the
+    // whole point.
+    const [drafting] = checkVisualStandardAssetRefs(
+      'visual_standard',
+      standard([{ id: 'ref_abc27032', blobKey: VS_FABRICATED, weight: 1 }]),
+      {}
+    );
+    assert.strictEqual(drafting.status, 'missing');
+    // That it is WIRED into the pipeline (and so really refuses the write with
+    // a 422) is proved end to end against the live verb path in
+    // tests/netlify/visual-standard.test.ts — `validateObject` cannot be
+    // called from here with a resolver, because checkMediaBudget would then
+    // reach `activeMediaPolicy()` and this core-side test must not import a
+    // site's policy bindings.
+  });
+
+  it('accepts a reference whose bytes really are indexed', () => {
+    const [result] = checkVisualStandardAssetRefs(
+      'visual_standard',
+      standard([{ id: 'ref_053u3o9t', blobKey: VS_REAL, weight: 1 }]),
+      resolving(new Set([VS_REAL]))
+    );
+    assert.strictEqual(result.status, 'complete');
+  });
+
+  it('checks generated examples[] by the same rule as references[]', () => {
+    const [result] = checkVisualStandardAssetRefs(
+      'visual_standard',
+      standard([], [{ usageContext: 'article_header', blobKey: VS_FABRICATED }]),
+      {}
+    );
+    assert.strictEqual(result.status, 'missing');
+    assert.ok(result.message.includes('examples[0].blobKey'), result.message);
+  });
+
+  it('ignores a blobKey the admin would never try to preview, rather than blocking it', () => {
+    // `img/mood/1.jpg` and friends are not Major-Key shaped, so
+    // getAdminBlobImageEndpoint refuses to build a preview URL and the card
+    // renders "not in the admin-previewable artifact store" — honest, not a
+    // broken promise. That is a different (non-)problem from the one this
+    // criterion exists for, and several tests use the shape as a placeholder.
+    for (const blobKey of ['img/mood/1.jpg', 'https://example.com/photo.jpg', 'just-a-name.png']) {
+      const [result] = checkVisualStandardAssetRefs(
+        'visual_standard',
+        standard([{ id: 'ref_x', blobKey, weight: 1 }]),
+        resolving(new Set())
+      );
+      assert.strictEqual(result.status, 'optional', `${blobKey} is out of scope, not a blocker`);
+    }
+  });
+
+  it('degrades to silence when existence is not verifiable, rather than blocking a legitimate write', () => {
+    // No resolveArtifactRef wired (no blob credentials, a bare harness) — the
+    // same posture validateAssetRef takes when the resolver cannot answer.
+    const [result] = checkVisualStandardAssetRefs(
+      'visual_standard',
+      standard([{ id: 'ref_053u3o9t', blobKey: VS_REAL, weight: 1 }]),
+      {}
+    );
+    assert.strictEqual(result.status, 'complete');
+  });
+
+  it('says nothing at all for other object types, and reports "optional" for a board with no images', () => {
+    assert.deepStrictEqual(checkVisualStandardAssetRefs('content_item', articleBody(), {}), []);
+    const [empty] = checkVisualStandardAssetRefs('visual_standard', standard([]), {});
+    assert.strictEqual(empty.status, 'optional');
   });
 });

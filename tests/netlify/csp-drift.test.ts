@@ -61,7 +61,13 @@ const ADAPTER_CSP: Record<string, HostSets> = {
 const BASE: Record<Directive, readonly string[]> = {
   script: ["'self'", "'unsafe-inline'"],
   connect: ["'self'"],
-  frame: ['https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
+  // 'self' is NOT a media-mint host: it is the article body's own attached-PDF
+  // preview, a same-origin <iframe src="/pdf/{id}/{sha256}.pdf"> emitted by
+  // article-object/render-nodes.ts's documentMediaHtml (2026-09-07 — it was an
+  // <object> until then, and `object-src 'none'` below would have blocked it
+  // the moment this header is promoted out of Report-Only). Removing 'self'
+  // here breaks every article that attaches a PDF.
+  frame: ["'self'", 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
 };
 
 const repoRoot = (): string => {

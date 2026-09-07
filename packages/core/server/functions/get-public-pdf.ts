@@ -109,6 +109,34 @@ const encodeRFC5987ValueChars = (value: string): string =>
     .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
     .replace(/\*/g, '%2A');
 
+export type PdfDisposition = 'inline' | 'attachment';
+
+/**
+ * `inline` unless the caller explicitly asks to download.
+ *
+ * WHY INLINE IS THE DEFAULT (2026-09-07). An article body attaches its PDF as
+ * `<iframe src="/pdf/{id}/{sha256}.pdf">` (article-object/render-nodes.ts's
+ * `documentMediaHtml`), and every browser REFUSES to display an
+ * attachment-dispositioned response in an embedded viewer. The response is a
+ * clean 200, so the embed counts as loaded and no fallback is shown either —
+ * which rendered the attached PDF as a blank bordered box on every article
+ * carrying one, in the admin preview and on the live site alike. The bytes
+ * were never the problem; this header was.
+ *
+ * `admin-get-blob-pdf.ts` (the admin sidebar's preview endpoint) has always
+ * sent `inline` for the same reason, and its iframe has always worked — this
+ * makes the public path agree with the one that was already right.
+ *
+ * The download path is unaffected either way: the article card's own link
+ * carries the `download` attribute, which is same-origin here and forces a
+ * save regardless of disposition. `?download=1` is for callers that cannot
+ * set that attribute (a bare address pasted into a browser, an email link).
+ */
+const parseDisposition = (value: unknown): PdfDisposition => {
+  const normalized = toText(value).toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' ? 'attachment' : 'inline';
+};
+
 /**
  * Emits BOTH Content-Disposition forms per RFC 6266 / RFC 5987 so non-ASCII
  * names degrade gracefully: an ASCII-safe `filename=` for legacy clients, and
@@ -116,8 +144,16 @@ const encodeRFC5987ValueChars = (value: string): string =>
  * resolved name collapses it to an empty stem (e.g. an all-symbols name),
  * fall back to the sha-based name instead of serving a bare/underscore-only
  * filename.
+ *
+ * The filename travels on BOTH dispositions on purpose: `inline` still names
+ * the file for a "save as" out of the browser's own PDF viewer, so switching
+ * the default cost nothing in download-name quality.
  */
-const buildContentDisposition = (resolvedName: string, fallbackName: string): string => {
+const buildContentDisposition = (
+  resolvedName: string,
+  fallbackName: string,
+  disposition: PdfDisposition = 'inline'
+): string => {
   const displayCandidate = ensurePdfExtension(resolvedName);
   const asciiCandidate = sanitizeFilename(displayCandidate);
   const stem = asciiCandidate.replace(/\.pdf$/i, '');
@@ -126,7 +162,7 @@ const buildContentDisposition = (resolvedName: string, fallbackName: string): st
     ? [displayCandidate, asciiCandidate]
     : [ensurePdfExtension(fallbackName), ensurePdfExtension(fallbackName)];
 
-  return `attachment; filename="${asciiSafeName}"; filename*=UTF-8''${encodeRFC5987ValueChars(displayName)}`;
+  return `${disposition}; filename="${asciiSafeName}"; filename*=UTF-8''${encodeRFC5987ValueChars(displayName)}`;
 };
 
 const handlerImpl = async (event: LambdaEvent) => {
@@ -161,7 +197,11 @@ const handlerImpl = async (event: LambdaEvent) => {
         // Content-addressed key ⇒ the bytes for this URL can never change.
         'Cache-Control': 'public, max-age=31536000, immutable',
         'X-Content-Type-Options': 'nosniff',
-        'Content-Disposition': buildContentDisposition(resolvedName, fallbackName),
+        'Content-Disposition': buildContentDisposition(
+          resolvedName,
+          fallbackName,
+          parseDisposition(event.queryStringParameters?.download)
+        ),
       },
       body: event.httpMethod === 'HEAD' ? '' : buffer.toString('base64'),
       isBase64Encoded: event.httpMethod !== 'HEAD',

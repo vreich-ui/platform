@@ -201,7 +201,7 @@ test('get-public-pdf accepts clean public PDF paths and falls back to the sha-ba
   // to the blobKey's sha-based basename.
   assert.equal(
     response.headers['Content-Disposition'],
-    `attachment; filename="${digest}.pdf"; filename*=UTF-8''${digest}.pdf`
+    `inline; filename="${digest}.pdf"; filename*=UTF-8''${digest}.pdf`
   );
   assert.equal(Buffer.from(response.body, 'base64').toString(), bytes.toString());
 });
@@ -284,7 +284,7 @@ test('get-public-pdf uses metadata.originalFilename for Content-Disposition, san
     assert.equal(response.statusCode, 200);
     assert.equal(
       response.headers['Content-Disposition'],
-      `attachment; filename="Product_Catalog.pdf"; filename*=UTF-8''Product%20Catalog.pdf`
+      `inline; filename="Product_Catalog.pdf"; filename*=UTF-8''Product%20Catalog.pdf`
     );
   });
 });
@@ -302,7 +302,7 @@ test('get-public-pdf falls back to metadata.label when originalFilename is absen
     assert.equal(response.statusCode, 200);
     assert.equal(
       response.headers['Content-Disposition'],
-      `attachment; filename="Quarterly_Report.pdf"; filename*=UTF-8''Quarterly%20Report.pdf`
+      `inline; filename="Quarterly_Report.pdf"; filename*=UTF-8''Quarterly%20Report.pdf`
     );
   });
 });
@@ -330,7 +330,7 @@ test('get-public-pdf falls back to the artifact-index reference name, reading th
     assert.equal(response.statusCode, 200);
     assert.equal(
       response.headers['Content-Disposition'],
-      `attachment; filename="Index_Sourced_Name.pdf"; filename*=UTF-8''Index%20Sourced%20Name.pdf`
+      `inline; filename="Index_Sourced_Name.pdf"; filename*=UTF-8''Index%20Sourced%20Name.pdf`
     );
     assert.equal(index.getCallCount(), 1);
   });
@@ -364,7 +364,7 @@ test('get-public-pdf falls back to the sha-based filename when no name exists an
     assert.equal(response.statusCode, 200);
     assert.equal(
       response.headers['Content-Disposition'],
-      `attachment; filename="${digest}.pdf"; filename*=UTF-8''${digest}.pdf`
+      `inline; filename="${digest}.pdf"; filename*=UTF-8''${digest}.pdf`
     );
     // The index lookup was attempted (metadata alone had nothing) but found nothing either.
     assert.equal(index.getCallCount(), 1);
@@ -384,7 +384,7 @@ test('get-public-pdf produces a safe filename and a correct filename* for names 
 
     assert.equal(response.statusCode, 200);
     const disposition = response.headers['Content-Disposition'] as string;
-    assert.match(disposition, /^attachment; filename="[^"]*"; filename\*=UTF-8''.+$/);
+    assert.match(disposition, /^inline; filename="[^"]*"; filename\*=UTF-8''.+$/);
 
     const asciiMatch = disposition.match(/filename="([^"]*)"/);
     assert.ok(asciiMatch);
@@ -395,5 +395,70 @@ test('get-public-pdf produces a safe filename and a correct filename* for names 
     const starMatch = disposition.match(/filename\*=UTF-8''(.+)$/);
     assert.ok(starMatch);
     assert.equal(decodeURIComponent(starMatch![1]), rawName);
+  });
+});
+
+/**
+ * DISPOSITION (2026-09-07 — the blank-PDF-box defect).
+ *
+ * An article attaches its PDF as a same-origin `<iframe src="/pdf/{id}/{sha}.pdf">`
+ * (article-object/render-nodes.ts's `documentMediaHtml`). Every browser refuses to
+ * display an attachment-dispositioned response in an embedded viewer, and because the
+ * response is a clean 200 the embed counts as loaded and shows no fallback either — so
+ * every article carrying a PDF rendered a blank bordered box, in the admin preview and
+ * on the live site. The bytes were always fine; this header was the whole defect.
+ *
+ * These two tests are the pin: `inline` is the default, `?download=1` is the opt-out.
+ * `admin-get-blob-pdf.ts` has always sent `inline` and its iframe has always worked.
+ */
+test('get-public-pdf serves inline by default so an embedded <iframe> preview actually renders', async () => {
+  await withFakeBlobStores(async ({ artifacts }) => {
+    const requestId = `public-pdf-inline-default-${Date.now()}`;
+    const bytes = Buffer.from('%PDF-1.4 inline default pdf content');
+    const digest = sha256(bytes);
+    const blobKey = buildBlobKey(requestId, digest);
+    artifacts.seed(blobKey, bytes, { originalFilename: 'Flare Tracker' });
+
+    // No `download` param at all — the shape the /pdf/* redirect produces for an
+    // ordinary article embed.
+    const response = await handler({ httpMethod: 'GET', queryStringParameters: { blobKey } });
+
+    assert.equal(response.statusCode, 200);
+    const disposition = response.headers['Content-Disposition'] as string;
+    assert.match(disposition, /^inline;/);
+    // Inline still names the file, so "save as" out of the browser's own PDF
+    // viewer keeps the good name — switching the default cost nothing here.
+    assert.equal(disposition, `inline; filename="Flare_Tracker.pdf"; filename*=UTF-8''Flare%20Tracker.pdf`);
+  });
+});
+
+test('get-public-pdf honours ?download=1 (and only truthy values) with an attachment disposition', async () => {
+  await withFakeBlobStores(async ({ artifacts }) => {
+    const requestId = `public-pdf-download-optout-${Date.now()}`;
+    const bytes = Buffer.from('%PDF-1.4 download opt-out pdf content');
+    const digest = sha256(bytes);
+    const blobKey = buildBlobKey(requestId, digest);
+    artifacts.seed(blobKey, bytes, { originalFilename: 'Flare Tracker' });
+
+    for (const value of ['1', 'true', 'yes']) {
+      const response = await handler({ httpMethod: 'GET', queryStringParameters: { blobKey, download: value } });
+      assert.equal(response.statusCode, 200);
+      assert.equal(
+        response.headers['Content-Disposition'],
+        `attachment; filename="Flare_Tracker.pdf"; filename*=UTF-8''Flare%20Tracker.pdf`,
+        `download=${value} must force an attachment`
+      );
+    }
+
+    // Anything else is not an opt-out — an embed must never be turned into a
+    // download by a stray or malformed param.
+    for (const value of ['0', 'false', '', 'maybe']) {
+      const response = await handler({ httpMethod: 'GET', queryStringParameters: { blobKey, download: value } });
+      assert.match(
+        response.headers['Content-Disposition'] as string,
+        /^inline;/,
+        `download=${JSON.stringify(value)} must stay inline`
+      );
+    }
   });
 });

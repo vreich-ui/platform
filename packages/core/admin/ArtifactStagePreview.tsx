@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, EmptyState, Skeleton } from './primitives';
 import { IconLibrary } from './icons';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
-import { createArtifactPreviewLoader } from '@core/lib/admin/artifact-preview-loader';
+import { ArtifactPreviewFetchError, createArtifactPreviewLoader } from '@core/lib/admin/artifact-preview-loader';
+import { describeArtifactPreviewError } from '@core/lib/admin/artifact-preview-error';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -59,7 +60,13 @@ export interface ArtifactStagePreviewProps {
 export function ArtifactStagePreview({ artifact, size = 'full' }: ArtifactStagePreviewProps) {
   const thumbnail = size === 'thumbnail';
   const [source, setSource] = useState<string>();
-  const [error, setError] = useState(false);
+  /**
+   * The HTTP status the fetch failed with, kept so the error state can say
+   * what actually happened (`describeArtifactPreviewError`). `null` is "failed
+   * with no status" (timeout / dropped connection); `undefined` is "not
+   * failed" — the two are different answers and must not collapse.
+   */
+  const [errorStatus, setErrorStatus] = useState<number | null>();
   const [attempt, setAttempt] = useState(0);
   const cacheKey = useMemo(() => previewCacheKey(artifact, thumbnail), [artifact, thumbnail]);
   const fetchUrl = useMemo(() => previewFetchUrl(artifact, thumbnail), [artifact, thumbnail]);
@@ -67,7 +74,7 @@ export function ArtifactStagePreview({ artifact, size = 'full' }: ArtifactStageP
   useEffect(() => {
     let alive = true;
     setSource(undefined);
-    setError(false);
+    setErrorStatus(undefined);
     (async () => {
       try {
         const token = await getToken();
@@ -75,8 +82,9 @@ export function ArtifactStagePreview({ artifact, size = 'full' }: ArtifactStageP
           headers: { Authorization: `Bearer ${token}` },
         });
         if (alive) setSource(objectUrl);
-      } catch {
-        if (alive) setError(true);
+      } catch (error) {
+        if (!alive) return;
+        setErrorStatus(error instanceof ArtifactPreviewFetchError && error.status !== undefined ? error.status : null);
       }
     })();
     return () => {
@@ -88,17 +96,26 @@ export function ArtifactStagePreview({ artifact, size = 'full' }: ArtifactStageP
     };
   }, [cacheKey, fetchUrl, attempt]);
 
-  if (error) {
+  if (errorStatus !== undefined) {
+    // Every word of this — and whether a retry control exists at all — is
+    // decided in `artifact-preview-error.ts`, where node:test can see it.
+    // A 404 (the mood-board reference whose bytes were never stored) must not
+    // offer "Try again": the control would be a lie, so it does not render.
+    const view = describeArtifactPreviewError(errorStatus ?? undefined);
     return (
       <EmptyState
         severity="error"
-        title="Preview unavailable"
-        message="The artifact is still indexed, but its preview bytes could not be loaded — even after automatic retries. Try again, or check your connection."
-        action={
-          <Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
-            Try preview again
-          </Button>
-        }
+        title={view.title}
+        message={view.message}
+        {...(view.canRetry
+          ? {
+              action: (
+                <Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
+                  Try preview again
+                </Button>
+              ),
+            }
+          : {})}
       />
     );
   }

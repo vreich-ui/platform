@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { describeArtifactPreviewError } from './artifact-preview-error.js';
 import {
   createArtifactPreviewLoader,
   createConcurrencyQueue,
@@ -145,6 +146,58 @@ test('a non-retryable status fails immediately without spending remaining attemp
     /403/
   );
   assert.equal(calls, 1, 'a 403 cannot be retried into success, so only one attempt is spent');
+});
+
+/**
+ * The JOIN the error copy got wrong (2026-09-07). `ArtifactStagePreview` used
+ * to render one hardcoded message — "could not be loaded — even after
+ * automatic retries. Try again, or check your connection." — for every
+ * failure. For the case it was most often shown for (a 404: a mood-board
+ * reference whose bytes were never stored) that was false twice over: no
+ * retry was attempted, and no retry could ever succeed.
+ *
+ * `describeArtifactPreviewError` now decides the copy and whether a retry
+ * control renders at all. Its own file pins the wording; this pins the thing
+ * only THIS file can prove — that `canRetry` matches what `fetchWithRetry`
+ * actually does with each status, so the two can never drift back apart.
+ */
+test('describeArtifactPreviewError.canRetry agrees with the attempts fetchWithRetry really spends', async () => {
+  const policy = { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 100, timeoutMs: 1000 };
+
+  const attemptsFor = async (status: number): Promise<number> => {
+    const { clock, timers } = createFakeClock();
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls += 1;
+      return new Response('', { status });
+    }) as typeof fetch;
+    await assert.rejects(() =>
+      drive(
+        () => fetchWithRetry('https://example.test/preview', undefined, { fetchFn, clock, random: () => 0.5, policy }),
+        timers
+      )
+    );
+    return calls;
+  };
+
+  // Permanent: one attempt spent, so the copy must not claim retries ran and
+  // must not offer another.
+  for (const status of [401, 403, 404, 409, 422]) {
+    assert.equal(await attemptsFor(status), 1, `HTTP ${status} spends exactly one attempt`);
+    assert.equal(describeArtifactPreviewError(status).canRetry, false, `HTTP ${status} must not offer a retry`);
+    assert.doesNotMatch(
+      describeArtifactPreviewError(status).message,
+      /after automatic retries/i,
+      `HTTP ${status} must not claim retries that never happened`
+    );
+  }
+
+  // Retryable: every attempt really is spent, so the copy may honestly say so
+  // and offer another.
+  for (const status of [408, 429, 503]) {
+    assert.equal(await attemptsFor(status), policy.maxAttempts, `HTTP ${status} spends every attempt`);
+    assert.equal(describeArtifactPreviewError(status).canRetry, true, `HTTP ${status} may offer a retry`);
+  }
 });
 
 test('fetchWithRetry: a hung request times out via the injected clock, and the timeout counts as a retryable failure', async () => {
