@@ -72,6 +72,7 @@ function extractPlatform(root) {
   const weights = read(root, 'scripts/lib/tracking-experiments.mjs');
   const checkout = read(root, 'packages/core/server/functions/create-checkout-session.ts');
   const webhook = read(root, 'packages/core/server/functions/stripe-webhook.ts');
+  const commerceEventIds = read(root, 'packages/core/server/lib/commerce-event-ids.ts');
 
   // Every CMS-Agent tool name platform calls through CmsAgentClient (any generic between callTool and the paren).
   const callFiles = [
@@ -127,7 +128,15 @@ function extractPlatform(root) {
     trackingPropsAllowlist: propsAllowlist,
     commerceEventTypes: stringArray(commerce, /commerceEventTypes\s*=\s*\[([\s\S]*?)\]\s*as const/),
     commerceSinkKindSource: firstString(commerce, /kind:\s*(event\.type)/),
-    checkoutEventIdGenerator: checkout && /event_id:\s*randomUUID\(\)/.test(checkout) ? 'randomUUID' : null,
+    // Checkout mints the purchase id by calling the shared derivation (S-01 fix, platform #700)
+    // rather than inlining `event_id: randomUUID()` any more — read the seed the shared helper
+    // actually hashes so this stays truthful if the event name it derives from ever changes.
+    checkoutEventIdGenerator: (() => {
+      if (checkout && /event_id:\s*randomUUID\(\)/.test(checkout)) return 'randomUUID';
+      if (!checkout || !commerceEventIds || !/checkoutCompletedEventId\(session\.id\)/.test(checkout)) return null;
+      const seed = commerceEventIds.match(/checkoutCompletedEventId[\s\S]*?deterministicUuid\(`\$\{sessionId\}:([a-z_]+)`\)/);
+      return seed ? `deterministicUuid(session.id:${seed[1]})` : null;
+    })(),
     webhookEventIdGenerator: webhook && /event_id:\s*deterministicUuid\(/.test(webhook) ? 'deterministicUuid(session.id:type)' : null,
     allowedArtifactReferenceKeys: stringArray(artifacts, /allowedArtifactReferenceKeys\s*=\s*new Set\(\[([\s\S]*?)\]\)/),
     grantStores: (() => {
@@ -224,7 +233,12 @@ function extractKugelData(root) {
   const rollups = read(root, 'netlify/functions/_shared/rollups.ts');
   const stats = read(root, 'netlify/functions/_shared/stats.ts');
   const experiment = read(root, 'netlify/functions/_shared/experiment.ts');
-  const statsFn = read(root, 'netlify/functions/tracking-sink-stats.ts');
+  // The /stats window parsing moved into the shared helper (kugel-data S-23), so reading the
+  // function file alone would report that the sink no longer reads `days`/`from`/`to` at all.
+  // Both files together are what "the /stats function reads".
+  const statsFn = [read(root, 'netlify/functions/tracking-sink-stats.ts'), read(root, 'netlify/functions/_shared/stats.ts')]
+    .filter(Boolean)
+    .join('\n') || null;
   const dimsFn = read(root, 'netlify/functions/tracking-sink-dims.ts');
   const sink = read(root, 'netlify/functions/tracking-sink.ts');
   const migrations = ['001_tracking_sink_reference.sql', '002_tracking_sink_commerce_dims_weights.sql', '003_tracking_events_commerce_event_id_idx.sql', '004_rollup_views.sql', '005_rollups_on_baseline_traffic.sql'];

@@ -35,6 +35,8 @@ const { computeVisitorHashes } = await import('../../packages/core/server/lib/tr
 const { setStripeClientForTesting, resetStripeClientForTesting, stripeMode, stripeSecretKey, stripeLinkageForMode } =
   await import('../../packages/core/server/lib/stripe-env.js');
 const { objectRecordKey } = await import('../../packages/core/server/lib/object-store-keys.js');
+const { checkoutCompletedEventId } = await import('../../packages/core/server/lib/commerce-event-ids.js');
+const { deterministicUuid } = await import('../../netlify/functions/stripe-webhook.js');
 const { drlurieSiteBinding } = await import('../../sites/drlurie/config/site-binding.js');
 
 const SESSION_ID = 'cs_test_a1B2c3d4';
@@ -134,7 +136,10 @@ test('create-checkout-session charges the LINKED price and stamps metadata (§3/
   assert.equal(received.mode, 'payment');
   assert.deepEqual(received.line_items, [{ price: 'price_Test1', quantity: 1 }], 'charges price_id, never the cache');
   assert.equal(received.metadata.product_id, PRODUCT_ID);
-  assert.equal(received.metadata.event_id, body.event_id);
+  // S-01 — the purchase id is derived from the session, not minted here, so it is
+  // no longer stamped into Stripe metadata and no longer random.
+  assert.equal(received.metadata.event_id, undefined);
+  assert.equal(body.event_id, checkoutCompletedEventId(SESSION_ID));
   assert.equal(received.metadata.visitor_shash, undefined, 'visitor hash metadata is present only with tracking env');
   assert.equal(
     received.success_url,
@@ -186,7 +191,7 @@ test('create-checkout-session stamps the browser visitor shash for the later Str
     projectId: 'drlurie',
     nowMs,
   }).shash;
-  assert.deepEqual(Object.keys(received.metadata).sort(), ['event_id', 'product_id', 'visitor_shash']);
+  assert.deepEqual(Object.keys(received.metadata).sort(), ['product_id', 'visitor_shash']);
   assert.equal(received.metadata.visitor_shash, expected);
   assert.equal(JSON.stringify(received.metadata).includes('198.51.100.7'), false);
   assert.equal(JSON.stringify(received.metadata).includes('checkout-browser-agent'), false);
@@ -247,7 +252,9 @@ test('status: paid but webhook not landed → order_ready:false (the page keeps 
 
 test('status: order present → fresh download link minted from the product fulfillment', async () => {
   await seedProduct();
-  const checkoutEventId = 'a1b2c3d4-0000-4000-8000-000000000000';
+  // S-01 — derived from the session, and identical to what the webhook writes.
+  const checkoutEventId = checkoutCompletedEventId(SESSION_ID);
+  assert.equal(checkoutEventId, deterministicUuid(`${SESSION_ID}:checkout_completed`));
   await createLocalBlobStore('commerce').setJSON(`orders/${SESSION_ID}.json`, {
     schema: 'commerce_order.v1',
     order_id: 'ord_abc123def456',
@@ -267,7 +274,7 @@ test('status: order present → fresh download link minted from the product fulf
         retrieve: async () => ({
           id: SESSION_ID,
           payment_status: 'paid',
-          metadata: { event_id: checkoutEventId },
+          metadata: {},  // S-01 — no id in metadata; the status endpoint derives it from the session id
         }),
       },
     },
@@ -380,4 +387,32 @@ test('unlock: checkout requires an EXISTING pre-generated artifact under the pro
     'unlock/quiz-results/r_abc.pdf',
     'the webhook fulfils exactly this artifact'
   );
+});
+
+// S-01 — the whole point of the fix: the id the browser stamps on buy_click/goal,
+// the id the success page reports, and the id the webhook writes for
+// checkout_completed are ONE id. Before this they were a randomUUID() and a
+// deterministicUuid() that could never be equal, so every revenue join was empty.
+test('create, status and the webhook agree on one purchase id for a session', async () => {
+  await seedProduct();
+  const created = await withFakeStripe(
+    {
+      checkout: {
+        sessions: {
+          create: async () => ({ id: SESSION_ID, url: 'https://checkout.stripe.com/c/pay/x' }),
+        },
+      },
+    },
+    () => post({ product_id: PRODUCT_ID })
+  );
+  const createdBody = JSON.parse(created.body) as { event_id: string };
+
+  // The webhook's own derivation for this session, unchanged by this fix — it is
+  // the create side that used to mint a random id that could never equal it.
+  const webhookEventId = deterministicUuid(`${SESSION_ID}:checkout_completed`);
+
+  assert.equal(createdBody.event_id, webhookEventId);
+  assert.equal(created.headers['X-CEID'], webhookEventId);
+  // The status endpoint's half of the join is asserted where an order exists, in
+  // 'status: order present → fresh download link minted from the product fulfillment'.
 });

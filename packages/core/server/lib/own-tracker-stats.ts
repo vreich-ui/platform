@@ -115,8 +115,8 @@ export const fetchOwnTrackerStats = async (
 
 // ─── R11.2 (T21.28) — raw event export ──────────────────────────────────────
 //
-// A second, distinct sink endpoint from `/stats`: `GET /api/tracking-sink/
-// export?project_id&from&to&kind=events|commerce|dims`, Bearer-authenticated,
+// A second, distinct sink endpoint from `/stats`: `GET /export?project_id&
+// from&to&kind=events|commerce|dims`, Bearer-authenticated,
 // NDJSON, one row per event/commerce-event/dim-fact in the window. This
 // module is the ONLY place the Bearer token is ever attached to a request —
 // `admin-analytics.ts`'s `resource=raw_export` branch calls this and returns
@@ -150,7 +150,9 @@ const exportEndpoint = (sinkUrl: string, projectId: string, options: OwnTrackerE
     to: options.to,
     kind: options.kind,
   });
-  return `${sinkUrl.replace(/\/+$/, '')}/api/tracking-sink/export?${params.toString()}`;
+  // S-22: TRACKING_SINK_URL is already the full `.../api/tracking-sink` relay URL —
+  // every other reader here (`statsEndpoint` included) appends just `/<route>`.
+  return `${sinkUrl.replace(/\/+$/, '')}/export?${params.toString()}`;
 };
 
 /**

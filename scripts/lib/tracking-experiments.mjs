@@ -196,6 +196,12 @@ export const fetchWeights = async ({
     }
     const body = await response.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    // S-24: the sink's real envelope is `{project_id, experiments: {object_id: {variant_id:
+    // weight}}}` — `weights` never existed on the wire and reading it (then falling back to
+    // the WHOLE body, `project_id` included) fed `project_id` into the weight map as if it
+    // were an object's variant weights. `weights` stays as a fallback for a future/alternate
+    // sink shape, checked after the real field.
+    if (body.experiments && typeof body.experiments === 'object') return body.experiments;
     return body.weights && typeof body.weights === 'object' ? body.weights : body;
   } catch (error) {
     warn(`weights: ${error instanceof Error ? error.message : String(error)} — equal weights.`);

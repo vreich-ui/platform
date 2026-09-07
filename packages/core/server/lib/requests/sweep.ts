@@ -84,6 +84,9 @@ export interface SweepBridge {
    * go-live, so the row gets `object_published` without a live path.
    */
   callTool?<T>(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: T }>;
+  /** S-26: the project `callTool` is scoped to, forwarded onto `node_get_latest_output`
+   * (a run-addressed call) via `PublicationOutputReader`. Optional alongside `callTool`. */
+  projectId?: string;
 }
 
 export interface SweepChatSink {
@@ -249,7 +252,9 @@ const recordPublicationEvidence = async (
 
   const callTool = deps.bridge?.callTool;
   const reader: PublicationOutputReader | undefined =
-    callTool && deps.bridge ? { callTool: callTool.bind(deps.bridge) } : undefined;
+    callTool && deps.bridge
+      ? { callTool: callTool.bind(deps.bridge), projectId: deps.bridge.projectId }
+      : undefined;
   const outputs =
     reader && publicationOutputsWorthReading(nodes)
       ? await fetchPublicationOutputs(reader, run).catch(() => ({}))

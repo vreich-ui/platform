@@ -469,11 +469,13 @@ test('publish_workspace_run on "go" records the operator decision BEFORE workflo
     ],
     'the durable operator decision must be recorded before the publish call, not folded into it via the deprecated `approved` field'
   );
+  // S-26: every run-addressed CMS-Agent call carries the site's projectId, workflow_get_run included.
+  assert.deepEqual(calls[0]!.args, { runId: 'run_1', projectId: 'platform' });
   // The decision write itself: pinned to this runId, unconditionally "approved" (this
   // ctx simulates the "ask"-gated approval card having just been accepted —
   // ctx.humanApprovedCall — which is what actually gates this write now),
   // and NOT wrapped by the publish idempotency key — it is not inside idempotentCalls.
-  assert.deepEqual(calls[2]!.args, { runId: 'run_1', decision: 'approved' });
+  assert.deepEqual(calls[2]!.args, { runId: 'run_1', projectId: 'platform', decision: 'approved' });
   assert.deepEqual(idempotentCalls, [{ tool: 'publish_workspace_run', key: 'publish:run_1' }]);
 
   const sent = calls[3]!.args as {
@@ -652,7 +654,7 @@ test('publish_workspace_run: a human-accepted approval card writes the operator 
     'a card-accepted call must write the decision before publishing'
   );
   const decisionCall = calls.find((call) => call.name === 'workflow_set_operator_publish_decision')!;
-  assert.deepEqual(decisionCall.args, { runId: 'run_1', decision: 'approved' });
+  assert.deepEqual(decisionCall.args, { runId: 'run_1', projectId: 'platform', decision: 'approved' });
   const publishCall = calls.find((call) => call.name === 'workflow_publish_run')!;
   const sent = publishCall.args as { readiness: { approval: { approvedBy: string } } };
   // "Pinned to ctx.principal": the approval that reaches CMS-Agent identifies

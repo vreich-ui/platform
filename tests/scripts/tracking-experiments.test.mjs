@@ -101,11 +101,19 @@ test('fetchWeights: absent configuration, a timeout, and a non-2xx all mean equa
     env,
     fetchImpl: async (url) => {
       seen = url;
-      return { ok: true, json: async () => ({ weights: { [CONTROL]: { [CONTROL]: 1 } } }) };
+      // S-24: the sink's real envelope — `{project_id, experiments: {object_id:
+      // {variant_id: weight}}}` — not `weights`, which never existed on the wire.
+      return { ok: true, json: async () => ({ project_id: 'demo', experiments: { [CONTROL]: { [CONTROL]: 1 } } }) };
     },
   });
   assert.equal(seen, 'https://sink.example.com/weights?project_id=demo', 'the documented endpoint, trailing slash trimmed');
   assert.deepEqual(ok, { [CONTROL]: { [CONTROL]: 1 } });
+
+  const fallback = await fetchWeights({
+    env,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ weights: { [CONTROL]: { [CONTROL]: 1 } } }) }),
+  });
+  assert.deepEqual(fallback, { [CONTROL]: { [CONTROL]: 1 } }, '`weights` still works as a fallback shape');
 
   assert.deepEqual(await fetchWeights({ env, fetchImpl: async () => ({ ok: false, status: 503 }) }), {});
   assert.deepEqual(

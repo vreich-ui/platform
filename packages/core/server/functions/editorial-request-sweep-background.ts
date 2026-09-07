@@ -18,6 +18,7 @@
 import { z } from 'zod';
 
 import type { SiteBinding } from '../lib/site-binding.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import { getHeader } from '../lib/admin-auth.js';
 import { getAgentChatBlobStore, appendChatEvent, loadChatDoc, saveChatDoc } from '../lib/agent/chat-store.js';
 import { getEditorialRequestsBlobStore } from '../lib/blob-store.js';
@@ -61,7 +62,10 @@ const bridge = (): SweepBridge | undefined =>
         // `stall` is a SIBLING of `run` on the wire but derive-status reads it off
         // the snapshot (§5.2's dispatch heartbeat), so it is folded back in.
         getRun: async (runId) => {
-          const result = await cmsAgentClient.callTool<Record<string, unknown>>('workflow_get_run', { runId });
+          const result = await cmsAgentClient.callTool<Record<string, unknown>>('workflow_get_run', {
+            runId,
+            projectId: getSiteIdentity().cmsAgentProjectId,
+          });
           if (!result.ok) return result;
           const payload = result.data;
           const row =
@@ -76,6 +80,7 @@ const bridge = (): SweepBridge | undefined =>
         // compact run view does not carry — see `publication-outputs.ts` for
         // why those two reads beat a `detail: "full"` run record.
         callTool: (name, args) => cmsAgentClient.callTool(name, args),
+        projectId: getSiteIdentity().cmsAgentProjectId,
       }
     : undefined;
 

@@ -20,6 +20,10 @@ import { publicationOutputsWorthReading } from './publication-evidence.js';
 
 export interface PublicationOutputReader {
   callTool<T>(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: T }>;
+  /** S-26: `node_get_latest_output` is run-addressed like every other CMS-Agent call and
+   * needs the project it is scoped to. Optional so a caller without one (older bridge
+   * shapes, tests) still satisfies this interface — the read is just unscoped for them. */
+  projectId?: string;
 }
 
 export const PUBLICATION_OUTPUT_NODES = ['publish_executor', 'release_executor'] as const;
@@ -54,7 +58,11 @@ export const fetchPublicationOutputs = async (
   const reads: Array<[string, unknown] | undefined> = await Promise.all(
     PUBLICATION_OUTPUT_NODES.map(async (nodeId): Promise<[string, unknown] | undefined> => {
       try {
-        const result = await client.callTool<Record<string, unknown>>('node_get_latest_output', { nodeId, runId });
+        const result = await client.callTool<Record<string, unknown>>('node_get_latest_output', {
+          nodeId,
+          runId,
+          ...(client.projectId ? { projectId: client.projectId } : {}),
+        });
         if (!result.ok || !isRecord(result.data)) return undefined;
         const output = isRecord(result.data.output) ? result.data.output : result.data;
         // The value is the executor's artifact; a record for another run is

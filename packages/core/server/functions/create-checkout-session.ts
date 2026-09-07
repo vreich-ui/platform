@@ -11,17 +11,19 @@
  * - Charges the linked `price_id`; the display cache is never the charge
  *   source (§3 canonicality — a stale cache is cosmetic, never a wrong
  *   charge).
- * - Stamps `metadata: { product_id, event_id }` so the webhook can correlate
- *   the completed session back to the product and the event chain (§5).
+ * - Stamps `metadata: { product_id }` so the webhook can correlate the
+ *   completed session back to the product (§5). The purchase's own id is NOT
+ *   minted here: it is derived from the Checkout Session id (S-01), so the
+ *   browser and the webhook name the same purchase without either telling the
+ *   other.
  * - success/cancel URLs are built from the SERVER's site URL (never a
  *   request header — a forged Origin must not steer the redirect).
  */
 import type { SiteBinding } from '../lib/site-binding.js';
-import { randomUUID } from 'node:crypto';
-
 import { getArtifactBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import { checkBuyability, loadPublishedProduct } from '../lib/commerce-products.js';
 import { visitorShashForRequest, type MemberLinkDeps } from '../lib/member-link.js';
+import { checkoutCompletedEventId } from '../lib/commerce-event-ids.js';
 import { getStripeClient } from '../lib/stripe-env.js';
 import { isObjectIdForType } from '../../lib/object-ids.js';
 
@@ -118,7 +120,7 @@ const handlerImpl = async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = 
     // payment under the product's unlock prefix; the buyer's session names it
     // and the webhook only flips retrieval. The key must sit under the
     // product's own prefix AND already exist — nobody pays for a ghost.
-    const metadata: Record<string, string> = { product_id: productId, event_id: randomUUID() };
+    const metadata: Record<string, string> = { product_id: productId };
     const visitorShash = visitorShashForRequest(event, memberLinkDeps);
     if (visitorShash) metadata.visitor_shash = visitorShash;
     if (product.body.fulfillment.kind === 'unlock') {
@@ -144,7 +146,11 @@ const handlerImpl = async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = 
     });
 
     if (!session.url) return reply(502, { error: 'Stripe did not return a Checkout URL.' });
-    return reply(200, { ok: true, url: session.url, session_id: session.id, event_id: metadata.event_id });
+    // S-01 — the id the browser stamps on buy_click/goal is derived from the
+    // session Stripe just created, which is exactly what the webhook will
+    // derive its checkout_completed event_id from. A random id here could
+    // never join to a purchase.
+    return reply(200, { ok: true, url: session.url, session_id: session.id, event_id: checkoutCompletedEventId(session.id) });
   } catch (error) {
     console.error('Failed to create a Checkout Session.', error);
     return reply(502, { error: 'Checkout Session could not be created.' });

@@ -96,7 +96,10 @@ test('fetchOwnTrackerRawExport requests the exact contract endpoint/params, kind
   });
   assert.ok(capturedUrl);
   const parsed = new URL(capturedUrl!);
-  assert.equal(parsed.origin + parsed.pathname, 'https://sink.example.test/api/tracking-sink/export');
+  // S-22: TRACKING_SINK_URL is already the full `.../api/tracking-sink` relay URL, so the
+  // export request appends only `/export` — the same convention every other sink reader
+  // (stats, weights) uses against this env var.
+  assert.equal(parsed.origin + parsed.pathname, 'https://sink.example.test/export');
   assert.equal(parsed.searchParams.get('project_id'), 'proj_9');
   assert.equal(parsed.searchParams.get('kind'), 'commerce');
   assert.equal(parsed.searchParams.get('from'), baseOptions.from);

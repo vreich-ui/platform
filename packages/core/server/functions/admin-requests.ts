@@ -20,6 +20,7 @@ import { z } from 'zod';
 
 import type { SiteBinding } from '../lib/site-binding.js';
 import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-client.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import { getEditorialRequestsBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import { objectRecordKey } from '../lib/object-store-keys.js';
@@ -104,7 +105,10 @@ const cmsAgentClient = new CmsAgentClient();
 const cancelWorkflowRun = async (runId: string): Promise<string | undefined> => {
   if (!isCmsAgentConfigured()) return 'cms_agent_unavailable';
   try {
-    const result = await cmsAgentClient.callTool('workflow_cancel_run', { runId });
+    const result = await cmsAgentClient.callTool('workflow_cancel_run', {
+      runId,
+      projectId: getSiteIdentity().cmsAgentProjectId,
+    });
     return result.ok ? undefined : result.code || 'cancel_failed';
   } catch (error) {
     return error instanceof Error ? error.message.slice(0, 120) : 'cancel_threw';

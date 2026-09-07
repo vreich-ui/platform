@@ -28,6 +28,8 @@
  */
 import type { SiteBinding } from '../lib/site-binding.js';
 import { createHash } from 'node:crypto';
+
+import { deterministicUuid } from '../lib/commerce-event-ids.js';
 import type Stripe from 'stripe';
 
 import { getCommerceBlobStore, getCommerceEventsBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
@@ -63,17 +65,10 @@ const header = (headers: LambdaEvent['headers'], name: string): string | undefin
   return match?.[1];
 };
 
-/**
- * RFC-4122-shaped uuid derived from a seed — used for DETERMINISTIC event
- * ids (same Stripe event → same id → same store key → replays no-op).
- */
-export const deterministicUuid = (seed: string): string => {
-  const hex = createHash('sha256').update(seed).digest('hex').slice(0, 32).split('');
-  hex[12] = '4';
-  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
-  const s = hex.join('');
-  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20, 32)}`;
-};
+// S-01 — the id derivation moved to lib/commerce-event-ids.ts so the checkout
+// endpoints mint the SAME purchase id this function writes. Still re-exported
+// here because callers and tests already import it from this module.
+export { deterministicUuid };
 
 const isoFromEpochSeconds = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
