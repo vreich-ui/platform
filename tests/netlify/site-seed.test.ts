@@ -66,17 +66,37 @@ test('the batch is the single site_drlurie singleton owning itself', () => {
   );
 });
 
+// Fields production owns and a seed must not: an operator configures these per site
+// THROUGH THE ADMIN after the site exists, so production legitimately carries values a
+// seed has no business shipping. `brandImagery` is set from a visual standard or derived
+// from a theme; `pdf` binds that tenant's own template ids. Comparing them made a routine
+// publish turn `main` red — four consecutive runs in a row on 2026-09-07 — and pulling
+// them INTO the seed is worse: the seed is the starting state for a NEW site, and six
+// brand-imagery tests correctly build on a site that has no brandImagery yet.
+//
+// Everything else still drifts loudly. Adding a key here is a deliberate statement that
+// production owns it, not a way to quiet a failing guard.
+const OPERATOR_OWNED_KEYS = new Set(['brandImagery', 'pdf']);
+
 test('the seed body matches the released production export (drift guard — run sites/drlurie/seeds/sync-site-seed.mjs)', () => {
   const exported = JSON.parse(readFileSync(findExport(), 'utf8')) as Record<string, unknown>;
   delete exported.__generated;
-  const drift = [...new Set([...Object.keys(exported), ...Object.keys(body as Record<string, unknown>)])].filter(
-    (key) => JSON.stringify(stable((body as Record<string, unknown>)[key])) !== JSON.stringify(stable(exported[key]))
-  );
+  const drift = [...new Set([...Object.keys(exported), ...Object.keys(body as Record<string, unknown>)])]
+    .filter((key) => !OPERATOR_OWNED_KEYS.has(key))
+    .filter(
+      (key) => JSON.stringify(stable((body as Record<string, unknown>)[key])) !== JSON.stringify(stable(exported[key]))
+    );
   assert.deepEqual(
     drift,
     [],
     `site seed drifted from production on: ${drift.join(', ')} — run \`node sites/drlurie/seeds/sync-site-seed.mjs\` to resync`
   );
+});
+
+// The exemption list is the whole risk of narrowing the guard: it is quiet by design, so
+// growing it must be a visible line in a diff rather than a thing that happens.
+test('exactly two keys are exempt from the drift guard, and they are the operator-owned ones', () => {
+  assert.deepEqual([...OPERATOR_OWNED_KEYS].sort(), ['brandImagery', 'pdf']);
 });
 
 test('the body parses under site.v1 and the id passes T0.3', () => {
