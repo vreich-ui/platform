@@ -1,0 +1,928 @@
+{
+  "__generated": {
+    "at": "2026-09-07T07:53:35.357Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_plugin_hard_water_skin_20260907_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_hard_water_skin_20260907_01"
+    },
+    "record_version": 8,
+    "surface": "plugin:claude"
+  },
+  "author": "Dr. Lurie",
+  "deck": "If your skin got worse when you moved house, the water is a reasonable suspect. The observational evidence is fairly consistent. The one large treatment trial is not, and that gap should change what you spend.",
+  "description": "What hard water does to the skin barrier, why the association with eczema is well replicated, what happened when water softeners were tested in a randomised trial, and what is worth doing instead.",
+  "editorial": {
+    "framework": "fw_concern",
+    "writer_notes": "TOP-of-funnel. Reader moved house or changed area and their skin got worse. The piece exists because the honest answer is a split verdict — association strong, treatment trial negative — and that is exactly where the market sells hardware. Dials under ceiling: claim_strength ~0.16, urgency 0, agitation ~0.05, cta_density ~0.05. One ask: read the occlusive routine piece."
+  },
+  "image": {
+    "alt": "Water running from a plain chrome bathroom tap into cupped hands in daylight",
+    "src": "/img/req_plugin_hard_water_skin_20260907_01/6d144ab59ded383dfb156e0fbfa35335c545ce571b516a18340d68b12b154b90.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_opening",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Nothing in your routine changed. You moved, or the water company changed supply, and within a few weeks your face felt tight after washing in a way it never used to. Soap stopped rinsing off cleanly. There is a film on the shower screen and something like it on your skin."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "This is one of the few skincare suspicions that has actually been studied, repeatedly, in large populations. It is also one where the honest answer splits in two — and where the second half is the part nobody selling a water softener will mention."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Both halves are below, in that order."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What you are seeing"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_underneath",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Hard water simply means water carrying a lot of dissolved calcium and magnesium, picked up from the rock the supply passes through. It is not a contaminant, and it is safe to drink. What it changes is how soap behaves on your skin."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Surfactants stop rinsing cleanly."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Calcium and magnesium react with soap to form an insoluble residue — the same scum you can see on a shower screen. Some of it stays on skin after the water has gone."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "You compensate by using more."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Hard water lathers poorly, so most people quietly increase the dose of cleanser and the length of the wash. That, rather than the minerals themselves, may be doing much of the damage."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "The barrier is measurably affected."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Work in this area reports changes in barrier measures after washing in harder water, which is the plausible mechanism linking it to conditions like eczema."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "None of that is exotic. It is mostly a story about detergent staying where it should not, on skin that is being washed more thoroughly than it needs."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What is happening underneath"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_evidence",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Here is the split, stated plainly."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "The association is well replicated."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A systematic review and meta-analysis of water hardness, atopic eczema and skin barrier function found the relationship across multiple populations ("
+                        },
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "pubmed.ncbi.nlm.nih.gov/33259122"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pubmed.ncbi.nlm.nih.gov/33259122/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "). Living in a hard-water area is associated with more eczema, particularly in children."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Softening the water did not treat it."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " When ion-exchange water softeners were tested in a randomised controlled trial in children with eczema, the softeners did not produce a meaningful improvement over usual care ("
+                        },
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "pubmed.ncbi.nlm.nih.gov/21358807"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pubmed.ncbi.nlm.nih.gov/21358807/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "). A later pilot trial looked at prevention rather than treatment, and remains preliminary ("
+                        },
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "pubmed.ncbi.nlm.nih.gov/34854157"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pubmed.ncbi.nlm.nih.gov/34854157/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": ")."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "An association that survives replication and an intervention that fails a trial is not a contradiction. It usually means the exposure is a marker for something, or that by the time skin is inflamed, removing the original irritant is no longer enough to settle it."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "For you, practically, it means this: hard water is a reasonable explanation for why your skin changed, and a poor reason to buy plumbing."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What the evidence supports"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_kettle",
+      "kind": "content",
+      "public": {
+        "media": {
+          "alt": "The inside of a stainless steel kettle showing a pale chalky mineral deposit",
+          "caption": "The inside of your kettle is a free hardness test. Your water supplier also publishes the hardness for your postcode, usually as a number in milligrams of calcium carbonate per litre.",
+          "contentType": "image/webp",
+          "sizeBytes": 43066,
+          "src": "/img/req_plugin_hard_water_skin_20260907_01/3f03901a68cc708e89450382b9e7e10cbb425b4c1e46b264d60b92f7262f419a.webp",
+          "type": "image"
+        },
+        "title": "How to know what you are dealing with"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "section"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_notworth",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If the mechanism is mostly detergent that will not rinse, the cheap interventions are aimed at the detergent rather than at the water."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Worth trying first, in roughly this order:"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Use less cleanser, less often."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Once a day for the face is enough for most people. If the lather is poor, resist adding more."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Switch to a non-soap cleanser."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Syndet bars and cream cleansers form far less of the insoluble residue that traditional soap does in hard water."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Shorten and cool the shower."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Heat and duration strip lipids regardless of hardness, and they are free to change."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Moisturise onto damp skin."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Within a few minutes of getting out, while there is still water to hold."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "ordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Harder to justify:"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "A whole-house water softener bought for your skin."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " It is the one intervention that has been properly trialled for eczema, and it did not beat usual care. If you want one for your kettle and your boiler, that is a different and perfectly good reason."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Shower filters sold for skin and hair."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Most are not ion-exchange softeners at all, and the claims made for them run well ahead of anything published."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Replacing your whole routine at once."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " If four things change and your skin settles, you have learned nothing you can take with you to the next house."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What is worth doing, and what is not"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whensee",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Dry, tight skin after a house move is usually a routine problem. Some of what people attribute to their water is not."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Speak to your dermatologist or GP if the skin is itchy rather than merely dry, if it is cracking, weeping or bleeding, if it is keeping you or your child awake, or if it has not settled after several weeks of a gentler routine. Eczema is a diagnosis and it is treated with more than a change of cleanser — and in children in particular, it is worth being seen rather than managed from an article."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "That is also the conversation in which to ask whether a softener is worth it for your household specifically, rather than deciding it from a brochure."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "When to see someone"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_next",
+      "kind": "action",
+      "public": {
+        "body": "The next step for skin that stays tight and flaky after washing is an occlusive layer at night — the oldest and cheapest thing in the cupboard, in the right order.",
+        "ctaLink": "/slugging-overnight-occlusive-routine",
+        "ctaText": "Read: the overnight occlusive routine",
+        "title": "If the gentler routine is not holding"
+      },
+      "rendering": {
+        "emphasis": "low",
+        "placement": "section",
+        "presentation": "callout"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "The effect of water hardness on atopic eczema, skin barrier function: A systematic review, meta-analysis."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " 2021. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/33259122"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/33259122/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "A randomised controlled trial of ion-exchange water softeners for the treatment of eczema in children."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " 2011. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/21358807"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/21358807/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Randomized controlled pilot trial with ion-exchange water softeners to prevent eczema (SOFTER trial)."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " 2022. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/34854157"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/34854157/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Dry skin."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/dry-skin"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/dry-skin"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Hard water is consistently associated with eczema, but a randomised trial of water softeners did not improve it. What that means for your routine and your money.",
+    "meta_title": "Hard Water and Your Skin: What the Evidence Actually Shows"
+  },
+  "slug": "hard-water-and-your-skin",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-07",
+        "name": "The effect of water hardness on atopic eczema, skin barrier function: A systematic review, meta-analysis",
+        "publisher": "PubMed",
+        "source_id": "src_pubmed_hardness_meta",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33259122/"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "A randomised controlled trial of ion-exchange water softeners for the treatment of eczema in children",
+        "publisher": "PubMed",
+        "source_id": "src_pubmed_swet",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/21358807/"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Randomized controlled pilot trial with ion-exchange water softeners to prevent eczema (SOFTER trial)",
+        "publisher": "PubMed",
+        "source_id": "src_pubmed_softer",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/34854157/"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Dry skin",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_dryskin",
+        "url": "https://dermnetnz.org/topics/dry-skin"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skin-health",
+    "tags": [
+      "skin-barrier",
+      "dry-skin",
+      "sensitive-skin",
+      "skin-science"
+    ]
+  },
+  "title": "Hard Water and Your Skin: A Real Association, and a Trial That Complicates It"
+}
