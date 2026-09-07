@@ -66,17 +66,47 @@ test('the batch is the single site_drlurie singleton owning itself', () => {
   );
 });
 
+// The exemption list lives with the script CI actually runs as its own gate
+// (`sync-site-seed.mjs --check`), so the two can never disagree about what counts as
+// drift. It is READ from that file rather than imported, because importing the script
+// would execute it — it syncs on load. See that file for why these two keys are
+// production's and not the seed's.
+const findSyncScript = (): string => {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 10; i += 1) {
+    const candidate = join(dir, 'sites', 'drlurie', 'seeds', 'sync-site-seed.mjs');
+    if (existsSync(candidate)) return candidate;
+    dir = dirname(dir);
+  }
+  throw new Error('could not locate sites/drlurie/seeds/sync-site-seed.mjs');
+};
+const operatorOwnedKeysFromScript = (): string[] => {
+  const source = readFileSync(findSyncScript(), 'utf8');
+  const match = /export const OPERATOR_OWNED_KEYS = \[([^\]]*)\]/.exec(source);
+  assert.ok(match, 'sync-site-seed.mjs must export OPERATOR_OWNED_KEYS — the drift guard and this test share it');
+  return [...match![1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]!);
+};
+const OPERATOR_OWNED_KEYS = new Set(operatorOwnedKeysFromScript());
+
 test('the seed body matches the released production export (drift guard — run sites/drlurie/seeds/sync-site-seed.mjs)', () => {
   const exported = JSON.parse(readFileSync(findExport(), 'utf8')) as Record<string, unknown>;
   delete exported.__generated;
-  const drift = [...new Set([...Object.keys(exported), ...Object.keys(body as Record<string, unknown>)])].filter(
-    (key) => JSON.stringify(stable((body as Record<string, unknown>)[key])) !== JSON.stringify(stable(exported[key]))
-  );
+  const drift = [...new Set([...Object.keys(exported), ...Object.keys(body as Record<string, unknown>)])]
+    .filter((key) => !OPERATOR_OWNED_KEYS.has(key))
+    .filter(
+      (key) => JSON.stringify(stable((body as Record<string, unknown>)[key])) !== JSON.stringify(stable(exported[key]))
+    );
   assert.deepEqual(
     drift,
     [],
     `site seed drifted from production on: ${drift.join(', ')} — run \`node sites/drlurie/seeds/sync-site-seed.mjs\` to resync`
   );
+});
+
+// The exemption list is the whole risk of narrowing the guard: it is quiet by design, so
+// growing it must be a visible line in a diff rather than a thing that happens.
+test('the drift guard and the CI sync script exempt exactly the same two operator-owned keys', () => {
+  assert.deepEqual([...OPERATOR_OWNED_KEYS].sort(), ['brandImagery', 'pdf']);
 });
 
 test('the body parses under site.v1 and the id passes T0.3', () => {

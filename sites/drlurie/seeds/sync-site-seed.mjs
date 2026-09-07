@@ -63,9 +63,23 @@ const stable = (value) =>
         )
       : value;
 
-const driftedKeys = [...new Set([...Object.keys(exported), ...Object.keys(currentBody)])].filter(
-  (key) => JSON.stringify(stable(currentBody[key])) !== JSON.stringify(stable(exported[key]))
-);
+// Fields production owns and a seed must not. An operator configures these per site
+// THROUGH THE ADMIN after the site exists — `brandImagery` from a visual standard or
+// derived from a theme, `pdf` binding that tenant's own template ids — so a routine
+// content publish carries them into the export and the guard fired on a difference that
+// is not drift at all. Four consecutive `main` runs went red that way on 2026-09-07.
+//
+// Syncing them INTO the seed is worse: a seed is the starting state for a NEW site, and
+// six brand-imagery tests correctly build on a site that has no `brandImagery` yet.
+//
+// Everything else still drifts loudly. Adding a key here is a deliberate statement that
+// production owns it, not a way to quiet a failing guard — tests/netlify/site-seed.test.ts
+// imports this list and pins its contents so growing it shows up in a diff.
+export const OPERATOR_OWNED_KEYS = ['brandImagery', 'pdf'];
+
+const driftedKeys = [...new Set([...Object.keys(exported), ...Object.keys(currentBody)])]
+  .filter((key) => !OPERATOR_OWNED_KEYS.includes(key))
+  .filter((key) => JSON.stringify(stable(currentBody[key])) !== JSON.stringify(stable(exported[key])));
 
 if (driftedKeys.length === 0) {
   console.log('[sync-site-seed] seed already matches the production export — nothing to do.');
