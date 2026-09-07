@@ -66,17 +66,27 @@ test('the batch is the single site_drlurie singleton owning itself', () => {
   );
 });
 
-// Fields production owns and a seed must not: an operator configures these per site
-// THROUGH THE ADMIN after the site exists, so production legitimately carries values a
-// seed has no business shipping. `brandImagery` is set from a visual standard or derived
-// from a theme; `pdf` binds that tenant's own template ids. Comparing them made a routine
-// publish turn `main` red — four consecutive runs in a row on 2026-09-07 — and pulling
-// them INTO the seed is worse: the seed is the starting state for a NEW site, and six
-// brand-imagery tests correctly build on a site that has no brandImagery yet.
-//
-// Everything else still drifts loudly. Adding a key here is a deliberate statement that
-// production owns it, not a way to quiet a failing guard.
-const OPERATOR_OWNED_KEYS = new Set(['brandImagery', 'pdf']);
+// The exemption list lives with the script CI actually runs as its own gate
+// (`sync-site-seed.mjs --check`), so the two can never disagree about what counts as
+// drift. It is READ from that file rather than imported, because importing the script
+// would execute it — it syncs on load. See that file for why these two keys are
+// production's and not the seed's.
+const findSyncScript = (): string => {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 10; i += 1) {
+    const candidate = join(dir, 'sites', 'drlurie', 'seeds', 'sync-site-seed.mjs');
+    if (existsSync(candidate)) return candidate;
+    dir = dirname(dir);
+  }
+  throw new Error('could not locate sites/drlurie/seeds/sync-site-seed.mjs');
+};
+const operatorOwnedKeysFromScript = (): string[] => {
+  const source = readFileSync(findSyncScript(), 'utf8');
+  const match = /export const OPERATOR_OWNED_KEYS = \[([^\]]*)\]/.exec(source);
+  assert.ok(match, 'sync-site-seed.mjs must export OPERATOR_OWNED_KEYS — the drift guard and this test share it');
+  return [...match![1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]!);
+};
+const OPERATOR_OWNED_KEYS = new Set(operatorOwnedKeysFromScript());
 
 test('the seed body matches the released production export (drift guard — run sites/drlurie/seeds/sync-site-seed.mjs)', () => {
   const exported = JSON.parse(readFileSync(findExport(), 'utf8')) as Record<string, unknown>;
@@ -95,7 +105,7 @@ test('the seed body matches the released production export (drift guard — run 
 
 // The exemption list is the whole risk of narrowing the guard: it is quiet by design, so
 // growing it must be a visible line in a diff rather than a thing that happens.
-test('exactly two keys are exempt from the drift guard, and they are the operator-owned ones', () => {
+test('the drift guard and the CI sync script exempt exactly the same two operator-owned keys', () => {
   assert.deepEqual([...OPERATOR_OWNED_KEYS].sort(), ['brandImagery', 'pdf']);
 });
 
