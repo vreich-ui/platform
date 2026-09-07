@@ -1,14 +1,52 @@
 {
   "__generated": {
-    "at": "2026-08-28T19:14:00.003Z",
+    "at": "2026-09-07T13:00:58.425Z",
+    "attribution": "oauth",
     "from": "objects/site/by-id/site_drlurie.json",
-    "record_version": 34
+    "record_version": 55,
+    "surface": "plugin:claude"
   },
   "blog": {
     "categoryBase": "category",
     "listPath": "learn/library",
     "postsPerPage": 6,
     "tagBase": "tag"
+  },
+  "brandImagery": {
+    "aspectRatios": {
+      "article_body": "1:1",
+      "article_header": "3:2",
+      "category_page": "7:4",
+      "social_og": "3:2"
+    },
+    "composition": {
+      "cropRule": "No harsh cropping of faces; generous margins.",
+      "depthOfField": "Backgrounds are gently blurred or softly lit, but recognizable.",
+      "subjectScale": "Subject occupies 40–70% of the frame."
+    },
+    "medium": "photograph",
+    "negative": [
+      "obvious filters",
+      "beauty-retouch smoothing",
+      "overly stylized magazine looks",
+      "text overlays",
+      "harsh shadows",
+      "product placement",
+      "before/after exaggerations"
+    ],
+    "palette": [
+      "#e9e7e0",
+      "#babfc1",
+      "#6d7370",
+      "#b59f89",
+      "#aae0eb",
+      "#fbe0c4",
+      "#f3e3da",
+      "#a5b2bf"
+    ],
+    "seedBase": 1640599041,
+    "styleSentence": "Clean, natural, and approachable photography focusing on real people with visible skin texture. Soft daylight, minimal artificial effects. Moments feel candid or gently posed—never glossy, never clinical, and without fantasy or unreal perfection. Genuine expressions or everyday routines.",
+    "version": 1
   },
   "brandTokens": {
     "colors": {
@@ -56,6 +94,14 @@
     "twitterHandle": "@drlurie"
   },
   "name": "Dr. Lurié Skincare",
+  "pdf": {
+    "byKind": {
+      "article": "drlurie_article_v1",
+      "lead_magnet": "bef0d7b0-a042-4221-aa03-7870f1deb879",
+      "sales_brochure": "eca2337c-de69-4376-8645-75225caabfa0"
+    },
+    "defaultTemplateId": "drlurie_article_v1"
+  },
   "urls": {
     "base": "/",
     "canonicalHost": "https://drluriescience.netlify.app"
