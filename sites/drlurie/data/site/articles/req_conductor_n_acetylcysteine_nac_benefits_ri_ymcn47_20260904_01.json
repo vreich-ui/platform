@@ -1,8 +1,10 @@
 {
   "__generated": {
-    "at": "2026-09-07T16:25:48.134Z",
+    "at": "2026-09-07T17:16:18.435Z",
+    "attribution": "oauth",
     "from": "objects/content_item/by-id/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01.json",
-    "record_version": 70
+    "record_version": 74,
+    "surface": "plugin:claude"
   },
   "deck": "NAC is often marketed around antioxidants, glutathione support, detox, clarity, and healthy aging. Here is what is actually known, what is still uncertain, and how to decide whether it belongs in your routine.",
   "description": "NAC is marketed for antioxidant and glutathione support, but its role in skin health is more limited and nuanced than many product claims suggest. This guide explains the evidence, risks, product types, marketing strategies, and decision points to consider before adding NAC to a skincare or supplement routine.",
@@ -41,11 +43,11 @@
       "public": {
         "body": "NAC is linked to skin claims because oxidative stress and inflammation are relevant to many skin conversations. The skin is exposed to ultraviolet light, pollution, irritation, infection, hormones, immune signals, and wound-healing demands. Antioxidant pathways can matter in those processes.\n\nNAC is also discussed because it can contribute to cysteine availability, and cysteine is connected to glutathione.[1] In simple terms, brands often position NAC as a way to support an internal antioxidant system.\n\nThat is biologically plausible. It is not the same as proof that taking NAC will make your skin look better.\n\nThis is where marketing can get ahead of the evidence. A supplement can sound scientific because the pathway is real, even when the promised skin outcome has not been shown clearly in people like you, using the product you are considering, for the goal you actually care about.",
         "media": {
-          "alt": "Simplified NAC to cysteine to glutathione pathway with antioxidant-support context",
+          "alt": "NAC to cysteine to glutathione shown as a labelled pathway",
           "caption": "A simplified pathway view: NAC is relevant to cysteine and glutathione biology, but that mechanism does not by itself prove visible skin benefits.",
           "contentType": "image/webp",
-          "sizeBytes": 66858,
-          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/291c9e7486797d7b62593bb24a5d959187944818d64730b81370a88270ddef29.webp",
+          "sizeBytes": 24928,
+          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/2121dc69573962396cb8b0fffbc7494b1b16292172c55a7abf822e49eabcafee.webp",
           "type": "image"
         },
         "title": "Why NAC is linked to skin claims"
