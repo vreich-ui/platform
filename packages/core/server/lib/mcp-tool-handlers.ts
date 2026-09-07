@@ -76,7 +76,12 @@ import {
   type ExamplesJobStatus,
   type ExamplesJobStore,
 } from './visual-standard-examples-jobs.js';
-import { publicPathForArtifactRef, MAJOR_KEY_ARTIFACT_REF_RE } from './artifact-trust.js';
+import {
+  publicPathForArtifactRef,
+  rawArtifactRefForPublicPath,
+  MAJOR_KEY_ARTIFACT_REF_RE,
+  PUBLIC_ARTIFACT_PATH_RE,
+} from './artifact-trust.js';
 import {
   failedContentCheckFromQualityGate,
   inspectDocumentContent,
@@ -84,7 +89,7 @@ import {
   type DocumentContentCheck,
 } from './pdf-content-inspection.js';
 import { recordPdfContentCheck } from './pdf-content-check-store.js';
-import type { ArtifactIndexStore } from './artifact-index.js';
+import { readArtifactReferenceResult, type ArtifactIndexStore } from './artifact-index.js';
 import type { DocumentContentRequirement } from '../../lib/pdf/document-content-check.js';
 import {
   CAPTURE_BRIDGE_MAX_PAGES,
@@ -92,7 +97,10 @@ import {
   validateCaptureSeedUrl,
 } from './capture-bridge-policy.js';
 import {
+  analyzePlatformImageLayout,
+  annotatePlatformImage,
   canonicalPlatformArtifact,
+  checkPlatformImageText,
   createPlatformArtifactJob,
   createPlatformCaptureJob,
   createPlatformPdfTemplate,
@@ -111,6 +119,7 @@ import {
   importPlatformImageFromUrl,
   importPlatformImagesFromUrl,
   listPlatformPdfTemplates,
+  previewPlatformImageGrid,
   previewPlatformPdfTemplate,
   publishPlatformPdfTemplate,
   resumePlatformArtifactJob,
@@ -1964,6 +1973,438 @@ export const callGetAgentArtifactBySlot = async (event: LambdaEvent, input: Reco
   });
 };
 
+// ── T-IMG: the image-annotation bridge (pdf-tool T3/T4) ─────────────────────
+//
+// `annotate_image`, `analyze_image_layout`, `preview_image_grid` and
+// `check_image_text` are bridged EXACTLY the way `get_agent_artifact_by_slot`
+// is: the caller passes site_id + the owning content-item request_id and names
+// the artifact the way every other Platform artifact tool names one; Platform
+// resolves the canonical pdf-tool project, proves the request belongs to this
+// site, mints a fresh short-lived storage grant server-side, forwards it, and
+// never returns it. The caller never holds a grant.
+//
+// Three things this bridge deliberately does NOT do:
+//
+//  1. It does not re-validate the AnnotationSpec. pdf-tool's
+//     image-annotate/spec.ts zod schema is the single source of truth and its
+//     TEMPLATE_INVALID refusal names the exact field paths that failed —
+//     re-deriving that judgement here would only let the two drift and would
+//     replace a useful message with a worse one. The spec travels verbatim.
+//  2. It does not re-map upstream error codes. `pdfToolBridgeError` spreads
+//     pdf-tool's own body (which carries `errorCode`: ARTIFACT_NOT_VERIFIED,
+//     ANNOTATE_BASE_MISMATCH, TEMPLATE_INVALID, IMAGE_CANVAS_TOO_LARGE,
+//     ASSET_TOO_LARGE, OCR_UNAVAILABLE, RENDER_SERVICE_UNAVAILABLE, ...) into
+//     the tool error alongside `error_code: pdf_tool_bridge_request_failed`,
+//     so a named upstream refusal is never flattened into a generic platform
+//     failure.
+//  3. It does not summarise `renderReport` / `textCheck` / `hints`. Those
+//     payloads ARE the product of these tools — the warnings are the reason a
+//     caller runs them — so they are forwarded verbatim, and a response that
+//     arrives without one is reported as `pdf_tool_invalid_response` rather
+//     than silently answered with a report-shaped blank.
+//
+// It also does not forward a clock. pdf-tool budgets these synchronous calls
+// against ITS OWN remaining invocation time (ANNOTATE_BUDGET_EXCEEDED /
+// OCR_BUDGET_EXCEEDED) and its tool schemas are `.strict()` with no budget
+// argument, so there is nothing for Platform to pass even if it wanted to.
+
+/**
+ * The keys a caller may never supply on an artifact-bridge call. The grant,
+ * the project id and pdf-tool's own materialization proof are all resolved or
+ * minted server-side; a caller that sends one is either confused about where
+ * the trust boundary is or trying to move it, and both deserve a refusal by
+ * name rather than a silently-ignored argument. (Platform's /mcp does not
+ * enforce a tool's advertised inputSchema on tools/call, so
+ * `additionalProperties: false` in the published schema is documentation —
+ * this check is the enforcement.)
+ */
+const CALLER_FORBIDDEN_BRIDGE_KEYS = [
+  'storage',
+  'token',
+  'projectId',
+  'project_id',
+  'materializationProof',
+  'materialization_proof',
+] as const;
+
+const refuseCallerSuppliedBridgeCredentials = (
+  input: Record<string, unknown>,
+  where = 'this call'
+): ReturnType<typeof toolError> | undefined => {
+  const supplied = CALLER_FORBIDDEN_BRIDGE_KEYS.filter((key) => input[key] !== undefined);
+  if (supplied.length === 0) return undefined;
+  return toolError(
+    `${supplied.join(', ')} may not be supplied on ${where}: Platform resolves the canonical pdf-tool project and mints a fresh short-lived storage grant server-side, and never accepts or returns one. Remove ${supplied.length === 1 ? 'it' : 'them'} — site_id + request_id are all this bridge needs.`,
+    { error_code: 'artifact_grant_not_accepted' }
+  );
+};
+
+type AnnotationSourceArtifact = { blobKey: string; sha256: string; publicPath: string };
+
+/**
+ * Resolve the image artifact a bridge call is about, from the identifiers a
+ * Platform caller already holds — the SAME two `get_artifact_metadata` /
+ * `list_artifacts_for_request` / `verify_article_images` speak in:
+ *
+ *   - `public_path`  — `/img/{requestId}/{sha256}.{ext}`, exactly what
+ *                      create_agent_artifact_job, get_agent_artifact_job_status
+ *                      and get_agent_artifact_by_slot return and what an
+ *                      article's media nodes carry. It is the inverse of a raw
+ *                      Major Key blobKey, so no lookup is needed.
+ *   - `sha256`       — the digest half of (requestId, sha256), resolved to its
+ *                      blobKey through this request's artifact index (the same
+ *                      record get_artifact_metadata reads).
+ *
+ * pdf-tool needs the blobKey (verifyArtifactMaterialization refuses a call
+ * that has only a sha256), so one of these two must resolve to one. Nobody has
+ * to hand-assemble a blobKey, and no new identifier convention is invented.
+ */
+const resolveAnnotationSourceArtifact = async (
+  event: LambdaEvent,
+  requestId: string,
+  input: Record<string, unknown>
+): Promise<{ ok: true; source: AnnotationSourceArtifact } | { ok: false; result: ReturnType<typeof toolError> }> => {
+  const publicPath = toNonEmptyString(input.public_path);
+  const sha256Input = toNonEmptyString(input.sha256)?.toLowerCase();
+
+  if (!publicPath && !sha256Input) {
+    return {
+      ok: false,
+      result: toolError(
+        'Name the image artifact with public_path (the /img/{request_id}/{sha256}.{ext} path this bridge returns) or with sha256 (as get_artifact_metadata takes it). At least one is required.',
+        { error_code: 'artifact_target_required' }
+      ),
+    };
+  }
+  if (sha256Input && !/^[a-f0-9]{64}$/.test(sha256Input)) {
+    return {
+      ok: false,
+      result: toolError('sha256 must be a 64-character hex digest.', { error_code: 'artifact_target_required' }),
+    };
+  }
+
+  if (publicPath) {
+    if (!PUBLIC_ARTIFACT_PATH_RE.test(publicPath)) {
+      return {
+        ok: false,
+        result: toolError(
+          `public_path "${publicPath}" is not a servable artifact path. Pass the /img/{request_id}/{sha256}.{ext} value this bridge returned, verbatim.`,
+          { error_code: 'artifact_target_required' }
+        ),
+      };
+    }
+    // The regex admits upper-case hex; pdf-tool's blobKey<->sha256 binding check
+    // does not fold case, so normalise BOTH halves here rather than let an
+    // upper-cased path fail verification for a reason the caller cannot see.
+    const rawKey = rawArtifactRefForPublicPath(publicPath);
+    const [kind = '', ownerRequestId = '', filename = ''] = rawKey.split('/');
+    const [rawSha = '', extension = ''] = filename.split('.');
+    const sha256 = rawSha.toLowerCase();
+    const blobKey = `${kind}/${ownerRequestId}/${sha256}.${extension}`;
+    if (ownerRequestId !== requestId) {
+      return {
+        ok: false,
+        result: toolError(
+          `public_path "${publicPath}" belongs to request '${ownerRequestId}', not '${requestId}'. Cross-request artifact references are not accepted; pass the request_id that owns the image.`,
+          { error_code: 'artifact_request_scope_mismatch' }
+        ),
+      };
+    }
+    if (sha256Input && sha256Input !== sha256) {
+      return {
+        ok: false,
+        result: toolError(
+          `public_path and sha256 name two different artifacts (${sha256} vs ${sha256Input}). Pass one, or pass both from the same artifact reference.`,
+          { error_code: 'artifact_target_required' }
+        ),
+      };
+    }
+    return { ok: true, source: { blobKey, sha256, publicPath } };
+  }
+
+  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const read = await readArtifactReferenceResult(store, requestId, sha256Input!);
+  if (read.status === 'absent') {
+    return {
+      ok: false,
+      result: toolError(
+        `No artifact with sha256 ${sha256Input} is indexed for request '${requestId}'. list_artifacts_for_request shows what exists; a soft-deleted reference is visible only through get_artifact_metadata.`,
+        { error_code: 'artifact_not_in_request_index' }
+      ),
+    };
+  }
+  if (read.status === 'rejected') {
+    return {
+      ok: false,
+      result: toolError(
+        `The artifact-index record for sha256 ${sha256Input} on request '${requestId}' is not a usable ArtifactReference (${read.issue}).`,
+        { error_code: 'pdf_tool_invalid_response' }
+      ),
+    };
+  }
+  if (read.reference.deletedAtISO) {
+    return {
+      ok: false,
+      result: toolError(
+        `Artifact ${sha256Input} on request '${requestId}' is soft-deleted; it is excluded from trust and publish until restored.`,
+        { error_code: 'artifact_not_in_request_index' }
+      ),
+    };
+  }
+  return {
+    ok: true,
+    source: {
+      blobKey: read.reference.blobKey,
+      sha256: read.reference.sha256,
+      publicPath: publicPathForArtifactRef(read.reference.blobKey),
+    },
+  };
+};
+
+/** Scope + grant + source artifact, in the order the job bridge does them: the cheap refusals first. */
+const beginImageAnnotationCall = async (
+  event: LambdaEvent,
+  input: Record<string, unknown>
+): Promise<
+  | {
+      ok: true;
+      scope: ArtifactBridgeScope;
+      grant: Extract<ReturnType<typeof buildArtifactBridgeGrant>, { ok: true }>['grant'];
+      source: AnnotationSourceArtifact;
+    }
+  | { ok: false; result: ReturnType<typeof toolError> }
+> => {
+  const refused = refuseCallerSuppliedBridgeCredentials(input);
+  if (refused) return { ok: false, result: refused };
+
+  const scoped = await resolveArtifactBridgeScope(event, input);
+  if (!scoped.ok) return { ok: false, result: scoped.result };
+
+  const source = await resolveAnnotationSourceArtifact(event, scoped.scope.requestId, input);
+  if (!source.ok) return { ok: false, result: source.result };
+
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return { ok: false, result: built.result };
+
+  return { ok: true, scope: scoped.scope, grant: built.grant, source: source.source };
+};
+
+/** The scope fields every image-annotation response opens with, same as the job bridge's. */
+const imageBridgeScopeFields = (
+  scope: ArtifactBridgeScope,
+  grant: Extract<ReturnType<typeof buildArtifactBridgeGrant>, { ok: true }>['grant'],
+  source: AnnotationSourceArtifact
+) => ({
+  siteId: scope.siteId,
+  projectId: grant.projectId,
+  requestId: scope.requestId,
+  source_public_path: source.publicPath,
+});
+
+/**
+ * The artifact `annotate_image` / `preview_image_grid` just WROTE, given
+ * pdf-tool's `artifact` block. `public_path` gets the same treatment the job
+ * bridge gives it (publicPathForArtifactRef over the returned blobKey) — and
+ * the Major Key shape is asserted first, because a blobKey that is not one
+ * would come back out of that function unchanged and a raw blobKey published
+ * as an image `src` is precisely the failure publicPathForArtifactRef exists
+ * to prevent.
+ */
+const canonicalAnnotationOutput = (
+  body: Record<string, unknown>
+):
+  | { ok: true; artifact: Record<string, unknown>; publicPath: string }
+  | { ok: false; result: ReturnType<typeof toolError> } => {
+  const artifact = isJsonObject(body.artifact) ? body.artifact : undefined;
+  const blobKey = artifact && typeof artifact.blobKey === 'string' ? artifact.blobKey : undefined;
+  if (!artifact || !blobKey || !MAJOR_KEY_ARTIFACT_REF_RE.test(blobKey)) {
+    return {
+      ok: false,
+      result: toolError('pdf-tool returned no canonical artifact reference for the image it wrote.', {
+        error_code: 'pdf_tool_invalid_response',
+      }),
+    };
+  }
+  return { ok: true, artifact, publicPath: publicPathForArtifactRef(blobKey) };
+};
+
+/** A verbatim report/hints payload, or a typed refusal — never a fabricated empty one. */
+const requireVerbatimPayload = (
+  body: Record<string, unknown>,
+  field: 'renderReport' | 'hints' | 'textCheck'
+): { ok: true; value: Record<string, unknown> } | { ok: false; result: ReturnType<typeof toolError> } => {
+  const value = isJsonObject(body[field]) ? body[field] : undefined;
+  if (!value) {
+    return {
+      ok: false,
+      result: toolError(
+        `pdf-tool returned no ${field}. It is the product of this call (the warnings are what you are here for), so an absent one is reported rather than answered with a blank.`,
+        { error_code: 'pdf_tool_invalid_response' }
+      ),
+    };
+  }
+  return { ok: true, value };
+};
+
+export const callAnnotateImage = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  // The spec's own refusals are free and synchronous, so they come before the
+  // scope lookup and the index read -- same ordering discipline the job bridge
+  // uses, and the same one pdf-tool applies to the spec on its side.
+  const spec = isJsonObject(input.spec) ? input.spec : undefined;
+  if (!spec) return toolError('spec is required and must be the AnnotationSpec document.');
+  const smuggled = refuseCallerSuppliedBridgeCredentials(spec, 'the AnnotationSpec');
+  if (smuggled) return smuggled;
+
+  const started = await beginImageAnnotationCall(event, input);
+  if (!started.ok) return started.result;
+  const { scope, grant, source } = started;
+
+  // pdf-tool requires `spec.base.artifactRef` to name the SAME artifact the
+  // call was access-checked against (ANNOTATE_BASE_MISMATCH otherwise), and it
+  // is the one field of the spec Platform authoritatively knows. Fill it in
+  // when the caller left `base` out — that is what lets a caller annotate from
+  // a public_path without hand-assembling a blobKey. A caller that DID author
+  // `base` keeps it untouched: the mismatch check is upstream's and must stay
+  // reachable, so a disagreement is answered by pdf-tool's own named refusal
+  // rather than silently overwritten here.
+  const forwardedSpec =
+    spec.base === undefined
+      ? { ...spec, base: { artifactRef: { blobKey: source.blobKey, sha256: source.sha256 } } }
+      : spec;
+
+  const annotated = await annotatePlatformImage(grant, {
+    requestId: scope.requestId,
+    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    spec: forwardedSpec,
+    format: input.format,
+    quality: input.quality,
+    deviceScaleFactor: input.device_scale_factor,
+    filename: input.filename,
+    slot: input.slot,
+    tags: input.tags,
+    label: input.label,
+  });
+  if (!annotated.ok) return pdfToolBridgeError(annotated);
+
+  const output = canonicalAnnotationOutput(annotated.body);
+  if (!output.ok) return output.result;
+  const report = requireVerbatimPayload(annotated.body, 'renderReport');
+  if (!report.ok) return report.result;
+
+  event.log?.({
+    event: 'artifact_bridge_image_annotated',
+    siteId: scope.siteId,
+    requestId: scope.requestId,
+    projectId: grant.projectId,
+    sourceBlobKey: source.blobKey,
+    blobKey: output.artifact.blobKey,
+  });
+  return toolResult({
+    ...imageBridgeScopeFields(scope, grant, source),
+    ...(isJsonObject(annotated.body.artifactReference)
+      ? { source_artifact_reference: annotated.body.artifactReference }
+      : {}),
+    artifact: output.artifact,
+    public_path: output.publicPath,
+    renderReport: report.value,
+  });
+};
+
+export const callAnalyzeImageLayout = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const started = await beginImageAnnotationCall(event, input);
+  if (!started.ok) return started.result;
+  const { scope, grant, source } = started;
+
+  const analyzed = await analyzePlatformImageLayout(grant, {
+    requestId: scope.requestId,
+    source: { blobKey: source.blobKey, sha256: source.sha256 },
+  });
+  if (!analyzed.ok) return pdfToolBridgeError(analyzed);
+
+  const hints = requireVerbatimPayload(analyzed.body, 'hints');
+  if (!hints.ok) return hints.result;
+
+  return toolResult({
+    ...imageBridgeScopeFields(scope, grant, source),
+    public_path: source.publicPath,
+    ...(isJsonObject(analyzed.body.artifactReference) ? { artifactReference: analyzed.body.artifactReference } : {}),
+    hints: hints.value,
+  });
+};
+
+export const callPreviewImageGrid = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const started = await beginImageAnnotationCall(event, input);
+  if (!started.ok) return started.result;
+  const { scope, grant, source } = started;
+
+  const preview = await previewPlatformImageGrid(grant, {
+    requestId: scope.requestId,
+    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    filename: input.filename,
+    tags: input.tags,
+    label: input.label,
+  });
+  if (!preview.ok) return pdfToolBridgeError(preview);
+
+  const output = canonicalAnnotationOutput(preview.body);
+  if (!output.ok) return output.result;
+  const hints = requireVerbatimPayload(preview.body, 'hints');
+  if (!hints.ok) return hints.result;
+
+  event.log?.({
+    event: 'artifact_bridge_image_grid_previewed',
+    siteId: scope.siteId,
+    requestId: scope.requestId,
+    projectId: grant.projectId,
+    sourceBlobKey: source.blobKey,
+    blobKey: output.artifact.blobKey,
+  });
+  return toolResult({
+    ...imageBridgeScopeFields(scope, grant, source),
+    ...(isJsonObject(preview.body.artifactReference)
+      ? { source_artifact_reference: preview.body.artifactReference }
+      : {}),
+    artifact: output.artifact,
+    public_path: output.publicPath,
+    hints: hints.value,
+  });
+};
+
+export const callCheckImageText = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  // ABSENCE only. Which VALUES are legal is pdf-tool's call (its refusal is the
+  // named TEXT_CHECK_INVALID_MODE, and it also owns the mode/expect pairing
+  // rule) -- but a missing `mode` would otherwise come back as the transport
+  // layer's generic "Invalid input", which names nothing.
+  if (input.mode === undefined) {
+    return toolError(
+      'mode is required: "expect_none" to flag any text found, or "expect" with the strings that must appear.'
+    );
+  }
+
+  const started = await beginImageAnnotationCall(event, input);
+  if (!started.ok) return started.result;
+  const { scope, grant, source } = started;
+
+  const checked = await checkPlatformImageText(grant, {
+    requestId: scope.requestId,
+    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    mode: input.mode,
+    expect: input.expect,
+    languages: input.languages,
+  });
+  if (!checked.ok) return pdfToolBridgeError(checked);
+
+  const textCheck = requireVerbatimPayload(checked.body, 'textCheck');
+  if (!textCheck.ok) return textCheck.result;
+
+  return toolResult({
+    ...imageBridgeScopeFields(scope, grant, source),
+    public_path: source.publicPath,
+    ...(isJsonObject(checked.body.artifactReference) ? { artifactReference: checked.body.artifactReference } : {}),
+    textCheck: textCheck.value,
+  });
+};
+
 // Templates are site/project-level assets, not content-item-scoped — this is
 // deliberately lighter than resolveArtifactBridgeScope (no request_id, no
 // content_item lookup; templates have no equivalent owning object).
@@ -2294,7 +2735,6 @@ export const callBuildPdfRenderData = async (event: LambdaEvent, input: Record<s
     unfilled: mapped.unfilled,
   });
 };
-
 
 // ── T2.3: validate_pdf_render_data ──────────────────────────────────────────
 //

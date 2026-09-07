@@ -281,6 +281,133 @@ export const inspectPlatformArtifact = (
 ) => postPdfTool('inspect-pdf-artifact', projectPayload(grant, { requestId, artifactReference }), options);
 
 /**
+ * T-IMG: the four image-annotation bridge calls — `annotate_image`,
+ * `analyze_image_layout`, `preview_image_grid` and `check_image_text`
+ * (pdf-tool T3/T4; docs/IMAGE_PIPELINE.md §2).
+ *
+ * Same trusted-bridge shape as every other call in this file: the grant is
+ * minted server-side (buildArtifactBridgeGrant in mcp-tool-handlers.ts) and
+ * forwarded via projectPayload(grant, ...), never invented per-call and never
+ * returned to the MCP caller. Two things are specific to these four:
+ *
+ *  - They never had standalone Netlify Functions on pdf-tool (same as
+ *    validate-pdf-template / preview-pdf-template above): `/mcp` is the only
+ *    entry point they have ever had. The kebab-case name below is still the
+ *    file's convention, mapped 1:1 onto the snake_case MCP tool by postPdfTool.
+ *  - The source artifact is named by `blobKey` + `sha256`, which is the input
+ *    shape `verify_agent_artifact` / `inspect_pdf_artifact` already take.
+ *    pdf-tool REQUIRES the blobKey (agent-artifact-verification.ts fails a
+ *    call with only a sha256), so the platform side resolves the blobKey from
+ *    the caller's `public_path` / `sha256` before calling — see
+ *    resolveAnnotationSourceArtifact in mcp-tool-handlers.ts.
+ *
+ * The render options (`spec`, `format`, `quality`, `deviceScaleFactor`,
+ * `mode`, `expect`, `languages`, ...) are typed `unknown` ON PURPOSE. pdf-tool's
+ * zod schemas (mcp-tool-schemas.ts + image-annotate/spec.ts) are the single
+ * source of truth for them and refuse a bad value with a NAMED code
+ * (TEMPLATE_INVALID / TEXT_CHECK_INVALID_MODE) naming the offending field
+ * paths; re-typing them here would only let the two drift and would turn a
+ * useful upstream refusal into a generic platform one.
+ */
+export type PlatformImageArtifactRef = { blobKey: string; sha256: string };
+
+export type PlatformAnnotateImageInput = {
+  requestId: string;
+  source: PlatformImageArtifactRef;
+  /** The AnnotationSpec document, forwarded verbatim. */
+  spec: unknown;
+  format?: unknown;
+  quality?: unknown;
+  deviceScaleFactor?: unknown;
+  filename?: unknown;
+  slot?: unknown;
+  tags?: unknown;
+  label?: unknown;
+};
+
+const annotationSourcePayload = (requestId: string, source: PlatformImageArtifactRef) => ({
+  requestId,
+  blobKey: source.blobKey,
+  sha256: source.sha256,
+});
+
+export const annotatePlatformImage = (
+  grant: PdfToolStorageGrant,
+  input: PlatformAnnotateImageInput,
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'annotate-image',
+    projectPayload(grant, {
+      ...annotationSourcePayload(input.requestId, input.source),
+      spec: input.spec,
+      ...(input.format !== undefined ? { format: input.format } : {}),
+      ...(input.quality !== undefined ? { quality: input.quality } : {}),
+      ...(input.deviceScaleFactor !== undefined ? { deviceScaleFactor: input.deviceScaleFactor } : {}),
+      ...(input.filename !== undefined ? { filename: input.filename } : {}),
+      ...(input.slot !== undefined ? { slot: input.slot } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.label !== undefined ? { label: input.label } : {}),
+    }),
+    options
+  );
+
+export const analyzePlatformImageLayout = (
+  grant: PdfToolStorageGrant,
+  input: { requestId: string; source: PlatformImageArtifactRef },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'analyze-image-layout',
+    projectPayload(grant, annotationSourcePayload(input.requestId, input.source)),
+    options
+  );
+
+export const previewPlatformImageGrid = (
+  grant: PdfToolStorageGrant,
+  input: {
+    requestId: string;
+    source: PlatformImageArtifactRef;
+    filename?: unknown;
+    tags?: unknown;
+    label?: unknown;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'preview-image-grid',
+    projectPayload(grant, {
+      ...annotationSourcePayload(input.requestId, input.source),
+      ...(input.filename !== undefined ? { filename: input.filename } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.label !== undefined ? { label: input.label } : {}),
+    }),
+    options
+  );
+
+export const checkPlatformImageText = (
+  grant: PdfToolStorageGrant,
+  input: {
+    requestId: string;
+    source: PlatformImageArtifactRef;
+    mode: unknown;
+    expect?: unknown;
+    languages?: unknown;
+  },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'check-image-text',
+    projectPayload(grant, {
+      ...annotationSourcePayload(input.requestId, input.source),
+      mode: input.mode,
+      ...(input.expect !== undefined ? { expect: input.expect } : {}),
+      ...(input.languages !== undefined ? { languages: input.languages } : {}),
+    }),
+    options
+  );
+
+/**
  * T2.3/JOIN B: `renderDataSchema`, `sampleData` and `sampleAssets` are part of
  * pdf-tool's own create_pdf_template contract (confirmed against its live MCP
  * tool schema, not guessed) and this client dropped all three on the floor.

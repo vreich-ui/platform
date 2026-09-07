@@ -53,7 +53,10 @@ import type { LambdaEvent } from '../../functions/mcp.js';
 import { callPing, toolResult, visibleToolDefinitions } from '../../functions/mcp.js';
 import { buildWhoami } from '../whoami.js';
 import {
+  callAnalyzeImageLayout,
+  callAnnotateImage,
   callBrandImageryPropose,
+  callCheckImageText,
   callCommerceOrders,
   callCreateAgentArtifactJob,
   callCreatePdfTemplate,
@@ -78,6 +81,7 @@ import {
   callObjectAction,
   callOrderReissue,
   callPdfToolHealth,
+  callPreviewImageGrid,
   callProductSetPrice,
   callPublishPdfTemplate,
   callRegistryGet,
@@ -196,6 +200,14 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   get_agent_artifact_job_status: callGetAgentArtifactJobStatus,
   resume_agent_artifact_job: callResumeAgentArtifactJob,
   get_agent_artifact_by_slot: callGetAgentArtifactBySlot,
+  // T-IMG: the image-annotation bridge. The two WRITING tools replicate
+  // mcp.ts's own idempotency wrapping exactly, same as create_agent_artifact_job.
+  analyze_image_layout: callAnalyzeImageLayout,
+  check_image_text: callCheckImageText,
+  annotate_image: (event, args) =>
+    withIdempotentToolCall(event, 'annotate_image', args.idempotency_key, () => callAnnotateImage(event, args)),
+  preview_image_grid: (event, args) =>
+    withIdempotentToolCall(event, 'preview_image_grid', args.idempotency_key, () => callPreviewImageGrid(event, args)),
   create_pdf_template: (event, args) =>
     withIdempotentToolCall(event, 'create_pdf_template', args.idempotency_key, () =>
       callCreatePdfTemplate(event, args)

@@ -187,6 +187,21 @@ export const ARTIFACT_TEMPLATE_ERROR_CODES: Record<string, { http: number; meani
     meaning:
       "pdf-tool reported the job complete but this bridge's own server-side verification of the resulting bytes failed — do not trust the artifact reference; re-run the job.",
   },
+  artifact_grant_not_accepted: {
+    http: 400,
+    meaning:
+      'The call supplied a storage / token / projectId / materializationProof argument (or smuggled one inside an AnnotationSpec). This bridge mints the pdf-tool grant server-side and never accepts one from a caller — remove the argument and pass site_id + request_id.',
+  },
+  artifact_target_required: {
+    http: 400,
+    meaning:
+      'An image-annotation call did not name its artifact. Pass public_path (the /img/{request_id}/{sha256}.{ext} value the artifact bridge returned) or sha256 (as get_artifact_metadata takes it); passing both is fine when they agree.',
+  },
+  artifact_not_in_request_index: {
+    http: 404,
+    meaning:
+      'No live artifact with that sha256 is indexed for the given request_id (it never existed here, or it is soft-deleted). list_artifacts_for_request shows what exists; get_artifact_metadata also shows soft-deleted references.',
+  },
   TEMPLATE_VALIDATION_REQUIRED: {
     http: 409,
     meaning:
@@ -255,6 +270,34 @@ const artifactUploadIntentInputSchema = () =>
     },
     ['requestId', 'artifactKind', 'contentType', 'expectedSizeBytes', 'expectedSha256']
   );
+
+/**
+ * T-IMG: the four arguments every image-annotation bridge tool takes.
+ *
+ * The artifact is named the way every OTHER Platform artifact tool names one —
+ * `public_path` (what create_agent_artifact_job / get_agent_artifact_job_status /
+ * get_agent_artifact_by_slot return, and what an article's media nodes carry) or
+ * `sha256` (the digest half of the (requestId, sha256) pair get_artifact_metadata
+ * takes). No new identifier convention, and no caller ever hand-assembles the
+ * raw blobKey pdf-tool wants: Platform resolves it, from the path itself or from
+ * this request's artifact index.
+ */
+const annotationSiteIdJsonSchema = stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.');
+const annotationRequestIdJsonSchema = stringSchema(
+  'The content_item request id that owns the image artifact. The image must belong to THIS request; a cross-request reference is refused.'
+);
+const annotationPublicPathJsonSchema = {
+  type: 'string',
+  pattern: '^/(img|pdf)/[^/]+/[0-9a-fA-F]{64}\\.[a-z]+$',
+  description:
+    'The image artifact\'s public path, e.g. /img/{request_id}/{sha256}.webp — pass the value create_agent_artifact_job, get_agent_artifact_job_status or get_agent_artifact_by_slot returned, verbatim. Supply this or sha256 (both is fine when they name the same artifact).',
+};
+const annotationSha256JsonSchema = {
+  type: 'string',
+  pattern: '^[a-fA-F0-9]{64}$',
+  description:
+    'The image artifact\'s SHA-256 hex digest, as get_artifact_metadata takes it alongside the request id. Resolved to pdf-tool\'s blobKey through this request\'s artifact index. Supply this or public_path.',
+};
 
 const artifactListLimitJsonSchema = {
   type: 'integer',
@@ -592,6 +635,118 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         slot: stringSchema('The exact slot used when the job was created.'),
       },
       ['site_id', 'request_id', 'slot']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  // ── T-IMG: the image-annotation bridge (pdf-tool T3/T4; its
+  //    docs/IMAGE_PIPELINE.md §2). Four SYNCHRONOUS tools over an image that is
+  //    already an artifact of this request. Scoped exactly like the artifact-job
+  //    bridge above — site_id + request_id, project and grant minted and
+  //    forwarded server-side, never returned — and the artifact is named the way
+  //    every other Platform artifact tool names one (public_path or sha256), not
+  //    by a hand-assembled blobKey. ──
+  {
+    name: 'analyze_image_layout',
+    description:
+      "Read-only, deterministic layout analysis of an image artifact of THIS request, through this site's trusted Platform bridge — the call to make BEFORE annotate_image, to find out where text can go. SYNCHRONOUS: it answers in this one call, there is no job to poll. It WRITES NOTHING (no artifact, no index entry) and returns no pixels — only numbers about them. Returns `hints` verbatim from pdf-tool: a fixed 6x6 grid (cells \"A1\"..\"F6\", columns A-F left-to-right by rows 1-6 top-to-bottom — the SAME cell ids an AnnotationSpec's `at` field takes) with each cell's mean relative luminance (`lum`, 0=black..1=white), Sobel edge density (`busy`, 0=flat..1=maximally detailed) and mean color; up to 5 ranked `safeZones` ({x,y,w,h} normalized rects, best first); and a small `dominant` palette. `faces` is always [] and `subject` always null — detection is a later phase upstream, not a promise. Name the image with public_path (the /img/{request_id}/{sha256}.{ext} value the artifact bridge returned) or with sha256, exactly as get_artifact_metadata takes it; Platform resolves it to pdf-tool's blobKey for you. Platform resolves the canonical pdf-tool project, verifies the request and the artifact belong to this site, and mints/forwards a fresh short-lived storage grant server-side — never supply your own storage/token/projectId argument, it is refused (artifact_grant_not_accepted), never honoured. Error codes (upstream `errorCode` rides along verbatim beside this bridge's own `error_code`): artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, artifact_target_required, artifact_not_in_request_index, artifact_grant_not_accepted, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response; from pdf-tool: ARTIFACT_NOT_VERIFIED, ANNOTATE_ARTIFACT_NOT_IMAGE, IMAGE_DECODE_ERROR.",
+    inputSchema: objectSchema(
+      {
+        site_id: annotationSiteIdJsonSchema,
+        request_id: annotationRequestIdJsonSchema,
+        public_path: annotationPublicPathJsonSchema,
+        sha256: annotationSha256JsonSchema,
+      },
+      ['site_id', 'request_id']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'preview_image_grid',
+    description:
+      "Render the 6x6 annotation grid (lines, \"A1\"..\"F6\" cell labels, and a green-to-red tint showing how busy each cell is) over a downscaled copy of an image artifact of THIS request, and save it as a NEW image artifact. SYNCHRONOUS: the preview exists when this call returns, there is no job to poll. IT WRITES TO THE TENANT PLANE — a new image artifact in this site's own artifact store, under this request; nothing is overwritten and the source image is untouched. This is the LOOK-AT-IT companion to analyze_image_layout's numbers: use it when a human has to SEE which cell is which before approving a caption's placement. Returns metadata only — never bytes, base64 or a data URI: `artifact` (pdf-tool's own block: assetId, blobKey, sha256, contentType, sizeBytes, and the PREVIEW's own widthPx/heightPx, which are the downscaled ones, not the source image's), `public_path` for THAT NEW preview (the /img/... path a human can open, and the only form a renderable src may take), `source_public_path` + `source_artifact_reference` for the image it was drawn over, and the same `hints` analyze_image_layout returns, verbatim. Name the source image with public_path or sha256, exactly as get_artifact_metadata takes it. Platform resolves the canonical pdf-tool project, verifies the request and the artifact belong to this site, and mints/forwards a fresh short-lived storage grant server-side — never supply your own storage/token/projectId argument, it is refused (artifact_grant_not_accepted), never honoured. If this call times out or 502s (ambiguous whether the preview was written), retry with the SAME idempotency_key. Error codes: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, artifact_target_required, artifact_not_in_request_index, artifact_grant_not_accepted, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response; from pdf-tool: ARTIFACT_NOT_VERIFIED, ANNOTATE_ARTIFACT_NOT_IMAGE, IMAGE_DECODE_ERROR, ANNOTATE_STORE_FAILED.",
+    inputSchema: objectSchema(
+      {
+        site_id: annotationSiteIdJsonSchema,
+        request_id: annotationRequestIdJsonSchema,
+        public_path: annotationPublicPathJsonSchema,
+        sha256: annotationSha256JsonSchema,
+        filename: stringSchema(
+          'Optional filename for the preview artifact; pdf-tool derives "<source stem>-grid.png" when omitted.'
+        ),
+        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional ArtifactReference tags for the preview.'),
+        label: stringSchema('Optional human-readable label for the preview artifact.'),
+        idempotency_key: idempotencyKeyJsonSchema,
+      },
+      ['site_id', 'request_id']
+    ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'annotate_image',
+    description:
+      "Draw a DETERMINISTIC annotation layer (labels, titles, captions, numbered badges, arrows, boxes, gradient scrims, a logo) over an image artifact of THIS request and save the result as a NEW image artifact, through this site's trusted Platform bridge. No model is called anywhere in this path: you supply an AnnotationSpec — a layout language of 6x6 grid cells (\"A1\"..\"F6\") and normalized {x,y} points — and the same spec over the same base image always produces the same picture. Use it to caption a generated hero image, number the steps of a diagram, or put a title over a photo, INSTEAD of asking an image model to render text (which it cannot do reliably). CALL analyze_image_layout FIRST: it reports each grid cell's luminance and busyness and ranks the quiet zones, and placing text without it is guessing. SYNCHRONOUS: the annotated image exists when this call returns, there is no job to poll. IT WRITES TO THE TENANT PLANE — a new image artifact in this site's own artifact store, under this request; the base image is untouched, and passing `slot` REPLACES that slot's by-slot pointer (the previous artifact's bytes stay stored). Returns metadata only — never bytes, base64 or a data URI: `artifact` (pdf-tool's own block: assetId — the id this image can be bound under in a later render job's assets.images[] — plus blobKey, sha256, contentType, sizeBytes, widthPx, heightPx, format), `public_path` for THAT NEW image (the /img/... path a human can open, and the only form a renderable src may take), `source_public_path` + `source_artifact_reference` for the base image, and `renderReport` VERBATIM. THE REPORT IS THE POINT AND IT IS WARN-ONLY: `renderReport.warnings[]` rides along with a SUCCESSFUL render and never fails the call — TEXT_SHRUNK / TEXT_WRAPPED / TEXT_OVERFLOW (the string did not fit its maxWidth), COLLISION_PUSHED and AVOID_ZONE_OVERLAP (an element was moved out of another's way), CLAMPED_TO_CANVAS, CONTRAST_LOW (the text color fails WCAG 4.5:1 against the base image behind it, measured per text style; an automatic scrim was inserted), ARROW_TARGET_NO_BOX, and the two the browser reports rather than the layout engine: MEASURED_BOX_DRIFT (this element's real rendered box differs materially from the predicted one — if the drift is on the height axis it may now overlap what sits below it) and MEASUREMENT_UNAVAILABLE (the measurement pass did not run for this element, so the ABSENCE of drift warnings proves nothing about it). Read them and decide; they do not mean the image is unusable, and this bridge never summarises or drops them. THE SPEC IS FORWARDED VERBATIM and validated by pdf-tool alone — its schema is the single source of truth and refuses a bad document with errorCode TEMPLATE_INVALID naming the exact field paths, which is far more useful than anything this bridge could say. Platform fills in `spec.base.artifactRef` from the artifact you named when you omit `spec.base` entirely, so you never hand-assemble a blobKey; if you DO author `spec.base`, it is passed through untouched and pdf-tool refuses a disagreement with ANNOTATE_BASE_MISMATCH. A `storage` or `token` field inside the spec is refused, not forwarded. Every `logo` element's own artifactRef is access-checked upstream exactly like the base image — take its {blobKey, sha256} from get_artifact_metadata or list_artifacts_for_request. CAPS (all named refusals, checked before the clock is): canvas edges 1-4096px and at most ~16.8 megapixels after device_scale_factor (1-3, default 1); at most 256 elements and 64 avoid zones per spec; base image and every logo at most 5 MB each and 20 MB together. A canvas that cannot finish inside pdf-tool's remaining clock is refused up front with ANNOTATE_BUDGET_EXCEEDED naming what to reduce. Platform resolves the canonical pdf-tool project, verifies the request and the artifact belong to this site, and mints/forwards a fresh short-lived storage grant server-side — never supply your own storage/token/projectId argument, it is refused (artifact_grant_not_accepted), never honoured. If this call times out or 502s (ambiguous whether the artifact was written), retry with the SAME idempotency_key. Error codes: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, artifact_target_required, artifact_not_in_request_index, artifact_grant_not_accepted, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response; from pdf-tool, verbatim: ARTIFACT_NOT_VERIFIED, TEMPLATE_INVALID, ANNOTATE_BASE_MISMATCH, ANNOTATE_ARTIFACT_NOT_FOUND, ANNOTATE_ARTIFACT_NOT_IMAGE, IMAGE_CANVAS_TOO_LARGE, ASSET_TOO_LARGE, ANNOTATE_BUDGET_EXCEEDED, IMAGE_REQ_MAX_BYTES, ANNOTATE_ENCODE_FAILED, ANNOTATE_STORE_FAILED, RENDER_SERVICE_UNCONFIGURED, RENDER_SERVICE_UNAVAILABLE, RENDER_TIMEOUT.",
+    inputSchema: objectSchema(
+      {
+        site_id: annotationSiteIdJsonSchema,
+        request_id: annotationRequestIdJsonSchema,
+        public_path: annotationPublicPathJsonSchema,
+        sha256: annotationSha256JsonSchema,
+        spec: anyObjectSchema(
+          'The AnnotationSpec v1 document, forwarded to pdf-tool VERBATIM and validated only there: { version: 1, canvas: {w,h}, base?: {artifactRef}, theme?, elements: [], avoid: [] }. POSITIONS are a 6x6 grid cell ("A1".."F6", the same ids analyze_image_layout reports) or a normalized {x,y} point (0..1 fractions of the canvas, NEVER pixels). ELEMENTS (every one needs a unique `id`): text {content, at, anchor?: tl|tc|tr|cl|c|cr|bl|bc|br, maxWidth?: 0..1, style?: label|title|caption|badge, align?: left|center|right}; arrow {from, to, curve?: -1..1, style?: thin|bold|dashed} — an endpoint may also be "#<id>", terminating on that element\'s box edge; badge {n: a non-negative integer OR a label of at most 4 characters, at}; box {rect: {at, w, h} in 0..1 fractions with `at` as its top-left corner, style?: {fill, stroke, strokeWidthPx, radiusPx}}; scrim {rect, direction?: top|bottom|left|right, strength?: 0..1}; logo {at, size: 0..1 of the canvas\'s SHORTER edge, artifactRef: {blobKey, sha256}} — its artifactRef is access-checked upstream exactly like the base image. `avoid: [{at, w, h}]` are zones to keep clear. `theme` is {fontFamily?, textColor?, textColors?: {label,title,caption,badge}, accentColor?, scrimColor?}. COLORS are #rgb / #rrggbb / #rrggbbaa. Omit `base` and Platform fills it in from the artifact you named; author it yourself and it is forwarded untouched. The upstream schema is STRICT — an unknown field is refused with TEMPLATE_INVALID naming its path, never silently dropped — and a `storage`/`token` field here is refused by this bridge before it is forwarded.'
+        ),
+        format: stringSchema(
+          'Output image format: "png" (default, lossless, the renderer\'s exact bytes), "jpeg" or "webp". Validated by pdf-tool (TEMPLATE_INVALID).'
+        ),
+        quality: {
+          type: 'integer',
+          description:
+            'Encoder quality 1-100 for jpeg/webp. Rejected for png, which is lossless. Validated by pdf-tool (TEMPLATE_INVALID).',
+        },
+        device_scale_factor: {
+          type: 'integer',
+          description:
+            'Render the canvas at this pixel density (1-3, default 1). The stored image is canvas.w*factor x canvas.h*factor pixels, so 2 costs 4x the pixels and is what an ANNOTATE_BUDGET_EXCEEDED refusal is most often about. Validated by pdf-tool.',
+        },
+        filename: stringSchema(
+          'Optional filename for the annotated artifact; pdf-tool derives "<source stem>-annotated.<ext>" when omitted.'
+        ),
+        slot: stringSchema(
+          'Optional request-scoped slot so the annotated image is retrievable via get_agent_artifact_by_slot. Setting it REPLACES that slot\'s lookup pointer (the previous artifact\'s bytes stay stored).'
+        ),
+        tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional ArtifactReference tags for the annotated image.'),
+        label: stringSchema('Optional human-readable label for the annotated artifact.'),
+        idempotency_key: idempotencyKeyJsonSchema,
+      },
+      ['site_id', 'request_id', 'spec']
+    ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'check_image_text',
+    description:
+      "A WARN-ONLY OCR gate over an image artifact of THIS request, through this site's trusted Platform bridge. SYNCHRONOUS: it answers in this one call, there is no job to poll. IT WRITES NOTHING — no artifact, no index entry, no slot pointer — and it is the only one of the four image tools that does not touch the tenant plane. THE GATE IS INFORMATION, NEVER A FAILURE: a failing check still comes back as a SUCCESSFUL call, with the verdict nested in `textCheck.ok`; treat `textCheck` as a warning to read, not a blocker. Two modes. mode:\"expect_none\" flags ANY significant text OCR finds — call it on a generated BASE image before annotating it, to catch a model that baked its own (usually garbled) text into the pixels. mode:\"expect\" verifies every string in `expect` actually rendered — call it AFTER annotate_image with the same strings its AnnotationSpec's text/badge elements were supposed to draw, to confirm the render service produced legible glyphs rather than, say, a font substitution silently dropping them. MATCHING POLICY: case-insensitive, whitespace-collapsed, with the 0/O and 1/l/I pairs folded together, matched as a normalized substring of the detected text in reading order. Nothing else is fuzzy — a genuinely misspelled or wrong string still fails to match. Returns `textCheck` VERBATIM: { mode, detected: string[], ok, warnings, matched?, missing? }; the image's bytes never reach this response, only the text read out of them. WHAT IT DOES NOT COVER, so you do not over-trust it: it says nothing about whether detected text is legible or well-composed, nothing about scripts beyond the supported OCR languages, and — because OCR can miss faint, tiny or heavily-stylized text — a passing expect_none check is evidence of no OBVIOUS leaked text, not a guarantee of none. Name the image with public_path or sha256, exactly as get_artifact_metadata takes it. Platform resolves the canonical pdf-tool project, verifies the request and the artifact belong to this site, and mints/forwards a fresh short-lived storage grant server-side — never supply your own storage/token/projectId argument, it is refused (artifact_grant_not_accepted), never honoured. NOTE ON AVAILABILITY: the OCR engine lives in pdf-tool's render service, so this tool can answer OCR_UNAVAILABLE or RENDER_SERVICE_UNAVAILABLE while every other tool here works — that is a deployment state, not a caller mistake. Error codes: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, artifact_target_required, artifact_not_in_request_index, artifact_grant_not_accepted, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response; from pdf-tool, verbatim: TEXT_CHECK_INVALID_MODE, ARTIFACT_NOT_VERIFIED, ANNOTATE_ARTIFACT_NOT_IMAGE, OCR_ARTIFACT_NOT_FOUND, OCR_IMAGE_INVALID, OCR_IMAGE_TOO_LARGE, OCR_LANGUAGE_UNAVAILABLE, OCR_BUDGET_EXCEEDED, OCR_UNAVAILABLE, RENDER_SERVICE_UNCONFIGURED, RENDER_SERVICE_UNAVAILABLE, OCR_TIMEOUT.",
+    inputSchema: objectSchema(
+      {
+        site_id: annotationSiteIdJsonSchema,
+        request_id: annotationRequestIdJsonSchema,
+        public_path: annotationPublicPathJsonSchema,
+        sha256: annotationSha256JsonSchema,
+        mode: {
+          type: 'string',
+          enum: ['expect_none', 'expect'],
+          description:
+            '"expect_none" flags ANY significant text found in the image (run it on a generated base image BEFORE annotating). "expect" verifies every string in `expect` actually appears (run it AFTER annotate_image). Required.',
+        },
+        expect: arraySchema(
+          { type: 'string', minLength: 1 },
+          'Required (non-empty) when mode is "expect"; must be OMITTED when mode is "expect_none" — expect_none checks for the ABSENCE of any text and takes no strings. Enforced by pdf-tool (TEXT_CHECK_INVALID_MODE).'
+        ),
+        languages: arraySchema(
+          { type: 'string', minLength: 1 },
+          'Optional OCR language codes; omit for the render service\'s default. Only languages with traineddata installed there are supported — anything else is refused with OCR_LANGUAGE_UNAVAILABLE naming what IS supported, rather than silently mis-recognizing text in the wrong script.'
+        ),
+      },
+      ['site_id', 'request_id', 'mode']
     ),
     governance: { toolClass: 'read' },
   },

@@ -47,15 +47,15 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 // ─── registry shape ────────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 98 names: every visible TOOL_DEFINITION (63 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
+test('the registry has exactly the expected 102 names: every visible TOOL_DEFINITION (63 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + the four image-annotation bridge tools, T-IMG) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
     ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
   );
-  assert.equal(expectedVisible.size, 87);
+  assert.equal(expectedVisible.size, 91);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 98);
-  assert.equal(new Set(registryNames).size, 98, 'no duplicate names');
+  assert.equal(registryNames.length, 102);
+  assert.equal(new Set(registryNames).size, 102, 'no duplicate names');
 
   const workspaceNames = [
     'list_workspace_nodes',
@@ -108,9 +108,9 @@ test('every registry tool that routes to the operational bridge has a handler wi
   );
 });
 
-test('wire-tool budget: the non-membership registry (82) + present_candidates <= 99; the membership family (16, W18 T18.6b) is trimmed by the CMS-Agent engine when the wire exceeds the bound; serialized registry under the 200_000 char budget', () => {
+test('wire-tool budget: the non-membership registry (86) + present_candidates <= 99; the DEFAULT wire fits the bound untouched while the full 102-tool registry trims the membership family (16, W18 T18.6b) WHOLE; serialized registry under the 200_000 char budget', () => {
   const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
-  assert.equal(nonMembership.length, 82);
+  assert.equal(nonMembership.length, 86);
   // W19 T19.8: the old ceiling was 64 and the registry sat at exactly 63 + the
   // learning-mode tool — no headroom at all, so one more tool would have been
   // silently sliced off the wire. The bound moved to 96 on both sides.
@@ -133,7 +133,41 @@ test('wire-tool budget: the non-membership registry (82) + present_candidates <=
     !fitToolsToCmsAgentBound(wire, 64).some((tool) => tool.name === 'get_request'),
     'the request family is dropped together, never half of it'
   );
-  assert.equal(fitToolsToCmsAgentBound(wire).length, wire.length, 'within the raised bound → untouched');
+  /**
+   * T-IMG (the image-annotation bridge, +4 tools) took the FULL registry —
+   * every tool including the 15 that default to `off` — from 98 to 102, one
+   * past the 99 bound, so the worst case (an operator who has enabled every
+   * off-defaulted tool) now drops the membership family in the local trim
+   * instead of going untouched. That is the SAME situation R12.3 answered by
+   * raising the bound 96 → 99, and it is deliberately NOT answered that way
+   * here: CMS_AGENT_BOUNDS.maxTools cannot move above CMS-Agent's own
+   * MAX_CONVERSATION_TOOLS (99 at the pinned SHA) without the coordinated
+   * change in that repo — a unilateral raise makes a 100+-tool wire fail
+   * there (`invalid_turn_request`) and engages the legacy-64 fallback, which
+   * drops membership AND the editorial-request family. Strictly worse.
+   *
+   * What is asserted instead is the wire that is actually SENT: the default
+   * list excludes off-defaulted tools (registry-wiring.test.ts pins that), and
+   * THAT list plus present_candidates still fits the bound untouched. Raise
+   * both bounds together to restore full-registry headroom.
+   */
+  const defaultOffNames = new Set(
+    ALL_DEFINITIONS.filter((def) => def.governance.chatDefaultOff).map((def) => def.name)
+  );
+  const defaultWire = wire.filter((tool) => !defaultOffNames.has(tool.name));
+  assert.equal(
+    fitToolsToCmsAgentBound([
+      ...defaultWire,
+      { name: PRESENT_CANDIDATES_TOOL_NAME, description: 'x', input_schema: {} },
+    ]).length,
+    defaultWire.length + 1,
+    'the DEFAULT wire (off-defaulted tools excluded) + present_candidates must still fit the bound untouched'
+  );
+  assert.equal(
+    fitToolsToCmsAgentBound(wire).length,
+    wire.length - TOOL_DEFINITIONS_MEMBERSHIP.length,
+    'the full registry (every off-defaulted tool enabled) is 3 over the bound and drops the membership family WHOLE'
+  );
   assert.equal(PRESENT_CANDIDATES_TOOL_NAME, 'present_candidates');
 
   const serialized = JSON.stringify(
@@ -577,8 +611,8 @@ test('compileSchema throws at compile time on an unsupported keyword', () => {
   );
 });
 
-test('every one of the 101 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 101);
+test('every one of the 105 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 105);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }

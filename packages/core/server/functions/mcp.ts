@@ -181,8 +181,11 @@ import {
   wipeBlobStores,
 } from '../lib/mcp-artifact-admin.js';
 import {
+  callAnalyzeImageLayout,
+  callAnnotateImage,
   callArtifactUpload,
   callBrandImageryPropose,
+  callCheckImageText,
   callCreateAgentArtifactJob,
   callCreateArtifactUploadIntent,
   callCreatePdfTemplate,
@@ -206,6 +209,7 @@ import {
   callObjectPublish,
   callGetPdfTemplateValidation,
   callPdfToolHealth,
+  callPreviewImageGrid,
   callPublishPdfTemplate,
   callResumeAgentArtifactJob,
   callSearchImages,
@@ -1003,6 +1007,20 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callResumeAgentArtifactJob(event, input);
     case 'get_agent_artifact_by_slot':
       return callGetAgentArtifactBySlot(event, input);
+    // T-IMG: the image-annotation bridge. analyze/check are read-only and need
+    // no idempotency wrapper; annotate/preview each WRITE one new image
+    // artifact, so they take the same withIdempotentToolCall wrapping every
+    // other artifact-writing bridge tool takes -- a 502/timeout on either is
+    // ambiguous about whether the artifact was written, and a same-key retry
+    // must replay the original result rather than write a second one.
+    case 'analyze_image_layout':
+      return callAnalyzeImageLayout(event, input);
+    case 'preview_image_grid':
+      return withIdempotentToolCall(event, name, input.idempotency_key, () => callPreviewImageGrid(event, input));
+    case 'annotate_image':
+      return withIdempotentToolCall(event, name, input.idempotency_key, () => callAnnotateImage(event, input));
+    case 'check_image_text':
+      return callCheckImageText(event, input);
     case 'create_pdf_template':
       return withIdempotentToolCall(event, name, input.idempotency_key, () => callCreatePdfTemplate(event, input));
     case 'list_pdf_templates':
