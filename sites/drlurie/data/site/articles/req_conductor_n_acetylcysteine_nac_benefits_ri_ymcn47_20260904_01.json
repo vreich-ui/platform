@@ -1,16 +1,20 @@
 {
   "__generated": {
-    "at": "2026-09-07T17:16:18.435Z",
+    "at": "2026-09-07T18:52:15.438Z",
     "attribution": "oauth",
     "from": "objects/content_item/by-id/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01.json",
-    "record_version": 74,
-    "surface": "plugin:claude"
+    "record_version": 81,
+    "surface": "plugin:openai-agent"
   },
   "deck": "NAC is often marketed around antioxidants, glutathione support, detox, clarity, and healthy aging. Here is what is actually known, what is still uncertain, and how to decide whether it belongs in your routine.",
   "description": "NAC is marketed for antioxidant and glutathione support, but its role in skin health is more limited and nuanced than many product claims suggest. This guide explains the evidence, risks, product types, marketing strategies, and decision points to consider before adding NAC to a skincare or supplement routine.",
   "editorial": {
     "framework": "Evidence-led consumer decision guide: define NAC, separate mechanism from visible skin evidence, triage claims by confidence, decode marketing, screen safety context, and close with a practical fit checklist.",
     "writer_notes": "Draft content item built from draft_writer and revised according to review_aggregator: added an evidence-confidence snapshot, a label-reading checklist, reader-facing references, qualitative marketing-positioning language, non-branded product categories, and explicit no-dosing boundaries."
+  },
+  "image": {
+    "alt": "Adult considering an unbranded NAC supplement while looking at natural skin in a mirror",
+    "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/822b28476cd08e88a5a6656bef3ef2ebfe5c5afba6929cc745fd3f756d3acb58.webp"
   },
   "nodes": [
     {
@@ -34,6 +38,14 @@
       "kind": "content",
       "public": {
         "body": "NAC appears in several different settings, and the setting changes what you can responsibly conclude from the label.\n\nIn medicine, acetylcysteine has established uses under clinician direction. That medical identity is one reason the ingredient can feel more serious than many supplements. Still, a medical use in one context does not prove that an over-the-counter supplement improves skin health for everyday cosmetic goals.\n\nIn supplements, NAC may be sold as capsules, tablets, powders, effervescent products, or combination formulas. Combination products may pair NAC with ingredients marketed for antioxidant, liver, immune, respiratory, cellular-health, or glutathione-support positioning, such as vitamin C, selenium, glycine, alpha-lipoic acid, milk thistle, or other wellness ingredients.\n\nTopical or cosmetic products containing NAC or acetylcysteine appear less commonly than oral supplements. If you see it on a skincare label, read the full ingredient list and the product claims carefully. A topical cosmetic product, an oral supplement, and a prescription or hospital-use medication should not be treated as the same thing.",
+        "media": {
+          "alt": "Three NAC contexts shown side by side: medical acetylcysteine, oral supplement, and topical skincare",
+          "caption": "NAC can appear in medical, supplement, and topical contexts. Evidence and safety assumptions do not transfer automatically between them.",
+          "contentType": "image/webp",
+          "sizeBytes": 67210,
+          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/9ae22990458be99e54aac3613faf9c6024911c0cb647be40d0bb85af589b0aca.webp",
+          "type": "image"
+        },
         "title": "How NAC is used: medicine, supplements, and skin-adjacent products"
       }
     },
@@ -106,6 +118,14 @@
       "kind": "content",
       "public": {
         "body": "Brands do not all market NAC the same way, but several patterns are common.\n\nOne approach is scientific-language framing. Terms such as cysteine, glutathione, oxidative stress, free radicals, mitochondria, and cellular health can make a product feel evidence-based. Sometimes that language is appropriate background; sometimes it is used to make an uncertain outcome feel more proven than it is.\n\nAnother approach is borrowed credibility. NAC’s medical identity can make supplement claims feel more established, even when the over-the-counter product is being used for a very different purpose.\n\nA third approach is category crossover. NAC may be presented as relevant to respiratory wellness, immune support, liver support, detox routines, longevity, exercise recovery, mental clarity, or skin radiance. The more categories a product touches, the easier it is for a consumer to feel that it must be useful for something.\n\nIngredient bundling is also common. NAC may be paired with other antioxidants, minerals, amino acids, herbal extracts, or wellness ingredients. This can broaden the appeal, but it can also increase the number of variables if you experience a side effect or see no change.\n\nFinally, watch for indirect beauty promises. Words such as glow, clarity, resilience, balance, and healthy aging can sound meaningful while staying hard to measure. A helpful question is: what visible or health-related outcome is this product actually promising, and what evidence supports that exact outcome?",
+        "media": {
+          "alt": "Editorial graphic reading Pathway, Promise, Proof, with the note Mechanism is not outcome",
+          "caption": "A real pathway can support a plausible story. The missing step is proof that the promised visible outcome actually occurs.",
+          "contentType": "image/webp",
+          "sizeBytes": 27672,
+          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/842d0e6095393c4a92feb41ed0469d0c6cbb62f92967c730fee8ac89c253024f.webp",
+          "type": "image"
+        },
         "title": "Common marketing approaches brands use for NAC products"
       }
     },
@@ -130,6 +150,14 @@
       "kind": "content",
       "public": {
         "body": "A practical NAC decision starts with the goal, not the ingredient.\n\nAsk yourself: what am I trying to change? If the answer is general glow, vague detox, or better skin health, the evidence for NAC is not strong enough to make it a necessary step.\n\nIf the goal is acne, pigmentation, eczema, rosacea, irritation, scarring, wounds, or another specific skin concern, ask whether there is a better-supported option. In many cases, there is.\n\nIf the concern involves skin picking, hair pulling, nail biting, or a behavior that feels hard to control, treat that as a reason to seek support rather than as a simple supplement choice. NAC has been studied in some body-focused repetitive behaviors, but that conversation belongs in clinician-guided care.[2][3][4]\n\nThen look at your personal risk context. Are you pregnant or breastfeeding? Considering this for a child? Taking medications? Managing asthma, bleeding risk, chronic illness, or an upcoming procedure? If yes, do not treat NAC as a casual skincare add-on.\n\nAlso ask whether trying NAC would delay care you already know you need. A supplement is not a good trade if it postpones treatment for a condition that is worsening, scarring, painful, or affecting your daily life.",
+        "media": {
+          "alt": "Decision path for whether NAC fits a skin-health routine",
+          "caption": "Start with the goal. General wellness, a specific skin condition, a body-focused repetitive behavior, and a medication or health-risk context lead to different next steps.",
+          "contentType": "image/webp",
+          "sizeBytes": 64590,
+          "src": "/img/req_conductor_n_acetylcysteine_nac_benefits_ri_ymcn47_20260904_01/6850467c6e76196d5af15eaf6235532793110cd455bdf69da9f8f2ea95c264b9.webp",
+          "type": "image"
+        },
         "title": "How to decide whether NAC fits your routine"
       }
     },
