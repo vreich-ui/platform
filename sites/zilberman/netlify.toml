@@ -283,6 +283,14 @@
   status = 301
   force = true
 
+# T6: Maintenance (owner-only raw blob browser) is retired in favor of
+# Inventory (owner+admin search across objects/artifacts/system stores).
+[[redirects]]
+  from = "/admin/maintenance"
+  to = "/admin/inventory"
+  status = 301
+  force = true
+
 # T21.9b: the traffic dashboard is renamed to Analytics (it now carries
 # engagement, conversions, producers, and experiments -- not just visits).
 [[redirects]]

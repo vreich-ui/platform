@@ -41,6 +41,7 @@ import {
   IconExternalLink,
   IconChartBar,
   IconMail,
+  IconArchive,
   type IconProps,
 } from './icons';
 import { objectTypeLabel } from '@core/lib/admin/display-name';
@@ -73,6 +74,12 @@ interface NavItem {
    * why) — a group can mix owner-only and admin-visible items.
    */
   ownerOnly?: boolean;
+  /**
+   * T6: the owner+admin tier (see `lib/admin/admin-navigation.ts`'s widened
+   * `isNavVisible(item, owner, admin)`) — visible to owner and admin, hidden
+   * from publisher/editor/viewer.
+   */
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -96,6 +103,7 @@ const NAV_ICON_MAP: Record<NavIconName, (p: IconProps) => ReactNode> = {
   wrench: IconWrench,
   sparkles: IconSparkles,
   mail: IconMail,
+  archive: IconArchive,
 };
 
 // The nav tree itself lives in `lib/admin/admin-nav-items.ts` — a plain data
@@ -117,15 +125,17 @@ function isActive(currentPath: string, href: string): boolean {
 function NavList({
   currentPath,
   owner,
+  admin,
   settingsLabel,
   onNavigate,
 }: {
   currentPath: string;
   owner: boolean;
+  admin: boolean;
   settingsLabel: string;
   onNavigate?: () => void;
 }) {
-  const groups = visibleNavGroups(NAV, owner);
+  const groups = visibleNavGroups(NAV, owner, admin);
   return (
     <nav className="flex flex-col gap-5" aria-label="Admin sections">
       {groups.map((group, gi) => (
@@ -238,6 +248,10 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const currentUser = useCurrentUser();
   const user = currentUser.user;
   const owner = currentUser.roles.includes('owner') || user?.role === 'owner';
+  // T6: owner expands to include 'admin' server-side (roles.ts), so this
+  // alone is already true for an owner — same idiom `admin-auth-state.ts`
+  // uses for its display `tier`.
+  const isAdmin = currentUser.roles.includes('admin') || user?.role === 'admin';
   const [mobileNav, setMobileNav] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [objectRows, setObjectRows] = useState<LibraryRow[]>([]);
@@ -327,7 +341,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
       .finally(() => window.location.assign('/admin'));
   };
 
-  const navCommands: CommandItem[] = visibleNavGroups(NAV, owner).flatMap((group) =>
+  const navCommands: CommandItem[] = visibleNavGroups(NAV, owner, isAdmin).flatMap((group) =>
     group.items
       .filter((item) => !item.soon)
       .map((item) => ({
@@ -380,6 +394,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
           <NavList
             currentPath={currentPath}
             owner={owner}
+            admin={isAdmin}
             settingsLabel={settingsNavigationLabel(identity.brandName)}
           />
           <a
@@ -535,6 +550,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
           <NavList
             currentPath={currentPath}
             owner={owner}
+            admin={isAdmin}
             settingsLabel={settingsNavigationLabel(identity.brandName)}
             onNavigate={() => setMobileNav(false)}
           />

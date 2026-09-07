@@ -126,10 +126,17 @@ export const ADMIN_NAV_GROUP = {
       target: { kind: 'route', href: '/admin/agents' },
     },
     {
-      id: 'i_admin_maintenance',
-      label: 'Maintenance',
-      description: 'Blob browser, diagnostics, and wipe tools (Owner-only).',
-      target: { kind: 'route', href: '/admin/maintenance' },
+      // T6/T8: Maintenance is retired — /admin/inventory supersedes it
+      // (owner+admin search across objects, artifacts and system stores; the
+      // raw store delete/wipe verbs live on there, still owner-gated
+      // server-side). The four established tenants keep their seeded
+      // /admin/maintenance quicklink working through the netlify.toml 301,
+      // but a site created from here is born with the live name rather than
+      // a dead one plus a redirect.
+      id: 'i_admin_inventory',
+      label: 'Inventory',
+      description: 'Search, preview and act on every object, artifact and system store.',
+      target: { kind: 'route', href: '/admin/inventory' },
     },
   ],
 };

@@ -1,19 +1,27 @@
 ---
-// Maintenance (T9.24 reskin of /admin/blobs) — Owner-only blob browser,
-// diagnostics, and wipe tools, on AdminLayout. Server-side Owner gate landed
-// at T9.4 (admin-blob-manager / admin-blob-store-diagnostics); this page
-// wires the client to it.
-import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
-import { getSiteIdentity } from '@core/lib/site-identity';
-import AdminLayout from '~/layouts/AdminLayout.astro';
-import MaintenancePage from '~/admin/MaintenancePage';
-
-// D2: resolve identity once, server-side, where process.env is real, and
-// pass it down explicitly — the island must not call getSiteIdentity()
-// itself (the browser has no process.env, so env overrides never reached it).
-const identity = getSiteIdentity();
+// Maintenance retired (T6): the raw blob workspace is superseded by
+// /admin/inventory (owner+admin — real search across objects, artifacts and
+// system stores, not an owner-only blob browser). `MaintenancePage.tsx` and
+// `admin/MaintenancePage.ts` (its island shim) are deleted.
+//
+// netlify.toml carries the real 301 (force=true, same precedent as the
+// /admin/content|templates|studio|media retirements) that serves this
+// redirect in production. This route file stays registered in
+// `shell-routes.ts` only so a route file exists for the pattern
+// (`admin-nav-route-parity.test.ts` lists it in
+// ADMIN_ROUTES_INTENTIONALLY_UNREACHED_FROM_NAV) — its own body is a static
+// fallback for anyone who reaches the built file directly without the
+// netlify.toml rule applying (e.g. a stale cache, `astro preview`).
 ---
 
-<AdminLayout title="Admin — Maintenance">
-  <MaintenancePage client:load identity={identity} />
-</AdminLayout>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="refresh" content="0; url=/admin/inventory" />
+    <link rel="canonical" href="/admin/inventory" />
+    <title>Moved to Inventory</title>
+  </head>
+  <body>
+    <p>Maintenance has moved to <a href="/admin/inventory">/admin/inventory</a>.</p>
+  </body>
+</html>

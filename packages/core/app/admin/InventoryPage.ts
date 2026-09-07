@@ -6,4 +6,4 @@
  */
 import '@site/config/policy-bindings';
 
-export { default } from '@core/admin/MaintenancePage';
+export { default } from '@core/admin/InventoryPage';
