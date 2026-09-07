@@ -1,10 +1,8 @@
 {
   "__generated": {
-    "at": "2026-09-07T13:33:35.067Z",
-    "attribution": "oauth",
+    "at": "2026-09-07T16:26:26.820Z",
     "from": "objects/content_item/by-id/req_plugin_collagen_supplements_20260907_01.json",
-    "record_version": 17,
-    "surface": "plugin:claude"
+    "record_version": 23
   },
   "author": "Dr. Lurie",
   "deck": "The claim is that drinking collagen rebuilds the collagen in your face. What the trials measured is narrower than that, and the gap between the two is where the marketing lives.",
@@ -280,146 +278,7 @@
       "id": "n_origin",
       "kind": "content",
       "public": {
-        "body": {
-          "content": [
-            {
-              "content": [
-                {
-                  "data": {},
-                  "marks": [],
-                  "nodeType": "text",
-                  "value": "Three things had to line up for this idea to take hold, and none of them is dishonest on its own."
-                }
-              ],
-              "data": {},
-              "nodeType": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "content": [
-                    {
-                      "content": [
-                        {
-                          "data": {},
-                          "marks": [
-                            {
-                              "type": "bold"
-                            }
-                          ],
-                          "nodeType": "text",
-                          "value": "The biology is real."
-                        },
-                        {
-                          "data": {},
-                          "marks": [],
-                          "nodeType": "text",
-                          "value": " Dermal collagen genuinely does decline with age and with sun exposure. Everyone reading a collagen advertisement already believes the premise, because the premise is true."
-                        }
-                      ],
-                      "data": {},
-                      "nodeType": "paragraph"
-                    }
-                  ],
-                  "data": {},
-                  "nodeType": "list-item"
-                },
-                {
-                  "content": [
-                    {
-                      "content": [
-                        {
-                          "data": {},
-                          "marks": [
-                            {
-                              "type": "bold"
-                            }
-                          ],
-                          "nodeType": "text",
-                          "value": "Supplements are regulated differently from medicines."
-                        },
-                        {
-                          "data": {},
-                          "marks": [],
-                          "nodeType": "text",
-                          "value": " In the United States, dietary supplements do not need approval before sale, and manufacturers carry primary responsibility for their own claims ("
-                        },
-                        {
-                          "content": [
-                            {
-                              "data": {},
-                              "marks": [],
-                              "nodeType": "text",
-                              "value": "fda.gov"
-                            }
-                          ],
-                          "data": {
-                            "uri": "https://www.fda.gov/food/information-consumers-using-dietary-supplements/questions-and-answers-dietary-supplements"
-                          },
-                          "nodeType": "hyperlink"
-                        },
-                        {
-                          "data": {},
-                          "marks": [],
-                          "nodeType": "text",
-                          "value": "). The bar a marketing claim has to clear is not the bar a drug claim has to clear."
-                        }
-                      ],
-                      "data": {},
-                      "nodeType": "paragraph"
-                    }
-                  ],
-                  "data": {},
-                  "nodeType": "list-item"
-                },
-                {
-                  "content": [
-                    {
-                      "content": [
-                        {
-                          "data": {},
-                          "marks": [
-                            {
-                              "type": "bold"
-                            }
-                          ],
-                          "nodeType": "text",
-                          "value": "A small positive result travels further than its caveats."
-                        },
-                        {
-                          "data": {},
-                          "marks": [],
-                          "nodeType": "text",
-                          "value": " A meta-analysis reporting a modest change in a probe reading becomes a headline, then a product page, then a sentence a friend repeats to you. Each retelling drops a qualifier."
-                        }
-                      ],
-                      "data": {},
-                      "nodeType": "paragraph"
-                    }
-                  ],
-                  "data": {},
-                  "nodeType": "list-item"
-                }
-              ],
-              "data": {},
-              "nodeType": "unordered-list"
-            },
-            {
-              "content": [
-                {
-                  "data": {},
-                  "marks": [],
-                  "nodeType": "text",
-                  "value": "By the time it reaches the tub, a narrow finding has become a promise about your face."
-                }
-              ],
-              "data": {},
-              "nodeType": "paragraph"
-            }
-          ],
-          "data": {},
-          "nodeType": "document"
-        },
+        "body": "",
         "title": "Where the belief came from"
       },
       "visibility": "public"
