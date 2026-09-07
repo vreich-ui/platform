@@ -162,15 +162,15 @@ Sources: `netlify.toml` (drlurie), `sites/fernwell/netlify.toml` (fernwell), `si
 
 | Source file | Tool count |
 |---|---|
-| `packages/core/server/lib/mcp-tool-definitions-2.ts` | 32 |
+| `packages/core/server/lib/mcp-tool-definitions-2.ts` | 33 |
 | `packages/core/server/lib/mcp-tool-definitions-analytics.ts` | 3 |
 | `packages/core/server/lib/mcp-tool-definitions-membership.ts` | 16 |
 | `packages/core/server/lib/mcp-tool-definitions.ts` | 49 |
-| **Total** | **100** |
+| **Total** | **101** |
 
 Duplicate names across files: none.
 
-Matches the count pinned by `packages/core/server/lib/mcp-tool-definitions.test.ts`: **100**.
+Matches the count pinned by `packages/core/server/lib/mcp-tool-definitions.test.ts`: **101**.
 
 ### All tool names (sorted)
 
@@ -181,6 +181,7 @@ Matches the count pinned by `packages/core/server/lib/mcp-tool-definitions.test.
 - build_pdf_render_data
 - capability_status
 - commerce_orders
+- content_search
 - create_agent_artifact_job
 - create_artifact_from_url
 - create_artifact_upload_intent

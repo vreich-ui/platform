@@ -1,0 +1,1032 @@
+{
+  "__generated": {
+    "at": "2026-09-07T07:39:16.764Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_plugin_fragrance_free_20260907_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_fragrance_free_20260907_01"
+    },
+    "record_version": 9,
+    "surface": "plugin:claude"
+  },
+  "author": "Dr. Lurie",
+  "deck": "One of those words is a claim about what is in the bottle. The other is a claim about what your nose can detect. Knowing which is which changes how you shop for reactive skin.",
+  "description": "What fragrance means on a skincare ingredient list, why unscented can still contain it, who genuinely benefits from avoiding it, and the mistakes that waste money.",
+  "editorial": {
+    "framework": "fw_ingredient",
+    "writer_notes": "TOP-of-funnel. Reader has a bottle in hand and reacted to something. Ingredient-review framework. Dials well under ceiling: claim_strength ~0.15, urgency 0, agitation ~0.04, cta_density ~0.05. One ask: read the hard-water piece. Deliberately does not tell everyone to avoid fragrance."
+  },
+  "image": {
+    "alt": "Two unlabelled white cosmetic bottles side by side on a pale surface in soft daylight",
+    "src": "/img/req_plugin_fragrance_free_20260907_01/7c69cce1ccebfffa7d47c6923e9d980353ea59b1118326e79aa623e06eca011c.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_opening",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "You reacted to something. A cream that stung, a cleanser that left your face tight and pink, a body lotion that turned your arms itchy by evening. So you did the sensible thing and went looking for a product without fragrance in it."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "On the shelf there are two words, used almost interchangeably by the people selling them, that do not mean the same thing."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Fragrance-free"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " is a claim about the formula: no fragrance material has been added."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Unscented"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " is a claim about the experience: the product does not smell of anything in particular. A masking fragrance may have been added specifically to cover the smell of the raw ingredients."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Neither term is tightly policed. The U.S. Food and Drug Administration notes that it does not require the individual components of a fragrance to be listed, and that terms of this kind are not defined by regulation in the way people assume ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "fda.gov"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.fda.gov/cosmetics/cosmetic-ingredients/fragrances-cosmetics"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "). The ingredient list is more reliable than the front of the bottle."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What the label is telling you"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whatitis",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The word fragrance, or parfum, is not one ingredient. It is a permitted collective term standing in for a blend that can contain dozens of individual materials, disclosed as a single line to protect the formula."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "That is why it is hard to be precise about what you reacted to. If a product with parfum on the list gave you a rash, you know the blend was involved. You do not know which of its parts, and the label cannot tell you."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Three things complicate the picture further, and they are worth recognising by name."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Named allergens."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " In the European Union a set of well-recognised fragrance allergens must be named individually rather than hidden inside parfum — linalool, limonene, citronellol, geraniol and their relatives. Seeing them listed is not a sign of a worse product; it is a sign of a more informative label."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Essential oils."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Lavender oil, tea tree oil and citrus peel oils are fragrance materials with a botanical name. A product built on them is a scented product, whatever the front of the bottle says about being gentle or natural."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Masking fragrance."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Added to make a formula smell of nothing. This is the specific thing that lets a product be honestly unscented and still contain fragrance."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What fragrance actually is on an ingredient list"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_evidence",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Fragrance materials are among the more commonly identified causes of allergic contact dermatitis from cosmetics, and they are a standard part of the patch-test series clinics use to investigate it ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/fragrance-allergy"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/fragrance-allergy"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "). That is a solid, unglamorous finding, and it is most of what can honestly be said."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Two distinctions do most of the practical work here."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Irritation"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " is a dose-related response that can happen to anyone if the product is strong enough or the skin is compromised enough. It usually shows up quickly, roughly where the product went, and it settles when you stop."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Allergy"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " is your immune system learning a specific molecule. It can appear a day or two after contact, can spread beyond where you applied the product, and once established it tends to persist for years."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "They look similar in the mirror and they are not the same problem. Only patch testing, arranged through a dermatologist, distinguishes them properly ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/patch-tests"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/patch-tests"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": ")."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What the evidence shows"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_labeldetail",
+      "kind": "content",
+      "public": {
+        "media": {
+          "alt": "Close-up of the small printed ingredient list on the back of an unbranded cosmetic tube",
+          "caption": "The back of the tube settles the question the front of it raises. Look for parfum, for named allergens such as linalool or limonene, and for botanical oils.",
+          "contentType": "image/webp",
+          "sizeBytes": 61472,
+          "src": "/img/req_plugin_fragrance_free_20260907_01/117632efb5390ac61d7406a462d1b1bd63f41e1945d9f27348cf94a4a9a4cc84.webp",
+          "type": "image"
+        },
+        "title": "Where the answer actually is"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "section"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whoitsuits",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Fragrance is not a hazard for everybody, and most people wear scented products their whole lives without consequence. Avoiding it is a targeted decision, not a general upgrade."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The evidence points most clearly at a few groups."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "A known fragrance allergy."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " If patch testing has identified one, avoidance is the treatment, and it needs to extend past the face to shampoo, detergent and hand soap."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Eczema or a repeatedly compromised barrier."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Skin that is already inflamed lets more of everything through, which raises the chance of both irritation and, over time, sensitisation."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Anywhere thin-skinned or occluded."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Eyelids, the neck, and skin under a dressing or a mask react to concentrations the rest of your face would ignore."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Leave-on products used daily."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A moisturiser sits on skin for hours; a cleanser is rinsed off in seconds. If you only change one thing, change the one that stays."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Who this genuinely matters for"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_mistakes",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Treating natural as a synonym for safe."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Some of the best-recognised fragrance allergens are plant-derived. A botanical name on the list is not a reassurance about how your skin will respond to it."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Changing the face routine and nothing else."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " If a rash keeps returning on a fragrance-free routine, the pillowcase, the shampoo running down your face in the shower and the hand cream you use before bed are all still in the experiment."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Replacing five products at once."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " If it clears, you have learned nothing about which one was responsible, and you have committed to a more expensive routine than you may need."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Assuming a sting means a reaction."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Plenty of well-tolerated ingredients tingle briefly on freshly cleansed skin. Redness that persists for hours is the signal worth acting on."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "How people get this wrong"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whensee",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Reading labels is a reasonable first move. It is not a diagnosis, and it has a ceiling."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If a rash keeps coming back, spreads beyond where you applied anything, appears a day or two after contact, or has persisted for weeks despite a stripped-back routine, that is the point to ask your dermatologist about patch testing rather than to buy another bottle. Patch testing names the specific molecule, which is the only thing that turns avoidance from guesswork into a plan."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Anything painful, blistering, weeping or spreading quickly should be seen promptly rather than researched."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "When to involve a clinician"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_next",
+      "kind": "action",
+      "public": {
+        "body": "There is a quieter suspect that people rarely check, and it is the same in every product you own because it comes out of the tap.",
+        "ctaLink": "/hard-water-and-your-skin",
+        "ctaText": "Read: what hard water does to your skin",
+        "title": "If fragrance turns out not to be the culprit"
+      },
+      "rendering": {
+        "emphasis": "low",
+        "placement": "section",
+        "presentation": "callout"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Fragrance allergy."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/fragrance-allergy"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/fragrance-allergy"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Allergic contact dermatitis."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/allergic-contact-dermatitis"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/allergic-contact-dermatitis"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Patch tests."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/patch-tests"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/patch-tests"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Fragrances in Cosmetics."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " U.S. Food and Drug Administration. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "fda.gov/cosmetics/cosmetic-ingredients/fragrances-cosmetics"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.fda.gov/cosmetics/cosmetic-ingredients/fragrances-cosmetics"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Unscented products can still contain fragrance. What the terms mean on an ingredient list, who benefits from avoiding fragrance, and how people waste money on it.",
+    "meta_title": "Fragrance-Free vs Unscented: What the Labels Actually Mean"
+  },
+  "slug": "fragrance-free-versus-unscented",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Fragrance allergy",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_fragrance",
+        "url": "https://dermnetnz.org/topics/fragrance-allergy"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Allergic contact dermatitis",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_acd",
+        "url": "https://dermnetnz.org/topics/allergic-contact-dermatitis"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Patch tests",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_patch",
+        "url": "https://dermnetnz.org/topics/patch-tests"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Fragrances in Cosmetics",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_fragrance",
+        "url": "https://www.fda.gov/cosmetics/cosmetic-ingredients/fragrances-cosmetics"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "ingredients",
+    "tags": [
+      "sensitive-skin",
+      "ingredients",
+      "marketing-claims",
+      "skincare-basics"
+    ]
+  },
+  "title": "Fragrance-Free and Unscented Are Not the Same Thing"
+}

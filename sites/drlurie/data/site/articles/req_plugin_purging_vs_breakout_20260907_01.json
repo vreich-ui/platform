@@ -1,0 +1,1003 @@
+{
+  "__generated": {
+    "at": "2026-09-07T07:36:33.309Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_plugin_purging_vs_breakout_20260907_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_purging_vs_breakout_20260907_01"
+    },
+    "record_version": 8,
+    "surface": "plugin:claude"
+  },
+  "author": "Dr. Lurie",
+  "deck": "The word gets used for anything that goes wrong in the first month of a new product. Here is what the evidence actually supports — and how to read your own skin instead of a comment thread.",
+  "description": "Purging and an ordinary breakout look alike in week two. What changes underneath, the three questions that separate them, and the point at which it is worth seeing a dermatologist.",
+  "editorial": {
+    "framework": "fw_concern",
+    "writer_notes": "TOP-of-funnel. Reader arrived from search two weeks into a retinoid with worse skin. Dials held under ceiling: claim_strength ~0.14, urgency 0, agitation ~0.04, cta_density ~0.06. One ask: the free four-week checkpoint PDF. Purging framed as a plausible mechanism, not a proven schedule."
+  },
+  "image": {
+    "alt": "Close-up of an adult cheek and jawline in soft daylight, bare skin with visible natural texture",
+    "src": "/img/req_plugin_purging_vs_breakout_20260907_01/a5724fa800922d39233aab1b4d29a77c0abd3a4b2c54faa4d364c5d7dadea7e7.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_opening",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "You started something new two weeks ago — a retinoid, an exfoliating acid, a cream a clinician prescribed — and your skin is worse than it was before you began. Small bumps in the places you usually get them. A dull, faintly irritated look that was not there in week one."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Somewhere online, one person will tell you this is purging and that you should push through. Another will tell you the product is wrong for you and that you should stop today. Both are said with total confidence. They cannot both be right."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The honest position is narrower than either. Purging is not a formally defined clinical diagnosis, and there is no agreed timetable for it. What is well described is that certain ingredients speed up how quickly the lining of a pore sheds, and that an early flare is a recognised part of starting a topical retinoid."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "That distinction matters, because it changes what you should do next."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What you are seeing"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_underneath",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "A spot does not begin on the day you notice it. It begins weeks earlier as a microcomedone — a small plug of oil and shed cells inside a pore, far too small to see or feel."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Retinoids and exfoliating acids act in part on that process. DermNet describes topical retinoids as normalising the way cells lining the follicle are shed, which is how they reduce the formation of new plugs over time ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/topical-retinoid"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/topical-retinoid"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": ")."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The proposed mechanism for purging follows from that. If shedding speeds up, the plugs already forming reach the surface sooner than they otherwise would. The queue arrives early rather than a new queue forming."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "It is a plausible account, consistent with how retinoids are understood to work. It is not the same thing as a trial showing that it happens to a predictable schedule in most people. Hold it loosely, and let the pattern in your own skin do the deciding."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What is happening underneath"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_threequestions",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "You do not need a dermatologist to answer these, and you can answer all three from a phone photo taken the week you started."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Where is it?"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A flare that follows the map of where you normally break out is more consistent with existing plugs surfacing early. Spots appearing somewhere you have never had them — along the jaw when you are a forehead person, or on the neck — point away from that explanation and towards a reaction to the product itself."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "What does it look like?"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Small, superficial bumps that come to a head and settle within a few days behave differently from deep, tender, slow lumps, and differently again from a flat red rash with stinging or scaling. The last of those is closer to irritation than to acne, and it is a reason to ease off rather than push through."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "How long has it run?"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " This is the most useful of the three. Acne treatment is generally judged over months, not weeks — the NHS notes that treatments can take up to three months to work. Something still worsening at the eight-to-twelve week mark is no longer an early adjustment, whatever it is called."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Two of the three pointing the same way is usually enough to decide. If they disagree, the timeline wins."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Three questions that separate them"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_evidence",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Most of what helps here is about tolerability rather than potency. The American Academy of Dermatology's guidance on starting a retinoid is unglamorous and mostly about going slowly ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "aad.org"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/retinoid-retinol"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": ")."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Reduce frequency before you reduce strength."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Two or three nights a week is a real routine, not a failed one. Most people who conclude a retinoid did nothing for them were using it every night, could not tolerate it, and stopped."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Use less than you think."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A pea-sized amount is the commonly cited quantity for the whole face. More product does not speed the result; in most people it only raises the irritation."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Hold everything else still."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Adding a second active in the same fortnight makes the flare unreadable. If two things changed, you cannot tell which one your skin is answering."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Keep a plain moisturiser in the routine."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Supporting the barrier is what makes a retinoid survivable long enough to judge it. It does not blunt the effect."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Photograph it weekly."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Same light, same angle, no filter. Skin changes too slowly for memory to be a fair judge, and the photo is the only thing that will settle the argument at week eight."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What the evidence supports doing"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_notworth",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "A flare is a good moment to sell someone something, and the market knows it. Three things tend to appear at exactly this point in a routine."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Products sold as clearing the flare faster."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " There is no established way to shorten an early flare, and the ones marketed for it are usually just another active. Adding one is the opposite of holding everything else still."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Scrubs and stiff brushes."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Physically abrading skin that is already reacting tends to make the redness worse without touching what is inside the pore."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Supplements marketed as clearing skin from within."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " The evidence linking most of these to acne outcomes is thin, and a supplement is a slow, expensive way to test a weak hypothesis."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The cheapest useful thing you can do in week two is nothing new."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What is not worth your money"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whensee",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Nothing above is a substitute for an examination, and some of it is not a decision you should be making alone. Raise it with your dermatologist, your GP, or the clinician who prescribed the product if any of the following applies."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Deep, painful lumps."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Nodular or cystic acne is the kind most associated with scarring, and it is treated differently from surface spots. It is worth being seen early rather than waiting out a three-month trial."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Swelling, blistering, or a spreading rash."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " That is not an adjustment period. Stop the product and get it looked at."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "You are pregnant, trying to conceive, or breastfeeding."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Retinoid use in pregnancy is a clinical decision, not a personal-preference one. Ask before you start and before you continue."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "It is affecting how you feel day to day."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Acne has a documented effect on mood and confidence, and that is a legitimate reason to seek treatment on its own, without waiting for the skin to get worse first."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "For everything else, the answer is usually time, fewer variables, and a photograph."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "When to stop reading and see someone"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_checkpoint",
+      "kind": "action",
+      "public": {
+        "body": "If it helps to have this away from the screen, the three questions and the weekly notes they need are in a short printable guide. Keep it somewhere you will see it on the day you are ready to give up.",
+        "ctaLink": "/pdf/req_plugin_purging_vs_breakout_20260907_01/7dc803c5891b949f6798ff52480a4fe549f9a498ec8e56a39f5a882c65f35e84.pdf",
+        "ctaText": "Download the four-week checkpoint (PDF)",
+        "media": {
+          "contentType": "application/pdf",
+          "sizeBytes": 2725821,
+          "src": "/pdf/req_plugin_purging_vs_breakout_20260907_01/7dc803c5891b949f6798ff52480a4fe549f9a498ec8e56a39f5a882c65f35e84.pdf",
+          "title": "Starting a Retinoid: The Four-Week Checkpoint",
+          "type": "document"
+        },
+        "title": "The four-week checkpoint, on paper"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "callout"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Topical retinoids."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/topical-retinoid"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/topical-retinoid"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Acne vulgaris."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/acne-vulgaris"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/acne-vulgaris"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Retinoid or retinol?"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " American Academy of Dermatology. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "aad.org/public/everyday-care/skin-care-secrets/anti-aging/retinoid-retinol"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/retinoid-retinol"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Acne."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " NHS. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "nhs.uk/conditions/acne"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.nhs.uk/conditions/acne/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "Purging and a breakout look alike in week two. The mechanism underneath, three questions that separate them, and when to see a dermatologist.",
+    "meta_title": "Skin Purging or a Breakout? How to Tell the Difference"
+  },
+  "slug": "skin-purging-or-breakout",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Topical retinoids",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_retinoid",
+        "url": "https://dermnetnz.org/topics/topical-retinoid"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Acne vulgaris",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_acne",
+        "url": "https://dermnetnz.org/topics/acne-vulgaris"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Retinoid or retinol?",
+        "publisher": "American Academy of Dermatology",
+        "source_id": "src_aad_retinoid",
+        "url": "https://www.aad.org/public/everyday-care/skin-care-secrets/anti-aging/retinoid-retinol"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Acne",
+        "publisher": "NHS",
+        "source_id": "src_nhs_acne",
+        "url": "https://www.nhs.uk/conditions/acne/"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skin-health",
+    "tags": [
+      "acne",
+      "patient-education",
+      "retinoids"
+    ]
+  },
+  "title": "Skin Purging or a Breakout? Three Questions That Tell Them Apart"
+}
