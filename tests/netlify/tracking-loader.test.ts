@@ -1219,5 +1219,11 @@ test('SIZE BUDGET: the built loader chunk stays under the commerce-era soft targ
   // commerce-event correlation), and T21.5 (+126B: the experiment exposure —
   // one DOM read, one id-grammar guard, one per-page idempotence key) grew the
   // chunk deliberately — the 6KB ceiling is the hard line.
-  assert.ok(gzipped <= 5504, `BUDGET: loader is ${gzipped}B min+gzip (>5.375KB target)`);
+  // Quick-fix wave 2 raised the soft target 5504 → 5568 for two deliberate
+  // additions: S-13 (+28B: the served object version read off the marker, so a
+  // republish stops rewriting past attribution) and S-08 (+17B: page-level
+  // events on an article route name the content item, not the page shell, so
+  // per-object rates stop being computed over a denominator of zero). Both are
+  // one DOM read and one branch; neither is a feature that will keep growing.
+  assert.ok(gzipped <= 5568, `BUDGET: loader is ${gzipped}B min+gzip (>5.4KB target)`);
 });
