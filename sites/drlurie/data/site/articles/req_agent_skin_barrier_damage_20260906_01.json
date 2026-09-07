@@ -1,16 +1,8 @@
 {
   "__generated": {
-    "at": "2026-09-06T16:11:38.842Z",
-    "attribution": "oauth",
+    "at": "2026-09-07T16:25:56.362Z",
     "from": "objects/content_item/by-id/req_agent_skin_barrier_damage_20260906_01.json",
-    "producer": {
-      "model": "GPT-5.6 Sol",
-      "node_id": "plugin:openai-gpt",
-      "prompt_version": "dr-lurie-openai-20260906",
-      "run_id": "plugin_openai-gpt_req_agent_skin_barrier_damage_20260906_01_media_revision"
-    },
-    "record_version": 19,
-    "surface": "plugin:openai-agent"
+    "record_version": 31
   },
   "deck": "What the skin barrier does, what can temporarily disrupt it, and what evidence supports a gentler approach.",
   "description": "An evidence-led guide to skin-barrier disruption, common signs, and practical ways to support recovery without alarmist claims.",
@@ -36,29 +28,17 @@
       }
     },
     {
-      "id": "n_visual",
+      "id": "n_dryhand",
       "kind": "content",
       "public": {
+        "body": "This public-domain photograph shows a hand with visible dryness. It is an example of appearance only: dryness can have many causes, and a photograph cannot establish whether the skin barrier is impaired.",
         "media": {
-          "alt": "Simplified educational cross-section of the outer skin barrier with layered skin cells and lipids between them.",
-          "caption": "A simplified view of the stratum corneum. Real skin is more complex.",
-          "src": "/img/req_agent_skin_barrier_damage_20260906_01/9201660c92324d931c5a87f9270535cca9b516eb4cd40144c6ceb30bbd8f7a78.webp",
-          "type": "image"
-        }
-      }
-    },
-    {
-      "id": "n_anatomy",
-      "kind": "content",
-      "public": {
-        "body": "This existing public-web diagram is included as a visual reference. It simplifies skin anatomy and should be read alongside the evidence-based explanation above, not as a diagnostic tool.",
-        "media": {
-          "alt": "Diagram illustrating layers and components of the skin barrier.",
-          "caption": "An anatomy diagram sourced from the public web for this temporary test.",
-          "src": "/img/req_agent_skin_barrier_damage_20260906_01/9811d7d00c860d2a60b5e98423f71a5113e7712fdb45eecf5ef81a0a0e7470c6.png",
+          "alt": "Photograph of the back of a hand with visible dry skin.",
+          "caption": "Dry skin on a hand. CC0 image by DePootisMan / Ryan Corrigan via Wikimedia Commons.",
+          "src": "/img/req_agent_skin_barrier_damage_20260906_01/e26eb25f8e0ae5ac31b79d301932690d5dd8575bd34774109044540724db3dc8.jpg",
           "type": "image"
         },
-        "title": "A second view of the barrier"
+        "title": "Dryness can be subtle"
       }
     },
     {
@@ -78,6 +58,20 @@
       }
     },
     {
+      "id": "n_closeup",
+      "kind": "content",
+      "public": {
+        "body": "A close view can make fine roughness and surface texture more visible. These features are common in dry skin, but their appearance does not identify the underlying cause.",
+        "media": {
+          "alt": "Close-up photograph of dry skin on an adult hand.",
+          "caption": "Close-up of dry skin on an adult hand. CC0 image by Clump via Wikimedia Commons.",
+          "src": "/img/req_agent_skin_barrier_damage_20260906_01/633ade784aa616483c14e5121d5e8749f3008898b817f0b7d93bb6ea2067f6b2.jpg",
+          "type": "image"
+        },
+        "title": "Texture is easier to see up close"
+      }
+    },
+    {
       "id": "n_reset",
       "kind": "content",
       "public": {
@@ -94,33 +88,33 @@
       }
     },
     {
-      "id": "n_clinical",
-      "kind": "content",
-      "public": {
-        "body": "This clinical photograph shows redness, scaling and fissuring. Those visible changes are not specific to one cause, so the image cannot tell you whether your own skin has a barrier problem.",
-        "media": {
-          "alt": "Clinical photograph of hands showing redness, scaling and fissuring.",
-          "caption": "A clinical example of visible irritation; appearance alone does not establish the cause.",
-          "src": "/img/req_agent_skin_barrier_damage_20260906_01/77dfa569046001347cfc7aad07731818b5b0f69caa248cced3238ba9c4589a97.jpg",
-          "type": "image"
-        },
-        "title": "An example of visible irritation"
-      }
-    },
-    {
       "id": "n_download",
       "kind": "action",
       "public": {
         "body": "Save the illustrated PDF version for a calm reference when your routine needs simplifying.",
-        "ctaLink": "/pdf/req_agent_skin_barrier_damage_20260906_01/82635589f2acb042b690c2081da3ee9c3fcf3a682d3f8bedd57bfa106e509fec.pdf",
+        "ctaLink": "/pdf/req_agent_skin_barrier_damage_20260906_01/8d0c6f9e41223a0fb5750665102b1c51bb2874a505357bee82f62926699408fd.pdf",
         "ctaText": "Download the article PDF",
         "media": {
           "contentType": "application/pdf",
-          "src": "/pdf/req_agent_skin_barrier_damage_20260906_01/82635589f2acb042b690c2081da3ee9c3fcf3a682d3f8bedd57bfa106e509fec.pdf",
-          "title": "Skin-barrier damage article PDF with existing images",
+          "src": "/pdf/req_agent_skin_barrier_damage_20260906_01/8d0c6f9e41223a0fb5750665102b1c51bb2874a505357bee82f62926699408fd.pdf",
+          "title": "Skin-barrier damage article PDF with public-web images",
           "type": "document"
         },
         "title": "Keep the guide"
+      }
+    },
+    {
+      "id": "n_dermphoto",
+      "kind": "content",
+      "public": {
+        "body": "This photograph is labeled as hand dermatitis by its source. Redness and scaling can overlap with several skin conditions, so it should not be used to diagnose your own skin or to assume that a skincare product caused the change.",
+        "media": {
+          "alt": "Clinical photograph of a hand with dermatitis, showing visible redness and scaling.",
+          "caption": "Hand dermatitis. CC BY-SA 3.0 image by James Heilman, MD, via Wikimedia Commons.",
+          "src": "/img/req_agent_skin_barrier_damage_20260906_01/8c6c3549397c3aa71837719b7120881ff8901ed7e8af7f57cc1f76bb7a9197a7.jpg",
+          "type": "image"
+        },
+        "title": "More visible inflammation is less specific"
       }
     },
     {
