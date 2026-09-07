@@ -11,6 +11,11 @@ import {
   type ArtifactReference,
   type ReadableArtifactBlobStore,
 } from '../../packages/core/server/lib/artifacts.js';
+import {
+  readArtifactReference,
+  writeArtifactReferenceIndexes,
+  type ArtifactIndexStore,
+} from '../../packages/core/server/lib/artifact-index.js';
 import { sha256Hex } from '../../packages/core/server/lib/crypto.js';
 
 test('sha256Hex returns lowercase hexadecimal digests', () => {
@@ -138,6 +143,92 @@ test('ArtifactReference validation rejects invented media handles and incomplete
     /deletedAtISO must be a valid ISO date string/
   );
   assert.match(getArtifactReferenceIssue({ ...reference, deletedBy: '<admin>' }) ?? '', /deletedBy must not contain/);
+});
+
+test('S-20: materializationProof is a purely additive, opaque optional field', () => {
+  const bytes = Buffer.from('proof-bearing artifact');
+  const reference = createArtifactReference({
+    input: {
+      requestId: 'req_test_proof_20260605_01',
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      filename: 'proof.pdf',
+    },
+    bytes,
+    createdAtISO: '2026-06-05T00:00:00.000Z',
+  });
+
+  // Present and well-formed: validates, and every OTHER field's meaning is untouched.
+  const withProof = { ...reference, materializationProof: 'sig.eyJhbGciOiJIUzI1NiJ9.token' };
+  assert.equal(getArtifactReferenceIssue(withProof), undefined);
+  assert.equal(isArtifactReference(withProof), true);
+
+  // A reference with no proof at all still validates exactly as before this field existed.
+  assert.equal(getArtifactReferenceIssue(reference), undefined);
+  assert.equal('materializationProof' in reference, false);
+
+  // Malformed the same way any other bounded string field would be rejected.
+  assert.match(
+    getArtifactReferenceIssue({ ...reference, materializationProof: 42 }) ?? '',
+    /materializationProof must be a string/
+  );
+  assert.match(
+    getArtifactReferenceIssue({ ...reference, materializationProof: 'x'.repeat(8193) }) ?? '',
+    /materializationProof must be at most 8192 characters/
+  );
+});
+
+test('S-20: an ingested reference carrying a proof persists it; one without it is unchanged', async () => {
+  const values = new Map<string, string>();
+  const indexStore: ArtifactIndexStore = {
+    async get(key) {
+      return values.get(key) ?? null;
+    },
+    async setJSON(key, value) {
+      values.set(key, JSON.stringify(value));
+      return { modified: true };
+    },
+    async list() {
+      return { blobs: [], directories: [] };
+    },
+  };
+
+  const bytes = Buffer.from('ingest-time proof artifact');
+  const reference = createArtifactReference({
+    input: {
+      requestId: 'req_test_ingest_proof_20260605_01',
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      filename: 'ingested.pdf',
+    },
+    bytes,
+    createdAtISO: '2026-06-05T00:00:00.000Z',
+  });
+  const withProof: ArtifactReference = { ...reference, materializationProof: 'attn.proof.value' };
+
+  await writeArtifactReferenceIndexes(indexStore, 'req_test_ingest_proof_20260605_01', withProof);
+  const readBack = await readArtifactReference(indexStore, 'req_test_ingest_proof_20260605_01', reference.sha256);
+  assert.equal(readBack?.materializationProof, 'attn.proof.value');
+  // Every existing field kept its value across the round trip.
+  assert.equal(readBack?.blobKey, reference.blobKey);
+  assert.equal(readBack?.sha256, reference.sha256);
+  assert.equal(readBack?.contentType, reference.contentType);
+
+  // A second ingest with no proof at all round-trips exactly as it always has.
+  const requestIdNoProof = 'req_test_ingest_noproof_20260605_01';
+  const referenceNoProof = createArtifactReference({
+    input: {
+      requestId: requestIdNoProof,
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      filename: 'unproven.pdf',
+    },
+    bytes: Buffer.from('no proof here'),
+    createdAtISO: '2026-06-05T00:00:00.000Z',
+  });
+  await writeArtifactReferenceIndexes(indexStore, requestIdNoProof, referenceNoProof);
+  const readBackNoProof = await readArtifactReference(indexStore, requestIdNoProof, referenceNoProof.sha256);
+  assert.equal(readBackNoProof ? 'materializationProof' in readBackNoProof : true, false);
 });
 
 type FakeArtifactStoreValue = Buffer | string;
