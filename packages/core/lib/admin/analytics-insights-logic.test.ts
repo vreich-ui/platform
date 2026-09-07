@@ -151,7 +151,7 @@ test('resolveInsightsPanel: all four sections ready from one fixture (2026-09-05
   assert.deepEqual(state.proposals, { kind: 'empty', message: INSIGHTS_EMPTY_COPY.proposals });
   assert.deepEqual(state.strategyObservations, {
     kind: 'empty',
-    message: 'No strategy observations yet — needs two consecutive windows.',
+    message: INSIGHTS_EMPTY_COPY.strategyObservations,
   });
 });
 

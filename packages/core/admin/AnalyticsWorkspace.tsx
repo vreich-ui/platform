@@ -1235,7 +1235,7 @@ function InsightsSectionCard<T>({
             state.kind === 'error'
               ? 'Could not load this section'
               : state.kind === 'workspace_scope'
-                ? 'Workspace-wide — not available at tenant scope'
+                ? 'Managed across every site we run'
                 : 'Nothing here yet'
           }
           message={state.message}
@@ -1265,22 +1265,22 @@ function InsightsPanel({ state }: { state: InsightsPanelState }) {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <InsightsSectionCard
-        title="Latest tracking outcomes"
+        title="How published articles performed"
         state={state.outcomes}
         renderRows={(rows) => rows.map((row) => <OutcomeRow key={row.id} row={row} />)}
       />
       <InsightsSectionCard
-        title="Playbook — cites tracking"
+        title="Writing lessons from results"
         state={state.playbookItems}
         renderRows={(rows) => rows.map((row) => <PlaybookItemRow key={row.id} row={row} />)}
       />
       <InsightsSectionCard
-        title="Open optimizer proposals"
+        title="Suggested changes"
         state={state.proposals}
         renderRows={(rows) => rows.map((row) => <ProposalRow key={row.id} row={row} />)}
       />
       <InsightsSectionCard
-        title="Strategy observations"
+        title="Trends and comparisons"
         state={state.strategyObservations}
         renderRows={(rows) => rows.map((row) => <StrategyObservationRowView key={row.id} row={row} />)}
       />
@@ -1320,9 +1320,8 @@ function InsightsTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-        Read-only — the learning loop&rsquo;s own evidence: tracking outcomes ingested, playbook lessons drawn from
-        them, open optimizer proposals, and strategy-level observations. Every row carries its own evidence window
-        and sample size.
+        How the articles on this site have actually performed once published, and what we&rsquo;ve learned from it.
+        Read-only — there&rsquo;s nothing to change here.
       </p>
       <InsightsPanel state={panel} />
     </div>
