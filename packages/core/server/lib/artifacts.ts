@@ -342,7 +342,10 @@ type CreateArtifactReferenceOptions = {
   createdAtISO?: string;
 };
 
-const allowedArtifactReferenceKeys = new Set([
+// S-16: exported so a contract fixture test can assert this stays a superset
+// of whatever pdf-tool's own ArtifactReference actually carries — see
+// tests/fixtures/pdf-tool-artifact-reference.json.
+export const allowedArtifactReferenceKeys = new Set([
   'blobKey',
   'sizeBytes',
   'sha256',

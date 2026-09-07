@@ -1,7 +1,10 @@
 import '../../sites/drlurie/config/policy-bindings.js'; // W11: register site providers (tests exercise the drlurie-bound core)
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import {
+  allowedArtifactReferenceKeys,
   ArtifactKind,
   artifactKindValues,
   createArtifactBlobKey,
@@ -17,6 +20,11 @@ import {
   type ArtifactIndexStore,
 } from '../../packages/core/server/lib/artifact-index.js';
 import { sha256Hex } from '../../packages/core/server/lib/crypto.js';
+
+const repoRoot = (() => {
+  const cwd = process.cwd();
+  return basename(cwd) === 'ci-test' && basename(dirname(cwd)) === '.tmp' ? join(cwd, '..', '..') : cwd;
+})();
 
 test('sha256Hex returns lowercase hexadecimal digests', () => {
   assert.equal(sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
@@ -229,6 +237,35 @@ test('S-20: an ingested reference carrying a proof persists it; one without it i
   await writeArtifactReferenceIndexes(indexStore, requestIdNoProof, referenceNoProof);
   const readBackNoProof = await readArtifactReference(indexStore, requestIdNoProof, referenceNoProof.sha256);
   assert.equal(readBackNoProof ? 'materializationProof' in readBackNoProof : true, false);
+});
+
+// S-16: pdf-tool and platform each implement the ArtifactReference shape
+// independently, and platform's allowlist rejects any key it doesn't know —
+// adding `filename` on the pdf-tool side already broke every reference for
+// four days (see the ArtifactReference.filename doc comment in artifacts.ts).
+// This fixture is a REAL reference produced by pdf-tool's own
+// saveArtifactBytes (netlify/lib/artifact-layout.ts) at pdf-tool commit
+// 0a62d14d6c2dded2b45cf318fad5cbe89d4794c1, captured with a genuine filename
+// collision so `filename` and `originalFilename` differ exactly as they do
+// in production. If pdf-tool adds a field platform's allowlist does not
+// know about, this test fails the moment this fixture is refreshed from a
+// current pdf-tool checkout — that refresh is the obvious update point a
+// future pdf-tool field addition should trigger.
+test('S-16: allowedArtifactReferenceKeys is a superset of a real pdf-tool ArtifactReference', () => {
+  const fixturePath = join(repoRoot, 'tests/fixtures/pdf-tool-artifact-reference.json');
+  const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as Record<string, unknown>;
+
+  // Sanity: the fixture itself must still look like a real, populated reference —
+  // a future accidental trim to `{}` would make the superset check vacuous.
+  assert.ok(Object.keys(fixture).length >= 8, 'fixture looks truncated');
+  assert.ok('filename' in fixture, 'fixture must include filename — the field that broke this contract before');
+  assert.notEqual(fixture.filename, fixture.originalFilename, 'fixture should show a real collision-resolved name');
+
+  const unknownKeys = Object.keys(fixture).filter((key) => !allowedArtifactReferenceKeys.has(key));
+  assert.deepEqual(unknownKeys, [], `platform's allowlist is missing pdf-tool field(s): ${unknownKeys.join(', ')}`);
+
+  // The fixture must also pass platform's full validator, not just the key check.
+  assert.equal(getArtifactReferenceIssue(fixture), undefined);
 });
 
 type FakeArtifactStoreValue = Buffer | string;
