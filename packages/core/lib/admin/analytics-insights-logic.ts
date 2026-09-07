@@ -222,26 +222,34 @@ export type InsightsPanelState =
   | { kind: 'not_configured'; message: string }
   | InsightsPanelReady;
 
-/** Named per-section "why is this empty" copy — the task's own words for the strategy row, matched in tone for the other three. */
+/**
+ * Named per-section "why is this empty" copy, written for the editor
+ * reading this tab, not the engineer who built it — plain, concrete, and
+ * answering "is something broken?" / "when will it fill in?" rather than
+ * naming an internal schema, job, or data shape.
+ */
 export const INSIGHTS_EMPTY_COPY = {
-  outcomes: 'No tracking:engagement.v1 outcomes ingested yet.',
-  playbookItems: 'No playbook items cite tracking evidence yet.',
-  proposals: 'No open optimizer proposals.',
-  strategyObservations: 'No strategy observations yet — needs two consecutive windows.',
+  outcomes: 'No results yet — this updates once a day with the previous day’s numbers.',
+  playbookItems: 'No lessons drawn from performance data yet.',
+  proposals: 'No suggested changes waiting on a decision right now.',
+  strategyObservations:
+    'Nothing to compare yet — this needs enough traffic across at least two separate periods before a trend can show up.',
 } as const;
 
 /**
  * Named per-section "why you'll never see this at tenant scope" copy for
  * `playbook_get`/`optimizer_status` — node-keyed tools with no per-tenant
  * partition, kept out of the tenant scope by design (see the file header).
+ * Written for the editor: this is managed across every site we run, not
+ * per-site, so nothing is broken and there's nothing for them to do here.
  * Used only as the DEFAULT when the server sent `workspaceScope: true` with
  * no `message` of its own; the server currently always sends one.
  */
 export const INSIGHTS_WORKSPACE_SCOPE_COPY = {
   playbookItems:
-    'Workspace-wide — not available at tenant scope. Playbooks are keyed by node, and nodes are shared across the whole workspace, not this site.',
+    'These writing lessons are shared across every site we run, not tracked separately here — nothing’s broken, and there’s nothing for you to do.',
   proposals:
-    'Workspace-wide — not available at tenant scope. Optimizer proposals are keyed by node, and nodes are shared across the whole workspace, not this site.',
+    'Suggested changes like this are shared across every site we run, not tracked separately here — nothing’s broken, and there’s nothing for you to do.',
 } as const;
 
 function resolveSection<T>(
@@ -256,7 +264,7 @@ function resolveSection<T>(
   if (payload.workspaceScope) {
     return {
       kind: 'workspace_scope',
-      message: payload.message || workspaceScopeMessage || 'Workspace-wide — not available at tenant scope.',
+      message: payload.message || workspaceScopeMessage || 'Shared across every site we run, not tracked separately here.',
     };
   }
   if (payload.rows) {
