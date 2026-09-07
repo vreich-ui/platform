@@ -24,6 +24,7 @@ import {
   getChat,
   pollIntervalFor,
   rejectCandidates as rejectCandidatesRequest,
+  resolveBlockage as resolveBlockageRequest,
   sendChatMessage,
   type AgentView,
   type ChatEventView,
@@ -73,6 +74,8 @@ import { insertQuoteIntoDraft, selectionWithinContainer } from '@core/lib/admin/
 import { findControlsSubmissionText, splitControlsSegments } from '@core/lib/admin/chat-controls';
 import { useDictation } from '@core/lib/admin/use-dictation';
 import { cmsAgentErrorCopy, type CmsAgentErrorDetail } from '@core/lib/admin/cms-agent-error-copy';
+import type { Blockage } from '@core/lib/admin/blockage';
+import { BlockageCard } from './BlockageCard';
 
 // ─── useChat: since_seq polling over get_chat ───────────────────────
 
@@ -81,6 +84,15 @@ export interface UseChatState {
   events: ChatEventView[];
   pending: PendingView | undefined;
   candidateSet: CandidateSetView | undefined;
+  /**
+   * D6 — the wall this chat is waiting on, whoever raised it. Unlike `pending`
+   * and `candidateSet` it is NOT gated on the chat's status: a blockage raised
+   * by a page button is real and actionable while a chat run is still going,
+   * which is the whole point of putting page-origin runs in this transcript.
+   */
+  blockage: Blockage | undefined;
+  /** D4: post the remedy back. The server holds the blockage; this names which one. */
+  resolveBlockage: (remedyId: string, args?: Record<string, unknown>) => Promise<void>;
   previewCandidate: CandidateOptionView | undefined;
   agent: AgentView | undefined;
   /** W19 T19.5: the editorial request this conversation is about, once the server has resolved it. */
@@ -141,6 +153,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
   const [events, setEvents] = useState<ChatEventView[]>([]);
   const [pending, setPending] = useState<PendingView | undefined>(undefined);
   const [candidateSet, setCandidateSet] = useState<CandidateSetView | undefined>(undefined);
+  const [blockage, setBlockage] = useState<Blockage | undefined>(undefined);
   const [previewCandidateId, setPreviewCandidateId] = useState<string | undefined>(undefined);
   const [agent, setAgent] = useState<AgentView | undefined>(undefined);
   const [request, setRequest] = useState<ChatRequestBindingView | undefined>(undefined);
@@ -168,6 +181,10 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     pendingRef.current = view.pending;
     setPending(view.pending);
     setCandidateSet(view.candidate_set);
+    // Every poll, not only when present: a blockage cleared from ANOTHER
+    // surface (the Imagery card, D4) has to disappear from here too, and the
+    // server dropping the field is exactly how it says so.
+    setBlockage(view.blockage);
     setPreviewCandidateId((current) =>
       current && view.candidate_set?.candidates.some((candidate) => candidate.candidate_id === current)
         ? current
@@ -315,6 +332,7 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     events,
     pending,
     candidateSet,
+    blockage,
     previewCandidate: candidateSet?.candidates.find((candidate) => candidate.candidate_id === previewCandidateId),
     agent,
     request,
@@ -349,6 +367,25 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
         setPreviewCandidateId(undefined);
       }),
     approve,
+    resolveBlockage: (remedyId, args) =>
+      wrap(async () => {
+        if (!blockage) return;
+        // Claimed like an approval: a blockage_id claimed here stays claimed
+        // until the next poll confirms the server moved past it, so a second
+        // click cannot post a second raise before the first has landed. The
+        // SERVER's ledger (D4) is the real guarantee; this is the local half
+        // that keeps the button honest in the meantime.
+        if (!claimRef.current.claim(blockage.blockage_id)) return;
+        try {
+          const result = await resolveBlockageRequest(getToken, chatId!, blockage.blockage_id, remedyId, args);
+          // `already_resolved` is a success: the wall really is gone, someone
+          // else just cleared it first.
+          if (result.resolved || result.status === 'already_resolved') setBlockage(undefined);
+        } catch (actionError) {
+          claimRef.current.release(blockage.blockage_id);
+          throw actionError;
+        }
+      }),
     // Reject shares `pending.call_id` with Approve — claiming through the
     // same guard means a click on one disables the other immediately, not
     // just after the next poll.
@@ -1325,11 +1362,16 @@ export function ChatThread({
   onUndo,
   isOwner = false,
   hasRunCard = false,
+  blockage,
+  onResolveBlockage,
 }: {
   events: ChatEventView[];
   status: ChatStatus | undefined;
   pending: PendingView | undefined;
   candidateSet?: CandidateSetView;
+  /** D6 — the wall this chat is waiting on. Sits beside `pending`/`candidateSet`. */
+  blockage?: Blockage;
+  onResolveBlockage?: (remedyId: string, args?: Record<string, unknown>) => void;
   previewCandidateId?: string;
   busy: boolean;
   onApprove: (editedArgs?: Record<string, unknown>) => void;
@@ -1634,6 +1676,22 @@ export function ChatThread({
           onPreview={onPreviewCandidate}
           onChoose={onChooseCandidate}
           onReject={onRejectCandidates}
+        />
+      ) : null}
+      {/* D6 — the same card the Imagery tab renders, in the transcript, with
+          the same remedies and the same ids. Resolving here resolves there
+          (D4): both post back one blockage_id, and the server's ledger applies
+          it once. Placed alongside the approval card rather than inside the
+          event list because it is CURRENT state, not history — the transcript
+          keeps its own `blockage` event as the record of when it happened. */}
+      {blockage && onResolveBlockage ? (
+        <BlockageCard
+          blockage={blockage}
+          isOwner={isOwner}
+          busy={busy}
+          variant="transcript"
+          chatHint="Or just say what you want — “raise it to $2 and try again” works."
+          onResolve={(button) => onResolveBlockage(button.remedy_id)}
         />
       ) : null}
       {pending ? (

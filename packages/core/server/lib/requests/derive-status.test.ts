@@ -565,3 +565,70 @@ describe('editor copy', () => {
     }
   });
 });
+
+// ─── D7 — resolvable is "Needs you", not "Failed" ────────────────────────────
+//
+// This is also the answer to the open STALLED_VS_FAILED_SPLIT question for the
+// failure side: a run stopped on a ceiling has not failed in any sense an editor
+// should read as over — there is a button that continues it. Red stays for the
+// walls where nothing can be done.
+
+const budgetBlockageOn = (nodeId: string) => ({
+  blockage_id: 'blk_budget_1',
+  contract: 'blockage.v1',
+  code: 'budget_exceeded',
+  kind: 'budget',
+  message: `Node "${nodeId}" stopped before the turn that would cross its ceiling.`,
+  operator_action: `Raise ${nodeId} budget to $4.50 (this run or default) and retry the node.`,
+  remedies: [
+    { id: 'raise_budget_run', type: 'raise_node_budget', args: { scope: 'run', budgetUsd: 4.5 }, default: true },
+    { id: 'cancel', type: 'cancel' },
+  ],
+  scope: { node_id: nodeId, run_id: 'run_1787408495018_e97wrk' },
+});
+
+const failedRunWithBlockage = (blockage: unknown): RunSnapshot => {
+  const run = realRun();
+  run.status = 'failed';
+  run.currentNodeId = 'artifact_plan';
+  run.nodes = [
+    node('input_triage', 'completed'),
+    node('artifact_plan', 'failed', {
+      errors: ['budget_exceeded', 'stopped on budget'],
+      output: { error: { code: 'budget_exceeded', message: 'stopped on budget', operatorAction: 'Raise the budget.' } },
+      ...(blockage === undefined ? {} : { blockage }),
+    }),
+  ];
+  return run;
+};
+
+describe('D7 — a resolvable failure is needs_you', () => {
+  it('derives needs_you, with the engine own next-step sentence, when the failed node carries a remedy', () => {
+    const derived = deriveRequestStatus({ run: failedRunWithBlockage(budgetBlockageOn('artifact_plan')), now: NOW });
+    assert.equal(derived.status, 'needs_you');
+    assert.match(String(derived.status_reason), /Raise artifact_plan budget/);
+    assert.equal(derived.nudgeable, false, 'a human gate is never nudgeable');
+  });
+
+  it('carries the blockage on the blocker, so the card can render buttons rather than the sentence', () => {
+    const derived = deriveRequestStatus({ run: failedRunWithBlockage(budgetBlockageOn('artifact_plan')), now: NOW });
+    assert.equal(derived.blockers[0]?.blockage?.blockage_id, 'blk_budget_1');
+    assert.equal(derived.blockers[0]?.blockage?.remedies[0]?.type, 'raise_node_budget');
+  });
+
+  it('stays FAILED when the blockage offers nothing but a dismissal', () => {
+    const unresolvable = { ...budgetBlockageOn('artifact_plan'), kind: 'validation', code: 'input_validation_failed', remedies: [{ id: 'cancel', type: 'cancel' }] };
+    const derived = deriveRequestStatus({ run: failedRunWithBlockage(unresolvable), now: NOW });
+    assert.equal(derived.status, 'failed');
+  });
+
+  it('stays FAILED against an old engine that sends no blockage at all (D9 is a UI-side fallback, not a status one)', () => {
+    const derived = deriveRequestStatus({ run: failedRunWithBlockage(undefined), now: NOW });
+    assert.equal(derived.status, 'failed');
+  });
+
+  it('ignores a blockage whose shape it cannot trust', () => {
+    const derived = deriveRequestStatus({ run: failedRunWithBlockage({ code: 'budget_exceeded' }), now: NOW });
+    assert.equal(derived.status, 'failed');
+  });
+});

@@ -63,7 +63,7 @@ import {
 import { severityFromActivity, type AdminSeverity } from '@core/lib/admin/severity';
 import { decisionDisabledReason, relativeAge, retryReceipt } from '@core/lib/admin/request-logic';
 import { cmsAgentErrorCopy, hasOperatorAction } from '@core/lib/admin/cms-agent-error-copy';
-import { budgetRaiseButtons } from '@core/lib/admin/budget-raise';
+import { remedyButtons, resolveBlockage } from '@core/lib/admin/blockage';
 import {
   liveArticleUrl,
   liveUrlIsLinkable,
@@ -1009,7 +1009,48 @@ export function RequestActivity({
   const recoveryNodeFailure = resolvedRecoveryNodeId
     ? activity.nodes.find((node) => node.id === resolvedRecoveryNodeId)?.failure
     : undefined;
-  const raiseButtons = budgetRaiseButtons(recoveryNodeFailure, isOwner);
+  /**
+   * W3.2 — the SAME table the Imagery card and the chat transcript render
+   * from, so "Raise to $4.50 for this run" is one string in one place rather
+   * than three that drift. Behaviour is unchanged for the budget case this
+   * card already handled: `resolveBlockage` prefers CMS-Agent's own
+   * `blockage.v1` and, against an engine that predates it, reconstructs the
+   * identical two buttons from the identical numbers (D9,
+   * `blockageFromLegacyMessage` — which is `budget-raise.ts`'s own regex,
+   * moved).
+   *
+   * Only budget remedies are wired to a click here: this card's raise handler
+   * is the `admin-request-activity` endpoint's two budget actions. An approval
+   * remedy on the same blockage is not dropped — this card ALREADY has its own
+   * approve/withhold controls, fed by `approvals`, and a second pair of
+   * buttons for the same gate would be worse than none.
+   */
+  const recoveryBlockage = resolveBlockage(
+    recoveryNodeFailure?.blockage,
+    recoveryNodeFailure
+      ? {
+          code: recoveryNodeFailure.code,
+          message: recoveryNodeFailure.message,
+          ...(recoveryNodeFailure.details ? { details: recoveryNodeFailure.details } : {}),
+          ...(recoveryNodeFailure.operatorAction ? { operatorAction: recoveryNodeFailure.operatorAction } : {}),
+          ...(activity.run_id ? { runId: activity.run_id } : {}),
+          ...(resolvedRecoveryNodeId ? { nodeId: resolvedRecoveryNodeId } : {}),
+        }
+      : undefined
+  );
+  const raiseButtons = remedyButtons(recoveryBlockage, { isOwner })
+    .map((button) => {
+      const remedy = recoveryBlockage?.remedies.find((entry) => entry.id === button.remedy_id);
+      if (!remedy || remedy.type !== 'raise_node_budget') return undefined;
+      const budgetUsd = typeof remedy.args?.budgetUsd === 'number' ? remedy.args.budgetUsd : undefined;
+      if (budgetUsd === undefined || button.disabledReason) return undefined;
+      return {
+        label: button.label,
+        scope: (remedy.args?.scope === 'default' ? 'default' : 'for_run') as 'for_run' | 'default',
+        budgetUsd,
+      };
+    })
+    .filter((button): button is { label: string; scope: 'for_run' | 'default'; budgetUsd: number } => button !== undefined);
   // The run-level sentence's own instruction, or (C4 item 2) the resolved
   // node's own, when the run-level one is silent — either is a reason to
   // show the "what to do next" text instead of a retry affordance.

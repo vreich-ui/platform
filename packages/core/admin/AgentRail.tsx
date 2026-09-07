@@ -219,6 +219,8 @@ export function AgentRail({
         status={chat.status}
         pending={chat.pending}
         candidateSet={chat.candidateSet}
+        {...(chat.blockage ? { blockage: chat.blockage } : {})}
+        onResolveBlockage={(remedyId, args) => void chat.resolveBlockage(remedyId, args)}
         previewCandidateId={chat.previewCandidate?.candidate_id}
         busy={chat.busy}
         onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}

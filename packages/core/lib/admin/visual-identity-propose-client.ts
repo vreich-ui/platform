@@ -9,7 +9,50 @@
  * `visual_identity_propose` itself, so the browser sends only the standard
  * id and an optional brief.
  */
+import { parseBlockage, type Blockage } from './blockage.js';
+
 const ENDPOINT = '/.netlify/functions/admin-visual-identity-propose';
+
+/**
+ * F5, the LAST flattening on this path. `throw new Error(body.error)` turned a
+ * response that already carried `error_code` and (after blockage.v1) the whole
+ * remedy into a bare sentence, which `ImageryBoard` then stored as
+ * `error: string` and rendered under a red X. The card cannot show a button it
+ * was never handed, so it showed prose naming a raise nobody could click.
+ *
+ * Everything the server said now survives the throw. Nothing else about the
+ * call changed: `.message` is the same sentence it always was, so any caller
+ * that only ever read that still reads it.
+ */
+export class VisualIdentityProposeError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly blockage?: Blockage;
+  /** CMS-Agent's own English remedy sentence — shown when there is no blockage (an older engine). */
+  readonly operatorAction?: string;
+
+  constructor(message: string, options: { code: string; status: number; blockage?: Blockage; operatorAction?: string }) {
+    super(message);
+    this.name = 'VisualIdentityProposeError';
+    this.code = options.code;
+    this.status = options.status;
+    if (options.blockage) this.blockage = options.blockage;
+    if (options.operatorAction) this.operatorAction = options.operatorAction;
+  }
+}
+
+/**
+ * D3 — what "Raise to $1.50 for this attempt" actually sends: the same propose
+ * call again, naming the wall and the remedy the engine offered. The server
+ * decides what that means (a one-shot ceiling, or an Owner-gated default write
+ * first) — the browser never names a budget the engine did not.
+ */
+export type ProposeRemedyInput = {
+  blockage_id: string;
+  remedy_id: string;
+  scope: 'attempt' | 'default';
+  budget_usd: number;
+};
 
 export type ProposeContractResponse = {
   standardId: string;
@@ -28,6 +71,15 @@ export type ProposeContractResponse = {
 export type ProposeContractInput = {
   standardId: string;
   brief?: string;
+  /** Present only when this call is a blockage resolution (a re-propose). */
+  remedy?: ProposeRemedyInput;
+  /**
+   * D6 — the Publishing Agent panel's chat, so a run started from this BUTTON
+   * shows up in the transcript beside it (a note, and the same blockage card
+   * with the same remedies). Absent, the endpoint writes no chat events at all
+   * and behaves exactly as it did before.
+   */
+  chatId?: string;
 };
 
 type Fetcher = typeof fetch;
@@ -44,6 +96,8 @@ export const proposeVisualIdentityContract = async (
     body: JSON.stringify({
       standardId: input.standardId,
       ...(input.brief?.trim() ? { brief: input.brief.trim() } : {}),
+      ...(input.remedy ? { remedy: input.remedy } : {}),
+      ...(input.chatId ? { chat_id: input.chatId } : {}),
     }),
   });
   const body = (await response.json().catch(() => ({}))) as Partial<{
@@ -55,8 +109,20 @@ export const proposeVisualIdentityContract = async (
     warnings: string[];
     proposal: Record<string, unknown>;
     error: string;
+    error_code: string;
+    blockage: unknown;
+    operatorAction: string;
   }>;
-  if (!response.ok) throw new Error(body.error || `The contract could not be proposed (${response.status}).`);
+  if (!response.ok) {
+    throw new VisualIdentityProposeError(body.error || `The contract could not be proposed (${response.status}).`, {
+      code: body.error_code || 'propose_failed',
+      status: response.status,
+      // Validated, not trusted: `parseBlockage` drops a remedy this build has
+      // no handler for rather than letting a dead button reach the card.
+      ...(parseBlockage(body.blockage) ? { blockage: parseBlockage(body.blockage)! } : {}),
+      ...(typeof body.operatorAction === 'string' && body.operatorAction ? { operatorAction: body.operatorAction } : {}),
+    });
+  }
   return {
     standardId: body.standard_id ?? input.standardId,
     mode: body.mode ?? 'template',

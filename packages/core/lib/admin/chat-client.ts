@@ -5,6 +5,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { CandidateSetView } from './candidate-choice.js';
+import type { Blockage } from './blockage.js';
 
 const ENDPOINT = '/.netlify/functions/admin-agent-chat';
 
@@ -14,6 +15,8 @@ export type ChatStatus =
   | 'running'
   | 'awaiting_approval'
   | 'awaiting_candidate'
+  /** D6 — a wall is on the transcript and the chat is waiting for a human to clear it. */
+  | 'awaiting_blockage_resolution'
   | 'error'
   | 'cancelled';
 
@@ -37,6 +40,9 @@ export interface ChatEventView {
     | 'run_cancelled'
     /** W19 T19.3: sweeper-appended job progress. */
     | 'request_progress'
+    /** D6 — a resolvable wall, from a chat run OR from a page button. */
+    | 'blockage'
+    | 'blockage_resolved'
     | 'events_trimmed';
   detail?: Record<string, unknown>;
 }
@@ -95,6 +101,13 @@ export interface ChatView extends ChatSummaryView {
   events: ChatEventView[];
   pending?: PendingView;
   candidate_set?: CandidateSetView;
+  /**
+   * The wall this chat is waiting on. Unlike `pending`/`candidate_set` it is
+   * NOT tied to the chat's status: a blockage raised by a page button (D6) is
+   * real while a chat run is still going.
+   */
+  blockage?: Blockage;
+  blockage_origin?: 'page' | 'chat';
 }
 
 async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
@@ -201,6 +214,34 @@ export const denyTool = (getToken: GetToken, chatId: string, callId: string, rea
 
 export const cancelChatRun = (getToken: GetToken, chatId: string) =>
   post<{ cancelled: boolean }>(getToken, { action: 'cancel', chat_id: chatId });
+
+export interface ResolveBlockageResult {
+  resolved: boolean;
+  status: 'applied' | 'already_resolved' | 'failed' | 'caller_action' | 'unsupported';
+  /** For an attempt-scoped raise: what the CALLING SURFACE must re-run with (D3). */
+  rerun_with?: Record<string, number>;
+  navigate_to?: string;
+}
+
+/**
+ * D4 — the one post-back every surface makes. The server holds the blockage;
+ * the browser names only which wall and which remedy, plus (for a typed amount)
+ * the numbers a human may override.
+ */
+export const resolveBlockage = (
+  getToken: GetToken,
+  chatId: string,
+  blockageId: string,
+  remedyId: string,
+  args?: Record<string, unknown>
+) =>
+  post<ResolveBlockageResult>(getToken, {
+    action: 'resolve_blockage',
+    chat_id: chatId,
+    blockage_id: blockageId,
+    remedy_id: remedyId,
+    ...(args ? { args } : {}),
+  });
 
 /** Live statuses poll fast (~1.2s); idle backs off (5s). */
 export const pollIntervalFor = (status: ChatStatus | undefined): number =>

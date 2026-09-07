@@ -28,6 +28,7 @@ import {
   type Severity,
 } from '../../../lib/admin/activity-severity.js';
 import { nodeLabel } from '../../../lib/admin/request-logic.js';
+import { parseBlockage, type Blockage } from '../../../lib/admin/blockage.js';
 import {
   derivePublication,
   isAdvisoryApproval,
@@ -84,10 +85,18 @@ export interface ActivityNode {
      * `budget_exceeded` failure (post `budget-override-and-ui-save`),
      * verbatim from `output.error.details`. Absent for every other failure
      * code, and for an older CMS-Agent that has not yet started sending it —
-     * `suggestedBudgetRaise` (`lib/admin/budget-raise.ts`) falls back to
+     * `blockageFromLegacyMessage` (`lib/admin/blockage.ts`) falls back to
      * parsing the two dollar figures out of `message` when this is missing.
      */
     details?: { nodeId?: string; budgetUsd?: number; spentUsd?: number; nextTurnEstimateUsd?: number; suggestedBudgetUsd?: number };
+    /**
+     * blockage.v1 — the structured form of everything above: the same failure
+     * plus the REMEDIES that clear it, minted by CMS-Agent (its
+     * `execution/blockage.ts`) and carried through unchanged. The card renders
+     * buttons from this rather than re-deriving them from `details`/`message`;
+     * `blockageFromLegacyMessage` (D9) covers an engine that predates it.
+     */
+    blockage?: Blockage;
   };
   tools: ActivityToolCall[];
   cost?: { tokens: number; usd: number };
@@ -335,11 +344,16 @@ export const projectActivity = (
               : {}),
           }
         : undefined;
+      // Read off the NODE, not off `output.error`: the engine writes it there
+      // (`NodeExecutionState.blockage`) precisely so it survives independently
+      // of the error envelope's shape.
+      const nodeBlockage = parseBlockage((node as { blockage?: unknown }).blockage);
       const failure =
         failureCode && failureMessage
           ? {
               code: failureCode,
               message: failureMessage,
+              ...(nodeBlockage ? { blockage: nodeBlockage } : {}),
               ...(str(rawFailure!.operatorAction) ? { operatorAction: str(rawFailure!.operatorAction)! } : {}),
               ...(num(rawFailure!.providerStatus) !== undefined ? { providerStatus: num(rawFailure!.providerStatus)! } : {}),
               ...(str(rawFailure!.providerMessage) ? { providerMessage: str(rawFailure!.providerMessage)! } : {}),

@@ -125,7 +125,9 @@ export function ObjectBrowser({
           Object.fromEntries(
             chatResult.chats
               .filter((chat) =>
-                ['queued', 'running', 'awaiting_approval', 'awaiting_candidate', 'error'].includes(chat.status)
+                ['queued', 'running', 'awaiting_approval', 'awaiting_candidate', 'awaiting_blockage_resolution', 'error'].includes(
+                  chat.status
+                )
               )
               .filter((chat): chat is ChatSummaryView & { object_id: string } => Boolean(chat.object_id))
               .map((chat) => [chat.object_id, chat])

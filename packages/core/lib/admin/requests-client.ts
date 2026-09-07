@@ -10,6 +10,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import { AuthExpiredError, clearAuthExpired, isAuthExpiredStatus, markAuthExpired } from './auth-expiry.js';
+import type { Blockage } from './blockage.js';
 
 const ENDPOINT = '/.netlify/functions/admin-requests';
 
@@ -320,8 +321,10 @@ export interface ActivityNodeView {
     operatorAction?: string;
     providerStatus?: number;
     providerMessage?: string;
-    /** Bug B (budget-raise-card): CMS-Agent's own numbers for a `budget_exceeded` failure — see `lib/admin/budget-raise.ts`. */
+    /** Bug B (budget-raise-card): CMS-Agent's own numbers for a `budget_exceeded` failure — see `lib/admin/blockage.ts`. */
     details?: { nodeId?: string; budgetUsd?: number; spentUsd?: number; nextTurnEstimateUsd?: number; suggestedBudgetUsd?: number };
+    /** blockage.v1 — the same failure with the remedies that clear it, minted by CMS-Agent. */
+    blockage?: Blockage;
   };
   tools: ActivityToolCallView[];
   cost?: { tokens: number; usd: number };

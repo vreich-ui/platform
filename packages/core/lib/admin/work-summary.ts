@@ -12,7 +12,14 @@ export interface WorkSummary {
 export function getWorkSummary(rows: readonly LibraryRow[], chats: readonly ChatSummaryView[]): WorkSummary {
   const working = chats.filter((chat) => chat.status === 'queued' || chat.status === 'running');
   const needsYouChats = chats.filter(
-    (chat) => chat.status === 'awaiting_approval' || chat.status === 'awaiting_candidate' || chat.status === 'error'
+    (chat) =>
+      chat.status === 'awaiting_approval' ||
+      chat.status === 'awaiting_candidate' ||
+      // D7's "header counts follow": without this a chat holding a wall was in
+      // neither `working` nor `needsYouCount` — invisible in the one place an
+      // editor looks to find what is waiting on them.
+      chat.status === 'awaiting_blockage_resolution' ||
+      chat.status === 'error'
   );
   const chatObjectIds = new Set(needsYouChats.map((chat) => chat.object_id).filter(Boolean));
   const pendingReviews = rows.filter((row) => row.review_state === 'open' && !chatObjectIds.has(row.object_id));
@@ -29,6 +36,7 @@ export function getWorkSummary(rows: readonly LibraryRow[], chats: readonly Chat
 export const chatWorkLabel = (chat: Pick<ChatSummaryView, 'status'>): string => {
   if (chat.status === 'awaiting_candidate') return 'Ready to review';
   if (chat.status === 'awaiting_approval') return 'Waiting for you';
+  if (chat.status === 'awaiting_blockage_resolution') return 'Waiting for you';
   if (chat.status === 'error') return 'Failed';
   return chat.status === 'queued' ? 'Starting' : 'Working';
 };

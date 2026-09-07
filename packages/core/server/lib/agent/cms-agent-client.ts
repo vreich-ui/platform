@@ -23,6 +23,7 @@
 import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBindingEnvNames } from '../site-binding.js';
 import type { ChatMsg, ChatToolCall } from './chat-store.js';
 import type { WireTool } from './provider.js';
+import { parseBlockage, type Blockage } from '../../../lib/admin/blockage.js';
 
 // ─── protocol + bounds constants (frozen contract) ───────────────────────────
 
@@ -179,6 +180,18 @@ export type CmsAgentError = {
   providerStatus?: number;
   providerMessage?: string;
   /**
+   * `blockage.v1` (2.2) — CMS-Agent's structured, actionable form of this
+   * failure: what stopped, and the remedies that would clear it. Present only
+   * when the engine minted one (a node that hit a ceiling, a gate, a limit) and
+   * only from a parsed JSON-RPC error body. Carried through UNCHANGED — this
+   * client's whole job for it is not to flatten it, which is what every layer
+   * on this path used to do.
+   *
+   * Absent against a CMS-Agent deployed before blockage.v1; the surface then
+   * falls back to `blockageFromLegacyMessage` (D9).
+   */
+  blockage?: Blockage;
+  /**
    * True only when CMS-Agent actually answered with a parseable JSON-RPC
    * error body (`parsed.error` in `callTool`) — i.e. `code`/`message` here
    * are real detail, not a guess. False/absent for every transport-class
@@ -200,6 +213,7 @@ const fail = (
     operatorAction?: string;
     providerStatus?: number;
     providerMessage?: string;
+    blockage?: Blockage;
     fromJsonBody?: boolean;
   } = {}
 ): { ok: false } & CmsAgentError => ({
@@ -213,6 +227,7 @@ const fail = (
   ...(options.operatorAction === undefined ? {} : { operatorAction: options.operatorAction }),
   ...(options.providerStatus === undefined ? {} : { providerStatus: options.providerStatus }),
   ...(options.providerMessage === undefined ? {} : { providerMessage: options.providerMessage }),
+  ...(options.blockage === undefined ? {} : { blockage: options.blockage }),
   ...(options.fromJsonBody === undefined ? {} : { fromJsonBody: options.fromJsonBody }),
 });
 
@@ -812,6 +827,7 @@ export class CmsAgentClient {
               operatorAction?: unknown;
               providerStatus?: unknown;
               providerMessage?: unknown;
+              blockage?: unknown;
             })
           : undefined;
       const wire = typeof inner?.code === 'string' && WIRE_ERROR_CODES.has(inner.code) ? inner.code : undefined;
@@ -833,11 +849,20 @@ export class CmsAgentClient {
         typeof inner?.providerMessage === 'string'
           ? safeMessage(inner.providerMessage, secrets, '') || undefined
           : undefined;
+      // `error.blockage` — CMS-Agent's WorkspaceToolError spreads its `details`
+      // onto the envelope's error object, so a refusal carrying a blockage puts
+      // it here as a first-class field. Validated by `parseBlockage` rather than
+      // trusted: an unknown remedy type is dropped there, never rendered as a
+      // button with no handler. Not sanitized through `safeMessage` — it is
+      // structured data whose only free text is `message`/`operator_action`,
+      // both of which the engine composed from its own figures.
+      const blockage = parseBlockage(inner?.blockage);
       const detailOptions = {
         statusCode: response.status,
         operatorAction,
         providerStatus,
         providerMessage,
+        blockage,
         fromJsonBody: true,
       };
       return wire

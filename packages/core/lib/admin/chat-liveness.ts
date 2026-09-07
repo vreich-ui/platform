@@ -66,6 +66,11 @@ export function deriveLivenessChip(
       return { tier: 'waiting', label: 'Needs you — approval', severity: 'needs_you' };
     case 'awaiting_candidate':
       return { tier: 'waiting', label: 'Needs you — pick a version', severity: 'needs_you' };
+    case 'awaiting_blockage_resolution':
+      // Amber, not red: a blockage is by definition a wall something CAN be
+      // done about. Without this case the switch fell through to `undefined`
+      // and the thread's only live indicator showed nothing at all.
+      return { tier: 'waiting', label: 'Needs you — a decision', severity: 'needs_you' };
     case 'error':
       return { tier: 'blocked', label: 'Blocked', severity: 'blocked' };
     case 'cancelled':
