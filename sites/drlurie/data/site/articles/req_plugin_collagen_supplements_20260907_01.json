@@ -1,0 +1,832 @@
+{
+  "__generated": {
+    "at": "2026-09-07T07:42:26.265Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_plugin_collagen_supplements_20260907_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_collagen_supplements_20260907_01"
+    },
+    "record_version": 8,
+    "surface": "plugin:claude"
+  },
+  "author": "Dr. Lurie",
+  "deck": "The claim is that drinking collagen rebuilds the collagen in your face. What the trials measured is narrower than that, and the gap between the two is where the marketing lives.",
+  "description": "Oral collagen has real trial evidence and real limitations. What the systematic reviews found, why digestion complicates the story, where the belief came from, and what to weigh before spending.",
+  "editorial": {
+    "framework": "fw_myth",
+    "writer_notes": "TOP-of-funnel myth check. Correcting the record is the article; nothing is sold as the alternative. Dials under ceiling: claim_strength ~0.18 (highest of the five, because the piece cites meta-analyses), urgency 0, agitation ~0.03, cta_density ~0.04. One ask: raise it with a clinician — no link, no download."
+  },
+  "image": {
+    "alt": "A plain glass jar of unlabelled pale powder with a small metal scoop beside it on a kitchen counter",
+    "src": "/img/req_plugin_collagen_supplements_20260907_01/ed07e0ceb0cd002c67e8d888280f39a9024c868aef03d5cf044b181c69c7b831.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_theclaim",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "It is one of the tidiest stories in the industry. Skin loses collagen with age. Collagen is a protein. Therefore drink collagen and put it back."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The story is tidy because it skips a step. Collagen taken by mouth is a protein like any other, and protein does not survive digestion intact. It is broken down into amino acids and short peptides, absorbed, and distributed by a body that decides for itself what to build and where."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Nothing about swallowing collagen instructs the body to send the pieces to your face. That is the gap the advertising quietly steps over, and it is worth naming before looking at the trials — because the trials are not nothing."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "The claim"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_known",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Oral collagen has been studied more seriously than most supplements marketed for skin, and several systematic reviews and meta-analyses have pooled the randomised trials. They tend to report small improvements in measured skin hydration and elasticity compared with placebo ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/33742704"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/33742704/"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": ")."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "That is a genuine finding and it deserves to be stated plainly rather than dismissed. It also comes with caveats the packaging never carries."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "The outcomes are instrument readings."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Hydration and elasticity are measured by probes on a patch of skin. A statistically detectable shift on a probe is not the same as a change you or anyone else would notice in a photograph."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "The studies are small and short."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Reviewers of this literature repeatedly note modest sample sizes, varying preparations and doses, and follow-up measured in weeks ("
+                        },
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "pubmed.ncbi.nlm.nih.gov/30681787"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://pubmed.ncbi.nlm.nih.gov/30681787/"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "). Nothing here speaks to what happens over years."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Industry funding is common."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A large share of this research is sponsored by companies that make the ingredient. That does not make a result false; it does mean the body of evidence has a known lean, and independent replication matters more than usual."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "The products are not interchangeable."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Trials use specific hydrolysed peptides at specific doses. A tub on a shelf may share the word on the label and little else."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The honest summary is that studies suggest a small measurable effect in some people, on measures that are not the same as visible change, from preparations that may not match what you can buy."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What is actually known"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_origin",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Three things had to line up for this idea to take hold, and none of them is dishonest on its own."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "The biology is real."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Dermal collagen genuinely does decline with age and with sun exposure. Everyone reading a collagen advertisement already believes the premise, because the premise is true."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Supplements are regulated differently from medicines."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " In the United States, dietary supplements do not need approval before sale, and manufacturers carry primary responsibility for their own claims ("
+                        },
+                        {
+                          "content": [
+                            {
+                              "data": {},
+                              "marks": [],
+                              "nodeType": "text",
+                              "value": "fda.gov"
+                            }
+                          ],
+                          "data": {
+                            "uri": "https://www.fda.gov/food/information-consumers-using-dietary-supplements/questions-and-answers-dietary-supplements"
+                          },
+                          "nodeType": "hyperlink"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": "). The bar a marketing claim has to clear is not the bar a drug claim has to clear."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "A small positive result travels further than its caveats."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A meta-analysis reporting a modest change in a probe reading becomes a headline, then a product page, then a sentence a friend repeats to you. Each retelling drops a qualifier."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "By the time it reaches the tub, a narrow finding has become a promise about your face."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Where the belief came from"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_instead",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If the goal is the collagen in your skin rather than the collagen in your kitchen cupboard, the interventions with the strongest evidence behind them are dull and mostly not supplements."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Daily sun protection."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Ultraviolet exposure is the best-established modifiable driver of collagen loss in skin. Nothing you swallow competes with not doing the damage in the first place."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "A topical retinoid, if your skin tolerates one."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " This is the ingredient class with the longest record for changes in the dermis, and it is applied where you want the effect rather than routed through digestion."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Enough protein in the diet generally."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " If protein intake is genuinely low, that is worth addressing for many reasons. Collagen powder is one of the more expensive ways to buy protein."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If you still want to try it — which is a perfectly reasonable thing to decide about your own money — test it properly. Change one thing, give it at least three months, photograph in the same light each month, and set a budget in advance. An honest personal trial is worth more than another article, this one included."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What to do instead"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_boundary",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Supplements are not automatically harmless, and a skin article is not the place to decide this on your own."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Speak to a pharmacist or your doctor first if you take prescription medication, if you have kidney or liver disease, if you are pregnant or breastfeeding, or if you have a food allergy — collagen preparations are derived from animal sources including fish and shellfish, and the source is not always prominent on the front of the packaging."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "For visible changes in your skin that came on quickly, or that concern you, your dermatologist is the right first stop rather than the supplement aisle."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Before you add any supplement"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_ask",
+      "kind": "action",
+      "public": {
+        "body": "At your next appointment, ask your dermatologist what they would spend the same money on for your skin specifically. It is a short question, it costs nothing, and the answer is tailored to you in a way no article can be.",
+        "ctaText": "Raise it with your dermatologist",
+        "title": "One thing worth asking"
+      },
+      "rendering": {
+        "emphasis": "low",
+        "placement": "section",
+        "presentation": "callout"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Effects of hydrolyzed collagen supplementation on skin aging: a systematic review and meta-analysis."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " International Journal of Dermatology, 2021. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/33742704"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/33742704/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Oral Collagen Supplementation: A Systematic Review of Dermatological Applications."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " Journal of Drugs in Dermatology, 2019. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/30681787"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/30681787/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Effects of Oral Collagen for Skin Anti-Aging: A Systematic Review and Meta-Analysis."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " 2023. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "pubmed.ncbi.nlm.nih.gov/37432180"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://pubmed.ncbi.nlm.nih.gov/37432180/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Questions and Answers on Dietary Supplements."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " U.S. Food and Drug Administration. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "fda.gov/food/information-consumers-using-dietary-supplements/questions-and-answers-dietary-supplements"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.fda.gov/food/information-consumers-using-dietary-supplements/questions-and-answers-dietary-supplements"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "What systematic reviews of oral collagen found, why the results are weaker than the marketing, and how to decide whether it is worth your money.",
+    "meta_title": "Collagen Supplements and Skin: What the Trials Actually Measured"
+  },
+  "slug": "collagen-supplements-what-the-trials-measured",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Effects of hydrolyzed collagen supplementation on skin aging: a systematic review and meta-analysis",
+        "publisher": "International Journal of Dermatology (via PubMed)",
+        "source_id": "src_pubmed_hydrolyzed",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33742704/"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Oral Collagen Supplementation: A Systematic Review of Dermatological Applications",
+        "publisher": "Journal of Drugs in Dermatology (via PubMed)",
+        "source_id": "src_pubmed_dermapps",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30681787/"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Effects of Oral Collagen for Skin Anti-Aging: A Systematic Review and Meta-Analysis",
+        "publisher": "PubMed",
+        "source_id": "src_pubmed_oralmeta",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/37432180/"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Questions and Answers on Dietary Supplements",
+        "publisher": "U.S. Food and Drug Administration",
+        "source_id": "src_fda_supplements",
+        "url": "https://www.fda.gov/food/information-consumers-using-dietary-supplements/questions-and-answers-dietary-supplements"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skin-health",
+    "tags": [
+      "supplements",
+      "marketing-claims",
+      "skin-science",
+      "skin-after-40"
+    ]
+  },
+  "title": "Collagen Supplements: What the Trials Actually Measured"
+}
