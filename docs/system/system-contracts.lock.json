@@ -25,8 +25,6 @@
       "learning_list_observations",
       "node_execute",
       "node_get_latest_output",
-      "optimizer_status",
-      "playbook_get",
       "visual_identity_propose",
       "workflow_cancel_run",
       "workflow_get_run",
@@ -206,6 +204,8 @@
     "siteClientManagerTools": [
       "agent_converse",
       "agent_resolve",
+      "feedback_list",
+      "learning_list_observations",
       "node_get_latest_output",
       "visual_identity_propose",
       "workflow_cancel_run",
@@ -218,7 +218,7 @@
       "workflow_start_dry_run",
       "workspace_get_nodes"
     ],
-    "siteClientManagerToolCount": 13,
+    "siteClientManagerToolCount": 15,
     "rollupsByValues": [
       "producer",
       "object",
@@ -307,7 +307,6 @@
     ],
     "eventKindLiterals": [
       "buy_click",
-      "completion",
       "cta_click",
       "exposure",
       "node_impression",
@@ -325,7 +324,6 @@
     ],
     "trackingEventsHasVersionColumn": false,
     "dimsReadKeys": [
-      "attribution",
       "intent",
       "model",
       "node_id",
@@ -341,16 +339,13 @@
       "route",
       "run_id",
       "strategy",
-      "surface",
       "variant_of",
       "version"
     ],
     "statsDaysParam": true,
     "statsParamsRead": [
       "days",
-      "from",
-      "project_id",
-      "to"
+      "project_id"
     ],
     "weightsEnvelopeKeys": [
       "experiments",

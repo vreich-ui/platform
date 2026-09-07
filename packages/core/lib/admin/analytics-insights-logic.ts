@@ -27,6 +27,19 @@
  * exist yet for this tenant, and strategy observations need a migration +
  * two job runs that haven't happened) — never a silent zero, never a
  * spinner that never resolves.
+ *
+ * A companion CMS-Agent change moves `feedback_list` and
+ * `learning_list_observations` INTO the tenant scope (both now take an
+ * optional `projectId`, and a tenant-scoped bearer must pass it) while
+ * `playbook_get`/`optimizer_status` stay OUT of it forever — they are keyed
+ * by node, and nodes are workspace-wide, so a tenant credential can never
+ * legitimately call them. That is not a transient failure to retry; it is a
+ * standing fact about the tool, which is why sections (2) and (3) below get
+ * their own `workspace_scope` state instead of ever reaching `error` for
+ * this reason (a real network failure or a genuinely bad token on any
+ * section — this pair included, should either ever be called again — still
+ * resolves to `error`; `workspace_scope` is set only by the server module
+ * deliberately, never inferred from a CMS-Agent response).
  */
 
 // ─── shared evidence shape ──────────────────────────────────────────────────
@@ -161,11 +174,20 @@ export interface StrategyObservationRow {
  * empty copy below. `rows` absent means the call itself failed (transport,
  * auth, a CMS-Agent tool error) — `message` is already the human-safe text
  * `cms-agent-client.ts` produced, safe to render verbatim.
+ *
+ * `workspaceScope: true` is a THIRD, distinct case from either of those: the
+ * server module never called CMS-Agent at all for this section, because the
+ * tool is permanently out of tenant scope by design (`playbook_get`,
+ * `optimizer_status` — node-keyed, workspace-wide). It is set deliberately
+ * by the server, never derived from a response, so it can never be confused
+ * with a genuine `error` on a section that DOES call out (outcomes,
+ * strategy observations).
  */
 export interface InsightsSectionPayload<T> {
   rows?: T[];
   error_code?: string;
   message?: string;
+  workspaceScope?: boolean;
 }
 
 export interface InsightsOverview {
@@ -183,6 +205,7 @@ export interface InsightsOverview {
 export type InsightsSectionState<T> =
   | { kind: 'ready'; rows: T[] }
   | { kind: 'empty'; message: string }
+  | { kind: 'workspace_scope'; message: string }
   | { kind: 'error'; message: string };
 
 export interface InsightsPanelReady {
@@ -207,11 +230,35 @@ export const INSIGHTS_EMPTY_COPY = {
   strategyObservations: 'No strategy observations yet — needs two consecutive windows.',
 } as const;
 
+/**
+ * Named per-section "why you'll never see this at tenant scope" copy for
+ * `playbook_get`/`optimizer_status` — node-keyed tools with no per-tenant
+ * partition, kept out of the tenant scope by design (see the file header).
+ * Used only as the DEFAULT when the server sent `workspaceScope: true` with
+ * no `message` of its own; the server currently always sends one.
+ */
+export const INSIGHTS_WORKSPACE_SCOPE_COPY = {
+  playbookItems:
+    'Workspace-wide — not available at tenant scope. Playbooks are keyed by node, and nodes are shared across the whole workspace, not this site.',
+  proposals:
+    'Workspace-wide — not available at tenant scope. Optimizer proposals are keyed by node, and nodes are shared across the whole workspace, not this site.',
+} as const;
+
 function resolveSection<T>(
   payload: InsightsSectionPayload<T> | undefined,
-  emptyMessage: string
+  emptyMessage: string,
+  workspaceScopeMessage?: string
 ): InsightsSectionState<T> {
   if (!payload) return { kind: 'error', message: 'This section did not load.' };
+  // Checked BEFORE `rows`/`message` — a deliberate, server-set fact about the
+  // tool, never a response to interpret, so it can never be shadowed by an
+  // incidental `rows`/`message` on the same payload.
+  if (payload.workspaceScope) {
+    return {
+      kind: 'workspace_scope',
+      message: payload.message || workspaceScopeMessage || 'Workspace-wide — not available at tenant scope.',
+    };
+  }
   if (payload.rows) {
     return payload.rows.length > 0 ? { kind: 'ready', rows: payload.rows } : { kind: 'empty', message: emptyMessage };
   }
@@ -248,8 +295,12 @@ export function resolveInsightsPanel(input: InsightsPanelInput): InsightsPanelSt
   return {
     kind: 'ready',
     outcomes: resolveSection(overview.outcomes, INSIGHTS_EMPTY_COPY.outcomes),
-    playbookItems: resolveSection(overview.playbookItems, INSIGHTS_EMPTY_COPY.playbookItems),
-    proposals: resolveSection(overview.proposals, INSIGHTS_EMPTY_COPY.proposals),
+    playbookItems: resolveSection(
+      overview.playbookItems,
+      INSIGHTS_EMPTY_COPY.playbookItems,
+      INSIGHTS_WORKSPACE_SCOPE_COPY.playbookItems
+    ),
+    proposals: resolveSection(overview.proposals, INSIGHTS_EMPTY_COPY.proposals, INSIGHTS_WORKSPACE_SCOPE_COPY.proposals),
     strategyObservations: resolveSection(overview.strategyObservations, INSIGHTS_EMPTY_COPY.strategyObservations),
   };
 }

@@ -1225,8 +1225,19 @@ function InsightsSectionCard<T>({
         <ul>{renderRows(state.rows)}</ul>
       ) : (
         <EmptyState
-          severity={state.kind === 'error' ? 'error' : undefined}
-          title={state.kind === 'error' ? 'Could not load this section' : 'Nothing here yet'}
+          // D4: `workspace_scope` is a fact being reported, not a decision —
+          // "info", never "error". It is set only when the server never even
+          // called CMS-Agent for this section (a standing, by-design
+          // exclusion), so it can never collide with a genuine failure on a
+          // section that does call out.
+          severity={state.kind === 'error' ? 'error' : state.kind === 'workspace_scope' ? 'info' : undefined}
+          title={
+            state.kind === 'error'
+              ? 'Could not load this section'
+              : state.kind === 'workspace_scope'
+                ? 'Workspace-wide — not available at tenant scope'
+                : 'Nothing here yet'
+          }
           message={state.message}
           className="border-none px-0 py-6"
         />

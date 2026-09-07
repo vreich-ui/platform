@@ -1,3 +1,9 @@
+// Same convention as `mcp-analytics-handlers.test.ts`: `getSiteIdentity()`
+// (called by `fetchAnalyticsInsights` below to source `cmsAgentProjectId`)
+// throws unless the site's config provider is registered first — import the
+// site's policy bindings before anything that resolves site identity.
+import '../../../../sites/drlurie/config/policy-bindings.js';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -12,7 +18,11 @@ import {
   normalizeProposalRow,
   observationSource,
   normalizeStrategyObservation,
+  fetchAnalyticsInsights,
+  type AnalyticsInsightsCmsAgentClient,
 } from './analytics-insights.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
+import type { CmsAgentErrorCode } from './agent/cms-agent-client.js';
 
 // ─── extractArray ───────────────────────────────────────────────────────────
 
@@ -254,4 +264,132 @@ test('normalizeStrategyObservation: a real live fleet-log observation (no tracki
     }),
     null
   );
+});
+
+// ─── fetchAnalyticsInsights ─────────────────────────────────────────────────
+//
+// projectId sourcing on the two now-tenant-scoped calls; the two
+// permanently-workspace-wide sections never reaching CMS-Agent at all; and a
+// genuine failure on either scoped call still surfacing as `error`, never
+// silently reclassified as `workspaceScope`.
+
+const CMS_AGENT_ENV_KEYS = ['CMS_AGENT_MCP_ENDPOINT', 'CMS_AGENT_MCP_TOKEN'] as const;
+
+/** Pins CMS-Agent's two env vars configured (any non-empty value — no real network call happens, every call goes through the stubbed `AnalyticsInsightsCmsAgentClient`) for the duration of `fn`, restoring whatever was there before. */
+const withCmsAgentConfigured = async (fn: () => Promise<void>): Promise<void> => {
+  const previous = Object.fromEntries(CMS_AGENT_ENV_KEYS.map((key) => [key, process.env[key]]));
+  process.env.CMS_AGENT_MCP_ENDPOINT = 'https://cms-agent.example.invalid/mcp';
+  process.env.CMS_AGENT_MCP_TOKEN = 'test-token-should-never-be-used';
+  try {
+    await fn();
+  } finally {
+    for (const key of CMS_AGENT_ENV_KEYS) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+};
+
+type StubCall = { name: string; args: Record<string, unknown> };
+type StubResponse = { ok: true; data: unknown } | { ok: false; code: CmsAgentErrorCode; message: string };
+
+/** A stubbed `AnalyticsInsightsCmsAgentClient` recording every call it receives — same shape as `brand-imagery-proxy.test.ts`'s `stubCmsAgent`. */
+const stubClient = (
+  respond: (name: string, args: Record<string, unknown>) => StubResponse
+): { client: AnalyticsInsightsCmsAgentClient; calls: StubCall[] } => {
+  const calls: StubCall[] = [];
+  return {
+    calls,
+    client: {
+      callTool: async (name, args) => {
+        calls.push({ name, args });
+        return respond(name, args) as never;
+      },
+    },
+  };
+};
+
+test('fetchAnalyticsInsights: feedback_list and learning_list_observations both carry the site cmsAgentProjectId', async () => {
+  await withCmsAgentConfigured(async () => {
+    const { client, calls } = stubClient((name) => {
+      if (name === 'feedback_list') return { ok: true, data: { records: [] } };
+      if (name === 'learning_list_observations') return { ok: true, data: { observations: [] } };
+      return { ok: false, code: 'cms_agent_error', message: `unexpected call: ${name}` };
+    });
+
+    const overview = await fetchAnalyticsInsights(client);
+
+    assert.equal(overview.configured, true);
+    const expectedProjectId = getSiteIdentity().cmsAgentProjectId;
+    const feedbackCall = calls.find((call) => call.name === 'feedback_list');
+    const learningCall = calls.find((call) => call.name === 'learning_list_observations');
+    assert.ok(feedbackCall, 'feedback_list was called');
+    assert.ok(learningCall, 'learning_list_observations was called');
+    assert.equal(feedbackCall!.args.projectId, expectedProjectId);
+    assert.equal(learningCall!.args.projectId, expectedProjectId);
+  });
+});
+
+test('fetchAnalyticsInsights: playbook_get/optimizer_status are never called — both sections resolve to workspaceScope with no network round trip', async () => {
+  await withCmsAgentConfigured(async () => {
+    const { client, calls } = stubClient((name) => {
+      if (name === 'feedback_list') return { ok: true, data: { records: [] } };
+      if (name === 'learning_list_observations') return { ok: true, data: { observations: [] } };
+      // Any call reaching here beyond those two is exactly the round trip
+      // this module must no longer make.
+      return { ok: false, code: 'cms_agent_auth_failed', message: 'CMS-Agent rejected the credential.' };
+    });
+
+    const overview = await fetchAnalyticsInsights(client);
+
+    assert.deepEqual(overview.playbookItems, { workspaceScope: true });
+    assert.deepEqual(overview.proposals, { workspaceScope: true });
+    assert.deepEqual(
+      calls.map((call) => call.name).sort(),
+      ['feedback_list', 'learning_list_observations']
+    );
+  });
+});
+
+test('fetchAnalyticsInsights: a genuine feedback_list/learning_list_observations failure still renders as a plain error payload, never workspaceScope', async () => {
+  await withCmsAgentConfigured(async () => {
+    const { client } = stubClient((name) => {
+      if (name === 'feedback_list') {
+        return { ok: false, code: 'cms_agent_auth_failed', message: 'CMS-Agent rejected the credential.' };
+      }
+      if (name === 'learning_list_observations') {
+        return { ok: false, code: 'cms_agent_unreachable', message: 'CMS-Agent is unreachable from Platform.' };
+      }
+      return { ok: false, code: 'cms_agent_error', message: `unexpected call: ${name}` };
+    });
+
+    const overview = await fetchAnalyticsInsights(client);
+
+    assert.deepEqual(overview.outcomes, { message: 'CMS-Agent rejected the credential.' });
+    assert.deepEqual(overview.strategyObservations, { message: 'CMS-Agent is unreachable from Platform.' });
+    // Neither carries `workspaceScope` — that flag is set only by the two
+    // sections that never call out at all, never derived from a response.
+    assert.equal((overview.outcomes as { workspaceScope?: boolean }).workspaceScope, undefined);
+    assert.equal((overview.strategyObservations as { workspaceScope?: boolean }).workspaceScope, undefined);
+  });
+});
+
+test('fetchAnalyticsInsights: CMS-Agent not configured short-circuits before any client call at all', async () => {
+  const previous = Object.fromEntries(CMS_AGENT_ENV_KEYS.map((key) => [key, process.env[key]]));
+  for (const key of CMS_AGENT_ENV_KEYS) delete process.env[key];
+  try {
+    const { client, calls } = stubClient(() => ({ ok: false, code: 'cms_agent_error', message: 'must not be called' }));
+
+    const overview = await fetchAnalyticsInsights(client);
+
+    assert.equal(overview.configured, false);
+    assert.equal(calls.length, 0);
+  } finally {
+    for (const key of CMS_AGENT_ENV_KEYS) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

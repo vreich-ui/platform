@@ -6,6 +6,7 @@ import {
   resolveInsightsPanel,
   summarizeOutcomeMetrics,
   INSIGHTS_EMPTY_COPY,
+  INSIGHTS_WORKSPACE_SCOPE_COPY,
   type InsightsOverview,
   type TrackingOutcomeRow,
   type PlaybookTrackingItem,
@@ -210,4 +211,73 @@ test('resolveInsightsPanel: an error payload with no message falls back to a gen
   const state = resolveInsightsPanel({ loading: false, error: null, overview });
   if (state.kind !== 'ready') throw new Error('unreachable');
   assert.deepEqual(state.outcomes, { kind: 'error', message: 'Could not load this section from CMS-Agent.' });
+});
+
+// ─── workspace_scope — playbook_get/optimizer_status are permanently out of tenant scope ──
+
+test('resolveInsightsPanel: playbookItems/proposals with workspaceScope render as workspace_scope, not error, with the named copy', () => {
+  const overview: InsightsOverview = {
+    configured: true,
+    outcomes: { rows: [] },
+    playbookItems: { workspaceScope: true },
+    proposals: { workspaceScope: true },
+    strategyObservations: { rows: [] },
+  };
+  const state = resolveInsightsPanel({ loading: false, error: null, overview });
+  assert.equal(state.kind, 'ready');
+  if (state.kind !== 'ready') throw new Error('unreachable');
+  assert.deepEqual(state.playbookItems, {
+    kind: 'workspace_scope',
+    message: INSIGHTS_WORKSPACE_SCOPE_COPY.playbookItems,
+  });
+  assert.deepEqual(state.proposals, {
+    kind: 'workspace_scope',
+    message: INSIGHTS_WORKSPACE_SCOPE_COPY.proposals,
+  });
+  // Never rendered as the credential-failure copy this replaces.
+  assert.doesNotMatch(state.playbookItems.message, /credential/i);
+  assert.doesNotMatch(state.proposals.message, /credential/i);
+});
+
+test('resolveInsightsPanel: workspaceScope wins even if the payload also carries rows/message — it is a deliberate server fact, not inferred', () => {
+  const overview: InsightsOverview = {
+    configured: true,
+    outcomes: { rows: [] },
+    playbookItems: { workspaceScope: true, rows: [playbookItem], message: 'should be ignored' },
+    proposals: { rows: [] },
+    strategyObservations: { rows: [] },
+  };
+  const state = resolveInsightsPanel({ loading: false, error: null, overview });
+  if (state.kind !== 'ready') throw new Error('unreachable');
+  assert.equal(state.playbookItems.kind, 'workspace_scope');
+});
+
+test('resolveInsightsPanel: a server-supplied message on a workspaceScope payload overrides the default copy', () => {
+  const overview: InsightsOverview = {
+    configured: true,
+    outcomes: { rows: [] },
+    playbookItems: { workspaceScope: true, message: 'custom workspace-wide sentence' },
+    proposals: { rows: [] },
+    strategyObservations: { rows: [] },
+  };
+  const state = resolveInsightsPanel({ loading: false, error: null, overview });
+  if (state.kind !== 'ready') throw new Error('unreachable');
+  assert.deepEqual(state.playbookItems, { kind: 'workspace_scope', message: 'custom workspace-wide sentence' });
+});
+
+test('resolveInsightsPanel: a GENUINE failure on outcomes/strategy observations still renders as error, never workspace_scope', () => {
+  const overview: InsightsOverview = {
+    configured: true,
+    outcomes: { message: 'CMS-Agent rejected the credential.' },
+    playbookItems: { workspaceScope: true },
+    proposals: { workspaceScope: true },
+    strategyObservations: { message: 'CMS-Agent is unreachable from Platform.' },
+  };
+  const state = resolveInsightsPanel({ loading: false, error: null, overview });
+  if (state.kind !== 'ready') throw new Error('unreachable');
+  assert.deepEqual(state.outcomes, { kind: 'error', message: 'CMS-Agent rejected the credential.' });
+  assert.deepEqual(state.strategyObservations, { kind: 'error', message: 'CMS-Agent is unreachable from Platform.' });
+  // The two node-keyed sections are unaffected, in either direction.
+  assert.equal(state.playbookItems.kind, 'workspace_scope');
+  assert.equal(state.proposals.kind, 'workspace_scope');
 });

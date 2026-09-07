@@ -18,14 +18,17 @@
  *    `parseWindowFromNote` below is load-bearing, not decorative; `n` is
  *    `outcome.metrics.sessions`.
  *  - `playbook_get({nodeId})` → `{playbook: null | {...}, rendered}`.
- *    NODE-SCOPED — there is no "list every playbook" tool — so this module
- *    calls it once per distinct producer `nodeId` seen in (1). A tenant
- *    with no playbook yet on a node gets `playbook: null` (verified live:
- *    both `plugin:claude` and `plugin:openai-agent` on dr-lurie return this
- *    today) — a real, honest "nothing here", not a fetch failure.
+ *    NODE-SCOPED, and — unlike `feedback_list`/`learning_list_observations`
+ *    below — deliberately kept OUT of the tenant scope FOREVER: nodes are
+ *    workspace-wide, there is nothing per-tenant to partition, and exposing
+ *    this tool to a tenant bearer would hand one tenant the whole
+ *    workspace's shared learning state. This module does not call it at
+ *    all (see §2 below) rather than draw a refusal it already knows is
+ *    coming.
  *  - `optimizer_status({})` (no `nodeId` — the global roll-up) →
- *    `{status:{proposals:[...], trials:[...]}}`. Verified live: empty on
- *    dr-lurie today.
+ *    `{status:{proposals:[...], trials:[...]}}`. Same permanent
+ *    workspace-wide exclusion as `playbook_get`, for the same reason
+ *    (proposals are node-keyed) — also not called (see §3).
  *  - `learning_list_observations({})` → `{observations:[{id, observation,
  *    createdAt, runId?, nodeId?, metadata?}]}`. Verified live: dozens of
  *    rows, NONE carrying a `tracking:strategy.v1` source tag today — this
@@ -36,17 +39,28 @@
  *    the task specifies — it is not safe to also assume every row belongs
  *    to this tenant.
  *
- * None of these four tools accept a `project_id` argument (checked against
- * their actual schemas, not assumed from `agent_converse`/
- * `visual_identity_propose`'s convention) — the per-site `CmsAgentClient`
- * (env-scoped bearer, "one client per site binding") is what scopes every
- * call to this tenant's own CMS-Agent workspace.
+ * A companion CMS-Agent change moves `feedback_list` and
+ * `learning_list_observations` INTO the tenant scope — both now accept an
+ * optional `projectId`, and a tenant-scoped bearer MUST pass it or the call
+ * is refused. (Earlier revisions of this comment said "none of these four
+ * tools accept a `project_id` argument" — that was true when written and is
+ * now wrong for these two; `playbook_get`/`optimizer_status` still take
+ * none, by design, per above.) Both calls below now send
+ * `projectId: getSiteIdentity().cmsAgentProjectId`, the same accessor
+ * `admin-agent-chat-run-background.ts`/`admin-visual-identity-propose.ts`
+ * already use to source this value — never a new one invented here.
  *
- * Every one of the four fetches is independent and never throws past this
+ * Every one of the four sections is independent and never throws past this
  * module — a failure on one degrades ONLY that section (mirrors R6.2's
  * `admin-analytics.ts` own doc: "a failure on any one never blocks the
- * primary series").
+ * primary series"). Two of the four (playbook items, optimizer proposals)
+ * never reach CMS-Agent at all and always resolve to the
+ * `workspace_scope`/`INSIGHTS_WORKSPACE_SCOPE_COPY` state
+ * (`lib/admin/analytics-insights-logic.ts`) — a standing, honest fact about
+ * those tools, not a `cms_agent_auth_failed` masquerading as a bad
+ * credential.
  */
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import { CmsAgentClient, cmsAgentMissingEnvVars, type CmsAgentResult } from './agent/cms-agent-client.js';
 import {
   type InsightsOverview,
@@ -61,8 +75,16 @@ import {
 
 const cmsAgentClient = new CmsAgentClient();
 
-/** How many distinct producer nodes get a `playbook_get` call — bounded fanout, not "one call per row". */
-const MAX_PLAYBOOK_NODES = 10;
+/**
+ * The one method every fetch below needs — narrower than `CmsAgentClient`
+ * itself, exactly like `brand-imagery-proxy.ts`'s `BrandImageryCmsAgentClient`
+ * — so a test can hand `fetchAnalyticsInsights` a plain stub object instead
+ * of standing up the real MCP handshake `CmsAgentClient` performs.
+ */
+export type AnalyticsInsightsCmsAgentClient = {
+  callTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<CmsAgentResult<T>>;
+};
+
 /** How many outcome rows the tab shows — "latest", not "all of history". */
 const OUTCOMES_DISPLAY_LIMIT = 20;
 
@@ -174,15 +196,16 @@ export function normalizeOutcomeRow(raw: unknown): TrackingOutcomeRow | null {
   };
 }
 
-interface OutcomesFetchResult {
-  payload: InsightsSectionPayload<TrackingOutcomeRow>;
-  /** Distinct producer nodeIds seen — feeds the playbook fetch below (playbook_get is node-scoped). */
-  producers: string[];
-}
-
-async function fetchOutcomesSection(client: CmsAgentClient): Promise<OutcomesFetchResult> {
-  const result = await client.callTool<unknown>('feedback_list', { kind: 'outcome', limit: 200 });
-  if (!result.ok) return { payload: { message: humanFailureMessage(result) }, producers: [] };
+async function fetchOutcomesSection(
+  client: AnalyticsInsightsCmsAgentClient,
+  projectId: string
+): Promise<InsightsSectionPayload<TrackingOutcomeRow>> {
+  // `feedback_list` entered the tenant scope alongside `learning_list_observations`
+  // (file header) — a tenant-scoped bearer must pass `projectId` or the call
+  // is refused, so this is not optional the way it might look for a tool
+  // that merely accepts the filter.
+  const result = await client.callTool<unknown>('feedback_list', { kind: 'outcome', limit: 200, projectId });
+  if (!result.ok) return { message: humanFailureMessage(result) };
 
   const rows = extractArray(result.data, ['records', 'items', 'feedback', 'rows'])
     .map(normalizeOutcomeRow)
@@ -190,8 +213,7 @@ async function fetchOutcomesSection(client: CmsAgentClient): Promise<OutcomesFet
     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
     .slice(0, OUTCOMES_DISPLAY_LIMIT);
 
-  const producers = [...new Set(rows.map((row) => row.producer))];
-  return { payload: { rows }, producers };
+  return { rows };
 }
 
 // ─── section 2: playbook items citing tracking ─────────────────────────────
@@ -232,35 +254,16 @@ export function normalizePlaybookItem(nodeId: string, raw: unknown): PlaybookTra
   return { id, nodeId, text, evidenceSources: sources, evidence: readEvidence(raw) };
 }
 
-async function fetchPlaybookSection(
-  client: CmsAgentClient,
-  producers: string[]
-): Promise<InsightsSectionPayload<PlaybookTrackingItem>> {
-  if (producers.length === 0) return { rows: [] };
-
-  const nodeIds = producers.slice(0, MAX_PLAYBOOK_NODES);
-  const results = await Promise.all(nodeIds.map((nodeId) => client.callTool<unknown>('playbook_get', { nodeId })));
-
-  const failures = results.filter((result): result is CmsAgentResult<unknown> & { ok: false } => !result.ok);
-  // A roll-up across nodes: one unreadable node must not blank the others.
-  // Only surface a hard error when EVERY node failed — otherwise render
-  // whatever succeeded (possibly zero items, a real empty state).
-  if (failures.length === results.length && results.length > 0) {
-    return { message: humanFailureMessage(failures[0]!) };
-  }
-
-  const rows: PlaybookTrackingItem[] = [];
-  results.forEach((result, index) => {
-    if (!result.ok) return;
-    const nodeId = nodeIds[index]!;
-    const playbook = isRecord(result.data) ? result.data.playbook : undefined;
-    if (!isRecord(playbook)) return; // `playbook: null` — no playbook on this node yet, not a failure.
-    for (const raw of extractArray(playbook, ['items', 'lessons', 'entries'])) {
-      const item = normalizePlaybookItem(nodeId, raw);
-      if (item) rows.push(item);
-    }
-  });
-  return { rows };
+/**
+ * `playbook_get` is node-scoped and permanently OUT of tenant scope (file
+ * header) — a tenant bearer would draw the same refusal every time, so this
+ * never calls CMS-Agent at all. `normalizePlaybookItem`/`itemEvidenceSources`
+ * above stay exported and tested (they're still the right shape for
+ * whatever surface — an operator/workspace view, someday — DOES get to call
+ * this tool), but nothing in this module invokes them anymore.
+ */
+async function fetchPlaybookSection(): Promise<InsightsSectionPayload<PlaybookTrackingItem>> {
+  return { workspaceScope: true };
 }
 
 // ─── section 3: open optimizer proposals ───────────────────────────────────
@@ -297,15 +300,14 @@ export function normalizeProposalRow(raw: unknown): OptimizerProposalRow | null 
   };
 }
 
-async function fetchProposalsSection(client: CmsAgentClient): Promise<InsightsSectionPayload<OptimizerProposalRow>> {
-  const result = await client.callTool<unknown>('optimizer_status', {});
-  if (!result.ok) return { message: humanFailureMessage(result) };
-
-  const statusBlock = isRecord(result.data) ? (result.data.status ?? result.data) : result.data;
-  const rows = extractArray(statusBlock, ['proposals', 'items', 'rows'])
-    .map(normalizeProposalRow)
-    .filter((row): row is OptimizerProposalRow => row !== null);
-  return { rows };
+/**
+ * `optimizer_status` is node-keyed and permanently OUT of tenant scope
+ * (file header), same as `playbook_get` above — never called with the
+ * tenant bearer. `normalizeProposalRow`/`isOpenProposalStatus` stay exported
+ * and tested for the same reason `normalizePlaybookItem` does.
+ */
+async function fetchProposalsSection(): Promise<InsightsSectionPayload<OptimizerProposalRow>> {
+  return { workspaceScope: true };
 }
 
 // ─── section 4: tracking:strategy.v1 observations ──────────────────────────
@@ -338,9 +340,12 @@ export function normalizeStrategyObservation(raw: unknown): StrategyObservationR
 }
 
 async function fetchStrategySection(
-  client: CmsAgentClient
+  client: AnalyticsInsightsCmsAgentClient,
+  projectId: string
 ): Promise<InsightsSectionPayload<StrategyObservationRow>> {
-  const result = await client.callTool<unknown>('learning_list_observations', {});
+  // Same tenant-scope entry as `feedback_list` above (file header) —
+  // `projectId` is required now, not merely accepted.
+  const result = await client.callTool<unknown>('learning_list_observations', { projectId });
   if (!result.ok) return { message: humanFailureMessage(result) };
 
   const rows = extractArray(result.data, ['observations', 'items', 'rows'])
@@ -351,7 +356,15 @@ async function fetchStrategySection(
 
 // ─── top level ──────────────────────────────────────────────────────────────
 
-export async function fetchAnalyticsInsights(): Promise<InsightsOverview> {
+/**
+ * `client` defaults to the module singleton; a caller (test) may pass its
+ * own stub satisfying `AnalyticsInsightsCmsAgentClient` — same DI shape
+ * `admin-visual-identity-propose.ts` uses for `proposeBrandImagery`'s
+ * `cmsAgent` dependency, sized down to what this module actually needs.
+ */
+export async function fetchAnalyticsInsights(
+  client: AnalyticsInsightsCmsAgentClient = cmsAgentClient
+): Promise<InsightsOverview> {
   const missing = cmsAgentMissingEnvVars();
   if (missing.length > 0) {
     return {
@@ -360,19 +373,22 @@ export async function fetchAnalyticsInsights(): Promise<InsightsOverview> {
     };
   }
 
-  const [outcomesResult, proposals, strategyObservations] = await Promise.all([
-    fetchOutcomesSection(cmsAgentClient),
-    fetchProposalsSection(cmsAgentClient),
-    fetchStrategySection(cmsAgentClient),
+  const projectId = getSiteIdentity().cmsAgentProjectId;
+
+  // All four are independent now: `playbook_get`/`optimizer_status` never
+  // reach CMS-Agent (they're permanently workspace-scope, see the file
+  // header), so nothing here waits on the outcomes fetch the way the old
+  // node-fanout playbook lookup used to.
+  const [outcomes, playbookItems, proposals, strategyObservations] = await Promise.all([
+    fetchOutcomesSection(client, projectId),
+    fetchPlaybookSection(),
+    fetchProposalsSection(),
+    fetchStrategySection(client, projectId),
   ]);
-  // Playbook lookups need the producers the outcomes fetch just found
-  // (playbook_get is node-scoped) — this is the one section that can't run
-  // fully in parallel with the others.
-  const playbookItems = await fetchPlaybookSection(cmsAgentClient, outcomesResult.producers);
 
   return {
     configured: true,
-    outcomes: outcomesResult.payload,
+    outcomes,
     playbookItems,
     proposals,
     strategyObservations,
