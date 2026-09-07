@@ -1,15 +1,9 @@
 {
   "__generated": {
-    "at": "2026-09-07T07:42:26.265Z",
+    "at": "2026-09-07T13:17:37.979Z",
     "attribution": "oauth",
     "from": "objects/content_item/by-id/req_plugin_collagen_supplements_20260907_01.json",
-    "producer": {
-      "model": "claude-opus-5",
-      "node_id": "plugin:claude",
-      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
-      "run_id": "plugin_claude_req_plugin_collagen_supplements_20260907_01"
-    },
-    "record_version": 8,
+    "record_version": 11,
     "surface": "plugin:claude"
   },
   "author": "Dr. Lurie",
@@ -776,6 +770,13 @@
           ],
           "data": {},
           "nodeType": "document"
+        },
+        "media": {
+          "alt": "Collagen Supplements: What the Trials Actually Measured",
+          "contentType": "application/pdf",
+          "sizeBytes": 956204,
+          "src": "/pdf/req_plugin_collagen_supplements_20260907_01/8b06ae383672eeea5e2dd878e1ab3a7c3332ca5435247446215e658d783ab49a.pdf",
+          "type": "document"
         },
         "title": "Sources"
       },
