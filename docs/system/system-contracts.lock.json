@@ -143,7 +143,8 @@
       "tags",
       "metadata",
       "deletedAtISO",
-      "deletedBy"
+      "deletedBy",
+      "materializationProof"
     ],
     "grantStores": {
       "artifacts": "artifacts",
@@ -282,6 +283,8 @@
     "grantLimitsRead": [
       "maxImageBytes",
       "max_image_bytes",
+      "overBudget",
+      "over_budget",
       "preferredImageFormat",
       "preferred_image_format"
     ],
@@ -304,6 +307,7 @@
     ],
     "eventKindLiterals": [
       "buy_click",
+      "completion",
       "cta_click",
       "exposure",
       "node_impression",

@@ -168,6 +168,22 @@ test('pageview fires on page-load; UTM + referrer + viewport ride ONLY the first
   assert.equal((pageviews[1]! as { context?: unknown }).context, undefined, 'later pageviews carry no context');
 });
 
+test('S-13: a page context carrying a version puts object.version on the event; without one, no version key at all', () => {
+  const { tracker, allEvents, fireTimers } = makeTracker();
+  tracker.pageLoad({
+    path: '/blog/req-x',
+    route: '/blog/req-x',
+    object: { object_type: 'content_item', object_id: 'req_x_20260719_01', version: 7 },
+  });
+  tracker.pageLoad({ path: '/blog/req-y', route: '/blog/req-y', object: { object_type: 'content_item', object_id: 'req_y_20260719_01' } });
+  fireTimers();
+  const pageviews = allEvents().filter((event) => event.event === 'pageview');
+  const withVersion = pageviews[0]! as { object?: Record<string, unknown> };
+  const withoutVersion = pageviews[1]! as { object?: Record<string, unknown> };
+  assert.equal(withVersion.object?.version, 7);
+  assert.equal(withoutVersion.object ? 'version' in withoutVersion.object : true, false);
+});
+
 test('browser startup waits for page markers and does not duplicate the initial pageview', async () => {
   const listeners = new Map<string, ((event?: Event) => void)[]>();
   const sent: SentBatch[] = [];
@@ -783,6 +799,294 @@ test('T21.9: end-to-end — node_impression and completion fire off the box-chil
   }
 });
 
+// ═══ page identity: article node markers vs. the page shell (S-08) ═══════════
+//
+// On an article route the DOM carries BOTH a page SHELL marker
+// (`data-cms-object-id="page_article"`) and article node markers
+// (`[data-cms-node-id]`). Before the fix, readPageContext() took page
+// identity from the shell, so page-level kinds (pageview, engagement,
+// scroll_depth, cta_click) named `page_article` — an object with zero
+// pageviews for every article on the site. The fix takes identity AND
+// version from the first node marker whenever one exists.
+
+test('S-08: end-to-end — an article route names page-level events with the content item, not the page shell', async () => {
+  const shellMarker: BoxElementLike = {
+    getAttribute: (name: string) => (name === 'data-cms-object-id' ? 'page_article' : null),
+  } as BoxElementLike;
+
+  const nodeMarker1Node: BoxNode = {
+    attrs: {
+      'data-cms-node-id': 'n_a1',
+      'data-cms-node-kind': 'content',
+      'data-cms-object-id': 'req_agent_x_1',
+      'data-cms-object-version': '7',
+    },
+    box: false,
+  };
+  nodeMarker1Node.children = [{ attrs: { 'data-test-role': 'box' }, box: true, parent: nodeMarker1Node }];
+  const nodeMarker2Node: BoxNode = { attrs: { 'data-cms-node-id': 'n_d4', 'data-cms-node-kind': 'content' }, box: false };
+  nodeMarker2Node.children = [{ attrs: { 'data-test-role': 'box' }, box: true, parent: nodeMarker2Node }];
+  const nodeMarker1 = boxElement(nodeMarker1Node);
+  const nodeMarker2 = boxElement(nodeMarker2Node);
+
+  const listeners = new Map<string, ((event?: Event) => void)[]>();
+  const sent: SentBatch[] = [];
+
+  const addDocumentListener = (type: string, callback: EventListenerOrEventListenerObject): void => {
+    const list = listeners.get(type) ?? [];
+    list.push(typeof callback === 'function' ? callback : (event?: Event) => callback.handleEvent(event!));
+    listeners.set(type, list);
+  };
+  const fire = (type: string): void => {
+    for (const callback of listeners.get(type) ?? []) callback(new Event(type));
+  };
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    navigator: globalThis.navigator,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+    crypto: globalThis.crypto,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+    addEventListener: globalThis.addEventListener,
+    IntersectionObserver: globalThis.IntersectionObserver,
+  };
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      readyState: 'complete',
+      body: {},
+      referrer: '',
+      hidden: false,
+      documentElement: { scrollHeight: 1000 },
+      addEventListener: addDocumentListener,
+      getElementById: (id: string) =>
+        id === 'trk-config'
+          ? { textContent: JSON.stringify({ defaults: DEFAULTS, batch: { max_events: 20, max_wait_ms: 10000 } }) }
+          : null,
+      querySelector: (selector: string) => (selector === '[data-cms-object-id^="page_"]' ? shellMarker : null),
+      querySelectorAll: (selector: string) => {
+        if (selector === '[data-cms-node-id]') return [nodeMarker1, nodeMarker2];
+        if (selector === '[data-cms-section-id],[data-cms-node-id]') return [nodeMarker1, nodeMarker2];
+        return [];
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { pathname: '/learn/barrier', search: '', hostname: 'drluriescience.netlify.app' },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      language: 'en-US',
+      sendBeacon: (sendPath: string, bodyText: string) => {
+        const parsed = JSON.parse(bodyText) as { schema: string; events: Record<string, unknown>[] };
+        sent.push({ path: sendPath, events: parsed.events });
+        return true;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 1200 });
+  Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: 800 });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => '00000000-0000-4000-8000-000000000998' },
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+  });
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: () => Promise.resolve(new Response(null, { status: 204 })),
+  });
+  Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: addDocumentListener });
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    value: class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  });
+
+  try {
+    const { startTracker } = await import(`../../packages/core/lib/tracking/loader/index.js?s08a=${Date.now()}`);
+    startTracker(); // readyState is 'complete' — bindPage runs synchronously
+    fire('pagehide'); // endPage() -> tracker.pageEnd() -> flush()
+
+    const events = sent.flatMap((batch) => batch.events);
+    const pageview = events.find((event) => event.event === 'pageview') as
+      | { object?: Record<string, unknown> }
+      | undefined;
+    assert.ok(pageview, 'pageview fired');
+
+    const expectedObject = { object_type: 'content_item', object_id: 'req_agent_x_1', version: 7 };
+    assert.deepEqual(
+      pageview!.object,
+      expectedObject,
+      'pageview names the article node and carries its version — not the page_article shell'
+    );
+
+    // Belt and braces: EVERY page-level event this page produced (pageview
+    // plus whichever of engagement/scroll_depth/cta_click fired) must carry
+    // the same identity — never the shell, and never bare (node-scoped
+    // events carry a node_id alongside and are excluded here).
+    const pageLevelEvents = events.filter((event) => {
+      const object = (event as { object?: Record<string, unknown> }).object;
+      return object !== undefined && !('node_id' in object) && !('section_id' in object);
+    });
+    assert.ok(pageLevelEvents.length >= 1, 'at least the pageview carried an object');
+    for (const event of pageLevelEvents) {
+      assert.deepEqual(
+        (event as { object?: unknown }).object,
+        expectedObject,
+        `${event.event as string} must name the article, not the page shell`
+      );
+    }
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous.window });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previous.document });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: previous.location });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previous.navigator });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: previous.innerWidth });
+    Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: previous.innerHeight });
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous.crypto });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous.localStorage });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: previous.fetch });
+    Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: previous.addEventListener });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: previous.IntersectionObserver,
+    });
+  }
+});
+
+test('S-08: without node markers, the page shell keeps naming page-level events (non-article route unaffected)', async () => {
+  const shellMarker: BoxElementLike = {
+    getAttribute: (name: string) => (name === 'data-cms-object-id' ? 'page_article' : null),
+  } as BoxElementLike;
+
+  const listeners = new Map<string, ((event?: Event) => void)[]>();
+  const sent: SentBatch[] = [];
+
+  const addDocumentListener = (type: string, callback: EventListenerOrEventListenerObject): void => {
+    const list = listeners.get(type) ?? [];
+    list.push(typeof callback === 'function' ? callback : (event?: Event) => callback.handleEvent(event!));
+    listeners.set(type, list);
+  };
+  const fire = (type: string): void => {
+    for (const callback of listeners.get(type) ?? []) callback(new Event(type));
+  };
+
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    navigator: globalThis.navigator,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+    crypto: globalThis.crypto,
+    localStorage: globalThis.localStorage,
+    fetch: globalThis.fetch,
+    addEventListener: globalThis.addEventListener,
+    IntersectionObserver: globalThis.IntersectionObserver,
+  };
+
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      readyState: 'complete',
+      body: {},
+      referrer: '',
+      hidden: false,
+      documentElement: { scrollHeight: 1000 },
+      addEventListener: addDocumentListener,
+      getElementById: (id: string) =>
+        id === 'trk-config'
+          ? { textContent: JSON.stringify({ defaults: DEFAULTS, batch: { max_events: 20, max_wait_ms: 10000 } }) }
+          : null,
+      querySelector: (selector: string) => (selector === '[data-cms-object-id^="page_"]' ? shellMarker : null),
+      querySelectorAll: () => [],
+    },
+  });
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: { pathname: '/about', search: '', hostname: 'drluriescience.netlify.app' },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      language: 'en-US',
+      sendBeacon: (sendPath: string, bodyText: string) => {
+        const parsed = JSON.parse(bodyText) as { schema: string; events: Record<string, unknown>[] };
+        sent.push({ path: sendPath, events: parsed.events });
+        return true;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: 1200 });
+  Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: 800 });
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { randomUUID: () => '00000000-0000-4000-8000-000000000999' },
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+  });
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: () => Promise.resolve(new Response(null, { status: 204 })),
+  });
+  Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: addDocumentListener });
+  Object.defineProperty(globalThis, 'IntersectionObserver', {
+    configurable: true,
+    value: class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  });
+
+  try {
+    const { startTracker } = await import(`../../packages/core/lib/tracking/loader/index.js?s08b=${Date.now()}`);
+    startTracker();
+    fire('pagehide');
+
+    const events = sent.flatMap((batch) => batch.events);
+    const pageview = events.find((event) => event.event === 'pageview') as
+      | { object?: Record<string, unknown> }
+      | undefined;
+    assert.ok(pageview, 'pageview fired');
+    assert.deepEqual(
+      pageview!.object,
+      { object_type: 'page', object_id: 'page_article' },
+      'no article node markers on this page — identity stays the shell, with no version key'
+    );
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previous.window });
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: previous.document });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: previous.location });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previous.navigator });
+    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: previous.innerWidth });
+    Object.defineProperty(globalThis, 'innerHeight', { configurable: true, value: previous.innerHeight });
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: previous.crypto });
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous.localStorage });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: previous.fetch });
+    Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: previous.addEventListener });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: previous.IntersectionObserver,
+    });
+  }
+});
+
 test('term pages emit one term_view on page-load and non-term pages emit none', () => {
   const { tracker, allEvents, fireTimers } = makeTracker();
   tracker.pageLoad({
@@ -1203,5 +1507,11 @@ test('SIZE BUDGET: the built loader chunk stays under the commerce-era soft targ
   // commerce-event correlation), and T21.5 (+126B: the experiment exposure —
   // one DOM read, one id-grammar guard, one per-page idempotence key) grew the
   // chunk deliberately — the 6KB ceiling is the hard line.
-  assert.ok(gzipped <= 5504, `BUDGET: loader is ${gzipped}B min+gzip (>5.375KB target)`);
+  // Quick-fix wave 2 raised the soft target 5504 → 5568 for two deliberate
+  // additions: S-13 (+28B: the served object version read off the marker, so a
+  // republish stops rewriting past attribution) and S-08 (+17B: page-level
+  // events on an article route name the content item, not the page shell, so
+  // per-object rates stop being computed over a denominator of zero). Both are
+  // one DOM read and one branch; neither is a feature that will keep growing.
+  assert.ok(gzipped <= 5568, `BUDGET: loader is ${gzipped}B min+gzip (>5.4KB target)`);
 });

@@ -27,6 +27,7 @@ export const artifactReferenceLimits = {
   label: 120,
   tag: 40,
   tags: 20,
+  materializationProof: 8192,
 } as const;
 
 export type ArtifactReference = {
@@ -53,6 +54,14 @@ export type ArtifactReference = {
   metadata?: Record<string, unknown>;
   deletedAtISO?: string;
   deletedBy?: string;
+  /**
+   * S-20: pdf-tool's materialization attestation for this artifact, opaque here —
+   * platform neither parses nor trusts it, only stores it so a later pass can
+   * re-verify against it. Purely additive: absent on every reference written
+   * before this field existed, and nothing downstream changes meaning because
+   * it is present.
+   */
+  materializationProof?: string;
 };
 
 export type ReadableArtifactBlobStore = {
@@ -333,7 +342,10 @@ type CreateArtifactReferenceOptions = {
   createdAtISO?: string;
 };
 
-const allowedArtifactReferenceKeys = new Set([
+// S-16: exported so a contract fixture test can assert this stays a superset
+// of whatever pdf-tool's own ArtifactReference actually carries — see
+// tests/fixtures/pdf-tool-artifact-reference.json.
+export const allowedArtifactReferenceKeys = new Set([
   'blobKey',
   'sizeBytes',
   'sha256',
@@ -348,6 +360,8 @@ const allowedArtifactReferenceKeys = new Set([
   'metadata',
   'deletedAtISO',
   'deletedBy',
+  // S-20: opaque materialization attestation — stored, never interpreted here.
+  'materializationProof',
 ]);
 
 export const safePathSegment = (value: string): string => {
@@ -523,6 +537,7 @@ export const getArtifactReferenceIssue = (value: unknown): string | undefined =>
     metadata,
     deletedAtISO,
     deletedBy,
+    materializationProof,
   } = value;
   if (typeof blobKey !== 'string' || !blobKey.trim()) return 'blobKey must be a non-empty string';
   if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) return 'sha256 must be a 64-character hex string';
@@ -575,6 +590,14 @@ export const getArtifactReferenceIssue = (value: unknown): string | undefined =>
   }
   if (deletedBy !== undefined) {
     const issue = getSafeArtifactStringIssue(deletedBy, 'deletedBy', artifactReferenceLimits.label);
+    if (issue) return issue;
+  }
+  if (materializationProof !== undefined) {
+    const issue = getSafeArtifactStringIssue(
+      materializationProof,
+      'materializationProof',
+      artifactReferenceLimits.materializationProof
+    );
     if (issue) return issue;
   }
 

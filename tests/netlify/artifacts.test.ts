@@ -1,7 +1,10 @@
 import '../../sites/drlurie/config/policy-bindings.js'; // W11: register site providers (tests exercise the drlurie-bound core)
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import {
+  allowedArtifactReferenceKeys,
   ArtifactKind,
   artifactKindValues,
   createArtifactBlobKey,
@@ -11,7 +14,17 @@ import {
   type ArtifactReference,
   type ReadableArtifactBlobStore,
 } from '../../packages/core/server/lib/artifacts.js';
+import {
+  readArtifactReference,
+  writeArtifactReferenceIndexes,
+  type ArtifactIndexStore,
+} from '../../packages/core/server/lib/artifact-index.js';
 import { sha256Hex } from '../../packages/core/server/lib/crypto.js';
+
+const repoRoot = (() => {
+  const cwd = process.cwd();
+  return basename(cwd) === 'ci-test' && basename(dirname(cwd)) === '.tmp' ? join(cwd, '..', '..') : cwd;
+})();
 
 test('sha256Hex returns lowercase hexadecimal digests', () => {
   assert.equal(sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
@@ -138,6 +151,121 @@ test('ArtifactReference validation rejects invented media handles and incomplete
     /deletedAtISO must be a valid ISO date string/
   );
   assert.match(getArtifactReferenceIssue({ ...reference, deletedBy: '<admin>' }) ?? '', /deletedBy must not contain/);
+});
+
+test('S-20: materializationProof is a purely additive, opaque optional field', () => {
+  const bytes = Buffer.from('proof-bearing artifact');
+  const reference = createArtifactReference({
+    input: {
+      requestId: 'req_test_proof_20260605_01',
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      filename: 'proof.pdf',
+    },
+    bytes,
+    createdAtISO: '2026-06-05T00:00:00.000Z',
+  });
+
+  // Present and well-formed: validates, and every OTHER field's meaning is untouched.
+  const withProof = { ...reference, materializationProof: 'sig.eyJhbGciOiJIUzI1NiJ9.token' };
+  assert.equal(getArtifactReferenceIssue(withProof), undefined);
+  assert.equal(isArtifactReference(withProof), true);
+
+  // A reference with no proof at all still validates exactly as before this field existed.
+  assert.equal(getArtifactReferenceIssue(reference), undefined);
+  assert.equal('materializationProof' in reference, false);
+
+  // Malformed the same way any other bounded string field would be rejected.
+  assert.match(
+    getArtifactReferenceIssue({ ...reference, materializationProof: 42 }) ?? '',
+    /materializationProof must be a string/
+  );
+  assert.match(
+    getArtifactReferenceIssue({ ...reference, materializationProof: 'x'.repeat(8193) }) ?? '',
+    /materializationProof must be at most 8192 characters/
+  );
+});
+
+test('S-20: an ingested reference carrying a proof persists it; one without it is unchanged', async () => {
+  const values = new Map<string, string>();
+  const indexStore: ArtifactIndexStore = {
+    async get(key) {
+      return values.get(key) ?? null;
+    },
+    async setJSON(key, value) {
+      values.set(key, JSON.stringify(value));
+      return { modified: true };
+    },
+    async list() {
+      return { blobs: [], directories: [] };
+    },
+  };
+
+  const bytes = Buffer.from('ingest-time proof artifact');
+  const reference = createArtifactReference({
+    input: {
+      requestId: 'req_test_ingest_proof_20260605_01',
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      filename: 'ingested.pdf',
+    },
+    bytes,
+    createdAtISO: '2026-06-05T00:00:00.000Z',
+  });
+  const withProof: ArtifactReference = { ...reference, materializationProof: 'attn.proof.value' };
+
+  await writeArtifactReferenceIndexes(indexStore, 'req_test_ingest_proof_20260605_01', withProof);
+  const readBack = await readArtifactReference(indexStore, 'req_test_ingest_proof_20260605_01', reference.sha256);
+  assert.equal(readBack?.materializationProof, 'attn.proof.value');
+  // Every existing field kept its value across the round trip.
+  assert.equal(readBack?.blobKey, reference.blobKey);
+  assert.equal(readBack?.sha256, reference.sha256);
+  assert.equal(readBack?.contentType, reference.contentType);
+
+  // A second ingest with no proof at all round-trips exactly as it always has.
+  const requestIdNoProof = 'req_test_ingest_noproof_20260605_01';
+  const referenceNoProof = createArtifactReference({
+    input: {
+      requestId: requestIdNoProof,
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      filename: 'unproven.pdf',
+    },
+    bytes: Buffer.from('no proof here'),
+    createdAtISO: '2026-06-05T00:00:00.000Z',
+  });
+  await writeArtifactReferenceIndexes(indexStore, requestIdNoProof, referenceNoProof);
+  const readBackNoProof = await readArtifactReference(indexStore, requestIdNoProof, referenceNoProof.sha256);
+  assert.equal(readBackNoProof ? 'materializationProof' in readBackNoProof : true, false);
+});
+
+// S-16: pdf-tool and platform each implement the ArtifactReference shape
+// independently, and platform's allowlist rejects any key it doesn't know —
+// adding `filename` on the pdf-tool side already broke every reference for
+// four days (see the ArtifactReference.filename doc comment in artifacts.ts).
+// This fixture is a REAL reference produced by pdf-tool's own
+// saveArtifactBytes (netlify/lib/artifact-layout.ts) at pdf-tool commit
+// 0a62d14d6c2dded2b45cf318fad5cbe89d4794c1, captured with a genuine filename
+// collision so `filename` and `originalFilename` differ exactly as they do
+// in production. If pdf-tool adds a field platform's allowlist does not
+// know about, this test fails the moment this fixture is refreshed from a
+// current pdf-tool checkout — that refresh is the obvious update point a
+// future pdf-tool field addition should trigger.
+test('S-16: allowedArtifactReferenceKeys is a superset of a real pdf-tool ArtifactReference', () => {
+  const fixturePath = join(repoRoot, 'tests/fixtures/pdf-tool-artifact-reference.json');
+  const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as Record<string, unknown>;
+
+  // Sanity: the fixture itself must still look like a real, populated reference —
+  // a future accidental trim to `{}` would make the superset check vacuous.
+  assert.ok(Object.keys(fixture).length >= 8, 'fixture looks truncated');
+  assert.ok('filename' in fixture, 'fixture must include filename — the field that broke this contract before');
+  assert.notEqual(fixture.filename, fixture.originalFilename, 'fixture should show a real collision-resolved name');
+
+  const unknownKeys = Object.keys(fixture).filter((key) => !allowedArtifactReferenceKeys.has(key));
+  assert.deepEqual(unknownKeys, [], `platform's allowlist is missing pdf-tool field(s): ${unknownKeys.join(', ')}`);
+
+  // The fixture must also pass platform's full validator, not just the key check.
+  assert.equal(getArtifactReferenceIssue(fixture), undefined);
 });
 
 type FakeArtifactStoreValue = Buffer | string;

@@ -80,7 +80,7 @@ const OBJECT_TYPE_SET = new Set<string>(objectTypes);
  */
 export const sanitizeObjectRef = (ref: ClientTrackingEvent['object']): TrackingEvent['object'] => {
   if (!ref) return undefined;
-  const out: Record<string, string | null> = {};
+  const out: Record<string, string | number | null> = {};
   const objectType =
     typeof ref.object_type === 'string' && OBJECT_TYPE_SET.has(ref.object_type) ? ref.object_type : null;
   if (objectType) out.object_type = objectType;
@@ -94,6 +94,8 @@ export const sanitizeObjectRef = (ref: ClientTrackingEvent['object']): TrackingE
   if (typeof ref.node_id === 'string' && /^n_[a-z0-9]+$/i.test(ref.node_id)) out.node_id = ref.node_id;
   if (typeof ref.node_kind === 'string' && /^[a-z][a-z0-9_]{0,31}$/.test(ref.node_kind)) out.node_kind = ref.node_kind;
   if (typeof ref.term_id === 'string' && /^t_[a-z0-9]+$/.test(ref.term_id)) out.term_id = ref.term_id;
+  // S-13: the served revision — passed through unchanged, no re-derivation.
+  if (typeof ref.version === 'number' && Number.isInteger(ref.version)) out.version = ref.version;
   return Object.keys(out).length > 0 ? out : undefined;
 };
 

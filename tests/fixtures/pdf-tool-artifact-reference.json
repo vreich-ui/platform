@@ -1,0 +1,16 @@
+{
+  "blobKey": "image/req_fixture_sample_20260907_01/91cda3d6bba55d4e527f71b7ae533de7912be2ef92356c8e40abc9a612bab6f3.png",
+  "sizeBytes": 103,
+  "sha256": "91cda3d6bba55d4e527f71b7ae533de7912be2ef92356c8e40abc9a612bab6f3",
+  "contentType": "image/png",
+  "createdAtISO": "2026-09-07T07:51:49.037Z",
+  "artifactKind": "image",
+  "originalFilename": "skin-barrier-hero-photo.png",
+  "filename": "skin-barrier-hero-photo-2.png",
+  "label": "Fixture sample for B4",
+  "tags": ["hero", "fixture"],
+  "metadata": {
+    "imageRole": "hero",
+    "usageContext": "article"
+  }
+}

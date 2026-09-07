@@ -66,17 +66,38 @@ const TYPE_BY_PREFIX: Record<string, string> = {
 };
 
 const readPageContext = (): PageContext => {
-  const first =
+  let first =
     document.querySelector('[data-cms-object-id^="page_"]') ?? document.querySelector('[data-cms-object-id]');
-  const objectId = first?.getAttribute('data-cms-object-id') ?? null;
-  const prefix = objectId ? Object.keys(TYPE_BY_PREFIX).find((candidate) => objectId.startsWith(candidate)) : undefined;
+  let objectId = first?.getAttribute('data-cms-object-id') ?? null;
   const termId = document.querySelector('[data-cms-term-id]')?.getAttribute('data-cms-term-id') ?? undefined;
   const nodes = document.querySelectorAll('[data-cms-node-id]');
   const articleId = nodes[0]?.getAttribute('data-cms-object-id') ?? undefined;
+  // S-08: on an article route the page-level kinds (pageview, engagement,
+  // scroll_depth, cta_click, section kinds) used to name the page SHELL
+  // (page_article) while only the node-level kinds named the article. The
+  // sink's per-object denominators are pageviews and exposures, so every
+  // article's rates were computed over a denominator of zero while the shell
+  // collected the page traffic for every article on the site. When the DOM
+  // carries article node markers the page IS the content item, so one object
+  // owns all of it — identity AND version are taken from the article marker
+  // rather than the shell. Everywhere else (a real page, a term route, a
+  // product) nothing changes.
+  if (articleId) {
+    first = nodes[0];
+    objectId = articleId;
+  }
+  const prefix = articleId ? 'req_' : objectId ? Object.keys(TYPE_BY_PREFIX).find((candidate) => objectId!.startsWith(candidate)) : undefined;
   return {
     path: location.pathname,
     route: null,
-    object: objectId && prefix ? { object_type: TYPE_BY_PREFIX[prefix], object_id: objectId } : undefined,
+    object: objectId && prefix
+      ? {
+          object_type: TYPE_BY_PREFIX[prefix],
+          object_id: objectId,
+          // S-13: optional — absent on a page rendered before this shipped.
+          version: Number(first?.getAttribute('data-cms-object-version')) || undefined,
+        }
+      : undefined,
     term: termId ? { term_id: termId } : undefined,
     article:
       nodes.length > 0 && articleId
