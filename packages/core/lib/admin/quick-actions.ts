@@ -87,6 +87,7 @@ import type { ObjectType } from '../../schema/object-record-v1.js';
 import type { LibraryRow } from './library-logic.js';
 import type { VerbCaller, VerbResult } from './bulk-object-ops.js';
 import type { UserRole } from './users-client.js';
+import { buildInventoryChatPrompt, type InventoryChatSelectionItem } from './inventory-chat.js';
 
 // ─── shape ──────────────────────────────────────────────────────────────────
 
@@ -348,6 +349,80 @@ export function buildQuickActionPrompt(definition: QuickActionDefinition, row: L
   }
   /* c8 ignore next 2 — unreachable while `replace_image` is the only hand-off. */
   return `I want to ${definition.label.toLowerCase()} on ${subject}. Ask me what you need as a \`controls\` block rather than in prose.`;
+}
+
+// ─── Inventory starter chips (T5) ──────────────────────────────────────────
+
+/**
+ * Admin Inventory's three collections, spelled the way
+ * `inventory-server-logic.ts`'s `InventoryCollection` does (canonical,
+ * plural). Kept as a local literal union rather than an import so this
+ * module's dependency graph does not grow a link to `inventory-logic.ts` (or
+ * vice versa) for one three-value string type.
+ */
+export type InventoryQuickActionCollection = 'objects' | 'artifacts' | 'stores';
+
+/**
+ * ONE starter intent per collection, and where that number comes from —
+ * because BRIEF.md says two different things and this is the reconciliation.
+ * Its "Design (ruled)" section says "plus 3 starter chips per collection";
+ * its T5 task row, which is the operative instruction, names exactly one
+ * intent for each ("Objects: 'Validate + summarize issues'; Artifacts: 'Audit
+ * alt text / find unused'; Stores: 'Explain these runs / find stuck jobs'").
+ * Three per collection would mean inventing six intents nobody asked for, so
+ * this ships the three that were specified — one per collection — and says so
+ * rather than letting the shortfall read as an oversight.
+ */
+const INVENTORY_STARTER_INTENT: Record<InventoryQuickActionCollection, string> = {
+  objects: 'Validate these and summarize issues',
+  artifacts: 'Audit alt text and find unused',
+  stores: 'Explain these runs, flag stuck jobs',
+};
+
+/**
+ * How `InventoryQuickActionChips` (`admin/QuickActions.tsx`) executes a
+ * resolved chip. Deliberately just the one hand-off — an inventory starter
+ * is never `immediate` or `popover`, so there is nothing else to inject.
+ */
+export interface InventoryQuickActionHandlers {
+  handOff: (chip: QuickActionChip) => void;
+}
+
+/**
+ * One starter chip for `collection`, its `prompt` already the FULL seeded
+ * composer text — the collection's canned intent plus `items` rendered
+ * through `inventory-chat.ts`'s fenced-block builder — exactly like
+ * `buildQuickActionPrompt` above precomputes a row-based chip's `prompt`.
+ * `items` is the current selection (one row for a row-menu chip, the whole
+ * bulk selection for the toolbar); an empty selection still resolves a chip
+ * (the fenced block is just empty), since a Drawer showing a hit not yet
+ * counted as "selected" should still offer its collection's starter.
+ *
+ * No `roles` parameter: unlike `DEFAULT_QUICK_ACTION_REGISTRY`, this never
+ * renders anywhere but Inventory, and the WHOLE Inventory surface is already
+ * owner+admin only (`inventory-logic.ts`'s `hasAdminAccess`, BRIEF.md D2) —
+ * a second rights gate here would just repeat that check on a chip nobody
+ * without access could ever see the surface around.
+ */
+export function inventoryQuickActionChips(
+  collection: InventoryQuickActionCollection,
+  items: readonly InventoryChatSelectionItem[],
+  handlers: InventoryQuickActionHandlers
+): QuickActionChip[] {
+  const intent = INVENTORY_STARTER_INTENT[collection];
+  const { prompt } = buildInventoryChatPrompt(intent, items);
+  const chip: QuickActionChip = {
+    id: `inventory-${collection}`,
+    label: intent,
+    title: `Send "${intent}" to chat with this selection.`,
+    verb: 'agent_chat',
+    execution: 'chat-handoff',
+    rights: ['owner', 'admin'],
+    params: [],
+    prompt,
+    onSelect: () => handlers.handOff(chip),
+  };
+  return [chip];
 }
 
 // ─── resolution ─────────────────────────────────────────────────────────────

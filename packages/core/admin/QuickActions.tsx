@@ -35,11 +35,14 @@ import { Popover, useToast } from './overlays';
 import { cn } from './utils';
 import {
   DEFAULT_QUICK_ACTION_REGISTRY,
+  inventoryQuickActionChips,
   runQuickAction,
+  type InventoryQuickActionCollection,
   type QuickActionChip,
   type QuickActionValues,
 } from '@core/lib/admin/quick-actions';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
+import type { InventoryChatSelectionItem } from '@core/lib/admin/inventory-chat';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -389,6 +392,64 @@ export function QuickActionChips({
           onConfirm={(values) => void run(chip, values)}
           onCancel={() => setOpenId(undefined)}
         />
+      ))}
+    </span>
+  );
+}
+
+// ─── Inventory starter chips (T5) ───────────────────────────────────────────
+
+/** No-op stand-ins for the popover machinery `QuickActionChipButton` still
+ *  accepts — an inventory starter is always `chat-handoff`, so `open` never
+ *  turns true and neither callback is ever invoked. Kept as one shared
+ *  reference rather than a fresh closure per render. */
+const noop = () => {};
+
+export interface InventoryQuickActionChipsProps {
+  /** Which collection's starter to offer — `admin/InventoryPage.tsx` picks
+   *  this from the inspected row (Drawer) or the selection's shared
+   *  collection (bulk toolbar; omitted for a mixed-collection selection). */
+  collection: InventoryQuickActionCollection;
+  /** The rows the starter's prompt is built over — the inspected hit alone,
+   *  or the whole bulk selection. May be empty (a hit not yet selected still
+   *  gets to offer its collection's starter; its fenced block is just empty
+   *  until something is picked). */
+  items: readonly InventoryChatSelectionItem[];
+  /** Seeds the Inventory page's OWN chat composer — never sends anything by
+   *  itself, exactly like the row-based `QuickActionChips`' `onSeedComposer`. */
+  onSeedComposer: (prompt: string) => void;
+  variant?: 'pill' | 'button';
+  className?: string;
+}
+
+/**
+ * The three collection starters — one per collection, for the reason
+ * `inventoryQuickActionChips` documents (BRIEF.md's Design section and its
+ * T5 task row disagree on the count; the task row wins) — rendered through
+ * the same chip button the
+ * row-based registry uses — a starter and a governed-object chip should look
+ * identical on screen, since both are "click to hand this off to chat".
+ * `inventoryQuickActionChips` always resolves to exactly one chip for a
+ * given `collection`, but this stays a `.map` rather than hard-coding that,
+ * matching `QuickActionChips` above.
+ */
+export function InventoryQuickActionChips({
+  collection,
+  items,
+  onSeedComposer,
+  variant = 'button',
+  className,
+}: InventoryQuickActionChipsProps) {
+  const chips = inventoryQuickActionChips(collection, items, {
+    handOff: (chip) => onSeedComposer(chip.prompt ?? ''),
+  });
+
+  if (!chips.length) return null;
+
+  return (
+    <span className={cn('flex flex-wrap items-center gap-1', className)}>
+      {chips.map((chip) => (
+        <QuickActionChipButton key={chip.id} chip={chip} variant={variant} open={false} busy={false} onConfirm={noop} onCancel={noop} />
       ))}
     </span>
   );

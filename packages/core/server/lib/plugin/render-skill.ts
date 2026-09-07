@@ -507,5 +507,41 @@ gives the sequence they belong to and when building a template is warranted at a
 | tool | class | what it is for |
 |---|---|---|
 ${toolLines(tools)}
+
+## 8. Inventory & bulk operations
+
+This is not the only surface that inspects and cleans up objects — the Owner/Admin \`/admin/inventory\`
+page walks the same objects, artifacts and stores through these same verbs, and enforces exactly the
+rules below. There is no separate batch verb: bulk work here is the same single-object verbs, chained
+and called once per item.
+
+- **Bulk object work** — one of two chains, never a batch call:
+  - \`object_inventory\` → \`object_validate\` — find the candidates, then check each one before
+    touching anything.
+  - \`object_inventory\` → \`object_checkout\` → \`object_retire\` → \`object_checkin\` — find, lock,
+    retire, release the lock. Never retire without checking out first, and never leave a checkout
+    hanging on an item you decided not to touch.
+- **Artifact cleanup** — \`search_artifacts\` → \`get_artifact_metadata\` — find candidate artifacts,
+  then read each one's own metadata before acting on it. Metadata is where an active reference shows
+  up, and it is the only place that tells you.
+
+Rules, every pass:
+
+- **Artifact delete is SOFT.** Deleting an artifact stamps it deleted in the index and KEEPS its
+  bytes — it is recoverable, and the artifact still appears in listings with a deleted status. Never
+  tell anyone an artifact was erased, purged, or removed from storage; say it was marked deleted.
+  There is no hard-delete verb for artifacts.
+- **A referenced artifact is refused, by name.** If an artifact's metadata (or the delete call
+  itself) shows it is still referenced by an active object, refuse that item with a stated reason and
+  name the referencing object id in the refusal. Never delete an artifact out from under a live
+  object.
+- **Never bulk publish. Never bulk release.** Both stay single-object, human-approved actions on
+  their own surfaces (§4), whatever chain of verbs led you to the selection. If asked to publish or
+  release a selection, say so and handle each one individually instead.
+- **Cap every pass at 50 items.** A larger selection is split into passes of 50 or fewer, each with
+  its own report — never widen the cap to cover a selection in one pass.
+- **Report per item, never one aggregate success.** Every pass answers with an ok/failed line per
+  item — id and, on failure, the reason — not a single "done" for the whole selection. "n ok, n
+  failed" is a summary of that list, never a replacement for it.
 `;
 };

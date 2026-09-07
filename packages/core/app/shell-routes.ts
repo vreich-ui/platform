@@ -80,7 +80,17 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   { pattern: '/admin/media', entry: 'admin/media.astro' },
   { pattern: '/admin/release', entry: 'admin/release.astro' },
   { pattern: '/admin/kit', entry: 'admin/kit.astro' },
+  // T6: retired in favor of /admin/inventory (owner+admin nav entry below).
+  // netlify.toml carries the real 301 (force=true, same precedent as
+  // /admin/content|templates|studio|media); this route file stays registered
+  // — a plain redirect page, `MaintenancePage.tsx` deleted — only so
+  // shell-routes/admin-parity's route inventory stays satisfied (see
+  // `admin-nav-route-parity.test.ts`'s ADMIN_ROUTES_INTENTIONALLY_UNREACHED_FROM_NAV).
   { pattern: '/admin/maintenance', entry: 'admin/maintenance.astro' },
+  // T4 → T6: the inventory surface (objects + artifacts + system stores in
+  // one search). The sidebar entry (owner+admin tier, `adminOnly`) landed
+  // with T6 — no longer needs the unreached-from-nav exception.
+  { pattern: '/admin/inventory', entry: 'admin/inventory.astro' },
   // W5.1: the publishing-plugin bundle page (render / promote / per-platform
   // install cards). Core-owned — every tenant gets the same one, because the
   // bundle it renders is tenant-generic.

@@ -29,7 +29,8 @@ export type NavIconName =
   | 'user'
   | 'wrench'
   | 'sparkles'
-  | 'mail';
+  | 'mail'
+  | 'archive';
 
 export interface NavItemData {
   label: string;
@@ -39,6 +40,13 @@ export interface NavItemData {
   soon?: boolean;
   /** See `admin-navigation.ts`'s `isNavVisible` doc comment — per-item, not just per-group. */
   ownerOnly?: boolean;
+  /**
+   * T6: the owner+admin tier — visible to owner AND admin, hidden from
+   * publisher/editor/viewer. Independent of `ownerOnly` (which stays
+   * owner-only exactly as before); see `admin-navigation.ts`'s widened
+   * `isNavVisible(item, owner, admin)`.
+   */
+  adminOnly?: boolean;
 }
 
 export interface NavGroupData {
@@ -82,7 +90,11 @@ export const NAV_ITEMS: NavGroupData[] = [
       // changes whether the link is shown.
       { label: 'Admins', href: '/admin/settings/admins', icon: 'user' },
       { label: 'Profile', href: '/admin/profile', icon: 'user', ownerOnly: true },
-      { label: 'Maintenance', href: '/admin/maintenance', icon: 'wrench', ownerOnly: true },
+      // T6: Maintenance (owner-only blob browser) is retired — /admin/maintenance
+      // 301s to /admin/inventory (netlify.toml). Inventory is owner+admin: it
+      // searches every object/artifact/store and does bulk verbs; only the raw
+      // store delete/wipe actions underneath stay owner-only (server-gated).
+      { label: 'Inventory', href: '/admin/inventory', icon: 'archive', adminOnly: true },
       { label: 'Component kit', href: '/admin/kit', icon: 'library', ownerOnly: true },
       { label: 'Agents', href: '/admin/agents', icon: 'sparkles', ownerOnly: true },
       // W5.1: the per-tenant publishing-plugin bundle (skill + connector +

@@ -1,0 +1,21 @@
+---
+// Admin Inventory (T4) — the owner/admin surface that searches every object,
+// artifact and system store for this site, previews a hit, and acts on it
+// singly or in bulk. The server (`admin-inventory`) gates owner|admin via
+// `resolveAdminAccessFromEvent`; the island mirrors that gate with `fetchMe`
+// so a non-owner/admin sees an EmptyState instead of a page whose every
+// request 403s.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import InventoryPage from '~/admin/InventoryPage';
+
+// D2: resolve identity once, server-side, where process.env is real, and
+// pass it down explicitly — the island must not call getSiteIdentity()
+// itself (the browser has no process.env, so env overrides never reached it).
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Inventory">
+  <InventoryPage client:load identity={identity} />
+</AdminLayout>

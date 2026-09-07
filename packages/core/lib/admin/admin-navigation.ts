@@ -26,36 +26,49 @@ export const settingsNavigationLabel = (brandName: string | undefined): string =
  * group can mix owner-only and admin-visible items (a group itself may still
  * be marked `ownerOnly` to hide it in full, for a group with nothing
  * non-owners should ever see).
+ *
+ * T6 adds a second, independent tier: `adminOnly` is visible to owner AND
+ * admin, hidden from publisher/editor/viewer — there was no owner+admin tier
+ * before Inventory needed one. `ownerOnly` keeps behaving exactly as it did:
+ * an `ownerOnly` node is never shown to a non-owner regardless of `admin`. A
+ * node would not normally set both flags, but if it did, `ownerOnly` wins.
  */
 export interface NavVisibilityNode {
   ownerOnly?: boolean;
+  adminOnly?: boolean;
 }
 
 export interface NavVisibilityGroup extends NavVisibilityNode {
   items: readonly NavVisibilityNode[];
 }
 
-/** One item/group is visible to an owner always, and to a non-owner unless it is marked `ownerOnly`. */
-export const isNavVisible = (node: NavVisibilityNode, owner: boolean): boolean => owner || !node.ownerOnly;
+/**
+ * One item/group is visible to an owner always; to a non-owner it is visible
+ * unless `ownerOnly`, and — when it is also `adminOnly` — only if the viewer
+ * is an admin.
+ */
+export const isNavVisible = (node: NavVisibilityNode, owner: boolean, admin: boolean): boolean =>
+  owner || (!node.ownerOnly && (!node.adminOnly || admin));
 
 /**
  * Filters a NAV tree for one viewer: drops `ownerOnly` groups outright for a
- * non-owner, then drops `ownerOnly` items within a surviving group, then
- * drops any group left with no items (a group that WAS only owner-only items
- * plus a non-owner viewer). Pure and generic over the item shape (a single
- * type param, with the item type pulled out via `G['items'][number]` rather
- * than a second free type param — TS cannot infer a param that appears only
- * inside another param's constraint) so the caller's real `NavItem`
- * (label/href/icon/…) round-trips unchanged; the sidebar list and the Cmd-K
- * command list (`AdminShell.tsx`) both call this rather than each
- * re-implementing the same two-level filter.
+ * non-owner, drops `adminOnly` groups/items for a non-admin non-owner, then
+ * drops any group left with no items (a group that WAS only owner-only or
+ * admin-only items plus a viewer with neither tier). Pure and generic over
+ * the item shape (a single type param, with the item type pulled out via
+ * `G['items'][number]` rather than a second free type param — TS cannot
+ * infer a param that appears only inside another param's constraint) so the
+ * caller's real `NavItem` (label/href/icon/…) round-trips unchanged; the
+ * sidebar list and the Cmd-K command list (`AdminShell.tsx`) both call this
+ * rather than each re-implementing the same two-level filter.
  */
 export function visibleNavGroups<G extends NavVisibilityGroup>(
   groups: readonly G[],
-  owner: boolean
+  owner: boolean,
+  admin: boolean
 ): Array<Omit<G, 'items'> & { items: Array<G['items'][number]> }> {
   return groups
-    .filter((group) => isNavVisible(group, owner))
-    .map((group) => ({ ...group, items: group.items.filter((item) => isNavVisible(item, owner)) }))
+    .filter((group) => isNavVisible(group, owner, admin))
+    .map((group) => ({ ...group, items: group.items.filter((item) => isNavVisible(item, owner, admin)) }))
     .filter((group) => group.items.length > 0);
 }

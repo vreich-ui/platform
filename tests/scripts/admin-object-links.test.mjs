@@ -213,6 +213,25 @@ function parseOpeningTag(source, tagStart) {
 
 // ─── this test's own addition: ancestor-aware, id-specific ─────────────────
 
+/**
+ * Consumes one string or template literal starting at the quote character at
+ * `source[i]`, honouring backslash escapes, and returns the index just past
+ * its closing quote (or the end of the file for an unterminated one).
+ */
+function skipStringLiteral(source, i) {
+  const quote = source[i];
+  i++;
+  while (i < source.length) {
+    if (source[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (source[i] === quote) return i + 1;
+    i++;
+  }
+  return i;
+}
+
 const ID_PATTERN = /\bobject_id\b|\bobjectId\b/;
 const IDENTIFIER_CHAR = /[A-Za-z0-9_$]/;
 
@@ -244,6 +263,22 @@ function findBareObjectIds(source) {
       i += 2;
       while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
       i = Math.min(i + 2, source.length);
+      continue;
+    }
+
+    // A STRING's own text is never markup either — and at stack depth 0 a
+    // quote can only be one, because JSX text (where an apostrophe is just an
+    // apostrophe) exists solely inside an element, and a string inside an
+    // opening tag or a `{...}` was already consumed by `parseOpeningTag` /
+    // `skipBalancedBraces`. This is the same hazard the comment skips above
+    // guard against, and it is not hypothetical: a plain error message like
+    // `'expected \u003cobject_type\u003e/\u003cobject_id\u003e'` pushed TWO
+    // phantom ancestors that never close, after which every `{ object_id: … }`
+    // object literal in the rest of the file read as an unlinked JSX child and
+    // was flagged. Skipping is safe in this direction: nothing at depth 0 is
+    // rendered, so a mis-skip here can never hide a real offender.
+    if (stack.length === 0 && (c === '"' || c === "'" || c === '`')) {
+      i = skipStringLiteral(source, i);
       continue;
     }
 
