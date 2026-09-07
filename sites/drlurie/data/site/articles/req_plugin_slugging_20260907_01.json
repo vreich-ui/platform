@@ -1,0 +1,1172 @@
+{
+  "__generated": {
+    "at": "2026-09-07T07:51:15.868Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_plugin_slugging_20260907_01.json",
+    "producer": {
+      "model": "claude-opus-5",
+      "node_id": "plugin:claude",
+      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
+      "run_id": "plugin_claude_req_plugin_slugging_20260907_01"
+    },
+    "record_version": 10,
+    "surface": "plugin:claude"
+  },
+  "author": "Dr. Lurie",
+  "deck": "Sealing your face under an ointment overnight is an old dermatology trick with a new name. It is genuinely useful for one kind of skin and genuinely counterproductive for another.",
+  "description": "What slugging is, the barrier science behind occlusion, the order the steps go in, who should skip it, and what to drop first if your skin objects.",
+  "editorial": {
+    "framework": "fw_routine",
+    "writer_notes": "TOP-of-funnel routine guide. Chosen over fw_concern because the reader wants a sequence, and dry winter skin is common enough that a general routine is responsible. Dials under ceiling: claim_strength ~0.13, urgency 0, agitation ~0.03, cta_density ~0.05. One ask: the two-page occlusive card PDF, rendered from a purpose-built chromium template that crops and tones the hero in CSS and draws the layer diagram server-side."
+  },
+  "image": {
+    "alt": "An open jar of plain clear ointment on a bedside table beside a folded flannel in low lamplight",
+    "src": "/img/req_plugin_slugging_20260907_01/abef746fab351fa8b8f3eed073f2778fbfc10f706548db166cca75cbc3461820.webp"
+  },
+  "nodes": [
+    {
+      "id": "n_whoitisfor",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Slugging is the practice of finishing an evening routine with a thin layer of an occlusive ointment — usually plain petrolatum — and sleeping in it. The name is recent. The technique is not: sealing skin under an ointment to slow water loss is one of the oldest moves in dermatology, and it is still what a clinician reaches for when skin is very dry."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "It suits a specific situation rather than everyone."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Skin that feels tight, rough or flaky"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " despite moisturising — particularly in winter, in dry indoor heat, or after air travel."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Skin recovering from over-exfoliation"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " or from a retinoid it is still adjusting to, on the nights you are not applying the active."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Small stubborn dry patches"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " — around the nose, at the corners of the mouth, on the eyelids — where you can apply it to that area alone."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If your skin is oily and prone to congestion, this is probably not your technique. That is covered further down rather than buried."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Who this is for"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whyitworks",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Skin loses water continuously to the air. When the barrier is working well that loss is slow; when it is disrupted, the loss speeds up and the skin underneath stays dry and reactive no matter how much you drink."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Moisturisers address that in three broadly different ways, and most products combine them ("
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/emollients-and-moisturisers"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/emollients-and-moisturisers"
+                  },
+                  "nodeType": "hyperlink"
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": ")."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Humectants"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " draw water into the outer layer. Glycerin and hyaluronic acid are the familiar ones."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Emollients"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " sit between the surface cells and make skin feel smooth rather than rough."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Occlusives"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " form a physical film that slows evaporation. Petrolatum is the most effective of them and among the least likely to provoke an allergic reaction, which is why it remains a clinical staple."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Slugging is simply putting the third category on last, and giving it eight uninterrupted hours to work. The ointment adds no water of its own — it only holds on to what is already there, which is why the step underneath it matters more than the ointment does."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What occlusion actually does"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_steps",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Cleanse gently."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A mild cleanser, lukewarm water. Nothing stripping — you are about to seal this in for eight hours."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Leave the skin slightly damp."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Pat, do not dry completely. The water still on your face is the thing the rest of the routine is trying to keep."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Apply your humectant, then your moisturiser."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Draw water into the surface, then a cream to hold it there. If you only own a moisturiser, that is enough."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Finish with a thin layer of ointment."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Thin is the operative word. A thick layer is not more effective, only harder on your pillowcase."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Wash it off in the morning."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A normal cleanse. Then sunscreen, as on any other day."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "ordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Two or three nights a week is a reasonable starting rhythm. This is not a routine that rewards doing it harder."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "The steps, in order"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_whyorder",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "The sequence is not fussiness. Each step only works if the one before it happened."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Damp skin first,"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " because an occlusive supplies no water of its own. Seal dry skin and you have sealed in dryness."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Humectant before occlusive,"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " because a humectant applied on top of an ointment never reaches the skin. It is sitting on a film designed to keep things out."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Ointment last and thin,"
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " because its whole job is the outermost layer. Nothing is meant to go over it."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Not over an active."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Occlusion increases how much of what is underneath gets absorbed. Sealing a retinoid or an acid under petrolatum can turn a tolerable amount into an irritating one, so keep those on separate nights."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Why that order"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_skip",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "Petrolatum itself does not block pores in the way the word greasy suggests, and it is one of the least allergenic things you can put on skin. The problem is rarely the ointment on its own — it is what the ointment holds against your face for eight hours."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Active or easily congested acne."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Occluding a face that is already producing plenty of oil tends not to help, and some people find it clearly makes things worse."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Anything oily underneath."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " A heavy cream sealed under an ointment is a very different proposition from a light one. Whatever is beneath gets a longer, stronger contact than usual."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Skin that is broken, weeping or infected."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " That is a see-someone situation, not a routine to experiment on."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Hot, humid weather."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " This is a dry-air technique. In summer most people simply do not need it."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "unordered-list"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Who should skip it"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_dropfirst",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If you wake up congested or red, change one variable and try again rather than abandoning the whole idea."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Drop the frequency."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Twice a week instead of nightly."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Drop the layer underneath."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Try the ointment over bare damp skin, or over a simple humectant only."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Drop the area."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " Keep it to the dry patches — around the nose, the corners of the mouth — and leave the rest of the face alone."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "data": {},
+                          "marks": [
+                            {
+                              "type": "bold"
+                            }
+                          ],
+                          "nodeType": "text",
+                          "value": "Then drop the technique."
+                        },
+                        {
+                          "data": {},
+                          "marks": [],
+                          "nodeType": "text",
+                          "value": " If three adjustments have not helped, it is not for your skin, and that is a complete answer rather than a failure."
+                        }
+                      ],
+                      "data": {},
+                      "nodeType": "paragraph"
+                    }
+                  ],
+                  "data": {},
+                  "nodeType": "list-item"
+                }
+              ],
+              "data": {},
+              "nodeType": "ordered-list"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": "If your skin is persistently dry, itchy or inflamed rather than just dry in winter, that is worth raising with your dermatologist or GP. Eczema and other conditions are managed with more than an ointment, and the NHS guidance on atopic eczema is a reasonable place to start reading before that appointment."
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "What to drop first if it irritates"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_card",
+      "kind": "action",
+      "public": {
+        "body": "The layers, the order, and what to change first if your skin objects — in a printable card you can keep in the bathroom cupboard rather than on a phone you are about to put down.",
+        "ctaLink": "/pdf/req_plugin_slugging_20260907_01/a5e494bd3a83eeb6c657e1514b62c4500190c9c929e59419524272ab82300cf3.pdf",
+        "ctaText": "Download the overnight occlusive card (PDF)",
+        "media": {
+          "contentType": "application/pdf",
+          "sizeBytes": 430816,
+          "src": "/pdf/req_plugin_slugging_20260907_01/a5e494bd3a83eeb6c657e1514b62c4500190c9c929e59419524272ab82300cf3.pdf",
+          "title": "The Overnight Occlusive Card",
+          "type": "document"
+        },
+        "title": "The routine on two pages"
+      },
+      "rendering": {
+        "emphasis": "medium",
+        "placement": "section",
+        "presentation": "callout"
+      },
+      "visibility": "public"
+    },
+    {
+      "id": "n_sources",
+      "kind": "content",
+      "public": {
+        "body": {
+          "content": [
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Emollients and moisturisers."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/emollients-and-moisturisers"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/emollients-and-moisturisers"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Dry skin."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/dry-skin"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/dry-skin"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Acne vulgaris."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " DermNet. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "dermnetnz.org/topics/acne-vulgaris"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://dermnetnz.org/topics/acne-vulgaris"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "data": {},
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "nodeType": "text",
+                  "value": "Atopic eczema."
+                },
+                {
+                  "data": {},
+                  "marks": [],
+                  "nodeType": "text",
+                  "value": " NHS. "
+                },
+                {
+                  "content": [
+                    {
+                      "data": {},
+                      "marks": [],
+                      "nodeType": "text",
+                      "value": "nhs.uk/conditions/atopic-eczema"
+                    }
+                  ],
+                  "data": {
+                    "uri": "https://www.nhs.uk/conditions/atopic-eczema/"
+                  },
+                  "nodeType": "hyperlink"
+                }
+              ],
+              "data": {},
+              "nodeType": "paragraph"
+            }
+          ],
+          "data": {},
+          "nodeType": "document"
+        },
+        "title": "Sources"
+      },
+      "visibility": "public"
+    }
+  ],
+  "seo": {
+    "meta_description": "The barrier science behind overnight occlusion, the correct order of steps, who should avoid slugging, and what to change first if it irritates.",
+    "meta_title": "Slugging: What It Is, Who It Suits, and How to Do It"
+  },
+  "slug": "slugging-overnight-occlusive-routine",
+  "sources": {
+    "source_list": [
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Emollients and moisturisers",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_emollients",
+        "url": "https://dermnetnz.org/topics/emollients-and-moisturisers"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Dry skin",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_dryskin",
+        "url": "https://dermnetnz.org/topics/dry-skin"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Acne vulgaris",
+        "publisher": "DermNet",
+        "source_id": "src_dermnet_acne",
+        "url": "https://dermnetnz.org/topics/acne-vulgaris"
+      },
+      {
+        "accessed_at": "2026-09-07",
+        "name": "Atopic eczema",
+        "publisher": "NHS",
+        "source_id": "src_nhs_eczema",
+        "url": "https://www.nhs.uk/conditions/atopic-eczema/"
+      }
+    ]
+  },
+  "taxonomy": {
+    "category": "skincare",
+    "tags": [
+      "skincare-routine",
+      "moisturizers",
+      "dry-skin",
+      "skin-barrier"
+    ]
+  },
+  "title": "Slugging: Who It Suits, Who It Sets Back"
+}
