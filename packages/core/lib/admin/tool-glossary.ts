@@ -36,6 +36,16 @@ export interface ToolGlossaryEntry {
 
 export const TOOL_GLOSSARY: Record<string, ToolGlossaryEntry> = {
   // ─── Looking things up (read) ────────────────────────────────────────────
+  content_search: {
+    label: 'Find content by name or URL',
+    short: 'Looks up an article or page by its slug, URL, headline or a few words, and returns the matches.',
+    detail:
+      'Searches the site for content the agent already half-knows — a URL it was given, a headline, or a phrase ' +
+      'from the title — and hands back the matching objects so it can open the right one. It is how the agent ' +
+      'avoids asking you for an internal id before it can edit anything. It only reads: nothing is changed, ' +
+      'created or published by a search, and it looks at titles, slugs, tags and headings rather than the full ' +
+      'text of an article.',
+  },
   get_object: {
     label: 'Read an object',
     short: 'Opens one page, section or article and reads what it currently says.',

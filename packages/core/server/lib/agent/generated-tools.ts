@@ -123,6 +123,23 @@ type VerbPayloadBuilder = (args: Record<string, unknown>) => Record<string, unkn
 const VERB_PAYLOAD_BUILDERS: Record<string, VerbPayloadBuilder> = {
   object_get: (args) => ({ action: 'get', object_type: args.object_type, object_id: args.object_id }),
   object_list: (args) => ({ action: 'list', object_type: args.object_type, status: args.status }),
+  // W-CS: routed to the object verb (not the operational bridge) because it
+  // reads the same site-objects store every other object_* tool does — see
+  // `routesToOperationalBridge`, which decides by this map's membership.
+  content_search: (args) => ({
+    action: 'content_search',
+    object_type: args.object_type,
+    query: args.query,
+    slug: args.slug,
+    url: args.url,
+    route: args.route,
+    title: args.title,
+    request_id: args.request_id,
+    status: args.status,
+    published: args.published,
+    limit: args.limit,
+    fuzzy: args.fuzzy,
+  }),
   object_create: (args) => ({
     action: 'create',
     object_type: args.object_type,
@@ -284,6 +301,8 @@ const DESCRIBE_OVERRIDES: Record<string, (args: Record<string, unknown>) => stri
   object_contract: (args) => `Read the ${args.object_type} contract`,
   object_list: (args) => `List ${args.object_type} objects`,
   object_inventory: () => 'Browse the object inventory',
+  content_search: (args) =>
+    `Find content matching ${args.slug ?? args.url ?? args.route ?? args.title ?? args.query ?? args.request_id}`,
   // Adapted from tools.ts's `validate` (which always required object_id):
   // object_validate has a second, object_id-less candidate-body mode.
   object_validate: (args) => `Validate ${args.object_type}${args.object_id ? ` ${args.object_id}` : ''}`,
