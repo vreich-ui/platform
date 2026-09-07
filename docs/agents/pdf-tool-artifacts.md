@@ -117,3 +117,65 @@ Treat every `ArtifactReference` as immutable. If an artifact must be regenerated
 5. Read the completed job response and copy the returned `ArtifactReference` exactly as returned.
 6. Check out the latest Dr. Lurie workflow JSON again, patch the hero slot with the returned `ArtifactReference`, and check in the workflow lock through the existing Dr. Lurie MCP tools.
 7. Leave publication unchanged. The publisher later reads the stored `ArtifactReference` from workflow JSON and resolves it through the current server-side publishing path.
+
+## Annotating a stored image (T-IMG): `analyze_image_layout` → `annotate_image` → `check_image_text`
+
+Four bridged tools operate on an image that is **already an artifact of a request** —
+`analyze_image_layout`, `preview_image_grid`, `annotate_image`, `check_image_text`. They are
+the Platform face of pdf-tool's deterministic annotation pipeline (its
+`docs/IMAGE_PIPELINE.md` §2): a model draws pixels, this pipeline draws *labels*, and the two
+never mix inside one render.
+
+All four are **synchronous** — no job, no polling. `annotate_image` and `preview_image_grid`
+each write ONE new image artifact into this site's own artifact store under the same request
+(the tenant plane); `analyze_image_layout` and `check_image_text` write nothing at all.
+
+Scope and credentials are the artifact bridge's, unchanged: pass `site_id` + the owning
+content-item `request_id`, and Platform resolves the canonical pdf-tool project, proves the
+request and the artifact belong to this site, mints a fresh short-lived storage grant
+server-side, forwards it, and never returns it. A caller-supplied `storage` / `token` /
+`projectId` / `materializationProof` argument is **refused** (`artifact_grant_not_accepted`),
+including one nested inside an `AnnotationSpec`.
+
+Name the image the way every other Platform artifact tool names one — no hand-assembled
+blobKeys:
+
+- `public_path` — the `/img/{request_id}/{sha256}.{ext}` value `create_agent_artifact_job`,
+  `get_agent_artifact_job_status` or `get_agent_artifact_by_slot` returned, verbatim;
+- `sha256` — the digest half of the `(request_id, sha256)` pair `get_artifact_metadata`
+  takes, resolved to its blobKey through this request's artifact index.
+
+Order of operations:
+
+1. `analyze_image_layout` → `hints`: the 6×6 grid (`A1`..`F6`) with each cell's luminance and
+   busyness, plus ranked `safeZones`. Pick a quiet cell from this rather than guessing.
+   `preview_image_grid` renders the same grid as a viewable PNG artifact when a human has to
+   see it.
+2. `annotate_image` with an `AnnotationSpec` whose `at` fields use those cell ids. The spec is
+   forwarded **verbatim** and validated only by pdf-tool, whose `TEMPLATE_INVALID` names the
+   offending field paths. Omit `spec.base` and Platform fills it in from the artifact you
+   named; author it yourself and it is passed through untouched, so a disagreement still
+   comes back as pdf-tool's own `ANNOTATE_BASE_MISMATCH`.
+3. `check_image_text` — a **warn-only** OCR gate. `mode:"expect_none"` on a freshly generated
+   base image catches a model that baked its own text into the pixels; `mode:"expect"` after
+   an annotation confirms the labels actually rendered. A failing check is still a
+   **successful call**: the verdict is nested in `textCheck.ok`, never an error.
+
+`renderReport` (annotate), `hints` (analyze/preview) and `textCheck` (check) are returned
+**verbatim** — the warnings are the product of these calls and are never summarised or
+dropped. `renderReport.warnings[]` is warn-only: `TEXT_SHRUNK`, `TEXT_WRAPPED`,
+`TEXT_OVERFLOW`, `COLLISION_PUSHED`, `AVOID_ZONE_OVERLAP`, `CLAMPED_TO_CANVAS`,
+`CONTRAST_LOW`, `ARROW_TARGET_NO_BOX`, `MEASURED_BOX_DRIFT`, `MEASUREMENT_UNAVAILABLE`. Read
+them and decide; none of them means the image is unusable.
+
+On the two writing tools, `public_path` names the artifact the call just **wrote** (that is
+what a human opens and what a renderable `src` may carry); the base image comes back as
+`source_public_path` + `source_artifact_reference`.
+
+pdf-tool's own error codes travel unchanged in `errorCode`, alongside this bridge's
+`error_code: pdf_tool_bridge_request_failed` — `ARTIFACT_NOT_VERIFIED`, `TEMPLATE_INVALID`,
+`ANNOTATE_BASE_MISMATCH`, `IMAGE_CANVAS_TOO_LARGE`, `ASSET_TOO_LARGE`,
+`ANNOTATE_BUDGET_EXCEEDED`, `OCR_UNAVAILABLE`, `RENDER_SERVICE_UNAVAILABLE`, and the rest. A
+named upstream refusal is never flattened into a generic platform failure. Note that OCR runs
+in pdf-tool's separately-deployed render service, so `check_image_text` can answer
+`OCR_UNAVAILABLE` while every other tool on this bridge works.

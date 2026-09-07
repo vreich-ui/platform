@@ -14,8 +14,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 101 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 101, `Expected 101 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 105 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 105, `Expected 105 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -277,6 +277,80 @@ describe('Tool definitions', () => {
       (schema.properties!.filename as { description: string }).description,
       /slug/i,
       'filename must document the pdf-job slug fallback that took it out of required'
+    );
+  });
+
+  /**
+   * T-IMG — the image-annotation bridge. Four tools, two tiers, and the tier is
+   * the whole point: `annotate_image` and `preview_image_grid` each WRITE a new
+   * image artifact into this site's own artifact store (the tenant plane), so
+   * they carry `creation` — the same class as create_agent_artifact_job — plus
+   * an approval preview and an idempotency_key, exactly like every other
+   * artifact-writing bridge tool. `analyze_image_layout` and `check_image_text`
+   * persist NOTHING (upstream says so in as many words), so they are `read`,
+   * unfloored and preview-free like every other read here.
+   *
+   * The description is executable documentation, so this also pins the four
+   * facts a model must not have to infer: that these are synchronous, which of
+   * them writes to the tenant plane, that the report is warn-only, and that
+   * analyze_image_layout comes before annotate_image.
+   */
+  it('the four image-annotation bridge tools carry the right class and say what they do', () => {
+    const expectedToolClass: Record<string, ToolDefinition['governance']['toolClass']> = {
+      annotate_image: 'creation',
+      preview_image_grid: 'creation',
+      analyze_image_layout: 'read',
+      check_image_text: 'read',
+    };
+    for (const [name, expectedClass] of Object.entries(expectedToolClass)) {
+      const tool = TOOL_DEFINITIONS.find((t) => t.name === name);
+      assert.ok(tool, `${name} must be registered`);
+      assert.strictEqual(
+        tool!.governance.toolClass,
+        expectedClass,
+        `${name} should carry toolClass "${expectedClass}"`
+      );
+      assert.strictEqual(tool!.governance.autonomyFloor, undefined, `${name} needs no autonomy floor`);
+      // Synchronous, and it must say so: there is no job id to poll here.
+      assert.match(tool!.description, /SYNCHRONOUS/, `${name} must state that it is synchronous`);
+      // The artifact is named the platform way, never by a hand-assembled blobKey.
+      const schema = tool!.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+      assert.ok(
+        schema.properties?.public_path && schema.properties?.sha256,
+        `${name} must accept public_path or sha256`
+      );
+      assert.ok(!schema.properties?.blobKey && !schema.properties?.blob_key, `${name} must not ask for a blobKey`);
+      // The grant is minted server-side and a caller-supplied one is refused.
+      assert.ok(!schema.properties?.storage && !schema.properties?.token && !schema.properties?.project_id);
+      assert.match(tool!.description, /artifact_grant_not_accepted/, `${name} must document the grant refusal`);
+    }
+
+    // The two writers: tenant-plane writes, an approval preview, and a retry key.
+    for (const name of ['annotate_image', 'preview_image_grid']) {
+      const tool = TOOL_DEFINITIONS.find((t) => t.name === name)!;
+      assert.strictEqual(tool.governance.preview?.kind, 'input_echo');
+      assert.match(tool.description, /WRITES TO THE TENANT PLANE/, `${name} must say it writes to the tenant plane`);
+      assert.ok(
+        (tool.inputSchema as { properties?: Record<string, unknown> }).properties?.idempotency_key,
+        `${name} writes an artifact; it must take an idempotency_key`
+      );
+    }
+
+    // The two reads: no preview, and check_image_text says it writes nothing at all.
+    for (const name of ['analyze_image_layout', 'check_image_text']) {
+      const tool = TOOL_DEFINITIONS.find((t) => t.name === name)!;
+      assert.strictEqual(tool.governance.preview, undefined, `${name} is a read; it needs no approval preview`);
+      assert.match(tool.description, /WRITES NOTHING/, `${name} must say it persists nothing`);
+    }
+
+    const annotate = TOOL_DEFINITIONS.find((t) => t.name === 'annotate_image')!;
+    assert.match(annotate.description, /CALL analyze_image_layout FIRST/, 'the ordering must be stated, not implied');
+    assert.match(annotate.description, /WARN-ONLY/, 'the render report must be stated as warn-only');
+    assert.match(annotate.description, /VERBATIM/, 'the report must be promised verbatim, never summarised');
+    assert.match(
+      TOOL_DEFINITIONS.find((t) => t.name === 'check_image_text')!.description,
+      /WARN-ONLY/,
+      'the OCR gate must be stated as warn-only'
     );
   });
 
