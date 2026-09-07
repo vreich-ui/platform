@@ -27,11 +27,7 @@ import { templateSlug, visualStandardTemplateId } from '../../packages/core/lib/
 import { visualStandardIdFor } from '../../packages/core/cli/visual-standard-genesis.mjs';
 import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import { patchOpNamesByObjectType } from '../../packages/core/schema/object-patch-ops.js';
-import {
-  applyPatchOps,
-  derivePatchInverse,
-  type PatchOpCapture,
-} from '../../packages/core/lib/object-patch-apply.js';
+import { applyPatchOps, derivePatchInverse, type PatchOpCapture } from '../../packages/core/lib/object-patch-apply.js';
 import { checkPublishGate } from '../../packages/core/server/lib/publish-gate.js';
 import {
   handleObjectVerb,
@@ -146,9 +142,7 @@ test('sampleSubjects must have 1..6 entries once active/archived; a draft may st
   // picture looks like, never what it is OF.
   assert.ok(visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: [] }).success);
   assert.ok(visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['one'] }).success);
-  assert.ok(
-    visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['a', 'b', 'c', 'd', 'e', 'f'] }).success
-  );
+  assert.ok(visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['a', 'b', 'c', 'd', 'e', 'f'] }).success);
   // The 6-entry ceiling is unconditional — it never depended on status.
   assert.ok(
     !visualStandardBodySchema.safeParse({ ...VALID, sampleSubjects: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }).success
@@ -332,7 +326,13 @@ test('a mood board and its examples may hold real pdf-tool artifact keys (nothin
 
   const created = await handleObjectVerb(
     verbStore,
-    { action: 'create', object_type: 'visual_standard', site: 'site_drlurie', body: withRealKeys, requested_id: 'vis_drlurie' },
+    {
+      action: 'create',
+      object_type: 'visual_standard',
+      site: 'site_drlurie',
+      body: withRealKeys,
+      requested_id: 'vis_drlurie',
+    },
     AGENT,
     { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
   );
@@ -341,7 +341,11 @@ test('a mood board and its examples may hold real pdf-tool artifact keys (nothin
   // ...and the same body still fails the guard on a type something DOES
   // render, so the exemption is scoped, not a hole in the check.
   const renderable = validateObject(
-    { objectType: 'theme', objectId: 'thm_drlurie_default', body: { imageAssetRefButRendered: `image/req_x_y_20260901_01/${sha}.webp` } },
+    {
+      objectType: 'theme',
+      objectId: 'thm_drlurie_default',
+      body: { imageAssetRefButRendered: `image/req_x_y_20260901_01/${sha}.webp` },
+    },
     await buildStoreValidationContext(verbStore)
   );
   const imageRefCriterion = renderable
@@ -440,7 +444,8 @@ test('INCIDENT: the exact live body mints vis_drlurie — never an id derived fr
 
   // And the old behaviour is gone in the way that matters: nothing about the
   // body reaches the id.
-  const mintedFromLabel = String(dryRun.body.object_id).includes('house') || String(dryRun.body.object_id).includes('label');
+  const mintedFromLabel =
+    String(dryRun.body.object_id).includes('house') || String(dryRun.body.object_id).includes('label');
   assert.equal(mintedFromLabel, false, 'the id must carry no trace of the body');
 });
 
@@ -505,7 +510,10 @@ test('the minted id agrees with the CLI genesis rule and the admin studio rule a
   }
 
   // Every id the rule produces is a legal visual_standard id, by the real validator.
-  for (const id of [visualStandardIdFor('drlurie'), visualStandardTemplateId('drlurie', templateSlug('Guide Covers'))]) {
+  for (const id of [
+    visualStandardIdFor('drlurie'),
+    visualStandardTemplateId('drlurie', templateSlug('Guide Covers')),
+  ]) {
     assert.ok(validateObjectIdForType('visual_standard', id).ok, id);
   }
 });
@@ -700,4 +708,76 @@ test('a set_visual_standard_fields patch with duplicate reference ids is refused
     { nowMs: NOW }
   );
   assert.equal((after.body.record as ObjectRecord).version, version);
+});
+
+// ─── mood-board blobKeys must name artifacts that actually exist ────────────
+//
+// THE DEFECT (2026-09-07). The test above proves a mood board MAY hold a real
+// pdf-tool key. Nothing proved it may hold only real ones — and it could not,
+// because artifact existence was checked exclusively for `*AssetRef`-suffixed
+// keys and content_item media, while `visual_standard` is exempted from
+// `checkRenderableImageRefs` on top of that. Live on drlurie, `vis_drlurie`
+// ended up carrying references whose "sha256" was the reference's own minted
+// id padded out to 64 hex characters (`ref_abc27032` →
+// `image/vis_drlurie/abc2703243a27a…`) under `vis_drlurie` — the OBJECT id,
+// which is not even a valid `req_<flow>_<topic>_<yyyymmdd>_<nn>`, so nothing
+// was ever indexed there and no bytes were ever stored. Those keys ARE
+// Major-Key shaped, so the admin built an `admin-get-blob-image?blobKey=…`
+// URL from the shape, the endpoint answered 404, and the card read "Preview
+// unavailable" forever.
+//
+// This is the end-to-end half of `checkVisualStandardAssetRefs`
+// (object-validate.ts, unit-tested in object-validate.test.ts): that the
+// criterion is wired into the real verb path and really refuses the write.
+test('a mood-board blobKey owned by an object id is refused 422 — not accepted into a card that can never preview', async () => {
+  const store = createMemoryStore();
+  const verbStore = store as unknown as ObjectVerbStore;
+  // The exact live shape: the ref id padded out to 64 hex, under `vis_drlurie`
+  // — the OBJECT id, which is not a request id, so no artifact can ever live
+  // there. Tier 1 of checkVisualStandardAssetRefs blocks this on the key
+  // alone: no artifact index is wired here on purpose, because that is the
+  // state most deployments validate in (a MISS only proves absence under a
+  // strongly-consistent read).
+  const fabricated = `image/vis_drlurie/${'abc27032'}${'0'.repeat(56)}.jpg`;
+  const body: VisualStandardBody = {
+    ...VALID,
+    references: [{ id: 'ref_abc27032', blobKey: fabricated, note: 'mood board add: imported' }],
+  };
+
+  const created = await handleObjectVerb(
+    verbStore,
+    { action: 'create', object_type: 'visual_standard', site: 'site_drlurie', body, requested_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+
+  assert.equal(created.status, 422, JSON.stringify(created.body));
+  const blockers = (created.body as { blockers?: Array<{ id: string; message: string }> }).blockers ?? [];
+  const blocker = blockers.find((entry) => entry.id === 'visual_standard_refs');
+  assert.ok(blocker, `expected a visual_standard_refs blocker, got ${JSON.stringify(blockers)}`);
+  assert.match(blocker!.message, /references\[0\]\.blobKey/);
+  assert.match(blocker!.message, /not a request id/);
+  // It must point at the fix, not just refuse.
+  assert.match(blocker!.message, /Import references|image library/);
+});
+
+test('the same board is accepted once its key is owned by a real artifact request', async () => {
+  const store = createMemoryStore();
+  const verbStore = store as unknown as ObjectVerbStore;
+  const sha = 'c'.repeat(64);
+  // What visual-reference-import.ts's mintVisualReferenceRequestId produces.
+  const blobKey = `image/req_visref_drlurie_20260906_01/${sha}.jpg`;
+  const body: VisualStandardBody = {
+    ...VALID,
+    references: [{ id: 'ref_a1b2c3d4', blobKey, note: 'mood board add: imported' }],
+  };
+
+  const created = await handleObjectVerb(
+    verbStore,
+    { action: 'create', object_type: 'visual_standard', site: 'site_drlurie', body, requested_id: 'vis_drlurie' },
+    AGENT,
+    { nowMs: NOW, validationContext: await buildStoreValidationContext(verbStore) }
+  );
+
+  assert.equal(created.status, 200, JSON.stringify(created.body));
 });

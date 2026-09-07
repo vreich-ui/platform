@@ -257,7 +257,12 @@ test('toml-posture check GAPs when a site netlify.toml is missing the canonical 
     // both must be individually detected.
     const degraded = original
       .replace('[build.processing.html]\n  pretty_urls = false\n', '')
-      .replace('frame-src https://www.youtube-nocookie.com', 'frame-src https://youtube-nocookie.com');
+      // Anchored on the host alone, NOT on `frame-src <host>`: the directive's
+      // source list is not frozen (2026-09-07 added 'self' ahead of the hosts,
+      // for the article PDF <iframe>), and an anchor that includes the
+      // directive prefix silently stops matching when it changes — degrading
+      // nothing, so the CSP half of this assertion passed vacuously.
+      .replace('https://www.youtube-nocookie.com', 'https://youtube-nocookie.com');
     fs.writeFileSync(tomlPath, degraded);
 
     const checks = computeAdminParity(resolveAuditTarget(`sites/${slug}`));

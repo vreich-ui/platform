@@ -159,7 +159,7 @@ export const CANONICAL_TOML_POSTURE = {
   astroImmutableHeaders:
     '[[headers]]\n  for = "/_astro/*"\n  [headers.values]\n    Cache-Control = "public, max-age=31536000, immutable"\n',
   cspReportOnly:
-    "[[headers]]\n  for = \"/*\"\n  [headers.values]\n    Content-Security-Policy-Report-Only = \"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'\"\n",
+    "[[headers]]\n  for = \"/*\"\n  [headers.values]\n    Content-Security-Policy-Report-Only = \"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'\"\n",
 };
 
 // ─── admin-critical env + blob stores ────────────────────────────────────────

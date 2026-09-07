@@ -23,7 +23,10 @@
 # is the ALL-PROVIDERS-DISABLED baseline: script-src keeps 'unsafe-inline'
 # (the inline consent bootstrap + astro-compress reality); style/font cover
 # the Google Fonts chrome; frame-src covers the T10.5 media mint's embed
-# hosts (youtube-nocookie/vimeo); img-src stays wide (article/content images
+# hosts AND 'self' (an article's attached PDF renders as a same-origin
+# <iframe> — article-object/render-nodes.ts's documentMediaHtml; it was an
+# <object> until 2026-09-07 and object-src 'none' would have killed it the
+# moment this header stopped being Report-Only); img-src stays wide (article/content images
 # are externally hosted by design) — the pinning value lives in script-src,
 # connect-src, and frame-src. Enabling any ad provider REQUIRES adding its
 # adapter's cspHosts here in the SAME change: the hosts-drift test
@@ -31,7 +34,7 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'"
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'"
 
 [functions]
   directory = "netlify/functions"

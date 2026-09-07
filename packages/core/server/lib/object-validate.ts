@@ -59,6 +59,7 @@ import {
 import { AGGRESSION_CEILING_DIALS, getSiteIdentity, type AggressionCeiling } from '../../lib/site-identity.js';
 import type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
 import { validateObjectIdForType, validateSectionInstanceId } from '../../lib/object-ids.js';
+import { isRequestId } from '../../lib/agents-naming.js';
 import { contentItemRoute, DEFAULT_POST_PERMALINK_PATTERN } from '../../lib/tracking/experiments/arms.js';
 import { applyPatchOps, PatchApplyError } from '../../lib/object-patch-apply.js';
 import { navigationBodySchema, type NavigationBody } from '../../schema/bodies/navigation-v1.js';
@@ -874,6 +875,140 @@ export const checkArtifactTrust = (
   if (!sawAssetRef)
     return [crit('artifact_trust', 'Media / artifact trust', 'optional', 'No asset references present.')];
   return [crit('artifact_trust', 'Media / artifact trust', 'complete', '')];
+};
+
+// ─── check 5b: visual_standard mood-board / example blobKeys ─────────────────
+//
+// WHY THIS EXISTS (2026-09-07 — the "Preview unavailable" mood board).
+//
+// `checkArtifactTrust` above resolves existence ONLY for `*AssetRef`-suffixed
+// keys and for content_item media public paths. A visual_standard's
+// `references[].blobKey` / `examples[].blobKey` are neither, and
+// `checkRenderableImageRefs` exempts the whole object type (nothing renders a
+// visual_standard, so a raw Major Key there is legitimate — see
+// UNRENDERED_OBJECT_TYPES). Net effect: `set_visual_standard_fields` accepted
+// ANY shape-valid string as a mood-board image.
+//
+// It did. Live on drlurie, `vis_drlurie` carried two references whose
+// "sha256" was the reference's own minted id padded out to 64 hex characters
+// (`ref_abc27032` → `image/vis_drlurie/abc2703243a27a…`), and a later pair
+// under the same non-existent `image/vis_drlurie/…` request id. `vis_drlurie`
+// is the OBJECT id — it is not even a valid request id (`req_<flow>_<topic>_
+// <yyyymmdd>_<nn>`), so nothing was ever indexed under it and no bytes were
+// ever stored. The admin built an `admin-get-blob-image?blobKey=…` URL from
+// the key's SHAPE alone (visual-identity-imagery.ts's
+// `buildMoodBoardReference`), the endpoint answered 404
+// `missing-artifact-bytes`, and the card promised a preview it could never
+// deliver — permanently, with no way for an editor to tell a typo from an
+// outage.
+//
+// BLOCKS AT WRITE, not at publish. Every other existence check in this file
+// warns while drafting and blocks at publish, because an agent mid-assembly
+// may reference an artifact it uploads next. That reasoning does not transfer:
+// a visual_standard is not publishable at all (it has no materializer and is
+// absent from approval-policy.ts's governedObjectTypes), so "block at publish"
+// means "never block", which is exactly the state that let these land. And the
+// legitimate path stores bytes FIRST: visual-reference-import.ts mirrors the
+// bytes through `saveArtifactBytes` and only then patches the board with the
+// canonical key it got back, so nothing real is refused by checking now.
+//
+// TWO TIERS, because existence alone would not have caught this reliably.
+//
+//   1. THE REQUEST-ID SHAPE — always checked, always trustworthy. Every
+//      artifact blobKey is `image/<requestId>/<sha256>.<ext>` and every
+//      requestId `saveArtifactBytes` ever mints is a real request id
+//      (`req_<flow>_<topic>_<yyyymmdd>_<nn>`, agents-naming.ts's
+//      `isRequestId`). `vis_drlurie` is an OBJECT id: no artifact can ever
+//      live under it, so the key is unservable BY CONSTRUCTION and saying so
+//      costs no store read and cannot be wrong. Checked against the live
+//      drlurie index (2026-09-07): all 49 distinct request ids holding image
+//      artifacts pass `isRequestId`; the fabricated mood-board keys do not.
+//
+//   2. INDEX EXISTENCE — checked only when the resolver can actually answer.
+//      This tier deliberately cannot stand alone: `preloadArtifactRefResolutions`
+//      only treats a MISS as proof of absence under a strongly-consistent read
+//      (`isBlobCredentialsConfigured()`), because on the Lambda name-lookup
+//      path a just-written artifact is routinely invisible for minutes — the
+//      2026-08-11 incident in that function's own doc. So on a deployment
+//      without explicit blob credentials tier 2 is silent, and tier 1 is what
+//      holds the line.
+//
+// Unverifiable stays unverifiable: with no `resolveArtifactRef` wired (no blob
+// credentials, a bare harness) tier 2 reports nothing rather than blocking —
+// the same posture `validateAssetRef` takes when the resolver cannot answer.
+//
+// SCOPE: EXISTENCE ONLY, AND ONLY FOR KEYS THE ADMIN WILL ACTUALLY FETCH.
+// A blobKey that is not Major-Key shaped (`img/mood/1.jpg`, a placeholder, a
+// hand-written path) is deliberately NOT rejected here. It is not the defect:
+// `getAdminBlobImageEndpoint` refuses to build a preview URL for it at all, so
+// `buildMoodBoardReference` renders the honest "This image is not in the
+// admin-previewable artifact store." instead of a preview that will never
+// arrive — the UI already tells the truth about it, and several tests use
+// exactly that shape as a stand-in while exercising unrelated rules (id
+// minting, the singleton house, the reference ceiling).
+//
+// The lie is narrower and worse: a key that LOOKS servable, so the admin
+// promises a preview, fetches it, and gets a 404. That is the one this blocks.
+const VISUAL_STANDARD_REF_ARRAYS = ['references', 'examples'] as const;
+
+export const checkVisualStandardAssetRefs = (
+  objectType: ObjectType | undefined,
+  body: unknown,
+  context: ObjectValidationContext
+): ReadinessCriterion[] => {
+  if (objectType !== 'visual_standard') return [];
+  if (!isRecord(body)) return [];
+
+  const problems: string[] = [];
+  let sawRef = false;
+
+  for (const arrayKey of VISUAL_STANDARD_REF_ARRAYS) {
+    const entries = body[arrayKey];
+    if (!Array.isArray(entries)) continue;
+    entries.forEach((entry, index) => {
+      if (!isRecord(entry)) return;
+      const blobKey = entry.blobKey;
+      if (typeof blobKey !== 'string' || !blobKey) return;
+      // Not Major-Key shaped ⇒ the admin never builds a preview URL for it and
+      // says so plainly. Out of scope (see the SCOPE note above).
+      if (!MAJOR_KEY_ARTIFACT_REF_RE.test(blobKey)) return;
+      sawRef = true;
+      const path = `${arrayKey}[${index}].blobKey`;
+
+      // Tier 1: the owning segment must be a request id. No store read, no
+      // consistency caveat — an object id here can never name an artifact.
+      const requestId = blobKey.split('/')[1] ?? '';
+      if (!isRequestId(requestId)) {
+        problems.push(
+          `${path} "${blobKey}" is not owned by a real artifact request — "${requestId}" is not a request id ` +
+            `(req_<flow>_<topic>_<yyyymmdd>_<nn>), so nothing can ever be stored under this key.`
+        );
+        return;
+      }
+
+      // Tier 2: index existence, when the resolver can answer at all.
+      const problem = validateAssetRef(path, blobKey, context);
+      // Shape already passed, so anything left is a trust/existence answer.
+      if (problem) problems.push(problem.message);
+    });
+  }
+
+  if (problems.length > 0) {
+    return [
+      crit(
+        'visual_standard_refs',
+        'Mood board / example images',
+        'missing',
+        `${problems.slice(0, 5).join(' ')} A mood-board image must be an artifact that already exists: import it ` +
+          `through the admin's "Import references" (which stores the bytes and hands back the canonical blobKey), ` +
+          `or pick one from the image library. Never hand-write a blobKey.`
+      ),
+    ];
+  }
+  if (!sawRef) {
+    return [crit('visual_standard_refs', 'Mood board / example images', 'optional', 'No mood-board images present.')];
+  }
+  return [crit('visual_standard_refs', 'Mood board / example images', 'complete', '')];
 };
 
 // ─── check 5c: image byte budget (src/config/media-policy.ts) ────────────────
@@ -3433,6 +3568,7 @@ export const validateObject = (
       label: 'Media / artifact trust',
       criteria: [
         ...checkArtifactTrust(input.body, context, atPublish),
+        ...checkVisualStandardAssetRefs(input.objectType, input.body, context),
         ...checkMediaBudget(input.body, context, atPublish),
       ],
     },

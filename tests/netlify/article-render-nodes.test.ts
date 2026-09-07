@@ -353,7 +353,7 @@ test('media render matrix: image media renders <img>, document media renders an 
   assert.match(html, /<span class="font-semibold">Flare tracker<\/span>/);
 });
 
-test('document media SNAPSHOT: a PDF attachment renders a download block + <object> preview, never an <img>', () => {
+test('document media SNAPSHOT: a PDF attachment renders a download block + <iframe> preview, never an <img>', () => {
   const sha = 'e'.repeat(64);
   const src = `/pdf/req_render_pdf_20260831_01/${sha}.pdf`;
   const body = article({
@@ -389,14 +389,21 @@ test('document media SNAPSHOT: a PDF attachment renders a download block + <obje
       `<span class="flex flex-col"><span class="font-semibold">Flare tracker</span>` +
       `<span class="text-sm text-muted">${sha}.pdf · PDF · 240 KB</span></span>` +
       `</a>` +
-      `<object class="article-document-preview w-full aspect-[3/4] max-h-[80vh] rounded-lg border border-gray-200 dark:border-slate-700" data="${src}" type="application/pdf" aria-label="Flare tracker">` +
-      `<p class="text-sm text-muted">Your browser cannot preview this PDF — <a href="${src}" rel="sponsored" download="${sha}.pdf">download ${sha}.pdf</a>.</p>` +
-      `</object>` +
+      `<iframe class="article-document-preview w-full aspect-[3/4] max-h-[80vh] rounded-lg border border-gray-200 dark:border-slate-700" src="${src}" title="Flare tracker" loading="lazy"></iframe>` +
       `<figcaption>PDF, 4 pages</figcaption>` +
       `</figure>`
   );
   // The whole point: a PDF is never an <img>.
   assert.equal(/<img[^>]*\.pdf/.test(html), false);
+  // …and never an <object> again. The preview was an <object> until 2026-09-07
+  // and rendered as a blank bordered box on every article: get-public-pdf sent
+  // `Content-Disposition: attachment`, which no browser displays in an embedded
+  // viewer, and the clean 200 meant the <object>'s fallback never showed either.
+  // The header is fixed at the source (get-public-pdf.test.ts pins `inline`);
+  // the embed is an <iframe> because `object-src 'none'` in the CSP would kill
+  // an <object> outright once that header leaves Report-Only, while <iframe> is
+  // covered by the `frame-src 'self'` this change added (csp-drift.test.ts).
+  assert.equal(/<object/.test(html), false);
 });
 
 test('document media: size is omitted when unknown; title falls back to the node title, then the filename', () => {
