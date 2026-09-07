@@ -160,7 +160,8 @@ const loadArticleObjectPosts = async (takenSlugs: Set<string>): Promise<Post[]> 
   const posts: Post[] = [];
 
   for (const entry of entries) {
-    const { __generated, ...body } = entry.data as { __generated: { at: string } } & Record<string, unknown>;
+    const { __generated, ...body } = entry.data as { __generated: { at: string; record_version?: number } } &
+      Record<string, unknown>;
     const parsed = contentItemBodySchema.safeParse(body);
     if (!parsed.success) {
       // Loud skip, never a build failure: a bad export is healed store-side.
@@ -176,7 +177,7 @@ const loadArticleObjectPosts = async (takenSlugs: Set<string>): Promise<Post[]> 
     }
 
     const publishDate = new Date(__generated.at);
-    const rendered = renderArticleNodes(entry.id, article);
+    const rendered = renderArticleNodes(entry.id, article, __generated.record_version);
     const category = article.taxonomy?.category
       ? {
           slug: cleanSlug(article.taxonomy.category),

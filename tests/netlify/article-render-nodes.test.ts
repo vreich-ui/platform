@@ -416,3 +416,16 @@ test('document media: size is omitted when unknown; title falls back to the node
   assert.match(html, new RegExp(`<span class="text-sm text-muted">${sha}\\.pdf · PDF</span>`));
   assert.equal(html.includes(' KB'), false);
 });
+
+// S-13: the served revision (__generated.record_version) rides the marker as
+// data-cms-object-version — optional end to end, so a page rendered before
+// this shipped (no third arg) carries no such attribute at all.
+test('S-13: a version arg stamps data-cms-object-version on every node marker', () => {
+  const { html } = renderArticleNodes('req_agent_barrier_myths_20260713_01', article(), 7);
+  assert.match(html, /data-cms-object-id="req_agent_barrier_myths_20260713_01"[^>]*data-cms-object-version="7"/);
+});
+
+test('S-13: no version arg means no data-cms-object-version attribute at all', () => {
+  const { html } = renderArticleNodes('req_agent_barrier_myths_20260713_01', article());
+  assert.equal(html.includes('data-cms-object-version'), false);
+});

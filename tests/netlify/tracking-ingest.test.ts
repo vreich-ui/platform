@@ -93,6 +93,26 @@ test('full schema: the enriched event parses; a client event does NOT (server st
   assert.ok(!('city' in (full.context.geo as Record<string, unknown>)), 'city never exists on the stored shape');
 });
 
+test('S-13: object.version is an optional integer end to end — present, absent, both validate', () => {
+  const withVersion = clientEvent({ object: { object_type: 'content_item', object_id: 'req_x_20260719_01', version: 3 } });
+  const parsedWith = clientTrackingEventSchema.safeParse(withVersion);
+  assert.equal(parsedWith.success, true);
+  assert.equal(parsedWith.success ? parsedWith.data.object?.version : undefined, 3);
+  const full = buildTrackingEvent(clientTrackingEventSchema.parse(withVersion), enrichment);
+  assert.equal(full.object?.version, 3);
+  assert.ok(trackingEventSchema.safeParse(full).success);
+
+  // A page rendered before this shipped carries no version at all — the key
+  // itself is absent (not undefined, not null), and the event still validates.
+  const withoutVersion = clientEvent({ object: { object_type: 'content_item', object_id: 'req_x_20260719_01' } });
+  const parsedWithout = clientTrackingEventSchema.safeParse(withoutVersion);
+  assert.equal(parsedWithout.success, true);
+  assert.equal(parsedWithout.success && parsedWithout.data.object ? 'version' in parsedWithout.data.object : true, false);
+  const fullWithout = buildTrackingEvent(clientTrackingEventSchema.parse(withoutVersion), enrichment);
+  assert.equal(fullWithout.object ? 'version' in fullWithout.object : true, false);
+  assert.ok(trackingEventSchema.safeParse(fullWithout).success);
+});
+
 // ═══ sanitizers ═══════════════════════════════════════════════════════════════
 
 test('props sanitizer is an allowlist per event kind — never a passthrough', () => {

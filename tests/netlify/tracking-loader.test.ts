@@ -168,6 +168,22 @@ test('pageview fires on page-load; UTM + referrer + viewport ride ONLY the first
   assert.equal((pageviews[1]! as { context?: unknown }).context, undefined, 'later pageviews carry no context');
 });
 
+test('S-13: a page context carrying a version puts object.version on the event; without one, no version key at all', () => {
+  const { tracker, allEvents, fireTimers } = makeTracker();
+  tracker.pageLoad({
+    path: '/blog/req-x',
+    route: '/blog/req-x',
+    object: { object_type: 'content_item', object_id: 'req_x_20260719_01', version: 7 },
+  });
+  tracker.pageLoad({ path: '/blog/req-y', route: '/blog/req-y', object: { object_type: 'content_item', object_id: 'req_y_20260719_01' } });
+  fireTimers();
+  const pageviews = allEvents().filter((event) => event.event === 'pageview');
+  const withVersion = pageviews[0]! as { object?: Record<string, unknown> };
+  const withoutVersion = pageviews[1]! as { object?: Record<string, unknown> };
+  assert.equal(withVersion.object?.version, 7);
+  assert.equal(withoutVersion.object ? 'version' in withoutVersion.object : true, false);
+});
+
 test('browser startup waits for page markers and does not duplicate the initial pageview', async () => {
   const listeners = new Map<string, ((event?: Event) => void)[]>();
   const sent: SentBatch[] = [];

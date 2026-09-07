@@ -322,15 +322,22 @@ const nodeHtml = (node: ContentItemNode): string => {
 
 const WORDS_PER_MINUTE = 200;
 
-export const renderArticleNodes = (objectId: string, body: ContentItemBody): RenderedArticle => {
+export const renderArticleNodes = (
+  objectId: string,
+  body: ContentItemBody,
+  version?: number
+): RenderedArticle => {
   const rendered: string[] = [];
   // T13.5 (W13): an article with tracking.enabled:false opts every node
   // wrapper out — the loader skips [data-cms-track="off"] subtrees.
   const trackingOffAttr = body.tracking?.enabled === false ? ' data-cms-track="off"' : '';
+  // S-13: the served revision (__generated.record_version), optional — a
+  // page rendered before this change carries no attribute at all.
+  const versionAttr = typeof version === 'number' ? ` data-cms-object-version="${version}"` : '';
   for (const node of body.nodes) {
     if ((node.visibility ?? 'public') !== 'public') continue; // never-render-private
     rendered.push(
-      `<div style="display:contents" data-cms-object-id="${escapeHtml(objectId)}" data-cms-node-id="${escapeHtml(node.id)}" data-cms-node-kind="${escapeHtml(node.kind)}"${trackingOffAttr}>${nodeHtml(node)}</div>`
+      `<div style="display:contents" data-cms-object-id="${escapeHtml(objectId)}" data-cms-node-id="${escapeHtml(node.id)}" data-cms-node-kind="${escapeHtml(node.kind)}"${trackingOffAttr}${versionAttr}>${nodeHtml(node)}</div>`
     );
   }
   const html = rendered.join('');

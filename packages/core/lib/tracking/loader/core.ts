@@ -46,7 +46,7 @@ export type PageContext = {
   path: string;
   route: string | null;
   /** The page's own object identity (from the render seam). */
-  object?: { object_type?: string; object_id?: string };
+  object?: { object_type?: string; object_id?: string; version?: number };
   /** Present on term pages: the taxonomy term whose route is being viewed. */
   term?: { term_id: string };
   /** Present on article pages: public node count + last node id. */
@@ -161,10 +161,11 @@ export const createTracker = (
 
   const refKey = (ref: TrackableRef): string => (ref.kind === 'section' ? `s:${ref.section_id}` : `n:${ref.node_id}`);
 
-  const objectOf = (ref: TrackableRef | null): Record<string, string> | undefined => {
-    const out: Record<string, string> = {};
+  const objectOf = (ref: TrackableRef | null): Record<string, string | number> | undefined => {
+    const out: Record<string, string | number> = {};
     if (page.object?.object_type) out.object_type = page.object.object_type;
     if (page.object?.object_id) out.object_id = page.object.object_id;
+    if (page.object?.version) out.version = page.object.version;
     if (ref?.kind === 'section') {
       out.section_id = ref.section_id;
       if (ref.section_type) out.section_type = ref.section_type;
@@ -294,7 +295,11 @@ export const createTracker = (
   ): void => {
     const object = extraObject ?? objectOf(ref);
     fireGoalBindings(
-      matchActivityGoals(config.goals, activity, [object?.object_id, object?.section_id, object?.term_id]),
+      matchActivityGoals(config.goals, activity, [
+        object?.object_id as string | undefined,
+        object?.section_id as string | undefined,
+        object?.term_id as string | undefined,
+      ]),
       ref,
       extraObject,
       sharedProps

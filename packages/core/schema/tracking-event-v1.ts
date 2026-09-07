@@ -48,6 +48,10 @@ const objectRefSchema = z
     node_id: nullableString(64),
     node_kind: nullableString(32),
     term_id: nullableString(64),
+    // S-13: the served revision, sourced from __generated.record_version at
+    // render time. Optional end to end — a page rendered before this change
+    // carries no version and must still validate/ingest unchanged.
+    version: z.number().int().min(0),
   })
   .partial()
   .optional();

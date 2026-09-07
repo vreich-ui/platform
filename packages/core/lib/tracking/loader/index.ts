@@ -76,7 +76,14 @@ const readPageContext = (): PageContext => {
   return {
     path: location.pathname,
     route: null,
-    object: objectId && prefix ? { object_type: TYPE_BY_PREFIX[prefix], object_id: objectId } : undefined,
+    object: objectId && prefix
+      ? {
+          object_type: TYPE_BY_PREFIX[prefix],
+          object_id: objectId,
+          // S-13: optional — absent on a page rendered before this shipped.
+          version: Number(first?.getAttribute('data-cms-object-version')) || undefined,
+        }
+      : undefined,
     term: termId ? { term_id: termId } : undefined,
     article:
       nodes.length > 0 && articleId
