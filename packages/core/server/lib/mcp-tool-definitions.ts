@@ -495,7 +495,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'release_to_production',
     description:
-      'Release accumulated CMS object exports to production. Object publishes commit to main with [skip netlify], so they do NOT deploy on their own — this is the explicit release that makes them live, and the ONLY thing that fires a production build for them. Steps: resolve the target commit (defaults to the content-branch HEAD, which includes every accumulated skipped export commit), POST the server-side production build hook ONCE (the same hook trigger_netlify_build uses; the only allowed production-build trigger), then poll Netlify deploy receipts until the deploy for that commit is terminal, and report whether production actually reflects it. Returns released:true only when the site\'s PUBLISHED deploy (what production actually serves) reflects the target commit — confirmed as productionConfirmed:true; released:false with status build_not_confirmed_live means the build did not finish within the wait budget (re-check deploy_status). status build_ready_not_published means the build IS ready but production still serves an older commit — Netlify "Auto Publishing" is likely locked; unlock it or publish the deploy manually, then re-check deploy_status. When the published-deploy lookup is unavailable, the tool degrades to ready-by-commit with productionConfirmed:false — treat that as "not independently proven live". WAIT BUDGET: the in-call wait is capped to this serverless function\'s remaining invocation time (seconds, not the full build duration), so a normal 30-120s production build usually returns build_not_confirmed_live on the first call — that is the expected flow, not an error. Prefer polling deploy_status with the returned targetCommit until deployStatus is "ready" AND productionConfirmed is true over calling this again; if you DO call it again for the same release attempt (e.g. after a client-side timeout or 502), pass the SAME idempotency_key so a build that already fired is not fired a second time. One release deploys every skipped commit at once, so batch publishes and release once — it consumes real build minutes.',
+      'Release accumulated CMS object exports to production. Object publishes commit to main with [skip netlify], so they do NOT deploy on their own — this is the explicit release that makes them live, and the ONLY thing that fires a production build for them. ASYNCHRONOUS BY DEFAULT: it resolves the target commit (the content-branch HEAD, which includes every accumulated skipped export commit), POSTs the server-side production build hook ONCE, and returns IMMEDIATELY with http_status 202 and {commit, build_hook_fired:true, status:"building"} — it does NOT wait for the deploy. That is deliberate: a 30-120s production build never fits a serverless invocation, and waiting for it is what used to get this call killed mid-response and answered as a CDN 502 with the build already running. VERIFY BY POLLING: call deploy_status {commit} (the commit this tool returned) every ~15s until deployStatus is "ready" AND productionConfirmed is true. deploy_status also reports build_ready_not_published — the build IS ready but production still serves an older commit, meaning Netlify "Auto Publishing" is locked; unlock it or publish the deploy manually. IF THIS CALL ITSELF 502s OR TIMES OUT, DO NOT RETRY IT. The build hook fires BEFORE the response, so the release has almost certainly already landed, and idempotency_key cannot suppress a second build when the first invocation died before storing its result — a retry can fire a second paid production build. Call deploy_status {commit} instead: a deploy already building/queued/ready for that commit IS your release. Pass wait_for_deploy:true only if you deliberately want the old blocking behaviour (still capped to the remaining invocation budget, so it usually returns build_not_confirmed_live anyway). One release deploys every skipped commit at once, so batch publishes and release once — it consumes real build minutes.',
     inputSchema: objectSchema({
       commit: stringSchema(
         'Optional commit SHA the live production deploy must reflect. Defaults to the current content branch HEAD.'
@@ -505,11 +505,16 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         description:
           'When true (default), POST the build hook to force a fresh production build before verifying. When false, only wait for and verify the deploy already triggered by the push.',
       },
+      wait_for_deploy: {
+        type: 'boolean',
+        description:
+          'Default false: return as soon as the build hook has fired (202 / status "building") and poll deploy_status yourself. Set true only to restore the legacy in-call wait, which is still capped to the remaining serverless invocation budget and therefore still cannot outlast a real build.',
+      },
       timeout_seconds: {
         type: 'integer',
         minimum: 1,
         description:
-          'Optional maximum seconds to wait for the deploy to reach a terminal state before reporting back. Always additionally capped to the remaining serverless invocation budget so the call returns a structured receipt instead of being killed by the platform timeout.',
+          'Only meaningful with wait_for_deploy:true. Maximum seconds to wait for the deploy to reach a terminal state before reporting back; always additionally capped to the remaining serverless invocation budget so the call returns a structured receipt instead of being killed by the platform timeout.',
       },
       idempotency_key: idempotencyKeyJsonSchema,
     }),
@@ -518,13 +523,62 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'create_agent_artifact_job',
     description:
-      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. For a PDF OF AN ARTICLE prefer render_article_pdf, which runs this call with the render-data mapper, the poll and the attach; if you do call this directly, omit `data` (Platform maps the article), and pass `kind` when the render is not an article — `kind` picks the template from site.pdf.byKind and gates the article-shaped requirements default (see the field). If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). OVERRIDE CHANNEL (`style`, BRIEF §3.4/D4): pass `style.visualStandardId` and/or `style.override` to point THIS job at a different visual_standard or a one-off partial brandImagery instead of the site's own — see the `style` field's own description for the full resolution order and the guardrail. requirements.image.usageContext not recognized by this project's image-model routing policy (get_image_model_policy's `contexts`) is coerced to article_body and reported in the response's `warnings` (never an error); when requirements.image.size is omitted, the effective brandImagery's aspectRatios[usageContext] (site's own, or from the resolved style) maps to the nearest of pdf-tool's 5 allowed sizes. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response, and pdf_no_template_configured (a pdf job on a site whose site object declares neither pdf.byKind.<kind> nor pdf.defaultTemplateId — the SITE is unconfigured, not the article: pass template_id or set the site's pdf defaults) — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
+      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. For a PDF OF AN ARTICLE prefer render_article_pdf, which runs this call with the render-data mapper, the poll and the attach; if you do call this directly, omit `data` (Platform maps the article), and pass `kind` when the render is not an article — `kind` picks the template from site.pdf.byKind and gates the article-shaped requirements default (see the field). If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). OVERRIDE CHANNEL (`style`, BRIEF §3.4/D4): pass `style.visualStandardId` and/or `style.override` to point THIS job at a different visual_standard or a one-off partial brandImagery instead of the site's own — see the `style` field's own description for the full resolution order and the guardrail. requirements.image.usageContext not recognized by this project's image-model routing policy (get_image_model_policy's `contexts`) is coerced to article_body and reported in the response's `warnings` (never an error); when requirements.image.size is omitted, the effective brandImagery's aspectRatios[usageContext] (site's own, or from the resolved style) maps to the nearest of pdf-tool's 5 allowed sizes. EDIT JOBS: pass operation:\"edit\" together with `sourceArtifact` ({artifactReference, expectedSha256} of the artifact being edited) and `editMode` — plus `maskRef` for a masked_edit and optional `editInstructions`. All five are TOP-LEVEL arguments of THIS call; none of them belongs under `requirements`, and a job that puts them there (or omits them) is failed by pdf-tool with \"edit jobs require sourceArtifact.artifactReference … expectedSha256 … editMode\". MODEL ROUTING DEFAULT: an image job that omits `model` runs on the model this site's image-model policy names for its requirements.image.usageContext; a job that names NO usageContext runs on the model that policy gives article_body (get_image_model_policy shows both), never on pdf-tool's own gpt-image-1 fallback — Platform states this site's default explicitly on every image job. Omitting usageContext is still worth fixing and is reported as the warning \"usageContext_missing\" in the response's `warnings` (a warning, never an error); \"image_model_default_unresolved\" there means this site's policy named no model at all (unreadable, or empty), so pdf-tool's own default decided instead — fix the policy. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response, and pdf_no_template_configured (a pdf job on a site whose site object declares neither pdf.byKind.<kind> nor pdf.defaultTemplateId — the SITE is unconfigured, not the article: pass template_id or set the site's pdf defaults) — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
         request_id: stringSchema('Existing content_item object id that will own the artifact.'),
         artifact_kind: { type: 'string', enum: ['image', 'pdf'], description: 'Artifact kind.' },
-        operation: { type: 'string', enum: ['generate', 'edit'], description: 'Defaults to generate.' },
+        operation: {
+          type: 'string',
+          enum: ['generate', 'edit'],
+          description:
+            'Defaults to generate. `edit` REQUIRES sourceArtifact and editMode, both TOP-LEVEL on this call (never under `requirements`) — see those fields.',
+        },
+        sourceArtifact: objectSchema(
+          {
+            artifactReference: anyObjectSchema(
+              'The ArtifactReference of the artifact being edited — the SAME object create_agent_artifact_job / get_agent_artifact_job_status / get_agent_artifact_by_slot returned for it, passed back verbatim.'
+            ),
+            expectedSha256: stringSchema(
+              "The source artifact's sha256, as the same response reported it. pdf-tool re-checks it before editing, so an edit can never silently run against different bytes than the caller looked at."
+            ),
+          },
+          ['artifactReference', 'expectedSha256'],
+          'REQUIRED when operation is "edit": the artifact this job edits. TOP-LEVEL on this call — it is not a member of `requirements`, and putting it there is the same as omitting it.'
+        ),
+        editMode: {
+          type: 'string',
+          enum: [
+            'deterministic_transform',
+            'masked_edit',
+            'image_variation',
+            'template_data_patch',
+            'pdf_overlay',
+            'pdf_transform',
+          ],
+          description:
+            'REQUIRED when operation is "edit": which kind of edit this is. Image edits are deterministic_transform (no model — crop/resize/format), masked_edit (regenerate inside maskRef) and image_variation; template_data_patch, pdf_overlay and pdf_transform are the pdf ones. TOP-LEVEL, like sourceArtifact.',
+        },
+        maskRef: objectSchema(
+          {
+            artifactReference: anyObjectSchema('ArtifactReference of the stored mask image, passed back verbatim.'),
+          },
+          ['artifactReference'],
+          'masked_edit only: the mask artifact naming the region to regenerate. Optional for every other editMode.'
+        ),
+        editInstructions: objectSchema(
+          {
+            change: stringSchema('What to change.'),
+            preserve: arraySchema(stringSchema('An element that must survive the edit unchanged.'), 'What to keep.'),
+            negativeInstructions: arraySchema(
+              stringSchema('Something the edit must not do.'),
+              'What the edit must avoid.'
+            ),
+          },
+          [],
+          'Optional edit guidance: {change, preserve[], negativeInstructions[]}. Applies to model-backed edits (masked_edit, image_variation); a deterministic_transform ignores it.'
+        ),
         prompt: stringSchema(
           'Generation prompt; required for image generation. For an image-GENERATION job on a site with a brandImagery contract this is the SUBJECT ONLY (e.g. "a jar of moisturizer on a marble countertop") — Platform prepends the site\'s styleSentence server-side. Never author style/medium/lighting/mood here; a site without brandImagery uses this text verbatim.'
         ),
@@ -757,6 +811,27 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         ),
       },
       ['site_id', 'request_id', 'mode']
+    ),
+    governance: { toolClass: 'read' },
+  },
+  {
+    name: 'derive_render_data_schema',
+    description:
+      "Read a PDF template's placeholders and get back the render-data CONTRACT they imply — WITHOUT storing anything — through THIS site's trusted Platform bridge. Storage-free and template-less: pass the same template_json you would send to create_pdf_template and pdf-tool returns { renderDataSchema, sampleData, sampleAssets, slots, imageSlots, notes }; nothing is written to any store and no template id is created. Use it BEFORE create_pdf_template: its renderDataSchema / sampleData / sampleAssets are exactly what create_pdf_template's render_data_schema / sample_data / sample_assets arguments take, which is how a template gets a contract instead of the silent blank-page renders a schema-less template produces. Every placeholder becomes a required string; a slot interpolated inside an `src=` attribute or a CSS `url()` is typed as an image reference and sampled as a bare assetId paired with a placeholder in sampleAssets; a variable only read inside {% if %}/{% unless %}/{% case %} or through `| default:` is optional; one only ever tested for truthiness is typed boolean; {% for x in items %} makes items an array described from the loop body. Anything ambiguous comes back with NO type, a description saying why, and a null sample. Supported for chromium (Liquid), pdfme (its declared fields) and react-pdf (a docTree envelope). Read-only: it creates nothing, costs no render, and needs no idempotency key.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        template_json: anyObjectSchema(
+          'The renderer-specific template document to read placeholders from — exactly what you would send to create_pdf_template. Nothing is stored.'
+        ),
+        renderer: {
+          type: 'string',
+          enum: ['pdfme', 'react-pdf', 'typst', 'chromium'],
+          description:
+            'Optional target renderer. Omit to resolve it the way create_pdf_template does: a pdfme fixed-layout shape (basePdf + schemas) stays on pdfme, everything else defaults to chromium.',
+        },
+      },
+      ['site_id', 'template_json']
     ),
     governance: { toolClass: 'read' },
   },
@@ -1146,6 +1221,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
           'Caller-asserted license recorded in artifact metadata; defaults to unknown.'
         ),
         max_bytes: intSchema('Optional byte cap for the stored image (max 5000000).'),
+        max_dimension_px: intSchema(
+          "Optional longest-edge cap in pixels for the stored image — the resize control this bridge previously did not expose. Aspect ratio is preserved and the image is NEVER cropped and never upscaled (fit: inside), so a 3000x2000 source with max_dimension_px 1600 is stored as 1600x1067 and a 900x600 source is stored unchanged. pdf-tool clamps this to the project's image sourcing policy quotas.maxImportDimensionPx ceiling (default 2048): it can only ask for something SMALLER than policy, never larger. Omit it to accept the policy bound."
+        ),
       },
       ['site_id', 'request_id', 'url']
     ),
@@ -1185,6 +1263,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         ),
         policy_overrides: anyObjectSchema(
           'Optional partial image sourcing policy (e.g. quotas.maxUrlImportsPerBatch) merged for this job only.'
+        ),
+        max_dimension_px: intSchema(
+          "Optional longest-edge cap in pixels applied to EVERY image in the batch, exactly as on import_image_from_url: aspect ratio preserved, never cropped, never upscaled, and clamped by pdf-tool to the policy's quotas.maxImportDimensionPx ceiling (default 2048)."
         ),
       },
       ['site_id', 'request_id', 'urls']

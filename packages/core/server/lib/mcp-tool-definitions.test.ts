@@ -14,8 +14,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 105 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 105, `Expected 105 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 106 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 106, `Expected 106 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {

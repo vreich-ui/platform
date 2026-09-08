@@ -219,3 +219,107 @@ test('with the deploy API unconfigured, a triggered build cannot be verified liv
     }
   );
 });
+
+// ── S5: awaitDeploy:false — respond as soon as the hook has fired ───────────
+//
+// The post-hook awaits (deploy-receipt poll, published-deploy lookup, GitHub
+// ancestry compare) are what made the first release call outlive the 10s
+// Netlify function ceiling and answer a CDN 502 with the build already
+// running. With awaitDeploy:false none of them may be reached — which is
+// exactly what these tests assert, by refusing to serve those URLs at all.
+
+test('awaitDeploy:false fires the hook, resolves HEAD, and returns "building" without ANY verification call', async () => {
+  await withEnv(CONFIGURED, async () => {
+    const seen: string[] = [];
+    await withFetch(
+      (url) => {
+        seen.push(url);
+        if (url.includes('/build_hooks/')) return new Response('ok', { status: 200 });
+        if (url.includes('api.github.com') && url.includes('/git/ref/heads/')) {
+          return jsonResponse({ object: { sha: HEAD_SHA } });
+        }
+        // Any deploy poll, site lookup or /compare here would be a regression:
+        // the unstubbed route throws, failing the test loudly.
+        return undefined;
+      },
+      async () => {
+        const result = await releaseToProduction({ awaitDeploy: false });
+        assert.equal(result.status, 'building');
+        assert.equal(result.released, false);
+        assert.equal(result.buildTriggered, true);
+        assert.equal(result.targetCommit, HEAD_SHA);
+        assert.equal(result.productionConfirmed, false);
+        assert.equal(result.productionReflectsCommit, false);
+        assert.equal(result.deploy, undefined);
+        assert.equal(result.publishedDeploy, undefined);
+        assert.match(result.reason, /deploy_status/);
+      }
+    );
+    assert.equal(
+      seen.filter((url) => url.includes('/deploys') || url.includes('/compare/')).length,
+      0,
+      'no deploy poll and no ancestry compare may run on the fast path'
+    );
+    assert.equal(seen.filter((url) => url.includes('/build_hooks/')).length, 1, 'the hook fires exactly once');
+  });
+});
+
+test('awaitDeploy:false with an explicit commit skips even the GitHub HEAD lookup', async () => {
+  await withEnv(CONFIGURED, async () => {
+    const seen: string[] = [];
+    await withFetch(
+      (url) => {
+        seen.push(url);
+        if (url.includes('/build_hooks/')) return new Response('ok', { status: 200 });
+        return undefined;
+      },
+      async () => {
+        const result = await releaseToProduction({ commit: 'feedfacefeedfacefeedface', awaitDeploy: false });
+        assert.equal(result.status, 'building');
+        assert.equal(result.targetCommit, 'feedfacefeedfacefeedface');
+        assert.ok(result.triggeredAt, 'the hook fire time is reported so the caller can age the build');
+      }
+    );
+    assert.deepEqual(
+      seen.map((url) => url.includes('/build_hooks/')),
+      [true]
+    );
+  });
+});
+
+test('awaitDeploy:false still refuses when no build hook is configured — it cannot claim a build', async () => {
+  await withEnv({ ...CONFIGURED, NETLIFY_BUILD_HOOK_URL: '' }, async () => {
+    await withFetch(
+      () => undefined,
+      async () => {
+        const result = await releaseToProduction({ awaitDeploy: false });
+        assert.equal(result.status, 'build_hook_not_configured');
+        assert.equal(result.buildTriggered, false);
+      }
+    );
+  });
+});
+
+test('awaitDeploy:false warns in-band when deploy_status cannot answer the poll it just prescribed', async () => {
+  await withEnv({ NETLIFY_BUILD_HOOK_URL: CONFIGURED.NETLIFY_BUILD_HOOK_URL }, async () => {
+    await withFetch(
+      (url) => (url.includes('/build_hooks/') ? new Response('ok', { status: 200 }) : undefined),
+      async () => {
+        const result = await releaseToProduction({ commit: 'deadbeefdeadbeef', awaitDeploy: false });
+        assert.equal(result.status, 'building');
+        assert.equal(result.buildTriggered, true);
+        assert.match(result.reason, /deploy lookup .* is not configured/i);
+      }
+    );
+  });
+});
+
+test('the default is unchanged for callers that do not opt in — verification still runs', async () => {
+  await withEnv(CONFIGURED, async () => {
+    await withFetch(routeWithPublished(HEAD_SHA, 'ready', HEAD_SHA), async () => {
+      const result = await releaseToProduction({ intervalSeconds: 1, timeoutSeconds: 1 });
+      assert.equal(result.status, 'released');
+      assert.equal(result.productionConfirmed, true);
+    });
+  });
+});

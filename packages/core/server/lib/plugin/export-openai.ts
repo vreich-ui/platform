@@ -159,8 +159,11 @@ is accepted.
    This is a dark commit. **It is not live.** Keep \`commit_sha\` and \`production.article_path\`.
 9. \`object_checkin\` — release the lock before anything else.
 10. Ask: "Release now, or batch more articles first?" A release costs a build. On "release":
-    \`release_to_production {idempotency_key:<request_id>}\`, then poll \`deploy_status {commit}\` every
-    ~15 s until \`deployStatus:"ready"\` AND \`productionConfirmed:true\`.
+    \`release_to_production {idempotency_key:<request_id>}\` — it answers at once with
+    \`{commit, build_hook_fired:true, status:"building"}\` (202); it does not wait for the build.
+    Then poll \`deploy_status {commit}\` every ~15 s until \`deployStatus:"ready"\` AND
+    \`productionConfirmed:true\`. **If the release call itself 502s, do NOT retry it** — the hook
+    fires before the response, so call \`deploy_status {commit}\` instead.
 11. \`verify_article_images {url, expectedImages:["/img/…"], expectedDocuments:["/pdf/…"], commit}\`.
 12. Report: live URL, request_id, commit, what was verified.
 
@@ -176,8 +179,8 @@ is accepted.
   the SAME \`idempotency_key\` — a write that already landed replays its original receipt
   (\`replayed_from_idempotency_key:true\`) instead of running twice. With no key, check
   \`object_inventory\` first. Treat a transport error as *unknown*, never as *failed*.
-- \`build_not_confirmed_live\` on a first release, and \`inconclusive\` from verify, are both normal —
-  poll, do not retry the action.
+- \`status:"building"\` from a release, and \`inconclusive\` from verify, are both normal — poll, do
+  not retry the action. A release is the ONE write you never re-issue after a 502.
 - Report honestly: published ≠ released ≠ verified. Always say which state you reached.
 - **One article at a time, or a handful.** A publication-wide job — re-voicing every article, a batch
   refresh — is twenty-plus lock/patch/publish cycles with a confirmation on each, and it is fragile in

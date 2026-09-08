@@ -29,6 +29,7 @@ import {
 } from './brand-imagery-resolve.js';
 import { isNetlifyBuildHookConfigured, NetlifyBuildHookTriggerError, triggerNetlifyBuild } from './netlify-deploys.js';
 import { releaseToProduction } from './production-release.js';
+import { buildAsyncReleaseBody } from '../../lib/release/release-async.js';
 import { buildPdfToolStorageGrant } from './pdf-tool-storage-grant.js';
 import {
   classifyRenderDataBrandSlot,
@@ -40,6 +41,12 @@ import {
   ARTICLE_BROCHURE_V1_RENDER_DATA_SCHEMA,
   ARTICLE_BROCHURE_V1_TEMPLATE_ID,
 } from '../../lib/pdf/article-brochure-v1-render-data-schema.js';
+import {
+  buildArtifactJobDescriptor,
+  resolveRoutingWarnings,
+  type ArtifactJobDescriptor,
+} from '../../lib/pdf/artifact-job-descriptor.js';
+import { resolveArtifactJobEditFields } from '../../lib/pdf/artifact-job-edit-fields.js';
 import { buildRenderData } from '../../lib/pdf/render-data-mapper.js';
 import { checkRenderDataAgainstSchema, checkRenderDataAssets } from '../../lib/pdf/render-data-schema-check.js';
 import {
@@ -105,6 +112,7 @@ import {
   createPlatformCaptureJob,
   createPlatformPdfTemplate,
   deletePlatformPdfTemplate,
+  derivePlatformRenderDataSchema,
   getPlatformArtifactBySlot,
   getPlatformArtifactJobStatus,
   getPlatformCaptureJobStatus,
@@ -343,10 +351,9 @@ export const callVerifyPdfContent = async (event: LambdaEvent, input: Record<str
   } else if (artifactReferenceInput) {
     const blobKey = toNonEmptyString(artifactReferenceInput.blobKey);
     if (!blobKey || !MAJOR_KEY_ARTIFACT_REF_RE.test(blobKey) || !blobKey.startsWith('pdf/')) {
-      return toolError(
-        'artifactReference.blobKey must be a PDF artifact reference (pdf/<requestId>/<sha256>.pdf).',
-        { error_code: 'artifact_reference_invalid' }
-      );
+      return toolError('artifactReference.blobKey must be a PDF artifact reference (pdf/<requestId>/<sha256>.pdf).', {
+        error_code: 'artifact_reference_invalid',
+      });
     }
     const requestId = blobKey.split('/')[1];
     if (!requestId) {
@@ -366,7 +373,11 @@ export const callVerifyPdfContent = async (event: LambdaEvent, input: Record<str
   // `pdf_quality` criterion say anything. Filed under the PDF's own public
   // path so the next publish attempt reads back what this call found, instead
   // of the criterion staying silent forever (which is how T2.5 shipped).
-  await filePdfContentCheck(event, url ?? (artifactReferenceInput ? `/${toNonEmptyString(artifactReferenceInput.blobKey)}` : undefined), check);
+  await filePdfContentCheck(
+    event,
+    url ?? (artifactReferenceInput ? `/${toNonEmptyString(artifactReferenceInput.blobKey)}` : undefined),
+    check
+  );
 
   return toolResult(documentContentCheckToolBody(identity.siteId, check));
 };
@@ -429,14 +440,24 @@ export const callReleaseToProduction = async (event: LambdaEvent, input: Record<
   const commit = toNonEmptyString(input.commit);
   const forceBuild = typeof input.force_build === 'boolean' ? input.force_build : undefined;
   const requestedTimeoutSeconds = typeof input.timeout_seconds === 'number' ? input.timeout_seconds : undefined;
-  const timeoutSeconds = resolveReleaseWaitBudgetSeconds(requestedTimeoutSeconds, event.invocationDeadlineMs);
+  // S5: waiting is now OPT-IN. Three live QA sessions saw the first release
+  // call 502 (origin_bad_gateway) with the build hook already fired, 3 for 3 —
+  // the post-hook awaits (deploy poll + published-deploy lookup + GitHub
+  // ancestry + the idempotency blob write) outlived the 10 s function ceiling.
+  // Default is now: fire the hook, answer 202/"building" with the commit, and
+  // let the caller poll deploy_status — which a 30-120 s build required anyway.
+  const waitForDeploy = input.wait_for_deploy === true;
+  const timeoutSeconds = waitForDeploy
+    ? resolveReleaseWaitBudgetSeconds(requestedTimeoutSeconds, event.invocationDeadlineMs)
+    : undefined;
 
   event.log?.({
     event: 'production_release_requested',
     commit: commit ?? null,
     forceBuild: forceBuild ?? null,
+    waitForDeploy,
     requestedTimeoutSeconds: requestedTimeoutSeconds ?? null,
-    effectiveTimeoutSeconds: timeoutSeconds,
+    effectiveTimeoutSeconds: timeoutSeconds ?? null,
   });
 
   try {
@@ -444,6 +465,7 @@ export const callReleaseToProduction = async (event: LambdaEvent, input: Record<
       ...(commit ? { commit } : {}),
       ...(forceBuild !== undefined ? { forceBuild } : {}),
       ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+      awaitDeploy: waitForDeploy,
     });
     event.log?.({
       event: 'production_release_result',
@@ -456,6 +478,16 @@ export const callReleaseToProduction = async (event: LambdaEvent, input: Record<
     // "released: false" success it might misread as "build still running".
     if (result.status === 'build_hook_not_configured' || result.status === 'deploy_lookup_not_configured') {
       return toolError(result.reason, { error_code: result.status, ...result });
+    }
+    if (result.status === 'building') {
+      return toolResult(
+        buildAsyncReleaseBody({
+          targetCommit: result.targetCommit,
+          buildTriggered: result.buildTriggered,
+          ...(result.triggeredAt ? { triggeredAt: result.triggeredAt } : {}),
+          reason: result.reason,
+        })
+      );
     }
     return toolResult({ ...result });
   } catch (error) {
@@ -1355,10 +1387,31 @@ export const callCreateAgentArtifactJob = async (
     return toolError('artifact_kind must be image or pdf, and filename is required.');
   }
   const wait = input.wait !== false;
-  const operationInput = toNonEmptyString(input.operation);
+  // S1/Task A: `operation` AND the four fields that ride with it
+  // (sourceArtifact, editMode, maskRef, editInstructions). All five are
+  // top-level on pdf-tool's job input; this bridge used to carry `operation`
+  // alone and silently drop the rest, so every edit job arrived at pdf-tool
+  // stripped of what made it an edit. See artifact-job-edit-fields.ts.
+  const editFields = resolveArtifactJobEditFields(input);
+  const operationInput = editFields.operation;
 
   const built = buildArtifactBridgeGrant();
   if (!built.ok) return built.result;
+
+  // S1/Task B: this site's image-model policy, fetched AT MOST ONCE per call
+  // and only when something actually needs it (an image job, or a
+  // usageContext membership check). Both the context check below and the
+  // project descriptor read the same body.
+  let modelPolicyBodyCache: Record<string, unknown> | undefined;
+  let modelPolicyFetched = false;
+  const loadImageModelPolicyBody = async (): Promise<Record<string, unknown> | undefined> => {
+    if (!modelPolicyFetched) {
+      modelPolicyFetched = true;
+      const modelPolicy = await getPlatformImageModelPolicy(built.grant);
+      modelPolicyBodyCache = modelPolicy.ok ? (modelPolicy.body as Record<string, unknown>) : undefined;
+    }
+    return modelPolicyBodyCache;
+  };
 
   const slotInput = toNonEmptyString(input.slot);
   let promptOverride = toNonEmptyString(input.prompt);
@@ -1457,8 +1510,7 @@ export const callCreateAgentArtifactJob = async (
         const requestedContext = toNonEmptyString(imageRequirements.usageContext);
         let policyContexts: string[] | undefined;
         if (requestedContext) {
-          const modelPolicy = await getPlatformImageModelPolicy(built.grant);
-          const contexts = modelPolicy.ok ? modelPolicy.body.contexts : undefined;
+          const contexts = (await loadImageModelPolicyBody())?.contexts;
           policyContexts = Array.isArray(contexts)
             ? contexts.filter((c): c is string => typeof c === 'string')
             : undefined;
@@ -1484,6 +1536,43 @@ export const callCreateAgentArtifactJob = async (
         }
       }
     }
+  }
+
+  // ── S1/Task B: FAL is the default; nothing lands on OpenAI by omission ──
+  //
+  // pdf-tool's `descriptor.defaultModel` decides what a job that omits
+  // `model` runs on, and pdf-tool's own fallback for it is gpt-image-1. This
+  // bridge sent NO descriptor at all, so an image job whose
+  // requirements.image.usageContext did not route (the common case: omitted
+  // entirely) inherited that fallback and ran on the openai-image executor --
+  // billing OpenAI, on a site whose every declared context routes to FAL.
+  // Platform now always states the default explicitly, read from THIS SITE's
+  // own image-model policy at call time; no model id is hardcoded anywhere in
+  // this path, so re-pointing the policy re-points the default.
+  //
+  // Image jobs only: a pdf render selects no generation model, and making
+  // every PDF render pay for a policy round trip would buy nothing.
+  let jobDescriptor: ArtifactJobDescriptor | undefined;
+  if (artifactKind === 'image') {
+    jobDescriptor = buildArtifactJobDescriptor({
+      projectId: built.grant.projectId,
+      policyBody: await loadImageModelPolicyBody(),
+    });
+    // `usageContext_missing` (and, if the policy could not be read at all,
+    // `image_model_policy_unavailable`) ride the response's `warnings` --
+    // warn, never fail: the omission stops being invisible without breaking
+    // a single existing caller.
+    sizeUsageWarnings.push(
+      ...resolveRoutingWarnings({ requirements: requirementsOverride, descriptor: jobDescriptor })
+    );
+    event.log?.({
+      event: 'artifact_bridge_image_descriptor_resolved',
+      siteId: scoped.scope.siteId,
+      requestId: scoped.scope.requestId,
+      projectId: built.grant.projectId,
+      defaultModel: jobDescriptor?.defaultModel,
+      warnings: sizeUsageWarnings,
+    });
   }
 
   // T2.2 (BRIEF-W2.md §3, D-1/D-2/D-3/D-4): the pdf-only bridge defaults.
@@ -1662,7 +1751,11 @@ export const callCreateAgentArtifactJob = async (
     requestId: scoped.scope.requestId,
     artifactKind,
     filename,
-    ...(operationInput ? { operation: operationInput as 'generate' | 'edit' } : {}),
+    // S1/Task A: operation + sourceArtifact + editMode + maskRef +
+    // editInstructions, all five, verbatim.
+    ...editFields,
+    // S1/Task B.
+    ...(jobDescriptor ? { descriptor: jobDescriptor } : {}),
     ...(promptOverride ? { prompt: promptOverride } : {}),
     ...(negativePromptOverride ? { negativePrompt: negativePromptOverride } : {}),
     ...(slotInput ? { slot: slotInput } : {}),
@@ -3154,6 +3247,49 @@ const attachPdfToArticle = async (
  * resolveTemplateBridgeScope exactly as-is (site_id only) rather than the
  * heavier content_item-owning resolveArtifactBridgeScope.
  */
+/**
+ * S2 — `derive_render_data_schema`: pdf-tool reads a template's placeholders and
+ * returns the render-data CONTRACT it implies (renderDataSchema, sampleData,
+ * sampleAssets, slots, imageSlots, notes) without storing anything.
+ *
+ * Two things make it the odd one out among the template bridge handlers, both
+ * copied from callPdfToolHealth rather than invented here:
+ *  1. It is STORAGE-FREE. The grant is still built, purely as the
+ *     bridge-configured check (so a misconfigured site gets
+ *     pdf_tool_bridge_not_configured rather than a confusing upstream error),
+ *     but nothing from it is sent — pdf-tool's args schema for this tool has no
+ *     projectId property and rejects unknown keys.
+ *  2. It is a READ. Nothing is created, so there is no idempotency wrapper.
+ *
+ * Site scope is resolved and echoed exactly like every other tool on this
+ * bridge: a foreign site_id is refused with template_site_mismatch before any
+ * outbound call is made.
+ */
+export const callDeriveRenderDataSchema = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+
+  const templateJson = input.template_json;
+  if (!templateJson || typeof templateJson !== 'object' || Array.isArray(templateJson)) {
+    return toolError('template_json is required and must be an object.');
+  }
+
+  const renderer = toNonEmptyString(input.renderer);
+  if (renderer && !['pdfme', 'react-pdf', 'typst', 'chromium'].includes(renderer)) {
+    return toolError('renderer must be one of: pdfme, react-pdf, typst, chromium.');
+  }
+
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const derived = await derivePlatformRenderDataSchema({
+    templateJson,
+    ...(renderer ? { renderer: renderer as PlatformCreateTemplateInput['renderer'] } : {}),
+  });
+  if (!derived.ok) return pdfToolBridgeError(derived);
+  return toolResult({ ...derived.body, siteId: scoped.siteId });
+};
+
 export const callPdfToolHealth = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const scoped = resolveTemplateBridgeScope(input);
   if (!scoped.ok) return scoped.result;
@@ -3485,6 +3621,15 @@ export const callImportImageFromUrl = async (event: LambdaEvent, input: Record<s
 
   const maxBytes =
     typeof input.max_bytes === 'number' && Number.isFinite(input.max_bytes) ? input.max_bytes : undefined;
+  // S2: the longest-edge downscale bound pdf-tool has always accepted and this
+  // bridge never forwarded. Sent verbatim when it is a finite number; pdf-tool
+  // clamps it to the project's quotas.maxImportDimensionPx ceiling, so a value
+  // named here can only ever be SMALLER than policy — this bridge deliberately
+  // holds no second opinion about it.
+  const maxDimensionPx =
+    typeof input.max_dimension_px === 'number' && Number.isFinite(input.max_dimension_px)
+      ? input.max_dimension_px
+      : undefined;
   const license = normalizeImageLicenseInput(input.license);
   const imported = await importPlatformImageFromUrl(built.grant, {
     requestId,
@@ -3495,6 +3640,7 @@ export const callImportImageFromUrl = async (event: LambdaEvent, input: Record<s
     ...(toNonEmptyString(input.label) ? { label: toNonEmptyString(input.label) } : {}),
     ...(license ? { license } : {}),
     ...(maxBytes !== undefined ? { maxBytes } : {}),
+    ...(maxDimensionPx !== undefined ? { maxDimensionPx } : {}),
   });
   if (!imported.ok) return pdfToolBridgeError(imported);
 
@@ -3518,6 +3664,12 @@ export const callImportImagesFromUrl = async (event: LambdaEvent, input: Record<
   if (!built.ok) return built.result;
 
   const license = normalizeImageLicenseInput(input.license);
+  // S2: the same longest-edge bound as the single import, applied by pdf-tool to
+  // every image in the batch.
+  const maxDimensionPx =
+    typeof input.max_dimension_px === 'number' && Number.isFinite(input.max_dimension_px)
+      ? input.max_dimension_px
+      : undefined;
   const imported = await importPlatformImagesFromUrl(built.grant, {
     requestId,
     urls,
@@ -3527,6 +3679,7 @@ export const callImportImagesFromUrl = async (event: LambdaEvent, input: Record<
     ...(input.policy_overrides && typeof input.policy_overrides === 'object' && !Array.isArray(input.policy_overrides)
       ? { policyOverrides: input.policy_overrides as Record<string, unknown> }
       : {}),
+    ...(maxDimensionPx !== undefined ? { maxDimensionPx } : {}),
   });
   if (!imported.ok) return pdfToolBridgeError(imported);
 

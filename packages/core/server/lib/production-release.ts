@@ -5,9 +5,18 @@
  * (see object-publish.ts), so pushing them does NOT build or deploy — the
  * exports accumulate on main, dark, until an explicit release. This module IS
  * that release: it fires the production build hook once (producing a single
- * deploy that includes every accumulated skipped commit) and then BLOCKS until
- * it can prove the live production deploy reflects a specific commit. This is
- * what separates object export from production deploy.
+ * deploy that includes every accumulated skipped commit) and then — when the
+ * caller asked to wait (`awaitDeploy`, default true for this shared core) —
+ * blocks until it can prove the live production deploy reflects a specific
+ * commit. This is what separates object export from production deploy.
+ *
+ * S5: both shipped entry points now pass `awaitDeploy:false` by default and
+ * answer `status:'building'` the moment the hook has fired. The post-hook
+ * awaits below (a deploy-receipt poll that sleeps a full 5 s interval, an
+ * unbounded published-deploy lookup, an unbounded GitHub ancestry compare)
+ * routinely outran the 10 s Netlify function ceiling, so the caller saw a CDN
+ * 502 for a release that HAD already fired the hook. Verification is the
+ * caller's `deploy_status` poll, which a 30-120 s build required anyway.
  *
  * The build hook is the only thing here that can start a production build (the
  * project invariant, and the whole point of the deferral): forceBuild POSTs
@@ -47,6 +56,21 @@ export type ReleaseToProductionOptions = {
   commit?: string;
   /** POST the build hook to force a fresh production build first. Default true. */
   forceBuild?: boolean;
+  /**
+   * S5. When false, RETURN AS SOON AS THE HOOK HAS FIRED and the commit is
+   * known (`status: 'building'`), skipping every post-hook await: the
+   * deploy-receipt poll, the published-deploy lookup and the GitHub ancestry
+   * call. Those three are what made the first release call outlive the
+   * serverless invocation and answer a CDN 502 with the build already
+   * triggered — see release-async.ts's header. The caller polls
+   * `deploy_status {commit}` instead, which is what it had to do anyway
+   * (a 30-120 s build never fits an in-call wait budget).
+   *
+   * Defaults to true so this shared core keeps its old blocking contract for
+   * any caller that has not opted in; both shipped entry points
+   * (`release_to_production` and `admin-release`) now pass false by default.
+   */
+  awaitDeploy?: boolean;
   timeoutSeconds?: number;
   intervalSeconds?: number;
   /** Injectable for tests; defaults to global fetch. */
@@ -59,6 +83,8 @@ export type ReleaseToProductionResult = {
   /** Machine-readable outcome for callers that branch on it. */
   status:
     | 'released'
+    /** S5: the hook fired and the commit is known; verification is the caller's poll. */
+    | 'building'
     | 'build_not_confirmed_live'
     | 'build_ready_not_published'
     | 'commit_unresolved'
@@ -216,6 +242,7 @@ export const releaseToProduction = async (
 ): Promise<ReleaseToProductionResult> => {
   const fetchImpl = options.fetchImpl ?? fetch;
   const forceBuild = options.forceBuild ?? true;
+  const awaitDeploy = options.awaitDeploy ?? true;
 
   // The build hook is the ONLY sanctioned production-build trigger. If a
   // forced build is requested but no hook is configured, refuse rather than
@@ -253,6 +280,36 @@ export const releaseToProduction = async (
     const trigger = await triggerNetlifyBuild();
     buildTriggered = true;
     triggeredAt = trigger.triggeredAt;
+  }
+
+  // S5 — the release is DONE being irreversible right here: the hook has
+  // fired and the commit is resolved. Everything below is verification the
+  // caller can (and, for a 30-120 s build, must anyway) do with
+  // `deploy_status`. Returning now is what keeps the response inside the
+  // serverless invocation instead of dying as a CDN 502 with a build already
+  // running. Nothing is skipped silently: `status: 'building'` says exactly
+  // what is true and what to poll.
+  if (!awaitDeploy) {
+    // Not a blocker for a 202 (the hook has already fired), but the caller is
+    // being told to poll deploy_status — so say up front when that poll cannot
+    // answer, rather than letting them poll a tool that is unconfigured.
+    const lookupCaveat = isNetlifyDeployLookupConfigured()
+      ? ''
+      : ' NOTE: Netlify deploy lookup (NETLIFY_SITE_ID + token) is not configured on this deployment, so deploy_status cannot confirm go-live — this is an operator-level setup gap.';
+    return {
+      released: false,
+      status: 'building',
+      reason:
+        (buildTriggered
+          ? `The production build hook fired for commit ${targetCommit}; the build is running. Poll deploy_status {commit: "${targetCommit}"} until deployStatus is "ready" AND productionConfirmed is true. Do NOT call release again for this commit.`
+          : `No build was forced (force_build:false); reporting the target commit only. Poll deploy_status {commit: "${targetCommit}"} for the deploy this commit's push produced.`) +
+        lookupCaveat,
+      targetCommit,
+      buildTriggered,
+      ...(triggeredAt ? { triggeredAt } : {}),
+      productionReflectsCommit: false,
+      productionConfirmed: false,
+    };
   }
 
   // Verification needs the Netlify deploy API. Without it we can at most report
