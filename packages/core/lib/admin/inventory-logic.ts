@@ -133,18 +133,58 @@ const STORE_WIDE_ACTIONS: ReadonlySet<ActionId> = new Set<ActionId>(['wipe-store
 export const isRowScopedAction = (action: ActionId): boolean => !STORE_WIDE_ACTIONS.has(action);
 
 /**
+ * Row-scoped verbs that are still SINGLE-SUBJECT: each one acts on the one row
+ * you invoked it from and has no meaningful "apply to all twelve" form, so it
+ * belongs in the row menu and the drawer, never in a bulk toolbar.
+ *
+ * WHY THIS SET EXISTS. `bulkActionsFor` returned all three of these for a
+ * uniform selection while `bulkButtons()` rendered no button for any of them.
+ * A tested function said the action was available and the surface silently
+ * disagreed — the same class of defect as the toolbar that used to go quiet
+ * with no explanation, and the reason `download` was reported. Fixed by
+ * DROPPING them from the bulk set rather than growing three bulk buttons:
+ *
+ *   - `download`: "download 12 artifacts" is not one action, it is twelve
+ *     authenticated byte fetches and twelve separate browser saves, which
+ *     browsers block after the first couple with no error the page can see. A
+ *     bulk button that reliably half-works is worse than none.
+ *   - `open-in-workspace`: navigates to ONE object's workspace; the bulk form
+ *     would be twelve tabs, and the popup blocker decides how many open.
+ *   - `read`: opens the drawer inspector, which inspects one hit at a time by
+ *     construction.
+ *
+ * All three stay in `allowedActions`, so the row menu and the drawer footer
+ * still offer them per row — where `download` can also say when there are no
+ * bytes to fetch (`inventoryPreviewPlan(hit).mode === 'json'`).
+ */
+const BULK_UNSAFE_ACTIONS: ReadonlySet<ActionId> = new Set<ActionId>([
+  'download',
+  'open-in-workspace',
+  'read',
+]);
+
+/** True when an action is safe to offer over a whole selection at once. */
+export const isBulkOfferableAction = (action: ActionId): boolean =>
+  isRowScopedAction(action) && !BULK_UNSAFE_ACTIONS.has(action);
+
+/**
  * The bulk-toolbar's enabled set: only actions valid for EVERY row in the
  * selection (BRIEF.md "Design (ruled)": "Bulk toolbar shows only verbs valid
  * for every selected row"). A mixed objects+artifacts selection intersects
  * down to `send-to-chat` only; an empty selection has no actions. The
- * store-wide verbs are excluded outright — see `STORE_WIDE_ACTIONS`.
+ * store-wide verbs are excluded outright — see `STORE_WIDE_ACTIONS` — as is
+ * `download`, which is row-scoped but not bulk-offerable (`BULK_UNSAFE_ACTIONS`).
+ *
+ * Every id this returns MUST have a button in the toolbar: this is the list
+ * the surface renders from, so an id here with nothing behind it is the
+ * function lying about what the page can do.
  */
 export function bulkActionsFor(selection: readonly InventoryHit[], roles: readonly Role[]): ActionId[] {
   if (selection.length === 0) return [];
   const perHit = selection.map((hit) => allowedActions(hit, roles));
   const [first, ...rest] = perHit;
   const restSets = rest.map((actions) => new Set(actions));
-  return first.filter((action) => isRowScopedAction(action) && restSets.every((set) => set.has(action)));
+  return first.filter((action) => isBulkOfferableAction(action) && restSets.every((set) => set.has(action)));
 }
 
 // ─── preview summaries ───────────────────────────────────────────────────────

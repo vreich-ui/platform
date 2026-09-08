@@ -111,9 +111,21 @@ export interface DeleteArtifactResult {
   deleted: boolean;
 }
 
+/**
+ * `tags`/`persistedTags` are the tags the SERVER READ BACK out of the artifact
+ * index after writing — not the list the request computed. A retag the server
+ * could not confirm never reaches here: it answers 409 with the store's own
+ * answer in the error message, which `callInventory` throws and
+ * `bulkRetagArtifacts` records per item. So a `RetagArtifactResult` in hand
+ * means the index was re-read and it carries these tags.
+ */
 export interface RetagArtifactResult {
   id: string;
   tags: string[];
+  persistedTags: string[];
+  verified: true;
+  added: string[];
+  removed: string[];
 }
 
 async function callInventory<T>(getToken: GetToken, action: string, payload: Record<string, unknown> = {}) {

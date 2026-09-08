@@ -96,6 +96,41 @@ describe('matchesInventoryQuery', () => {
   it('treats an empty query as "everything"', () => {
     assert.ok(matchesInventoryQuery('', [null, undefined]));
   });
+
+  /**
+   * The reported defect: the FIELD was lowercased and the QUERY was compared
+   * verbatim, so any query carrying an uppercase character could never match
+   * anything. These pin both halves of the comparison, called WITHOUT
+   * `normalizeInventoryQuery` in front — the function has to be correct on its
+   * own, not only when a caller remembers to normalize first.
+   */
+  it('matches a mixed-case query against a lowercase field', () => {
+    assert.ok(matchesInventoryQuery('Niacinamide', ['niacinamide barrier serum']));
+  });
+
+  it('matches an all-uppercase query against a lowercase field', () => {
+    assert.ok(matchesInventoryQuery('NIACINAMIDE', ['niacinamide barrier serum']));
+  });
+
+  it('ignores leading and trailing whitespace on the query', () => {
+    assert.ok(matchesInventoryQuery('  Niacinamide \n', ['a guide to niacinamide']));
+  });
+
+  it('treats a whitespace-only query as empty, so it still matches everything', () => {
+    assert.ok(matchesInventoryQuery('   ', [null, undefined]));
+  });
+
+  it('still returns false for a query that genuinely does not occur', () => {
+    assert.strictEqual(matchesInventoryQuery('Retinol', ['niacinamide barrier serum', null]), false);
+  });
+
+  it('answers the same whether or not the caller pre-normalized', () => {
+    const fields = ['A guide to RETINOL'];
+    assert.strictEqual(
+      matchesInventoryQuery(normalizeInventoryQuery('  Retinol '), fields),
+      matchesInventoryQuery('  Retinol ', fields)
+    );
+  });
 });
 
 describe('hit ids', () => {
@@ -423,6 +458,32 @@ describe('artifact reference detection', () => {
   it('never matches on an empty needle set', () => {
     const records = [{ object_id: 'req_other', object_type: 'article', serialized: '{"a":""}' }];
     assert.strictEqual(findReferencingObjectId(records, ['']), undefined);
+  });
+
+  /**
+   * Same one-sided-normalization shape the query matcher had: the needle is
+   * lowercased by `artifactReferenceNeedles`, the serialized record was not.
+   * A record spelling the digest in upper case therefore did not match, and
+   * the delete guard reported "not referenced" over an object that is.
+   */
+  it('matches a record that spells the sha256 in upper case', () => {
+    const records = [
+      { object_id: 'req_uses_it', object_type: 'page', serialized: `{"sha":"${sha.toUpperCase()}"}` },
+    ];
+
+    assert.deepStrictEqual(findReferencingObjectId(records, artifactReferenceNeedles({ sha256: sha })), {
+      object_id: 'req_uses_it',
+      object_type: 'page',
+    });
+  });
+
+  it('matches a mixed-case needle against a lowercase record', () => {
+    const records = [{ object_id: 'req_uses_it', object_type: 'page', serialized: `{"sha":"${sha}"}` }];
+
+    assert.deepStrictEqual(findReferencingObjectId(records, [sha.toUpperCase()]), {
+      object_id: 'req_uses_it',
+      object_type: 'page',
+    });
   });
 });
 

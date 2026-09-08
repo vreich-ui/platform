@@ -39,6 +39,7 @@ import {
   type ArtifactIndexStore,
 } from '../lib/artifact-index.js';
 import type { ArtifactReference } from '../lib/artifacts.js';
+import { verifyArtifactRetag } from '../../lib/admin/artifact-retag-verification.js';
 import { getManagedBlobStore, listManagedBlobStores } from '../lib/blob-admin.js';
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY } from '../lib/blob-list.js';
 import { getArtifactIndexBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
@@ -652,10 +653,52 @@ const handleRetagArtifact: ActionHandler = async (params, context) => {
   await writeArtifactReferenceIndexes(indexStore, parsed.requestId, updated);
   for (const key of staleTagPointerKeys) await deleteIndexKey(indexStore, key);
 
+  /**
+   * THE WRITE IS NOT THE ANSWER — THE READ-BACK IS.
+   *
+   * This handler used to return 200 with `change.tags`: the list it had just
+   * COMPUTED, never a list anything had read. The client turned that into
+   * "N of N updated", so a retag that did not end up visible to the very next
+   * search — the reported acceptance failure — was indistinguishable from one
+   * that did. `readArtifactReferences` (the search sweep) reads exactly this
+   * key, so reading it here asks the same question the search will ask, at the
+   * moment the operator is still looking.
+   *
+   * The read-back costs one `get` against a store this request already has
+   * open, and it is the only thing entitled to say the tag is on the artifact.
+   * `verifyArtifactRetag` owns the ruling; anything short of `verified` comes
+   * back as a refusal carrying the store's own answer, because a 200 here is
+   * read downstream as proof.
+   */
+  const readBack = await readArtifactReferenceResult(indexStore, parsed.requestId, parsed.sha256);
+  const verification = verifyArtifactRetag(
+    change.tags,
+    readBack.status === 'ok' ? { status: 'ok', tags: readBack.reference.tags } : readBack
+  );
+
+  if (!verification.verified) {
+    return jsonResponse(409, {
+      refused: true,
+      id: formatArtifactHitId(parsed.requestId, parsed.sha256),
+      verified: false,
+      // What the STORE says, never what this request intended.
+      tags: verification.persistedTags,
+      persistedTags: verification.persistedTags,
+      intendedTags: change.tags,
+      missing: verification.missing,
+      unexpected: verification.unexpected,
+      error: verification.reason ?? 'The retag could not be confirmed.',
+    });
+  }
+
   return jsonResponse(200, {
     id: formatArtifactHitId(parsed.requestId, parsed.sha256),
-    artifact: updated,
-    tags: change.tags,
+    artifact: readBack.status === 'ok' ? readBack.reference : updated,
+    verified: true,
+    // Both spellings carry the read-back list, so no caller can accidentally
+    // report the intended tags as the stored ones.
+    tags: verification.persistedTags,
+    persistedTags: verification.persistedTags,
     added: change.added,
     removed: change.removed,
   });

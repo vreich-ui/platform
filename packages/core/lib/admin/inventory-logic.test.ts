@@ -105,10 +105,13 @@ describe('allowedActions — role matrix', () => {
 });
 
 describe('bulkActionsFor', () => {
-  it('is the full per-hit action set when every row in the selection is the same collection', () => {
+  it('is the per-hit action set minus the single-subject verbs, for a uniform selection', () => {
     const selection = [hit({ collection: 'objects', id: 'a' }), hit({ collection: 'objects', id: 'b' })];
-    // Objects carry no store-wide verb, so the bulk set is the whole per-hit set.
-    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.admin), allowedActions(selection[0], ROLES.admin));
+    // Objects carry no store-wide verb, so only `open-in-workspace` is dropped
+    // — it navigates to ONE object and has no "all twelve" form. It stays in
+    // the per-hit matrix, which is what the row menu reads.
+    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.admin), ['archive', 'validate', 'send-to-chat']);
+    assert.ok(allowedActions(selection[0], ROLES.admin).includes('open-in-workspace'));
   });
 
   it('drops actions not shared across a mixed objects+artifacts selection, keeping only send-to-chat', () => {
@@ -129,8 +132,11 @@ describe('bulkActionsFor', () => {
     // store-wide, so a bulk toolbar ("apply to each selected row") is the
     // wrong place for them — see `isRowScopedAction`. They stay in
     // `allowedActions`, offered one row at a time with a typed confirm.
-    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.owner), ['read', 'send-to-chat', 'delete-blob']);
-    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.admin), ['read', 'send-to-chat']);
+    // `read` is absent for the other reason: it opens the drawer inspector,
+    // which inspects one hit at a time — see `BULK_UNSAFE_ACTIONS`.
+    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.owner), ['send-to-chat', 'delete-blob']);
+    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.admin), ['send-to-chat']);
+    assert.ok(allowedActions(selection[0], ROLES.admin).includes('read'));
   });
 
   it('never offers a store-wide verb in a bulk selection, however uniform', () => {
@@ -143,6 +149,21 @@ describe('bulkActionsFor', () => {
     assert.ok(!actions.includes('wipe-all'), 'wipe-all must not reach the bulk toolbar');
     // …while the row-level matrix still allows them for an owner.
     assert.ok(allowedActions(selection[0], ROLES.owner).includes('wipe-store'));
+  });
+
+  it('offers exactly the artifact verbs the bulk toolbar has buttons for', () => {
+    const selection = [hit({ collection: 'artifacts', id: 'a' }), hit({ collection: 'artifacts', id: 'b' })];
+
+    // `download` used to survive the intersection while the toolbar rendered
+    // no button for it — the action list and the surface disagreed. It is
+    // excluded here and still offered per row.
+    assert.deepStrictEqual(bulkActionsFor(selection, ROLES.admin), [
+      'delete',
+      'add-tag',
+      'remove-tag',
+      'send-to-chat',
+    ]);
+    assert.ok(allowedActions(selection[0], ROLES.admin).includes('download'));
   });
 
   it('is empty for an empty selection', () => {
