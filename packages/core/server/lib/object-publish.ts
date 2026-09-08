@@ -53,6 +53,7 @@
  * hold the live lock, which is what makes concurrent body drift during a
  * publish the exception rather than the norm.
  */
+import { describeDimsPush, pushNodeStrategyDims } from './tracking-dims-publish.js';
 import { materialize, type MaterializableObjectType, type MaterializedFile } from './materialize.js';
 import {
   commitMaterializedFiles,
@@ -121,6 +122,12 @@ export type PublishObjectDeps = {
    * than silently writing to some hardcoded tree.
    */
   exportRoot?: string;
+  /**
+   * Best-effort `node_strategy` dims push, run after the publish is durable
+   * (KI-08). Injected in tests; production uses the real one. It never throws
+   * and its outcome never changes the publish result.
+   */
+  pushDims?: typeof pushNodeStrategyDims;
 };
 
 export type PublishFailureCode =
@@ -397,6 +404,25 @@ export const publishObject = async (
       detail: error instanceof Error ? error.message : String(error),
       reconciliation: 'retry_publish',
     });
+  }
+
+  // ── KI-08: the annotation layer reaches the SINK, from the STORE ─────────
+  // AFTER the stamp, deliberately. The export this publish just committed is
+  // stripped of every `private` block — that strip is a security seam and stays
+  // — so the strategy/intent labels can only come from `fresh.body`, which is
+  // the full record. Best-effort in the strongest sense: the publish is already
+  // committed and stamped, and nothing this returns can change that.
+  try {
+    const dims = await (deps.pushDims ?? pushNodeStrategyDims)({
+      objectType,
+      objectId: input.object_id,
+      body: fresh.body,
+      fetchImpl: deps.fetchImpl,
+    });
+    console.log(describeDimsPush(input.object_id, dims));
+  } catch {
+    // pushNodeStrategyDims does not throw; an injected one might.
+    console.warn(`[tracking-dims] ${input.object_id}: push threw; publish unaffected`);
   }
 
   // The live permalink for a content_item (blog pattern /%slug%) — the publish
