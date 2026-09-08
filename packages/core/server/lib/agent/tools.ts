@@ -31,6 +31,7 @@ import type { Role } from '../roles.js';
 import { projectActivityForChat } from '../requests/activity-for-chat.js';
 import { fetchPublicationOutputs } from '../requests/publication-outputs.js';
 import { nodeLabel } from '../../../lib/admin/request-logic.js';
+import { buildLostReleaseResult } from '../../../lib/release/release-async.js';
 import { objectTypeSchema, type ObjectType } from '../../../schema/object-record-v1.js';
 
 /** W18 T18.6a: `membership` tools are `ask`-class by construction (autonomyFloor 'ask'; definitions in T18.6b). */
@@ -1552,7 +1553,37 @@ const releaseWorkspaceRun: ChatTool = {
       ...(commit ? { commit } : {}),
       idempotency_key: idempotencyKey,
     });
-    if (released.is_error) return released;
+
+    // S5 — THE 502 PATH. A failed release response is NOT evidence that
+    // nothing happened: the build hook fires before the response, so a
+    // transport failure (Cloudflare origin_bad_gateway, an invocation killed
+    // at the 10 s ceiling) very often sits on top of a release that HAS
+    // landed. The standing ruling on this platform is therefore: never retry
+    // it — a retry can fire a second paid production build, and
+    // idempotency_key does not suppress that when the first invocation died
+    // before it could store its own result.
+    //
+    // So the recovery is a READ, in the same turn: ask deploy_status what
+    // actually exists for the commit and answer with that, flagged
+    // `release_response_lost`. There is exactly one call below and it is
+    // deploy_status — release_to_production is never re-issued here.
+    if (released.is_error) {
+      const lostCommit = commit ?? null;
+      const deployProbe = await ctx.operational.call('deploy_status', lostCommit ? { commit: lostCommit } : {});
+      return {
+        content: json(
+          buildLostReleaseResult({
+            commit: lostCommit,
+            releaseError: released.content,
+            deploy: deployProbe.is_error ? null : parseJson(deployProbe.content),
+          })
+        ),
+        // Not an error result: this IS the truthful answer to the caller's
+        // question, in one call. The payload says what is and is not known.
+        is_error: false,
+      };
+    }
+
     const releaseBody = parseJson(released.content);
     const targetCommit = (releaseBody.targetCommit as string | undefined) ?? commit;
     const deploy = await ctx.operational.call('deploy_status', targetCommit ? { commit: targetCommit } : {});

@@ -79,6 +79,8 @@ test('tools/list exposes the pdf template bridge tools', async () => {
   assert.ok(names.has('publish_pdf_template'));
   assert.ok(names.has('delete_pdf_template'));
   assert.ok(names.has('health'));
+  // S2: the storage-free schema-derivation read.
+  assert.ok(names.has('derive_render_data_schema'));
 });
 
 test('health returns pdf-tool capability manifest through the bridge and never exposes the grant', async () => {
@@ -393,6 +395,117 @@ test('create_agent_artifact_job forwards template_id, data, and assets to pdf-to
     assert.equal(jobCall?.body.templateId, 'tpl_report_card');
     assert.deepEqual(jobCall?.body.data, data);
     assert.deepEqual(jobCall?.body.assets, assets);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+/**
+ * S2 — derive_render_data_schema. Three things this pins, all of them the
+ * places a passthrough wrapper actually goes wrong:
+ *  1. PARAM MAPPING. snake_case in (template_json / renderer), camelCase out
+ *     (templateJson / renderer) — the whole job of the wrapper.
+ *  2. NO GRANT, NO PROJECT SCOPE. pdf-tool's args schema for this tool is
+ *     additionalProperties:false with no projectId, so a projectPayload()-shaped
+ *     call would fail upstream exactly as it did for `health` (see that test).
+ *     The forwarded body must be EXACTLY the two business args.
+ *  3. The response is echoed with siteId, like every other tool on the bridge.
+ */
+test('derive_render_data_schema forwards template_json/renderer and sends no grant or project scope', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    derive_render_data_schema: (body) => ({
+      body: {
+        renderer: body.renderer ?? 'chromium',
+        supported: true,
+        renderDataSchema: {
+          type: 'object',
+          properties: { title: { type: 'string' }, hero_image: { type: 'string', 'x-slotKind': 'imageRef' } },
+          required: ['title', 'hero_image'],
+        },
+        sampleData: { title: 'Sample title', hero_image: 'hero-image' },
+        sampleAssets: { images: [{ assetId: 'hero-image', dataUri: 'data:image/png;base64,AAAA' }] },
+        slots: [
+          { path: 'title', kind: 'string', required: true },
+          { path: 'hero_image', kind: 'imageRef', required: true },
+        ],
+        imageSlots: ['hero_image'],
+        notes: [],
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const templateJson = { html: '<h1>{{ title }}</h1><img src="{{ hero_image }}">' };
+    const derived = await rpc('derive_render_data_schema', {
+      site_id: 'site_drlurie',
+      template_json: templateJson,
+      renderer: 'chromium',
+    });
+    assert.ok(!derived.result.isError, JSON.stringify(derived.result.structuredContent));
+    assert.equal(derived.result.structuredContent?.supported, true);
+    assert.equal(derived.result.structuredContent?.siteId, 'site_drlurie');
+    assert.deepEqual(derived.result.structuredContent?.imageSlots, ['hero_image']);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].authorization, `Bearer ${RUN_SECRET}`);
+    // Exactly the two business args: no projectId, no storage, nothing else —
+    // deepEqual over the whole forwarded body is the assertion that proves it.
+    assert.deepEqual(calls[0].body, { templateJson, renderer: 'chromium' });
+
+    const visible = JSON.stringify(derived.response.body);
+    assert.ok(!visible.includes(STORAGE_SECRET));
+    assert.ok(!visible.includes(RUN_SECRET));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('derive_render_data_schema omits renderer when the caller does not name one', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    derive_render_data_schema: () => ({ body: { renderer: 'chromium', supported: true, notes: [] } }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const templateJson = { html: '<p>{{ body }}</p>' };
+    const derived = await rpc('derive_render_data_schema', { site_id: 'site_drlurie', template_json: templateJson });
+    assert.ok(!derived.result.isError, JSON.stringify(derived.result.structuredContent));
+    assert.deepEqual(calls[0].body, { templateJson });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('derive_render_data_schema refuses a bad call before any outbound fetch', async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    return Response.json({ error: 'must not be reached' }, { status: 500 });
+  }) as typeof fetch;
+  try {
+    const missingTemplate = await rpc('derive_render_data_schema', { site_id: 'site_drlurie' });
+    assert.equal(missingTemplate.result.isError, true);
+
+    const notAnObject = await rpc('derive_render_data_schema', { site_id: 'site_drlurie', template_json: 'nope' });
+    assert.equal(notAnObject.result.isError, true);
+
+    const badRenderer = await rpc('derive_render_data_schema', {
+      site_id: 'site_drlurie',
+      template_json: { html: '<p>{{ a }}</p>' },
+      renderer: 'crayon',
+    });
+    assert.equal(badRenderer.result.isError, true);
+
+    const foreignSite = await rpc('derive_render_data_schema', {
+      site_id: 'site_other',
+      template_json: { html: '<p>{{ a }}</p>' },
+    });
+    assert.equal(foreignSite.result.isError, true);
+    assert.equal(foreignSite.result.structuredContent?.error_code, 'template_site_mismatch');
+
+    assert.equal(fetchCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

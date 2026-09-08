@@ -74,6 +74,7 @@ import {
   callRenderArticlePdf,
   callValidatePdfRenderData,
   callGetPdfRenderBrand,
+  callDeriveRenderDataSchema,
   callGetPdfTemplateValidation,
   callImportImageFromUrl,
   callImportImagesFromUrl,
@@ -228,6 +229,8 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   get_pdf_render_brand: callGetPdfRenderBrand,
   validate_pdf_template: callValidatePdfTemplate,
   get_pdf_template_validation: callGetPdfTemplateValidation,
+  // S2: the schema-derivation read that precedes create_pdf_template.
+  derive_render_data_schema: callDeriveRenderDataSchema,
   publish_pdf_template: callPublishPdfTemplate,
   delete_pdf_template: callDeletePdfTemplate,
   health: callPdfToolHealth,

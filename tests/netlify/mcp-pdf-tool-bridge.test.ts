@@ -1081,7 +1081,17 @@ test('a COMPLETING inline job still reports Platform’s styleSource and warning
     assert.equal(body.styleSource, 'site_locked', "pdf-tool's best-effort styleSource must not overwrite Platform's");
     assert.deepEqual(body.overriddenFields, ['style']);
     // Platform's warning survives, and pdf-tool's is kept rather than replaced.
-    assert.deepEqual(body.warnings, ['usage_context_not_in_policy:newsletter_hero', 'pdf_tool_render_warning']);
+    // S1/Task B: this stub's policy is deliberately EMPTY (byUsageContext
+    // {}), so the bridge can name no default model and sends pdf-tool no
+    // descriptor — which means pdf-tool's own gpt-image-1 fallback would
+    // decide the model. That is the exact condition that put a Platform image
+    // job on OpenAI, so it is reported rather than left silent, between
+    // Platform's own context warning and pdf-tool's echoed render warning.
+    assert.deepEqual(body.warnings, [
+      'usage_context_not_in_policy:newsletter_hero',
+      'image_model_default_unresolved',
+      'pdf_tool_render_warning',
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     await clearGovernanceOverride();

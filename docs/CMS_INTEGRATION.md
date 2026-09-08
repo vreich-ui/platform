@@ -591,6 +591,7 @@ enabled.
 | `publish_pdf_template` | `callPublishPdfTemplate` | publication | — | **yes** (remote) |
 | `delete_pdf_template` | `callDeletePdfTemplate` | privileged | ask | **yes** (remote) |
 | `get_agent_artifact_job_status` · `get_agent_artifact_by_slot` · `list_pdf_templates` · `get_pdf_template` · `build_pdf_render_data` · `validate_pdf_render_data` · `get_pdf_render_brand` · `validate_pdf_template` · `get_pdf_template_validation` · `health` | `mcp-tool-handlers.ts` | read | — | no |
+| `derive_render_data_schema` (storage-free, like `health`: no grant or project scope is forwarded) | `callDeriveRenderDataSchema` | read | — | no |
 | `search_images` · `update_image_search_candidate` | `mcp-tool-handlers.ts` | draft | — | no |
 | `get_image_search_job_status` · `get_image_search_bank` · `get_image_search_policy` · `get_image_model_policy` | `mcp-tool-handlers.ts` | read | — | no |
 | `set_image_search_policy` · `set_image_model_policy` | `mcp-tool-handlers.ts` | privileged | ask + off | **yes** (remote) |

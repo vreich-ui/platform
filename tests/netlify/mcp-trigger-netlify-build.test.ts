@@ -151,7 +151,13 @@ test('release_to_production is listed and documents the deferred-deploy release 
 
   assert.ok(tool, 'expected tools/list to include release_to_production');
   assert.match(tool!.description, /\[skip netlify\]/i);
-  assert.match(tool!.description, /released:true only when/i);
+  // S5: the tool is asynchronous — it fires the hook and returns 202/"building".
+  // The description must teach the poll AND the never-retry-a-502 ruling, since
+  // an agent that retries a lost release fires a second paid production build.
+  assert.match(tool!.description, /status:"building"/i);
+  assert.match(tool!.description, /poll/i);
+  assert.match(tool!.description, /deploy_status/);
+  assert.match(tool!.description, /502[^.]*DO NOT RETRY/i);
 });
 
 test('release_to_production surfaces build_hook_not_configured as a tool error when forcing a build with no hook', async () => {

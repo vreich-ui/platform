@@ -196,7 +196,7 @@
     ],
     "rawExportPath": "/export",
     "weightsEnvelopeKey": "experiments",
-    "mcpToolCount": 105
+    "mcpToolCount": 106
   },
   "cmsAgent": {
     "maxConversationTools": 99,

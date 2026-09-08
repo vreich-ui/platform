@@ -163,6 +163,27 @@ export type PlatformArtifactJobInput = {
   requestId: string;
   artifactKind: 'image' | 'pdf';
   operation?: 'generate' | 'edit';
+  // S1/Task A: the four EDIT fields that ride WITH `operation:'edit'`. They
+  // are top-level on pdf-tool's own job input (its create_agent_artifact_job
+  // schema declares sourceArtifact / editMode / maskRef / editInstructions
+  // alongside operation, not under `requirements`), and this bridge used to
+  // declare `operation` alone -- so every edit job reached pdf-tool stripped
+  // of the very fields that make it an edit and failed with "edit jobs
+  // require sourceArtifact.artifactReference; ... expectedSha256; ...
+  // editMode". Forwarded verbatim; pdf-tool stays the arbiter of their
+  // contract (artifact-job-edit-fields.ts's header says why).
+  sourceArtifact?: Record<string, unknown>;
+  editMode?: string;
+  maskRef?: Record<string, unknown>;
+  editInstructions?: Record<string, unknown>;
+  // S1/Task B: pdf-tool's optional project descriptor. Its `defaultModel` is
+  // what a job that omits `model` runs on, and pdf-tool's own fallback for it
+  // is gpt-image-1 -- so a Platform image job whose usageContext did not
+  // route landed on OpenAI by omission. Platform now always states the
+  // default from THIS SITE's image-model policy (see
+  // artifact-job-descriptor.ts). pdf-tool requires descriptor.projectId to
+  // equal the request's and the grant's projectId.
+  descriptor?: { projectId: string; defaultModel: string };
   prompt?: string;
   filename: string;
   slot?: string;
@@ -209,6 +230,15 @@ export const createPlatformArtifactJob = (
       requestId: input.requestId,
       artifactKind: input.artifactKind,
       operation: input.operation ?? 'generate',
+      // S1/Task A: forwarded, not dropped. `projectPayload` strips nothing,
+      // and postPdfTool omits undefined members, so an ordinary generate job
+      // sends exactly what it sent before.
+      sourceArtifact: input.sourceArtifact,
+      editMode: input.editMode,
+      maskRef: input.maskRef,
+      editInstructions: input.editInstructions,
+      // S1/Task B.
+      descriptor: input.descriptor,
       prompt: input.prompt,
       filename: input.filename,
       slot: input.slot,
@@ -554,6 +584,36 @@ export const previewPlatformPdfTemplate = (
     options
   );
 
+/**
+ * S2 (bridge passthrough wave): pdf-tool's `derive_render_data_schema` — read a
+ * template's placeholders and get back the render-data CONTRACT it implies
+ * (renderDataSchema + sampleData + sampleAssets + slots) WITHOUT storing
+ * anything. It is the natural first step before create_pdf_template, whose
+ * render_data_schema / sample_data / sample_assets arguments take exactly those
+ * three response fields.
+ *
+ * STORAGE-FREE, like `health` and unlike every other template call here.
+ * pdf-tool's args schema for this tool is `additionalProperties: false` over
+ * { templateJson, renderer?, storage?, descriptor? } — there is NO projectId
+ * property, so projectPayload() would fail upstream validation on the stray key
+ * exactly as it did for health (see healthPlatformPdfTool's comment). Verified
+ * against the LIVE tool schema and a live call carrying no `storage` argument
+ * at all, which returned a full schema: nothing tenant-scoped is read or
+ * written, so nothing needs a grant.
+ */
+export const derivePlatformRenderDataSchema = (
+  input: { templateJson: unknown; renderer?: 'pdfme' | 'react-pdf' | 'typst' | 'chromium' },
+  options: PdfToolClientOptions = {}
+) =>
+  postPdfTool(
+    'derive-render-data-schema',
+    {
+      templateJson: input.templateJson,
+      ...(input.renderer ? { renderer: input.renderer } : {}),
+    },
+    options
+  );
+
 export const getPlatformPdfTemplateValidation = (
   grant: PdfToolStorageGrant,
   input: { templateId: string; version?: number; validationId?: string },
@@ -698,6 +758,14 @@ export const importPlatformImageFromUrl = (
     label?: string;
     license?: PlatformImageLicenseInput;
     maxBytes?: number;
+    /**
+     * S2: pdf-tool's longest-edge cap for the stored image (fit: inside —
+     * aspect ratio preserved, never cropped, never upscaled). pdf-tool clamps
+     * it to the project's image sourcing policy quotas.maxImportDimensionPx
+     * ceiling (default 2048), so this can only ever ask for something SMALLER.
+     * Forwarded verbatim: Platform holds no second opinion about the bound.
+     */
+    maxDimensionPx?: number;
   },
   options: PdfToolClientOptions = {}
 ) =>
@@ -712,6 +780,7 @@ export const importPlatformImageFromUrl = (
       ...(input.label ? { label: input.label } : {}),
       ...(input.license ? { license: input.license } : {}),
       ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+      ...(input.maxDimensionPx !== undefined ? { maxDimensionPx: input.maxDimensionPx } : {}),
     }),
     options
   );
@@ -725,6 +794,8 @@ export const importPlatformImagesFromUrl = (
     label?: string;
     license?: PlatformImageLicenseInput;
     policyOverrides?: Record<string, unknown>;
+    /** S2: as importPlatformImageFromUrl's, applied to every image in the batch. */
+    maxDimensionPx?: number;
   },
   options: PdfToolClientOptions = {}
 ) =>
@@ -737,6 +808,7 @@ export const importPlatformImagesFromUrl = (
       ...(input.label ? { label: input.label } : {}),
       ...(input.license ? { license: input.license } : {}),
       ...(input.policyOverrides ? { policyOverrides: input.policyOverrides } : {}),
+      ...(input.maxDimensionPx !== undefined ? { maxDimensionPx: input.maxDimensionPx } : {}),
     }),
     options
   );

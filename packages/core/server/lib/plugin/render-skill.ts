@@ -365,9 +365,11 @@ That is how this publish is attributed in the ledger.`
    and \`production.article_path\`.
 9. \`object_checkin\`.
 10. Ask: "Release now, or batch more articles first?" A release costs a build. On "release":
-    \`release_to_production {idempotency_key: request_id}\`, then poll \`deploy_status {commit}\` every
-    ~15 s until \`deployStatus:"ready"\` **and** \`productionConfirmed:true\`. \`build_not_confirmed_live\`
-    on the first call is normal — poll, do not re-release.
+    \`release_to_production {idempotency_key: request_id}\`. It answers immediately —
+    \`{commit, build_hook_fired:true, status:"building"}\`, HTTP 202 — because it fires the hook
+    and returns rather than waiting for a 30-120 s build. Then poll \`deploy_status {commit}\`
+    every ~15 s until \`deployStatus:"ready"\` **and** \`productionConfirmed:true\`. A
+    \`queued\`/\`building\` deploy is normal — poll, do not re-release.
 
     **If \`release_to_production\` itself 502s, do NOT retry it.** This is the one exception to the
     502 rule in §6. The build hook fires BEFORE the response, so the release has almost certainly

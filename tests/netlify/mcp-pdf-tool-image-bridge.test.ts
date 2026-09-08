@@ -467,3 +467,127 @@ test('foreign site_id fails every image bridge tool with template_site_mismatch 
     globalThis.fetch = originalFetch;
   }
 });
+
+/**
+ * S2 — max_dimension_px, the resize control this bridge never forwarded.
+ *
+ * pdf-tool has always accepted `maxDimensionPx` on both url-import tools (a
+ * longest-edge bound: aspect preserved, never cropped, never upscaled, clamped
+ * upstream to the policy's quotas.maxImportDimensionPx ceiling). The wrappers
+ * dropped it, which is why a QA pass concluded "no resize tool exists anywhere
+ * on this bridge". These pin the mapping in BOTH directions: snake_case in,
+ * camelCase out when named, and ABSENT from the forwarded body when not — a
+ * wrapper that always sends the key would silently override the policy default
+ * for every caller who never asked for a bound.
+ */
+test('import_image_from_url forwards max_dimension_px as maxDimensionPx, and omits it when unset', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    import_image_from_url: (body) => ({
+      body: {
+        projectId: body.projectId,
+        requestId: body.requestId,
+        artifactReference: { blobKey: `image/${body.requestId}/${'b'.repeat(64)}.webp`, sha256: 'b'.repeat(64) },
+        candidateId: 'cand_url_bounded',
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const bounded = await rpc('import_image_from_url', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      url: 'https://example.com/huge.jpg',
+      max_dimension_px: 1600,
+      max_bytes: 400000,
+    });
+    assert.ok(!bounded.result.isError, JSON.stringify(bounded.result.structuredContent));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].body.maxDimensionPx, 1600);
+    assert.equal(calls[0].body.maxBytes, 400000);
+    assert.equal(calls[0].body.max_dimension_px, undefined);
+
+    const unbounded = await rpc('import_image_from_url', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      url: 'https://example.com/other.jpg',
+    });
+    assert.ok(!unbounded.result.isError, JSON.stringify(unbounded.result.structuredContent));
+    assert.equal(calls.length, 2);
+    assert.ok(!('maxDimensionPx' in calls[1].body));
+
+    const ignoredJunk = await rpc('import_image_from_url', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      url: 'https://example.com/third.jpg',
+      max_dimension_px: 'big',
+    });
+    assert.ok(!ignoredJunk.result.isError, JSON.stringify(ignoredJunk.result.structuredContent));
+    assert.equal(calls.length, 3);
+    assert.ok(!('maxDimensionPx' in calls[2].body));
+
+    assertGrantNeverExposed(JSON.stringify(bounded.response.body));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('import_images_from_url forwards max_dimension_px as maxDimensionPx for the whole batch', async () => {
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    import_images_from_url: (body) => ({
+      status: 202,
+      body: {
+        jobId: 'job-url-import-bounded',
+        status: 'pending',
+        projectId: body.projectId,
+        requestId: body.requestId,
+        urls: body.urls,
+      },
+    }),
+  });
+  globalThis.fetch = fetchImpl;
+  try {
+    const urls = ['https://example.com/a.jpg', 'https://example.com/b.jpg'];
+    const bounded = await rpc('import_images_from_url', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      urls,
+      max_dimension_px: 1200,
+    });
+    assert.ok(!bounded.result.isError, JSON.stringify(bounded.result.structuredContent));
+    assert.equal(bounded.result.structuredContent?.jobId, 'job-url-import-bounded');
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body.urls, urls);
+    assert.equal(calls[0].body.maxDimensionPx, 1200);
+
+    const unbounded = await rpc('import_images_from_url', {
+      site_id: 'site_drlurie',
+      request_id: REQUEST_ID,
+      urls,
+    });
+    assert.ok(!unbounded.result.isError, JSON.stringify(unbounded.result.structuredContent));
+    assert.equal(calls.length, 2);
+    assert.ok(!('maxDimensionPx' in calls[1].body));
+
+    assertGrantNeverExposed(JSON.stringify(bounded.response.body));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('both url-import tools advertise max_dimension_px in their input schema', async () => {
+  const response = await handler({
+    httpMethod: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  const tools = (JSON.parse(response.body) as {
+    result: { tools: Array<{ name: string; inputSchema: { properties?: Record<string, unknown> } }> };
+  }).result.tools;
+  for (const name of ['import_image_from_url', 'import_images_from_url']) {
+    const tool = tools.find((candidate) => candidate.name === name);
+    assert.ok(tool, `${name} must be listed`);
+    assert.ok(tool!.inputSchema.properties?.max_dimension_px, `${name} must advertise max_dimension_px`);
+  }
+});

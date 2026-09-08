@@ -17,6 +17,7 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import { resolveRolesFromEvent } from '../lib/request-roles.js';
 import { releaseToProduction } from '../lib/production-release.js';
+import { releaseHttpStatusFor } from '../../lib/release/release-async.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -33,18 +34,30 @@ const jsonResponse = (status: number, body: Record<string, unknown>) => ({
   body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
 });
 
-const parseOptions = (event: LambdaEvent): { commit?: string; forceBuild?: boolean; timeoutSeconds?: number } => {
-  if (!event.body) return {};
+/**
+ * S5: `awaitDeploy` is opt-in here too. This endpoint used to forward the
+ * browser's `timeout_seconds: 8` straight into `pollDeployReceipt` inside a
+ * 10 s Netlify function, then do two more unbounded API calls after it — the
+ * same shape that made the agent-side release 502. The dashboard already
+ * renders a non-released result as "Release started", so answering 202 the
+ * moment the hook fires is both faster and more truthful.
+ */
+const parseOptions = (
+  event: LambdaEvent
+): { commit?: string; forceBuild?: boolean; timeoutSeconds?: number; awaitDeploy: boolean } => {
+  if (!event.body) return { awaitDeploy: false };
   try {
     const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
     const value = JSON.parse(raw) as Record<string, unknown>;
+    const awaitDeploy = value.wait_for_deploy === true;
     return {
       ...(typeof value.commit === 'string' && value.commit.trim() ? { commit: value.commit.trim() } : {}),
       ...(typeof value.force_build === 'boolean' ? { forceBuild: value.force_build } : {}),
-      ...(typeof value.timeout_seconds === 'number' ? { timeoutSeconds: value.timeout_seconds } : {}),
+      ...(awaitDeploy && typeof value.timeout_seconds === 'number' ? { timeoutSeconds: value.timeout_seconds } : {}),
+      awaitDeploy,
     };
   } catch {
-    return {};
+    return { awaitDeploy: false };
   }
 };
 
@@ -66,9 +79,8 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     const result = await releaseToProduction(parseOptions(event));
     // A configuration gap (no build hook / no deploy API) is a 400 the operator
     // must fix, not a 200 "released:false" the UI might read as "still building".
-    const status =
-      result.status === 'build_hook_not_configured' || result.status === 'deploy_lookup_not_configured' ? 400 : 200;
-    return jsonResponse(status, { result });
+    // `building` is a 202: accepted, hook fired, go poll.
+    return jsonResponse(releaseHttpStatusFor(result.status), { result });
   } catch (error) {
     console.error('Admin_Release request failed.', error);
     return jsonResponse(500, { error: 'Production release could not be processed.' });

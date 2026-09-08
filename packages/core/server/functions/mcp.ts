@@ -191,6 +191,7 @@ import {
   callCreatePdfTemplate,
   callDeletePdfTemplate,
   callDeployStatus,
+  callDeriveRenderDataSchema,
   callCreateCaptureJob,
   callBuildPdfRenderData,
   callGetAgentArtifactBySlot,
@@ -1046,6 +1047,10 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return callValidatePdfTemplate(event, input);
     case 'get_pdf_template_validation':
       return callGetPdfTemplateValidation(event, input);
+    // S2: storage-free and read-only — it stores nothing and creates no
+    // template, so no idempotency wrapper (same class as validate/get above).
+    case 'derive_render_data_schema':
+      return callDeriveRenderDataSchema(event, input);
     case 'publish_pdf_template':
       return callPublishPdfTemplate(event, input);
     case 'delete_pdf_template':
