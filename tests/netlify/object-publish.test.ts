@@ -638,3 +638,69 @@ test('a content_item publish returns the live article_path derived from the body
     assert.equal('article_path' in navResult.body, false);
   });
 });
+
+// ─── KI-08: the tracking-dims push, wired at the end of publishObject ─────────
+// It exists because the export is stripped of `private` and the labels can only
+// come from the store record. Its three properties are asserted here, because
+// they are about the CALLER, not about the push: it runs after the record is
+// durably stamped, it cannot change the result, and it cannot hang or throw the
+// publish. Without these, the whole block could be deleted and every other test
+// in this file would still pass.
+
+test('the dims push receives the STORE body, after the stamp, and cannot change the result', async () => {
+  await withGitHubEnv(async () => {
+    const events: PublishEvent[] = [];
+    const github = createGitHubApiMock(events);
+    const store = createStore(events);
+    store.seed(navRecord());
+
+    const seen: Array<{ objectType: string; objectId: string; body: unknown }> = [];
+    const result = await publishNav(store, github.fetchImpl, {}, {
+      pushDims: async (options) => {
+        seen.push({ objectType: options.objectType, objectId: options.objectId, body: options.body });
+        // The record must already be stamped by the time this runs — the push is
+        // best-effort ONLY because the thing it follows is already durable.
+        const stamped = JSON.parse((await store.get('objects/navigation/by-id/nav_footer.json'))!) as {
+          publication?: { publish_receipt?: unknown };
+        };
+        assert.ok(stamped.publication?.publish_receipt, 'the publish receipt is written before the dims push runs');
+        return { ok: true, rows: 0, labelled: 0 };
+      },
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]!.objectType, 'navigation');
+    assert.equal(seen[0]!.objectId, 'nav_footer');
+    // The STORE body, not the export: the export has been stripped of `private`.
+    assert.deepEqual(seen[0]!.body, navRecord().body);
+  });
+});
+
+test('a dims push that rejects, and one that never settles, both leave the publish successful', async () => {
+  await withGitHubEnv(async () => {
+    const rejectingEvents: PublishEvent[] = [];
+    const rejectingGitHub = createGitHubApiMock(rejectingEvents);
+    const rejectingStore = createStore(rejectingEvents);
+    rejectingStore.seed(navRecord());
+    const rejected = await publishNav(rejectingStore, rejectingGitHub.fetchImpl, {}, {
+      pushDims: async () => {
+        throw new Error('sink exploded');
+      },
+    });
+    assert.equal(rejected.status, 200, 'a throwing push must not fail a publish that is already committed');
+
+    // A push that never settles must be bounded by the caller's own race, not by
+    // a timeout inside the fetch it never reached.
+    const hangingEvents: PublishEvent[] = [];
+    const hangingGitHub = createGitHubApiMock(hangingEvents);
+    const hangingStore = createStore(hangingEvents);
+    hangingStore.seed(navRecord());
+    const started = Date.now();
+    const hung = await publishNav(hangingStore, hangingGitHub.fetchImpl, {}, {
+      pushDims: () => new Promise(() => {}),
+    });
+    assert.equal(hung.status, 200);
+    assert.ok(Date.now() - started < 10_000, 'publishObject must not wait on a push that never settles');
+  });
+});

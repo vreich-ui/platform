@@ -46,10 +46,13 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
  * `packages/core/server/lib/tracking-dims-publish.ts`, and of the `node_strategy`
  * branch of `dimensionRowsForExport` in `scripts/tracking-dims-push.mjs`. Three
  * implementations of one projection is two too many, and the only reason for it
- * is that this repository has no TypeScript runner for scripts. They are held
- * together by fixture: `tests/scripts/tracking-dims-backfill.test.mjs` asserts
- * this one against the same article the TypeScript test uses. Change one, change
- * all three, or the fixture test fails — which is the point.
+ * is that this repository has no TypeScript runner for scripts.
+ *
+ * What actually holds them together: `tests/scripts/tracking-dims-backfill.test.mjs`
+ * runs THIS projection and `dimensionRowsForExport` over the same article and
+ * asserts the rows match (bar the labels, which is the bug being fixed). The
+ * TypeScript twin is pinned by the identical literal and expected rows in
+ * `tracking-dims-publish.test.ts`. Change one, change all three.
  */
 export const nodeStrategyRowsFromRecord = (objectId, body) => {
   if (!isRecord(body) || !Array.isArray(body.nodes)) return [];
@@ -106,24 +109,42 @@ export const collectPublishedArticles = async ({ tool, log = console.log }) => {
   return { perArticle, failed: false, listed: objects.length, published: published.length };
 };
 
-/** One POST carrying only the node_strategy family. Never throws. */
+/**
+ * The sink builds one `INSERT … VALUES` with seven placeholders per row, and
+ * PostgreSQL caps a statement at 65 535 parameters — so a corpus past ~9 300
+ * nodes would fail as one unit, at the end, having written nothing. Chunked well
+ * under that. Each chunk is independent: a later failure leaves the earlier
+ * chunks landed, which is the right shape for an idempotent COALESCE upsert.
+ */
+export const DIMS_PUSH_CHUNK_ROWS = 1_000;
+
+/** POSTs the node_strategy family in chunks. Never throws. */
 export const pushRows = async ({ rows, env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 10_000 }) => {
   const sinkUrl = env.TRACKING_SINK_URL?.trim();
   const token = env.TRACKING_SINK_TOKEN?.trim();
   const projectId = env.TRACKING_PROJECT_ID?.trim();
   if (!sinkUrl || !token || !projectId) return { ok: false, skipped: 'missing_configuration' };
   if (rows.length === 0) return { ok: true, skipped: 'no_rows' };
-  try {
-    const response = await fetchImpl(`${sinkUrl.replace(/\/+$/, '')}/dims`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, node_strategy: rows }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    return { ok: response.ok, status: response.status };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  const chunks = [];
+  for (let index = 0; index < rows.length; index += DIMS_PUSH_CHUNK_ROWS) {
+    chunks.push(rows.slice(index, index + DIMS_PUSH_CHUNK_ROWS));
   }
+  let sent = 0;
+  for (const chunk of chunks) {
+    try {
+      const response = await fetchImpl(`${sinkUrl.replace(/\/+$/, '')}/dims`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, node_strategy: chunk }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) return { ok: false, status: response.status, chunks: chunks.length, sent };
+      sent += chunk.length;
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error), chunks: chunks.length, sent };
+    }
+  }
+  return { ok: true, status: 200, chunks: chunks.length, sent };
 };
 
 export const runBackfill = async ({ tool, apply = false, env = process.env, fetchImpl = globalThis.fetch, log = console.log }) => {
@@ -133,11 +154,13 @@ export const runBackfill = async ({ tool, apply = false, env = process.env, fetc
     `[tracking-dims-backfill] ${counts.articles} published article(s), ${counts.rows} node_strategy row(s), ` +
       `${counts.labelled} labelled, ${counts.articlesWithNoLabels} article(s) with no label at all`
   );
-  if (counts.labelled === 0) {
-    // Every article unlabelled means the labels are not in the store either —
-    // a different fault from the one this exists to repair, and re-pushing
-    // nulls would achieve nothing while looking like a successful backfill.
-    log('[tracking-dims-backfill] nothing to fill: no article carries a label in the store. Investigate before applying.');
+  if (counts.labelled === 0 && counts.articles > 0) {
+    // Every article unlabelled means the labels are not in the store either — a
+    // different fault from the one this exists to repair. Re-pushing nulls would
+    // be COALESCEd away by the sink and log "pushed N rows": a successful-looking
+    // backfill that changed nothing. Refuse, rather than report that.
+    log('[tracking-dims-backfill] nothing to fill: no article carries a label in the store. Investigate before applying — a null re-push would be a no-op the sink discards.');
+    return { ...counts, applied: false, failed: true };
   }
   if (!apply) {
     log('[tracking-dims-backfill] DRY RUN — nothing was sent. Re-run with --apply to push.');
@@ -176,6 +199,9 @@ export const main = async (argv) => {
     process.exitCode = 2;
     return;
   }
+  // `--site` names the tenant in the log; the ENDPOINT is what selects it. Both
+  // are required so a run is self-describing in a scrollback with several in it.
+  console.log(`[tracking-dims-backfill] ${opts.slug} — ${opts.apply ? 'APPLY' : 'dry run'}`);
   const result = await runBackfill({ tool: createTool(opts.endpoint, token), apply: opts.apply });
   process.exitCode = result.failed ? 1 : 0;
 };

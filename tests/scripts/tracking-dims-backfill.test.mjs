@@ -9,6 +9,7 @@ import {
   runBackfill,
   summarise,
 } from '../../scripts/tracking-dims-backfill.mjs';
+import { dimensionRowsForExport } from '../../scripts/tracking-dims-push.mjs';
 
 // THE FIXTURE IS THE PIN. This article is byte-identical to the one in
 // packages/core/server/lib/tracking-dims-publish.test.ts, and the expected rows
@@ -70,6 +71,29 @@ describe('nodeStrategyRowsFromRecord', () => {
   it('is empty for a body with no nodes', () => {
     assert.deepEqual(nodeStrategyRowsFromRecord('x', { nodes: 'no' }), []);
     assert.deepEqual(nodeStrategyRowsFromRecord('x', null), []);
+  });
+});
+
+describe('the three projections are one projection', () => {
+  it('projects identically to the postbuild script node_strategy branch — the pin, not a promise', () => {
+    // Three implementations of one projection exist (the publish path in
+    // TypeScript, the postbuild push, and this). Nothing but this assertion stops
+    // them drifting: renumber `position` in one of them and every OTHER test in
+    // this repository still passes, while the sink's COALESCE upsert quietly
+    // overwrites correct positions with wrong ones.
+    const viaExport = dimensionRowsForExport(
+      {
+        __generated: { from: 'objects/content_item/by-id/art_1.json', at: '2026-09-08T00:00:00.000Z', record_version: 1 },
+        ...ARTICLE,
+      },
+      'content_item'
+    ).node_strategy;
+    // Given the SAME input the two must agree exactly — `position` most of all.
+    // (In production they see different inputs: the postbuild script reads the
+    // stripped export and gets null labels, which is the bug this wave routes
+    // around. That difference is a property of the INPUT, not of the projection,
+    // and `materializers/shared.test.ts` is what pins it.)
+    assert.deepEqual(viaExport, nodeStrategyRowsFromRecord('art_1', ARTICLE));
   });
 });
 
@@ -147,7 +171,7 @@ describe('runBackfill', () => {
     assert.equal(result.failed, false);
   });
 
-  it('says so, rather than pushing nulls, when the store has no labels either', async () => {
+  it('REFUSES to apply, rather than pushing nulls, when the store has no labels either', async () => {
     // Re-pushing nulls is a no-op the sink COALESCEs away — it would look like a
     // successful backfill and change nothing. That is a different fault and it
     // needs to be seen, not absorbed.
@@ -156,8 +180,18 @@ describe('runBackfill', () => {
       return { isError: false, data: { record: { body: { nodes: [{ id: 'n', kind: 'body' }] } } } };
     };
     const lines = [];
-    await runBackfill({ tool: unlabelled, env: ENV, fetchImpl: () => assert.fail('no POST'), log: (l) => lines.push(l) });
+    // WITH --apply, which is the case that matters: a dry run would not POST
+    // anyway, so testing this without it would pass on the wrong branch.
+    const result = await runBackfill({
+      tool: unlabelled,
+      apply: true,
+      env: ENV,
+      fetchImpl: () => assert.fail('a null-only corpus must never be POSTed'),
+      log: (l) => lines.push(l),
+    });
     assert.ok(lines.some((line) => line.includes('no article carries a label in the store')));
+    assert.equal(result.applied, false);
+    assert.equal(result.failed, true);
   });
 
   it('never puts a token or a label in its own output', async () => {

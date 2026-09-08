@@ -53,7 +53,7 @@
  * hold the live lock, which is what makes concurrent body drift during a
  * publish the exception rather than the norm.
  */
-import { describeDimsPush, pushNodeStrategyDims } from './tracking-dims-publish.js';
+import { describeDimsPush, pushNodeStrategyDims, type PushNodeStrategyDimsResult } from './tracking-dims-publish.js';
 import { materialize, type MaterializableObjectType, type MaterializedFile } from './materialize.js';
 import {
   commitMaterializedFiles,
@@ -86,6 +86,10 @@ const SCHEDULING_SKEW_MS = 30_000;
  * committer, which stays message-agnostic and is reused by other callers.
  */
 const NETLIFY_SKIP_MARKER = '[skip netlify]';
+
+/** Wall-clock ceiling on the post-stamp dims push (KI-08). The publish is already durable; nothing
+ * about this call may delay the answer to the caller by more than this. */
+const DIMS_PUSH_WALL_CLOCK_MS = 3_000;
 const withDeferredDeployMarker = (message: string): string =>
   message.includes(NETLIFY_SKIP_MARKER) ? message : `${message} ${NETLIFY_SKIP_MARKER}`;
 
@@ -412,13 +416,29 @@ export const publishObject = async (
   // — so the strategy/intent labels can only come from `fresh.body`, which is
   // the full record. Best-effort in the strongest sense: the publish is already
   // committed and stamped, and nothing this returns can change that.
+  //
+  // `deps.fetchImpl` is deliberately NOT forwarded: that is the GITHUB committer's
+  // fetch, and handing it to the sink would send a dims POST through a transport
+  // whose test doubles answer GitHub paths (and record every call as a GitHub
+  // event). Production never sets it for this purpose anyway. `deps.pushDims` is
+  // the seam.
+  //
+  // The race is the second guard. `AbortSignal.timeout` inside the push bounds
+  // the FETCH, not this await — a transport that ignores the signal, or an
+  // injected push that never settles, would otherwise hang publishObject after
+  // the export is committed and the record stamped, and the caller would be told
+  // a publish failed that in fact succeeded.
   try {
-    const dims = await (deps.pushDims ?? pushNodeStrategyDims)({
-      objectType,
-      objectId: input.object_id,
-      body: fresh.body,
-      fetchImpl: deps.fetchImpl,
-    });
+    const dims = await Promise.race([
+      (deps.pushDims ?? pushNodeStrategyDims)({ objectType, objectId: input.object_id, body: fresh.body }),
+      new Promise<PushNodeStrategyDimsResult>((resolve) => {
+        const timer = setTimeout(
+          () => resolve({ ok: false, rows: 0, labelled: 0, error: 'dims_push_wall_clock_timeout' }),
+          DIMS_PUSH_WALL_CLOCK_MS
+        );
+        timer.unref?.();
+      }),
+    ]);
     console.log(describeDimsPush(input.object_id, dims));
   } catch {
     // pushNodeStrategyDims does not throw; an injected one might.
