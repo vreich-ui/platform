@@ -35,9 +35,15 @@ export interface MaterializeMeta {
    * established. Derived from the publishing actor, never from a tool argument.
    *
    * It goes in the EXPORT, not only the store, because the export is what the
-   * owner DB ingests: the tracking dimensions are built by reading these files
-   * (see the strategy-join recipe in the sink reference kit), and a dimension
-   * the ingest cannot see is a dimension nobody can group by.
+   * owner DB ingests for the `object_version` and `producer` families: those
+   * dimensions are built by reading these files at postbuild
+   * (`scripts/tracking-dims-push.mjs`), and a dimension the ingest cannot see is
+   * a dimension nobody can group by.
+   *
+   * `node_strategy` is the exception, and the reason is directly below: its
+   * labels live in `private`, which `stripPrivate` removes from every export. It
+   * is pushed from the STORE at publish instead (`tracking-dims-publish.ts`,
+   * KI-08). Do not "fix" that by exempting `private` here.
    */
   surface?: string;
   attribution?: string;

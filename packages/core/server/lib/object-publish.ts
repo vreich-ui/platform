@@ -53,6 +53,7 @@
  * hold the live lock, which is what makes concurrent body drift during a
  * publish the exception rather than the norm.
  */
+import { describeDimsPush, pushNodeStrategyDims, type PushNodeStrategyDimsResult } from './tracking-dims-publish.js';
 import { materialize, type MaterializableObjectType, type MaterializedFile } from './materialize.js';
 import {
   commitMaterializedFiles,
@@ -85,6 +86,10 @@ const SCHEDULING_SKEW_MS = 30_000;
  * committer, which stays message-agnostic and is reused by other callers.
  */
 const NETLIFY_SKIP_MARKER = '[skip netlify]';
+
+/** Wall-clock ceiling on the post-stamp dims push (KI-08). The publish is already durable; nothing
+ * about this call may delay the answer to the caller by more than this. */
+const DIMS_PUSH_WALL_CLOCK_MS = 3_000;
 const withDeferredDeployMarker = (message: string): string =>
   message.includes(NETLIFY_SKIP_MARKER) ? message : `${message} ${NETLIFY_SKIP_MARKER}`;
 
@@ -121,6 +126,12 @@ export type PublishObjectDeps = {
    * than silently writing to some hardcoded tree.
    */
   exportRoot?: string;
+  /**
+   * Best-effort `node_strategy` dims push, run after the publish is durable
+   * (KI-08). Injected in tests; production uses the real one. It never throws
+   * and its outcome never changes the publish result.
+   */
+  pushDims?: typeof pushNodeStrategyDims;
 };
 
 export type PublishFailureCode =
@@ -397,6 +408,50 @@ export const publishObject = async (
       detail: error instanceof Error ? error.message : String(error),
       reconciliation: 'retry_publish',
     });
+  }
+
+  // ── KI-08: the annotation layer reaches the SINK, from the STORE ─────────
+  // AFTER the stamp, deliberately. The export this publish just committed is
+  // stripped of every `private` block — that strip is a security seam and stays
+  // — so the strategy/intent labels can only come from `fresh.body`, which is
+  // the full record. Best-effort in the strongest sense: the publish is already
+  // committed and stamped, and nothing this returns can change that.
+  //
+  // `deps.fetchImpl` is deliberately NOT forwarded: that is the GITHUB committer's
+  // fetch, and handing it to the sink would send a dims POST through a transport
+  // whose test doubles answer GitHub paths (and record every call as a GitHub
+  // event). Production never sets it for this purpose anyway. `deps.pushDims` is
+  // the seam.
+  //
+  // The race is the second guard. `AbortSignal.timeout` inside the push bounds
+  // the FETCH, not this await — a transport that ignores the signal, or an
+  // injected push that never settles, would otherwise hang publishObject after
+  // the export is committed and the record stamped, and the caller would be told
+  // a publish failed that in fact succeeded.
+  //
+  // The timer is REF'd and cleared in `finally`, not unref'd. An unref'd timer
+  // lets the event loop drain while the race is still pending — which on a fast
+  // runtime means the race never settles at all (Node's test runner reports it
+  // as "Promise resolution is still pending but the event loop has already
+  // resolved"). Clearing it instead keeps the process from being held open for
+  // three seconds after a push that answered immediately.
+  let dimsTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const dims = await Promise.race([
+      (deps.pushDims ?? pushNodeStrategyDims)({ objectType, objectId: input.object_id, body: fresh.body }),
+      new Promise<PushNodeStrategyDimsResult>((resolve) => {
+        dimsTimer = setTimeout(
+          () => resolve({ ok: false, rows: 0, labelled: 0, error: 'dims_push_wall_clock_timeout' }),
+          DIMS_PUSH_WALL_CLOCK_MS
+        );
+      }),
+    ]);
+    console.log(describeDimsPush(input.object_id, dims));
+  } catch {
+    // pushNodeStrategyDims does not throw; an injected one might.
+    console.warn(`[tracking-dims] ${input.object_id}: push threw; publish unaffected`);
+  } finally {
+    if (dimsTimer) clearTimeout(dimsTimer);
   }
 
   // The live permalink for a content_item (blog pattern /%slug%) — the publish
