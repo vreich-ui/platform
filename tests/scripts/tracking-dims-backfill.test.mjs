@@ -175,7 +175,7 @@ describe('runBackfill', () => {
     // Re-pushing nulls is a no-op the sink COALESCEs away — it would look like a
     // successful backfill and change nothing. That is a different fault and it
     // needs to be seen, not absorbed.
-    const unlabelled = async (name, args) => {
+    const unlabelled = async (name) => {
       if (name === 'object_list') return { isError: false, data: { objects: [{ object_id: 'a', published_time: 'x' }] } };
       return { isError: false, data: { record: { body: { nodes: [{ id: 'n', kind: 'body' }] } } } };
     };

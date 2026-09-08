@@ -428,21 +428,30 @@ export const publishObject = async (
   // injected push that never settles, would otherwise hang publishObject after
   // the export is committed and the record stamped, and the caller would be told
   // a publish failed that in fact succeeded.
+  //
+  // The timer is REF'd and cleared in `finally`, not unref'd. An unref'd timer
+  // lets the event loop drain while the race is still pending — which on a fast
+  // runtime means the race never settles at all (Node's test runner reports it
+  // as "Promise resolution is still pending but the event loop has already
+  // resolved"). Clearing it instead keeps the process from being held open for
+  // three seconds after a push that answered immediately.
+  let dimsTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     const dims = await Promise.race([
       (deps.pushDims ?? pushNodeStrategyDims)({ objectType, objectId: input.object_id, body: fresh.body }),
       new Promise<PushNodeStrategyDimsResult>((resolve) => {
-        const timer = setTimeout(
+        dimsTimer = setTimeout(
           () => resolve({ ok: false, rows: 0, labelled: 0, error: 'dims_push_wall_clock_timeout' }),
           DIMS_PUSH_WALL_CLOCK_MS
         );
-        timer.unref?.();
       }),
     ]);
     console.log(describeDimsPush(input.object_id, dims));
   } catch {
     // pushNodeStrategyDims does not throw; an injected one might.
     console.warn(`[tracking-dims] ${input.object_id}: push threw; publish unaffected`);
+  } finally {
+    if (dimsTimer) clearTimeout(dimsTimer);
   }
 
   // The live permalink for a content_item (blog pattern /%slug%) — the publish
