@@ -87,6 +87,48 @@ test('the view model reads site.pdf off the site body and flags a dangling defau
   assert.equal(model.rows[0]?.isKindDefault, true);
 });
 
+// The clear affordance: a dangling default can be cleared exactly as it can
+// be re-pointed — the op layer (`buildSetSiteDefaultOp(null)`) already
+// supports it, only the panel used to omit any way to reach it.
+test('the clear-default affordance is available for a dangling default, Owner-gated the same way canSetDefault is', () => {
+  const owner = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article' })],
+    siteBody: { pdf: { defaultTemplateId: 'tpl_gone' } },
+    canEdit: true,
+  });
+  assert.equal(owner.canClearDefault, true);
+  assert.equal(owner.clearDefaultBlockedReason, undefined);
+
+  const notOwner = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article' })],
+    siteBody: { pdf: { defaultTemplateId: 'tpl_gone' } },
+    canEdit: false,
+  });
+  assert.equal(notOwner.canClearDefault, false);
+  assert.match(String(notOwner.clearDefaultBlockedReason), /Owner/);
+});
+
+// Point 5: clearing must also be reachable when the default is set AND
+// valid — not only when it is dangling.
+test('the clear-default affordance is also available for a valid, non-dangling default', () => {
+  const model = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article' })],
+    siteBody: { pdf: { defaultTemplateId: 'tpl_article' } },
+    canEdit: true,
+  });
+  assert.equal(model.danglingDefault, undefined, 'this default is valid — not dangling');
+  assert.equal(model.canClearDefault, true);
+});
+
+test('there is nothing to clear when no site default is set at all', () => {
+  const model = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article' })],
+    canEdit: true,
+  });
+  assert.equal(model.canClearDefault, false);
+  assert.match(String(model.clearDefaultBlockedReason), /no site default/);
+});
+
 // ─── the set-default op payload (acceptance) ────────────────────────────────
 
 test('set-as-site-default writes only defaultTemplateId, so kind pins survive the merge', () => {
@@ -100,6 +142,14 @@ test('set-as-site-default writes only defaultTemplateId, so kind pins survive th
 
 test('the set-default op refuses an empty id rather than writing a broken pointer', () => {
   assert.throws(() => buildSetSiteDefaultOp('   '), /template id is required/);
+  assert.throws(() => buildSetSiteDefaultOp(''), /template id is required/);
+});
+
+test('null clears the site default — the same unset marker buildPinKindDefaultOp already uses', () => {
+  assert.deepEqual(buildSetSiteDefaultOp(null), {
+    op: 'set_site_fields',
+    fields: { pdf: { defaultTemplateId: null } },
+  });
 });
 
 test('pinning a kind touches one key inside byKind, and null clears it', () => {
@@ -229,20 +279,48 @@ test('D1: a pdf-tool template thumbnail key now resolves to a real endpoint inst
   assert.equal(rows[0]?.thumbnailMissingReason, undefined);
 });
 
-// D2 fix: post-D1, a present-but-unservable key means the KEY'S SHAPE is
-// wrong (not that pdf-tool published nothing) — the message must surface the
-// offending key rather than a generic "not servable" excuse, and this is
-// the real remaining case D1 leaves: a template id with a dot, which
-// pdf-tool's own safeSegment allows but the admin reader's tighter shape
-// does not.
+// D2 fix: a present-but-unservable key means the KEY'S SHAPE is wrong (not
+// that pdf-tool published nothing) — the message must surface the offending
+// key rather than a generic "not servable" excuse. Now that the gate accepts
+// pdf-tool's full safeSegment id charset, a dotted id is NOT one of these any
+// more (see the test below it); what remains is a `.`/`..` segment, a
+// non-numeric version, a wrong extension, or extra path segments.
 test('an unservable thumbnail key names the key and explains the shape it needed', () => {
+  for (const key of [
+    'thumbnails/../v3.png',
+    'thumbnails/./v3.png',
+    'thumbnails/a..b/v3.png',
+    'thumbnails/tpl_article/vlatest.png',
+    'thumbnails/tpl_article/v3.svg',
+    'thumbnails/tpl_article/nested/v3.png',
+  ]) {
+    const row = buildPdfTemplatesViewModel({
+      templates: [template({ id: 'tpl_article', thumbnail_key: key })],
+    }).rows[0]!;
+    assert.equal(row.thumbnailUrl, undefined, `must not build a preview URL for ${key}`);
+    const reason = String(row.thumbnailMissingReason);
+    assert.match(reason, /admin image reader/);
+    // The offending key is quoted verbatim, whatever it is.
+    assert.ok(reason.includes(`"${key}"`), `must quote ${key}`);
+    // …and the message names what is actually refused now.
+    assert.match(reason, /"\.\." or containing "\.\."/);
+    assert.match(reason, /not digits/);
+    assert.match(reason, /other than \.png/);
+    assert.match(reason, /extra path segment/);
+    // It must no longer claim a dotted template id is unservable.
+    assert.doesNotMatch(reason, /containing a dot/);
+  }
+});
+
+// The widening this message now describes: pdf-tool's safeSegment keeps dots,
+// so `drlurie.article.v1` is a real template id and its thumbnail previews.
+test('a dotted pdf-tool template id previews instead of earning the unservable-key message', () => {
   const row = buildPdfTemplatesViewModel({
-    templates: [template({ id: 'tpl_article', thumbnail_key: 'thumbnails/my.template/v3.png' })],
+    templates: [template({ id: 'drlurie.article.v1', thumbnail_key: 'thumbnails/drlurie.article.v1/v3.png' })],
   }).rows[0]!;
-  assert.equal(row.thumbnailUrl, undefined);
-  assert.match(String(row.thumbnailMissingReason), /admin image reader/);
-  assert.match(String(row.thumbnailMissingReason), /thumbnails\/my\.template\/v3\.png/);
-  assert.match(String(row.thumbnailMissingReason), /dot/);
+  assert.match(String(row.thumbnailUrl), /admin-get-blob-image/);
+  assert.match(String(row.thumbnailUrl), /thumbnails%2Fdrlurie\.article\.v1%2Fv3\.png/);
+  assert.equal(row.thumbnailMissingReason, undefined);
 });
 
 test('a published template with sample data still cannot render while it is a draft', () => {

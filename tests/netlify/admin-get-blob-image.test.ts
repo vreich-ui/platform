@@ -8,9 +8,15 @@ import sharp from 'sharp';
 import {
   classifyAdminBlobImageKey,
   handler,
+  isTraversalSafePathSegment,
   readAdminBlobImage,
   readAdminTemplateThumbnail,
 } from '../../netlify/functions/admin-get-blob-image.js';
+import {
+  ADMIN_PREVIEWABLE_IMAGE_REF_RE,
+  classifyAdminPreviewableBlobKey,
+  isTraversalSafePathSegment as isTraversalSafePathSegmentOnTheClient,
+} from '../../packages/core/lib/admin/artifact-preview.js';
 import {
   getArtifactBlobStore,
   getArtifactIndexBlobStore,
@@ -204,57 +210,194 @@ const pngBytes = (width: number, height: number, tint: number) =>
     .png()
     .toBuffer();
 
+/**
+ * The keys this gate MUST admit. The dotted ids are pdf-tool's real id space:
+ * its writer-side `safeSegment` (pdf-tool netlify/lib/pdf-template-store.ts)
+ * sanitises to `[a-zA-Z0-9._-]`, so `drlurie.article.v1` is a legal template
+ * id and its thumbnail has to be servable.
+ */
+const ADMITTED_THUMBNAIL_KEYS = [
+  'thumbnails/tpl_article/v1.png',
+  'thumbnails/article_brochure_v1/v12.png',
+  'thumbnails/drlurie.article.v1/v2.png',
+  'thumbnails/a.b/v10.png',
+  'thumbnails/tpl.article/v1.png',
+  'thumbnails/0/v1.png',
+  `thumbnails/${'a'.repeat(128)}/v1.png`,
+];
+
+/**
+ * The refusal list this gate is defined by, kept in step with the same list in
+ * packages/core/lib/admin/artifact-preview.test.ts. Both classifiers are run
+ * over it below, so the browser gate and this server gate cannot drift apart
+ * without a failure here.
+ */
+const REFUSED_THUMBNAIL_KEYS = [
+  // Traversal and dot-only segments, in every spelling the key could carry
+  // them — refused outright, never sanitised, before any store is opened.
+  'thumbnails/../../secret.png',
+  'thumbnails/../v1.png',
+  'thumbnails/../secret/v1.png',
+  'thumbnails/..%2F..%2Fsecret/v1.png',
+  'thumbnails/./v1.png',
+  'thumbnails/a..b/v1.png',
+  'thumbnails/..a/v1.png',
+  'thumbnails/a../v1.png',
+  'thumbnails/..../v1.png',
+  'thumbnails/.hidden/v1.png',
+  '../thumbnails/tpl/v1.png',
+  // Wrong extension — only PNG is ever written here.
+  'thumbnails/tpl/v1.svg',
+  'thumbnails/tpl/v1.jpg',
+  'thumbnails/tpl/v1.png.svg',
+  'thumbnails/tpl/v1',
+  // Non-numeric or malformed version segment.
+  'thumbnails/tpl/vlatest.png',
+  'thumbnails/tpl/v.png',
+  'thumbnails/tpl/v-1.png',
+  'thumbnails/tpl/1.png',
+  'thumbnails/tpl/v1234567890123.png',
+  // Nested / extra path segments, and a missing one.
+  'thumbnails/tpl/nested/v1.png',
+  'thumbnails/v1.png',
+  'thumbnails//v1.png',
+  'thumbnails/tpl/v1.png/x',
+  // Not this prefix at all, or only prefixed by it.
+  'pdfme/tpl/v1.png',
+  'xthumbnails/tpl/v1.png',
+  'thumbnailsx/tpl/v1.png',
+  ' thumbnails/tpl/v1.png',
+  // Id-segment charset: dots are now inside the shape, but the first
+  // character is still letters/digits only, so no segment can start like a
+  // flag or a hidden file, and the length bound is unchanged.
+  'thumbnails/-tpl/v1.png',
+  'thumbnails/_tpl/v1.png',
+  `thumbnails/${'a'.repeat(129)}/v1.png`,
+  // An artifact-shaped key must never be reclassified as a thumbnail.
+  'thumbnails/tpl/v1.png\nimage/req/x',
+];
+
+const SHA64 = 'a'.repeat(64);
+
+/** The server's artifact pattern is private; its browser mirror is the same regex. */
+const artifactPatternAdmits = (key: string) => ADMIN_PREVIEWABLE_IMAGE_REF_RE.test(key);
+
+/**
+ * Artifact keys that MUST keep working. Not every key in the `artifacts` store
+ * was minted by `createArtifactBlobKey` (pdf-tool writes there through a
+ * storage grant with its own `safeRequestSegment`, and older/fixture keys use
+ * plain segments), so the request-id charset is deliberately not narrowed to
+ * the platform's own grammar — only traversal is guarded.
+ */
+const ADMITTED_ARTIFACT_KEYS = [
+  `image/req_a/${SHA64}.png`,
+  `image/req_a/${SHA64}`,
+  `image/req_agent_qa_artifact_stress_test_20260806_01/${SHA64}.png`,
+  `image/req_visimg_vis_drlurie_examples_article_header_20260908_83/${SHA64}.jpg`,
+  `image/guides/${SHA64}.png`,
+  // A single dot stays legal — the tightening is about `..`, nothing else.
+  `image/req_a.b/${SHA64}.png`,
+];
+
+/** Traversal spellings the artifact request-id segment must refuse outright. */
+const REFUSED_ARTIFACT_KEYS = [
+  `image/../${SHA64}.png`,
+  `image/./${SHA64}.png`,
+  `image/a..b/${SHA64}.png`,
+  `image/..../${SHA64}.png`,
+  `image/..a/${SHA64}.png`,
+  `image/a../${SHA64}.png`,
+  `image/../../${SHA64}.png`,
+  // Still the pre-existing refusals: a short digest and a nested path.
+  `image/req_a/${'a'.repeat(63)}.png`,
+  `image/a/b/${SHA64}.png`,
+];
+
 test('D1: a template thumbnail key is classified to the templates store, and an artifact key still to artifacts', () => {
-  assert.equal(classifyAdminBlobImageKey(`image/req_a/${'a'.repeat(64)}.png`), 'artifact');
-  assert.equal(classifyAdminBlobImageKey(`image/req_a/${'a'.repeat(64)}`), 'artifact');
-  assert.equal(classifyAdminBlobImageKey('thumbnails/tpl_article/v1.png'), 'template-thumbnail');
-  assert.equal(classifyAdminBlobImageKey('thumbnails/article_brochure_v1/v12.png'), 'template-thumbnail');
-});
-
-test('D1: the thumbnail shape refuses traversal, wrong extension, non-numeric version, nesting and every near miss', () => {
-  const refused = [
-    // Traversal, in every spelling the key could carry it.
-    'thumbnails/../../secret.png',
-    'thumbnails/../v1.png',
-    'thumbnails/../secret/v1.png',
-    'thumbnails/..%2F..%2Fsecret/v1.png',
-    'thumbnails/./v1.png',
-    '../thumbnails/tpl/v1.png',
-    // Wrong extension — only PNG is ever written here.
-    'thumbnails/tpl/v1.svg',
-    'thumbnails/tpl/v1.jpg',
-    'thumbnails/tpl/v1.png.svg',
-    'thumbnails/tpl/v1',
-    // Non-numeric or malformed version segment.
-    'thumbnails/tpl/vlatest.png',
-    'thumbnails/tpl/v.png',
-    'thumbnails/tpl/v-1.png',
-    'thumbnails/tpl/1.png',
-    'thumbnails/tpl/v1234567890123.png',
-    // Nested / extra path segments, and a missing one.
-    'thumbnails/tpl/nested/v1.png',
-    'thumbnails/v1.png',
-    'thumbnails//v1.png',
-    'thumbnails/tpl/v1.png/x',
-    // Not this prefix at all, or only prefixed by it.
-    'pdfme/tpl/v1.png',
-    'xthumbnails/tpl/v1.png',
-    'thumbnailsx/tpl/v1.png',
-    ' thumbnails/tpl/v1.png',
-    // Id-segment charset: dots are deliberately outside the shape, and a
-    // leading dash/underscore is refused so no segment can start like a flag.
-    'thumbnails/tpl.article/v1.png',
-    'thumbnails/-tpl/v1.png',
-    'thumbnails/_tpl/v1.png',
-    `thumbnails/${'a'.repeat(129)}/v1.png`,
-    // An artifact-shaped key must never be reclassified as a thumbnail.
-    'thumbnails/tpl/v1.png\nimage/req/x',
-  ];
-
-  for (const key of refused) {
+  for (const key of ADMITTED_ARTIFACT_KEYS) {
+    assert.equal(classifyAdminBlobImageKey(key), 'artifact', `must admit ${JSON.stringify(key)}`);
+  }
+  for (const key of ADMITTED_THUMBNAIL_KEYS) {
+    assert.equal(classifyAdminBlobImageKey(key), 'template-thumbnail', `must admit ${JSON.stringify(key)}`);
+  }
+  for (const key of REFUSED_ARTIFACT_KEYS) {
     assert.equal(classifyAdminBlobImageKey(key), undefined, `must refuse ${JSON.stringify(key)}`);
   }
 });
+
+/**
+ * The artifact request-id segment carries the same guard as the thumbnail id
+ * segment — the pattern alone would admit `image/../<sha>.png`, and this gate
+ * is what stops an authenticated admin reading an arbitrary blob.
+ */
+test('the artifact shape refuses traversal in its request-id segment, by guard rather than by pattern', () => {
+  assert.ok(artifactPatternAdmits(`image/../${SHA64}.png`), 'the pattern alone would admit it');
+  assert.ok(artifactPatternAdmits(`image/a..b/${SHA64}.png`), 'the pattern alone would admit it');
+  for (const key of [
+    `image/../${SHA64}.png`,
+    `image/./${SHA64}.png`,
+    `image/a..b/${SHA64}.png`,
+    `image/..../${SHA64}.png`,
+  ]) {
+    assert.equal(classifyAdminBlobImageKey(key), undefined, `must refuse ${JSON.stringify(key)}`);
+  }
+});
+
+test('D1: the traversal guard is its own predicate, refusing dot-only and `..`-bearing segments', () => {
+  for (const segment of ['.', '..', '...', 'a..b', '..a', 'a..', 'a.b..c']) {
+    assert.equal(isTraversalSafePathSegment(segment), false, `must refuse ${JSON.stringify(segment)}`);
+  }
+  for (const segment of ['a', 'drlurie.article.v1', 'a.b', 'tpl_article', 'a-b.c']) {
+    assert.equal(isTraversalSafePathSegment(segment), true, `must allow ${JSON.stringify(segment)}`);
+  }
+});
+
+test('D1: the server gate and the browser gate agree, key for key, on both lists', () => {
+  for (const key of ADMITTED_ARTIFACT_KEYS) {
+    assert.equal(classifyAdminPreviewableBlobKey(key), 'artifact', `browser must admit ${JSON.stringify(key)}`);
+    assert.equal(classifyAdminBlobImageKey(key), 'artifact', `server must admit ${JSON.stringify(key)}`);
+  }
+  for (const key of REFUSED_ARTIFACT_KEYS) {
+    assert.equal(classifyAdminPreviewableBlobKey(key), undefined, `browser must refuse ${JSON.stringify(key)}`);
+    assert.equal(classifyAdminBlobImageKey(key), undefined, `server must refuse ${JSON.stringify(key)}`);
+  }
+  for (const key of ADMITTED_THUMBNAIL_KEYS) {
+    assert.equal(
+      classifyAdminPreviewableBlobKey(key),
+      classifyAdminBlobImageKey(key),
+      `browser and server must agree on ${JSON.stringify(key)}`
+    );
+  }
+  // Parity is over keys as each gate actually sees them — already trimmed:
+  // the browser trims inside `classifyAdminPreviewableBlobKey`, the server in
+  // `handlerImpl`'s `toText` before it ever calls `classifyAdminBlobImageKey`.
+  // The one surrounding-whitespace entry is asserted on its own below.
+  for (const key of REFUSED_THUMBNAIL_KEYS.filter((candidate) => candidate === candidate.trim())) {
+    assert.equal(classifyAdminPreviewableBlobKey(key), undefined, `browser must refuse ${JSON.stringify(key)}`);
+    assert.equal(classifyAdminBlobImageKey(key), undefined, `server must refuse ${JSON.stringify(key)}`);
+  }
+  // Surrounding whitespace: the raw server classifier refuses it outright
+  // (strictly narrower), and the browser trims before classifying — so the
+  // key that reaches the server is the trimmed one either way.
+  assert.equal(classifyAdminBlobImageKey(' thumbnails/tpl/v1.png'), undefined);
+  assert.equal(classifyAdminPreviewableBlobKey(' thumbnails/tpl/v1.png'), 'template-thumbnail');
+  // The mirrored predicate is the same predicate, not a lookalike.
+  for (const segment of ['.', '..', 'a..b', 'drlurie.article.v1', 'tpl_article']) {
+    assert.equal(
+      isTraversalSafePathSegmentOnTheClient(segment),
+      isTraversalSafePathSegment(segment),
+      `browser and server must agree on segment ${JSON.stringify(segment)}`
+    );
+  }
+});
+
+test('D1: the thumbnail shape refuses traversal, wrong extension, non-numeric version, nesting and every near miss', () => {
+  for (const key of REFUSED_THUMBNAIL_KEYS) {
+    assert.equal(classifyAdminBlobImageKey(key), undefined, `must refuse ${JSON.stringify(key)}`);
+  }
+});
+
+
 
 test('D1: readAdminTemplateThumbnail serves PNG bytes out of the pdf-templates store', async () => {
   process.env.NETLIFY = 'false';
@@ -402,6 +545,69 @@ test('D1: the admin gate is enforced on the thumbnail path exactly as on the art
       adminContext('owner@example.com')
     );
     assert.equal(refused.statusCode, 400);
+  } finally {
+    if (previousAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = previousAdminEmails;
+  }
+});
+
+/**
+ * The pattern alone would admit `thumbnails/a..b/v1.png` — the separate
+ * traversal predicate is the only thing that stops it becoming a store read.
+ */
+test('D1: a `..` in either shape\'s id segment is stopped by the guard, and never reaches a store', async () => {
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.CONTEXT = 'dev';
+
+  assert.equal(classifyAdminBlobImageKey('thumbnails/a..b/v1.png'), undefined);
+
+  const previousAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = 'owner@example.com';
+  try {
+    for (const blobKey of [
+      'thumbnails/a..b/v1.png',
+      'thumbnails/../v1.png',
+      'thumbnails/./v1.png',
+      // The same guard on the artifact shape: neither store is opened.
+      `image/../${SHA64}.png`,
+      `image/./${SHA64}.png`,
+      `image/a..b/${SHA64}.png`,
+    ]) {
+      const response = await handler(
+        { httpMethod: 'GET', queryStringParameters: { blobKey } },
+        adminContext('owner@example.com')
+      );
+      assert.equal(response.statusCode, 400, `must refuse ${JSON.stringify(blobKey)} without opening a store`);
+    }
+  } finally {
+    if (previousAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = previousAdminEmails;
+  }
+});
+
+test('D1: a dotted pdf-tool template id serves its thumbnail bytes end to end', async () => {
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.CONTEXT = 'dev';
+
+  const templateId = `drlurie.article.v1.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  const blobKey = `thumbnails/${templateId}/v2.png`;
+  const bytes = await pngBytes(400, 300, 60);
+  await setThumbnailBytes(blobKey, bytes);
+
+  assert.equal(classifyAdminBlobImageKey(blobKey), 'template-thumbnail');
+
+  const previousAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = 'owner@example.com';
+  try {
+    const response = await handler(
+      { httpMethod: 'GET', queryStringParameters: { blobKey } },
+      adminContext('owner@example.com')
+    );
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['Content-Type'], 'image/png');
+    assert.equal(Buffer.from(response.body, 'base64').length, bytes.length);
   } finally {
     if (previousAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
     else process.env.ADMIN_EMAILS = previousAdminEmails;

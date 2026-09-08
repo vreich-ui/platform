@@ -141,6 +141,17 @@ export interface PdfTemplatesViewModel {
   canEdit: boolean;
   /** True when `site.pdf.defaultTemplateId` points at a template that is not in the list. */
   danglingDefault?: string;
+  /**
+   * The clear-default affordance's own can/blocked pair, in the same style
+   * as a row's `canSetDefault`/`setDefaultBlockedReason` — but this one is
+   * panel-level, not per-row: clearing `pdf.defaultTemplateId` is not an
+   * action any one template row owns (a dangling default names a row that
+   * is not even IN `rows`), so it lives on the view model itself. Owner-gated
+   * the same way `canSetDefault` is; also false with a reason when there is
+   * nothing to clear.
+   */
+  canClearDefault: boolean;
+  clearDefaultBlockedReason?: string;
   emptyState?: { title: string; message: string };
 }
 
@@ -253,14 +264,15 @@ const readSitePdf = (siteBody: unknown): SitePdfBlock | undefined => {
  *  1. `thumbnail_error` — pdf-tool's own reported reason (T2.6/W1). Always
  *     wins: it is the one message here pdf-tool actually wrote.
  *  2. `thumbnail_key` is a non-empty string but `thumbnailUrl` is still
- *     undefined — a key EXISTS but D1's admin-image-reader gate would not
- *     serve it (`getAdminBlobImageEndpoint` returned undefined). Post-D1
- *     this almost always means the key's shape is not
- *     `thumbnails/<id>/v<n>.png` with an id of only letters, digits, `_`
- *     and `-` — e.g. a template id containing a dot, which pdf-tool's own
- *     `safeSegment` allows but D1's tighter allow-shape does not. The
- *     offending key is surfaced so an operator can tell why at a glance
- *     instead of being told to go look.
+ *     undefined — a key EXISTS but the admin-image-reader gate would not
+ *     serve it (`getAdminBlobImageEndpoint` returned undefined). The gate
+ *     now accepts pdf-tool's full `safeSegment` id charset (letters, digits,
+ *     `.`, `_`, `-`), so a dotted id like `drlurie.article.v1` is servable
+ *     and is no longer the case that lands here; what lands here is a key
+ *     that is genuinely malformed for this reader — a `.`/`..` id segment,
+ *     a non-numeric version, an extension other than `.png`, or extra path
+ *     segments. The offending key is surfaced so an operator can tell why at
+ *     a glance instead of being told to go look.
  *  3. `thumbnail_key === null` — pdf-tool's list row AFFIRMATIVELY reports
  *     no thumbnail (see `PdfTemplateInput.thumbnail_key`'s doc comment).
  *     This is the one case honestly worded as "pdf-tool has not published
@@ -280,9 +292,11 @@ export function pdfThumbnailMissingReason(
   if (key) {
     return (
       `The stored thumbnail key ("${key}") is not a shape the admin image reader can serve — ` +
-      'it accepts only thumbnails/<template id>/v<version>.png, with an id of letters, digits, ' +
-      '"_" and "-" (a template id containing a dot, for example, is not previewable through this ' +
-      'gate even though pdf-tool allows it in the id). Check the raw key in pdf-tool.'
+      'it accepts only thumbnails/<template id>/v<version>.png, where the id starts with a letter ' +
+      'or digit and then uses letters, digits, ".", "_" and "-" (pdf-tool\'s own id charset). ' +
+      'Refused: an id segment of "." or ".." or containing "..", a version that is not digits ' +
+      '(v3, not vlatest), any extension other than .png, and any extra path segment. ' +
+      'Check the raw key in pdf-tool.'
     );
   }
   if (template.thumbnail_key === null) {
@@ -347,6 +361,9 @@ export function buildPdfTemplatesViewModel(input: {
   const dangling =
     sitePdf?.defaultTemplateId && !knownIds.has(sitePdf.defaultTemplateId) ? sitePdf.defaultTemplateId : undefined;
 
+  const hasDefault = Boolean(sitePdf?.defaultTemplateId);
+  const canClearDefault = input.canEdit === true && hasDefault;
+
   return {
     rows,
     ...(sitePdf?.defaultTemplateId ? { defaultTemplateId: sitePdf.defaultTemplateId } : {}),
@@ -356,6 +373,14 @@ export function buildPdfTemplatesViewModel(input: {
     available,
     canEdit: input.canEdit === true,
     ...(dangling ? { danglingDefault: dangling } : {}),
+    canClearDefault,
+    ...(canClearDefault
+      ? {}
+      : {
+          clearDefaultBlockedReason: !hasDefault
+            ? 'There is no site default to clear.'
+            : 'Clearing the site default needs the Owner role.',
+        }),
     ...(rows.length
       ? {}
       : {
@@ -386,8 +411,18 @@ export type PatchOp = {
  * `pdf.defaultTemplateId` and leaves any `byKind` pins exactly where they
  * were. Writing the whole block instead would silently drop a kind pin the
  * human never touched.
+ *
+ * `null` CLEARS the site default — the same unset marker
+ * `buildPinKindDefaultOp` already uses for a kind pin (the patch engine's
+ * null-inside-`fields`-unsets-a-key grammar, `object-patch-ops.ts`). An empty
+ * *string* is still refused: that is a caller bug (e.g. a blank form field
+ * slipping through), not a deliberate clear, so it keeps throwing rather than
+ * silently writing a broken pointer or being misread as "unset".
  */
-export function buildSetSiteDefaultOp(templateId: string): PatchOp {
+export function buildSetSiteDefaultOp(templateId: string | null): PatchOp {
+  if (templateId === null) {
+    return { op: 'set_site_fields', fields: { pdf: { defaultTemplateId: null } } };
+  }
   const id = str(templateId);
   if (!id) throw new Error('A template id is required to set the site default.');
   return { op: 'set_site_fields', fields: { pdf: { defaultTemplateId: id } } };

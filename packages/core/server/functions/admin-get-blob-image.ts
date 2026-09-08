@@ -34,7 +34,21 @@ import type sharpType from 'sharp';
  * (the gate that decides whether to render an <img> at all). Keep them in step.
  */
 
-/** `image/<requestId>/<sha256>[.ext]` — a Major Key artifact, in the `artifacts` store. */
+/**
+ * `image/<requestId>/<sha256>[.ext]` — a Major Key artifact, in the
+ * `artifacts` store.
+ *
+ * The `<requestId>` segment's charset stays loose ON PURPOSE and is NOT
+ * narrowed to the platform's own request-id grammar: bytes in this store are
+ * written both by `createArtifactBlobKey` (which validates the segment with
+ * `agents-naming.ts`'s `validateRequestId`) and by pdf-tool through a storage
+ * grant, which sanitises with its own `safeRequestSegment` and enforces a
+ * request-id grammar only when a project descriptor declares
+ * `requestIdPattern`. Tightening the charset here would refuse existing,
+ * legitimate keys. Traversal is a different question, and is guarded: the
+ * segment goes through `isTraversalSafePathSegment` below, the same predicate
+ * the thumbnail id segment uses.
+ */
 const artifactImageBlobKeyPattern = /^image\/[a-z0-9._-]+\/[a-f0-9]{64}(?:\.[a-z0-9]+)?$/i;
 
 /**
@@ -43,23 +57,58 @@ const artifactImageBlobKeyPattern = /^image\/[a-z0-9._-]+\/[a-f0-9]{64}(?:\.[a-z
  * `pdfTemplateThumbnailKey`; see server/lib/pdf-tool-storage-grant.ts for why
  * those bytes land in THIS site's blob namespace at all).
  *
- * Bounded far more tightly than pdf-tool's writer-side `safeSegment`, which
- * also permits `.`: no dot here means no `.`/`..` segment is expressible, and
- * no `/` in the id segment means the key can never carry a third path segment.
- * `thumbnails/../../secret.png`, `thumbnails/a/b/v1.png`, `thumbnails/x/v1.svg`
- * and `thumbnails/x/vlatest.png` all fail this test outright rather than
- * relying on anything downstream. The trade is deliberate: a template whose id
- * contains a dot is not servable here.
+ * The id segment covers pdf-tool's writer-side `safeSegment` charset
+ * (`[a-zA-Z0-9._-]`, dots included), because a real template id like
+ * `drlurie.article.v1` is one this reader must be able to serve. The dot is
+ * admitted by the pattern; the two spellings a dot makes dangerous — a `.`/
+ * `..` segment, or `..` anywhere inside the segment — are refused by
+ * `isTraversalSafePathSegment` below, deliberately as a separate,
+ * readable predicate rather than as regex trickery, and refused OUTRIGHT
+ * (never sanitised-and-served) before any store is opened.
+ *
+ * Everything else stays exactly as narrow: the first character must be a
+ * letter or digit, the id is length-bounded, and no `/` in the id segment
+ * means the key can never carry a third path segment. `thumbnails/a/b/v1.png`,
+ * `thumbnails/x/v1.svg` and `thumbnails/x/vlatest.png` still fail this test
+ * outright rather than relying on anything downstream.
+ *
+ * Mirrored (pattern, guard and refusal list) by lib/admin/artifact-preview.ts,
+ * which also carries the FOLLOW-UP note about converging this shape with
+ * pdf-tool's id minting instead of widening the reader again.
  */
-const templateThumbnailBlobKeyPattern = /^thumbnails\/[a-z0-9][a-z0-9_-]{0,127}\/v\d{1,9}\.png$/i;
+const templateThumbnailBlobKeyPattern = /^thumbnails\/[a-z0-9][a-z0-9._-]{0,127}\/v\d{1,9}\.png$/i;
+
+/**
+ * The traversal guard, held apart from the patterns on purpose so it is
+ * legible and testable on its own, and applied to BOTH shapes' middle segment
+ * — the artifact key's `<requestId>` and the thumbnail key's `<templateId>`
+ * are the same kind of caller-influenced path segment, and neither may
+ * express traversal. An all-dots segment is covered by the same three
+ * clauses: `.` is named, and every longer run of dots contains `..`. Mirrors
+ * artifact-preview.ts's `isTraversalSafePathSegment` verbatim — keep the two
+ * in step.
+ */
+export const isTraversalSafePathSegment = (segment: string): boolean =>
+  segment !== '.' && segment !== '..' && !segment.includes('..');
+
+/** The middle segment of a `<prefix>/<id>/<filename>` blob key (empty when there is none). */
+const blobKeyIdSegment = (blobKey: string): string => blobKey.split('/')[1] ?? '';
+
+/** Shape AND traversal guard — both must hold before this key names a store. */
+const isServableArtifactImageKey = (blobKey: string): boolean =>
+  artifactImageBlobKeyPattern.test(blobKey) && isTraversalSafePathSegment(blobKeyIdSegment(blobKey));
+
+/** Shape AND traversal guard — both must hold before this key names a store. */
+const isServableTemplateThumbnailKey = (blobKey: string): boolean =>
+  templateThumbnailBlobKeyPattern.test(blobKey) && isTraversalSafePathSegment(blobKeyIdSegment(blobKey));
 
 export type AdminBlobImageKeyShape = 'artifact' | 'template-thumbnail';
 
 /** The single place a key becomes a store choice. Undefined = serve nothing. Exported so
  *  the refusals themselves are directly testable. */
 export const classifyAdminBlobImageKey = (blobKey: string): AdminBlobImageKeyShape | undefined => {
-  if (artifactImageBlobKeyPattern.test(blobKey)) return 'artifact';
-  if (templateThumbnailBlobKeyPattern.test(blobKey)) return 'template-thumbnail';
+  if (isServableArtifactImageKey(blobKey)) return 'artifact';
+  if (isServableTemplateThumbnailKey(blobKey)) return 'template-thumbnail';
 
   return undefined;
 };

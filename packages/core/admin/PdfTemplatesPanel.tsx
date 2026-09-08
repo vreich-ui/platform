@@ -60,6 +60,17 @@ import {
 
 const MUTED = 'text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]';
 
+/**
+ * Clearing the site default is a panel-level action — no one row owns it (a
+ * DANGLING default names a row that is not even in `rows`) — so it cannot
+ * key `busyId`/`busyAction` off a template id the way every other action
+ * here does. These sentinels let it reuse the same single-flight-per-checkout
+ * gating (`busyId !== undefined` disables every other button while any
+ * action holds the site checkout) without colliding with a real template id.
+ */
+const CLEAR_SITE_DEFAULT_BUSY_ID = '__pdf_clear_site_default__';
+const clearKindPinBusyId = (kind: string) => `__pdf_clear_kind_pin__${kind}`;
+
 function TemplateThumbnail({ row }: { row: PdfTemplateRow }) {
   if (!row.thumbnailUrl) {
     return (
@@ -118,7 +129,9 @@ export function PdfTemplatesPanel({
    *  single-flight-per-checkout rule) stay silent instead of all claiming
    *  to be the one running. Presentation only; does not change what is
    *  disabled or when. */
-  const [busyAction, setBusyAction] = useState<'default' | 'kind' | 'sample' | 'preview' | undefined>(undefined);
+  const [busyAction, setBusyAction] = useState<
+    'default' | 'kind' | 'sample' | 'preview' | 'clear-default' | 'clear-kind' | undefined
+  >(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   /** D3: the SAME outcome as `error`/`notice` above, but keyed by template id
@@ -225,6 +238,82 @@ export function PdfTemplatesPanel({
       }
     },
     [getToken, identity.siteId, onChanged, setFeedback]
+  );
+
+  /**
+   * Clears `site.pdf.defaultTemplateId` (`buildSetSiteDefaultOp(null)`) —
+   * the un-set sibling of `setSiteDefault` above, reachable both when the
+   * default is dangling (the banner below) and when it is a live, valid
+   * template (next to that row's "Already the site default" indicator).
+   * Feedback goes to the existing top banner rather than `setFeedback`'s
+   * per-row `rowMessage`: there is no single row this action is "about" —
+   * the row a dangling default named is not even in `model.rows`.
+   */
+  const clearSiteDefault = useCallback(async () => {
+    setBusyId(CLEAR_SITE_DEFAULT_BUSY_ID);
+    setBusyAction('clear-default');
+    setError(undefined);
+    setNotice(undefined);
+    const session = new EditSession('site', identity.siteId, getToken);
+    try {
+      const checkout = await session.ensureCheckout();
+      if (!checkout.ok) {
+        setError(`The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
+        return;
+      }
+      const result = await session.patch([buildSetSiteDefaultOp(null)]);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setNotice('This publication no longer has a default PDF template.');
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The default could not be cleared.');
+    } finally {
+      await session.checkin().catch(() => undefined);
+      setBusyId(undefined);
+    }
+  }, [getToken, identity.siteId, onChanged]);
+
+  /**
+   * The kind-pin sibling of `clearSiteDefault`, over `buildPinKindDefaultOp`'s
+   * existing `null` (already used to write the pin in the first place). Lives
+   * on the "Per-kind pins" summary below rather than the per-row selector:
+   * that selector picks which KIND a *row's own template* should become the
+   * default for, so it has no notion of "no template" to offer — the
+   * per-kind list, which already names `kind: templateId`, is where "clear
+   * this kind's pin" reads as an action on an existing fact rather than a
+   * stray option in an unrelated dropdown.
+   */
+  const clearKindPin = useCallback(
+    async (kind: string) => {
+      setBusyId(clearKindPinBusyId(kind));
+      setBusyAction('clear-kind');
+      setError(undefined);
+      setNotice(undefined);
+      const session = new EditSession('site', identity.siteId, getToken);
+      try {
+        const checkout = await session.ensureCheckout();
+        if (!checkout.ok) {
+          setError(`The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
+          return;
+        }
+        const result = await session.patch([buildPinKindDefaultOp(kind, null)]);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setNotice(`${kind} no longer has a default PDF template.`);
+        await onChanged();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'The kind default could not be cleared.');
+      } finally {
+        await session.checkin().catch(() => undefined);
+        setBusyId(undefined);
+      }
+    },
+    [getToken, identity.siteId, onChanged]
   );
 
   /**
@@ -342,10 +431,26 @@ export function PdfTemplatesPanel({
       {model.danglingDefault ? (
         <div className="flex items-start gap-3 rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] bg-[var(--adm-warning-soft)] px-3 py-2">
           <IconAlertTriangle size={16} />
-          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-warning-text)]">
-            This publication&rsquo;s default PDF template is <code>{model.danglingDefault}</code>, which pdf-tool no
-            longer lists. Pick a published template below.
-          </p>
+          <div className="flex flex-1 flex-col gap-2">
+            <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-warning-text)]">
+              This publication&rsquo;s default PDF template is <code>{model.danglingDefault}</code>, which pdf-tool no
+              longer lists. Pick a published template below, or clear it.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!model.canClearDefault || busyId !== undefined}
+                loading={busyId === CLEAR_SITE_DEFAULT_BUSY_ID}
+                onClick={() => void clearSiteDefault()}
+              >
+                {busyId === CLEAR_SITE_DEFAULT_BUSY_ID ? 'Clearing…' : 'Clear the default'}
+              </Button>
+              {!model.canClearDefault && model.clearDefaultBlockedReason ? (
+                <span className={MUTED}>{model.clearDefaultBlockedReason}</span>
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -393,6 +498,23 @@ export function PdfTemplatesPanel({
                         ? 'Already the site default'
                         : 'Set as site default'}
                   </Button>
+                  {/* Point 5: clearing must be reachable when the default is
+                      set and VALID, too — not only from the dangling banner
+                      above, which only exists for a default that names a row
+                      no longer in this list. This row's "Already the site
+                      default" button above is the current-default indicator,
+                      so the clear action sits right next to it. */}
+                  {row.isSiteDefault ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={!model.canClearDefault || busyId !== undefined}
+                      loading={busyId === CLEAR_SITE_DEFAULT_BUSY_ID}
+                      onClick={() => void clearSiteDefault()}
+                    >
+                      {busyId === CLEAR_SITE_DEFAULT_BUSY_ID ? 'Clearing…' : 'Clear default'}
+                    </Button>
+                  ) : null}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -486,16 +608,35 @@ export function PdfTemplatesPanel({
 
       {model.byKind.length ? (
         <Card kicker="Per-kind pins" title="Templates pinned to a content kind">
-          <ul className="flex flex-col gap-1">
+          <ul className="flex flex-col gap-2">
             {model.byKind.map((pin) => (
-              <li key={pin.kind} className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
-                <span className="text-[var(--adm-text-muted)]">{pin.kind}: </span>
-                <code>{pin.templateId}</code>
-                {pin.resolved ? null : (
-                  <Badge tone="danger" className="ml-2">
-                    not listed
-                  </Badge>
-                )}
+              <li key={pin.kind} className="flex flex-wrap items-center justify-between gap-2 text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+                <span>
+                  <span className="text-[var(--adm-text-muted)]">{pin.kind}: </span>
+                  <code>{pin.templateId}</code>
+                  {pin.resolved ? null : (
+                    <Badge tone="danger" className="ml-2">
+                      not listed
+                    </Badge>
+                  )}
+                </span>
+                {/* Point 4: the op layer (`buildPinKindDefaultOp(kind, null)`)
+                    already supports unsetting a kind pin — this is the UI-only
+                    affordance for it. It lives here rather than as a "None"
+                    entry in each row's kind selector because that selector
+                    picks which KIND a row's own template pins to; it never
+                    lists templates, so it has no "no template" option to add.
+                    This list already names `kind: templateId`, so "clear"
+                    reads as an action on that fact directly. */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!model.canEdit || busyId !== undefined}
+                  loading={busyId === clearKindPinBusyId(pin.kind)}
+                  onClick={() => void clearKindPin(pin.kind)}
+                >
+                  {busyId === clearKindPinBusyId(pin.kind) ? 'Clearing…' : 'Clear'}
+                </Button>
               </li>
             ))}
           </ul>
