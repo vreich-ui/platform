@@ -6,6 +6,31 @@
 
 ---
 
+> ## ⚠️ Corrections — filed the same evening, 2026-09-07
+>
+> This report was written from a live drive of the surface and its *observations*
+> stand. Several of its **conclusions do not.** Three of the four P0s below are
+> wrong in ways that matter, and one of them sent a repair session to the wrong
+> repository for three and a half hours. Read the corrections before acting on
+> anything here.
+>
+> | Claim in this report | What is actually true |
+> |---|---|
+> | **P0-1** `render_article_pdf` fails because the platform mapper never populates `coverImage` | **Wrong repo.** `packages/core/lib/pdf/render-data-mapper.ts` was last changed by PR #682 on 4 September and was never at fault. The failure was pdf-tool rejecting an **optional** slot as required; closed by pdf-tool **#83** (`1c0cdc2`, 2026-09-07 15:27 UTC), *"strict binding must catch missing REQUIRED data, not optional fields"*. Verified working at 15:20 UTC the same day. |
+> | **P0-1** (cont.) the mapper "drops every hyperlink", so citations are silently lost from article PDFs | **Not a defect.** `dropped_link` means the hyperlink is flattened to its **visible text** — `flattenInline` recurses into the link and keeps its content; only the `href` is lost, because the target template has no link slot. Dr. Lurié's Sources blocks use the URL *as* the link text, so every citation URL reaches the PDF as readable text. Likewise `skipped_media:document` (a document is a download block, never a figure) and `skipped_node:action` (a CTA means nothing on paper) are deliberate and documented in the source. `unfilled[]` is the mapper honestly reporting a lossy mapping, not a bug list. |
+> | **P0-4** no upload path exists for agent-produced image bytes | **Wrong.** `create_artifact_upload_intent` (+ `POST /api/artifacts/upload`), `create_artifact_from_url` and `save_artifact` all exist in this repo. They are simply absent from the `plugin:claude` charter, so a plugin-surface agent cannot reach them. That is a charter line, not a missing capability. Separately, pdf-tool **#82** shipped a deterministic annotation layer (`annotate_image`, `analyze_image_layout`, `preview_image_grid`, `check_image_text`) bridged through platform **#705** — composing labels server-side onto a generated base is the better answer to the same problem. |
+> | **P0-2** framed as an ops task: "set the four image-search provider credentials" | **Out of scope, withdrawn.** This publication's pictures come from brandImagery generation plus the annotation layer; stock-photo search is not part of the pipeline. The credentials are only worth setting if stock sourcing is wanted, and nothing indicates it is. The genuine defect is narrower and stands: `search_images` returns `complete` when it is structurally unable to search. |
+>
+> **P0-3** (`operation: "edit"` unreachable) is the one P0 that survives intact.
+>
+> Everything under **P1** and **P2** below was verified against `main` and stands,
+> except that `site_id` is now in the `required` array for the three policy tools
+> and `get_pdf_template_validation` now accepts `validation_id` — both fixed
+> before this correction was written.
+
+
+---
+
 ## 1. What shipped
 
 | # | Article | Framework | Media | Ask (one per piece) |
@@ -30,10 +55,10 @@
 
 | # | Finding | Evidence |
 |---|---|---|
-| 1 | **`render_article_pdf` fails 100% of the time.** The article→render-data mapper never populates `coverImage`, even though the article carries `body.image.src`. Fails identically on two templates with two different schema sources. The tool exposes no `assets` parameter, so there is no workaround. "Make a PDF of this article" is currently impossible. | `ASSET_MISSING: Template references 1 image asset that cannot be resolved: coverImage` on `bef0d7b0` (schemaSource `template`) **and** `674a43bd` (schemaSource `article_brochure_v1`) |
-| 2 | **Image search is effectively dead and fails silently.** 3 of 5 providers have no credentials. Openverse returns 0 for descriptive queries and matches single keywords literally. Job status is `complete`, never `degraded`/`failed`. | Query *"collagen powder supplement scoop in a glass jar…"* → **0 candidates**. Query *"skin"* → 3 candidates, top-3 included **"Crispy Potato Skins with Sour Cream"** scored 0.628 and auto-`kept`. Diagnostics: `pexels/unsplash/google-cse skipped: missing credentials` |
+| 1 | ⚠️ **CORRECTED — see the banner above; the cause was in pdf-tool, not this repo.** **`render_article_pdf` fails 100% of the time.** The article→render-data mapper never populates `coverImage`, even though the article carries `body.image.src`. Fails identically on two templates with two different schema sources. The tool exposes no `assets` parameter, so there is no workaround. "Make a PDF of this article" is currently impossible. | `ASSET_MISSING: Template references 1 image asset that cannot be resolved: coverImage` on `bef0d7b0` (schemaSource `template`) **and** `674a43bd` (schemaSource `article_brochure_v1`) |
+| 2 | ⚠️ **PARTLY WITHDRAWN — the credentials framing was out of scope; the silent-success defect stands.** **Image search is effectively dead and fails silently.** 3 of 5 providers have no credentials. Openverse returns 0 for descriptive queries and matches single keywords literally. Job status is `complete`, never `degraded`/`failed`. | Query *"collagen powder supplement scoop in a glass jar…"* → **0 candidates**. Query *"skin"* → 3 candidates, top-3 included **"Crispy Potato Skins with Sour Cream"** scored 0.628 and auto-`kept`. Diagnostics: `pexels/unsplash/google-cse skipped: missing credentials` |
 | 3 | **`operation: "edit"` is structurally unreachable.** Server requires `sourceArtifact.artifactReference`, `sourceArtifact.expectedSha256`, `editMode`. None is in the MCP schema, which is `additionalProperties: false`. The enum advertises a capability that cannot be invoked. | Two attempts, identical validation error |
-| 4 | **No upload path for agent-produced image bytes.** Images can only enter via model generation, https URL import, or search. A chart, diagram, screenshot or client-supplied photo cannot become an image artifact. | `import_image_from_url` with a `data:` URI → `url must use https` |
+| 4 | ⚠️ **WRONG — see the banner above; upload tools exist, they are off-charter.** **No upload path for agent-produced image bytes.** Images can only enter via model generation, https URL import, or search. A chart, diagram, screenshot or client-supplied photo cannot become an image artifact. | `import_image_from_url` with a `data:` URI → `url must use https` |
 
 > **Workaround found for #4:** PDF template `assets.images` *does* accept `{assetId, dataUri}`. Locally-produced bytes can reach production **inside a PDF only**, never as an article image.
 

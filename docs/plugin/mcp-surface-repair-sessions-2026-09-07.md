@@ -217,3 +217,43 @@ The brief told S2 to rewrite the derived imageRef slot description toward the `h
 
 - Image-search provider credentials (`PEXELS_API_KEY`, `UNSPLASH_ACCESS_KEY`, `GOOGLE_CSE_KEY`, `GOOGLE_CSE_CX`) on `pdf-x.netlify.app`. Re-probed at 15:12 UTC: same three providers skipped, and Openverse now also times out at 20s.
 - None of the five published test articles carries a `tracking` block, so lead-magnet downloads and next-article clicks are unattributable.
+
+---
+
+## Correction and close-out, evening of 2026-09-07
+
+The status table above is superseded. What follows is what actually happened.
+
+### The P0 was never in this repository
+
+S3 was commissioned to fix `render_article_pdf` in `packages/core/lib/pdf/render-data-mapper.ts`. That file was last changed by PR **#682 on 4 September** and was never at fault. The `ASSET_MISSING: coverImage` failure came from pdf-tool treating an **optional** slot as required, and was closed by pdf-tool **#83** (`1c0cdc2`) at 15:27 UTC. `render_article_pdf` was verified working at 15:20 UTC.
+
+S3 ran for three hours and twenty-one minutes on Opus against the wrong repository, because the brief asserted a root cause that had been diagnosed from a symptom rather than from the code. Nothing of S3's is on `main`, and nothing of S3's is needed.
+
+### The "dropped citations" escalation was wrong
+
+`dropped_link` does not mean a link is discarded. `flattenInline` recurses into the hyperlink and keeps its text; only the `href` is lost, because the target template has no link slot. Since this publication writes source URLs *as* the visible link text, every citation reaches the PDF readable. `skipped_media:document` and `skipped_node:action` are equally deliberate and carry explanatory comments in the source.
+
+This was escalated repeatedly as "the most serious defect in the pipeline". It is designed, documented behaviour, and `unfilled[]` is the mapper reporting an honestly lossy mapping.
+
+### Process failures worth keeping
+
+These cost more than any defect in the report, and they will recur:
+
+- **A mechanism was chosen whose output could not be collected.** Five repair sessions were dispatched as scheduled tasks — fresh cloud sessions with no return path — rather than as sub-agents sharing a filesystem. Every patch they built died with its container. The fix is to prefer sub-agents when the deliverable is a file, or to require every dispatched session to **push a branch** rather than only build a zip.
+- **Sequencing was bound to a clock instead of a fact.** S4 was gated on a timestamp four hours out. The scheduler then fired S3 two hours late and S4 an hour early, so the intended order never held.
+- **Absence of a branch was read as absence of work.** A merged PR with its branch deleted is indistinguishable from work that never happened. Several "not landed" conclusions in the table above were drawn this way and were wrong.
+- **Designed behaviour was escalated as a defect** because the symptom was read without reading the code that produced it.
+- **A defect was diagnosed across a repository boundary without checking the other side.** The symptom appeared on the platform bridge; the cause was in pdf-tool. One `git log` on the suspect file would have settled it before a session was commissioned.
+
+The single rule that would have prevented four of these five: **verify a defect against the code that produces it, in the repository that owns it, before commissioning anyone to fix it.**
+
+### What genuinely remains
+
+- `operation: "edit"` is advertised in `create_agent_artifact_job` but unreachable — the server requires `sourceArtifact` and `editMode`, neither of which is in an `additionalProperties: false` schema. The only P0 from the report that survives.
+- `search_images` reports `complete` when it is structurally unable to search (pdf-tool).
+- Returned `polling` blocks name arguments the bridged tools do not accept (pdf-tool, passed through verbatim).
+- Internal `ctaLink` targets are never validated (warn, never block).
+- `object_contract("content_item")` asserts a refusal the `plugin:claude` surface does not enforce.
+- `object_create` has no `projection` parameter.
+- The five articles published during the test carry no `tracking` block, so their lead-magnet downloads and next-article clicks are unattributable.
