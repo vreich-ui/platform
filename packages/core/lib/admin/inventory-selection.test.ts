@@ -18,6 +18,7 @@ const hit = (collection: InventoryCollection, id: string): InventoryHit => ({
   previewRef: null,
   thumbnailRef: null,
   refs: [],
+  tags: [],
 });
 
 describe('describeInventorySelection', () => {

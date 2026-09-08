@@ -171,7 +171,14 @@ export function ConfirmDialog({
         </>
       }
     >
-      {message ? <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{message}</p> : null}
+      {/* `overflow-wrap: anywhere` because a confirm message routinely NAMES
+          the things it is about, and on Admin Inventory those names are blob
+          keys and 64-hex shas — single tokens with no break opportunity, wider
+          than this dialog. It changes nothing for prose: it only takes effect
+          on a word that would otherwise overflow. */}
+      {message ? (
+        <p className="[overflow-wrap:anywhere] text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{message}</p>
+      ) : null}
       {requireTyped ? (
         <div className="mt-3 flex flex-col gap-1">
           <label htmlFor={fieldId} className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
@@ -244,22 +251,67 @@ export function Drawer({ open, onClose, title, side = 'right', width = 420, chil
       style={{ width, maxWidth: '100vw' }}
       aria-labelledby={title ? headingId : undefined}
     >
-      <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-[var(--adm-border)] px-5 py-4">
+      {/*
+        WHY min-w-0 AND overflow-wrap ARE LOAD BEARING HERE.
+
+        The panel's own width is never in question: `dialog:modal` is an
+        out-of-flow box with an explicit `width`, so nothing it contains can
+        widen it. What CAN happen — and did, on Admin Inventory — is that a
+        child overflows the panel horizontally, and the UA's `overflow: auto`
+        on `dialog:modal` turns that overflow into a scrollable region. The
+        panel then has a horizontal scrollbar; worse, `showModal()` focuses
+        the first focusable descendant, which is the close button at the far
+        right of the header, and focusing scrolls it into view. The whole
+        column shifts left by the overflow amount: the title is cut off at the
+        left, the footer buttons are cut off at the left, and the extra
+        scrollable width shows as a band of panel background on the right.
+        That is the "slid to the left with extra space on the right" report.
+
+        Only the header and the footer could do it — the body between them is
+        already a scroll container, so its content overflows INSIDE it and
+        never reaches the panel. Two causes, both fixed at the source:
+
+          1. The header is a flex row and the <h2> is a flex item, so its
+             `min-width: auto` is its min-content width. An Inventory drawer
+             titles itself with a blob key or an artifact label carrying a
+             64-hex sha — one unbreakable word — so min-content was wider than
+             the panel and the item refused to shrink. `min-w-0` lets it
+             shrink and `overflow-wrap: anywhere` lets the sha wrap instead of
+             overflowing. `shrink-0` keeps the close button its own size.
+          2. The footer's children were laid out inline with no whitespace
+             between them (adjacent JSX elements produce no text node), so a
+             row of buttons was one unbreakable inline run. It is now a
+             wrapping flex row, matching Dialog's footer.
+
+        The Dialog above already wraps its title in a `min-w-0` box; the
+        Drawer simply never got the same guard.
+      */}
+      <div className="flex h-full min-w-0 flex-col">
+        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--adm-border)] px-5 py-4">
           {title ? (
             <h2
               id={headingId}
-              className="text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]"
+              className="min-w-0 [overflow-wrap:anywhere] text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]"
             >
               {title}
             </h2>
           ) : (
             <span />
           )}
-          <IconButton label="Close panel" icon={<IconX size={18} />} size="sm" onClick={() => ref.current?.close()} />
+          <IconButton
+            label="Close panel"
+            icon={<IconX size={18} />}
+            size="sm"
+            className="shrink-0"
+            onClick={() => ref.current?.close()}
+          />
         </div>
-        <div className="flex-1 overflow-auto px-5 py-4">{children}</div>
-        {footer ? <div className="border-t border-[var(--adm-border)] px-5 py-4">{footer}</div> : null}
+        <div className="min-w-0 flex-1 overflow-auto px-5 py-4">{children}</div>
+        {footer ? (
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--adm-border)] px-5 py-4">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </dialog>
   );

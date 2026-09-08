@@ -113,9 +113,14 @@ import {
 import {
   allowedActions,
   bulkActionsFor,
+  EMPTY_INVENTORY_FACETS,
   facetCounts,
+  filterHitsByFacets,
+  hasActiveFacets,
+  inventoryTagKey,
   previewSummary,
   type ActionId,
+  type InventoryFacetSelection,
   type PreviewField,
   type Role,
 } from '@core/lib/admin/inventory-logic';
@@ -534,14 +539,13 @@ function DiagnosticsGrid({ diagnostics }: { diagnostics: DiagnosticsMap }) {
 
 // ─── facet rail ─────────────────────────────────────────────────────────────
 
-interface FacetSelection {
-  collection: string | null;
-  kind: string | null;
-  status: string | null;
-}
-
-const EMPTY_FACETS: FacetSelection = { collection: null, kind: null, status: null };
-
+/**
+ * The selection shape and every rule that reads it live in
+ * `inventory-logic.ts` (`InventoryFacetSelection`, `filterHitsByFacets`,
+ * `hasActiveFacets`) — this file holds only the state and the chips, per the
+ * "nothing is decided here" rule in the header comment. The tag group joined
+ * the other three rather than growing a parallel mechanism beside them.
+ */
 function FacetGroup({
   title,
   counts,
@@ -604,7 +608,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  const [facet, setFacet] = useState<FacetSelection>(EMPTY_FACETS);
+  const [facet, setFacet] = useState<InventoryFacetSelection>(EMPTY_INVENTORY_FACETS);
   const [selection, setSelection] = useState<SelectionState>(emptySelection());
 
   const [inspected, setInspected] = useState<InventoryHit | null>(null);
@@ -715,16 +719,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
 
   const facets = useMemo(() => facetCounts(hits), [hits]);
 
-  const visibleHits = useMemo(
-    () =>
-      hits.filter(
-        (hit) =>
-          (facet.collection === null || hit.collection === facet.collection) &&
-          (facet.kind === null || hit.kind === facet.kind) &&
-          (facet.status === null || hit.status === facet.status)
-      ),
-    [hits, facet]
-  );
+  const visibleHits = useMemo(() => filterHitsByFacets(hits, facet), [hits, facet]);
 
   const visibleIds = useMemo(() => visibleHits.map((hit) => hit.id), [visibleHits]);
 
@@ -819,8 +814,25 @@ function InventoryBody({ siteId }: { siteId: string }) {
   const chatStorage = browserDockedChatStorage();
   const chatStorageKey = dockedChatStorageKey(INVENTORY_CHAT_SCOPE, siteId);
 
-  function toggleFacet(group: keyof FacetSelection, value: string) {
+  function toggleFacet(group: keyof InventoryFacetSelection, value: string) {
     setFacet((current) => ({ ...current, [group]: current[group] === value ? null : value }));
+  }
+
+  /**
+   * Clicking a tag in the drawer filters the table to it — the SAME
+   * `facet.tag` the rail's Tags chip sets, folded the same way, so the chip
+   * lights up and "Clear facets" clears it. There is one tag mechanism, not
+   * two. The drawer closes because the answer to the click is the table
+   * behind it.
+   *
+   * The tags rendered in the drawer come from the preview (the store's own
+   * read-back), while the filter runs over the tags the LOADED ROWS carry. If
+   * a retag landed after this page was fetched the two can disagree and the
+   * filter can come back empty — the honest outcome, and "Refresh" is the fix.
+   */
+  function filterByTag(tag: string) {
+    setFacet((current) => ({ ...current, tag: inventoryTagKey(tag) }));
+    setInspected(null);
   }
 
   function objectTargets(targets: readonly InventoryHit[]) {
@@ -1378,14 +1390,16 @@ function InventoryBody({ siteId }: { siteId: string }) {
    * The tags the SERVER reports for the inspected artifact — or an honest
    * statement that we do not know yet.
    *
-   * WHERE THESE COME FROM, AND WHY NOT FROM THE ROW. The drawer already
-   * fetches `preview` for the inspected hit, and the `preview` action answers
-   * an artifact with its whole `ArtifactReference`, `tags` included. Reading
-   * them from there costs NO extra round trip — not one per row and not one
-   * per open — whereas putting `tags` on `InventoryHit` would ship them on
-   * every row of every search response for data only this panel shows, and
-   * would create a second copy of the truth that can disagree with the
-   * preview the same panel is rendering beside it.
+   * WHERE THESE COME FROM, AND WHY STILL NOT FROM THE ROW. `InventoryHit` now
+   * DOES carry `tags` — the Tags facet needs them on every row, and no
+   * per-row preview can be a facet without one round trip per row. This panel
+   * still reads the preview instead, and the reason is freshness, not size:
+   * `preview` is a read of the canonical reference issued when the drawer
+   * opened, whereas `inspected` is the row object captured at search time and
+   * NOT replaced when a retag refreshes the table. Sourcing this row from the
+   * hit would show the pre-retag tag list immediately after retagging from
+   * this very drawer — the exact blind spot the read-back verification exists
+   * to close.
    *
    * The `preview.id === hit.id` guard is the "never claim a state you cannot
    * prove" rule at frame granularity: `setInspected` renders once before the
@@ -1564,9 +1578,36 @@ function InventoryBody({ siteId }: { siteId: string }) {
               active={facet.status}
               onToggle={(value) => toggleFacet('status', value)}
             />
-            {facet.collection || facet.kind || facet.status ? (
+            {/* Tags — the fourth facet, and the reason this rail exists at
+                all for a tag: before it, a tag was reachable only by typing
+                its exact spelling into the search box above, which also
+                matches labels, filenames and store keys. Chips are keyed on
+                the folded tag (`inventoryTagKey`) and labelled with the
+                spelling the rows carry, so `Julia` and `julia` are one chip
+                counted once — the same identity the by-tag pointer and
+                add/remove-tag already use. */}
+            <FacetGroup
+              title="Tags"
+              counts={facets.tag}
+              active={facet.tag}
+              onToggle={(value) => toggleFacet('tag', value)}
+              labelFor={(value) => facets.tagLabels[value] ?? value}
+            />
+            {/* What the numbers on those chips actually count. They are a
+                tally of the rows LOADED into this table, never of the
+                collection: the server's own totals are the "Server matched …"
+                line below, and a sweep that hit its scan cap says so there
+                too. This line was missing while there were three facets and
+                would have been just as wrong then. */}
+            {hits.length ? (
+              <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                Facet counts cover the {hits.length} row{hits.length === 1 ? '' : 's'} loaded here, not the whole
+                store. Only artifacts carry tags.
+              </p>
+            ) : null}
+            {hasActiveFacets(facet) ? (
               <div>
-                <Button size="sm" variant="ghost" onClick={() => setFacet(EMPTY_FACETS)}>
+                <Button size="sm" variant="ghost" onClick={() => setFacet(EMPTY_INVENTORY_FACETS)}>
                   Clear facets
                 </Button>
               </div>
@@ -1791,7 +1832,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
               {inspected.collection === 'artifacts' ? (
                 <div className="col-span-2">
                   <dt className="text-[var(--adm-text-muted)]">Tags</dt>
-                  <dd className="flex flex-wrap items-center gap-1">
+                  <dd className="flex min-w-0 flex-wrap items-center gap-1">
                     {(() => {
                       const read = inspectedArtifactTags(inspected);
                       if (read.state === 'reading') {
@@ -1807,10 +1848,19 @@ function InventoryBody({ siteId }: { siteId: string }) {
                       if (read.tags.length === 0) {
                         return <span className="text-[var(--adm-text-muted)]">No tags</span>;
                       }
+                      // Clickable, not decorative: a tag you can see but
+                      // cannot act on is the same dead end as a tag you
+                      // cannot see at all.
                       return read.tags.map((tag) => (
-                        <Badge key={tag} tone="neutral">
-                          {tag}
-                        </Badge>
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => filterByTag(tag)}
+                          title={`Filter the table to the tag "${tag}"`}
+                          className="adm-focusable inline-flex max-w-full items-center rounded-[var(--adm-radius-pill)] border border-[var(--adm-border)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:border-[var(--adm-accent)] hover:text-[var(--adm-text)]"
+                        >
+                          <span className="[overflow-wrap:anywhere]">{tag}</span>
+                        </button>
                       ));
                     })()}
                   </dd>
@@ -1819,9 +1869,13 @@ function InventoryBody({ siteId }: { siteId: string }) {
               {inspected.refs.length ? (
                 <div className="col-span-2">
                   <dt className="text-[var(--adm-text-muted)]">References</dt>
-                  <dd className="flex flex-wrap gap-1">
+                  <dd className="flex min-w-0 flex-wrap gap-1">
+                    {/* A ref is a request id — one long token with no space
+                        in it. Without `overflow-wrap` the badge is a flex
+                        item that refuses to shrink and pushes past the
+                        panel. */}
                     {inspected.refs.map((ref) => (
-                      <Badge key={ref} tone="neutral">
+                      <Badge key={ref} tone="neutral" className="max-w-full [overflow-wrap:anywhere]">
                         {ref}
                       </Badge>
                     ))}
@@ -1986,7 +2040,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
             {report?.ok.length ? (
               <ul className="flex flex-col gap-1">
                 {report.ok.map((entry) => (
-                  <li key={entry.id} className="font-mono text-[length:var(--adm-text-xs)]">
+                  <li key={entry.id} className="[overflow-wrap:anywhere] font-mono text-[length:var(--adm-text-xs)]">
                     {entry.id}
                     {entry.detail ? <span className="ml-2 font-sans text-[var(--adm-text-muted)]">{entry.detail}</span> : null}
                   </li>
@@ -2001,7 +2055,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
             {report?.failed.length ? (
               <ul className="flex flex-col gap-1">
                 {report.failed.map((entry) => (
-                  <li key={entry.id}>
+                  <li key={entry.id} className="[overflow-wrap:anywhere]">
                     <span className="font-mono text-[length:var(--adm-text-xs)]">{entry.id}</span>
                     <span className="ml-2 text-[var(--adm-danger)]">{entry.reason}</span>
                   </li>
