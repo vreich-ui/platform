@@ -912,12 +912,26 @@ function InventoryBody({ siteId }: { siteId: string }) {
     const ids = targets.map((hit) => hit.id);
     const add = action === 'add-tag' ? [tag] : [];
     const remove = action === 'remove-tag' ? [tag] : [];
-    const summary = await bulkRetagArtifacts(ids, add, remove, (id, addTags, removeTags) =>
-      retagArtifact(getToken, id, addTags, removeTags)
-    );
+    /**
+     * The tags the SERVER read back out of the index, per id. The old report
+     * said "N of N updated" and nothing else, so a retag the index did not
+     * actually end up carrying looked exactly like one that did — which is how
+     * a tag that no search could find was signed off as working. The server now
+     * refuses (409) anything it cannot re-read, so a row only lands in `ok`
+     * when the index was re-read; this keeps that proof and shows it.
+     */
+    const proven = new Map<string, string[]>();
+    const summary = await bulkRetagArtifacts(ids, add, remove, async (id, addTags, removeTags) => {
+      const result = await retagArtifact(getToken, id, addTags, removeTags);
+      proven.set(id, result.persistedTags ?? result.tags ?? []);
+      return result;
+    });
     return {
-      title: `${action === 'add-tag' ? 'Add tag' : 'Remove tag'} "${tag}" — ${summary.ok.length} of ${ids.length} updated`,
-      ok: summary.ok.map((id) => ({ id })),
+      title: `${action === 'add-tag' ? 'Add tag' : 'Remove tag'} "${tag}" — ${summary.ok.length} of ${ids.length} confirmed by the server`,
+      ok: summary.ok.map((id) => {
+        const tags = proven.get(id) ?? [];
+        return { id, detail: tags.length ? `tags now: ${tags.join(', ')}` : 'no tags' };
+      }),
       failed: summary.failed.map((failure) => ({ id: failure.id, reason: failure.reason ?? 'Retag failed.' })),
     };
   }
@@ -1360,6 +1374,32 @@ function InventoryBody({ siteId }: { siteId: string }) {
     return preview.format === 'artifact-metadata' ? JSON.stringify(preview.artifact, null, 2) : preview.text;
   }
 
+  /**
+   * The tags the SERVER reports for the inspected artifact — or an honest
+   * statement that we do not know yet.
+   *
+   * WHERE THESE COME FROM, AND WHY NOT FROM THE ROW. The drawer already
+   * fetches `preview` for the inspected hit, and the `preview` action answers
+   * an artifact with its whole `ArtifactReference`, `tags` included. Reading
+   * them from there costs NO extra round trip — not one per row and not one
+   * per open — whereas putting `tags` on `InventoryHit` would ship them on
+   * every row of every search response for data only this panel shows, and
+   * would create a second copy of the truth that can disagree with the
+   * preview the same panel is rendering beside it.
+   *
+   * The `preview.id === hit.id` guard is the "never claim a state you cannot
+   * prove" rule at frame granularity: `setInspected` renders once before the
+   * fetch effect clears `preview`, so without it the panel would briefly show
+   * the PREVIOUS artifact's tags under this artifact's name.
+   */
+  function inspectedArtifactTags(hit: InventoryHit): { state: 'reading' | 'unknown' | 'ready'; tags: string[] } {
+    if (previewLoading) return { state: 'reading', tags: [] };
+    if (previewError || !preview || preview.format !== 'artifact-metadata' || preview.id !== hit.id) {
+      return { state: 'unknown', tags: [] };
+    }
+    return { state: 'ready', tags: preview.artifact.tags ?? [] };
+  }
+
   const columns: Column<InventoryHit>[] = [
     {
       key: 'select',
@@ -1740,6 +1780,42 @@ function InventoryBody({ siteId }: { siteId: string }) {
                 <dt className="text-[var(--adm-text-muted)]">Id</dt>
                 <dd className="break-all font-mono text-[length:var(--adm-text-xs)]">{inspected.id}</dd>
               </div>
+              {/*
+                * Tags, for artifacts only, and ALWAYS rendered — an omitted row
+                * reads as "this artifact has no tags", which is a claim. An
+                * artifact could be tagged and untagged from this very drawer
+                * while never showing which tags it carried; that blind spot is
+                * why a tag that no search could find went unnoticed until a
+                * search failed.
+                */}
+              {inspected.collection === 'artifacts' ? (
+                <div className="col-span-2">
+                  <dt className="text-[var(--adm-text-muted)]">Tags</dt>
+                  <dd className="flex flex-wrap items-center gap-1">
+                    {(() => {
+                      const read = inspectedArtifactTags(inspected);
+                      if (read.state === 'reading') {
+                        return <span className="text-[var(--adm-text-muted)]">Reading…</span>;
+                      }
+                      if (read.state === 'unknown') {
+                        return (
+                          <span className="text-[var(--adm-text-muted)]">
+                            Unknown — the artifact metadata could not be read.
+                          </span>
+                        );
+                      }
+                      if (read.tags.length === 0) {
+                        return <span className="text-[var(--adm-text-muted)]">No tags</span>;
+                      }
+                      return read.tags.map((tag) => (
+                        <Badge key={tag} tone="neutral">
+                          {tag}
+                        </Badge>
+                      ));
+                    })()}
+                  </dd>
+                </div>
+              ) : null}
               {inspected.refs.length ? (
                 <div className="col-span-2">
                   <dt className="text-[var(--adm-text-muted)]">References</dt>

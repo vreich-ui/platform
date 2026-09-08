@@ -88,17 +88,38 @@ export const parseInventoryCollections = (value: unknown): InventoryCollection[]
   return selected.length > 0 ? selected : [...inventoryCollections];
 };
 
+/**
+ * THE ONE OWNER of "what a query string means" for the inventory. Trim, then
+ * lowercase. Every comparison in this module runs both sides through it, and
+ * `admin-inventory.ts` echoes its result back as the response's `query` so a
+ * surface can show what was actually searched for.
+ */
 export const normalizeInventoryQuery = (value: unknown): string => (asTrimmedString(value) ?? '').toLowerCase();
 
 /**
- * A hit matches when the (already lowercased) query is a substring of any of
- * the supplied fields. An empty query matches everything — the inventory's
- * default view is "show me what is there", not an empty table.
+ * A hit matches when the query is a substring of any of the supplied fields.
+ * An empty query matches everything — the inventory's default view is "show me
+ * what is there", not an empty table.
+ *
+ * BOTH SIDES ARE NORMALIZED HERE, and that is the fix for a real defect: this
+ * function used to lowercase the FIELD and compare it against the query
+ * verbatim. Every caller that happened to pre-lowercase was fine; any caller
+ * that did not silently returned zero rows for a query carrying a single
+ * uppercase character, with no error and no way to tell "nothing matched" from
+ * "the comparison was broken". Normalizing here rather than trusting the caller
+ * makes the function total: `matchesInventoryQuery('Niacinamide', …)` and
+ * `matchesInventoryQuery('niacinamide', …)` are the same question.
+ *
+ * This is not a second half-normalization: there is exactly one normalizer
+ * (`normalizeInventoryQuery`) and it is idempotent, so a caller that already
+ * ran it — `handleSearch` does, to echo the query back — costs a no-op rather
+ * than getting a different answer from a caller that did not.
  */
 export const matchesInventoryQuery = (query: string, fields: ReadonlyArray<string | null | undefined>): boolean => {
-  if (!query) return true;
+  const needle = normalizeInventoryQuery(query);
+  if (!needle) return true;
 
-  return fields.some((field) => typeof field === 'string' && field.toLowerCase().includes(query));
+  return fields.some((field) => typeof field === 'string' && field.toLowerCase().includes(needle));
 };
 
 // ─── ids ────────────────────────────────────────────────────────────────────
@@ -640,11 +661,25 @@ export const findReferencingObjectId = (
   records: ReadonlyArray<{ object_id: string; object_type: string; serialized: string }>,
   needles: ReadonlyArray<string>
 ): { object_id: string; object_type: string } | undefined => {
-  const present = needles.filter((needle) => typeof needle === 'string' && needle.length > 0);
+  // BOTH SIDES LOWERCASED, and for the same reason `matchesInventoryQuery`
+  // does it: `artifactReferenceNeedles` lowercases the sha256 it emits but the
+  // serialized record was compared verbatim, so a record that spells the
+  // digest in upper or mixed case — `JSON.stringify` preserves whatever the
+  // writer stored — did not match, and the delete guard reported "nothing
+  // references this" over an object that does. Every needle shape here is
+  // already case-insensitive by construction (hex digests; blob keys built
+  // from a lowercase kind enum, a lowercase snake_case requestId and a
+  // lowercase extension), so folding case can only widen the match — a
+  // refusal that names an object which merely mentions the sha, which this
+  // function's contract already accepts as the safe direction.
+  const present = needles
+    .filter((needle) => typeof needle === 'string' && needle.length > 0)
+    .map((needle) => needle.toLowerCase());
   if (present.length === 0) return undefined;
 
   for (const record of records) {
-    if (present.some((needle) => record.serialized.includes(needle))) {
+    const haystack = record.serialized.toLowerCase();
+    if (present.some((needle) => haystack.includes(needle))) {
       return { object_id: record.object_id, object_type: record.object_type };
     }
   }
