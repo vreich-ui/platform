@@ -169,3 +169,56 @@ describe('resolveBlockage', () => {
     assert.equal(resolveBlockage(undefined, undefined), undefined);
   });
 });
+
+describe('the surface a card is on decides which remedies are live', () => {
+  // THE SHIPPED BUG. An `attempt`-scoped raise is a re-call of the tool that
+  // hit the wall; the chat cannot make it. Rendered live there, the button
+  // posted, the server correctly said "nothing to re-run from here", and the
+  // human was left with a card that neither raised anything nor went away.
+  const syncWall = budgetBlockage({
+    scope: { node_id: 'brand_imagery_writer', tool: 'visual_identity_propose' },
+  });
+
+  it('offers every remedy on the page that owns the tool', () => {
+    const buttons = remedyButtons(syncWall, { isOwner: true }, { surface: 'page' });
+    assert.equal(buttons[0]!.disabledReason, undefined);
+    assert.equal(buttons[0]!.primary, true);
+  });
+
+  it('disables the one-shot raise in a transcript, and says where to press it', () => {
+    const buttons = remedyButtons(syncWall, { isOwner: true }, { surface: 'chat' });
+    assert.match(buttons[0]!.disabledReason ?? '', /Imagery tab/);
+    // …and it is no longer the primary button, because the primary has to be
+    // something the human can actually press.
+    assert.equal(buttons[0]!.primary, undefined);
+    // The default raise still works from anywhere — it writes config.
+    assert.equal(buttons[1]!.remedy_id, 'raise_budget_default');
+    assert.equal(buttons[1]!.disabledReason, undefined);
+    // …and Dismiss is never anyone's privilege, on any surface.
+    assert.equal(buttons[2]!.disabledReason, undefined);
+  });
+
+  it('leaves a RUN-scoped raise live in the chat — a run is exactly what a chat can act on', () => {
+    const runWall = budgetBlockage({
+      remedies: [{ id: 'raise_budget_run', type: 'raise_node_budget', args: { scope: 'run', budgetUsd: 4.5 }, default: true }],
+      scope: { node_id: 'article_body', run_id: 'run_9' },
+    });
+    assert.equal(remedyButtons(runWall, { isOwner: true }, { surface: 'chat' })[0]!.disabledReason, undefined);
+  });
+
+  it('does not call a chat-only wall resolvable when its only live remedy is elsewhere', () => {
+    const attemptOnly = budgetBlockage({
+      remedies: [
+        { id: 'raise_budget_attempt', type: 'raise_node_budget', args: { scope: 'attempt', budgetUsd: 4.5 }, default: true },
+        { id: 'cancel', type: 'cancel' },
+      ],
+      scope: { node_id: 'brand_imagery_writer', tool: 'visual_identity_propose' },
+    });
+    assert.equal(isResolvableBlockage(attemptOnly, { isOwner: true }, { surface: 'page' }), true);
+    assert.equal(isResolvableBlockage(attemptOnly, { isOwner: true }, { surface: 'chat' }), false);
+  });
+
+  it('defaults to the page surface, so an unaware caller gets everything', () => {
+    assert.equal(remedyButtons(syncWall, { isOwner: true })[0]!.disabledReason, undefined);
+  });
+});

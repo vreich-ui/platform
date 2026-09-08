@@ -637,6 +637,14 @@ export interface ImageryBoardProps {
    * from either surface clears both. Absent, the tab behaves exactly as before.
    */
   chatId?: string;
+  /**
+   * The wall the docked chat is holding for this tab, if any. `blockage` state
+   * below is this tab's own, from a propose it just ran; this is the DURABLE
+   * copy, which survives the reload that throws the local one away. Rendering
+   * it here is what keeps the one-shot "Raise to $X for this attempt" reachable
+   * — the chat cannot re-run a page's tool, and this page can.
+   */
+  pendingBlockage?: Blockage;
   /** The U3 seam: hand a tool-backed action to the docked chat rail. */
   onIntent: (intent: VisualIdentityChatIntent) => void;
   /** Reload the records this tab reads after a successful write. */
@@ -651,6 +659,7 @@ export function ImageryBoard({
   isOwner,
   getToken,
   chatId,
+  pendingBlockage,
   onIntent,
   onChanged,
 }: ImageryBoardProps) {
@@ -665,6 +674,12 @@ export function ImageryBoard({
    * union would have made all of them read as "maybe a card".
    */
   const [blockage, setBlockage] = useState<Blockage | undefined>(undefined);
+  /**
+   * A locally DISMISSED wall stays dismissed even though the chat is still
+   * holding it: the human took it off this screen, and the next poll putting it
+   * straight back would be the card refusing to close all over again.
+   */
+  const [dismissedBlockageId, setDismissedBlockageId] = useState<string | undefined>(undefined);
   const [resolving, setResolving] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [applyDiff, setApplyDiff] = useState<{ standardId: string; diff: ImageryDiffModel } | undefined>(undefined);
@@ -810,6 +825,11 @@ export function ImageryBoard({
         });
         setProposeResult({ standardId: selected.objectId, response });
         setNotice(referencesReachedWriterLabel(response));
+        // The re-propose WORKED, so the wall it was retrying is gone. The
+        // server clears the chat's durable copy too, but that is a poll away —
+        // without this the card blinks back for a beat over the proposal it
+        // just produced.
+        if (remedy) setDismissedBlockageId(remedy.blockage_id);
       } catch (reason) {
         // The remedy, when the engine sent one; the plain sentence otherwise —
         // including for an older CMS-Agent, where `blockageFromLegacyMessage`
@@ -861,13 +881,26 @@ export function ImageryBoard({
    * goes to the shared resolver through the chat, which is the one place that
    * holds the blockage and the idempotency ledger (D4).
    */
+  // This tab's own wall if it just hit one, otherwise the durable copy the chat
+  // is holding — minus anything dismissed here. One value, so the card and the
+  // click handler can never disagree about which wall is on screen.
+  const shownBlockage =
+    (blockage ?? pendingBlockage) && (blockage ?? pendingBlockage)!.blockage_id !== dismissedBlockageId
+      ? (blockage ?? pendingBlockage)
+      : undefined;
+
   const resolveBlockageButton = useCallback(
     async (button: RemedyButton) => {
+      const blockage = shownBlockage;
       if (!blockage) return;
       const remedy = blockage.remedies.find((entry) => entry.id === button.remedy_id);
       if (!remedy) return;
       if (remedy.type === 'cancel') {
         setBlockage(undefined);
+        setDismissedBlockageId(blockage.blockage_id);
+        // Clear the chat's durable copy too when there is one, so dismissing
+        // here does not leave the same card sitting in the panel beside it.
+        if (chatId) await resolveChatBlockage(getToken, chatId, blockage.blockage_id, remedy.id).catch(() => undefined);
         return;
       }
       setResolving(true);
@@ -896,7 +929,7 @@ export function ImageryBoard({
         setResolving(false);
       }
     },
-    [blockage, chatId, getToken, runPropose]
+    [shownBlockage, chatId, getToken, runPropose]
   );
 
   /**
@@ -1209,9 +1242,9 @@ export function ImageryBoard({
           sentence naming a raise nobody can click. The plain error line stays
           for everything that genuinely has no remedy (an import that failed, a
           checkout held by someone else). */}
-      {blockage ? (
+      {shownBlockage ? (
         <BlockageCard
-          blockage={blockage}
+          blockage={shownBlockage}
           isOwner={isOwner}
           busy={resolving || proposing}
           onResolve={resolveBlockageButton}

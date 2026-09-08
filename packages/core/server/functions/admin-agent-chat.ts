@@ -714,6 +714,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       }
 
       case 'resolve_blockage': {
+        // Captured once: TS drops the discriminated-union narrowing inside the
+        // `.find()` closures below.
+        const remedyId = request.data.remedy_id;
         const doc = await loadChatDoc(chatStore, request.data.chat_id);
         if (!doc) return jsonResponse(404, { error: 'chat not found' });
 
@@ -727,6 +730,27 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           // it a second ago and this chat is catching up. Say so, and let the
           // client clear its own copy.
           return jsonResponse(200, { resolved: false, status: 'already_resolved' });
+        }
+
+        // DISMISS CLEARS THE CARD, and does nothing else.
+        //
+        // It was routed through `applyRemedy`, which correctly answers "this is
+        // not a resolution, nothing was applied" — and the handler, reading only
+        // `ok`, returned 400, so the browser threw and the card stayed on screen
+        // forever. Both halves were right and the pair was wrong: dismissing IS
+        // a state change (take this off my screen), it is just not a REMEDY. It
+        // belongs here, before the resolver, not inside it.
+        const dismissing = parsed.remedies.find((remedy) => remedy.id === remedyId)?.type === 'cancel';
+        if (dismissing) {
+          const dismissedAt = new Date().toISOString();
+          resolvePendingBlockage(doc, dismissedAt, {
+            blockage_id: parsed.blockage_id,
+            remedy_id: request.data.remedy_id,
+            by: caller.email,
+            outcome: 'dismissed',
+          });
+          await saveChatDoc(chatStore, doc);
+          return jsonResponse(200, { resolved: true, status: 'dismissed' });
         }
 
         const bridge = cmsAgentToolBridge();
@@ -752,6 +776,22 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             by: caller.email,
             outcome: outcome.status,
           });
+          // THE STEP THE HUMAN STILL HAS TO TAKE, said out loud.
+          //
+          // Raising the stored default from here really does raise it — and
+          // then nothing runs, because the wall came from a tool this
+          // conversation cannot re-call (`scope.tool`). Clearing the card
+          // without saying so reads as "done" when the proposal the human was
+          // waiting for still does not exist.
+          const originTool = parsed.scope.tool;
+          if (originTool && parsed.remedies.find((remedy) => remedy.id === remedyId)?.type === 'raise_node_budget') {
+            appendChatEvent(doc, at, 'assistant_text', {
+              text:
+                originTool === 'visual_identity_propose'
+                  ? 'Budget raised. Press **Write contract from mood board** on the Imagery tab to try it again.'
+                  : 'Budget raised. Run it again from the page that started it.',
+            });
+          }
           await saveChatDoc(chatStore, doc);
         }
         return jsonResponse(outcome.ok ? 200 : 400, {

@@ -44,6 +44,7 @@ import { fetchStudioData } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { fetchGovernance } from '@core/lib/admin/governance-client';
 import { createFreeChat, sendChatMessage, type ChatStatus } from '@core/lib/admin/chat-client';
+import type { Blockage } from '@core/lib/admin/blockage';
 import {
   VISUAL_IDENTITY_CHAT_SCOPE,
   browserDockedChatStorage,
@@ -317,6 +318,18 @@ export interface VisualIdentityRailSeam {
    * behaves as it always has.
    */
   chatId?: string;
+  /**
+   * The wall the docked chat is holding, and the way to clear it.
+   *
+   * WHY THE PAGE READS THE CHAT'S COPY. `ImageryBoard` keeps the blockage from
+   * its own failed propose in React state, which a page reload throws away —
+   * leaving the durable copy only in the transcript, on the one surface that
+   * cannot honour the `attempt` raise (D3). So the human ended up looking at a
+   * card whose useful button was greyed out, with no way back to the live one.
+   * The chat's copy is the durable one; the page renders it and CAN re-run it.
+   */
+  blockage?: Blockage;
+  onBlockageResolved?: () => void;
 }
 
 const RETHEME_INTENT: VisualIdentityChatIntent = {
@@ -508,6 +521,7 @@ function VisualIdentityBody({
             isOwner={owner === true}
             getToken={getToken}
             {...(rail?.chatId ? { chatId: rail.chatId } : {})}
+            {...(rail?.blockage ? { pendingBlockage: rail.blockage } : {})}
             onIntent={runIntent}
             onChanged={load}
           />
@@ -699,8 +713,11 @@ export default function VisualIdentityWorkspace({
       // no reader — and the card's "or just tell the agent" hint would point at
       // a composer that is not on screen.
       ...(dockActive ? { chatId: chatSession.chatId } : {}),
+      // The durable copy of any wall this page raised, so the Imagery card can
+      // render it after a reload with its live buttons.
+      ...(dockActive && chat.blockage ? { blockage: chat.blockage } : {}),
     }),
-    [dockActive, chatSession.chatId]
+    [dockActive, chatSession.chatId, chat.blockage]
   );
   const rail = externalRail ?? dockedRail;
 
