@@ -416,3 +416,47 @@ describe('Tool definitions', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Controls pdf-tool accepts must be reachable from this bridge
+// ---------------------------------------------------------------------------
+
+describe('pdf bridge controls', () => {
+  const byName = (name: string) => TOOL_DEFINITIONS.find((definition) => definition.name === name);
+  const propsOf = (tool: ToolDefinition | undefined) =>
+    (tool?.inputSchema as { properties?: Record<string, Record<string, unknown>> } | undefined)?.properties ?? {};
+
+  it('create_agent_artifact_job exposes the render-strictness controls and names the unconfigured-site error', () => {
+    const tool = byName('create_agent_artifact_job');
+    assert.ok(tool, 'create_agent_artifact_job must exist');
+    const properties = propsOf(tool);
+
+    // Without these an agent whose render failed on incomplete data had no way to ask for a
+    // best-effort one, and no way to make the warn-only content gate a hard stop.
+    assert.strictEqual(properties.lenient?.type, 'boolean');
+    assert.strictEqual(properties.fail_on_quality_gate?.type, 'boolean');
+    assert.match(String(properties.lenient?.description), /DATA_BINDING_ERROR/);
+    assert.match(String(properties.fail_on_quality_gate?.description), /PDF_QUALITY_GATE/);
+
+    // A caller has to be able to tell "this SITE was never configured" from "this article is
+    // at fault" before they see the error, not after.
+    assert.match(String(tool.description), /pdf_no_template_configured/);
+  });
+
+  it('build_pdf_render_data can answer without the payload it is being asked about', () => {
+    const tool = byName('build_pdf_render_data');
+    assert.ok(tool, 'build_pdf_render_data must exist');
+    const verbosity = propsOf(tool).verbosity;
+
+    assert.deepStrictEqual(verbosity?.enum, ['full', 'summary']);
+    assert.strictEqual(verbosity?.default, 'full', 'the existing shape stays the default');
+    assert.match(String(tool.description), /summary/);
+  });
+
+  it('render_article_pdf tells a caller the site is unconfigured, not that the article failed', () => {
+    const tool = byName('render_article_pdf');
+    assert.ok(tool, 'render_article_pdf must exist');
+    assert.match(String(tool.description), /pdf_no_template_configured/);
+    assert.match(String(tool.description), /the SITE was never configured/);
+  });
+});
