@@ -1,0 +1,124 @@
+{
+  "__generated": {
+    "at": "2026-09-08T11:36:52.880Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_agent_qa_image_annotation_style_test_20260908_01.json",
+    "record_version": 21,
+    "surface": "plugin:claude"
+  },
+  "deck": "A QA pass on annotate_image across four image types — a face, a panorama, a product, and a table flat-lay — exercising all four text styles (label, title, caption, badge) and independent color themes to test placement control.",
+  "description": "A live test of the annotate_image / analyze_image_layout pipeline: labeling facial features, titling and captioning a landscape, badge-numbering a product's parts, and labeling items on a table, each in a different color, with a candid record of what rendered cleanly and what didn't.",
+  "image": {
+    "alt": "Annotated mountain panorama with a title and caption overlay in amber",
+    "src": "/img/req_agent_qa_image_annotation_style_test_20260908_01/67bfd7964652bba70b34091d1fe02453c5f6747ca2cb7299162204aaef250445.webp"
+  },
+  "lineage": {
+    "parent_content_id": "req_agent_how_image_artifacts_are_created_and_managed_20260804_01"
+  },
+  "nodes": [
+    {
+      "id": "n_f5f81ffcc6a0",
+      "kind": "content",
+      "public": {
+        "body": "This article exists to exercise one thing on this platform: annotate_image's ability to place item names precisely relative to whatever is actually in a photo, in four different visual styles, in four different colors, across four very different kinds of images — a face, a panorama, a product shot, and a flat-lay of items on a table. Every label below was placed with normalized coordinates and a 6x6 layout grid, not eyeballed in an image editor.",
+        "title": "Why This Test Exists"
+      }
+    },
+    {
+      "id": "n_5a9a1f87688c",
+      "kind": "content",
+      "public": {
+        "body": "Facial features labeled with the \"label\" text style in blue (#1e3a8a), each pointed at with a thin arrow rather than placed directly on top of the feature, to keep the labels legible against skin tones. Two of the four labels (Nose, Eyes) came back with a low-contrast warning during rendering, which is noted honestly here rather than hidden — see the findings note at the end.",
+        "media": {
+          "alt": "Portrait photo annotated with blue labels for Eyes, Nose, Mouth, and Chin, each connected by a thin arrow",
+          "caption": "Label style · blue theme · 4 arrow-connected labels",
+          "src": "/img/req_agent_qa_image_annotation_style_test_20260908_01/bde48a3eecc72be9284cf50bae1725d3b74944a4f5208e32947915478144d22a.webp",
+          "type": "image"
+        },
+        "title": "Face — Label Style, Blue"
+      }
+    },
+    {
+      "id": "n_9a163d936bbf",
+      "kind": "content",
+      "public": {
+        "body": "A wide landscape gets a large title at the top (\"title\" style) and a descriptive caption at the bottom (\"caption\" style), both in a warm amber theme (#78350f) with a solid background chip for legibility. This pairing — title up top, caption below — is the classic hero-image treatment, tested here on an extreme wide aspect ratio to see how the layout grid handles a very short, very wide canvas.",
+        "media": {
+          "alt": "Mountain panorama with an amber title reading Mountain Range and a caption at the bottom",
+          "caption": "Title + caption style · amber theme",
+          "src": "/img/req_agent_qa_image_annotation_style_test_20260908_01/67bfd7964652bba70b34091d1fe02453c5f6747ca2cb7299162204aaef250445.webp",
+          "type": "image"
+        },
+        "title": "Panorama — Title & Caption Style, Amber"
+      }
+    },
+    {
+      "id": "n_78e79b0913ec",
+      "kind": "content",
+      "public": {
+        "body": "A single product bottle gets four numbered badges (the dedicated \"badge\" element, not styled text) in red (#dc2626), each pinned to a different part of the bottle from top to bottom, with a legend caption at the bottom spelling out what each number refers to. This is the pattern for numbered step-by-step or part-callout diagrams.",
+        "media": {
+          "alt": "Product bottle with four numbered red badges for Cap, Pump, Label, and Body, with a legend caption",
+          "caption": "Badge style · red theme · 4 numbered call-outs + legend",
+          "src": "/img/req_agent_qa_image_annotation_style_test_20260908_01/4c63ef68685cc376b1d7dddc66f127256d01c78164149c9a4f0728a0b108920b.webp",
+          "type": "image"
+        },
+        "title": "Product — Badge Style, Red"
+      }
+    },
+    {
+      "id": "n_07a5c16d5703",
+      "kind": "content",
+      "public": {
+        "body": "Three items on a table — a coffee cup, a notebook, and a pen — each labeled in green (#14532d), reusing the same \"label\" style as the face image but in a different color, to confirm the same style renders consistently across unrelated subjects. All three labels passed the text-legibility check cleanly.",
+        "media": {
+          "alt": "Flat-lay of a coffee cup, notebook, and pen on a table, each labeled in green with an arrow",
+          "caption": "Label style · green theme · 3 arrow-connected labels",
+          "src": "/img/req_agent_qa_image_annotation_style_test_20260908_01/c3a53076ef727fe6afd1a9e75ad61152629b302c228cf655a3583db5e90fc090.webp",
+          "type": "image"
+        },
+        "title": "Table Items — Label Style, Green"
+      }
+    },
+    {
+      "id": "n_ea589091497c",
+      "kind": "content",
+      "public": {
+        "items": [
+          "All four annotation styles work end to end on this site: label, title, caption, and badge each rendered on a real image with an independent color theme.",
+          "Placement is fully controllable: every label, arrow, title, caption, and badge in this test was positioned with explicit coordinates or grid cells, not left to the renderer to guess.",
+          "A solid background chip behind text does not reliably clear the CONTRAST_LOW check the way a same-sized box would in a design tool — sizing the chip generously did not change the reported ratio for three of the four face labels, which suggests the check is sampling the actual composite more narrowly than the box's nominal footprint.",
+          "check_image_text (OCR verification) matched every label on the table and product images cleanly, matched the panorama's title, but missed the panorama's caption and three of the four face labels — a mix of genuinely low contrast and OCR being, as documented, imperfect on stylized small text.",
+          "The site's own AI image generator (create_agent_artifact_job) is out of credits right now (429, no credits remaining) — every base photo here was sourced from Wikimedia Commons via import_image_from_url instead, which cost nothing and worked on the first or second try for three of four images."
+        ],
+        "title": "What This Test Found"
+      }
+    }
+  ],
+  "slug": "qa-image-annotation-style-test",
+  "sources": {
+    "source_list": [
+      {
+        "name": "Face portrait (Unsplash)",
+        "publisher": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:Face_portrait_(Unsplash).jpg"
+      },
+      {
+        "name": "Mountains panorama",
+        "publisher": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:Mountains_panorama.jpg"
+      },
+      {
+        "name": "Black cosmetic plastic bottle",
+        "publisher": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:Black_cosmetic_plastic_bottle.jpg"
+      },
+      {
+        "name": "Coffee, notebooks and pen (Unsplash)",
+        "publisher": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:Coffee,_notebooks_and_pen_(Unsplash).jpg"
+      }
+    ]
+  },
+  "title": "Testing Image Annotation on Kugel-Platform: Placement, Styles, and Colors"
+}
