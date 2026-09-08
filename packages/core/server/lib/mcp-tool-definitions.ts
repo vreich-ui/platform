@@ -851,7 +851,22 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
-        template_json: anyObjectSchema('The pdf-tool template definition for the chosen renderer.'),
+        template_json: anyObjectSchema(
+          // THE SHAPE, UP FRONT. This field was documented as "the template
+          // definition for the chosen renderer" and nothing else, so an agent
+          // asked for a rich PDF, picked chromium, and invented a plausible
+          // declarative schema ({label, kind, schemaVersion, layout, sections}).
+          // pdf-tool rejected every key by name — a good error, arriving one
+          // turn too late, after a creation-tool approval had already been
+          // spent. Each renderer accepts ONE shape and rejects every unknown
+          // key, so the four shapes belong here, before the call.
+          'The pdf-tool template definition. EACH RENDERER TAKES ITS OWN SHAPE and rejects every key outside it — pick the renderer first, then send exactly this:\n' +
+            '• pdfme (default): { basePdf, schemas } — basePdf is a base64 PDF string OR one { width, height, padding } object (never an array); schemas is an array of PAGES, each an array of field objects (schemas[0] is page 1). Multi-page comes from more entries in schemas, not from more basePdfs.\n' +
+            '• chromium: { html, css?, assets? } — html is a non-empty Liquid/HTML string and is the whole document; css is a stylesheet string; assets.partials is { "<name>": "<liquid string>" } for {% include %}. This is the renderer for a rich, freely designed layout.\n' +
+            '• typst: { source } — the typst document as a string, and nothing else.\n' +
+            '• react-pdf: { docTreeVersion: 1, document, theme? } — the doc-tree JSON (flexbox-style nodes), NOT JSX and NOT HTML.\n' +
+            'Anything else is refused with each offending key named. For react-pdf/typst/chromium the shape is checked again by validate_pdf_template, which is required before publishing.'
+        ),
         renderer: {
           type: 'string',
           enum: ['pdfme', 'react-pdf', 'typst', 'chromium'],
