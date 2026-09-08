@@ -11,6 +11,7 @@
  * safe to import from a browser bundle; byte work goes through
  * TextEncoder/TextDecoder.
  */
+import { ADMIN_PREVIEWABLE_IMAGE_REF_RE } from './artifact-preview.js';
 
 export const inventoryCollections = ['objects', 'artifacts', 'stores'] as const;
 
@@ -34,6 +35,19 @@ export type InventoryHit = {
   updatedAt: string | null;
   sizeBytes: number | null;
   previewRef: string | null;
+  /**
+   * A blob key for an image this row can PROVE is its own, or `null`.
+   *
+   * Same nullability rule as the fields above, and for the same reason: a
+   * surface renders real bytes when this is set and its own type visual when
+   * it is not — never a placeholder image standing in for a picture that was
+   * never found. Objects get theirs from the requestId join the search
+   * response performs once (`buildRequestThumbnailIndex` +
+   * `attachObjectThumbnails`); artifacts already carry their bytes on
+   * `previewRef`, and store blobs have no imagery at all, so both leave this
+   * `null`.
+   */
+  thumbnailRef: string | null;
   refs: string[];
 };
 
@@ -192,6 +206,9 @@ export const normalizeObjectHit = (row: ObjectHitInput): InventoryHit => {
     updatedAt: asTrimmedString(row.updated_at) ?? null,
     sizeBytes: null,
     previewRef: id,
+    // Filled in by `attachObjectThumbnails` once the artifact index for this
+    // response has been read — never by this function, which sees one row.
+    thumbnailRef: null,
     refs: [],
   };
 };
@@ -227,6 +244,9 @@ export const normalizeArtifactHit = (reference: ArtifactHitInput): InventoryHit 
   sizeBytes:
     typeof reference.sizeBytes === 'number' && Number.isFinite(reference.sizeBytes) ? reference.sizeBytes : null,
   previewRef: asTrimmedString(reference.blobKey) ?? null,
+  // An artifact's own bytes are `previewRef`; it is never the thumbnail FOR
+  // something else in the same row.
+  thumbnailRef: null,
   refs: [reference.requestId],
 });
 
@@ -263,9 +283,145 @@ export const normalizeStoreHit = (blob: StoreHitInput): InventoryHit => {
     updatedAt: null,
     sizeBytes: null,
     previewRef: id,
+    // A store listing carries a key and maybe an etag; nothing image-like.
+    thumbnailRef: null,
     refs: [],
   };
 };
+
+// ─── object thumbnails (the requestId join) ─────────────────────────────────
+
+/**
+ * WHY OBJECTS CAN HAVE IMAGERY AT ALL. Objects and artifacts share an
+ * identifier: an object id is `<type>/<requestId>` (e.g.
+ * `content_item/req_agent_fruit_..._20260829_01`) and every artifact produced
+ * under that article carries an id of `<requestId>/<sha256>`. So an object's
+ * own pictures are exactly the artifact-index references whose `requestId`
+ * equals its object id — no extra store, no extra listing, no per-row fetch.
+ *
+ * The join is therefore a pure function of the artifact references the search
+ * response ALREADY read for the artifacts collection. It is built once per
+ * response (`buildRequestThumbnailIndex`) and applied to the object rows
+ * (`attachObjectThumbnails`); nothing here is per-row and nothing here does
+ * I/O.
+ */
+export type ArtifactThumbnailCandidate = {
+  requestId: string;
+  sha256: string;
+  blobKey?: string | null;
+  artifactKind?: string | null;
+  contentType?: string | null;
+  createdAtISO?: string | null;
+  deletedAtISO?: string | null;
+  /**
+   * The request-scoped slot this artifact was written under, when the
+   * reference carries one — `primary_image`, `hero_image`, `article_image_2`.
+   * Platform's `ArtifactReference` has no first-class `slot` field today (the
+   * by-slot pointer lives in pdf-tool), so the server reads it out of
+   * `metadata.slot` via `artifactSlotHint` and passes whatever it finds. When
+   * nothing carries a slot the selection below degrades to "earliest image",
+   * which is the documented second preference — not a guess dressed up as a
+   * hero.
+   */
+  slot?: string | null;
+};
+
+/** The slot spellings that mean "this is the one to show": `primary_image`, `hero`, `article_hero_image`. */
+const PRIMARY_SLOT_RE = /(^|[_-])(primary|hero)([_-]|$)/i;
+
+/** `metadata.slot`, when an artifact reference's opaque metadata bag carries one as a string. */
+export const artifactSlotHint = (metadata: unknown): string | null => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  return asTrimmedString((metadata as Record<string, unknown>).slot) ?? null;
+};
+
+/** True for a reference whose bytes are an image — by declared kind, else by content type. */
+const isImageCandidate = (candidate: ArtifactThumbnailCandidate): boolean => {
+  const kind = asTrimmedString(candidate.artifactKind)?.toLowerCase();
+  if (kind) return kind === 'image';
+  return (asTrimmedString(candidate.contentType)?.toLowerCase() ?? '').startsWith('image/');
+};
+
+/**
+ * The one image to show for a request, or `null`.
+ *
+ * Order of preference, per the brief: the primary/hero slot, else the
+ * EARLIEST image artifact. A candidate is only eligible when it is
+ * (a) an image, (b) not soft-deleted — a deleted artifact must not be a
+ * thing's face — and (c) carries a blob key `admin-get-blob-image` will
+ * actually serve, checked against the very pattern that endpoint enforces,
+ * so a row never issues a request that is known to 400.
+ *
+ * `null` is a real answer, and the only honest one when nothing qualifies:
+ * the surface then draws the type visual.
+ */
+export const selectRequestThumbnail = (candidates: readonly ArtifactThumbnailCandidate[]): string | null => {
+  const eligible = candidates.filter(
+    (candidate) =>
+      !asTrimmedString(candidate.deletedAtISO) &&
+      isImageCandidate(candidate) &&
+      ADMIN_PREVIEWABLE_IMAGE_REF_RE.test(asTrimmedString(candidate.blobKey) ?? '')
+  );
+  if (eligible.length === 0) return null;
+
+  const primary = eligible.filter((candidate) => PRIMARY_SLOT_RE.test(asTrimmedString(candidate.slot) ?? ''));
+  const pool = primary.length > 0 ? primary : eligible;
+
+  // Earliest first. A reference with no timestamp cannot claim to be the
+  // earliest, so it sorts after every dated one; sha256 breaks the remaining
+  // ties, which keeps the answer stable across responses.
+  const [chosen] = [...pool].sort((a, b) => {
+    const left = asTrimmedString(a.createdAtISO) ?? '';
+    const right = asTrimmedString(b.createdAtISO) ?? '';
+    if (left !== right) {
+      if (!left) return 1;
+      if (!right) return -1;
+      return left < right ? -1 : 1;
+    }
+    return a.sha256 < b.sha256 ? -1 : a.sha256 > b.sha256 ? 1 : 0;
+  });
+
+  return (chosen && asTrimmedString(chosen.blobKey)) ?? null;
+};
+
+/** requestId → hero image blob key, for every request that has one. Built once per search response. */
+export const buildRequestThumbnailIndex = (
+  candidates: readonly ArtifactThumbnailCandidate[]
+): Map<string, string> => {
+  const byRequest = new Map<string, ArtifactThumbnailCandidate[]>();
+  for (const candidate of candidates) {
+    const requestId = asTrimmedString(candidate.requestId);
+    if (!requestId) continue;
+    const existing = byRequest.get(requestId);
+    if (existing) existing.push(candidate);
+    else byRequest.set(requestId, [candidate]);
+  }
+
+  const index = new Map<string, string>();
+  for (const [requestId, group] of byRequest) {
+    const blobKey = selectRequestThumbnail(group);
+    if (blobKey) index.set(requestId, blobKey);
+  }
+
+  return index;
+};
+
+/**
+ * Stamps the joined thumbnail onto object rows. Every other collection passes
+ * through untouched, and an object with no match keeps `thumbnailRef: null`
+ * — which is what makes the type visual the fallback rather than a spinner
+ * that never resolves.
+ */
+export const attachObjectThumbnails = (
+  hits: readonly InventoryHit[],
+  thumbnails: ReadonlyMap<string, string>
+): InventoryHit[] =>
+  hits.map((hit) => {
+    if (hit.collection !== 'objects') return hit;
+    const parsed = parseObjectHitId(hit.id);
+    const blobKey = parsed ? thumbnails.get(parsed.objectId) : undefined;
+    return blobKey ? { ...hit, thumbnailRef: blobKey } : hit;
+  });
 
 // ─── cursors ────────────────────────────────────────────────────────────────
 

@@ -8,7 +8,10 @@ import {
   getAdminBlobPdfEndpoint,
   inventoryDownloadFilename,
   inventoryPreviewPlan,
+  inventoryTypeVisual,
   KNOWN_ROLES,
+  objectTypeVisual,
+  OBJECT_TYPE_ICONS,
   parseInventoryPreviewJson,
   previewStoreName,
   toInventoryRoles,
@@ -25,6 +28,7 @@ const hit = (overrides: Partial<InventoryHit> = {}): InventoryHit => ({
   updatedAt: null,
   sizeBytes: null,
   previewRef: null,
+  thumbnailRef: null,
   refs: [],
   ...overrides,
 });
@@ -90,12 +94,75 @@ test('an artifact with no usable blob key falls back to json, never to a broken 
   assert.deepEqual(inventoryPreviewPlan(hit({ previewRef: 'artifacts/whatever.bin' })), { mode: 'json' });
 });
 
-test('objects and store blobs are always json previews, whatever their previewRef looks like', () => {
+test('an object’s own previewRef is never treated as image bytes — it is the object id', () => {
+  // This is what made every Objects row a text chip: `normalizeObjectHit`
+  // sets previewRef to the hit id. The image now comes from thumbnailRef.
   assert.deepEqual(inventoryPreviewPlan(hit({ collection: 'objects', previewRef: `image/req_1/${SHA}.png` })), {
     mode: 'json',
   });
   assert.deepEqual(inventoryPreviewPlan(hit({ collection: 'stores', previewRef: 'workflows/run_1' })), {
     mode: 'json',
+  });
+});
+
+test('an object with a joined thumbnail previews through the SAME image endpoint and cache key as the artifact row', () => {
+  const blobKey = `image/req_1/${SHA}.png`;
+  const objectPlan = inventoryPreviewPlan(
+    hit({ collection: 'objects', kind: 'content_item', previewRef: 'content_item/req_1', thumbnailRef: blobKey })
+  );
+  const artifactPlan = inventoryPreviewPlan(hit({ previewRef: blobKey }));
+
+  assert.deepEqual(objectPlan, artifactPlan);
+  assert.equal(objectPlan.mode === 'image' && objectPlan.cacheKey, `inventory:image:${blobKey}`);
+});
+
+test('a thumbnailRef the image endpoint would refuse degrades to the type visual, not to a broken image', () => {
+  assert.deepEqual(
+    inventoryPreviewPlan(hit({ collection: 'objects', thumbnailRef: 'image/../secrets.png' })),
+    { mode: 'json' }
+  );
+  assert.deepEqual(inventoryPreviewPlan(hit({ collection: 'objects', thumbnailRef: '  ' })), { mode: 'json' });
+});
+
+test('thumbnailRef is the proof, not the collection — a store row simply never carries one', () => {
+  // The plan asks "can this row prove image bytes?", so any future collection
+  // the server joins imagery for works without touching this function.
+  // `normalizeStoreHit` leaves store rows at null, which is why they render
+  // the type visual in practice.
+  assert.equal(
+    inventoryPreviewPlan(hit({ collection: 'stores', kind: 'workflows', thumbnailRef: `image/req_1/${SHA}.png` })).mode,
+    'image'
+  );
+  assert.equal(inventoryPreviewPlan(hit({ collection: 'stores', kind: 'workflows' })).mode, 'json');
+});
+
+// ─── type visuals ───────────────────────────────────────────────────────────
+
+test('every governed object type has its own icon and its human label', () => {
+  assert.deepEqual(objectTypeVisual('content_item'), { iconId: 'note', label: 'Article' });
+  assert.deepEqual(objectTypeVisual('page'), { iconId: 'layout-list', label: 'Page' });
+  assert.deepEqual(objectTypeVisual('navigation'), { iconId: 'menu', label: 'Navigation' });
+  assert.deepEqual(objectTypeVisual('editorial_voice'), { iconId: 'mic', label: 'Editorial voice' });
+  assert.equal(Object.keys(OBJECT_TYPE_ICONS).length, 13, 'all thirteen object types are mapped');
+});
+
+test('an unknown object type still gets a visual and a readable name, never another type’s icon', () => {
+  assert.deepEqual(objectTypeVisual('some_future_type'), { iconId: 'info', label: 'Some future type' });
+  assert.deepEqual(objectTypeVisual(''), { iconId: 'info', label: 'Item' });
+});
+
+test('stores and artifacts get a type visual too, so the preview column is never empty', () => {
+  assert.deepEqual(inventoryTypeVisual(hit({ collection: 'stores', kind: 'agent-chats' })), {
+    iconId: 'settings',
+    label: 'Store blob',
+  });
+  assert.deepEqual(inventoryTypeVisual(hit({ collection: 'artifacts', kind: 'image' })), {
+    iconId: 'note',
+    label: 'Image',
+  });
+  assert.deepEqual(inventoryTypeVisual(hit({ collection: 'objects', kind: 'theme' })), {
+    iconId: 'palette',
+    label: 'Theme',
   });
 });
 

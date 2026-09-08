@@ -5,6 +5,9 @@ import {
   applyArtifactTagChanges,
   artifactMatchFields,
   artifactReferenceNeedles,
+  artifactSlotHint,
+  attachObjectThumbnails,
+  buildRequestThumbnailIndex,
   clampInventoryLimit,
   decodeInventoryCursors,
   encodeInventoryCursors,
@@ -24,7 +27,9 @@ import {
   parseStoreHitId,
   trimJsonPreview,
   trimStoreBlobPreview,
+  selectRequestThumbnail,
   trimTextPreview,
+  type ArtifactThumbnailCandidate,
   type InventoryHit,
 } from './inventory-server-logic.js';
 
@@ -37,6 +42,7 @@ const hit = (id: string, overrides: Partial<InventoryHit> = {}): InventoryHit =>
   updatedAt: null,
   sizeBytes: null,
   previewRef: id,
+  thumbnailRef: null,
   refs: [],
   ...overrides,
 });
@@ -170,6 +176,7 @@ describe('hit normalization', () => {
         updatedAt: '2026-09-01T00:00:00.000Z',
         sizeBytes: null,
         previewRef: 'article/req_a',
+        thumbnailRef: null,
         refs: [],
       }
     );
@@ -201,6 +208,7 @@ describe('hit normalization', () => {
         updatedAt: '2026-08-01T00:00:00.000Z',
         sizeBytes: 2048,
         previewRef: `image/req_img_01/${sha}.png`,
+        thumbnailRef: null,
         refs: ['req_img_01'],
       }
     );
@@ -415,5 +423,151 @@ describe('artifact reference detection', () => {
   it('never matches on an empty needle set', () => {
     const records = [{ object_id: 'req_other', object_type: 'article', serialized: '{"a":""}' }];
     assert.strictEqual(findReferencingObjectId(records, ['']), undefined);
+  });
+});
+
+
+// ─── object thumbnails (the requestId join) ─────────────────────────────────
+
+const SHA_A = 'a'.repeat(64);
+const SHA_B = 'b'.repeat(64);
+const SHA_C = 'c'.repeat(64);
+
+const candidate = (over: Partial<ArtifactThumbnailCandidate> & { sha256: string }): ArtifactThumbnailCandidate => ({
+  requestId: 'req_article_01',
+  blobKey: `image/req_article_01/${over.sha256}.png`,
+  artifactKind: 'image',
+  contentType: 'image/png',
+  createdAtISO: '2026-08-01T00:00:00.000Z',
+  ...over,
+});
+
+describe('artifactSlotHint', () => {
+  it('reads a string slot out of the reference metadata bag', () => {
+    assert.strictEqual(artifactSlotHint({ slot: ' primary_image ' }), 'primary_image');
+  });
+
+  it('answers null for metadata that carries no usable slot', () => {
+    assert.strictEqual(artifactSlotHint(undefined), null);
+    assert.strictEqual(artifactSlotHint(null), null);
+    assert.strictEqual(artifactSlotHint([{ slot: 'primary_image' }]), null);
+    assert.strictEqual(artifactSlotHint({ slot: 7 }), null);
+    assert.strictEqual(artifactSlotHint({ slot: '   ' }), null);
+  });
+});
+
+describe('selectRequestThumbnail', () => {
+  it('prefers the primary slot over an earlier image', () => {
+    const chosen = selectRequestThumbnail([
+      candidate({ sha256: SHA_A, createdAtISO: '2026-07-01T00:00:00.000Z' }),
+      candidate({ sha256: SHA_B, createdAtISO: '2026-08-01T00:00:00.000Z', slot: 'primary_image' }),
+    ]);
+    assert.strictEqual(chosen, `image/req_article_01/${SHA_B}.png`);
+  });
+
+  it('treats a hero slot as primary too', () => {
+    const chosen = selectRequestThumbnail([
+      candidate({ sha256: SHA_A, createdAtISO: '2026-07-01T00:00:00.000Z' }),
+      candidate({ sha256: SHA_C, createdAtISO: '2026-09-01T00:00:00.000Z', slot: 'article_hero_image' }),
+    ]);
+    assert.strictEqual(chosen, `image/req_article_01/${SHA_C}.png`);
+  });
+
+  it('falls back to the earliest image when nothing carries a primary slot', () => {
+    const chosen = selectRequestThumbnail([
+      candidate({ sha256: SHA_B, createdAtISO: '2026-08-05T00:00:00.000Z' }),
+      candidate({ sha256: SHA_A, createdAtISO: '2026-08-01T00:00:00.000Z' }),
+      candidate({ sha256: SHA_C, createdAtISO: null }),
+    ]);
+    assert.strictEqual(chosen, `image/req_article_01/${SHA_A}.png`);
+  });
+
+  it('considers image artifacts only — a PDF under the same request is never a thumbnail', () => {
+    assert.strictEqual(
+      selectRequestThumbnail([
+        candidate({
+          sha256: SHA_A,
+          artifactKind: 'pdf',
+          contentType: 'application/pdf',
+          blobKey: `pdf/req_article_01/${SHA_A}.pdf`,
+          slot: 'primary_image',
+        }),
+      ]),
+      null
+    );
+  });
+
+  it('accepts an image proven by content type when the reference declares no kind', () => {
+    const chosen = selectRequestThumbnail([candidate({ sha256: SHA_A, artifactKind: null, contentType: 'image/webp' })]);
+    assert.strictEqual(chosen, `image/req_article_01/${SHA_A}.png`);
+  });
+
+  it('never picks a soft-deleted artifact as a thing’s face', () => {
+    assert.strictEqual(
+      selectRequestThumbnail([
+        candidate({ sha256: SHA_A, slot: 'primary_image', deletedAtISO: '2026-09-01T00:00:00.000Z' }),
+      ]),
+      null
+    );
+  });
+
+  it('refuses a blob key admin-get-blob-image would not serve, rather than issuing a request that 400s', () => {
+    assert.strictEqual(selectRequestThumbnail([candidate({ sha256: SHA_A, blobKey: 'image/../secrets.png' })]), null);
+    assert.strictEqual(selectRequestThumbnail([candidate({ sha256: SHA_A, blobKey: null })]), null);
+  });
+
+  it('answers null for a request with no candidates at all', () => {
+    assert.strictEqual(selectRequestThumbnail([]), null);
+  });
+});
+
+describe('buildRequestThumbnailIndex', () => {
+  it('keys one hero image per request and omits requests that have none', () => {
+    const index = buildRequestThumbnailIndex([
+      candidate({ requestId: 'req_one', sha256: SHA_A, blobKey: `image/req_one/${SHA_A}.png` }),
+      candidate({
+        requestId: 'req_one',
+        sha256: SHA_B,
+        blobKey: `image/req_one/${SHA_B}.png`,
+        slot: 'primary_image',
+      }),
+      candidate({
+        requestId: 'req_two',
+        sha256: SHA_C,
+        artifactKind: 'pdf',
+        contentType: 'application/pdf',
+        blobKey: `pdf/req_two/${SHA_C}.pdf`,
+      }),
+    ]);
+
+    assert.deepStrictEqual([...index.entries()], [['req_one', `image/req_one/${SHA_B}.png`]]);
+  });
+});
+
+describe('attachObjectThumbnails', () => {
+  const index = new Map([['req_article_01', `image/req_article_01/${SHA_A}.png`]]);
+
+  it('stamps the joined blob key onto the object row whose id carries that request', () => {
+    const [row] = attachObjectThumbnails([hit('content_item/req_article_01')], index);
+    assert.strictEqual(row?.thumbnailRef, `image/req_article_01/${SHA_A}.png`);
+  });
+
+  it('leaves an object with no match null, so the surface draws its type visual', () => {
+    const [row] = attachObjectThumbnails([hit('content_item/req_nothing')], index);
+    assert.strictEqual(row?.thumbnailRef, null);
+  });
+
+  it('never touches artifacts or store blobs', () => {
+    const rows = attachObjectThumbnails(
+      [
+        hit(`req_article_01/${SHA_A}`, { collection: 'artifacts', previewRef: `image/req_article_01/${SHA_A}.png` }),
+        hit('workflows/req_article_01', { collection: 'stores' }),
+      ],
+      index
+    );
+    assert.deepStrictEqual(
+      rows.map((row) => row.thumbnailRef),
+      [null, null]
+    );
   });
 });
