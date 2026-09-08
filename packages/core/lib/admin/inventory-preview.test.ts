@@ -30,6 +30,7 @@ const hit = (overrides: Partial<InventoryHit> = {}): InventoryHit => ({
   previewRef: null,
   thumbnailRef: null,
   refs: [],
+  tags: [],
   ...overrides,
 });
 

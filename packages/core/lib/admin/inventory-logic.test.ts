@@ -4,9 +4,16 @@ import assert from 'node:assert';
 import {
   allowedActions,
   bulkActionsFor,
+  EMPTY_INVENTORY_FACETS,
   facetCounts,
+  filterHitsByFacets,
+  hasActiveFacets,
+  hitHasTag,
+  inventoryTagKey,
+  matchesInventoryFacets,
   previewSummary,
   type InventoryCollection,
+  type InventoryFacetSelection,
   type InventoryHit,
   type Role,
 } from './inventory-logic.js';
@@ -27,6 +34,7 @@ const hit = (over: Partial<InventoryHit> & { collection: InventoryCollection }):
   previewRef: null,
   thumbnailRef: null,
   refs: [],
+  tags: [],
   ...over,
 });
 
@@ -42,11 +50,134 @@ describe('facetCounts', () => {
       collection: { objects: 2, artifacts: 1, stores: 1 },
       kind: { page: 2, image: 1, workflows: 1 },
       status: { active: 2, archived: 1, running: 1 },
+      tag: {},
+      tagLabels: {},
     });
   });
 
   it('returns empty maps for an empty hit list', () => {
-    assert.deepStrictEqual(facetCounts([]), { collection: {}, kind: {}, status: {} });
+    assert.deepStrictEqual(facetCounts([]), {
+      collection: {},
+      kind: {},
+      status: {},
+      tag: {},
+      tagLabels: {},
+    });
+  });
+});
+
+describe('facetCounts — the tag facet', () => {
+  it('counts nothing when no hit carries a tag', () => {
+    const counts = facetCounts([hit({ collection: 'objects' }), hit({ collection: 'stores' })]);
+    assert.deepStrictEqual(counts.tag, {});
+    assert.deepStrictEqual(counts.tagLabels, {});
+  });
+
+  it('counts a hit once under each of its several tags', () => {
+    const counts = facetCounts([
+      hit({ collection: 'artifacts', id: 'a', tags: ['julia', 'hero', 'draft'] }),
+      hit({ collection: 'artifacts', id: 'b', tags: ['julia'] }),
+      hit({ collection: 'artifacts', id: 'c', tags: [] }),
+    ]);
+    assert.deepStrictEqual(counts.tag, { julia: 2, hero: 1, draft: 1 });
+  });
+
+  it('collapses tags that differ only by case, the way the by-tag pointer key already does', () => {
+    const counts = facetCounts([
+      hit({ collection: 'artifacts', id: 'a', tags: ['Julia'] }),
+      hit({ collection: 'artifacts', id: 'b', tags: ['julia'] }),
+      hit({ collection: 'artifacts', id: 'c', tags: ['JULIA'] }),
+    ]);
+    assert.deepStrictEqual(counts.tag, { julia: 3 });
+    // Label is the code-unit-smallest spelling seen, so it does not change as
+    // later pages load rows spelling it differently.
+    assert.deepStrictEqual(counts.tagLabels, { julia: 'JULIA' });
+  });
+
+  it('counts one ROW once even when it carries two case-variants of one tag', () => {
+    const counts = facetCounts([hit({ collection: 'artifacts', tags: ['Julia', 'julia'] })]);
+    assert.deepStrictEqual(counts.tag, { julia: 1 });
+  });
+
+  it('ignores blank and whitespace-only tags, and trims the label it shows', () => {
+    const counts = facetCounts([hit({ collection: 'artifacts', tags: ['  ', '', ' Julia '] })]);
+    assert.deepStrictEqual(counts.tag, { julia: 1 });
+    assert.deepStrictEqual(counts.tagLabels, { julia: 'Julia' });
+  });
+});
+
+describe('inventoryTagKey / hitHasTag', () => {
+  it('folds case and surrounding whitespace on both sides', () => {
+    assert.strictEqual(inventoryTagKey('  Julia '), 'julia');
+    const tagged = hit({ collection: 'artifacts', tags: ['Julia'] });
+    assert.strictEqual(hitHasTag(tagged, 'julia'), true);
+    assert.strictEqual(hitHasTag(tagged, ' JULIA '), true);
+    assert.strictEqual(hitHasTag(tagged, 'juli'), false, 'a tag filter is exact, not a substring search');
+  });
+
+  it('is false for a hit with no tags, and for an empty needle', () => {
+    assert.strictEqual(hitHasTag(hit({ collection: 'objects' }), 'julia'), false);
+    assert.strictEqual(hitHasTag(hit({ collection: 'artifacts', tags: ['julia'] }), '   '), false);
+  });
+});
+
+describe('matchesInventoryFacets / filterHitsByFacets', () => {
+  const facets = (over: Partial<InventoryFacetSelection> = {}): InventoryFacetSelection => ({
+    ...EMPTY_INVENTORY_FACETS,
+    ...over,
+  });
+
+  const rows: InventoryHit[] = [
+    hit({ collection: 'artifacts', id: 'a', kind: 'image', status: 'active', tags: ['Julia'] }),
+    hit({ collection: 'artifacts', id: 'b', kind: 'image', status: 'deleted', tags: ['julia'] }),
+    hit({ collection: 'artifacts', id: 'c', kind: 'pdf', status: 'active', tags: ['julia', 'hero'] }),
+    hit({ collection: 'artifacts', id: 'd', kind: 'image', status: 'active', tags: [] }),
+    hit({ collection: 'objects', id: 'e', kind: 'page', status: 'active' }),
+  ];
+
+  it('an empty selection filters nothing out', () => {
+    assert.deepStrictEqual(
+      filterHitsByFacets(rows, EMPTY_INVENTORY_FACETS).map((row) => row.id),
+      ['a', 'b', 'c', 'd', 'e']
+    );
+    assert.strictEqual(hasActiveFacets(EMPTY_INVENTORY_FACETS), false);
+  });
+
+  it('the tag facet alone keeps every row carrying that tag, whatever its casing', () => {
+    assert.deepStrictEqual(
+      filterHitsByFacets(rows, facets({ tag: 'julia' })).map((row) => row.id),
+      ['a', 'b', 'c']
+    );
+    assert.strictEqual(hasActiveFacets(facets({ tag: 'julia' })), true);
+  });
+
+  it('AND-combines with the other three facets', () => {
+    assert.deepStrictEqual(
+      filterHitsByFacets(rows, facets({ tag: 'julia', kind: 'image' })).map((row) => row.id),
+      ['a', 'b']
+    );
+    assert.deepStrictEqual(
+      filterHitsByFacets(rows, facets({ tag: 'julia', kind: 'image', status: 'active' })).map((row) => row.id),
+      ['a']
+    );
+    assert.deepStrictEqual(
+      filterHitsByFacets(rows, facets({ tag: 'julia', collection: 'artifacts', status: 'active' })).map(
+        (row) => row.id
+      ),
+      ['a', 'c']
+    );
+  });
+
+  it('drops untaggable rows the moment a tag facet is active — objects and stores carry no tags', () => {
+    assert.deepStrictEqual(
+      filterHitsByFacets(rows, facets({ collection: 'objects', tag: 'julia' })).map((row) => row.id),
+      []
+    );
+    assert.strictEqual(matchesInventoryFacets(rows[4] as InventoryHit, facets({ tag: 'julia' })), false);
+  });
+
+  it('a tag no loaded row carries yields nothing rather than everything', () => {
+    assert.deepStrictEqual(filterHitsByFacets(rows, facets({ tag: 't9-acceptance' })), []);
   });
 });
 

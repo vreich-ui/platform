@@ -44,6 +44,7 @@ const hit = (id: string, overrides: Partial<InventoryHit> = {}): InventoryHit =>
   previewRef: id,
   thumbnailRef: null,
   refs: [],
+  tags: [],
   ...overrides,
 });
 
@@ -213,6 +214,7 @@ describe('hit normalization', () => {
         previewRef: 'article/req_a',
         thumbnailRef: null,
         refs: [],
+        tags: [],
       }
     );
 
@@ -245,8 +247,30 @@ describe('hit normalization', () => {
         previewRef: `image/req_img_01/${sha}.png`,
         thumbnailRef: null,
         refs: ['req_img_01'],
+        tags: [],
       }
     );
+  });
+
+  it('carries the artifact reference tags onto the row, cleaned and case-deduplicated', () => {
+    const tagged = normalizeArtifactHit({
+      requestId: 'req_img_01',
+      sha256: 'f'.repeat(64),
+      tags: ['Julia', 'julia', '  hero  ', '', 'bad<tag>'],
+    });
+    // `Julia` wins over `julia` (first spelling seen), the blank and the
+    // unsafe tag are dropped, and `  hero  ` is trimmed — the same rules a
+    // write applies, so a row cannot report a tag the store would refuse.
+    assert.deepStrictEqual(tagged.tags, ['Julia', 'hero']);
+  });
+
+  it('reports no tags — not unknown tags — for an artifact reference carrying none', () => {
+    assert.deepStrictEqual(normalizeArtifactHit({ requestId: 'r', sha256: 'a'.repeat(64) }).tags, []);
+  });
+
+  it('gives object and store rows an empty tag list: they have no tag concept', () => {
+    assert.deepStrictEqual(normalizeObjectHit({ object_id: 'o', object_type: 'page' }).tags, []);
+    assert.deepStrictEqual(normalizeStoreHit({ store: 'workflows', key: 'a.json' }).tags, []);
   });
 
   it('reports a soft-deleted artifact as deleted rather than active', () => {

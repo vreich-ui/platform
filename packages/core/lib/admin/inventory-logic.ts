@@ -56,22 +56,123 @@ export interface FacetCounts {
   collection: Record<string, number>;
   kind: Record<string, number>;
   status: Record<string, number>;
+  /**
+   * Keyed by the CASE-FOLDED tag (`inventoryTagKey`), not by the spelling a
+   * row happened to store — see `tagLabels` for what to put on the chip.
+   * Folding is not a style choice here: the by-tag pointer key is a path
+   * segment compared case-insensitively, and `applyArtifactTagChanges`
+   * already treats `Julia` and `julia` as one tag when adding and removing.
+   * A facet that split them would offer two chips for one tag and let a
+   * "remove Julia" quietly clear the rows filed under `julia`.
+   */
+  tag: Record<string, number>;
+  /**
+   * Folded tag key → the spelling to display for it.
+   *
+   * Chosen as the code-unit-smallest spelling among the variants seen rather
+   * than the first one encountered, so the label does not change as more
+   * pages load. The SELECTION keys on the folded key, so even if a later page
+   * changes the label the active chip still matches.
+   */
+  tagLabels: Record<string, string>;
 }
 
 const bump = (counts: Record<string, number>, key: string): void => {
   counts[key] = (counts[key] ?? 0) + 1;
 };
 
-/** Counts hits per collection / kind / status, for the facet rail chips. */
+/**
+ * The identity of a tag for facet, filter and selection purposes: trimmed and
+ * lowercased, matching `applyArtifactTagChanges`' comparison and the by-tag
+ * pointer key. Display spelling is preserved separately (`FacetCounts.tagLabels`).
+ */
+export const inventoryTagKey = (tag: string): string => tag.trim().toLowerCase();
+
+/**
+ * Counts hits per collection / kind / status / tag, for the facet rail chips.
+ *
+ * SCOPE — and this is the honest bit. Every count here is over the hits it was
+ * handed, which is the page the surface has LOADED, not the collection. The
+ * server reports its own per-collection match totals (`SearchResult.counts`)
+ * and whether a sweep hit its scan cap (`SearchResult.truncated`) separately;
+ * a surface rendering these chips must say which of the two it is showing.
+ * That was already true of the three original facets and is not made truer or
+ * falser by the tag facet — but tags carry one extra caveat: only artifacts
+ * have them, so the tag chips describe the artifact rows and nothing else.
+ */
 export function facetCounts(hits: readonly InventoryHit[]): FacetCounts {
-  const counts: FacetCounts = { collection: {}, kind: {}, status: {} };
+  const counts: FacetCounts = { collection: {}, kind: {}, status: {}, tag: {}, tagLabels: {} };
   for (const hit of hits) {
     bump(counts.collection, hit.collection);
     bump(counts.kind, hit.kind);
     bump(counts.status, hit.status);
+
+    // Per HIT, not per tag occurrence: a row that somehow carries `Julia` and
+    // `julia` is one row tagged Julia, and must count once.
+    const seen = new Set<string>();
+    for (const tag of hit.tags) {
+      const key = inventoryTagKey(tag);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      bump(counts.tag, key);
+      const label = tag.trim();
+      const existing = counts.tagLabels[key];
+      if (existing === undefined || label < existing) counts.tagLabels[key] = label;
+    }
   }
   return counts;
 }
+
+// ─── facet filtering ────────────────────────────────────────────────────────
+
+/**
+ * One selected value per facet group, `null` for "this group is not
+ * filtering". `tag` holds a FOLDED key (`inventoryTagKey`), the same key
+ * `facetCounts` counts under, so a chip stays highlighted whichever spelling
+ * the rows use.
+ */
+export interface InventoryFacetSelection {
+  collection: string | null;
+  kind: string | null;
+  status: string | null;
+  tag: string | null;
+}
+
+export const EMPTY_INVENTORY_FACETS: InventoryFacetSelection = {
+  collection: null,
+  kind: null,
+  status: null,
+  tag: null,
+};
+
+/** True when this hit carries `tag`, comparing case-insensitively both ways. */
+export const hitHasTag = (hit: InventoryHit, tag: string): boolean => {
+  const key = inventoryTagKey(tag);
+  if (!key) return false;
+  return hit.tags.some((candidate) => inventoryTagKey(candidate) === key);
+};
+
+/**
+ * The four facet groups AND'ed together — an unselected group constrains
+ * nothing. The tag group is not special-cased anywhere else: a row with no
+ * tags simply fails a tag filter, which is how object and store rows drop out
+ * when one is active.
+ */
+export const matchesInventoryFacets = (hit: InventoryHit, selection: InventoryFacetSelection): boolean =>
+  (selection.collection === null || hit.collection === selection.collection) &&
+  (selection.kind === null || hit.kind === selection.kind) &&
+  (selection.status === null || hit.status === selection.status) &&
+  (selection.tag === null || hitHasTag(hit, selection.tag));
+
+/** `matchesInventoryFacets` over a list, preserving order. */
+export const filterHitsByFacets = (
+  hits: readonly InventoryHit[],
+  selection: InventoryFacetSelection
+): InventoryHit[] => hits.filter((hit) => matchesInventoryFacets(hit, selection));
+
+/** True when any facet group is filtering — what a "Clear facets" affordance keys off. */
+export const hasActiveFacets = (selection: InventoryFacetSelection): boolean =>
+  selection.collection !== null || selection.kind !== null || selection.status !== null || selection.tag !== null;
 
 // ─── verb matrix ─────────────────────────────────────────────────────────────
 

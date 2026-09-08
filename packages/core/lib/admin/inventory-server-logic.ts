@@ -49,6 +49,30 @@ export type InventoryHit = {
    */
   thumbnailRef: string | null;
   refs: string[];
+  /**
+   * The tags this row carries, `[]` when it carries none.
+   *
+   * WHY THIS IS ON THE ROW AT ALL, having deliberately not been. The drawer's
+   * Tags display is sourced from the `preview` response (a fresh read-back of
+   * the canonical reference) precisely so it cannot show a stale list after a
+   * retag, and that is unchanged. But a TAG FACET is a function of the loaded
+   * page: counting which tags exist across 50 rows cannot be done from a
+   * per-row preview without 50 extra round trips. So the rows carry tags too.
+   *
+   * The cost is response size, and it is small and bounded: tags are capped at
+   * `artifactReferenceLimits` (20 per artifact, 40 chars each), so an untagged
+   * artifact adds `"tags":[]` (11 bytes) and a realistically tagged one 20–40
+   * bytes. The absolute worst case — every one of a 50-row page carrying 20
+   * maximum-length tags — is ~43 KB; the realistic case is under 2 KB per
+   * page, against rows that already carry a 64-hex id, a request id, a label
+   * and a blob key each.
+   *
+   * `[]` and not `null`: objects and store blobs have no tag concept, and "this
+   * row carries no tags" is the true statement about them. There is no
+   * "unknown" state to represent — a row exists only because its reference was
+   * read, and a read reference's absent `tags` field means no tags.
+   */
+  tags: string[];
 };
 
 export const INVENTORY_MAX_LIMIT = 50;
@@ -231,6 +255,7 @@ export const normalizeObjectHit = (row: ObjectHitInput): InventoryHit => {
     // response has been read — never by this function, which sees one row.
     thumbnailRef: null,
     refs: [],
+    tags: [],
   };
 };
 
@@ -269,6 +294,7 @@ export const normalizeArtifactHit = (reference: ArtifactHitInput): InventoryHit 
   // something else in the same row.
   thumbnailRef: null,
   refs: [reference.requestId],
+  tags: normalizeArtifactTagList(reference.tags),
 });
 
 /** Every field the artifact query is matched against (BRIEF: label / originalFilename / tags / kind). */
@@ -307,6 +333,8 @@ export const normalizeStoreHit = (blob: StoreHitInput): InventoryHit => {
     // A store listing carries a key and maybe an etag; nothing image-like.
     thumbnailRef: null,
     refs: [],
+    // A raw blob has no tag concept — not "unknown tags", none.
+    tags: [],
   };
 };
 
@@ -577,6 +605,27 @@ export const normalizeArtifactTag = (value: unknown): string | undefined => {
   if (TAG_UNSAFE_CHARACTERS.test(normalized)) return undefined;
 
   return normalized;
+};
+
+/**
+ * The tag list a row reports, cleaned the same way a write would clean it:
+ * anything `normalizeArtifactTag` refuses is dropped, and case-variant
+ * duplicates collapse to the FIRST spelling seen — the same case-insensitive
+ * identity `applyArtifactTagChanges` and the by-tag pointer key already use,
+ * so a row cannot claim two tags where the store holds one.
+ */
+export const normalizeArtifactTagList = (tags: ReadonlyArray<string> | null | undefined): string[] => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of tags ?? []) {
+    const tag = normalizeArtifactTag(raw);
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+  }
+  return out;
 };
 
 export type ArtifactTagChange = {
