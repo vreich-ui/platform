@@ -1,5 +1,6 @@
 import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBinding, type SiteBindingEnvNames } from './site-binding.js';
 import { createLocalBlobStore, type LocalBlobStore } from './local-blobs.js';
+import { pdfToolStorageStores } from './pdf-tool-storage-grant.js';
 
 type BlobMetadata = Record<string, string>;
 type BlobSetOptions = { metadata?: BlobMetadata; onlyIfNew?: boolean };
@@ -337,6 +338,26 @@ export const getMarginaliaBlobStore = async (event: unknown, binding?: SiteBindi
  */
 export const getEditorialRequestsBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
   return getNetlifyBlobStore({ name: 'editorial-requests', consistency: 'strong' }, event, binding);
+};
+
+/**
+ * D1: the pdf-tool TEMPLATE store — `pdfme/<templateId>/…` records plus the
+ * publish-time first-page thumbnails at `thumbnails/<templateId>/v<n>.png`.
+ *
+ * pdf-tool is stateless and holds no blob credentials of its own: it writes
+ * here through the storage grant this site mints (server/lib/
+ * pdf-tool-storage-grant.ts), into THIS site's Netlify Blobs namespace. The
+ * store name is therefore not a literal — it is read from that grant's own
+ * `stores.templates`, so the writer (pdf-tool, via the grant) and the only
+ * reader on this side (admin-get-blob-image's thumbnail path) can never drift
+ * apart.
+ *
+ * Read-only from the platform side: nothing here writes a template record;
+ * eventual consistency is fine because the reader is a browser `<img>` for a
+ * thumbnail published by an earlier, separate request.
+ */
+export const getPdfTemplateBlobStore = async (event: unknown, binding?: SiteBinding): Promise<BlobStore> => {
+  return getNetlifyBlobStore(pdfToolStorageStores.templates, event, binding);
 };
 
 /**

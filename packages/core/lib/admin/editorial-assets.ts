@@ -27,8 +27,26 @@ export interface PdfTemplateSummary {
   created_at?: string;
   /** FIX-U1 / BRIEF §3.6: 'article' | 'guide' | 'checklist' … an open key set. */
   kind?: string;
-  /** FIX-U1 / BRIEF §3.6: set by publish; an image blob key. */
-  thumbnail_key?: string;
+  /**
+   * FIX-U1 / BRIEF §3.6: set by publish; an image blob key.
+   *
+   * D2 fix: `null` is a real, distinct value here — pdf-tool's own list row
+   * type (`PdfTemplateListEntry.thumbnailKey`, pdf-template-store.ts) is
+   * `string | null`, NEVER actually absent from a live `list_pdf_templates`
+   * response (`listEntryFromMeta` normalizes every entry with
+   * `thumbnailKey: meta.thumbnailKey ?? null`, and a stale/pre-thumbnailKey
+   * index gets rebuilt through that same normalizer the moment its
+   * `indexVersion` is behind). So `thumbnail_key: null` means pdf-tool
+   * AFFIRMATIVELY reports no thumbnail yet, while `thumbnail_key` being
+   * OMITTED from this summary means the raw row itself never carried a
+   * `thumbnailKey` property at all (an upstream pdf-tool deploy that
+   * predates thumbnailing entirely) — a weaker, shape-level fact, not a
+   * report from pdf-tool about this template. Collapsing the two used to
+   * lose that distinction before it reached the admin UI; keeping `null`
+   * explicit lets `visual-identity-pdf.ts` say which one is true instead of
+   * guessing.
+   */
+  thumbnail_key?: string | null;
   /**
    * D4 fix (task A5): WHY thumbnail_key is absent, whenever pdf-tool knows —
    * mirrors pdf-tool's own `PdfTemplateRecord.thumbnailError`
@@ -124,7 +142,16 @@ export function projectPdfTemplate(value: unknown): PdfTemplateSummary | undefin
     // pre-§3.6 template (or a store that predates this) still projects the
     // original six fields unchanged.
     ...(typeof row.kind === 'string' && row.kind.trim() ? { kind: row.kind.trim() } : {}),
-    ...(typeof row.thumbnailKey === 'string' && row.thumbnailKey.trim() ? { thumbnail_key: row.thumbnailKey.trim() } : {}),
+    // D2 fix: forward `null` as `null`, not as "field omitted" — only a row
+    // that never carried `thumbnailKey` at all (`row.thumbnailKey ===
+    // undefined`) omits `thumbnail_key` here. See the field's doc comment
+    // above for why that distinction is real and worth keeping.
+    ...(row.thumbnailKey !== undefined
+      ? {
+          thumbnail_key:
+            typeof row.thumbnailKey === 'string' && row.thumbnailKey.trim() ? row.thumbnailKey.trim() : null,
+        }
+      : {}),
     // D4 fix (task A5): forwarded alongside thumbnail_key, same defensive
     // shape — an older pdf-tool deploy (or a template with no thumbnail
     // attempt yet, which is not an error) simply never sends this key.
