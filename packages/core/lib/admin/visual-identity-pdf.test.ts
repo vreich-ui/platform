@@ -168,15 +168,32 @@ test('kind, thumbnail and sample data light up the row when pdf-tool sends them'
   assert.equal(row.renderSampleBlockedReason, undefined);
 });
 
+// D2 fix: `thumbnail_key` genuinely absent from the row (no property at all —
+// e.g. a pre-thumbnailing pdf-tool deploy, or some other shape gap upstream
+// of this function) is a WEAKER, shape-level fact than pdf-tool explicitly
+// reporting `thumbnailKey: null`, and must not be worded as if pdf-tool told
+// us anything about this template's thumbnail state.
 test('a row missing the §3.6 fields degrades honestly instead of faking them', () => {
   const row = buildPdfTemplatesViewModel({ templates: [template({ id: 'tpl_article' })], canEdit: true }).rows[0]!;
   assert.equal(row.kind, undefined);
   assert.equal(row.kindLabel, 'Unclassified');
   assert.equal(row.thumbnailUrl, undefined);
-  assert.match(String(row.thumbnailMissingReason), /has not published a thumbnail/);
+  assert.match(String(row.thumbnailMissingReason), /did not report a thumbnail_key/);
+  assert.doesNotMatch(String(row.thumbnailMissingReason), /has not published a thumbnail/);
   assert.equal(row.hasRenderDataSchema, false);
   assert.equal(row.canRenderSample, false);
   assert.match(String(row.renderSampleBlockedReason), /no sample data/);
+});
+
+// D2 fix: `thumbnail_key: null` is pdf-tool's OWN report ("no thumbnail"),
+// distinct from the field being absent above — this is the one case that may
+// honestly say "pdf-tool has not published a thumbnail yet".
+test('D2: an explicit thumbnail_key: null is pdf-tool\'s own report, worded as such', () => {
+  const row = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article', thumbnail_key: null })],
+  }).rows[0]!;
+  assert.equal(row.thumbnailUrl, undefined);
+  assert.equal(row.thumbnailMissingReason, 'pdf-tool has not published a thumbnail for this template yet.');
 });
 
 test('T2.6: a real thumbnailError from pdf-tool beats this module\'s own generic guess', () => {
@@ -187,12 +204,45 @@ test('T2.6: a real thumbnailError from pdf-tool beats this module\'s own generic
   assert.equal(row.thumbnailMissingReason, 'Chromium render timed out before the thumbnail step.');
 });
 
-test('an unservable thumbnail key says so rather than rendering a permanently broken image', () => {
+// D2 fix: thumbnail_error still wins even when a (rejected) key is ALSO
+// present — pdf-tool's own reason is more useful than restating the key's
+// shape problem.
+test('D2: thumbnail_error beats an also-present, also-unservable thumbnail_key', () => {
   const row = buildPdfTemplatesViewModel({
-    templates: [template({ id: 'tpl_article', thumbnail_key: 'pdf/not-an-image-key' })],
+    templates: [
+      template({
+        id: 'tpl_article',
+        thumbnail_key: 'pdf/not-an-image-key',
+        thumbnail_error: 'The render completed, but the render service returned no thumbnail image.',
+      }),
+    ],
+  }).rows[0]!;
+  assert.equal(row.thumbnailMissingReason, 'The render completed, but the render service returned no thumbnail image.');
+});
+
+test('D1: a pdf-tool template thumbnail key now resolves to a real endpoint instead of the unservable-key excuse', () => {
+  const { rows } = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article', thumbnail_key: 'thumbnails/tpl_article/v3.png' })],
+  });
+  assert.match(String(rows[0]?.thumbnailUrl), /admin-get-blob-image/);
+  assert.match(String(rows[0]?.thumbnailUrl), /thumbnails%2Ftpl_article%2Fv3\.png/);
+  assert.equal(rows[0]?.thumbnailMissingReason, undefined);
+});
+
+// D2 fix: post-D1, a present-but-unservable key means the KEY'S SHAPE is
+// wrong (not that pdf-tool published nothing) — the message must surface the
+// offending key rather than a generic "not servable" excuse, and this is
+// the real remaining case D1 leaves: a template id with a dot, which
+// pdf-tool's own safeSegment allows but the admin reader's tighter shape
+// does not.
+test('an unservable thumbnail key names the key and explains the shape it needed', () => {
+  const row = buildPdfTemplatesViewModel({
+    templates: [template({ id: 'tpl_article', thumbnail_key: 'thumbnails/my.template/v3.png' })],
   }).rows[0]!;
   assert.equal(row.thumbnailUrl, undefined);
   assert.match(String(row.thumbnailMissingReason), /admin image reader/);
+  assert.match(String(row.thumbnailMissingReason), /thumbnails\/my\.template\/v3\.png/);
+  assert.match(String(row.thumbnailMissingReason), /dot/);
 });
 
 test('a published template with sample data still cannot render while it is a draft', () => {

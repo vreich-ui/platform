@@ -113,8 +113,20 @@ export function PdfTemplatesPanel({
   onChanged,
 }: PdfTemplatesPanelProps) {
   const [busyId, setBusyId] = useState<string | undefined>(undefined);
+  /** Which action is in flight for `busyId`'s row — lets the row's OTHER
+   *  buttons (also disabled while busyId is set, per the existing
+   *  single-flight-per-checkout rule) stay silent instead of all claiming
+   *  to be the one running. Presentation only; does not change what is
+   *  disabled or when. */
+  const [busyAction, setBusyAction] = useState<'default' | 'kind' | 'sample' | 'preview' | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  /** D3: the SAME outcome as `error`/`notice` above, but keyed by template id
+   *  so the row a click actually acted on shows its own result inline —
+   *  the top banner is 25 cards away from a click deep in the grid. */
+  const [rowMessage, setRowMessage] = useState<Record<string, { tone: 'success' | 'error'; text: string } | undefined>>(
+    {}
+  );
   const [previewId, setPreviewId] = useState<string | undefined>(undefined);
   /** A5: the first-page-only chip's own last result, shown instead of an
    *  indexed artifact when the row has no rendered sample (or this is
@@ -140,62 +152,79 @@ export function PdfTemplatesPanel({
 
   const kindOptions = useMemo(() => pdfKindOptions(model.rows), [model.rows]);
 
+  /** D3: sets the top banner AND the acting row's own inline message from
+   *  one call, so the two never drift out of sync. */
+  const setFeedback = useCallback((templateId: string, tone: 'success' | 'error', text: string) => {
+    if (tone === 'error') {
+      setError(text);
+      setNotice(undefined);
+    } else {
+      setNotice(text);
+      setError(undefined);
+    }
+    setRowMessage((prior) => ({ ...prior, [templateId]: { tone, text } }));
+  }, []);
+
   const pinKind = useCallback(
     async (templateId: string, kind: string) => {
       setBusyId(templateId);
+      setBusyAction('kind');
       setError(undefined);
       setNotice(undefined);
+      setRowMessage((prior) => ({ ...prior, [templateId]: undefined }));
       const session = new EditSession('site', identity.siteId, getToken);
       try {
         const checkout = await session.ensureCheckout();
         if (!checkout.ok) {
-          setError(`The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
+          setFeedback(templateId, 'error', `The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
           return;
         }
         const result = await session.patch([buildPinKindDefaultOp(kind, templateId)]);
         if (!result.ok) {
-          setError(result.error);
+          setFeedback(templateId, 'error', result.error);
           return;
         }
-        setNotice(`${templateId} is now the default PDF template for ${kind}.`);
+        setFeedback(templateId, 'success', `${templateId} is now the default PDF template for ${kind}.`);
         await onChanged();
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'The kind default could not be set.');
+        setFeedback(templateId, 'error', reason instanceof Error ? reason.message : 'The kind default could not be set.');
       } finally {
         await session.checkin().catch(() => undefined);
         setBusyId(undefined);
       }
     },
-    [getToken, identity.siteId, onChanged]
+    [getToken, identity.siteId, onChanged, setFeedback]
   );
 
   const setSiteDefault = useCallback(
     async (templateId: string) => {
       setBusyId(templateId);
+      setBusyAction('default');
       setError(undefined);
       setNotice(undefined);
+      setRowMessage((prior) => ({ ...prior, [templateId]: undefined }));
       const session = new EditSession('site', identity.siteId, getToken);
       try {
         const checkout = await session.ensureCheckout();
         if (!checkout.ok) {
-          setError(`The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
+          setFeedback(templateId, 'error', `The publication is checked out by ${checkout.heldBy ?? 'someone else'}.`);
           return;
         }
         const result = await session.patch([buildSetSiteDefaultOp(templateId)]);
         if (!result.ok) {
-          setError(result.error);
+          setFeedback(templateId, 'error', result.error);
           return;
         }
-        setNotice(`${templateId} is now the publication's default PDF template.`);
+        setFeedback(templateId, 'success', `${templateId} is now the publication's default PDF template.`);
         await onChanged();
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'The default could not be set.');
+        setFeedback(templateId, 'error', reason instanceof Error ? reason.message : 'The default could not be set.');
       } finally {
         await session.checkin().catch(() => undefined);
         setBusyId(undefined);
       }
     },
-    [getToken, identity.siteId, onChanged]
+    [getToken, identity.siteId, onChanged, setFeedback]
   );
 
   /**
@@ -207,8 +236,10 @@ export function PdfTemplatesPanel({
   const renderSample = useCallback(
     async (row: PdfTemplateRow) => {
       setBusyId(row.id);
+      setBusyAction('sample');
       setError(undefined);
       setNotice(undefined);
+      setRowMessage((prior) => ({ ...prior, [row.id]: undefined }));
       setDirectPreview(undefined);
       setPreviewId(row.id);
       try {
@@ -219,19 +250,19 @@ export function PdfTemplatesPanel({
         if (result.pending) {
           pendingRenderAttemptsRef.current = 0;
           setPendingRender({ templateId: row.id, label: row.label });
-          setNotice(`Still rendering ${row.label} — this panel updates when the sample lands.`);
+          setFeedback(row.id, 'success', `Still rendering ${row.label} — this panel updates when the sample lands.`);
         } else {
           setPendingRender(undefined);
-          setNotice(`A sample of ${row.label} was rendered.`);
+          setFeedback(row.id, 'success', `A sample of ${row.label} was rendered.`);
         }
         await onChanged();
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'The sample could not be rendered.');
+        setFeedback(row.id, 'error', reason instanceof Error ? reason.message : 'The sample could not be rendered.');
       } finally {
         setBusyId(undefined);
       }
     },
-    [getToken, onChanged]
+    [getToken, onChanged, setFeedback]
   );
 
   /**
@@ -242,20 +273,22 @@ export function PdfTemplatesPanel({
   const previewSample = useCallback(
     async (row: PdfTemplateRow) => {
       setBusyId(row.id);
+      setBusyAction('preview');
       setError(undefined);
       setNotice(undefined);
+      setRowMessage((prior) => ({ ...prior, [row.id]: undefined }));
       setPreviewId(row.id);
       try {
         const result = await previewPdfTemplateSample(getToken, { templateId: row.id });
         setDirectPreview({ templateId: row.id, ...(result.previewUrl ? { url: result.previewUrl } : {}) });
-        setNotice(`First page of ${row.label} rendered — not the complete document.`);
+        setFeedback(row.id, 'success', `First page of ${row.label} rendered — not the complete document.`);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'The preview could not be rendered.');
+        setFeedback(row.id, 'error', reason instanceof Error ? reason.message : 'The preview could not be rendered.');
       } finally {
         setBusyId(undefined);
       }
     },
-    [getToken]
+    [getToken, setFeedback]
   );
 
   /**
@@ -275,13 +308,14 @@ export function PdfTemplatesPanel({
     );
     if (state === 'landed') {
       setPendingRender(undefined);
-      setNotice(`A sample of ${pendingRender.label} was rendered.`);
+      setFeedback(pendingRender.templateId, 'success', `A sample of ${pendingRender.label} was rendered.`);
       return;
     }
     if (state === 'gave_up') {
       setPendingRender(undefined);
-      setNotice(undefined);
-      setError(
+      setFeedback(
+        pendingRender.templateId,
+        'error',
         `${pendingRender.label} is taking longer than expected to render. The job is still running — reload this tab in a few minutes rather than rendering again.`
       );
       return;
@@ -291,7 +325,7 @@ export function PdfTemplatesPanel({
       void onChanged();
     }, SAMPLE_RENDER_POLL_INTERVAL_MS);
     return () => clearTimeout(timer);
-  }, [pendingRender, artifacts, onChanged]);
+  }, [pendingRender, artifacts, onChanged, setFeedback]);
 
   const previewRow = model.rows.find((row) => row.id === previewId);
   const previewArtifact = previewRow ? latestSampleArtifact(previewRow.id, artifacts) : undefined;
@@ -350,17 +384,25 @@ export function PdfTemplatesPanel({
                   <Button
                     size="sm"
                     disabled={!row.canSetDefault || row.isSiteDefault || busyId !== undefined}
+                    loading={busyId === row.id && busyAction === 'default'}
                     onClick={() => void setSiteDefault(row.id)}
                   >
-                    {row.isSiteDefault ? 'Already the site default' : 'Set as site default'}
+                    {busyId === row.id && busyAction === 'default'
+                      ? 'Setting…'
+                      : row.isSiteDefault
+                        ? 'Already the site default'
+                        : 'Set as site default'}
                   </Button>
                   <Button
                     variant="secondary"
                     size="sm"
                     disabled={!row.canRenderSample || busyId !== undefined || pendingRender !== undefined}
+                    loading={(busyId === row.id && busyAction === 'sample') || pendingRender?.templateId === row.id}
                     onClick={() => void renderSample(row)}
                   >
-                    {busyId === row.id || pendingRender?.templateId === row.id ? 'Rendering…' : 'Render sample'}
+                    {(busyId === row.id && busyAction === 'sample') || pendingRender?.templateId === row.id
+                      ? 'Rendering…'
+                      : 'Render sample'}
                   </Button>
                   {/* T2.6/A5: the DIRECT chip — W1's preview_pdf_template,
                       first page only. A shorter path than the full sample
@@ -370,9 +412,10 @@ export function PdfTemplatesPanel({
                     variant="ghost"
                     size="sm"
                     disabled={!row.canRenderSample || busyId !== undefined}
+                    loading={busyId === row.id && busyAction === 'preview'}
                     onClick={() => void previewSample(row)}
                   >
-                    {busyId === row.id ? 'Rendering…' : 'Render sample (first page only)'}
+                    {busyId === row.id && busyAction === 'preview' ? 'Rendering…' : 'Render sample (first page only)'}
                   </Button>
                   {latestSampleArtifact(row.id, artifacts) ? (
                     <Button
@@ -387,6 +430,23 @@ export function PdfTemplatesPanel({
                     </Button>
                   ) : null}
                 </div>
+                {/* D3: the row that was acted on gets its own result, right
+                    next to the buttons that produced it — the top banner
+                    (kept above, ~line 301) is too far from a click deep in a
+                    ~25-card grid to read as feedback at all. */}
+                {rowMessage[row.id] ? (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className={
+                      rowMessage[row.id]!.tone === 'error'
+                        ? 'text-[length:var(--adm-text-sm)] text-[var(--adm-danger-text)]'
+                        : 'text-[length:var(--adm-text-sm)] text-[var(--adm-success-text)]'
+                    }
+                  >
+                    {rowMessage[row.id]!.text}
+                  </p>
+                ) : null}
                 {/* T2.6: the byKind selector, alongside "Set as site default" —
                     the same `set_site_fields` merge, scoped to one kind
                     (`buildPinKindDefaultOp`) instead of the whole publication. */}
@@ -403,12 +463,13 @@ export function PdfTemplatesPanel({
                     variant="secondary"
                     size="sm"
                     disabled={!row.canSetDefault || busyId !== undefined}
+                    loading={busyId === row.id && busyAction === 'kind'}
                     onClick={() => {
                       const kind = kindChoice[row.id] ?? row.kind ?? kindOptions[0]?.kind;
                       if (kind) void pinKind(row.id, kind);
                     }}
                   >
-                    Set as default for kind
+                    {busyId === row.id && busyAction === 'kind' ? 'Setting…' : 'Set as default for kind'}
                   </Button>
                 </div>
                 {!row.canSetDefault && row.setDefaultBlockedReason ? (

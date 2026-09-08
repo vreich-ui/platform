@@ -28,6 +28,13 @@
  * missing and which affordance that disables — rather than rendering a
  * thumbnail well that is permanently blank or a "Render sample" button that
  * cannot know the sample data.
+ *
+ * D2 fix — `thumbnail_key`'s "optional" is `string | null`, not just
+ * `string | undefined`: `null` is pdf-tool affirmatively reporting no
+ * thumbnail, which is a different fact from the field being absent from
+ * the row entirely (a shape/projection gap). See `pdfThumbnailMissingReason`
+ * for the message each of those, plus a present-but-unservable key and a
+ * real `thumbnail_error`, actually earns.
  */
 import { getAdminBlobImageEndpoint } from './artifact-preview.js';
 import type { EditorialArtifact } from './editorial-assets.js';
@@ -56,8 +63,19 @@ export interface PdfTemplateInput {
   created_at?: string;
   /** §3.6: 'article' | 'guide' | 'checklist' … an open key set. */
   kind?: string;
-  /** §3.6: set by publish; an image blob key. */
-  thumbnail_key?: string;
+  /**
+   * §3.6: set by publish; an image blob key.
+   *
+   * D2 fix: `null` is a distinct value from the field being absent — see
+   * `PdfTemplateSummary.thumbnail_key` (editorial-assets.ts) for why that
+   * distinction is real: `null` means pdf-tool's list row affirmatively
+   * reported no thumbnail; the field being OMITTED means the row never
+   * carried `thumbnailKey` at all (a pre-thumbnailing pdf-tool deploy, or —
+   * defensively — some other shape gap upstream of this function). Both
+   * still mean "there is no key to preview", but only the first is a claim
+   * this function can attribute to pdf-tool.
+   */
+  thumbnail_key?: string | null;
   /** W1 (pdf-tool) / T2.6: why publish could not produce a thumbnail, when it couldn't. */
   thumbnail_error?: string;
   /** §3.6: the JSON Schema the materializer fills deterministically (R7). */
@@ -228,6 +246,51 @@ const readSitePdf = (siteBody: unknown): SitePdfBlock | undefined => {
   };
 };
 
+/**
+ * D2 fix — why a row has no thumbnail preview, told as three genuinely
+ * different facts instead of collapsed into one placeholder:
+ *
+ *  1. `thumbnail_error` — pdf-tool's own reported reason (T2.6/W1). Always
+ *     wins: it is the one message here pdf-tool actually wrote.
+ *  2. `thumbnail_key` is a non-empty string but `thumbnailUrl` is still
+ *     undefined — a key EXISTS but D1's admin-image-reader gate would not
+ *     serve it (`getAdminBlobImageEndpoint` returned undefined). Post-D1
+ *     this almost always means the key's shape is not
+ *     `thumbnails/<id>/v<n>.png` with an id of only letters, digits, `_`
+ *     and `-` — e.g. a template id containing a dot, which pdf-tool's own
+ *     `safeSegment` allows but D1's tighter allow-shape does not. The
+ *     offending key is surfaced so an operator can tell why at a glance
+ *     instead of being told to go look.
+ *  3. `thumbnail_key === null` — pdf-tool's list row AFFIRMATIVELY reports
+ *     no thumbnail (see `PdfTemplateInput.thumbnail_key`'s doc comment).
+ *     This is the one case honestly worded as "pdf-tool has not published
+ *     a thumbnail yet" — it is the one case pdf-tool actually told us that.
+ *  4. `thumbnail_key === undefined` — the row never carried a
+ *     `thumbnailKey` property at all. That is a shape/projection fact
+ *     about the LISTING, not a report from pdf-tool about this template,
+ *     so it must not be worded as one; saying "pdf-tool has not published
+ *     one yet" here would assert knowledge nobody actually has.
+ */
+export function pdfThumbnailMissingReason(
+  template: Pick<PdfTemplateInput, 'thumbnail_key' | 'thumbnail_error'>
+): string {
+  if (template.thumbnail_error) return template.thumbnail_error;
+
+  const key = str(template.thumbnail_key);
+  if (key) {
+    return (
+      `The stored thumbnail key ("${key}") is not a shape the admin image reader can serve — ` +
+      'it accepts only thumbnails/<template id>/v<version>.png, with an id of letters, digits, ' +
+      '"_" and "-" (a template id containing a dot, for example, is not previewable through this ' +
+      'gate even though pdf-tool allows it in the id). Check the raw key in pdf-tool.'
+    );
+  }
+  if (template.thumbnail_key === null) {
+    return 'pdf-tool has not published a thumbnail for this template yet.';
+  }
+  return 'The template listing did not report a thumbnail_key for this template at all, so it is not known whether pdf-tool has produced one.';
+}
+
 export function buildPdfTemplatesViewModel(input: {
   templates: readonly PdfTemplateInput[];
   /** The site record's body (or just its `pdf` block). */
@@ -258,19 +321,7 @@ export function buildPdfTemplatesViewModel(input: {
       badges,
       isSiteDefault: badges.some((badge) => badge.scope === 'site'),
       isKindDefault: badges.some((badge) => badge.scope === 'kind'),
-      ...(thumbnailUrl
-        ? { thumbnailUrl }
-        : {
-            // T2.6 / W1's `thumbnailError`: a real, pdf-tool-reported reason
-            // beats this module's own guess — a template can carry NEITHER a
-            // key nor an error (thumbnailing simply hasn't run yet), which
-            // still degrades to the honest generic reasons below.
-            thumbnailMissingReason:
-              template.thumbnail_error ??
-              (template.thumbnail_key
-                ? 'The stored thumbnail key is not one the admin image reader can serve.'
-                : 'pdf-tool has not published a thumbnail for this template yet.'),
-          }),
+      ...(thumbnailUrl ? { thumbnailUrl } : { thumbnailMissingReason: pdfThumbnailMissingReason(template) }),
       validation,
       canSetDefault,
       ...(canSetDefault

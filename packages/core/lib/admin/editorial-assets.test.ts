@@ -79,7 +79,14 @@ describe('editorial asset projection', () => {
   // yet" — thumbnailKey null, no thumbnailError — is not an error case; it
   // must forward has_render_data_schema: false and nothing else new, same as
   // the fully-legacy row below.
-  it('reports has_render_data_schema: false and no thumbnail_error when pdf-tool sends thumbnailKey: null with no error', () => {
+  //
+  // D2 fix: it MUST still forward `thumbnail_key: null` itself, though — that
+  // is pdf-tool affirmatively reporting "no thumbnail", a materially
+  // different fact from the row never carrying `thumbnailKey` at all (see
+  // the omits-every-optional-field case below, and PdfTemplateSummary's doc
+  // comment). Collapsing the two here is exactly the ambiguity
+  // visual-identity-pdf.ts used to have no way to tell apart.
+  it('forwards thumbnail_key: null (not omitted) when pdf-tool sends thumbnailKey: null with no error', () => {
     const projected = projectPdfTemplate({
       templateId: 'tpl_pending_thumbnail',
       latestVersion: 1,
@@ -93,6 +100,7 @@ describe('editorial asset projection', () => {
       status: 'draft',
       renderer: 'chromium',
       version: 1,
+      thumbnail_key: null,
       has_render_data_schema: false,
     });
   });

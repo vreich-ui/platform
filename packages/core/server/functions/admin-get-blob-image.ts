@@ -15,12 +15,54 @@ import {
 import {
   getArtifactBlobStore,
   getArtifactIndexBlobStore,
+  getBlobStoreSourceDiagnostics,
   getCoreBlobStoreSourceDiagnostics,
+  getPdfTemplateBlobStore,
 } from '../lib/blob-store.js';
 import { ImageValidationError, validatePublishImageBytes } from '../lib/image-validation.js';
 import type sharpType from 'sharp';
 
-const allowedImageBlobKeyPattern = /^image\/[a-z0-9._-]+\/[a-f0-9]{64}(?:\.[a-z0-9]+)?$/i;
+/**
+ * D1 — TWO ALLOW SHAPES, ONE STORE EACH. Everything this function will serve
+ * must match exactly one of the two patterns below, and the pattern that
+ * matched is what picks the backing store. The store is NEVER taken from the
+ * caller (there is no `store=` parameter and there must never be one), so a
+ * key of one shape can never be read out of the other's store.
+ *
+ * Mirrored on the browser side by lib/admin/artifact-preview.ts's
+ * ADMIN_PREVIEWABLE_IMAGE_REF_RE / ADMIN_PREVIEWABLE_TEMPLATE_THUMBNAIL_REF_RE
+ * (the gate that decides whether to render an <img> at all). Keep them in step.
+ */
+
+/** `image/<requestId>/<sha256>[.ext]` — a Major Key artifact, in the `artifacts` store. */
+const artifactImageBlobKeyPattern = /^image\/[a-z0-9._-]+\/[a-f0-9]{64}(?:\.[a-z0-9]+)?$/i;
+
+/**
+ * `thumbnails/<templateId>/v<n>.png` — a pdf-tool publish-time template
+ * thumbnail, in the `pdf-templates` store (pdf-tool's own
+ * `pdfTemplateThumbnailKey`; see server/lib/pdf-tool-storage-grant.ts for why
+ * those bytes land in THIS site's blob namespace at all).
+ *
+ * Bounded far more tightly than pdf-tool's writer-side `safeSegment`, which
+ * also permits `.`: no dot here means no `.`/`..` segment is expressible, and
+ * no `/` in the id segment means the key can never carry a third path segment.
+ * `thumbnails/../../secret.png`, `thumbnails/a/b/v1.png`, `thumbnails/x/v1.svg`
+ * and `thumbnails/x/vlatest.png` all fail this test outright rather than
+ * relying on anything downstream. The trade is deliberate: a template whose id
+ * contains a dot is not servable here.
+ */
+const templateThumbnailBlobKeyPattern = /^thumbnails\/[a-z0-9][a-z0-9_-]{0,127}\/v\d{1,9}\.png$/i;
+
+export type AdminBlobImageKeyShape = 'artifact' | 'template-thumbnail';
+
+/** The single place a key becomes a store choice. Undefined = serve nothing. Exported so
+ *  the refusals themselves are directly testable. */
+export const classifyAdminBlobImageKey = (blobKey: string): AdminBlobImageKeyShape | undefined => {
+  if (artifactImageBlobKeyPattern.test(blobKey)) return 'artifact';
+  if (templateThumbnailBlobKeyPattern.test(blobKey)) return 'template-thumbnail';
+
+  return undefined;
+};
 
 // D-preview-rendition: a card-sized `<img>` (mood board, examples strip, the
 // library picker) never needs the ORIGINAL bytes — it was the bulk of "24
@@ -202,6 +244,110 @@ const resolveArtifactContentType = async (
   return { contentType: '', source: 'missing' };
 };
 
+/** Same narrowing artifact-upload.ts uses: the shared BlobStore type declares the
+ *  no-options `get`, while both real backends accept the binary read form. */
+type PdfTemplateBlobStore = Omit<Awaited<ReturnType<typeof getPdfTemplateBlobStore>>, 'get'> & {
+  get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | Buffer | string | null>;
+};
+
+const toBufferOrNull = (value: unknown): Buffer | null => {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  if (typeof value === 'string') return Buffer.from(value, 'binary');
+
+  return null;
+};
+
+const createTemplateThumbnailDebugFields = (event: LambdaEvent, blobKey: string, extra: Record<string, unknown> = {}) => ({
+  blobKey,
+  store: 'pdf-templates',
+  lookup: 'bytes',
+  contentTypeSource: 'key-shape' as const,
+  blobStoreDiagnostics: getBlobStoreSourceDiagnostics('pdf-templates', event),
+  ...extra,
+});
+
+/**
+ * D1: the `thumbnails/<templateId>/v<n>.png` path.
+ *
+ * Deliberately NOT routed through the artifact machinery above: a template
+ * thumbnail has no artifact-index entry, no sha256 in its key and no request
+ * id, so index lookup, reconciliation and sha recovery are all meaningless
+ * here — running them would only invent stale-reference errors for bytes that
+ * are either present or absent. Everything that MATTERS is kept: the same
+ * admin gate in handlerImpl, the same site-scoped store resolution, the same
+ * `validatePublishImageBytes` decode before any bytes are returned, and the
+ * same optional `w` rendition over those validated bytes.
+ *
+ * The content type is fixed at image/png from the key shape itself (the
+ * pattern only admits `.png`), never from the query string — a caller cannot
+ * talk this path into labelling bytes as something else.
+ */
+export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: string) => {
+  const contentType = 'image/png';
+
+  try {
+    const store = (await getPdfTemplateBlobStore(event)) as unknown as PdfTemplateBlobStore;
+    const bytes = toBufferOrNull(await store.get(blobKey, { type: 'arrayBuffer' }));
+
+    if (!bytes || bytes.byteLength === 0) {
+      console.warn('PDF template thumbnail bytes are missing for a key a template record points at.', {
+        blobKey,
+        store: 'pdf-templates',
+      });
+
+      return jsonResponse(404, {
+        ...createTemplateThumbnailDebugFields(event, blobKey),
+        reason: 'missing-template-thumbnail-bytes',
+      });
+    }
+
+    const filename = blobKey.split('/').pop() || blobKey;
+
+    let decodedFormat: string | undefined;
+    try {
+      const metadata = await validatePublishImageBytes({ bytes, contentType, filename, path: blobKey });
+      decodedFormat = metadata.format;
+    } catch (error) {
+      if (error instanceof ImageValidationError) {
+        return jsonResponse(422, {
+          ...createTemplateThumbnailDebugFields(event, blobKey),
+          error: error.message,
+          reason: error.code,
+          validationReason: error.reason,
+        });
+      }
+
+      throw error;
+    }
+
+    const renditionWidth = parseRenditionWidth(event.queryStringParameters?.w);
+    const renditionBytes = renditionWidth
+      ? await renderBoundedRendition(bytes, decodedFormat, renditionWidth)
+      : undefined;
+    const responseBytes = renditionBytes ?? bytes;
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'private, max-age=300',
+      },
+      body: responseBytes.toString('base64'),
+      isBase64Encoded: true,
+    };
+  } catch (error) {
+    console.error('Failed to read a PDF template thumbnail.', error);
+
+    return jsonResponse(500, {
+      error: 'PDF template thumbnail could not be read.',
+      ...createTemplateThumbnailDebugFields(event, blobKey),
+    });
+  }
+};
+
 export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) => {
   let contentTypeSource: ContentTypeSource = 'missing';
 
@@ -327,6 +473,24 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
   }
 };
 
+/**
+ * D1 SCOPING AUDIT (recorded here because it is easy to mis-read the artifact
+ * key shape as carrying a tenant):
+ *
+ * Both paths are scoped identically, and NEITHER derives its scope from the
+ * key. Tenancy is the Netlify site (site-binding.ts's OQ-W11-4 note): every
+ * deployment reads the same env-var NAMES (PLATFORM_ENV_NAMES) and the
+ * platform supplies per-site VALUES, so `getArtifactBlobStore(event)` and
+ * `getPdfTemplateBlobStore(event)` both open a store inside this deployment's
+ * own blob namespace and cannot address another tenant's at all. The
+ * `<requestId>` segment of an artifact key is an editorial request id within
+ * one site — it is NOT a tenant discriminator, and nothing here treats it as
+ * one — so the thumbnail shape's lack of an equivalent segment removes no
+ * existing protection. Identity is the same single gate below for both shapes:
+ * authenticated (Netlify Identity or a verified bearer token) AND resolving to
+ * the `admin` role for THIS site (ADMIN_EMAILS ∪ this site's `users` store).
+ * The store is chosen from the key shape and never from caller input.
+ */
 const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') {
     return jsonResponse(405, { error: 'Method not allowed' });
@@ -344,14 +508,18 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   }
 
   const blobKey = toText(event.queryStringParameters?.blobKey);
-  if (!allowedImageBlobKeyPattern.test(blobKey)) {
+  const shape = classifyAdminBlobImageKey(blobKey);
+  if (!shape) {
     return jsonResponse(400, {
       error: 'A valid image artifact blobKey is required.',
       ...createArtifactDebugFields(event, blobKey),
     });
   }
 
-  return readAdminBlobImage(event, blobKey);
+  // The shape picks the store, and nothing else does.
+  return shape === 'template-thumbnail'
+    ? readAdminTemplateThumbnail(event, blobKey)
+    : readAdminBlobImage(event, blobKey);
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
