@@ -23,6 +23,7 @@ import {
   remedyButtons,
   type Blockage,
   type RemedyButton,
+  type RemedySurface,
 } from '@core/lib/admin/blockage';
 
 export interface BlockageCardProps {
@@ -40,6 +41,13 @@ export interface BlockageCardProps {
   chatHint?: string;
   /** Set when the card is inside a chat transcript, which has its own frame. */
   variant?: 'page' | 'transcript';
+  /**
+   * WHICH SURFACE THIS IS, for the remedy table — not a style. A transcript
+   * cannot re-run the page tool an `attempt`-scoped raise needs, so that button
+   * is disabled there with the reason. Defaults from `variant` so the two
+   * cannot disagree.
+   */
+  surface?: RemedySurface;
 }
 
 const KIND_WORDS: Record<Blockage['kind'], string> = {
@@ -105,8 +113,9 @@ export function BlockageCard({
   busy = false,
   chatHint,
   variant = 'page',
+  surface,
 }: BlockageCardProps) {
-  const buttons = remedyButtons(blockage, { isOwner });
+  const buttons = remedyButtons(blockage, { isOwner }, { surface: surface ?? (variant === 'transcript' ? 'chat' : 'page') });
   // Amber whenever ANYTHING can be done — including by someone else. A wall an
   // editor cannot clear but an Owner can is still not a dead end, and painting
   // it red would say it was.
@@ -168,11 +177,11 @@ export function BlockageCard({
 
       {/* The honest reason, in text and not only on hover, for the viewer who
           cannot press the thing they most need. */}
-      {buttons.some((button) => button.disabledReason) ? (
-        <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-          {buttons.find((button) => button.disabledReason)?.disabledReason}
+      {[...new Set(buttons.map((button) => button.disabledReason).filter(Boolean))].map((reason) => (
+        <p key={reason} className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          {reason}
         </p>
-      ) : null}
+      ))}
 
       {chatHint ? <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{chatHint}</p> : null}
 

@@ -208,35 +208,81 @@ function labelFor(remedy: Remedy): string {
 }
 
 /**
+ * WHICH SURFACE IS ASKING — and why that changes the answer.
+ *
+ * An `attempt`-scoped raise is a RE-CALL of the synchronous tool that hit the
+ * wall (D3): there is no run to override and no node to retry, so the only
+ * thing that can honour it is the surface that owns that tool. The chat is not
+ * that surface. Rendered there anyway, the button posts, the server correctly
+ * answers "nothing to re-run from here", and the human is left with a card that
+ * neither raises anything nor goes away — which is exactly what shipped.
+ *
+ * So the surface is an input, and the chat shows that remedy DISABLED with the
+ * reason and where to press it, rather than hidden (an editor who cannot see it
+ * cannot go and do it) or live (a button that cannot work).
+ */
+export type RemedySurface =
+  /** The page that owns the tool: it can re-run, so every remedy is live. */
+  | 'page'
+  /** A transcript beside it: it can write config and act on runs, but not re-call a page's tool. */
+  | 'chat';
+
+/** The tool a sync-surface blockage came from, in words a human recognises. */
+const TOOL_LABELS: Record<string, string> = {
+  visual_identity_propose: 'Write contract from mood board, on the Imagery tab',
+};
+
+/**
  * What a surface renders. `isOwner` gates the writes; everything else is shown
  * to everyone. A remedy this platform has no handler for is dropped entirely
  * rather than shown broken — see `NOT_YET_WIRED` for the deliberate exception.
  */
 export function remedyButtons(
   blockage: Blockage | undefined,
-  viewer: { isOwner: boolean }
+  viewer: { isOwner: boolean },
+  options: { surface?: RemedySurface } = {}
 ): RemedyButton[] {
   if (!blockage) return [];
+  const surface = options.surface ?? 'page';
+  const originTool = blockage.scope.tool;
   return blockage.remedies.map((remedy) => {
     const notWired = NOT_YET_WIRED.get(remedy.type);
     const ownerBlocked = OWNER_ONLY.has(remedy.type) && !viewer.isOwner;
+    // The one-shot raise, away from the page that can re-run it.
+    const needsItsOwnPage =
+      surface === 'chat' &&
+      remedy.type === 'raise_node_budget' &&
+      remedy.args?.scope === 'attempt' &&
+      Boolean(originTool);
     return {
       remedy_id: remedy.id,
       type: remedy.type,
       label: labelFor(remedy),
-      ...(remedy.default ? { primary: true as const } : {}),
+      // A disabled remedy is never the primary button — the primary has to be
+      // something the human can actually press.
+      ...(remedy.default && !needsItsOwnPage ? { primary: true as const } : {}),
       ...(notWired
         ? { disabledReason: notWired }
-        : ownerBlocked
-          ? { disabledReason: 'Only an Owner can change a budget or limit. Ask an Owner to approve this raise.' }
-          : {}),
+        : needsItsOwnPage
+          ? {
+              disabledReason: `This one applies to a single attempt, so it has to be re-run where it started — ${
+                TOOL_LABELS[originTool!] ?? originTool
+              }. Raising the default here works from anywhere.`,
+            }
+          : ownerBlocked
+            ? { disabledReason: 'Only an Owner can change a budget or limit. Ask an Owner to approve this raise.' }
+            : {}),
     };
   });
 }
 
 /** D7 — a wall with something a human can actually do is "Needs you", not "Blocked". */
-export function isResolvableBlockage(blockage: Blockage | undefined, viewer: { isOwner: boolean }): boolean {
-  return remedyButtons(blockage, viewer).some((button) => button.type !== 'cancel' && !button.disabledReason);
+export function isResolvableBlockage(
+  blockage: Blockage | undefined,
+  viewer: { isOwner: boolean },
+  options: { surface?: RemedySurface } = {}
+): boolean {
+  return remedyButtons(blockage, viewer, options).some((button) => button.type !== 'cancel' && !button.disabledReason);
 }
 
 /** Present on a blockage regardless of who is looking — for header counts, which are not per-viewer. */
