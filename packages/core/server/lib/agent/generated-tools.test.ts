@@ -7,7 +7,7 @@ import '../../../../../sites/drlurie/config/policy-bindings.js'; // registers si
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS } from '../mcp-tool-definitions.js';
+import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS, CHAT_HIDDEN_TOOLS } from '../mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../mcp-tool-definitions-2.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import { compileSchema } from './json-schema-lite.js';
@@ -49,7 +49,9 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 test('the registry has exactly the expected 103 names: every visible TOOL_DEFINITION (64 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + the four image-annotation bridge tools, T-IMG, + derive_render_data_schema, S2) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
-    ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name)).map((def) => def.name)
+    ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name) && !CHAT_HIDDEN_TOOLS.has(def.name)).map(
+      (def) => def.name
+    )
   );
   assert.equal(expectedVisible.size, 92);
 
@@ -84,6 +86,15 @@ test('the registry has exactly the expected 103 names: every visible TOOL_DEFINI
   }
   for (const internalName of INTERNAL_ONLY_TOOLS) {
     assert.ok(!registryNames.includes(internalName), `${internalName} is INTERNAL_ONLY and must not be chat-visible`);
+  }
+  // S2-followup (narrow split, ratified 2026-09-08): the capture bridge is advertised on
+  // /mcp but still absent from a client's chat registry — R-C5 only ever refused this
+  // surface. If one of these ever appears here, the ruling was reversed by accident.
+  for (const chatHiddenName of CHAT_HIDDEN_TOOLS) {
+    assert.ok(
+      !registryNames.includes(chatHiddenName),
+      `${chatHiddenName} is CHAT_HIDDEN and must not be chat-visible`
+    );
   }
 });
 

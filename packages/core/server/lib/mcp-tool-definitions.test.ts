@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { TOOL_DEFINITIONS_PART1, INTERNAL_ONLY_TOOLS, CHAT_TOOL_ALIASES } from './mcp-tool-definitions.js';
+import {
+  TOOL_DEFINITIONS_PART1,
+  INTERNAL_ONLY_TOOLS,
+  CHAT_HIDDEN_TOOLS,
+  CHAT_TOOL_ALIASES,
+} from './mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from './mcp-tool-definitions-2.js';
 import { TOOL_DEFINITIONS_MEMBERSHIP } from './mcp-tool-definitions-membership.js';
 import { TOOL_DEFINITIONS_ANALYTICS } from './mcp-tool-definitions-analytics.js';
@@ -413,6 +418,17 @@ describe('Tool definitions', () => {
     const toolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name));
     for (const internalTool of INTERNAL_ONLY_TOOLS) {
       assert.ok(toolNames.has(internalTool), `INTERNAL_ONLY_TOOLS includes "${internalTool}", which is not a tool`);
+    }
+  });
+
+  it('CHAT_HIDDEN_TOOLS members are all definition names, and disjoint from INTERNAL_ONLY_TOOLS', () => {
+    const toolNames = new Set(TOOL_DEFINITIONS.map((t) => t.name));
+    for (const chatHidden of CHAT_HIDDEN_TOOLS) {
+      assert.ok(toolNames.has(chatHidden), `CHAT_HIDDEN_TOOLS includes "${chatHidden}", which is not a tool`);
+      assert.ok(
+        !INTERNAL_ONLY_TOOLS.has(chatHidden),
+        `"${chatHidden}" is in both sets — INTERNAL_ONLY already hides it from /mcp, so the split means nothing`
+      );
     }
   });
 });
