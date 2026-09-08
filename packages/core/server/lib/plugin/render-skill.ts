@@ -390,6 +390,10 @@ ${templateIntro}
   Pointed at another subject they render confident headings about the wrong topic.
 - The generic reusable one is \`bef0d7b0-a042-4221-aa03-7870f1deb879\` —
   "Generic Evidence Guide (5-page, illustrated)".
+- **The chromium \`template_json\` shape is \`{ html, css?, assets? }\`** — \`html\` is a non-empty
+  Liquid/HTML string and IS the whole document, \`css\` a stylesheet string, \`assets.partials\` a
+  \`{ "<name>": "<liquid>" }\` map for \`{% include %}\`. Every other key is rejected by name, so a
+  declarative \`{label, kind, schemaVersion, layout, sections}\` fails the whole call.
 - To build a new one: \`create_pdf_template\` (renderer \`chromium\`) → \`validate_pdf_template\` → poll
   \`get_pdf_template_validation\` to a terminal \`PASSED\` report → \`publish_pdf_template\`. Without a
   PASSED report for that exact version \`publish_pdf_template\` refuses with

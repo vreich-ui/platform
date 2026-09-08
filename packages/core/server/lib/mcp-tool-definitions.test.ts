@@ -460,3 +460,53 @@ describe('pdf bridge controls', () => {
     assert.match(String(tool.description), /the SITE was never configured/);
   });
 });
+
+describe('create_pdf_template teaches the template shape BEFORE the call', () => {
+  /**
+   * Live failure, 2026-09-08: an agent asked for a rich PDF template, chose the
+   * chromium renderer, and sent `{label, kind, schemaVersion, layout, sections}`
+   * — a plausible declarative schema that no renderer accepts. pdf-tool refused
+   * it and named every offending key, which is a good error arriving one turn
+   * too late: a creation-tool approval had already been spent, and the agent
+   * reported failure rather than retrying.
+   *
+   * `template_json` was documented as "the template definition for the chosen
+   * renderer" and nothing more. Each renderer takes ONE shape and rejects every
+   * key outside it, so those shapes have to be on the contract. This pins that
+   * they stay there — the shapes themselves live in pdf-tool
+   * (`netlify/lib/pdf-render/engines/*`), so a change THERE still needs this
+   * description updated by hand.
+   */
+  const templateJsonDescription = (() => {
+    const tool = TOOL_DEFINITIONS.find((definition) => definition.name === 'create_pdf_template');
+    assert.ok(tool, 'create_pdf_template is defined');
+    const properties = (tool!.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
+    return properties.template_json?.description ?? '';
+  })();
+
+  it('names every renderer and the key that identifies its shape', () => {
+    for (const [renderer, requiredKey] of [
+      ['pdfme', 'basePdf'],
+      ['pdfme', 'schemas'],
+      ['chromium', 'html'],
+      ['typst', 'source'],
+      ['react-pdf', 'docTreeVersion'],
+    ]) {
+      assert.ok(templateJsonDescription.includes(renderer!), `names the ${renderer} renderer`);
+      assert.ok(templateJsonDescription.includes(requiredKey!), `names ${renderer}'s ${requiredKey}`);
+    }
+  });
+
+  it('says the shapes are exclusive, which is the part that was missed', () => {
+    // "the template definition for the chosen renderer" reads as "any shape the
+    // renderer understands". The renderers reject unknown keys outright.
+    assert.match(templateJsonDescription, /rejects every key|Anything else is refused/);
+  });
+
+  it('warns off the two wrong guesses these renderers actually attract', () => {
+    // basePdf as an array (one per page) and JSX/HTML for react-pdf are both
+    // shapes pdf-tool has a named error for — meaning both have been sent.
+    assert.match(templateJsonDescription, /never an array/);
+    assert.match(templateJsonDescription, /NOT JSX/);
+  });
+});
