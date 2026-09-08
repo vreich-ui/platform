@@ -20,6 +20,7 @@
  * `artifact-preview-loader.ts`'s job, unchanged.
  */
 import { getAdminBlobImageEndpoint } from './artifact-preview.js';
+import { OBJECT_TYPE_LABELS } from './display-name.js';
 import type { InventoryHit } from './inventory-server-logic.js';
 import type { Role } from '../../server/lib/roles.js';
 
@@ -80,19 +81,133 @@ export type InventoryPreviewPlan =
  * `admin-get-blob-image` / `admin-get-blob-pdf` enforce server-side, checked
  * here so the page never issues a request it knows will 400.
  */
+const trimmedRef = (value: string | null): string => (typeof value === 'string' ? value.trim() : '');
+
 export const inventoryPreviewPlan = (hit: InventoryHit): InventoryPreviewPlan => {
-  if (hit.collection !== 'artifacts') return { mode: 'json' };
+  if (hit.collection === 'artifacts') {
+    const ref = trimmedRef(hit.previewRef);
+    if (!ref) return { mode: 'json' };
 
-  const ref = typeof hit.previewRef === 'string' ? hit.previewRef.trim() : '';
-  if (!ref) return { mode: 'json' };
+    const image = getAdminBlobImageEndpoint(ref);
+    if (image) return { mode: 'image', endpoint: image, cacheKey: `inventory:image:${ref}` };
 
-  const image = getAdminBlobImageEndpoint(ref);
-  if (image) return { mode: 'image', endpoint: image, cacheKey: `inventory:image:${ref}` };
+    const pdf = getAdminBlobPdfEndpoint(ref);
+    if (pdf) return { mode: 'pdf', endpoint: pdf, cacheKey: `inventory:pdf:${ref}` };
 
-  const pdf = getAdminBlobPdfEndpoint(ref);
-  if (pdf) return { mode: 'pdf', endpoint: pdf, cacheKey: `inventory:pdf:${ref}` };
+    return { mode: 'json' };
+  }
+
+  /**
+   * A non-artifact row can still have imagery it can PROVE is its own: the
+   * search response joins each object to the artifact index by requestId and
+   * puts the hero image's blob key on `thumbnailRef` (see
+   * `inventory-server-logic.ts`). `previewRef` is deliberately NOT consulted
+   * here — an object's `previewRef` is its own id, which is what made every
+   * Objects row fall through to a text chip.
+   *
+   * `null` (nothing proven) falls through to `'json'`, and the surface draws
+   * `inventoryTypeVisual(hit)` — never a placeholder image, never a spinner
+   * waiting on bytes nobody found. The cache key is the blob key, so an
+   * object and the artifact row for the same image share one fetch.
+   */
+  const thumbnail = trimmedRef(hit.thumbnailRef);
+  if (thumbnail) {
+    const image = getAdminBlobImageEndpoint(thumbnail);
+    if (image) return { mode: 'image', endpoint: image, cacheKey: `inventory:image:${thumbnail}` };
+  }
 
   return { mode: 'json' };
+};
+
+// ─── type visuals ───────────────────────────────────────────────────────────
+
+/**
+ * The icon a row falls back to when it has no bytes of its own — named, not
+ * drawn, because this module is pure and the icons live in the admin kit's
+ * `.tsx`. Every id here is an icon that ALREADY EXISTS in `admin/icons.tsx`;
+ * this mapping invents no artwork and pulls in no image dependency.
+ */
+export type InventoryTypeIconId =
+  | 'note'
+  | 'layout-list'
+  | 'layout-grid'
+  | 'file-plus'
+  | 'menu'
+  | 'tag'
+  | 'home'
+  | 'palette'
+  | 'archive'
+  | 'chart-bar'
+  | 'mic'
+  | 'sparkles'
+  | 'bookmark'
+  | 'settings'
+  | 'info';
+
+export interface InventoryTypeVisual {
+  iconId: InventoryTypeIconId;
+  /** What the icon stands for, in words — the cell's accessible label and its caption. */
+  label: string;
+}
+
+/**
+ * One icon per governed object type — all thirteen of them
+ * (`schema/object-record-v1.ts`'s `objectTypes`). Keyed loosely on `string`
+ * rather than `ObjectType` because `hit.kind` arrives from the server as a
+ * plain string and an unrecognized value must degrade, not throw.
+ */
+export const OBJECT_TYPE_ICONS: Record<string, InventoryTypeIconId> = {
+  page: 'layout-list',
+  section: 'bookmark',
+  navigation: 'menu',
+  taxonomy: 'tag',
+  site: 'home',
+  template: 'layout-grid',
+  section_template: 'file-plus',
+  theme: 'palette',
+  product: 'archive',
+  content_item: 'note',
+  tracking_config: 'chart-bar',
+  editorial_voice: 'mic',
+  visual_standard: 'sparkles',
+};
+
+/** `content_item` → `Article`, `some_new_type` → `Some new type`. */
+const humanizeType = (value: string): string => {
+  const spaced = value.replace(/[_-]+/g, ' ').trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Item';
+};
+
+/**
+ * The per-type visual for an object row. An object type this deploy does not
+ * know still gets a visual and a readable name — a generic mark that says
+ * "no specific icon for this", which is honest, rather than borrowing another
+ * type's icon and implying a kinship that is not there.
+ */
+export const objectTypeVisual = (objectType: string): InventoryTypeVisual => {
+  const key = objectType.trim();
+  const iconId = OBJECT_TYPE_ICONS[key];
+  const label = (OBJECT_TYPE_LABELS as Record<string, string | undefined>)[key] ?? humanizeType(key);
+
+  return { iconId: iconId ?? 'info', label };
+};
+
+/**
+ * The visual for ANY row without provable bytes, so the preview column is
+ * never empty: objects by type, store blobs by their store name, artifacts by
+ * their artifact kind.
+ */
+export const inventoryTypeVisual = (hit: InventoryHit): InventoryTypeVisual => {
+  switch (hit.collection) {
+    case 'objects':
+      return objectTypeVisual(hit.kind);
+    case 'stores':
+      // Deliberately not the store name: the Kind column already carries it,
+      // and repeating it in the preview cell says nothing new.
+      return { iconId: 'settings', label: 'Store blob' };
+    case 'artifacts':
+      return { iconId: 'note', label: humanizeType(hit.kind) };
+  }
 };
 
 /** A file name for the download action — the blob key's last segment, or the hit id's. */

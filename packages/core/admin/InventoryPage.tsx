@@ -58,14 +58,28 @@ import { DataTable, type Column } from './data';
 import { DropdownMenu, type MenuItem } from './menus';
 import {
   IconArchive,
+  IconBookmark,
+  IconChartBar,
   IconCheck,
   IconDots,
   IconDownload,
   IconExternalLink,
+  IconFilePlus,
+  IconHome,
+  IconInfo,
+  IconLayoutGrid,
+  IconLayoutList,
+  IconMenu,
+  IconMic,
+  IconNote,
+  IconPalette,
   IconRobot,
+  IconSettings,
+  IconSparkles,
   IconTag,
   IconTrash,
   IconUser,
+  type IconProps,
 } from './icons';
 import { ARTIFACT_PREVIEW_THUMBNAIL_WIDTH } from './ArtifactStagePreview';
 import { fetchMe } from '@core/lib/admin/users-client';
@@ -109,11 +123,17 @@ import {
   canUseInventory,
   inventoryDownloadFilename,
   inventoryPreviewPlan,
+  inventoryTypeVisual,
   parseInventoryPreviewJson,
   previewStoreName,
   toInventoryRoles,
   type InventoryPreviewPlan,
+  type InventoryTypeIconId,
 } from '@core/lib/admin/inventory-preview';
+import {
+  describeInventorySelection,
+  INVENTORY_COLLECTION_LABELS as COLLECTION_LABELS,
+} from '@core/lib/admin/inventory-selection';
 import {
   clearSelection,
   emptySelection,
@@ -121,6 +141,7 @@ import {
   isSelected,
   isSomeSelected,
   pruneSelection,
+  selectAll,
   selectionCount,
   toggleSelectAll,
   toggleSelection,
@@ -171,12 +192,6 @@ const PAGE_LIMIT = 50;
  * (`<scope>:<siteId>`), and "New chat" below clears it.
  */
 const INVENTORY_CHAT_SCOPE = 'inventory-chat';
-
-const COLLECTION_LABELS: Record<InventoryCollection, string> = {
-  objects: 'Objects',
-  artifacts: 'Artifacts',
-  stores: 'System stores',
-};
 
 const formatBytes = (bytes: number | null): string => {
   if (bytes === null || !Number.isFinite(bytes)) return '—';
@@ -387,11 +402,58 @@ function BytesPreview({
 }
 
 /**
- * The row's preview cell. An image row issues its own authenticated,
- * width-bounded request (shared queue + cache); a PDF row shows a type chip,
- * because nothing in the browser can rasterize its first page and a faked
- * thumbnail would be a claim the page cannot prove; everything else shows
- * what collection the row is from.
+ * The icon behind each `InventoryTypeIconId`. The ids are chosen in
+ * `inventory-preview.ts` (pure, tested); this table is the only place they
+ * become artwork, and every entry is an icon the admin kit already ships —
+ * no new icon set, no image dependency.
+ */
+const TYPE_ICONS: Record<InventoryTypeIconId, (props: IconProps) => ReactNode> = {
+  note: IconNote,
+  'layout-list': IconLayoutList,
+  'layout-grid': IconLayoutGrid,
+  'file-plus': IconFilePlus,
+  menu: IconMenu,
+  tag: IconTag,
+  home: IconHome,
+  palette: IconPalette,
+  archive: IconArchive,
+  'chart-bar': IconChartBar,
+  mic: IconMic,
+  sparkles: IconSparkles,
+  bookmark: IconBookmark,
+  settings: IconSettings,
+  info: IconInfo,
+};
+
+/**
+ * A row with no bytes of its own: the icon for what it IS, plus that in
+ * words. Never blank, and never a stand-in picture — the frame is obviously
+ * an icon tile, so it cannot be misread as a thumbnail of the item.
+ */
+function InventoryTypeThumb({ iconId, label }: { iconId: InventoryTypeIconId; label: string }) {
+  const Icon = TYPE_ICONS[iconId];
+  return (
+    <div className="flex items-center gap-2">
+      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] text-[var(--adm-text-muted)]">
+        <Icon size={18} title={label} />
+      </div>
+      <span className="whitespace-nowrap text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * The row's preview cell. A row with provable image bytes issues its own
+ * authenticated, width-bounded request through the shared queue + cache —
+ * artifacts from their own `previewRef`, objects from the `thumbnailRef` the
+ * server joined for them (see `inventory-server-logic.ts`'s requestId join),
+ * both through the SAME loader and the same `admin-get-blob-image` endpoint.
+ *
+ * Everything else — a PDF, whose first page nothing in the browser can
+ * rasterize; an object with no image under its request; a store blob — gets
+ * the type visual. A thumbnail that fails to fetch degrades to that same
+ * visual, never to an error state and never to a spinner that never
+ * resolves.
  */
 function InventoryThumb({ hit, plan }: { hit: InventoryHit; plan: InventoryPreviewPlan }) {
   const thumbEndpoint = plan.mode === 'image' ? `${plan.endpoint}&w=${ARTIFACT_PREVIEW_THUMBNAIL_WIDTH}` : '';
@@ -435,11 +497,9 @@ function InventoryThumb({ hit, plan }: { hit: InventoryHit; plan: InventoryPrevi
     );
   }
 
-  return (
-    <Badge tone="neutral">
-      {plan.mode === 'pdf' ? 'PDF' : hit.collection === 'stores' ? 'JSON' : COLLECTION_LABELS[hit.collection]}
-    </Badge>
-  );
+  // A PDF artifact says PDF; everything else says what it is.
+  const visual = plan.mode === 'pdf' ? { iconId: 'note' as InventoryTypeIconId, label: 'PDF' } : inventoryTypeVisual(hit);
+  return <InventoryTypeThumb iconId={visual.iconId} label={visual.label} />;
 }
 
 // ─── system health (collapsed, on demand, owner-only endpoint) ──────────────
@@ -678,6 +738,15 @@ function InventoryBody({ siteId }: { siteId: string }) {
   );
 
   const bulkActions = useMemo(() => bulkActionsFor(selectedHits, roles), [selectedHits, roles]);
+  /**
+   * Why the toolbar looks the way it does. `bulkActionsFor` intersects
+   * `allowedActions` across the selection — correct, and unchanged — but a
+   * selection spanning two collections collapses to `send-to-chat` alone,
+   * which is what "Add tag disappeared when I picked more rows" actually
+   * was. `describeInventorySelection` turns that into a sentence plus the
+   * one-click narrowings below; the intersection itself is not relaxed.
+   */
+  const selectionSpan = useMemo(() => describeInventorySelection(selectedHits), [selectedHits]);
 
   useEffect(() => {
     if (!inspected) return;
@@ -1479,26 +1548,65 @@ function InventoryBody({ siteId }: { siteId: string }) {
           ) : (
             <>
               {selected > 0 ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-raised)] px-3 py-2">
-                  <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                    {selected} selected
-                  </span>
-                  {bulkButtons()}
-                  {bulkStarterCollection && bulkActions.includes('send-to-chat') ? (
-                    <InventoryQuickActionChips
-                      collection={bulkStarterCollection}
-                      items={selectedHits.map(hitToSelectionItem)}
-                      onSeedComposer={(prompt) => void seedInventoryComposer(prompt)}
-                    />
-                  ) : null}
-                  {bulkActions.length === 0 ? (
-                    <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-                      No verb applies to every selected row.
+                <div className="flex flex-col gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-raised)] px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                      {selected} selected
                     </span>
+                    {bulkButtons()}
+                    {bulkStarterCollection && bulkActions.includes('send-to-chat') ? (
+                      <InventoryQuickActionChips
+                        collection={bulkStarterCollection}
+                        items={selectedHits.map(hitToSelectionItem)}
+                        onSeedComposer={(prompt) => void seedInventoryComposer(prompt)}
+                      />
+                    ) : null}
+                    {bulkActions.length === 0 ? (
+                      <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                        No action applies to every selected item.
+                      </span>
+                    ) : null}
+                    <Button size="sm" variant="ghost" onClick={() => setSelection(clearSelection())}>
+                      Clear
+                    </Button>
+                  </div>
+
+                  {/* The intersection, said out loud. A selection spanning two
+                      collections keeps only the actions all of them share —
+                      which is why Add tag / Remove tag vanish the moment an
+                      object or a store row joins a set of artifacts. The
+                      buttons below narrow the selection to one collection
+                      (ids straight off the selection, so nothing the human
+                      did not tick is ever selected for them); the verbs come
+                      back because `bulkActionsFor` then intersects over one
+                      collection, not because the rule was relaxed. */}
+                  {selectionSpan.spansMultiple ? (
+                    <div
+                      className="flex flex-col gap-2 rounded-[var(--adm-radius-sm)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <p className="text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                        {selectionSpan.headline}
+                      </p>
+                      <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                        {selectionSpan.detail}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectionSpan.narrowingOptions.map((option) => (
+                          <Button
+                            key={option.collection}
+                            size="sm"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() => setSelection(selectAll(option.ids))}
+                          >
+                            {option.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                   ) : null}
-                  <Button size="sm" variant="ghost" onClick={() => setSelection(clearSelection())}>
-                    Clear
-                  </Button>
                 </div>
               ) : null}
 

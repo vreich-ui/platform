@@ -54,6 +54,9 @@ import {
   applyArtifactTagChanges,
   artifactMatchFields,
   artifactReferenceNeedles,
+  artifactSlotHint,
+  attachObjectThumbnails,
+  buildRequestThumbnailIndex,
   clampInventoryLimit,
   decodeInventoryCursors,
   encodeInventoryCursors,
@@ -72,6 +75,7 @@ import {
   parseStoreHitId,
   trimJsonPreview,
   trimStoreBlobPreview,
+  type ArtifactThumbnailCandidate,
   type InventoryCollection,
   type InventoryCursorMap,
   type InventoryHit,
@@ -213,18 +217,48 @@ const readArtifactReferences = async (
   };
 };
 
-const searchArtifacts = async (
-  query: string,
-  context: ActionContext
-): Promise<{ hits: InventoryHit[]; truncated: boolean }> => {
-  const indexStore = await openArtifactIndexStore(context.event);
-  const { references, truncated } = await readArtifactReferences(indexStore);
+type ArtifactIndexSweep = { references: Array<ArtifactReference & { requestId: string }>; truncated: boolean };
 
-  const hits = references
+/**
+ * ONE artifact-index sweep per search request, shared by the artifacts
+ * collection and the object-thumbnail join. The join must never turn into a
+ * second listing (let alone a per-row fetch), so the read happens here and
+ * both consumers work off the same array.
+ */
+const loadArtifactIndexSweep = async (context: ActionContext): Promise<ArtifactIndexSweep> =>
+  readArtifactReferences(await openArtifactIndexStore(context.event));
+
+const searchArtifacts = (query: string, sweep: ArtifactIndexSweep): { hits: InventoryHit[]; truncated: boolean } => ({
+  hits: sweep.references
     .filter((reference) => matchesInventoryQuery(query, artifactMatchFields(reference)))
-    .map((reference) => normalizeArtifactHit(reference));
+    .map((reference) => normalizeArtifactHit(reference)),
+  truncated: sweep.truncated,
+});
 
-  return { hits, truncated };
+/**
+ * The requestId → hero-image map for this response, or an EMPTY map.
+ *
+ * Empty when the index sweep hit `MAX_ARTIFACT_INDEX_KEYS`: a truncated sweep
+ * cannot prove which artifacts an object has, so the rows fall back to their
+ * type visual rather than showing a thumbnail for the objects that happened
+ * to sort early and nothing for the rest. Partial imagery would look like
+ * data ("this article has no picture") when it is really scan order.
+ */
+const thumbnailIndexFor = (sweep: ArtifactIndexSweep): Map<string, string> => {
+  if (sweep.truncated) return new Map();
+
+  const candidates: ArtifactThumbnailCandidate[] = sweep.references.map((reference) => ({
+    requestId: reference.requestId,
+    sha256: reference.sha256,
+    blobKey: reference.blobKey,
+    artifactKind: reference.artifactKind ?? null,
+    contentType: reference.contentType,
+    createdAtISO: reference.createdAtISO,
+    deletedAtISO: reference.deletedAtISO ?? null,
+    slot: artifactSlotHint(reference.metadata),
+  }));
+
+  return buildRequestThumbnailIndex(candidates);
 };
 
 const searchStores = async (
@@ -290,19 +324,33 @@ const handleSearch: ActionHandler = async (params, context) => {
   const hitsByCollection: Partial<Record<InventoryCollection, InventoryHit[]>> = {};
   const truncatedByCollection: Partial<Record<InventoryCollection, boolean>> = {};
 
+  /**
+   * The artifact index is read when EITHER collection needs it: artifacts to
+   * list, objects to find their own imagery under the shared requestId. One
+   * sweep serves both — an objects page never pays for it twice, and an
+   * objects-only page (a "Load more" whose cursor no longer names artifacts)
+   * still gets thumbnails instead of losing them halfway down the table.
+   */
+  const needsArtifactIndex = active.includes('artifacts') || active.includes('objects');
+
   // The three collections share no state — run them together rather than
   // making an admin wait for an object sweep before the store listing starts.
-  const [objects, artifacts, stores] = await Promise.all([
+  const [objects, artifactSweep, stores] = await Promise.all([
     active.includes('objects') ? searchObjects(query, context) : undefined,
-    active.includes('artifacts') ? searchArtifacts(query, context) : undefined,
+    needsArtifactIndex ? loadArtifactIndexSweep(context) : undefined,
     active.includes('stores') ? searchStores(query, context) : undefined,
   ]);
 
   if (objects) {
-    hitsByCollection.objects = objects;
+    // The join is a pure post-step over two results that were fetched in
+    // parallel — no extra round trip, and no per-row lookup.
+    hitsByCollection.objects = artifactSweep
+      ? attachObjectThumbnails(objects, thumbnailIndexFor(artifactSweep))
+      : objects;
     truncatedByCollection.objects = false;
   }
-  if (artifacts) {
+  if (artifactSweep && active.includes('artifacts')) {
+    const artifacts = searchArtifacts(query, artifactSweep);
     hitsByCollection.artifacts = artifacts.hits;
     truncatedByCollection.artifacts = artifacts.truncated;
   }
