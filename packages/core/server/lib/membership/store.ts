@@ -23,6 +23,7 @@ import { z } from 'zod';
 
 import type { Principal } from '../../../schema/object-record-v1.js';
 import { getNetlifyBlobStore } from '../blob-store.js';
+import type { SiteBinding } from '../site-binding.js';
 import type { BlobListResponse } from '../blob-list.js';
 
 export const MEMBERSHIP_SCHEMA_VERSION = 2;
@@ -289,8 +290,8 @@ export const pointerSchema = z.object({ person_id: z.string().min(1) });
 export const invitePointerSchema = z.object({ invite_id: z.string().min(1) });
 
 /** The site's `users` store (name unchanged from v1 — the key layout is what moved). */
-export const getMembershipStore = (event: unknown): Promise<MembershipStore> =>
-  getNetlifyBlobStore({ name: 'users', consistency: 'strong' }, event) as unknown as Promise<MembershipStore>;
+export const getMembershipStore = (event: unknown, binding?: SiteBinding): Promise<MembershipStore> =>
+  getNetlifyBlobStore({ name: 'users', consistency: 'strong' }, event, binding) as unknown as Promise<MembershipStore>;
 
 /** Audit actor from a verb principal. */
 export const auditActorFromPrincipal = (principal: Principal): AuditActor =>

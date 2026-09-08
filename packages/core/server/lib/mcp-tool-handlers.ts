@@ -18,6 +18,7 @@
  * of these handlers actually runs.
  */
 import { createHash } from 'node:crypto';
+import { getMcpBinding } from './mcp-binding.js';
 import { fnv1aHash, parseBrandImagery, toFiniteNumber, type BrandImageryRecord } from './brand-imagery-derive.js';
 import {
   getBrandImageryOverridePolicy,
@@ -306,7 +307,7 @@ const filePdfContentCheck = async (
   check: DocumentContentCheck | undefined
 ): Promise<void> => {
   if (!publicPath || !check) return;
-  const store = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding()).catch(() => undefined)) as unknown as
     | ArtifactIndexStore
     | undefined;
   const recorded = await recordPdfContentCheck(store, publicPath, check);
@@ -832,7 +833,7 @@ const resolveArtifactBridgeScopeForJob = async (
   requestId: string,
   jobId: string
 ) => {
-  const store = await getIdempotencyBlobStore(event);
+  const store = await getIdempotencyBlobStore(event, getMcpBinding());
   return resolveArtifactBridgeScopeForJobWithStore(
     store,
     () => resolveArtifactBridgeScope(event, input),
@@ -1288,7 +1289,7 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
     ...(toNonEmptyString(input.template_slug) ? { templateSlug: toNonEmptyString(input.template_slug) } : {}),
   };
 
-  const artifactStore = (await getArtifactBlobStore(event)) as {
+  const artifactStore = (await getArtifactBlobStore(event, getMcpBinding())) as {
     get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null>;
   };
   const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
@@ -1450,7 +1451,7 @@ export const callCreateAgentArtifactJob = async (
     // only consult it when the caller actually supplied a style block, so a
     // job that never touches `style` costs no extra round trip.
     const policy = styleInputParsed
-      ? await getBrandImageryOverridePolicy(scoped.scope.siteId, event)
+      ? await getBrandImageryOverridePolicy(scoped.scope.siteId, event, getMcpBinding())
       : ('allow' as const);
 
     let standardBrand: BrandImageryRecord | undefined;
@@ -2229,7 +2230,7 @@ const resolveAnnotationSourceArtifact = async (
     return { ok: true, source: { blobKey, sha256, publicPath } };
   }
 
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const read = await readArtifactReferenceResult(store, requestId, sha256Input!);
   if (read.status === 'absent') {
     return {
@@ -4006,7 +4007,7 @@ const triggerVisualStandardExamplesAfterObjectAction = async (
   if (!visualStandardId) return;
 
   try {
-    const store = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+    const store = (await getArtifactIndexBlobStore(event, getMcpBinding()).catch(() => undefined)) as unknown as
       | ExamplesJobStore
       | undefined;
     if (!store) return;
@@ -4096,7 +4097,7 @@ export const callProductSetPrice = async (event: LambdaEvent, input: Record<stri
   }
   const productId = toNonEmptyString(input.product_id);
   if (!productId) return toolError('product_id is required.');
-  const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+  const store = (await getSiteObjectsBlobStore(event, getMcpBinding())) as unknown as ObjectVerbStore;
   const principal = {
     kind: 'agent' as const,
     agent_name: toNonEmptyString(input.agent_name) ?? 'unattributed-agent',
@@ -4115,7 +4116,7 @@ export const callProductSetPrice = async (event: LambdaEvent, input: Record<stri
 };
 
 export const callCommerceOrders = async (event: LambdaEvent, input: Record<string, unknown>) => {
-  const commerce = await getCommerceBlobStore(event);
+  const commerce = await getCommerceBlobStore(event, getMcpBinding());
   const orderKeyLookup = toNonEmptyString(input.order_key);
   if (orderKeyLookup) {
     const detail = await getOrderDetail(commerce, orderKeyLookup);
@@ -4139,9 +4140,9 @@ export const callOrderReissue = async (event: LambdaEvent, input: Record<string,
       ttl_hours: typeof input.ttl_hours === 'number' ? input.ttl_hours : undefined,
     },
     {
-      commerce: await getCommerceBlobStore(event),
-      events: await getCommerceEventsBlobStore(event),
-      siteObjects: await getSiteObjectsBlobStore(event),
+      commerce: await getCommerceBlobStore(event, getMcpBinding()),
+      events: await getCommerceEventsBlobStore(event, getMcpBinding()),
+      siteObjects: await getSiteObjectsBlobStore(event, getMcpBinding()),
       by: toNonEmptyString(input.agent_name) ?? 'unattributed-agent',
     }
   );

@@ -149,9 +149,10 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
  *  users store a second time for the same request. */
 const verifyAdminSession = async (
   event: LambdaEvent,
-  context?: LambdaContext
+  context?: LambdaContext,
+  binding?: SiteBinding
 ): Promise<{ error: ReturnType<typeof jsonResponse> } | { error?: undefined; adminState: AdminAccessState }> => {
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
 
   if (!adminState.authenticated) {
     return {
@@ -181,7 +182,8 @@ const verifyAdminSession = async (
  *  signed-in human. */
 const verifyRequestAuthorization = async (
   event: LambdaEvent,
-  context?: LambdaContext
+  context?: LambdaContext,
+  binding?: SiteBinding
 ): Promise<{ error?: ReturnType<typeof jsonResponse>; principal?: Principal }> => {
   const publishKey = getHeader(event.headers, 'x-publish-key').trim();
 
@@ -201,7 +203,7 @@ const verifyRequestAuthorization = async (
     };
   }
 
-  const session = await verifyAdminSession(event, context);
+  const session = await verifyAdminSession(event, context, binding);
   if (session.error) return { error: session.error };
   const { adminState } = session;
   return {
@@ -533,7 +535,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       });
     }
 
-    const auth = await verifyRequestAuthorization(event, context);
+    const auth = await verifyRequestAuthorization(event, context, binding);
     if (auth.error) {
       return auth.error;
     }
@@ -605,8 +607,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
     // The object substrate with the SAME live wiring as admin-object: store
     // validation context, governance policies, artifact-index existence trust.
-    const objectStore = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
-    const artifactIndexStore = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+    const objectStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
+    const artifactIndexStore = (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
       | ArtifactIndexStore
       | undefined;
     const validationContext = await buildStoreValidationContext(objectStore, {
@@ -614,7 +616,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       ...(artifactIndexStore ? { artifactIndexStore } : {}),
       artifactRefSources: [input],
     });
-    const { approval, creation } = await resolveActivePolicies(await getGovernanceBlobStore(event));
+    const { approval, creation } = await resolveActivePolicies(await getGovernanceBlobStore(event, binding));
     const verbOptions = {
       validationContext,
       approvalPolicy: approval,

@@ -8,10 +8,15 @@ import { getAdminStateFromEvent, type LambdaContext, type LambdaEventWithHeaders
 import { resolveRolesForPrincipalAsync, type Role } from './roles.js';
 import { getUsersBlobStore, getUserRecord } from './users-store.js';
 import type { Principal } from '../../schema/object-record-v1.js';
+import type { SiteBinding } from './site-binding.js';
 
-export const resolveRolesFromEvent = async (event: unknown, principal: Principal): Promise<Role[]> =>
+export const resolveRolesFromEvent = async (
+  event: unknown,
+  principal: Principal,
+  binding?: SiteBinding
+): Promise<Role[]> =>
   resolveRolesForPrincipalAsync(principal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
   });
 
 /**
@@ -42,18 +47,23 @@ export type AdminAccessState = {
 
 export const resolveAdminAccessFromEvent = async (
   event: LambdaEventWithHeaders,
-  context?: LambdaContext
+  context?: LambdaContext,
+  binding?: SiteBinding
 ): Promise<AdminAccessState> => {
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated || !adminState.email) {
     return { ...adminState, isAdmin: false, roles: [] };
   }
 
-  const roles = await resolveRolesFromEvent(event, {
-    kind: 'human',
-    id: adminState.userId ?? '',
-    email: adminState.email,
-  });
+  const roles = await resolveRolesFromEvent(
+    event,
+    {
+      kind: 'human',
+      id: adminState.userId ?? '',
+      email: adminState.email,
+    },
+    binding
+  );
 
   return { ...adminState, isAdmin: roles.includes('admin'), roles };
 };

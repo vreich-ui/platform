@@ -15,6 +15,7 @@ import { createHandler as createDeployStatusHandler } from '../../../../packages
 import { siteBinding } from '../../config/site-binding.js';
 
 configureMcp({
+  binding: siteBinding,
   saveArtifactHandler: createSaveArtifactHandler(siteBinding),
   objectStoreHandler: createObjectStoreHandler(siteBinding),
   deployStatusHandler: createDeployStatusHandler(siteBinding),

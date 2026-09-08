@@ -637,7 +637,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // gate this replaces exactly for every request that doesn't name one of
   // these resources.
   if (params.resource === 'views') {
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return viewsResourceResponse(binding, event);
@@ -645,7 +645,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.resource === 'raw_export') {
     if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return rawExportResourceResponse(params);
@@ -653,14 +653,14 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.resource === 'annotations') {
     if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return annotationsResourceResponse(binding, event);
   }
 
   if (params.resource === 'notes') {
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return notesResourceResponse(binding, event, access.email);
@@ -668,14 +668,14 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.resource === 'object_identity') {
     if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return objectIdentityResourceResponse(binding, event);
   }
 
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context);
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 

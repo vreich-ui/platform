@@ -112,8 +112,8 @@ const mailer = (): SweepMailer | undefined => {
   };
 };
 
-const chatSink = async (event: unknown): Promise<SweepChatSink> => {
-  const chatStore = await getAgentChatBlobStore(event);
+const chatSink = async (event: unknown, binding?: SiteBinding): Promise<SweepChatSink> => {
+  const chatStore = await getAgentChatBlobStore(event, binding);
   return {
     appendProgress: async (chatId, detail) => {
       const doc = await loadChatDoc(chatStore, chatId);
@@ -125,7 +125,7 @@ const chatSink = async (event: unknown): Promise<SweepChatSink> => {
   };
 };
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
   if (!getHeader(event.headers, 'content-type').includes('application/json')) {
     return { statusCode: 415, body: 'application/json required' };
@@ -138,7 +138,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
     return { statusCode: 400, body: 'Invalid body' };
   }
 
-  const store = await getEditorialRequestsBlobStore(event);
+  const store = await getEditorialRequestsBlobStore(event, binding);
   if (!(await consumeSweepToken(store, parsed.trigger_token))) {
     // A replay, a forged POST, or a token that outlived its TTL. 202-shaped
     // refusal: the caller is a scheduler, not a human, and there is nothing to
@@ -151,7 +151,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
     store,
     ...(bridge() ? { bridge: bridge()! } : {}),
     ...(mailer() ? { mailer: mailer()! } : {}),
-    chats: await chatSink(event),
+    chats: await chatSink(event, binding),
     ...(context?.getRemainingTimeInMillis ? { remainingMs: () => context.getRemainingTimeInMillis!() } : {}),
   };
 

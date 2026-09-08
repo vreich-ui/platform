@@ -42,6 +42,7 @@
  * fresh retry is correct and safe.
  */
 import { getIdempotencyBlobStore } from './blob-store.js';
+import type { SiteBinding } from './site-binding.js';
 
 /** The minimal blob-store surface this module needs — real store or a test double. */
 export type IdempotencyBlobStore = {
@@ -156,11 +157,12 @@ export const withIdempotentToolCall = async (
   event: unknown,
   toolName: string,
   idempotencyKeyInput: unknown,
-  run: () => Promise<ToolCallResponse>
+  run: () => Promise<ToolCallResponse>,
+  binding?: SiteBinding
 ): Promise<ToolCallResponse> => {
   if (!isNonEmptyString(idempotencyKeyInput)) return run();
 
-  const store = await getIdempotencyBlobStore(event);
+  const store = await getIdempotencyBlobStore(event, binding);
   return withIdempotencyStore(store, toolName, idempotencyKeyInput, run);
 };
 

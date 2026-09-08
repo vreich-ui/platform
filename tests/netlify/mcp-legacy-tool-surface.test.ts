@@ -24,6 +24,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { configureMcp, visibleToolDefinitions, INTERNAL_ONLY_TOOLS } from '../../packages/core/server/functions/mcp.js';
+import { drlurieSiteBinding } from '../../sites/drlurie/config/site-binding.js';
 
 /** Walk up to the repo root — this file runs from the COMPILED tree. */
 const repoRoot = (): string => {
@@ -41,6 +42,7 @@ const SOURCE = join(repoRoot(), 'packages', 'core', 'server', 'functions', 'mcp.
 const noop = async () => ({ statusCode: 200, body: '{}' });
 
 const governedOnly = {
+  binding: drlurieSiteBinding,
   saveArtifactHandler: noop,
   objectStoreHandler: noop,
   deployStatusHandler: noop,

@@ -71,12 +71,12 @@ const listImageArtifacts = async (indexStore: ArtifactIndexStore, requestId: str
   );
 };
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) {
     return jsonResponse(401, {
       error: adminState.error || 'Authentication is required.',
@@ -88,7 +88,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   }
 
   try {
-    const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
     const images = await listImageArtifacts(indexStore, event.queryStringParameters?.requestId);
 
     return jsonResponse(200, { images, skipped: 0 });
@@ -100,4 +100,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

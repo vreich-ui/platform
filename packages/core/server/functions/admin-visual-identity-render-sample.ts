@@ -75,7 +75,6 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
   body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
 });
 
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -135,7 +134,8 @@ export const mintPdfSampleRequestId = async (input: {
   return pdfSampleRequestId(input.templateId, input.nowMs, 99);
 };
 
-const pdfSampleFilename = (templateId: string): string => `${toMachineSegment(templateId).replace(/_/g, '-')}-sample.pdf`;
+const pdfSampleFilename = (templateId: string): string =>
+  `${toMachineSegment(templateId).replace(/_/g, '-')}-sample.pdf`;
 
 export type AdminVisualIdentityRenderSampleOptions = {
   now?: () => number;
@@ -146,7 +146,7 @@ const buildHandlerImpl =
   async (event: LambdaEvent, context?: LambdaContext) => {
     if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
     if (!access.roles.some((role) => RENDER_SAMPLE_ROLES.has(role))) {
       return jsonResponse(403, {
@@ -163,6 +163,7 @@ const buildHandlerImpl =
     // Lazily, once per process, and never at module load — see
     // visual-standard-examples-background.ts's identical rationale.
     configureMcp({
+      binding,
       saveArtifactHandler: createSaveArtifactHandler(binding),
       objectStoreHandler: createObjectStoreHandler(binding),
       deployStatusHandler: createDeployStatusHandler(binding),
@@ -190,7 +191,7 @@ const buildHandlerImpl =
       }
 
       const nowMs = options.now?.() ?? Date.now();
-      const indexStore = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+      const indexStore = (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
         | ArtifactIndexStore
         | undefined;
       const requestId = await mintPdfSampleRequestId({

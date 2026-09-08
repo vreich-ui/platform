@@ -74,6 +74,57 @@ export default [
     },
   },
   {
+    // W22 (site-binding threading): core server code must THREAD the SiteBinding
+    // into every store handle it opens, instead of letting the getter fall back
+    // to the platform default env-var names. A discarded binding is invisible at
+    // runtime today (all four sites bind PLATFORM_ENV_NAMES, so the fallback
+    // resolves identically) and would only surface as cross-tenant reads the day
+    // a site rebinds — so the shape is guarded here, in the editor and in
+    // `check:eslint`, rather than left to review.
+    //
+    // Not `scripts/audit-site-admin-parity.mjs`: that audit is per-site
+    // PROVISIONING (netlify.toml, shims, env presence — read-only, no store
+    // access). This is a core-code shape rule, which is what check:eslint is for.
+    // Not a rule on the `_binding` parameter: that would miss unbound calls made
+    // inside lib code or inside a handler that already has a binding in scope,
+    // and would wrongly flag a future handler that genuinely needs nothing.
+    files: ['packages/core/server/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.name=/^get[A-Za-z]*(BlobStore|MembershipStore)$/]:not([callee.name='getNetlifyBlobStore']):not([callee.name='getBlobStoreSourceDiagnostics'])[arguments.length<2]",
+          message: 'Store getters must receive the SiteBinding: get…Store(event, binding). See lib/site-binding.ts.',
+        },
+        {
+          selector: "CallExpression[callee.name='getNetlifyBlobStore'][arguments.length<3]",
+          message: 'getNetlifyBlobStore(name, event, binding) — thread the binding.',
+        },
+        {
+          selector: "CallExpression[callee.name='getBlobStoreSourceDiagnostics'][arguments.length<3]",
+          message: 'getBlobStoreSourceDiagnostics(name, event, binding) — thread the binding.',
+        },
+        {
+          selector: "CallExpression[callee.name='getManagedBlobStore'][arguments.length<3]",
+          message: 'getManagedBlobStore(name, event, binding) — thread the binding.',
+        },
+        {
+          selector:
+            'CallExpression[callee.name=/^(listManagedBlobStores|getCoreBlobStoreSourceDiagnostics)$/][arguments.length<2]',
+          message:
+            'Pass the SiteBinding: listManagedBlobStores(event, binding) / getCoreBlobStoreSourceDiagnostics(event, binding).',
+        },
+        {
+          selector:
+            'CallExpression[callee.name=/^(resolveRolesFromEvent|resolveAdminAccessFromEvent)$/][arguments.length<3]',
+          message: 'Role resolution reads the users store — pass the SiteBinding.',
+        },
+      ],
+    },
+  },
+  {
     // .tmp holds local build-diff worktrees and compiled test output (both
     // full repo copies) — linting them triples every finding.
     ignores: ['dist', 'sites/*/dist', 'node_modules', '.github', 'types.generated.d.ts', '.astro', '.tmp'],

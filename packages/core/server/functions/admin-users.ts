@@ -126,7 +126,7 @@ const synthesizedRecord = (email: string, owner: boolean, ts = nowIso()): UserRe
 // T18.6a: `ListedUser` / `listUsersWithEnvironment` moved to membership/verbs.ts; re-exported for callers.
 export { listUsersWithEnvironment, type ListedUser } from '../lib/membership/verbs.js';
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
   // T18.0a: `invite_preview` is PUBLIC — the accept page calls it before the
@@ -151,7 +151,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       const inv = (request.data as { inv?: string }).inv;
       if (inv) {
         try {
-          const preview = await previewInvitationByToken(await getUsersBlobStore(event), inv);
+          const preview = await previewInvitationByToken(await getUsersBlobStore(event, binding), inv);
           if (preview) invitation = preview;
         } catch {
           invitation = undefined;
@@ -177,7 +177,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (!request.success) return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
 
   try {
-    const store = await getUsersBlobStore(event);
+    const store = await getUsersBlobStore(event, binding);
 
     // T18.0a: `accept` runs on the fresh JWT GoTrue's /verify returned. It is
     // authenticated (verified e-mail from the token) but NOT role-gated: an
@@ -231,8 +231,12 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     const fetchImpl = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
       fetch(url, init);
     const oauthStore = () =>
-      getNetlifyBlobStore({ name: 'governance', consistency: 'strong' }, event) as unknown as Promise<OAuthBlobStore>;
-    const objectStore = () => getSiteObjectsBlobStore(event);
+      getNetlifyBlobStore(
+        { name: 'governance', consistency: 'strong' },
+        event,
+        binding
+      ) as unknown as Promise<OAuthBlobStore>;
+    const objectStore = () => getSiteObjectsBlobStore(event, binding);
     // avatar ref is image/<requestId>/<sha256>.<ext> (isTrustedAvatarRef) → soft-delete that artifact
     const softDeleteAvatar = async (ref: string) => {
       const m = /^image\/([^/]+)\/([0-9a-f]{64})\./i.exec(ref);
@@ -386,4 +390,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 export type { UsersBlobStore };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

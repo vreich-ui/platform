@@ -75,6 +75,8 @@ export type ReleaseToProductionOptions = {
   intervalSeconds?: number;
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
+  /** Bound env-var names (SiteBinding.env). Defaults to the platform names. */
+  envNames?: SiteBindingEnvNames;
 };
 
 export type ReleaseToProductionResult = {
@@ -123,8 +125,11 @@ const resolveGitHubConfig = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES)
  * publish just pushed. Returns undefined when GitHub is not configured or the
  * ref cannot be read (the caller degrades to "commit unresolved").
  */
-export const resolveBranchHeadCommit = async (fetchImpl: typeof fetch = fetch): Promise<string | undefined> => {
-  const { token, repo, branch } = resolveGitHubConfig();
+export const resolveBranchHeadCommit = async (
+  fetchImpl: typeof fetch = fetch,
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
+): Promise<string | undefined> => {
+  const { token, repo, branch } = resolveGitHubConfig(envNames);
   if (!token || !repo) return undefined;
 
   try {
@@ -200,7 +205,8 @@ export const resetCommitAncestryMemoForTesting = (): void => {
 export const isCommitAncestorOrEqual = async (
   targetCommit: string,
   publishedCommit: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
 ): Promise<boolean | undefined> => {
   if (!targetCommit || !publishedCommit) return undefined;
   if (targetCommit === publishedCommit) return true;
@@ -209,7 +215,7 @@ export const isCommitAncestorOrEqual = async (
   const memoized = commitAncestryMemo.get(memoKey);
   if (memoized !== undefined) return memoized;
 
-  const { token, repo } = resolveGitHubConfig();
+  const { token, repo } = resolveGitHubConfig(envNames);
   if (!token || !repo) return undefined;
 
   try {
@@ -243,11 +249,12 @@ export const releaseToProduction = async (
   const fetchImpl = options.fetchImpl ?? fetch;
   const forceBuild = options.forceBuild ?? true;
   const awaitDeploy = options.awaitDeploy ?? true;
+  const envNames = options.envNames ?? PLATFORM_ENV_NAMES;
 
   // The build hook is the ONLY sanctioned production-build trigger. If a
   // forced build is requested but no hook is configured, refuse rather than
   // silently skipping it and reporting a stale deploy as "released".
-  if (forceBuild && !isNetlifyBuildHookConfigured()) {
+  if (forceBuild && !isNetlifyBuildHookConfigured(envNames)) {
     return {
       released: false,
       status: 'build_hook_not_configured',
@@ -260,7 +267,7 @@ export const releaseToProduction = async (
     };
   }
 
-  const targetCommit = options.commit?.trim() || (await resolveBranchHeadCommit(fetchImpl));
+  const targetCommit = options.commit?.trim() || (await resolveBranchHeadCommit(fetchImpl, envNames));
   if (!targetCommit) {
     return {
       released: false,
@@ -277,7 +284,7 @@ export const releaseToProduction = async (
   let buildTriggered = false;
   let triggeredAt: string | undefined;
   if (forceBuild) {
-    const trigger = await triggerNetlifyBuild();
+    const trigger = await triggerNetlifyBuild(envNames);
     buildTriggered = true;
     triggeredAt = trigger.triggeredAt;
   }
@@ -314,7 +321,7 @@ export const releaseToProduction = async (
 
   // Verification needs the Netlify deploy API. Without it we can at most report
   // that a build was triggered — never that production is confirmed live.
-  if (!isNetlifyDeployLookupConfigured()) {
+  if (!isNetlifyDeployLookupConfigured(envNames)) {
     return {
       released: false,
       status: 'deploy_lookup_not_configured',
@@ -332,6 +339,7 @@ export const releaseToProduction = async (
     commit: targetCommit,
     timeoutSeconds: options.timeoutSeconds,
     intervalSeconds: options.intervalSeconds,
+    envNames,
   });
   const productionReflectsCommit = deploy.deployStatus === 'ready' && deploy.commit === targetCommit;
 
@@ -339,7 +347,7 @@ export const releaseToProduction = async (
   // deploy builds to ready without production ever serving it. The site's
   // published_deploy is the authoritative live signal, so consult it and only
   // fall back to ready-by-commit when the site lookup is unavailable.
-  const publishedDeploy = await getPublishedProductionDeploy();
+  const publishedDeploy = await getPublishedProductionDeploy(envNames);
   const shared = {
     targetCommit,
     buildTriggered,
@@ -367,7 +375,7 @@ export const releaseToProduction = async (
   // before reporting "not confirmed" for a commit production has already
   // moved past.
   if (publishedDeploy && publishedDeploy.commit) {
-    const targetIsAncestor = await isCommitAncestorOrEqual(targetCommit, publishedDeploy.commit, fetchImpl);
+    const targetIsAncestor = await isCommitAncestorOrEqual(targetCommit, publishedDeploy.commit, fetchImpl, envNames);
     if (targetIsAncestor) {
       return {
         released: true,

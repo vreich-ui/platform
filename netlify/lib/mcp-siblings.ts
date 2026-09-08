@@ -15,6 +15,7 @@ import { handler as verifyArticleImagesHandler } from '../functions/verify-artic
 
 export const configureDrlurieMcpSiblings = (): void => {
   configureMcp({
+    binding: drlurieSiteBinding,
     saveArtifactHandler: createSaveArtifactHandler(drlurieSiteBinding),
     objectStoreHandler: createObjectStoreHandler(drlurieSiteBinding),
     deployStatusHandler: createDeployStatusHandler(drlurieSiteBinding),

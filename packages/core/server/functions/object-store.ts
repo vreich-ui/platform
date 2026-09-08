@@ -116,7 +116,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) =>
   if (!request.success) return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
 
   try {
-    const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
     // Wire the store-backed validation context so reference integrity, PageType
     // section rules, route uniqueness, and taxonomy resolution are enforced live
     // (not the previous no-context degradation to `optional`). Flows to create,
@@ -140,7 +140,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) =>
       // Artifact existence checks (Fix: asset refs were shape-only in production).
       // An unavailable index store degrades to "existence not verified", never a
       // failed write.
-      const artifactIndexStore = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+      const artifactIndexStore = (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
         | ArtifactIndexStore
         | undefined;
       validationContext = await buildStoreValidationContext(store, {
@@ -154,7 +154,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) =>
     // for the site-objects/artifact-index stores above — agents reach the
     // four marginalia_* actions over the publish key exactly like every
     // other object verb.
-    const marginaliaStore = (await getMarginaliaBlobStore(event)) as unknown as MarginaliaStore;
+    const marginaliaStore = (await getMarginaliaBlobStore(event, binding)) as unknown as MarginaliaStore;
     const result = await handleObjectVerb(store, request.data, callerPrincipal(event, parsed.value), {
       validationContext,
       publishDeps: { exportRoot: binding.dataRoot },

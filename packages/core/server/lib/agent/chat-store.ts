@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { getNetlifyBlobStore } from '../blob-store.js';
+import type { SiteBinding } from '../site-binding.js';
 import {
   collectBlobListItems,
   mapWithConcurrency,
@@ -376,8 +377,12 @@ export const appendChatEvent = (
 export const isRunStale = (doc: ChatDoc, nowMs: number): boolean =>
   (doc.status === 'queued' || doc.status === 'running') && nowMs - Date.parse(doc.updated_at) > STALE_RUN_MS;
 
-export const getAgentChatBlobStore = (event: unknown): Promise<AgentChatStore> =>
-  getNetlifyBlobStore({ name: 'agent-chats', consistency: 'strong' }, event) as unknown as Promise<AgentChatStore>;
+export const getAgentChatBlobStore = (event: unknown, binding?: SiteBinding): Promise<AgentChatStore> =>
+  getNetlifyBlobStore(
+    { name: 'agent-chats', consistency: 'strong' },
+    event,
+    binding
+  ) as unknown as Promise<AgentChatStore>;
 
 // ─── D6: blockages in the transcript ─────────────────────────────────────────
 

@@ -125,8 +125,11 @@ const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string,
 /** Config + permanent mode + a memoized live `agent_resolve` probe. Env NAMES
  *  only, never values; the probe is read-only and cached for a minute so the
  *  governance page cannot hammer the service. */
-const cmsAgentStatus = async (legacyOverride?: 'off' | 'fallback' | 'required'): Promise<Record<string, unknown>> => {
-  const missing = cmsAgentMissingEnvVars();
+const cmsAgentStatus = async (
+  binding: SiteBinding,
+  legacyOverride?: 'off' | 'fallback' | 'required'
+): Promise<Record<string, unknown>> => {
+  const missing = cmsAgentMissingEnvVars(binding.env);
   const status: Record<string, unknown> = {
     configured: missing.length === 0,
     ...(missing.length > 0 ? { missing_env: missing } : {}),
@@ -189,14 +192,14 @@ const chatToolsCatalog = [
   }),
 ];
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const email = (adminState.email ?? '').trim().toLowerCase();
-  const roles = await resolveRolesFromEvent(event, { kind: 'human', id: adminState.userId ?? '', email });
+  const roles = await resolveRolesFromEvent(event, { kind: 'human', id: adminState.userId ?? '', email }, binding);
   if (!roles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
   const owner = isOwner(roles);
 
@@ -206,7 +209,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (!request.success) return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
 
   try {
-    const store = await getGovernanceBlobStore(event);
+    const store = await getGovernanceBlobStore(event, binding);
     const req = request.data;
 
     if (req.verb === 'get') {
@@ -216,7 +219,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
         committed: committed(),
         active: await resolveActivePolicies(store),
         chat_tools_catalog: chatToolsCatalog,
-        cms_agent: await cmsAgentStatus(doc?.cms_agent_chat_mode),
+        cms_agent: await cmsAgentStatus(binding, doc?.cms_agent_chat_mode),
       });
     }
 
@@ -328,4 +331,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

@@ -42,15 +42,15 @@ async function listKind(store: ArtifactIndexStore, kind: 'image' | 'pdf'): Promi
   return [...unique.values()].sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO)).slice(0, 100);
 }
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
 
-  const access = await resolveAdminAccessFromEvent(event, context);
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin) return jsonResponse(403, { error: 'Admin access is required.' });
 
   try {
-    const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
     const [images, pdfs] = await Promise.all([listKind(indexStore, 'image'), listKind(indexStore, 'pdf')]);
     const artifacts = [...images, ...pdfs]
       .map(projectEditorialArtifact)

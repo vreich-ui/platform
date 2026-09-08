@@ -83,7 +83,7 @@ const safeJsonParse = (event: LambdaEvent): { ok: true; value: unknown } | { ok:
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
   if (!adminState.isAdmin) return jsonResponse(403, { error: 'Admin access required' });
 
@@ -96,7 +96,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const principal: Principal = { kind: 'human', id: adminState.userId ?? '', email: adminState.email ?? '' };
 
   try {
-    const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
     // Same live validation context as the publish-key path (object-store.ts):
     // the browser admin path enforces the identical structural rules.
     const requestData = request.data as {
@@ -117,7 +117,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     if (verbNeedsValidationContext(request.data.action)) {
       // Artifact existence checks — same wiring as object-store.ts; an
       // unavailable index store degrades to "existence not verified".
-      const artifactIndexStore = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+      const artifactIndexStore = (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
         | ArtifactIndexStore
         | undefined;
       validationContext = await buildStoreValidationContext(store, {
@@ -134,14 +134,14 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const roles = adminState.roles;
     // T9.15: runtime governance overrides (else committed policy) feed the
     // publish/create gates.
-    const { approval, creation } = await resolveActivePolicies(await getGovernanceBlobStore(event));
+    const { approval, creation } = await resolveActivePolicies(await getGovernanceBlobStore(event, binding));
     // S4x (2/2): the ONLY caller that wires this — a canvas save's ops array
     // may carry a tagged Ask-AI proposal trail marker; handleObjectVerb writes
     // it here, atomically with the patch, once the patch itself has persisted.
-    const agentLearningStore = (await getAgentLearningBlobStore(event)) as unknown as AgentLearningWriteStore;
+    const agentLearningStore = (await getAgentLearningBlobStore(event, binding)) as unknown as AgentLearningWriteStore;
     // W15 S4 (MVP): the same threading pattern as agentLearningStore above —
     // the ONLY caller-supplied dependency the four marginalia_* actions need.
-    const marginaliaStore = (await getMarginaliaBlobStore(event)) as unknown as MarginaliaStore;
+    const marginaliaStore = (await getMarginaliaBlobStore(event, binding)) as unknown as MarginaliaStore;
     const result = await handleObjectVerb(store, request.data, principal, {
       validationContext,
       roles,
@@ -158,7 +158,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       // side effect could not be started.
       const target = resolveExamplesTriggerTarget(request.data as Record<string, unknown>, result.body);
       if (target) {
-        const jobStore = (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+        const jobStore = (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
           | ExamplesJobStore
           | undefined;
         if (jobStore) {
@@ -171,7 +171,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       }
       // A7 polls this while it says `pending`: the readable status of the round
       // the write above (or an earlier one) started.
-      const examplesJob = await readVisualStandardExamplesJob(event, request.data);
+      const examplesJob = await readVisualStandardExamplesJob(event, request.data, binding);
       if (examplesJob) return jsonResponse(result.status, { ...result.body, examples_job: examplesJob });
     }
     return jsonResponse(result.status, result.body);
@@ -188,11 +188,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
  */
 const readVisualStandardExamplesJob = async (
   event: LambdaEvent,
-  request: { action?: string; object_type?: string; object_id?: string }
+  request: { action?: string; object_type?: string; object_id?: string },
+  binding?: SiteBinding
 ) => {
   if (request.action !== 'get' || request.object_type !== 'visual_standard' || !request.object_id) return undefined;
   try {
-    const jobStore = (await getArtifactIndexBlobStore(event)) as unknown as ExamplesJobStore;
+    const jobStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ExamplesJobStore;
     const job = await readExamplesJob(jobStore, request.object_id);
     return job ? examplesJobStatusView(job) : undefined;
   } catch {

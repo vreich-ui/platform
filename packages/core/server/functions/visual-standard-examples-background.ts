@@ -74,6 +74,7 @@ const buildHandlerImpl = (binding: SiteBinding) => {
   const configureSiblings = () => {
     if (configured) return;
     configureMcp({
+      binding,
       saveArtifactHandler: createSaveArtifactHandler(binding),
       objectStoreHandler: createObjectStoreHandler(binding),
       deployStatusHandler: createDeployStatusHandler(binding),
@@ -91,7 +92,7 @@ const buildHandlerImpl = (binding: SiteBinding) => {
 
     configureSiblings();
 
-    const store = (await getArtifactIndexBlobStore(event)) as unknown as ExamplesJobStore;
+    const store = (await getArtifactIndexBlobStore(event, binding)) as unknown as ExamplesJobStore;
     const claimed = await consumeExamplesJobToken(store, parsed.visualStandardId, parsed.triggerToken);
     if (!claimed) {
       // A replay, a forged POST, or a token already spent. 409-shaped refusal:

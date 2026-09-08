@@ -166,7 +166,11 @@ const renderBoundedRendition = async (
     const format = decodedFormat as 'jpeg' | 'png' | 'webp';
     return await pipeline.toFormat(format).toBuffer();
   } catch (error) {
-    console.warn('Preview rendition failed; falling back to the original image bytes.', { width, decodedFormat, error });
+    console.warn('Preview rendition failed; falling back to the original image bytes.', {
+      width,
+      decodedFormat,
+      error,
+    });
     return undefined;
   }
 };
@@ -222,13 +226,14 @@ const createArtifactDebugFields = (
   event: LambdaEvent,
   blobKey: string,
   contentTypeSource: ContentTypeSource = 'missing',
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  binding?: SiteBinding
 ) => ({
   blobKey,
   store: 'artifacts',
   lookup: 'bytes',
   contentTypeSource,
-  blobStoreDiagnostics: getCoreBlobStoreSourceDiagnostics(event),
+  blobStoreDiagnostics: getCoreBlobStoreSourceDiagnostics(event, binding),
   ...extra,
 });
 
@@ -270,12 +275,13 @@ const findArtifactReferenceByBlobKey = async (store: ArtifactIndexStore, blobKey
 const resolveArtifactContentType = async (
   event: LambdaEvent,
   blobKey: string,
-  reference?: ArtifactReference
+  reference?: ArtifactReference,
+  binding?: SiteBinding
 ): Promise<ResolvedArtifactContentType> => {
   try {
     let indexedContentType = getConcreteImageContentType(reference?.contentType);
     if (!indexedContentType) {
-      const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+      const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
       reference = await findArtifactReferenceByBlobKey(indexStore, blobKey);
       indexedContentType = getConcreteImageContentType(reference?.contentType);
     }
@@ -309,12 +315,17 @@ const toBufferOrNull = (value: unknown): Buffer | null => {
   return null;
 };
 
-const createTemplateThumbnailDebugFields = (event: LambdaEvent, blobKey: string, extra: Record<string, unknown> = {}) => ({
+const createTemplateThumbnailDebugFields = (
+  event: LambdaEvent,
+  blobKey: string,
+  extra: Record<string, unknown> = {},
+  binding?: SiteBinding
+) => ({
   blobKey,
   store: 'pdf-templates',
   lookup: 'bytes',
   contentTypeSource: 'key-shape' as const,
-  blobStoreDiagnostics: getBlobStoreSourceDiagnostics('pdf-templates', event),
+  blobStoreDiagnostics: getBlobStoreSourceDiagnostics('pdf-templates', event, binding),
   ...extra,
 });
 
@@ -334,11 +345,11 @@ const createTemplateThumbnailDebugFields = (event: LambdaEvent, blobKey: string,
  * pattern only admits `.png`), never from the query string — a caller cannot
  * talk this path into labelling bytes as something else.
  */
-export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: string) => {
+export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: string, binding?: SiteBinding) => {
   const contentType = 'image/png';
 
   try {
-    const store = (await getPdfTemplateBlobStore(event)) as unknown as PdfTemplateBlobStore;
+    const store = (await getPdfTemplateBlobStore(event, binding)) as unknown as PdfTemplateBlobStore;
     const bytes = toBufferOrNull(await store.get(blobKey, { type: 'arrayBuffer' }));
 
     if (!bytes || bytes.byteLength === 0) {
@@ -348,7 +359,7 @@ export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: st
       });
 
       return jsonResponse(404, {
-        ...createTemplateThumbnailDebugFields(event, blobKey),
+        ...createTemplateThumbnailDebugFields(event, blobKey, {}, binding),
         reason: 'missing-template-thumbnail-bytes',
       });
     }
@@ -362,7 +373,7 @@ export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: st
     } catch (error) {
       if (error instanceof ImageValidationError) {
         return jsonResponse(422, {
-          ...createTemplateThumbnailDebugFields(event, blobKey),
+          ...createTemplateThumbnailDebugFields(event, blobKey, {}, binding),
           error: error.message,
           reason: error.code,
           validationReason: error.reason,
@@ -392,24 +403,24 @@ export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: st
 
     return jsonResponse(500, {
       error: 'PDF template thumbnail could not be read.',
-      ...createTemplateThumbnailDebugFields(event, blobKey),
+      ...createTemplateThumbnailDebugFields(event, blobKey, {}, binding),
     });
   }
 };
 
-export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) => {
+export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string, binding?: SiteBinding) => {
   let contentTypeSource: ContentTypeSource = 'missing';
 
   try {
-    const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
     const indexedReference = await findArtifactReferenceByBlobKey(indexStore, blobKey);
-    const resolvedContentType = await resolveArtifactContentType(event, blobKey, indexedReference);
+    const resolvedContentType = await resolveArtifactContentType(event, blobKey, indexedReference, binding);
     const { contentType } = resolvedContentType;
     contentTypeSource = resolvedContentType.source;
     if (!contentType) {
       return jsonResponse(400, {
         error: 'A concrete image content type is required for this artifact.',
-        ...createArtifactDebugFields(event, blobKey, contentTypeSource),
+        ...createArtifactDebugFields(event, blobKey, contentTypeSource, {}, binding),
       });
     }
 
@@ -420,7 +431,7 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
       contentType,
       createdAtISO: new Date(0).toISOString(),
     };
-    const store = await getArtifactBlobStore(event);
+    const store = await getArtifactBlobStore(event, binding);
     const reconciliation = await reconcileImageArtifactReference(
       reference,
       store,
@@ -437,7 +448,7 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
       });
 
       return jsonResponse(404, {
-        ...createArtifactDebugFields(event, blobKey, contentTypeSource),
+        ...createArtifactDebugFields(event, blobKey, contentTypeSource, {}, binding),
         reason: 'missing-artifact-bytes',
         blobKey,
         store: 'artifacts',
@@ -454,7 +465,7 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
       });
 
       return jsonResponse(409, {
-        ...createArtifactDebugFields(event, blobKey, contentTypeSource),
+        ...createArtifactDebugFields(event, blobKey, contentTypeSource, {}, binding),
         error: 'Saved image artifact bytes are ambiguous.',
         reason: 'ambiguous-artifact-bytes',
         blobKey,
@@ -480,7 +491,7 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
     } catch (error) {
       if (error instanceof ImageValidationError) {
         return jsonResponse(422, {
-          ...createArtifactDebugFields(event, blobKey, contentTypeSource),
+          ...createArtifactDebugFields(event, blobKey, contentTypeSource, {}, binding),
           error: error.message,
           reason: error.code,
           validationReason: error.reason,
@@ -517,7 +528,7 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
 
     return jsonResponse(500, {
       error: 'Saved image artifact could not be read.',
-      ...createArtifactDebugFields(event, blobKey, contentTypeSource),
+      ...createArtifactDebugFields(event, blobKey, contentTypeSource, {}, binding),
     });
   }
 };
@@ -540,12 +551,12 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string) =>
  * the `admin` role for THIS site (ADMIN_EMAILS ∪ this site's `users` store).
  * The store is chosen from the key shape and never from caller input.
  */
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) {
     return jsonResponse(401, {
       error: adminState.error || 'Authentication is required.',
@@ -561,15 +572,15 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   if (!shape) {
     return jsonResponse(400, {
       error: 'A valid image artifact blobKey is required.',
-      ...createArtifactDebugFields(event, blobKey),
+      ...createArtifactDebugFields(event, blobKey, undefined, {}, binding),
     });
   }
 
   // The shape picks the store, and nothing else does.
   return shape === 'template-thumbnail'
-    ? readAdminTemplateThumbnail(event, blobKey)
-    : readAdminBlobImage(event, blobKey);
+    ? readAdminTemplateThumbnail(event, blobKey, binding)
+    : readAdminBlobImage(event, blobKey, binding);
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

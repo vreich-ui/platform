@@ -22,6 +22,8 @@ type PollDeployReceiptOptions = {
   deployId?: string;
   timeoutSeconds?: number;
   intervalSeconds?: number;
+  /** Bound env-var names (SiteBinding.env). Defaults to the platform names. */
+  envNames?: SiteBindingEnvNames;
 };
 
 const NETLIFY_API_BASE_URL = 'https://api.netlify.com/api/v1';
@@ -50,7 +52,8 @@ export const netlifyDeployLookupMissingEnvVars = (envNames: SiteBindingEnvNames 
   return [...(siteId ? [] : [envNames.blobSiteId[0]]), ...(token ? [] : [envNames.deployLookupToken[0]])];
 };
 
-export const isNetlifyDeployLookupConfigured = () => netlifyDeployLookupMissingEnvVars().length === 0;
+export const isNetlifyDeployLookupConfigured = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) =>
+  netlifyDeployLookupMissingEnvVars(envNames).length === 0;
 
 const getNetlifyBuildHookUrl = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) =>
   readBoundEnv(envNames.buildHookUrl) ?? '';
@@ -63,7 +66,8 @@ const getNetlifyBuildHookUrl = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAM
 export const netlifyBuildHookMissingEnvVars = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES): string[] =>
   getNetlifyBuildHookUrl(envNames) ? [] : [envNames.buildHookUrl[0]];
 
-export const isNetlifyBuildHookConfigured = () => netlifyBuildHookMissingEnvVars().length === 0;
+export const isNetlifyBuildHookConfigured = (envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) =>
+  netlifyBuildHookMissingEnvVars(envNames).length === 0;
 
 export class NetlifyBuildHookTriggerError extends Error {
   statusCode: number;
@@ -75,8 +79,10 @@ export class NetlifyBuildHookTriggerError extends Error {
   }
 }
 
-export const triggerNetlifyBuild = async (): Promise<{ triggeredAt: string }> => {
-  const hookUrl = getNetlifyBuildHookUrl();
+export const triggerNetlifyBuild = async (
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
+): Promise<{ triggeredAt: string }> => {
+  const hookUrl = getNetlifyBuildHookUrl(envNames);
 
   if (!hookUrl) {
     throw new Error('Netlify build hook is not configured.');
@@ -152,8 +158,8 @@ const mapNetlifyDeployToReceipt = (deploy: NetlifyDeploy): DeployReceipt => {
   };
 };
 
-const fetchNetlifyApi = async (path: string) => {
-  const { siteId, token } = getNetlifyDeployConfig();
+const fetchNetlifyApi = async (path: string, envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES) => {
+  const { siteId, token } = getNetlifyDeployConfig(envNames);
 
   if (!siteId || !token) {
     throw new Error('Netlify deploy lookup is not configured.');
@@ -173,10 +179,13 @@ const fetchNetlifyApi = async (path: string) => {
   return response.json() as Promise<unknown>;
 };
 
-export const fetchRecentDeploys = async (): Promise<DeployReceipt[]> => {
-  const { siteId } = getNetlifyDeployConfig();
+export const fetchRecentDeploys = async (
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
+): Promise<DeployReceipt[]> => {
+  const { siteId } = getNetlifyDeployConfig(envNames);
   const deploys = await fetchNetlifyApi(
-    `/sites/${encodeURIComponent(siteId)}/deploys?per_page=${RECENT_DEPLOYS_PAGE_SIZE}&page=1`
+    `/sites/${encodeURIComponent(siteId)}/deploys?per_page=${RECENT_DEPLOYS_PAGE_SIZE}&page=1`,
+    envNames
   );
 
   if (!Array.isArray(deploys)) return [];
@@ -186,20 +195,26 @@ export const fetchRecentDeploys = async (): Promise<DeployReceipt[]> => {
     .map(mapNetlifyDeployToReceipt);
 };
 
-export const getDeployReceiptByCommit = async (commit: string): Promise<DeployReceipt | undefined> => {
+export const getDeployReceiptByCommit = async (
+  commit: string,
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
+): Promise<DeployReceipt | undefined> => {
   const normalizedCommit = commit.trim();
   if (!normalizedCommit) return undefined;
 
-  const deploys = await fetchRecentDeploys();
+  const deploys = await fetchRecentDeploys(envNames);
 
   return deploys.find((deploy) => deploy.commit === normalizedCommit);
 };
 
-export const getDeployReceiptByDeployId = async (deployId: string): Promise<DeployReceipt | undefined> => {
+export const getDeployReceiptByDeployId = async (
+  deployId: string,
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
+): Promise<DeployReceipt | undefined> => {
   const normalizedDeployId = deployId.trim();
   if (!normalizedDeployId) return undefined;
 
-  const deploy = await fetchNetlifyApi(`/deploys/${encodeURIComponent(normalizedDeployId)}`);
+  const deploy = await fetchNetlifyApi(`/deploys/${encodeURIComponent(normalizedDeployId)}`, envNames);
 
   if (deploy && typeof deploy === 'object') return mapNetlifyDeployToReceipt(deploy as NetlifyDeploy);
 
@@ -214,12 +229,14 @@ export const getDeployReceiptByDeployId = async (deployId: string): Promise<Depl
  * unpublished deploy (or a deploy preview). Returns undefined when the site
  * lookup is unavailable so callers can degrade to a best-effort check.
  */
-export const getPublishedProductionDeploy = async (): Promise<DeployReceipt | undefined> => {
-  const { siteId } = getNetlifyDeployConfig();
+export const getPublishedProductionDeploy = async (
+  envNames: SiteBindingEnvNames = PLATFORM_ENV_NAMES
+): Promise<DeployReceipt | undefined> => {
+  const { siteId } = getNetlifyDeployConfig(envNames);
   if (!siteId) return undefined;
 
   try {
-    const site = await fetchNetlifyApi(`/sites/${encodeURIComponent(siteId)}`);
+    const site = await fetchNetlifyApi(`/sites/${encodeURIComponent(siteId)}`, envNames);
     const published = site && typeof site === 'object' ? (site as Record<string, unknown>).published_deploy : undefined;
     if (published && typeof published === 'object') return mapNetlifyDeployToReceipt(published as NetlifyDeploy);
   } catch {
@@ -247,6 +264,7 @@ export const pollDeployReceipt = async ({
   deployId = '',
   timeoutSeconds = DEFAULT_POLL_TIMEOUT_SECONDS,
   intervalSeconds = DEFAULT_POLL_INTERVAL_SECONDS,
+  envNames = PLATFORM_ENV_NAMES,
 }: PollDeployReceiptOptions): Promise<DeployReceipt> => {
   const normalizedCommit = commit.trim();
   const normalizedDeployId = deployId.trim();
@@ -257,8 +275,8 @@ export const pollDeployReceipt = async ({
 
   do {
     latestReceipt = normalizedDeployId
-      ? await getDeployReceiptByDeployId(normalizedDeployId)
-      : await getDeployReceiptByCommit(normalizedCommit);
+      ? await getDeployReceiptByDeployId(normalizedDeployId, envNames)
+      : await getDeployReceiptByCommit(normalizedCommit, envNames);
 
     if (latestReceipt && TERMINAL_DEPLOY_STATUSES.has(latestReceipt.deployStatus)) return latestReceipt;
     if (Date.now() >= deadline) break;

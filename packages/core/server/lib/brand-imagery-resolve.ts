@@ -19,11 +19,9 @@
  * never an error. `override` is a SHALLOW merge onto whichever base tier
  * applies (no per-key diff semantics — out of scope, BRIEF §4).
  */
-import {
-  deriveBrandImageryFromTokens,
-  type BrandImageryRecord,
-} from './brand-imagery-derive.js';
+import { deriveBrandImageryFromTokens, type BrandImageryRecord } from './brand-imagery-derive.js';
 import { getGovernanceBlobStore, getGovernanceDoc } from './governance-store.js';
+import type { SiteBinding } from './site-binding.js';
 
 export type BrandImageryOverridePolicy = 'allow' | 'lock';
 
@@ -219,15 +217,17 @@ export const resolveUsageContext = (
  * lookups; the blob store itself is already scoped to this deployment's one
  * site, so it is not otherwise used to select a store. `event` is the
  * Lambda/Netlify Blobs context (optional — omit in tests, where the local
- * file-backed store is used instead).
+ * file-backed store is used instead). `binding` is optional so callers that
+ * have not yet threaded a SiteBinding through still compile.
  */
 export const getBrandImageryOverridePolicy = async (
   siteId: string,
-  event?: unknown
+  event?: unknown,
+  binding?: SiteBinding
 ): Promise<BrandImageryOverridePolicy> => {
   void siteId;
   try {
-    const store = await getGovernanceBlobStore(event);
+    const store = await getGovernanceBlobStore(event, binding);
     const doc = await getGovernanceDoc(store);
     return doc?.brandImageryOverrides === 'lock' ? 'lock' : 'allow';
   } catch {

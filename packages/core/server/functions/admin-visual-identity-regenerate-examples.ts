@@ -94,70 +94,68 @@ const parseBody = (event: LambdaEvent): unknown => {
   }
 };
 
-const buildHandlerImpl =
-  (_binding: SiteBinding) =>
-  async (event: LambdaEvent, context?: LambdaContext) => {
-    if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+  if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-    const access = await resolveAdminAccessFromEvent(event, context);
-    if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
-    if (!access.roles.some((role) => REGENERATE_ROLES.has(role))) {
-      return jsonResponse(403, {
-        error: `${access.email ?? 'This account'} has no editing role on this publication, so it cannot regenerate examples. Ask the owner for editor or publisher.`,
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
+  if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
+  if (!access.roles.some((role) => REGENERATE_ROLES.has(role))) {
+    return jsonResponse(403, {
+      error: `${access.email ?? 'This account'} has no editing role on this publication, so it cannot regenerate examples. Ask the owner for editor or publisher.`,
+    });
+  }
+
+  const payload = parseBody(event);
+  if (!isRecord(payload)) return jsonResponse(400, { error: 'Invalid request body.' });
+
+  const standardId = text(payload.standardId);
+  if (!standardId) return jsonResponse(400, { error: 'standardId is required.' });
+
+  try {
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
+    const principal: Principal = { kind: 'human', id: access.userId ?? '', email: access.email ?? '' };
+    const roles = access.roles;
+    const verb = async (request: Record<string, unknown>): Promise<ObjectVerbResult> => {
+      const parsed = objectVerbRequestSchema.safeParse(request);
+      if (!parsed.success) return { status: 400, body: { error: 'Invalid object request.' } };
+      return handleObjectVerb(store, parsed.data, principal, { roles });
+    };
+
+    const read = await verb({ action: 'get', object_type: 'visual_standard', object_id: standardId });
+    if (read.status !== 200 || !isRecord(read.body.record)) {
+      return jsonResponse(read.status === 200 ? 404 : read.status, {
+        error: text(read.body.error) ?? `No visual standard ${standardId} exists on this publication.`,
       });
     }
 
-    const payload = parseBody(event);
-    if (!isRecord(payload)) return jsonResponse(400, { error: 'Invalid request body.' });
+    const cleared = await clearExamples({ store, principal, roles, event, standardId, binding });
+    if (!cleared.ok) return jsonResponse(cleared.status, { error: cleared.error });
 
-    const standardId = text(payload.standardId);
-    if (!standardId) return jsonResponse(400, { error: 'standardId is required.' });
+    const identity = getSiteIdentity();
+    const jobStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ExamplesJobStore;
+    const job = await triggerVisualStandardExamplesJob(jobStore, {
+      visualStandardId: standardId,
+      trigger: 'browser',
+      siteId: identity.siteId,
+      log: event.log,
+    });
 
-    try {
-      const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
-      const principal: Principal = { kind: 'human', id: access.userId ?? '', email: access.email ?? '' };
-      const roles = access.roles;
-      const verb = async (request: Record<string, unknown>): Promise<ObjectVerbResult> => {
-        const parsed = objectVerbRequestSchema.safeParse(request);
-        if (!parsed.success) return { status: 400, body: { error: 'Invalid object request.' } };
-        return handleObjectVerb(store, parsed.data, principal, { roles });
-      };
+    event.log?.({
+      event: 'visual_standard_examples_regenerate_requested',
+      siteId: identity.siteId,
+      standardId,
+      dispatched: job?.dispatched,
+    });
 
-      const read = await verb({ action: 'get', object_type: 'visual_standard', object_id: standardId });
-      if (read.status !== 200 || !isRecord(read.body.record)) {
-        return jsonResponse(read.status === 200 ? 404 : read.status, {
-          error: text(read.body.error) ?? `No visual standard ${standardId} exists on this publication.`,
-        });
-      }
-
-      const cleared = await clearExamples({ store, principal, roles, event, standardId });
-      if (!cleared.ok) return jsonResponse(cleared.status, { error: cleared.error });
-
-      const identity = getSiteIdentity();
-      const jobStore = (await getArtifactIndexBlobStore(event)) as unknown as ExamplesJobStore;
-      const job = await triggerVisualStandardExamplesJob(jobStore, {
-        visualStandardId: standardId,
-        trigger: 'browser',
-        siteId: identity.siteId,
-        log: event.log,
-      });
-
-      event.log?.({
-        event: 'visual_standard_examples_regenerate_requested',
-        siteId: identity.siteId,
-        standardId,
-        dispatched: job?.dispatched,
-      });
-
-      return jsonResponse(200, {
-        standard_id: standardId,
-        ...(job ? { examples_job: examplesJobStatusView(job) } : {}),
-      });
-    } catch (error) {
-      console.error('Visual identity examples regenerate failed.', error);
-      return jsonResponse(500, { error: 'The examples could not be regenerated.' });
-    }
-  };
+    return jsonResponse(200, {
+      standard_id: standardId,
+      ...(job ? { examples_job: examplesJobStatusView(job) } : {}),
+    });
+  } catch (error) {
+    console.error('Visual identity examples regenerate failed.', error);
+    return jsonResponse(500, { error: 'The examples could not be regenerated.' });
+  }
+};
 
 /**
  * checkout → patch(examples: []) → checkin, the same lifecycle A1's
@@ -171,11 +169,12 @@ const clearExamples = async (input: {
   roles: Role[];
   event: unknown;
   standardId: string;
+  binding?: SiteBinding;
 }): Promise<{ ok: true } | { ok: false; status: number; error: string }> => {
   const ops = [{ op: 'set_visual_standard_fields', fields: { examples: [] } }];
-  const artifactIndexStore = (await getArtifactIndexBlobStore(input.event).catch(() => undefined)) as unknown as
-    | ArtifactIndexStore
-    | undefined;
+  const artifactIndexStore = (await getArtifactIndexBlobStore(input.event, input.binding).catch(
+    () => undefined
+  )) as unknown as ArtifactIndexStore | undefined;
   const validationContext = await buildStoreValidationContext(input.store, {
     selfObjectId: input.standardId,
     selfObjectType: 'visual_standard',

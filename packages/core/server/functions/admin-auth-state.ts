@@ -21,7 +21,7 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
   body: JSON.stringify(body),
 });
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
@@ -32,7 +32,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   // display endpoint can never disagree with what the functions underneath
   // it actually enforce. Still read-only display info; publish-gate.ts is
   // the sole enforcement point for publishing.
-  let adminState = await resolveAdminAccessFromEvent(event, context);
+  let adminState = await resolveAdminAccessFromEvent(event, context, binding);
 
   // Wolf 2026-08-18: a signed-in human who resolves to NO role from any
   // source (not a bootstrap Owner, not on a ROLE_EMAILS_* allowlist, no
@@ -50,7 +50,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     adminState.roles.length === 0 &&
     !environmentRoleForEmail(adminState.email)
   ) {
-    const store = await getUsersBlobStore(event);
+    const store = await getUsersBlobStore(event, binding);
     const defaulted = await ensureDefaultMembershipOnLogin(
       store,
       adminState.email,
@@ -58,7 +58,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       new Date().toISOString()
     ).catch(() => null);
     if (defaulted) {
-      adminState = await resolveAdminAccessFromEvent(event, context);
+      adminState = await resolveAdminAccessFromEvent(event, context, binding);
     }
   }
 
@@ -76,4 +76,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

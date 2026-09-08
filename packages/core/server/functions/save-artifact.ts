@@ -6,7 +6,7 @@
  * - artifacts: final binary artifact bytes
  * - artifact-index: JSON request artifact reference indexes
  */
-import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
+import { readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
 import { timingSafeEqual } from 'node:crypto';
 
 import { z } from 'zod';
@@ -161,9 +161,9 @@ const secretsMatch = (provided: string, expected: string) => {
   return timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
-const verifyPublishKey = (event: LambdaEvent) => {
+const verifyPublishKey = (event: LambdaEvent, binding: SiteBinding) => {
   const provided = getHeader(event.headers, 'x-publish-key');
-  const expected = readBoundEnv(PLATFORM_ENV_NAMES.publishSecret) ?? '';
+  const expected = readBoundEnv(binding.env.publishSecret) ?? '';
 
   if (!provided || !expected || !secretsMatch(provided, expected)) {
     return jsonResponse(401, { error: 'Unauthorized' });
@@ -391,7 +391,12 @@ const stripSoftDeleteMarkers = (reference: ArtifactReference): { reference: Arti
   return { reference: restored, restored: true };
 };
 
-export const finalizeUpload = async (event: LambdaEvent, input: UploadRequest, finalBytes: Buffer) => {
+export const finalizeUpload = async (
+  event: LambdaEvent,
+  input: UploadRequest,
+  finalBytes: Buffer,
+  binding: SiteBinding
+) => {
   const reference = createArtifactReference({ input, bytes: finalBytes });
   logArtifactUpload(event, input, 'artifact_upload_finalize_started', {
     uploadId: reference.blobKey,
@@ -402,8 +407,8 @@ export const finalizeUpload = async (event: LambdaEvent, input: UploadRequest, f
 
   if (validationError) return validationError;
 
-  const artifactStore = await getArtifactBlobStore(event);
-  const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const artifactStore = await getArtifactBlobStore(event, binding);
+  const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
   const { deduped, integrityError } = await saveFinalArtifact(artifactStore, reference, finalBytes);
 
   if (integrityError) return integrityError;
@@ -434,12 +439,12 @@ export const finalizeUpload = async (event: LambdaEvent, input: UploadRequest, f
   });
 };
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'POST') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const unauthorized = verifyPublishKey(event);
+  const unauthorized = verifyPublishKey(event, binding);
 
   if (unauthorized) return unauthorized;
 
@@ -467,8 +472,8 @@ const handlerImpl = async (event: LambdaEvent) => {
     decodedBytes: bytes.length,
   });
 
-  return finalizeUpload(event, input, bytes);
+  return finalizeUpload(event, input, bytes, binding);
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

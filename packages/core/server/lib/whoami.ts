@@ -39,6 +39,7 @@
  * with the ledger would be worse than no `whoami` at all.
  */
 import { actorFromMcpAuth } from './caller-actor.js';
+import { getMcpBinding } from './mcp-binding.js';
 import { getSiteIdentity, type AggressionCeiling } from '../../lib/site-identity.js';
 import { activeApprovalPolicy } from '../../lib/approval-policy.js';
 import { buildPluginTools, toolSurfaceDigest } from './plugin/build-tools.js';
@@ -146,13 +147,13 @@ const memberFromActor = async (actor: Principal, event: unknown): Promise<Whoami
    * decides — which is the defect, not the feature.
    */
   const roles = await resolveRolesForPrincipalAsync(actor, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, getMcpBinding()), email),
   });
 
   let status: WhoamiMember['status'] = 'unknown';
   let tier: Role | 'none' = 'none';
   try {
-    const record = await getUserRecord(await getUsersBlobStore(event), actor.email);
+    const record = await getUserRecord(await getUsersBlobStore(event, getMcpBinding()), actor.email);
     if (record) {
       status = record.status;
       tier = record.role as Role;
@@ -188,7 +189,7 @@ export const buildWhoami = async (deps: WhoamiDeps): Promise<WhoamiResult> => {
   let charter: string[] | null = null;
   let manifestDigest: string | null = null;
   try {
-    const active = (await getPluginManifestDoc(await getPluginManifestBlobStore(deps.event))).active;
+    const active = (await getPluginManifestDoc(await getPluginManifestBlobStore(deps.event, getMcpBinding()))).active;
     if (active) {
       manifestVersion = active.manifest_version;
       charter = active.tools.map((tool) => tool.name);

@@ -119,7 +119,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
      * bundle — that is what the public branch below is for, and it says so
      * plainly rather than leaking it through a download's status code.
      */
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) {
       return json(401, {
         error: 'Sign in as the member this tenant invited to download the bundle.',

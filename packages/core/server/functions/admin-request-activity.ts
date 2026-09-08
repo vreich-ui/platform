@@ -94,14 +94,14 @@ const scopeAwareMessage = (code: string | undefined, message: string, attempted:
     ? `${message} Also check that this site's CMS-Agent token allows ${attempted.join(', ')} — a tool missing from the token's allowlist is refused with this same response.`
     : message;
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const callerPrincipal: Principal = { kind: 'human', id: adminState.userId ?? '', email: adminState.email ?? '' };
   const callerRoles = await resolveRolesForPrincipalAsync(callerPrincipal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
   });
   // Read-only, and requests are team-wide readable (plan §8) — the admin wall is the whole gate.
   if (!callerRoles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
@@ -123,7 +123,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
     let runId = request.data.run_id;
     let requestTitle: string | undefined;
     if (request.data.request_id) {
-      const doc = await loadRequest(await getEditorialRequestsBlobStore(event), request.data.request_id);
+      const doc = await loadRequest(await getEditorialRequestsBlobStore(event, binding), request.data.request_id);
       if (!doc) return jsonResponse(404, { error: 'Request not found.' });
       requestTitle = doc.title;
       runId = doc.workflow?.run_id ?? runId;
@@ -206,10 +206,10 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
     if (request.data.action === 'approve' || request.data.action === 'withhold') {
       if (!runId) return jsonResponse(400, { error: 'That request has no run to act on yet.' });
       const decision = request.data.action === 'approve' ? 'approved' : 'withheld';
-      const decided = await cmsAgentClient.callTool<Record<string, unknown>>(
-        'workflow_set_operator_publish_decision',
-        { runId, decision }
-      );
+      const decided = await cmsAgentClient.callTool<Record<string, unknown>>('workflow_set_operator_publish_decision', {
+        runId,
+        decision,
+      });
       if (!decided.ok) {
         return jsonResponse(200, {
           activity: null,

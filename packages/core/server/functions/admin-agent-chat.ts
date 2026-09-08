@@ -315,7 +315,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     email: adminState.email ?? '',
   };
   const callerRoles = await resolveRolesForPrincipalAsync(callerPrincipal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
   });
   if (!callerRoles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
 
@@ -343,7 +343,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   };
 
   try {
-    const chatStore = await getAgentChatBlobStore(event);
+    const chatStore = await getAgentChatBlobStore(event, binding);
 
     switch (request.data.action) {
       case 'create_chat': {
@@ -420,7 +420,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         // a bound chat polling every 1.2 s pays nothing.
         const wantsRequest = request.data.want_request ?? since === 0;
         const boundRequest = wantsRequest
-          ? await requestRowForChat(await getEditorialRequestsBlobStore(event), doc.chat_id).catch(() => undefined)
+          ? await requestRowForChat(await getEditorialRequestsBlobStore(event, binding), doc.chat_id).catch(
+              () => undefined
+            )
           : undefined;
         return jsonResponse(200, {
           ...chatSummary(doc),
@@ -453,7 +455,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           // Not gated on status, unlike the two above: a blockage that landed
           // while a run was in flight (a page-origin one, D6) is real and
           // actionable even though the doc's status still belongs to that run.
-          ...(doc.pending_blockage ? { blockage: doc.pending_blockage.blockage, blockage_origin: doc.pending_blockage.origin } : {}),
+          ...(doc.pending_blockage
+            ? { blockage: doc.pending_blockage.blockage, blockage_origin: doc.pending_blockage.origin }
+            : {}),
         });
       }
 
@@ -498,7 +502,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
             bridge,
             pendingForAnswer,
             { remedy_id: answer.remedy_id, ...(answer.args ? { args: answer.args } : {}), by: caller.email },
-            createBlobRemedyLedger((await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore),
+            createBlobRemedyLedger((await getIdempotencyBlobStore(event, binding)) as unknown as RemedyLedgerStore),
             undefined,
             { isOwner: isOwner(callerRoles), email: caller.email }
           );
@@ -531,12 +535,13 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           });
         }
 
-        const boundRow = await requestRowForChat(await getEditorialRequestsBlobStore(event), doc.chat_id).catch(
-          () => undefined
-        );
+        const boundRow = await requestRowForChat(
+          await getEditorialRequestsBlobStore(event, binding),
+          doc.chat_id
+        ).catch(() => undefined);
         const requestFocus = boundRow ? composeRequestFocus(boundRow, request.data.focus) : undefined;
 
-        const governanceStore = await getGovernanceBlobStore(event);
+        const governanceStore = await getGovernanceBlobStore(event, binding);
         const policies = await resolveActivePolicies(governanceStore);
         const { learning_mode } = policies;
         // Task 3 §1: the rollback lever — unset resolves to 'generated'.
@@ -556,7 +561,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         // regardless of whether the persist succeeds).
         const rawGovernanceDoc = await getGovernanceDoc(governanceStore);
         const chatTools = await migratedChatTools(governanceStore, rawGovernanceDoc);
-        const profilesStore = await getAgentProfilesBlobStore(event);
+        const profilesStore = await getAgentProfilesBlobStore(event, binding);
         const profilesDoc = await migratedProfilesDoc(profilesStore, await getProfilesDoc(profilesStore, nowIso()));
 
         // Compatibility profile resolution is policy-only: its autonomy
@@ -578,9 +583,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         }
 
         const principal: Principal = { kind: 'human', ...caller };
-        const objectStore = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+        const objectStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
         const roles = await resolveRolesForPrincipalAsync(principal, {
-          getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+          getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
         });
         const cmsAgent = cmsAgentToolBridge();
         // Decided ONCE, here, from roles this function resolved itself. Both the
@@ -590,10 +595,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const toolContext = buildToolContext({
           objectStore,
           // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
-          membershipStore: await getUsersBlobStore(event),
+          membershipStore: await getUsersBlobStore(event, binding),
           ...(cmsAgent ? { cmsAgent } : {}),
           governanceStore,
-          artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+          artifactIndexStore: (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
             | ArtifactIndexStore
             | undefined,
           principal,
@@ -641,18 +646,18 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         // the run) — the approver is recorded on the event. Roles are
         // re-resolved fresh so a demotion takes effect on the next write.
         const runPrincipal: Principal = doc.run.principal;
-        const objectStore = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+        const objectStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
         const roles = await resolveRolesForPrincipalAsync(runPrincipal, {
-          getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+          getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
         });
         const cmsAgent = cmsAgentToolBridge();
         const toolContext = buildToolContext({
           objectStore,
           // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
-          membershipStore: await getUsersBlobStore(event),
+          membershipStore: await getUsersBlobStore(event, binding),
           ...(cmsAgent ? { cmsAgent } : {}),
-          governanceStore: await getGovernanceBlobStore(event),
-          artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+          governanceStore: await getGovernanceBlobStore(event, binding),
+          artifactIndexStore: (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
             | ArtifactIndexStore
             | undefined,
           principal: runPrincipal,
@@ -674,7 +679,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const protocolDeps = {
           chatStore,
           toolContext,
-          learningStore: (await getAgentLearningBlobStore(event)) as unknown as LearningEvidenceStore,
+          learningStore: (await getAgentLearningBlobStore(event, binding)) as unknown as LearningEvidenceStore,
           siteId: binding.siteId,
         };
         const result =
@@ -754,13 +759,18 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         }
 
         const bridge = cmsAgentToolBridge();
-        if (!bridge) return jsonResponse(502, { error: 'The workspace orchestration bridge is not configured for this site.' });
+        if (!bridge)
+          return jsonResponse(502, { error: 'The workspace orchestration bridge is not configured for this site.' });
 
         const outcome = await applyRemedy(
           bridge,
           parsed,
-          { remedy_id: request.data.remedy_id, ...(request.data.args ? { args: request.data.args } : {}) , by: caller.email },
-          createBlobRemedyLedger((await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore),
+          {
+            remedy_id: request.data.remedy_id,
+            ...(request.data.args ? { args: request.data.args } : {}),
+            by: caller.email,
+          },
+          createBlobRemedyLedger((await getIdempotencyBlobStore(event, binding)) as unknown as RemedyLedgerStore),
           undefined,
           // D8 at the WRITE. This endpoint admits any `admin`; the Owner
           // distinction the buttons draw has to be re-drawn here or a scripted
@@ -804,7 +814,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       }
 
       case 'cancel': {
-        const objectStore = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+        const objectStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
         const toolContext = buildToolContext({
           objectStore,
           principal: { kind: 'human', ...caller },
@@ -817,13 +827,13 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       case 'export_preferences': {
         if (!isOwner(callerRoles)) return jsonResponse(403, { error: 'Owner access required' });
         const exported = await exportPreferencePairs(
-          (await getAgentLearningBlobStore(event)) as unknown as LearningEvidenceStore
+          (await getAgentLearningBlobStore(event, binding)) as unknown as LearningEvidenceStore
         );
         return jsonResponse(200, { ...exported });
       }
 
       case 'list_profiles': {
-        const doc = await getProfilesDoc(await getAgentProfilesBlobStore(event), nowIso());
+        const doc = await getProfilesDoc(await getAgentProfilesBlobStore(event, binding), nowIso());
         return jsonResponse(200, { profiles: Object.values(doc.profiles), assignments: doc.assignments });
       }
 
@@ -832,7 +842,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         // Owner-only management (§4a); reads stay open to any admin.
         if (!isOwner(callerRoles)) return jsonResponse(403, { error: 'Managing agents requires the Owner role.' });
 
-        const profilesStore = await getAgentProfilesBlobStore(event);
+        const profilesStore = await getAgentProfilesBlobStore(event, binding);
         const doc = await getProfilesDoc(profilesStore, nowIso());
 
         if (request.data.action === 'upsert_profile') {

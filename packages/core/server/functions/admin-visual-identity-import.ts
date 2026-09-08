@@ -151,11 +151,11 @@ export type AdminVisualIdentityImportOptions = {
 };
 
 const buildHandlerImpl =
-  (_binding: SiteBinding, options: AdminVisualIdentityImportOptions = {}) =>
+  (binding: SiteBinding, options: AdminVisualIdentityImportOptions = {}) =>
   async (event: LambdaEvent, context?: LambdaContext) => {
     if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
     if (!access.roles.some((role) => IMPORT_ROLES.has(role))) {
       return jsonResponse(403, {
@@ -185,7 +185,7 @@ const buildHandlerImpl =
     const note = text(payload.note)?.slice(0, 200);
 
     try {
-      const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+      const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
       const principal: Principal = { kind: 'human', id: access.userId ?? '', email: access.email ?? '' };
       const roles = access.roles;
       const verb = async (request: Record<string, unknown>): Promise<ObjectVerbResult> => {
@@ -235,11 +235,12 @@ const buildHandlerImpl =
       const requestId = await mintVisualReferenceRequestIdForEvent(
         event,
         identity.siteShortId,
-        options.now ?? new Date()
+        options.now ?? new Date(),
+        binding
       );
       const imported = await importVisualReferenceImages(
         event as ToolLambdaEvent,
-        { siteId: identity.siteId, requestId, urls, existingBySha, ...(note ? { note } : {}) },
+        { siteId: identity.siteId, requestId, urls, existingBySha, ...(note ? { note } : {}), binding },
         options.import ?? {}
       );
       if (!imported.ok) {
@@ -298,6 +299,7 @@ const buildHandlerImpl =
           event,
           standardId,
           additions,
+          binding,
         });
         if (!saved.ok) return jsonResponse(saved.status, { error: saved.error, request_id: requestId });
         added = saved.added.map(viewOf);
@@ -360,6 +362,7 @@ const appendReferences = async (input: {
   event: unknown;
   standardId: string;
   additions: StoredReference[];
+  binding?: SiteBinding;
 }): Promise<
   | { ok: true; added: StoredReference[]; duplicates: StoredReference[]; total: number }
   | { ok: false; status: number; error: string }
@@ -422,9 +425,7 @@ const appendReferences = async (input: {
         duplicates.push(already);
         continue;
       }
-      const reference = currentIds.has(addition.id)
-        ? { ...addition, id: mintUnusedReferenceId(currentIds) }
-        : addition;
+      const reference = currentIds.has(addition.id) ? { ...addition, id: mintUnusedReferenceId(currentIds) } : addition;
       currentIds.add(reference.id);
       currentByBlobKey.set(reference.blobKey, reference);
       added.push(reference);
@@ -441,9 +442,9 @@ const appendReferences = async (input: {
     if (added.length === 0) return { ok: true, added, duplicates, total: current.length };
 
     const ops = [{ op: 'set_visual_standard_fields', fields: { references } }];
-    const artifactIndexStore = (await getArtifactIndexBlobStore(input.event).catch(() => undefined)) as unknown as
-      | ArtifactIndexStore
-      | undefined;
+    const artifactIndexStore = (await getArtifactIndexBlobStore(input.event, input.binding).catch(
+      () => undefined
+    )) as unknown as ArtifactIndexStore | undefined;
     const validationContext = await buildStoreValidationContext(input.store, {
       selfObjectId: input.standardId,
       selfObjectType: 'visual_standard',

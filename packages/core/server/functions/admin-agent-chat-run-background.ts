@@ -63,15 +63,15 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     return { statusCode: 400, body: 'Invalid body' };
   }
 
-  const chatStore = await getAgentChatBlobStore(event);
+  const chatStore = await getAgentChatBlobStore(event, binding);
   const doc = await loadChatDoc(chatStore, parsed.chat_id);
   if (!doc?.run) return { statusCode: 404, body: 'chat not found' };
 
   const principal = doc.run.principal;
   const roles = await resolveRolesForPrincipalAsync(principal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
   });
-  const governanceStore = await getGovernanceBlobStore(event);
+  const governanceStore = await getGovernanceBlobStore(event, binding);
   // PF4: the workspace orchestration tools reach CMS-Agent through the same
   // module-level client; absent config → the tools answer with a clear error.
   const cmsAgentBridge = isCmsAgentConfigured()
@@ -91,23 +91,23 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     ...(remainingTimeMs !== undefined ? { invocationDeadlineMs: Date.now() + remainingTimeMs } : {}),
   };
   const toolContext = buildToolContext({
-    objectStore: (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore,
+    objectStore: (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore,
     governanceStore,
     ...(cmsAgentBridge ? { cmsAgent: cmsAgentBridge } : {}),
-    artifactIndexStore: (await getArtifactIndexBlobStore(event).catch(() => undefined)) as unknown as
+    artifactIndexStore: (await getArtifactIndexBlobStore(event, binding).catch(() => undefined)) as unknown as
       | ArtifactIndexStore
       | undefined,
     principal,
     roles,
     exportRoot: binding.dataRoot,
     // W18 T18.6a: membership verbs from chat, under the run's HUMAN principal (via:'chat')
-    membershipStore: await getUsersBlobStore(event),
+    membershipStore: await getUsersBlobStore(event, binding),
     // Task 3 §5: so the generated registry's operational-bridge tools
     // (deploy_status, pdf-tool/image families, commerce, ...) execute in the
     // background hop too, not only on the interactive approve path.
     operationalEvent: eventWithDeadline,
     // W19 T19.1: the hop that STARTS a job registers it, and attaches this chat.
-    requestStore: await getEditorialRequestsBlobStore(event),
+    requestStore: await getEditorialRequestsBlobStore(event, binding),
     chatId: doc.chat_id,
     chatKind: doc.kind,
     createdByFallback: doc.created_by,
@@ -129,7 +129,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       engine,
       // Task 5: an edit-and-approve's EXECUTION now happens in this hop, not
       // inline in approve — addPostEditDelta needs the learning store here.
-      learningStore: (await getAgentLearningBlobStore(event)) as unknown as LearningEvidenceStore,
+      learningStore: (await getAgentLearningBlobStore(event, binding)) as unknown as LearningEvidenceStore,
       ...(context?.getRemainingTimeInMillis ? { remainingMs: () => context.getRemainingTimeInMillis!() } : {}),
     },
     parsed.chat_id,

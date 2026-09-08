@@ -17,6 +17,7 @@
  * are invoked by a real request).
  */
 import { getArtifactBlobStore, getArtifactIndexBlobStore, getWorkflowBlobStore } from './blob-store.js';
+import { getMcpBinding } from './mcp-binding.js';
 import { collectBlobListItems } from './blob-list.js';
 import {
   listArtifactIndexKeys,
@@ -248,7 +249,7 @@ const listArtifactsFromPointerPrefixes = async (
   prefixes: string[],
   options: ArtifactBrowseOptions
 ) => {
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const pointerKeys: string[] = [];
 
   for (const prefix of prefixes) {
@@ -323,7 +324,7 @@ const requireAdminToolAccess = async (event: LambdaEvent) => {
     );
   }
 
-  const access = await resolveAdminAccessFromEvent(event);
+  const access = await resolveAdminAccessFromEvent(event, undefined, getMcpBinding());
   if (access.authenticated && access.isAdmin) return undefined;
 
   return toolError(
@@ -440,7 +441,7 @@ const normalizeDeletedByInput = (value: unknown, fallback: string) => {
 };
 
 const getArtifactReferencesForRequest = async (event: LambdaEvent, requestId: string): Promise<ArtifactReference[]> => {
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   return listArtifactReferencesForRequest(store, requestId);
 };
 
@@ -470,7 +471,7 @@ export const getArtifactMetadata = async (event: LambdaEvent, requestId: unknown
   const normalizedSha256 = normalizeArtifactSha256Input(sha256);
   if (!normalizedSha256.ok) return toolError(normalizedSha256.error);
 
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const artifact = await readArtifactReference(store, requestIdValidation.value, normalizedSha256.sha256);
 
   if (!artifact) return toolError('Artifact reference was not found.');
@@ -714,9 +715,14 @@ const normalizeWipeBlobPrefixes = (value: unknown) => {
 };
 
 const getWipeBlobTargets = async (event: LambdaEvent, prefixes: string[]): Promise<WipeBlobTarget[]> => {
-  const workflowsStorePromise = prefixes.includes('workflows/') ? getWorkflowBlobStore(event) : undefined;
-  const artifactIndexStorePromise = prefixes.includes('artifact-index/') ? getArtifactIndexBlobStore(event) : undefined;
-  const artifactStorePromise = prefixes.some(isArtifactWipeBlobPrefix) ? getArtifactBlobStore(event) : undefined;
+  const binding = getMcpBinding();
+  const workflowsStorePromise = prefixes.includes('workflows/') ? getWorkflowBlobStore(event, binding) : undefined;
+  const artifactIndexStorePromise = prefixes.includes('artifact-index/')
+    ? getArtifactIndexBlobStore(event, binding)
+    : undefined;
+  const artifactStorePromise = prefixes.some(isArtifactWipeBlobPrefix)
+    ? getArtifactBlobStore(event, binding)
+    : undefined;
 
   const workflowsStore = await workflowsStorePromise;
   const artifactIndexStore = await artifactIndexStorePromise;
@@ -843,7 +849,7 @@ export const migrateArtifactIndexes = async (event: LambdaEvent, input: Record<s
   if (!cursor.ok) return toolError(cursor.error);
 
   const dryRun = input.dryRun === true;
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const keys = await listArtifactIndexKeys(store, 'request-artifacts/');
   const pageKeys = keys.slice(cursor.value, cursor.value + limit.value);
   const results: Array<Awaited<ReturnType<typeof migrateArtifactIndexRecord>>> = [];
@@ -895,7 +901,7 @@ export const softDeleteArtifact = async (event: LambdaEvent, input: Record<strin
   const sha256 = normalizeArtifactSha256Input(input.sha256);
   if (!sha256.ok) return toolError(sha256.error);
 
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const loaded = await loadArtifactReferenceForAdminMutation(store, requestId, sha256.sha256);
   if (!loaded.ok) return toolError(loaded.error);
 
@@ -925,7 +931,7 @@ export const restoreArtifact = async (event: LambdaEvent, input: Record<string, 
   const sha256 = normalizeArtifactSha256Input(input.sha256);
   if (!sha256.ok) return toolError(sha256.error);
 
-  const store = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const loaded = await loadArtifactReferenceForAdminMutation(store, requestId, sha256.sha256);
   if (!loaded.ok) return toolError(loaded.error);
 
@@ -947,8 +953,8 @@ export const reconcileArtifactIndexes = async (event: LambdaEvent, input: Record
 
   const requestId = toNonEmptyString(input.requestId);
   const prefix = requestId ? `request-artifacts/${encodeURIComponent(requestId)}/` : 'request-artifacts/';
-  const indexStore = await getArtifactIndexBlobStore(event);
-  const artifactStore = await getArtifactBlobStore(event);
+  const indexStore = await getArtifactIndexBlobStore(event, getMcpBinding());
+  const artifactStore = await getArtifactBlobStore(event, getMcpBinding());
   const keys = await loadArtifactIndexKeysFromPrefix(indexStore, prefix, limit.value);
   const { results, skipped } = await reconcileArtifactIndexKeys(
     artifactStore,

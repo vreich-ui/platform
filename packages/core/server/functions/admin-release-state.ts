@@ -49,18 +49,22 @@ const CACHE_CONTROL = 'private, no-cache';
 
 const etagFor = (body: unknown): string => `"${createHash('sha1').update(JSON.stringify(body)).digest('hex')}"`;
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context);
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 
   try {
-    const overview = await loadReleaseOverview(event, {
-      userId: access.userId,
-      email: access.email,
-      roles: access.roles,
-    });
+    const overview = await loadReleaseOverview(
+      event,
+      {
+        userId: access.userId,
+        email: access.email,
+        roles: access.roles,
+      },
+      binding
+    );
     // `rows` is the raw inventory the overview was derived from — internal to
     // the shared builder, never part of this endpoint's wire contract.
     const body: Record<string, unknown> = {

@@ -24,8 +24,8 @@ import { expireAll } from '../lib/membership/invitations.js';
 import { purgeExpiredMemberships } from '../lib/membership/offboarding.js';
 import { collectBlobListItems } from '../lib/blob-list.js';
 
-export const runMembershipSweep = async (event: unknown, now = new Date().toISOString()) => {
-  const store = await getMembershipStore(event);
+export const runMembershipSweep = async (event: unknown, now = new Date().toISOString(), binding?: SiteBinding) => {
+  const store = await getMembershipStore(event, binding);
   const expired = await expireAll(store, now);
   const purged = await purgeExpiredMemberships(store, { now });
   // `.then()`/`.catch()` must NOT be chained off `store.list(...)` — with
@@ -44,9 +44,9 @@ export const runMembershipSweep = async (event: unknown, now = new Date().toISOS
   return { ok: true, at: now, expired_invitations: expired, purged_persons: purged, identity_deletes_queued: queued };
 };
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: unknown) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: unknown) => {
   try {
-    const result = await runMembershipSweep(event);
+    const result = await runMembershipSweep(event, undefined, binding);
     console.log(JSON.stringify({ ts: result.at, event: 'membership_sweep', ...result }));
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) };
   } catch (error) {

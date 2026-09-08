@@ -40,8 +40,8 @@ const triggerWorker = async (triggerToken: string, requestIds: string[]): Promis
   }
 };
 
-export const runEditorialRequestSweep = async (event: unknown) => {
-  const store = await getEditorialRequestsBlobStore(event);
+export const runEditorialRequestSweep = async (event: unknown, binding?: SiteBinding) => {
+  const store = await getEditorialRequestsBlobStore(event, binding);
   const index = (await loadIndex(store)) ?? (await rebuildIndex(store));
   const requestIds = selectSweepable(index.rows);
   // Minting a fresh token also invalidates any earlier one, so a pass that is
@@ -51,9 +51,9 @@ export const runEditorialRequestSweep = async (event: unknown) => {
   return { candidates: requestIds.length, dispatched };
 };
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: unknown) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: unknown) => {
   try {
-    const result = await runEditorialRequestSweep(event);
+    const result = await runEditorialRequestSweep(event, binding);
     return { statusCode: 200, body: JSON.stringify(result) };
   } catch (error) {
     console.error('Editorial_Request_Sweep failed.', error);

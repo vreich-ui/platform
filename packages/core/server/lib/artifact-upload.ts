@@ -14,6 +14,7 @@ import { readArtifactReference, writeArtifactReferenceIndexes, type ArtifactInde
 import { getArtifactBlobStore, getArtifactIndexBlobStore } from './blob-store.js';
 import { sha256Hex } from './crypto.js';
 import { ImageValidationError, validatePublishImageBytes } from './image-validation.js';
+import type { SiteBinding } from './site-binding.js';
 
 export type ArtifactUploadTokenClaims = {
   requestId: string;
@@ -42,6 +43,7 @@ export type SaveArtifactBytesInput = Omit<ArtifactUploadTokenClaims, 'expiresAt'
   bytes: Buffer | Uint8Array;
   metadata?: Record<string, unknown>;
   event?: unknown;
+  binding?: SiteBinding;
 };
 
 export type SaveArtifactBytesResult =
@@ -374,8 +376,8 @@ export const saveArtifactBytes = async (input: SaveArtifactBytesInput): Promise<
     bytes,
   });
 
-  const artifactStore = await getArtifactBlobStore(input.event);
-  const indexStore = (await getArtifactIndexBlobStore(input.event)) as unknown as ArtifactIndexStore;
+  const artifactStore = await getArtifactBlobStore(input.event, input.binding);
+  const indexStore = (await getArtifactIndexBlobStore(input.event, input.binding)) as unknown as ArtifactIndexStore;
   const existingReference = await readArtifactReference(indexStore, input.requestId, reference.sha256);
 
   if (existingReference) {

@@ -1,4 +1,4 @@
-import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
+import { readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
 import { timingSafeEqual } from 'node:crypto';
 
 import { z } from 'zod';
@@ -67,9 +67,9 @@ const secretsMatch = (provided: string, expected: string) => {
   return timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
-const verifyPublishKey = (event: LambdaEvent) => {
+const verifyPublishKey = (event: LambdaEvent, binding: SiteBinding) => {
   const provided = getHeader(event.headers, 'x-publish-key').trim();
-  const expected = readBoundEnv(PLATFORM_ENV_NAMES.publishSecret) ?? '';
+  const expected = readBoundEnv(binding.env.publishSecret) ?? '';
 
   if (!provided || !expected || !secretsMatch(provided, expected)) {
     return jsonResponse(401, { error: 'Unauthorized' });
@@ -93,7 +93,7 @@ const getQueuedReceipt = ({
   ...(errorMessage ? { errorMessage } : {}),
 });
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'POST') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
@@ -103,7 +103,7 @@ const handlerImpl = async (event: LambdaEvent) => {
     return jsonResponse(415, { error: 'Content-Type must be application/json.' });
   }
 
-  const authFailure = verifyPublishKey(event);
+  const authFailure = verifyPublishKey(event, binding);
   if (authFailure) return authFailure;
 
   const parsedJson = safeJsonParse(event);
@@ -116,7 +116,7 @@ const handlerImpl = async (event: LambdaEvent) => {
 
   const { commit, deployId } = parsedBody.data;
 
-  if (!isNetlifyDeployLookupConfigured()) {
+  if (!isNetlifyDeployLookupConfigured(binding.env)) {
     return jsonResponse(
       200,
       getQueuedReceipt({ commit, deployId, errorMessage: 'Netlify deploy lookup is not configured.' })
@@ -124,13 +124,15 @@ const handlerImpl = async (event: LambdaEvent) => {
   }
 
   try {
-    const receipt = commit ? await getDeployReceiptByCommit(commit) : await getDeployReceiptByDeployId(deployId ?? '');
+    const receipt = commit
+      ? await getDeployReceiptByCommit(commit, binding.env)
+      : await getDeployReceiptByDeployId(deployId ?? '', binding.env);
 
     // The published deploy is what production actually serves — a "ready"
     // receipt alone can be a ready-but-unpublished deploy under locked Auto
     // Publishing. Absent fields (site lookup unavailable) mean "unknown",
     // never "not live".
-    const publishedDeploy = await getPublishedProductionDeploy();
+    const publishedDeploy = await getPublishedProductionDeploy(binding.env);
     let productionConfirmed = publishedDeploy
       ? Boolean((commit && publishedDeploy.commit === commit) || (deployId && publishedDeploy.deployId === deployId))
       : undefined;
@@ -176,4 +178,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

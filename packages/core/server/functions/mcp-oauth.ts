@@ -206,10 +206,14 @@ const errorPage = (title: string, detail: string) =>
       '<p>Nothing was authorized. You can close this window.</p>'
   );
 
-const getOAuthStore = (event: unknown): Promise<OAuthBlobStore> =>
-  getNetlifyBlobStore({ name: 'governance', consistency: 'strong' }, event) as unknown as Promise<OAuthBlobStore>;
+const getOAuthStore = (event: unknown, binding: SiteBinding): Promise<OAuthBlobStore> =>
+  getNetlifyBlobStore(
+    { name: 'governance', consistency: 'strong' },
+    event,
+    binding
+  ) as unknown as Promise<OAuthBlobStore>;
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' }, body: '' };
   }
@@ -230,7 +234,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     return json(200, buildAuthorizationServerMetadata({ origin }), METADATA_HEADERS);
   }
 
-  const store = await getOAuthStore(event);
+  const store = await getOAuthStore(event, binding);
   const site = identity.siteId;
 
   /**
@@ -291,7 +295,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   // ─── consent: the one Identity-gated endpoint ────────────────────────────
   if (event.httpMethod !== 'POST') return json(405, { error: 'invalid_request', error_description: 'Use POST.' });
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated || !adminState.email || !adminState.userId) {
     return json(401, { error: 'unauthorized', error_description: 'Sign in to the admin workspace first.' });
   }
@@ -363,9 +367,9 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
  * The catch deliberately does NOT swallow anything into a success: every path
  * out of here is either the endpoint's own answer or an explicit 500.
  */
-const guardedHandler = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildGuardedHandler = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   try {
-    return await handlerImpl(event, context);
+    return await buildHandlerImpl(binding)(event, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(
@@ -387,4 +391,4 @@ const guardedHandler = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding?: SiteBinding) => guardedHandler;
+export const createHandler = (binding: SiteBinding) => buildGuardedHandler(binding);

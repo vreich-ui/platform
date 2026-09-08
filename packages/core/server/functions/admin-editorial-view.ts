@@ -138,9 +138,9 @@ const slotRow = (row: InventoryRow): EditorialSlotRow => ({
   unpublished_changes: row.unpublished_changes,
 });
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context);
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
   const email = access.email;
@@ -148,10 +148,10 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
   try {
     // The chat scan is independent of the overview — issue them together.
     const [overview, chatDocs] = await Promise.all([
-      loadReleaseOverview(event, { userId: access.userId, email, roles: access.roles }),
+      loadReleaseOverview(event, { userId: access.userId, email, roles: access.roles }, binding),
       (async () => {
         try {
-          return await listChatDocs(await getAgentChatBlobStore(event));
+          return await listChatDocs(await getAgentChatBlobStore(event, binding));
         } catch (error) {
           // The publication map is still worth painting without the "an agent
           // is working on this" line — the client already tolerated a failed
