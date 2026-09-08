@@ -49,17 +49,26 @@ export const INTERNAL_ONLY_TOOLS = new Set([
   // W18 T18.7: the membership counterpart (users-store reachability + policy
   // provenance) for the fleet probe's `membership` family. Same rationale.
   'membership_status',
-  // T12.13: the capture bridge. Present and identical on every tenant's /mcp (that is fleet
-  // law), but deliberately not in a CLIENT'S admin-chat registry. Two reasons, both from
-  // ruling R-C5: the duplication capability is operated from CMS-Agent, and a crawl's bounds
-  // come from the CMS-Agent project registry — a chat operator would have to hand-author a
-  // capture policy, which is precisely the second policy home R-C2 v2 refuses. A long
-  // asynchronous crawl surface also makes chat planning needlessly noisy, the same rationale
-  // as every entry above.
-  'create_capture_job',
-  'get_capture_job_status',
-  'get_capture_snapshot',
 ]);
+
+/**
+ * Hidden from the admin-chat registry ONLY — advertised on /mcp like any other
+ * tool, and callable there.
+ *
+ * T12.13 put the capture bridge in INTERNAL_ONLY_TOOLS, which gates BOTH the
+ * chat registry and `tools/list` with one list. Ruling R-C5 only ever refused
+ * the admin-chat registry: a chat operator would have to hand-author a capture
+ * policy, which is the second policy home R-C2 v2 refuses, and a long
+ * asynchronous crawl surface makes chat planning needlessly noisy. Neither
+ * reason reaches /mcp, where the caller supplies the CMS-Agent project
+ * registry's policy verbatim — as `validateCaptureBridgePolicy` already
+ * requires, clamping `maxPages` to 50 and refusing a policy missing
+ * `sameOriginOnly` / `respectRobots` / `authenticatedAccess:"prohibited"`.
+ *
+ * Ratified by Wolf 2026-09-08 (the "narrow split"): discoverable on /mcp,
+ * still absent from a client's chat registry. The bounds did not move.
+ */
+export const CHAT_HIDDEN_TOOLS = new Set(['create_capture_job', 'get_capture_job_status', 'get_capture_snapshot']);
 
 /**
  * Legacy chat tool names → canonical MCP tool names. Used ONLY to canonicalize

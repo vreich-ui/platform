@@ -553,9 +553,11 @@ build). Server-side commerce events go out through `commerce-events.ts` on the s
 
 **97 tools total**, pinned by `packages/core/server/lib/mcp-tool-definitions.test.ts:16`.
 Assembled at `packages/core/server/functions/mcp.ts:506-511` from three files (see defect #1).
-`visibleToolDefinitions` (`mcp.ts:1646-1655`) removes 14 `INTERNAL_ONLY_TOOLS`, removes
+`visibleToolDefinitions` (`mcp.ts:1646-1655`) removes 11 `INTERNAL_ONLY_TOOLS`, removes
 `verify_article_images` where no handler is injected, and lists the 16 membership tools **only to
-an OAuth-bound human** — so a shared-token caller on a non-drlurie tenant sees **66**.
+an OAuth-bound human** — so a shared-token caller on a non-drlurie tenant sees **69**.
+The admin-chat registry hides 3 more — `CHAT_HIDDEN_TOOLS`, the capture bridge — which stay
+advertised on /mcp (narrow split, ratified 2026-09-08; R-C5 refused the chat registry, not /mcp).
 
 Governance classes drive chat autonomy: `read → auto`, everything else → `ask`;
 `autonomyFloor:'ask'` cannot be promoted except when `publishing-policy.ts`'s `autonomyMode` is

@@ -26,7 +26,7 @@
  * `apply_brand_imagery` — the gate is independent of autonomy, so a
  * misconfigured 'auto' still cannot bypass it.
  */
-import { INTERNAL_ONLY_TOOLS, CHAT_TOOL_ALIASES } from '../mcp-tool-definitions.js';
+import { INTERNAL_ONLY_TOOLS, CHAT_HIDDEN_TOOLS, CHAT_TOOL_ALIASES } from '../mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART1 } from '../mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../mcp-tool-definitions-2.js';
 import {
@@ -70,7 +70,7 @@ const VISIBLE_DEFINITIONS: readonly ToolDefinition[] = [
   // like registry_get/commerce_orders, so client_manager can answer "what
   // should I write next?" with cited evidence.
   ...TOOL_DEFINITIONS_ANALYTICS,
-].filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name));
+].filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name) && !CHAT_HIDDEN_TOOLS.has(def.name));
 
 const MEMBERSHIP_UNAVAILABLE = {
   content: json({

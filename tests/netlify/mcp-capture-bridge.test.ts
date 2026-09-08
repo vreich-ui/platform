@@ -5,7 +5,11 @@ import test from 'node:test';
 import { handler } from '../../netlify/functions/mcp.js';
 import { setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
 import { CAPTURE_BRIDGE_MAX_PAGES } from '../../packages/core/server/lib/capture-bridge-policy.js';
-import { INTERNAL_ONLY_TOOLS, TOOL_DEFINITIONS_PART1 } from '../../packages/core/server/lib/mcp-tool-definitions.js';
+import {
+  INTERNAL_ONLY_TOOLS,
+  CHAT_HIDDEN_TOOLS,
+  TOOL_DEFINITIONS_PART1,
+} from '../../packages/core/server/lib/mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from '../../packages/core/server/lib/mcp-tool-definitions-2.js';
 import { stubPdfToolMcp } from './pdf-tool-mcp-fetch-stub.js';
 import { join } from 'node:path';
@@ -170,12 +174,11 @@ test('the capture bridge is defined on every tenant, site-scoped, credential-fre
   assert.equal(defined.get('get_capture_snapshot')!.governance.toolClass, 'read');
   assert.equal(defined.get('create_capture_job')!.governance.toolClass, 'draft');
 
-  // Callable on every tenant's /mcp, but deliberately absent from agent discovery — the
-  // documented INTERNAL_ONLY_TOOLS mechanism, same as create_artifact_from_url (which this
-  // very capture engine calls) and capability_status. Rationale in the definition comment:
-  // capture is operated from CMS-Agent, whose project registry is the ONE source of bounds
-  // (R-C2 v2 / R-C5); tenant-side there is no registry, so an autonomously-discovered crawl
-  // tool would take its origins from whoever called it.
+  // Narrow split, ratified by Wolf 2026-09-08. R-C5 refused the admin-chat REGISTRY, not
+  // /mcp: a chat operator would have to hand-author a capture policy (the second policy home
+  // R-C2 v2 refuses). On /mcp the caller supplies the CMS-Agent registry's policy verbatim,
+  // as validateCaptureBridgePolicy already demands — so the three tools are advertised here
+  // and stay out of chat via CHAT_HIDDEN_TOOLS. The bounds did not move.
   const response = await handler({
     httpMethod: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -185,8 +188,9 @@ test('the capture bridge is defined on every tenant, site-scoped, credential-fre
     (JSON.parse(response.body) as { result: { tools: Array<{ name: string }> } }).result.tools.map((tool) => tool.name)
   );
   for (const name of CAPTURE_BRIDGE_TOOLS) {
-    assert.ok(INTERNAL_ONLY_TOOLS.has(name), `${name} must be INTERNAL_ONLY`);
-    assert.ok(!listed.has(name), `${name} must not appear in agent discovery`);
+    assert.ok(CHAT_HIDDEN_TOOLS.has(name), `${name} must be CHAT_HIDDEN`);
+    assert.ok(!INTERNAL_ONLY_TOOLS.has(name), `${name} must NOT be INTERNAL_ONLY — that would re-hide it from /mcp`);
+    assert.ok(listed.has(name), `${name} must be advertised on /mcp`);
   }
   // The removed raw grant RPC stays removed, listed or otherwise.
   assert.ok(!listed.has('get_pdf_tool_storage_grant'));
