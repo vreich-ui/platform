@@ -1,0 +1,158 @@
+{
+  "__generated": {
+    "at": "2026-09-08T12:56:58.620Z",
+    "attribution": "oauth",
+    "from": "objects/content_item/by-id/req_agent_qa_image_pipeline_stress_test_round3_20260908_01.json",
+    "record_version": 20,
+    "surface": "plugin:claude"
+  },
+  "deck": "21 tests across generation, import, search, and annotation tools on the Kugel-Platform image pipeline. Pass/fail per test, minimal commentary.",
+  "description": "A comprehensive live test matrix of the Kugel-Platform image pipeline: create_agent_artifact_job generation (models, sizes, contexts, edit), import_image_from_url / import_images_from_url, search_images, and the annotation toolset (preview_image_grid, annotate_image elements, check_image_text).",
+  "lineage": {
+    "parent_content_id": "req_agent_how_image_artifacts_are_created_and_managed_20260804_01"
+  },
+  "nodes": [
+    {
+      "id": "n_rt3intro",
+      "kind": "content",
+      "public": {
+        "body": "Every image-related tool on this site's Platform bridge, run once each, live, and published as-is. No cherry-picking — failures are reported exactly like passes.",
+        "title": "What This Is"
+      }
+    },
+    {
+      "id": "n_rt3gen",
+      "kind": "content",
+      "public": {
+        "images": [
+          {
+            "alt": "gen_header result",
+            "caption": "gen_header — article_header context, FAL",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/892ccf41abc34fdd976e92fb59cc1865c87560fc65ba7bd703c409bc4bc5b7d9.webp",
+            "type": "image"
+          },
+          {
+            "alt": "gen_none result",
+            "caption": "gen_none — no context, fell back to OpenAI",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/546738652a2f494ae5ae23c284a35d3a06b9ff2f255adadbea61ba4ef16cb276.webp",
+            "type": "image"
+          },
+          {
+            "alt": "gen_text result",
+            "caption": "gen_text — 'OPEN' sign, legible OCR",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/803b0eeed3b3f6c8d2b85b87f8c1d1458b677da96e797492c584eb90f03f826c.webp",
+            "type": "image"
+          },
+          {
+            "alt": "gen_size_portrait result",
+            "caption": "gen_size_portrait — 1024x1792",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/713d2bd5d0e9009d87bdb82b7194bc3452352b998eef40dfefcef341bf3e7942.webp",
+            "type": "image"
+          },
+          {
+            "alt": "gen_size_landscape result",
+            "caption": "gen_size_landscape — 1792x1024",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/7f4d2dc7c76162dd1ec85bcfbabe790dbb61abf4f936e2cb41936cd67601ec2c.webp",
+            "type": "image"
+          }
+        ],
+        "items": [
+          "gen_header, usageContext=article_header — PASS: routed to fal-ai/flux-2/klein/9b, clean generation.",
+          "gen_none, usageContext omitted — PASS but notable: silently fell back to OpenAI gpt-image-1 instead of FAL. This is the real explanation for the earlier '429 no credits' error.",
+          "gen_badmodel, model='not-a-real-model-xyz' — correctly rejected: 'Unsupported model for platform'.",
+          "gen_text, prompt for a sign reading 'OPEN' — PASS: OCR found legible 'OPEN' baked into the pixels. These models can render some text.",
+          "gen_size 1024x768 / 768x1024 / 2048x2048 — all rejected, invalid size enum.",
+          "gen_size_portrait (1024x1792) / gen_size_landscape (1792x1024) — both PASS, confirming the real 5-value size allow-list.",
+          "gen_edit, operation='edit' — BROKEN: the bridge accepts the field but never forwards sourceArtifact/editMode to pdf-tool. Tried nested-in-requirements and top-level, same failure twice. Genuine gap, not a usage error."
+        ],
+        "title": "Generation (create_agent_artifact_job)"
+      }
+    },
+    {
+      "id": "n_rt3imp",
+      "kind": "content",
+      "public": {
+        "items": [
+          "import_single_baseline (Wikimedia Cat03.jpg) — 429 on the first two attempts (Wikimedia's own rate limit / a bad thumb URL, both unrelated to this platform), then PASS via a Special:FilePath URL: 1600x1598, 280KB.",
+          "import_capped (max_bytes=5000, same source) — correctly rejected: 'exceeds import limit (279603 bytes)'. Cap enforcement works as designed.",
+          "import_images_from_url batch of 3 URLs — PASS as an async job: 2/3 imported (a coffee/notebook photo, a cosmetic bottle), 1/3 failed 429 (the panorama source, again Wikimedia-side).",
+          "import_nonnative (webp from httpbin) — PASS, but stored AS webp. Docs say non-native formats convert to png/jpeg — this one didn't convert. Possible doc/behavior mismatch, or webp counts as native here.",
+          "import_badurl — clean 404. Correct behavior, not a bug."
+        ],
+        "title": "Import (import_image_from_url / import_images_from_url)"
+      }
+    },
+    {
+      "id": "n_rt3search",
+      "kind": "content",
+      "public": {
+        "items": [
+          "search_images, 'modern skincare bottle on a marble countertop' — job completed, 0 candidates. pexels/unsplash/google-cse all skipped for missing API keys; library + openverse found nothing matching. Combined with this site's own maxPaidImports:0 policy, paid image search is fully off right now for two independent reasons, not one."
+        ],
+        "title": "Search (search_images)"
+      }
+    },
+    {
+      "id": "n_rt3other",
+      "kind": "content",
+      "public": {
+        "images": [
+          {
+            "alt": "6x6 annotation grid preview",
+            "caption": "preview_image_grid overlay",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/2dfb10973bc6a2bdbba7a4818d0f580b5cc6e7eaa72f1d4913133460dab9ca3a.png",
+            "type": "image"
+          },
+          {
+            "alt": "scrim and caption test",
+            "caption": "annotate_image — scrim element",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/16c85e299c16c645c4e0a4b13d4c3abf2fbed0c6cc20d39a966e18a21cac5cb6.png",
+            "type": "image"
+          },
+          {
+            "alt": "logo overlay test",
+            "caption": "annotate_image — logo element",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/cb3d02ad6df33e1ae8fe7da8565937e203d3d3d52bc761a255a8eb13318fd41f.png",
+            "type": "image"
+          },
+          {
+            "alt": "device_scale_factor 1",
+            "caption": "device_scale_factor=1 → 750x750px",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/35957c9c6455fa4b0b09b54cca53c95f8f9b06a65302aa2090e9799953620091.png",
+            "type": "image"
+          },
+          {
+            "alt": "device_scale_factor 2",
+            "caption": "device_scale_factor=2 → 1500x1500px (4x pixels)",
+            "src": "/img/req_agent_qa_image_pipeline_stress_test_round3_20260908_01/9d706a27d587252de7393f393a8577244dcdbe0b8f41f89bc103e10a32a09d5b.png",
+            "type": "image"
+          }
+        ],
+        "items": [
+          "preview_image_grid — PASS: clean 6x6 luminance/busyness grid overlay.",
+          "annotate_image scrim element — PASS: bottom gradient scrim + caption text, 0 warnings.",
+          "annotate_image logo element — PASS: accepted an artifactRef and rendered without error.",
+          "annotate_image device_scale_factor 1 vs 2 — PASS: factor 1 = 750x750px output, factor 2 = 1500x1500px, exactly 4x the pixels as documented.",
+          "check_image_text expect_none control on a plain, non-generated stock photo — FALSE POSITIVE: OCR detected 'Li' on a photo with no real text. The warn-only gate has noise even on ordinary photos — a failing expect_none is a prompt to look, not an automatic fail."
+        ],
+        "title": "Other Tools (preview_image_grid, annotate_image, check_image_text)"
+      }
+    },
+    {
+      "id": "n_rt3gaps",
+      "kind": "content",
+      "public": {
+        "items": [
+          "No dedicated crop or resize tool exists anywhere on this bridge (confirmed via full tool search). Only the 5-value size enum at generation time and the max_bytes cap at import time control output size. PDF-Tool's own maxDimensionPx downscale param isn't exposed on this bridge.",
+          "operation='edit' on create_agent_artifact_job is a declared option with no working implementation through this bridge. Treat image editing as unsupported until it's fixed upstream.",
+          "Omitting usageContext doesn't skip model routing — it silently switches provider (FAL to OpenAI). Always set it explicitly, or you're billing the wrong account without knowing it.",
+          "search_images' paid providers (pexels/unsplash/google-cse) are listed 'enabled' but have no API keys configured, on top of this site's own maxPaidImports:0 policy. Two independent reasons paid image search returns nothing.",
+          "OCR (check_image_text) isn't noise-free even on clean, non-generated photos. A failing expect_none is a signal to look, not an automatic fail."
+        ],
+        "title": "Gaps and Findings Worth Acting On"
+      }
+    }
+  ],
+  "slug": "qa-image-pipeline-stress-test-round3",
+  "title": "Image Pipeline Stress Test — Round 3: Full Test Matrix"
+}
