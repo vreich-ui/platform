@@ -185,6 +185,11 @@ export type PlatformArtifactJobInput = {
   // does that (brand-imagery-resolve.ts) and reports the REAL styleSource in
   // its own response, overriding pdf-tool's best-effort one.
   style?: { visualStandardId?: string; override?: Record<string, unknown>; note?: string };
+  // Render-strictness controls pdf-tool has always accepted, previously unreachable from
+  // this bridge: an agent whose render failed on incomplete data had no way to ask for a
+  // best-effort one, and no way to turn the warn-only content gate into a hard stop.
+  lenient?: boolean;
+  failOnQualityGate?: boolean;
 };
 
 const projectPayload = (grant: PdfToolStorageGrant, payload: Record<string, unknown>) => ({
@@ -217,6 +222,8 @@ export const createPlatformArtifactJob = (
       seed: input.seed,
       loras: input.loras,
       style: input.style,
+      lenient: input.lenient,
+      failOnQualityGate: input.failOnQualityGate,
     }),
     options
   );

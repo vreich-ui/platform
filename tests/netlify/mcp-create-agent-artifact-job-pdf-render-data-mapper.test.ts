@@ -451,3 +451,79 @@ test("JOIN A: the template's own renderDataSchema reaches the mapper, and the ar
     globalThis.fetch = originalFetch;
   }
 });
+
+// ---------------------------------------------------------------------------
+// A site that was never configured must say so itself
+// ---------------------------------------------------------------------------
+
+test('a pdf job on a site with no pdf block is refused by NAME, not by pdf-tool input validation', async () => {
+  await resetAndSeedRequest();
+  // Exactly site_platform's real shape on 2026-09-07: a site body with no `pdf` key at all.
+  await seedSiteRecord({ name: 'Dr. Lurié' });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: objectBrandTemplateRoute,
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const result = (await callCreateAgentArtifactJob({}, {
+      site_id: SITE_ID,
+      request_id: REQUEST_ID,
+      artifact_kind: 'pdf',
+      filename: 'unconfigured-site.pdf',
+      wait: false,
+      // No template_id, and the site resolves none -- the D-1 gap.
+    })) as ToolResult;
+
+    assert.equal(result.isError, true);
+    const structured = result.structuredContent ?? {};
+    assert.equal(structured.error_code, 'pdf_no_template_configured');
+    assert.equal(structured.site_id, SITE_ID);
+    assert.equal(structured.kind, 'article');
+    // The message must name the SITE and the setting, not just restate that a templateId is
+    // required — which is all pdf-tool's own input validation could say.
+    assert.match(String(structured.error), /pdf\.defaultTemplateId/);
+    assert.match(String(structured.error), new RegExp(SITE_ID));
+
+    // And nothing was submitted: a job that cannot render must not be created.
+    assert.equal(
+      calls.filter((call) => call.tool === 'create_agent_artifact_job').length,
+      0,
+      'no job may be created for a site with no template'
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a site WITH pdf defaults still resolves its template without a caller-supplied template_id", async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié', pdf: { defaultTemplateId: 'tpl_article_brochure' } });
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: objectBrandTemplateRoute,
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const result = (await callCreateAgentArtifactJob({}, {
+      site_id: SITE_ID,
+      request_id: REQUEST_ID,
+      artifact_kind: 'pdf',
+      filename: 'configured-site.pdf',
+      wait: false,
+    })) as ToolResult;
+
+    assert.ok(!result.isError, JSON.stringify(result.structuredContent));
+    const submitted = calls.find((call) => call.tool === 'create_agent_artifact_job');
+    assert.ok(submitted, 'the job must be submitted');
+    assert.equal((submitted.body as Record<string, unknown>).templateId, 'tpl_article_brochure');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

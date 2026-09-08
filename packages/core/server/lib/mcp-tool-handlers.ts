@@ -1522,6 +1522,18 @@ export const callCreateAgentArtifactJob = async (
       templateIdInput = resolvePdfDefaultTemplateId(readSitePdfDefaults(siteBody), kindInput);
     }
 
+    // A pdf job with no template cannot render anything, and letting it through produced
+    // pdf-tool's own input-validation text ("templateId: PDF jobs require templateId or
+    // templateRef") -- true, but it names neither the site nor the setting that is missing,
+    // so the reader has no way to know the site was never configured. Observed on
+    // site_platform, whose site object carries no `pdf` block at all.
+    if (!templateIdInput) {
+      return toolError(
+        `Site ${scoped.scope.siteId} has no PDF template configured for kind "${kindInput}": its site object carries neither pdf.byKind.${kindInput} nor pdf.defaultTemplateId, so there is nothing to render from. Pass template_id explicitly, or set the site's pdf defaults (list_pdf_templates shows this site's templates, with their kind and label).`,
+        { error_code: 'pdf_no_template_configured', site_id: scoped.scope.siteId, kind: kindInput }
+      );
+    }
+
     // D-4: requirements default, article kind only, caller-supplied (even
     // partial) always wins untouched.
     requirementsOverride = resolvePdfRequirementsDefault(kindInput, requirementsOverride);
@@ -1662,6 +1674,8 @@ export const callCreateAgentArtifactJob = async (
     ...(seedOverride !== undefined ? { seed: seedOverride } : {}),
     ...(lorasOverride ? { loras: lorasOverride } : {}),
     ...(styleInputParsed ? { style: styleInputParsed } : {}),
+    ...(input.lenient === true ? { lenient: true } : {}),
+    ...(input.fail_on_quality_gate === true ? { failOnQualityGate: true } : {}),
   };
   const created = await createPlatformArtifactJob(built.grant, jobInput);
   if (!created.ok) return pdfToolBridgeError(created);
@@ -2718,6 +2732,12 @@ export const callBuildPdfRenderData = async (event: LambdaEvent, input: Record<s
 
   const mapped = buildRenderData(contentRecord, { ...(templateSchema ? { templateSchema } : {}) });
 
+  // This tool is used to DEBUG a render ("why is this PDF thin", "which template contract am
+  // I actually being mapped against"), and those answers live in schemaSource/schemaNote and
+  // unfilled[] -- not in `data`. Returning the whole payload every time made comparing three
+  // templates cost three full copies of the same multi-kilobyte article.
+  const summaryOnly = toNonEmptyString(input.verbosity) === 'summary';
+
   return toolResult({
     siteId: scoped.siteId,
     contentItemId,
@@ -2730,8 +2750,17 @@ export const callBuildPdfRenderData = async (event: LambdaEvent, input: Record<s
           schemaNote: `Template ${templateId} declares no renderDataSchema; mapped against the generic ${ARTICLE_BROCHURE_V1_TEMPLATE_ID} contract instead.`,
         }
       : {}),
-    data: mapped.data,
-    assets: mapped.assets,
+    // Summary keeps every ANSWER and drops the bulk: the asset ids are still named (that is
+    // a debugging answer too), only their blobKeys and the mapped `data` are omitted.
+    ...(summaryOnly
+      ? {
+          verbosity: 'summary' as const,
+          assetIds: (mapped.assets?.images ?? []).map((image) =>
+            typeof image === 'object' && image !== null ? (image as { assetId?: unknown }).assetId : undefined
+          ),
+          dataOmitted: true,
+        }
+      : { data: mapped.data, assets: mapped.assets }),
     unfilled: mapped.unfilled,
   });
 };
