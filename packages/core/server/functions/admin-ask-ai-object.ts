@@ -69,10 +69,10 @@ const jsonResponse = (status: number, body: Record<string, unknown>) => ({
   body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
 });
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
   if (!adminState.isAdmin) return jsonResponse(403, { error: 'Admin access required' });
 
@@ -93,7 +93,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
     // — profile resolution (object → type → site default) supplies provider +
     // model; nothing is hardcoded here anymore. Copy-only guard and schema
     // behavior are unchanged in the core.
-    const profilesDoc = await getProfilesDoc(await getAgentProfilesBlobStore(event), new Date().toISOString());
+    const profilesDoc = await getProfilesDoc(await getAgentProfilesBlobStore(event, binding), new Date().toISOString());
     const profile = resolveProfile(profilesDoc, {
       objectId: parsed.data.object_id,
       objectType: parsed.data.object_type,
@@ -105,7 +105,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
       });
     }
 
-    const store = (await getSiteObjectsBlobStore(event)) as unknown as AskAiObjectStore;
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as AskAiObjectStore;
     const result = await askAiForObject(store, parsed.data, {
       apiKey,
       model: profile.model,
@@ -123,4 +123,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

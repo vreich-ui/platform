@@ -138,7 +138,7 @@ const loadSinkConfig = async (event: LambdaEvent, nowMs: number, deps: TrackInge
   if (cachedSink && nowMs - cachedSink.readAtMs < SINK_CACHE_TTL_MS) return cachedSink.config;
   let ownBlock: unknown;
   try {
-    const store = await (deps.getObjectsStore ?? getSiteObjectsBlobStore)(event);
+    const store = await (deps.getObjectsStore ?? getSiteObjectsBlobStore)(event, deps.binding);
     const items = await collectBlobListItems(
       (await store.list({ prefix: objectStatusIndexPrefix('tracking_config', 'active') })) as BlobListResponse
     );
@@ -167,16 +167,23 @@ export const resetSinkConfigCacheForTests = (): void => {
 
 export type TrackIngestDeps = {
   fetchImpl?: typeof fetch;
-  getEventsStore?: (event: unknown) => Promise<{
+  getEventsStore?: (
+    event: unknown,
+    binding?: SiteBinding
+  ) => Promise<{
     get(key: string): Promise<string | null>;
     setJSON(key: string, value: unknown, options?: { onlyIfNew?: boolean }): Promise<void | { modified: boolean }>;
   }>;
-  getObjectsStore?: (event: unknown) => Promise<{
+  getObjectsStore?: (
+    event: unknown,
+    binding?: SiteBinding
+  ) => Promise<{
     get(key: string): Promise<string | null>;
     list(options: { prefix: string }): Promise<unknown>;
   }>;
   nowMs?: () => number;
   env?: Record<string, string | undefined>;
+  binding?: SiteBinding;
 };
 
 // Warn once per runtime instance, not per beacon — an unset project id is a
@@ -268,7 +275,7 @@ export const createTrackIngestHandler =
       const shouldMirror = sink.blobMirror === 'always' || (sink.blobMirror === 'fallback' && !forwarded);
       if (shouldMirror) {
         try {
-          const store = await (deps.getEventsStore ?? getTrackingEventsBlobStore)(event);
+          const store = await (deps.getEventsStore ?? getTrackingEventsBlobStore)(event, deps.binding);
           for (const trackingEvent of accepted) {
             await appendTrackingEvent(store, trackingEvent);
           }
@@ -306,4 +313,4 @@ const forwardToSink = async (
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => createTrackIngestHandler();
+export const createHandler = (binding: SiteBinding) => createTrackIngestHandler({ binding });

@@ -65,7 +65,7 @@ const sanitizeData = (value: unknown): Record<string, string | number> => {
   return data;
 };
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'POST') {
     return reply(405, { error: 'Method not allowed' });
   }
@@ -112,7 +112,7 @@ const handlerImpl = async (event: LambdaEvent) => {
       data: sanitizeData(input.data),
     });
 
-    const store = await getCommerceEventsBlobStore(event);
+    const store = await getCommerceEventsBlobStore(event, binding);
     const { key } = await appendCommerceEvent(store, commerceEvent);
 
     return reply(202, { ok: true, key });
@@ -123,4 +123,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

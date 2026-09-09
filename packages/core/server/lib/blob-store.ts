@@ -124,11 +124,11 @@ export const getBlobStoreSourceDiagnostics = (
   };
 };
 
-export const getCoreBlobStoreSourceDiagnostics = (event: unknown) => ({
-  workflows: getBlobStoreSourceDiagnostics('workflows', event),
-  siteObjects: getBlobStoreSourceDiagnostics('site-objects', event),
-  artifactIndex: getBlobStoreSourceDiagnostics('artifact-index', event),
-  artifacts: getBlobStoreSourceDiagnostics('artifacts', event),
+export const getCoreBlobStoreSourceDiagnostics = (event: unknown, binding?: SiteBinding) => ({
+  workflows: getBlobStoreSourceDiagnostics('workflows', event, binding),
+  siteObjects: getBlobStoreSourceDiagnostics('site-objects', event, binding),
+  artifactIndex: getBlobStoreSourceDiagnostics('artifact-index', event, binding),
+  artifacts: getBlobStoreSourceDiagnostics('artifacts', event, binding),
 });
 
 // Build an explicit Netlify Blobs API configuration (siteID + token) for a named store.

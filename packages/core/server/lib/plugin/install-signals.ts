@@ -31,6 +31,7 @@
 import { z } from 'zod';
 
 import { getPluginManifestBlobStore } from './manifest-store.js';
+import type { SiteBinding } from '../site-binding.js';
 
 export const INSTALL_SIGNALS_DOC_KEY = 'install-signals.v1';
 
@@ -150,10 +151,11 @@ export const latestSignalAt = (bySurface: Record<string, InstallSignal>): string
  */
 export const recordWhoamiSignal = async (
   event: unknown,
-  input: Parameters<typeof withRecordedWhoami>[1]
+  input: Parameters<typeof withRecordedWhoami>[1],
+  binding?: SiteBinding
 ): Promise<void> => {
   try {
-    const store = (await getPluginManifestBlobStore(event)) as unknown as InstallSignalsStore;
+    const store = (await getPluginManifestBlobStore(event, binding)) as unknown as InstallSignalsStore;
     const doc = await getInstallSignalsDoc(store);
     await store.setJSON(INSTALL_SIGNALS_DOC_KEY, withRecordedWhoami(doc, input));
   } catch {

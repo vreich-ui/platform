@@ -91,7 +91,8 @@ const deleteKeysInBatches = async (store: Store, keys: string[]) => {
   return deleted;
 };
 
-const getStoreHandle = (storeName: string, event: LambdaEvent) => getManagedBlobStore(storeName, event);
+const getStoreHandle = (storeName: string, event: LambdaEvent, binding: SiteBinding) =>
+  getManagedBlobStore(storeName, event, binding);
 
 const readBlobBuffer = async (store: Store, key: string) => {
   const result = await store.getWithMetadata(key, { type: 'arrayBuffer' });
@@ -103,20 +104,24 @@ const readBlobBuffer = async (store: Store, key: string) => {
   };
 };
 
-type ActionHandler = (params: Record<string, unknown>, event: LambdaEvent) => Promise<ReturnType<typeof jsonResponse>>;
+type ActionHandler = (
+  params: Record<string, unknown>,
+  event: LambdaEvent,
+  binding: SiteBinding
+) => Promise<ReturnType<typeof jsonResponse>>;
 
-const handleListStores: ActionHandler = async (_params, event) => {
-  const stores = await listManagedBlobStores(event);
+const handleListStores: ActionHandler = async (_params, event, binding) => {
+  const stores = await listManagedBlobStores(event, binding);
   return jsonResponse(200, { stores: stores.sort((a, b) => a.localeCompare(b)) });
 };
 
-const handleListBlobs: ActionHandler = async (params, event) => {
+const handleListBlobs: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   if (!storeName) return jsonResponse(400, { error: 'A store name is required.' });
 
   const prefix = asString(params.prefix);
   const search = asTrimmed(params.search)?.toLowerCase();
-  const store = getStoreHandle(storeName, event);
+  const store = getStoreHandle(storeName, event, binding);
 
   let keys = await listStoreKeys(store, prefix);
 
@@ -135,12 +140,12 @@ const handleListBlobs: ActionHandler = async (params, event) => {
   });
 };
 
-const handleGetBlob: ActionHandler = async (params, event) => {
+const handleGetBlob: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   const key = asString(params.key);
   if (!storeName || !key) return jsonResponse(400, { error: 'A store name and key are required.' });
 
-  const store = getStoreHandle(storeName, event);
+  const store = getStoreHandle(storeName, event, binding);
   const blob = await readBlobBuffer(store, key);
   if (!blob) return jsonResponse(404, { error: 'Blob not found.' });
 
@@ -204,7 +209,7 @@ const handleGetBlob: ActionHandler = async (params, event) => {
   });
 };
 
-const handleSetBlob: ActionHandler = async (params, event) => {
+const handleSetBlob: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   const key = asString(params.key);
   if (!storeName || !key) return jsonResponse(400, { error: 'A store name and key are required.' });
@@ -213,7 +218,7 @@ const handleSetBlob: ActionHandler = async (params, event) => {
   const content = typeof params.content === 'string' ? params.content : '';
   const contentType = asTrimmed(params.contentType);
 
-  const store = getStoreHandle(storeName, event);
+  const store = getStoreHandle(storeName, event, binding);
   const value = encoding === 'base64' ? Buffer.from(content, 'base64') : content;
   const options = contentType ? { metadata: { contentType } } : undefined;
 
@@ -222,12 +227,12 @@ const handleSetBlob: ActionHandler = async (params, event) => {
   return jsonResponse(200, { store: storeName, key });
 };
 
-const handleDeleteBlob: ActionHandler = async (params, event) => {
+const handleDeleteBlob: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   const key = asString(params.key);
   if (!storeName || !key) return jsonResponse(400, { error: 'A store name and key are required.' });
 
-  await getStoreHandle(storeName, event).delete(key);
+  await getStoreHandle(storeName, event, binding).delete(key);
 
   return jsonResponse(200, { store: storeName, key });
 };
@@ -242,7 +247,7 @@ const copyBlob = async (store: Store, sourceKey: string, targetKey: string) => {
   return true;
 };
 
-const handleDuplicateBlob: ActionHandler = async (params, event) => {
+const handleDuplicateBlob: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   const key = asString(params.key);
   const targetKey = asString(params.targetKey);
@@ -252,14 +257,14 @@ const handleDuplicateBlob: ActionHandler = async (params, event) => {
 
   if (key === targetKey) return jsonResponse(400, { error: 'The target key must differ from the source key.' });
 
-  const store = getStoreHandle(storeName, event);
+  const store = getStoreHandle(storeName, event, binding);
   const copied = await copyBlob(store, key, targetKey);
   if (!copied) return jsonResponse(404, { error: 'Source blob not found.' });
 
   return jsonResponse(200, { store: storeName, key, targetKey });
 };
 
-const handleRenameBlob: ActionHandler = async (params, event) => {
+const handleRenameBlob: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   const key = asString(params.key);
   const targetKey = asString(params.targetKey);
@@ -269,7 +274,7 @@ const handleRenameBlob: ActionHandler = async (params, event) => {
 
   if (key === targetKey) return jsonResponse(400, { error: 'The new key must differ from the current key.' });
 
-  const store = getStoreHandle(storeName, event);
+  const store = getStoreHandle(storeName, event, binding);
   const copied = await copyBlob(store, key, targetKey);
   if (!copied) return jsonResponse(404, { error: 'Source blob not found.' });
 
@@ -278,28 +283,28 @@ const handleRenameBlob: ActionHandler = async (params, event) => {
   return jsonResponse(200, { store: storeName, key, targetKey });
 };
 
-const handleWipeStore: ActionHandler = async (params, event) => {
+const handleWipeStore: ActionHandler = async (params, event, binding) => {
   const storeName = asTrimmed(params.store);
   if (!storeName) return jsonResponse(400, { error: 'A store name is required.' });
 
-  const store = getStoreHandle(storeName, event);
+  const store = getStoreHandle(storeName, event, binding);
   const keys = await listStoreKeys(store);
   const deleted = await deleteKeysInBatches(store, keys);
 
   return jsonResponse(200, { store: storeName, deleted });
 };
 
-const handleWipeAll: ActionHandler = async (params, event) => {
+const handleWipeAll: ActionHandler = async (params, event, binding) => {
   if (asTrimmed(params.confirm) !== 'WIPE ALL') {
     return jsonResponse(400, { error: 'Confirmation phrase "WIPE ALL" is required to wipe every store.' });
   }
 
-  const stores = await listManagedBlobStores(event);
+  const stores = await listManagedBlobStores(event, binding);
   const summary: Array<{ store: string; deleted: number }> = [];
   let totalDeleted = 0;
 
   for (const storeName of stores) {
-    const store = getStoreHandle(storeName, event);
+    const store = getStoreHandle(storeName, event, binding);
     const keys = await listStoreKeys(store);
     const deleted = await deleteKeysInBatches(store, keys);
 
@@ -310,7 +315,7 @@ const handleWipeAll: ActionHandler = async (params, event) => {
   return jsonResponse(200, { stores: summary, totalDeleted });
 };
 
-const handleGetArtifactMetadata: ActionHandler = async (params, event) => {
+const handleGetArtifactMetadata: ActionHandler = async (params, event, binding) => {
   const blobKey = asString(params.blobKey);
   if (!blobKey) return jsonResponse(400, { error: 'A blobKey is required.' });
 
@@ -327,7 +332,7 @@ const handleGetArtifactMetadata: ActionHandler = async (params, event) => {
     return jsonResponse(400, { error: 'Could not extract requestId or sha256 from blob key.' });
   }
 
-  const indexStore = getStoreHandle('artifact-index', event) as unknown as ArtifactIndexStore;
+  const indexStore = getStoreHandle('artifact-index', event, binding) as unknown as ArtifactIndexStore;
   const artifact = await readArtifactReference(indexStore, requestId, sha256);
 
   if (!artifact) {
@@ -350,12 +355,12 @@ const actionHandlers: Record<string, ActionHandler> = {
   'get-artifact-metadata': handleGetArtifactMetadata,
 };
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) {
     return jsonResponse(401, {
       error: adminState.error || 'Authentication is required.',
@@ -381,7 +386,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   }
 
   try {
-    return await actionHandler(params, event);
+    return await actionHandler(params, event, binding);
   } catch (error) {
     console.error(`Blob manager action "${action}" failed.`, error);
     return jsonResponse(500, { error: 'The blob store operation failed.' });
@@ -389,4 +394,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

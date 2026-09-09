@@ -220,13 +220,25 @@ const cmsAgentClient = new CmsAgentClient();
 const openChatForPageWrite = async (
   event: LambdaEvent,
   chatId: string,
-  callerEmail: string
-): Promise<{ store: Awaited<ReturnType<typeof getAgentChatBlobStore>>; doc: NonNullable<Awaited<ReturnType<typeof loadChatDoc>>> } | undefined> => {
-  const store = await getAgentChatBlobStore(event);
+  callerEmail: string,
+  binding?: SiteBinding
+): Promise<
+  | {
+      store: Awaited<ReturnType<typeof getAgentChatBlobStore>>;
+      doc: NonNullable<Awaited<ReturnType<typeof loadChatDoc>>>;
+    }
+  | undefined
+> => {
+  const store = await getAgentChatBlobStore(event, binding);
   const doc = await loadChatDoc(store, chatId);
   if (!doc) return undefined;
   if (doc.created_by !== callerEmail) return undefined;
-  if (doc.status !== 'idle' && doc.status !== 'error' && doc.status !== 'cancelled' && doc.status !== 'awaiting_blockage_resolution') {
+  if (
+    doc.status !== 'idle' &&
+    doc.status !== 'error' &&
+    doc.status !== 'cancelled' &&
+    doc.status !== 'awaiting_blockage_resolution'
+  ) {
     return undefined;
   }
   return { store, doc };
@@ -237,9 +249,10 @@ const appendProposeBlockageToChat = async (
   chatId: string,
   callerEmail: string,
   standardId: string,
-  blockage: Record<string, unknown>
+  blockage: Record<string, unknown>,
+  binding?: SiteBinding
 ): Promise<void> => {
-  const opened = await openChatForPageWrite(event, chatId, callerEmail);
+  const opened = await openChatForPageWrite(event, chatId, callerEmail, binding);
   if (!opened) return;
   const { store, doc } = opened;
   const at = new Date().toISOString();
@@ -260,9 +273,10 @@ const noteProposeFinishedInChat = async (
   callerEmail: string,
   standardId: string,
   resolvedBlockageId?: string,
-  remedyId?: string
+  remedyId?: string,
+  binding?: SiteBinding
 ): Promise<void> => {
-  const opened = await openChatForPageWrite(event, chatId, callerEmail);
+  const opened = await openChatForPageWrite(event, chatId, callerEmail, binding);
   if (!opened) return;
   const { store, doc } = opened;
   const at = new Date().toISOString();
@@ -292,11 +306,11 @@ export type AdminVisualIdentityProposeOptions = {
 };
 
 const buildHandlerImpl =
-  (_binding: SiteBinding, options: AdminVisualIdentityProposeOptions = {}) =>
+  (binding: SiteBinding, options: AdminVisualIdentityProposeOptions = {}) =>
   async (event: LambdaEvent, context?: LambdaContext) => {
     if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-    const access = await resolveAdminAccessFromEvent(event, context);
+    const access = await resolveAdminAccessFromEvent(event, context, binding);
     if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
     if (!access.roles.some((role) => PROPOSE_ROLES.has(role))) {
       return jsonResponse(403, {
@@ -344,7 +358,7 @@ const buildHandlerImpl =
     // design) and paying for the same writer turn twice.
     if (remedy?.blockage_id) {
       const alreadyResolved = await createBlobRemedyLedger(
-        (await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore
+        (await getIdempotencyBlobStore(event, binding)) as unknown as RemedyLedgerStore
       )
         .get(remedy.blockage_id)
         .catch(() => undefined);
@@ -358,7 +372,7 @@ const buildHandlerImpl =
     }
 
     try {
-      const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+      const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
       const principal: Principal = { kind: 'human', id: access.userId ?? '', email: access.email ?? '' };
       const roles = access.roles;
       const verb = async (request: Record<string, unknown>): Promise<ObjectVerbResult> => {
@@ -443,7 +457,7 @@ const buildHandlerImpl =
       };
 
       const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
-      const artifactStore = (await getArtifactBlobStore(event)) as unknown as {
+      const artifactStore = (await getArtifactBlobStore(event, binding)) as unknown as {
         get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null>;
       };
 
@@ -469,7 +483,14 @@ const buildHandlerImpl =
         // blockage_id (D4). Best-effort: a chat write that fails must never
         // turn a reportable propose failure into a 500.
         if (chatId && blockage) {
-          await appendProposeBlockageToChat(event, chatId, access.email ?? '', standardId, blockage as unknown as Record<string, unknown>).catch(() => undefined);
+          await appendProposeBlockageToChat(
+            event,
+            chatId,
+            access.email ?? '',
+            standardId,
+            blockage as unknown as Record<string, unknown>,
+            binding
+          ).catch(() => undefined);
         }
         return jsonResponse(result.status, {
           error: result.error,
@@ -485,7 +506,7 @@ const buildHandlerImpl =
       // path with no idempotency at all: the same wall could be resolved from
       // the chat card AND from the Imagery card, paying twice.
       if (remedy?.blockage_id) {
-        await createBlobRemedyLedger((await getIdempotencyBlobStore(event)) as unknown as RemedyLedgerStore)
+        await createBlobRemedyLedger((await getIdempotencyBlobStore(event, binding)) as unknown as RemedyLedgerStore)
           .put(remedy.blockage_id, {
             blockage_id: remedy.blockage_id,
             remedy_id: remedy.remedy_id,
@@ -500,7 +521,15 @@ const buildHandlerImpl =
       // The other half of the ledger: a propose that WORKED says so in the
       // transcript too, and clears any wall the previous attempt left there.
       if (chatId) {
-        await noteProposeFinishedInChat(event, chatId, access.email ?? '', standardId, remedy?.blockage_id, remedy?.remedy_id).catch(() => undefined);
+        await noteProposeFinishedInChat(
+          event,
+          chatId,
+          access.email ?? '',
+          standardId,
+          remedy?.blockage_id,
+          remedy?.remedy_id,
+          binding
+        ).catch(() => undefined);
       }
 
       const { unresolvedReferences: droppedIndexes, ...proposal } = result.body as Record<string, unknown> & {

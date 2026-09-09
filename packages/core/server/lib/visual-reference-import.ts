@@ -47,6 +47,7 @@ import {
 } from './artifact-upload.js';
 import { getArtifactBlobStore, getArtifactIndexBlobStore } from './blob-store.js';
 import { sha256Hex } from './crypto.js';
+import type { SiteBinding } from './site-binding.js';
 // LOAD ORDER, not decoration: mcp.ts and mcp-tool-handlers.ts are a module
 // CYCLE, and mcp.ts reads the handlers' exports at MODULE scope
 // (`_mcpInternal`). Whichever module enters the cycle first must therefore be
@@ -109,9 +110,10 @@ export const mintVisualReferenceRequestId = async (input: {
 export const mintVisualReferenceRequestIdForEvent = async (
   event: unknown,
   siteShortId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  binding?: SiteBinding
 ): Promise<string> => {
-  const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+  const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
   return mintVisualReferenceRequestId({
     siteShortId,
     now,
@@ -273,10 +275,11 @@ export const mirrorImportedImage = async (
      * bytes.
      */
     existingBySha?: ReadonlyMap<string, string>;
+    binding?: SiteBinding;
   }
 ): Promise<MirrorOutcome> => {
   const { candidate } = input;
-  const artifactStore = await getArtifactBlobStore(event);
+  const artifactStore = await getArtifactBlobStore(event, input.binding);
   const bytes = await readBlobBytes(artifactStore, candidate.blobKey);
   if (!bytes || bytes.byteLength === 0) {
     // W5 F9 — SAY WHERE WE LOOKED. This read rests on an assumption nothing in
@@ -362,6 +365,7 @@ export const mirrorImportedImage = async (
       ...(candidate.candidateId ? { candidateId: candidate.candidateId } : {}),
     },
     event,
+    ...(input.binding ? { binding: input.binding } : {}),
   });
   if (!saved.ok) return { ok: false, error: saved.error };
 
@@ -422,6 +426,7 @@ export const importVisualReferenceImages = async (
     urls: readonly string[];
     note?: string;
     existingBySha?: ReadonlyMap<string, string>;
+    binding?: SiteBinding;
   },
   options: ImportImagesOptions = {}
 ): Promise<ImportImagesResult> => {
@@ -482,6 +487,7 @@ export const importVisualReferenceImages = async (
       candidate,
       ...(input.note ? { note: input.note } : {}),
       ...(input.existingBySha ? { existingBySha: input.existingBySha } : {}),
+      ...(input.binding ? { binding: input.binding } : {}),
     });
     if (outcome.ok) mirrored.push(outcome.reference);
     else failures.push({ source: candidate.sourceUrl ?? candidate.blobKey, error: outcome.error });

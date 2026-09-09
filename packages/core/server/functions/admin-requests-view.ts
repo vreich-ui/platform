@@ -91,14 +91,14 @@ export const requestSchema = z
   .strict()
   .refine((data) => Boolean(data.request_id || data.run_id), { message: 'Provide request_id or run_id.' });
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const callerPrincipal: Principal = { kind: 'human', id: adminState.userId ?? '', email: adminState.email ?? '' };
   const callerRoles = await resolveRolesForPrincipalAsync(callerPrincipal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
   });
   // Read-only, and requests are team-wide readable (plan §8, admin-requests.ts's own precedent).
   if (!callerRoles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
@@ -121,7 +121,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
     // identity is already resolved — no need to read the doc again to
     // re-learn a fact that cannot change.
     if (!runId && request.data.request_id) {
-      const doc = await loadRequest(await getEditorialRequestsBlobStore(event), request.data.request_id);
+      const doc = await loadRequest(await getEditorialRequestsBlobStore(event, binding), request.data.request_id);
       if (!doc) return jsonResponse(404, { error: 'Request not found.' });
       requestTitle = doc.title;
       runId = doc.workflow?.run_id;

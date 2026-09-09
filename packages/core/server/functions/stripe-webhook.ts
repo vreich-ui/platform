@@ -72,44 +72,51 @@ export { deterministicUuid };
 
 const isoFromEpochSeconds = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
-const handlerImpl = async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = {}) => {
-  if (event.httpMethod !== 'POST') return reply(405, { error: 'Method not allowed' });
+const buildHandlerImpl =
+  (binding: SiteBinding) =>
+  async (event: LambdaEvent, memberLinkDeps: MemberLinkDeps = {}) => {
+    if (event.httpMethod !== 'POST') return reply(405, { error: 'Method not allowed' });
 
-  const webhookSecret = stripeWebhookSecret();
-  const stripe = await getStripeClient();
-  if (!webhookSecret || !stripe) {
-    return reply(503, { error: 'Webhook is not configured (no Stripe webhook secret for the running mode).' });
-  }
-
-  const signature = header(event.headers, 'stripe-signature');
-  if (!event.body || !signature) return reply(400, { error: 'Missing body or stripe-signature header.' });
-  const rawBody = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
-
-  let stripeEvent: Stripe.Event;
-  try {
-    stripeEvent = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-  } catch (error) {
-    console.error('Stripe webhook signature verification failed.', error);
-    return reply(400, { error: 'Invalid webhook signature.' });
-  }
-
-  try {
-    if (stripeEvent.type === 'checkout.session.completed') {
-      return await handleCompleted(event, stripeEvent, memberLinkDeps);
+    const webhookSecret = stripeWebhookSecret();
+    const stripe = await getStripeClient();
+    if (!webhookSecret || !stripe) {
+      return reply(503, { error: 'Webhook is not configured (no Stripe webhook secret for the running mode).' });
     }
-    if (stripeEvent.type === 'checkout.session.expired') {
-      return await handleExpired(event, stripeEvent);
-    }
-    return reply(200, { received: true, ignored: stripeEvent.type });
-  } catch (error) {
-    // Non-2xx makes Stripe retry — exactly what we want for transient store
-    // failures; the create-if-absent order write keeps retries safe.
-    console.error(`Stripe webhook handling failed for ${stripeEvent.type}.`, error);
-    return reply(500, { error: 'Webhook handling failed; Stripe will retry.' });
-  }
-};
 
-const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event, memberLinkDeps: MemberLinkDeps) => {
+    const signature = header(event.headers, 'stripe-signature');
+    if (!event.body || !signature) return reply(400, { error: 'Missing body or stripe-signature header.' });
+    const rawBody = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
+
+    let stripeEvent: Stripe.Event;
+    try {
+      stripeEvent = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    } catch (error) {
+      console.error('Stripe webhook signature verification failed.', error);
+      return reply(400, { error: 'Invalid webhook signature.' });
+    }
+
+    try {
+      if (stripeEvent.type === 'checkout.session.completed') {
+        return await handleCompleted(event, stripeEvent, memberLinkDeps, binding);
+      }
+      if (stripeEvent.type === 'checkout.session.expired') {
+        return await handleExpired(event, stripeEvent, binding);
+      }
+      return reply(200, { received: true, ignored: stripeEvent.type });
+    } catch (error) {
+      // Non-2xx makes Stripe retry — exactly what we want for transient store
+      // failures; the create-if-absent order write keeps retries safe.
+      console.error(`Stripe webhook handling failed for ${stripeEvent.type}.`, error);
+      return reply(500, { error: 'Webhook handling failed; Stripe will retry.' });
+    }
+  };
+
+const handleCompleted = async (
+  event: LambdaEvent,
+  stripeEvent: Stripe.Event,
+  memberLinkDeps: MemberLinkDeps,
+  binding?: SiteBinding
+) => {
   const session = stripeEvent.data.object as Stripe.Checkout.Session;
 
   // v1 sells by card through hosted Checkout: completed ⇒ paid. Delayed
@@ -126,7 +133,7 @@ const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event, me
     return reply(200, { received: true, skipped: 'no product_id metadata' });
   }
 
-  const siteObjects = await getSiteObjectsBlobStore(event);
+  const siteObjects = await getSiteObjectsBlobStore(event, binding);
   const product = await loadPublishedProduct(siteObjects, productId);
   const buyerEmail = session.customer_details?.email ?? session.customer_email ?? null;
   const createdAt = isoFromEpochSeconds(stripeEvent.created);
@@ -188,13 +195,13 @@ const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event, me
     flags: amountMismatch ? { amount_mismatch: true } : {},
   };
 
-  const commerce = await getCommerceBlobStore(event);
+  const commerce = await getCommerceBlobStore(event, binding);
   const written = await writeOrderIfAbsent(commerce, order);
 
   // Events are deterministic per (session, type): replays collide and no-op
   // even when the order write raced. Best-effort — a failed append must not
   // fail the order that already exists.
-  const events = await getCommerceEventsBlobStore(event);
+  const events = await getCommerceEventsBlobStore(event, binding);
   const emailHash = buyerEmail ? hashEmail(buyerEmail) : null;
   const appendAuthoritative = async (type: CommerceEventType, data: Record<string, string | number>) => {
     try {
@@ -239,9 +246,9 @@ const handleCompleted = async (event: LambdaEvent, stripeEvent: Stripe.Event, me
   });
 };
 
-const handleExpired = async (event: LambdaEvent, stripeEvent: Stripe.Event) => {
+const handleExpired = async (event: LambdaEvent, stripeEvent: Stripe.Event, binding?: SiteBinding) => {
   const session = stripeEvent.data.object as Stripe.Checkout.Session;
-  const events = await getCommerceEventsBlobStore(event);
+  const events = await getCommerceEventsBlobStore(event, binding);
   await appendCommerceEvent(
     events,
     newCommerceEvent({
@@ -257,6 +264,6 @@ const handleExpired = async (event: LambdaEvent, stripeEvent: Stripe.Event) => {
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
 export const createHandler =
-  (_binding: SiteBinding, memberLinkDeps: MemberLinkDeps = {}) =>
+  (binding: SiteBinding, memberLinkDeps: MemberLinkDeps = {}) =>
   (event: LambdaEvent) =>
-    handlerImpl(event, memberLinkDeps);
+    buildHandlerImpl(binding)(event, memberLinkDeps);

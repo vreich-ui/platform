@@ -67,7 +67,7 @@ const getRequestedBlobKey = (event: LambdaEvent) =>
   getBlobKeyFromPublicImageValue(toText(event.path)) ||
   getBlobKeyFromPublicImageValue(toText(event.rawUrl));
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
@@ -79,7 +79,7 @@ const handlerImpl = async (event: LambdaEvent) => {
   }
 
   try {
-    const store = await getArtifactBlobStore(event);
+    const store = await getArtifactBlobStore(event, binding);
     const result = (await (
       store as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> }
     ).get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
@@ -112,4 +112,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

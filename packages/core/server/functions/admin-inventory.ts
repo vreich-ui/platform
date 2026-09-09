@@ -137,6 +137,7 @@ const asStringArray = (value: unknown): string[] =>
 type ActionContext = {
   event: LambdaEvent;
   principal: Principal;
+  binding: SiteBinding;
   /** Display identity of the acting human, stamped onto a soft delete. */
   actor: string;
 };
@@ -148,31 +149,31 @@ type ActionHandler = (
 
 // ─── shared store access ────────────────────────────────────────────────────
 
-const openArtifactIndexStore = async (event: LambdaEvent) =>
-  (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore & {
+const openArtifactIndexStore = async (event: LambdaEvent, binding: SiteBinding) =>
+  (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore & {
     delete?: (key: string) => Promise<void>;
     del?: (key: string) => Promise<void>;
   };
 
-const openObjectStore = async (event: LambdaEvent) =>
-  (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+const openObjectStore = async (event: LambdaEvent, binding: SiteBinding) =>
+  (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
 
 /**
  * The one place a caller-supplied store name becomes a store handle. Returns
  * undefined for anything `listManagedBlobStores` did not name for this
  * request — never a handle to a store outside the allowlist.
  */
-const openAllowedManagedStore = async (storeName: string, event: LambdaEvent) => {
-  const allowed = await listManagedBlobStores(event);
+const openAllowedManagedStore = async (storeName: string, event: LambdaEvent, binding: SiteBinding) => {
+  const allowed = await listManagedBlobStores(event, binding);
   if (!allowed.includes(storeName)) return undefined;
 
-  return getManagedBlobStore(storeName, event);
+  return getManagedBlobStore(storeName, event, binding);
 };
 
 // ─── search ─────────────────────────────────────────────────────────────────
 
 const searchObjects = async (query: string, context: ActionContext): Promise<InventoryHit[]> => {
-  const store = await openObjectStore(context.event);
+  const store = await openObjectStore(context.event, context.binding);
   const result = await handleObjectVerb(store, { action: 'inventory' }, context.principal);
   if (result.status < 200 || result.status >= 300) return [];
 
@@ -227,7 +228,7 @@ type ArtifactIndexSweep = { references: Array<ArtifactReference & { requestId: s
  * both consumers work off the same array.
  */
 const loadArtifactIndexSweep = async (context: ActionContext): Promise<ArtifactIndexSweep> =>
-  readArtifactReferences(await openArtifactIndexStore(context.event));
+  readArtifactReferences(await openArtifactIndexStore(context.event, context.binding));
 
 const searchArtifacts = (query: string, sweep: ArtifactIndexSweep): { hits: InventoryHit[]; truncated: boolean } => ({
   hits: sweep.references
@@ -266,13 +267,13 @@ const searchStores = async (
   query: string,
   context: ActionContext
 ): Promise<{ hits: InventoryHit[]; truncated: boolean }> => {
-  const stores = await listManagedBlobStores(context.event);
+  const stores = await listManagedBlobStores(context.event, context.binding);
   let truncated = false;
   const hits: InventoryHit[] = [];
 
   const perStore = await mapWithConcurrency(stores, STORE_READ_CONCURRENCY, async (storeName) => {
     try {
-      const store = getManagedBlobStore(storeName, context.event);
+      const store = getManagedBlobStore(storeName, context.event, context.binding);
       const items = await collectBlobListItems(await store.list({ paginate: true }));
       return { storeName, items };
     } catch (error) {
@@ -414,7 +415,7 @@ const previewObject: ActionHandler = async (params, context) => {
   });
   if (!request.success) return jsonResponse(400, { error: 'Unknown object type or id.' });
 
-  const store = await openObjectStore(context.event);
+  const store = await openObjectStore(context.event, context.binding);
   const result = await handleObjectVerb(store, request.data, context.principal);
 
   if (result.status < 200 || result.status >= 300) {
@@ -441,7 +442,7 @@ const previewArtifact: ActionHandler = async (params, context) => {
   const parsed = parseArtifactHitId(params.id);
   if (!parsed) return jsonResponse(400, { error: 'An artifact preview id must be "<requestId>/<sha256>".' });
 
-  const indexStore = await openArtifactIndexStore(context.event);
+  const indexStore = await openArtifactIndexStore(context.event, context.binding);
   const read = await readArtifactReferenceResult(indexStore, parsed.requestId, parsed.sha256);
 
   if (read.status === 'absent') return jsonResponse(404, { error: 'Artifact metadata not found.' });
@@ -464,7 +465,7 @@ const previewStoreBlob: ActionHandler = async (params, context) => {
   const parsed = parseStoreHitId(params.id);
   if (!parsed) return jsonResponse(400, { error: 'A store preview id must be "<store>/<key>".' });
 
-  const store = await openAllowedManagedStore(parsed.store, context.event);
+  const store = await openAllowedManagedStore(parsed.store, context.event, context.binding);
   if (!store) {
     // The allowlist is the whole point: an unmanaged store name is refused
     // before any read is attempted, and the refusal does not disclose whether
@@ -536,8 +537,8 @@ const deleteIndexKey = async (
  * form, or its bare sha256 — deliberately broad, because a delete that slipped
  * past a narrow shape-aware check would break a published page.
  */
-const findActiveObjectReferencing = async (event: LambdaEvent, reference: ArtifactReference) => {
-  const store = await openObjectStore(event);
+const findActiveObjectReferencing = async (event: LambdaEvent, reference: ArtifactReference, binding: SiteBinding) => {
+  const store = await openObjectStore(event, binding);
   const records = await listAllObjectRecords(store, { status: 'active' });
   const scanned = records.slice(0, MAX_REFERENCE_SCAN_RECORDS);
 
@@ -560,14 +561,14 @@ const handleDeleteArtifact: ActionHandler = async (params, context) => {
   const parsed = parseArtifactHitId(params.id);
   if (!parsed) return jsonResponse(400, { error: 'An artifact id of "<requestId>/<sha256>" is required.' });
 
-  const indexStore = await openArtifactIndexStore(context.event);
+  const indexStore = await openArtifactIndexStore(context.event, context.binding);
   const read = await readArtifactReferenceResult(indexStore, parsed.requestId, parsed.sha256);
   if (read.status === 'absent') return jsonResponse(404, { error: 'Artifact metadata not found.' });
   if (read.status === 'rejected') {
     return jsonResponse(422, { error: `Artifact index entry is not usable: ${read.issue}` });
   }
 
-  const { match, complete } = await findActiveObjectReferencing(context.event, read.reference);
+  const { match, complete } = await findActiveObjectReferencing(context.event, read.reference, context.binding);
   if (match) {
     return jsonResponse(409, {
       refused: true,
@@ -622,7 +623,7 @@ const handleRetagArtifact: ActionHandler = async (params, context) => {
     return jsonResponse(400, { error: 'At least one tag to add or remove is required.' });
   }
 
-  const indexStore = await openArtifactIndexStore(context.event);
+  const indexStore = await openArtifactIndexStore(context.event, context.binding);
   const read = await readArtifactReferenceResult(indexStore, parsed.requestId, parsed.sha256);
   if (read.status === 'absent') return jsonResponse(404, { error: 'Artifact metadata not found.' });
   if (read.status === 'rejected') {
@@ -711,12 +712,12 @@ const actionHandlers: Record<string, ActionHandler> = {
   'retag-artifact': handleRetagArtifact,
 };
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) {
     return jsonResponse(401, { error: adminState.error || 'Authentication is required.' });
   }
@@ -744,7 +745,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   const actor = adminState.email || adminState.userId || 'admin';
 
   try {
-    return await actionHandler(params, { event, principal, actor });
+    return await actionHandler(params, { event, principal, actor, binding });
   } catch (error) {
     console.error(`Admin_Inventory action "${action}" failed.`, error);
     return jsonResponse(500, { error: 'The inventory operation failed.' });
@@ -752,4 +753,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

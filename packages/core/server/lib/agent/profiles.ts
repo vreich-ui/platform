@@ -14,6 +14,7 @@ import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { z } from 'zod';
 
 import { getNetlifyBlobStore } from '../blob-store.js';
+import type { SiteBinding } from '../site-binding.js';
 
 export const AGENT_PROFILES_DOC_KEY = 'profiles.v1';
 
@@ -157,8 +158,9 @@ export const resolveProfile = (
   return fallback ?? SEED_PROFILES[0]!;
 };
 
-export const getAgentProfilesBlobStore = (event: unknown): Promise<AgentProfilesStore> =>
+export const getAgentProfilesBlobStore = (event: unknown, binding?: SiteBinding): Promise<AgentProfilesStore> =>
   getNetlifyBlobStore(
     { name: 'agent-profiles', consistency: 'strong' },
-    event
+    event,
+    binding
   ) as unknown as Promise<AgentProfilesStore>;

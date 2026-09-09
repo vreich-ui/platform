@@ -48,7 +48,7 @@ const reply = (statusCode: number, body: Record<string, unknown>) => ({
   body: JSON.stringify(body),
 });
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'POST') return reply(405, { error: 'Method not allowed' });
 
   let input: Record<string, unknown>;
@@ -68,7 +68,7 @@ const handlerImpl = async (event: LambdaEvent) => {
   const email = typeof input.email === 'string' && input.email.includes('@') ? input.email.trim() : null;
 
   try {
-    const siteObjects = await getSiteObjectsBlobStore(event);
+    const siteObjects = await getSiteObjectsBlobStore(event, binding);
     const product = await loadPublishedProduct(siteObjects, productId);
     if (!product) return reply(404, { error: 'Product not found or not published.' });
     if (product.body.commerce.mode !== 'free' || product.body.commerce.availability !== 'available') {
@@ -111,12 +111,12 @@ const handlerImpl = async (event: LambdaEvent) => {
       flags: {},
     };
 
-    const commerce = await getCommerceBlobStore(event);
+    const commerce = await getCommerceBlobStore(event, binding);
     await writeOrderIfAbsent(commerce, order);
 
     // Same event machinery as a paid purchase (amount 0) — best-effort.
     try {
-      const events = await getCommerceEventsBlobStore(event);
+      const events = await getCommerceEventsBlobStore(event, binding);
       const emailHash = email ? hashEmail(email) : null;
       const subject = { product_id: productId, order_id: orderId, session_id: null };
       await appendCommerceEvent(
@@ -142,7 +142,7 @@ const handlerImpl = async (event: LambdaEvent) => {
     // machinery, exactly as a form submission would record it.
     if (email) {
       try {
-        const optIns = await getOptInBlobStore(event);
+        const optIns = await getOptInBlobStore(event, binding);
         const record = buildRecord({ formName: 'free_product_claim', email, source: `/shop/${product.body.slug}` });
         if (record) {
           await optIns.setJSON(`opt-ins/${record.submittedAt.slice(0, 10)}/${randomUUID()}.json`, record, {
@@ -171,4 +171,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

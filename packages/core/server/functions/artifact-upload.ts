@@ -156,7 +156,7 @@ const headersMatchClaims = (headers: ParsedHeaders, claims: ArtifactUploadTokenC
   (headers.filename ?? '') === (claims.filename ?? '') &&
   tagsMatch(headers.tags, claims.tags);
 
-async function handlerImpl(req: Request) {
+const buildHandlerImpl = (binding: SiteBinding) => async (req: Request) => {
   const maxBytes = getMaxBytes();
 
   if (req.method === 'OPTIONS') return new Response('', { status: 204, headers: jsonHeaders });
@@ -236,6 +236,7 @@ async function handlerImpl(req: Request) {
     bytes: bounded.bytes,
     expectedSizeBytes: bounded.bytes.byteLength,
     expectedSha256: sha256Hex(bounded.bytes),
+    binding,
   });
 
   if (!result.ok) return jsonResponse(result.statusCode, { ok: false, error: result.error, maxBytes });
@@ -246,7 +247,7 @@ async function handlerImpl(req: Request) {
     deduped: result.deduped,
     maxBytes,
   });
-}
+};
 
 /** W11 T11.4: per-site factory (Functions-2.0 default-export shape). */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

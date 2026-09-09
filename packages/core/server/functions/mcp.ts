@@ -33,6 +33,9 @@
  */
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 
+import { setMcpBinding } from '../lib/mcp-binding.js';
+import type { SiteBinding } from '../lib/site-binding.js';
+
 /**
  * A Netlify function handler, as invoked in-process by the tool bodies.
  * `LambdaEvent`/`LambdaContext` are declared further down this module.
@@ -45,6 +48,13 @@ type SiblingHandler = (event: LambdaEvent, context?: LambdaContext) => Promise<S
  * handler a site supplies when it deploys `verify-article-images`.
  */
 export interface McpSiblingHandlers {
+  /**
+   * The shim's own SiteBinding — the env-var NAMES this site's store handles
+   * are opened with. Required: a composite that dispatches into another
+   * tenant's stores is the outcome the fail-closed doctrine below exists to
+   * prevent, and an optional field would let a shim omit it silently.
+   */
+  binding: SiteBinding;
   saveArtifactHandler: SiblingHandler;
   objectStoreHandler: SiblingHandler;
   deployStatusHandler: SiblingHandler;
@@ -56,6 +66,7 @@ let siblings: McpSiblingHandlers | undefined;
 /** Called once per site, by that site's shim, before any request is served. */
 export const configureMcp = (handlers: McpSiblingHandlers): void => {
   siblings = handlers;
+  setMcpBinding(handlers.binding);
 };
 
 /**
@@ -84,6 +95,27 @@ const requireSiblings = (): McpSiblingHandlers => {
   }
   return siblings;
 };
+
+/**
+ * This site's binding, for the store handles opened in THIS module. Every body
+ * below runs behind `requireSiblings()`, so the binding is guaranteed present;
+ * the shared tool-handler libraries use the undefined-tolerant
+ * `getMcpBinding()` instead, because they are also reachable from lambdas that
+ * never configured the composite.
+ */
+const requireBinding = (): SiteBinding => requireSiblings().binding;
+
+/**
+ * Idempotency receipts live in THIS site's `idempotency` store, so every
+ * wrapped tool call carries the injected binding. A thin local wrapper keeps
+ * the ~10 call sites below unchanged in shape.
+ */
+const withBoundIdempotentToolCall = (
+  event: Parameters<typeof withIdempotentToolCall>[0],
+  toolName: Parameters<typeof withIdempotentToolCall>[1],
+  idempotencyKeyInput: Parameters<typeof withIdempotentToolCall>[2],
+  run: Parameters<typeof withIdempotentToolCall>[3]
+) => withIdempotentToolCall(event, toolName, idempotencyKeyInput, run, requireBinding());
 
 /**
  * Tools that cannot work without a handler only some sites inject. A site that
@@ -677,7 +709,7 @@ const resolveOAuthPrincipalForRequest = async (
     event.log?.({ event: 'mcp_oauth_store_error', rpcMethod: null, slug: null, error: detail });
 
   try {
-    const store = (await getGovernanceBlobStore(event)) as unknown as OAuthBlobStore;
+    const store = (await getGovernanceBlobStore(event, requireBinding())) as unknown as OAuthBlobStore;
     const resolved = await describeOAuthPrincipal(store, {
       token,
       site: getSiteIdentity().siteId,
@@ -713,7 +745,7 @@ const resolveVerifiedAgentNameForRequest = async (event: LambdaEvent, token: str
   if (cached !== undefined) return cached;
 
   try {
-    const store = await getGovernanceBlobStore(event);
+    const store = await getGovernanceBlobStore(event, requireBinding());
     const doc = await getAgentKeysDoc(store as unknown as AgentKeysBlobStore);
     const resolved = resolveVerifiedAgentName(token, getSiteIdentity().siteId, doc) ?? undefined;
     if (resolved) writeAuthMemo(verifiedAgentNameMemo, tokenKey, resolved, nowMs);
@@ -940,7 +972,8 @@ const callWhoami = async (event: LambdaEvent) => {
     definitions: visibleToolDefinitions(),
     event,
     surfacePolicy: async () =>
-      (await resolveActivePolicies(await getGovernanceBlobStore(event).catch(() => undefined))).surfaces,
+      (await resolveActivePolicies(await getGovernanceBlobStore(event, requireBinding()).catch(() => undefined)))
+        .surfaces,
     auth: {
       oauthPrincipal: event.oauthPrincipal,
       verifiedAgentName: event.verifiedAgentName,
@@ -949,14 +982,18 @@ const callWhoami = async (event: LambdaEvent) => {
   });
 
   if (result.member?.email && result.surface !== 'unknown') {
-    await recordWhoamiSignal(event, {
-      email: result.member.email,
-      surface: result.surface,
-      manifestVersion: result.manifest_version,
-      toolsDigest: result.tools_digest,
-      canWrite: result.can_write,
-      at: new Date().toISOString(),
-    });
+    await recordWhoamiSignal(
+      event,
+      {
+        email: result.member.email,
+        surface: result.surface,
+        manifestVersion: result.manifest_version,
+        toolsDigest: result.tools_digest,
+        canWrite: result.can_write,
+        at: new Date().toISOString(),
+      },
+      requireBinding()
+    );
   }
   return result;
 };
@@ -985,7 +1022,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
     case 'membership_status':
       // W18 T18.7: the fleet probe's `membership` family — store reachability +
       // policy provenance, non-secret by construction (names/numbers only).
-      return toolResult(await getMembershipStatus(event));
+      return toolResult(await getMembershipStatus(event, requireBinding()));
     case 'deploy_status':
       return callDeployStatus(event, input);
     case 'verify_article_images':
@@ -999,9 +1036,13 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // not happen — it very often already has. idempotency_key makes a
       // same-key retry replay the first result instead of firing a second
       // forceBuild.
-      return withIdempotentToolCall(event, name, input.idempotency_key, () => callReleaseToProduction(event, input));
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () =>
+        callReleaseToProduction(event, input)
+      );
     case 'create_agent_artifact_job':
-      return withIdempotentToolCall(event, name, input.idempotency_key, () => callCreateAgentArtifactJob(event, input));
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () =>
+        callCreateAgentArtifactJob(event, input)
+      );
     case 'get_agent_artifact_job_status':
       return callGetAgentArtifactJobStatus(event, input);
     case 'resume_agent_artifact_job':
@@ -1017,13 +1058,13 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
     case 'analyze_image_layout':
       return callAnalyzeImageLayout(event, input);
     case 'preview_image_grid':
-      return withIdempotentToolCall(event, name, input.idempotency_key, () => callPreviewImageGrid(event, input));
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () => callPreviewImageGrid(event, input));
     case 'annotate_image':
-      return withIdempotentToolCall(event, name, input.idempotency_key, () => callAnnotateImage(event, input));
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () => callAnnotateImage(event, input));
     case 'check_image_text':
       return callCheckImageText(event, input);
     case 'create_pdf_template':
-      return withIdempotentToolCall(event, name, input.idempotency_key, () => callCreatePdfTemplate(event, input));
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () => callCreatePdfTemplate(event, input));
     case 'list_pdf_templates':
       return callListPdfTemplates(event, input);
     case 'get_pdf_template':
@@ -1037,7 +1078,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
     // ambiguous about whether the job was created, and a same-key retry must
     // replay the original receipt rather than start a second render.
     case 'render_article_pdf':
-      return withIdempotentToolCall(event, name, input.idempotency_key, () => callRenderArticlePdf(event, input));
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () => callRenderArticlePdf(event, input));
     // W2 T2.3: both read-only — no job, no render, no write.
     case 'validate_pdf_render_data':
       return callValidatePdfRenderData(event, input);
@@ -1214,7 +1255,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // naive retry after a timeout/502 creates a second object even though
       // the first write landed. idempotency_key makes a same-key retry
       // replay the original created object instead.
-      return withIdempotentToolCall(event, name, input.idempotency_key, () =>
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () =>
         callObjectAction(event, {
           action: 'create',
           object_type: input.object_type,
@@ -1444,7 +1485,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // `version` and appends a fresh `history` entry on every call. A
       // same-key retry after a timeout/502 replays the original receipt
       // instead of stacking a redundant stamp/history entry.
-      return withIdempotentToolCall(event, name, input.idempotency_key, () =>
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () =>
         callObjectPublish(event, {
           action: 'publish_by_time',
           object_type: input.object_type,
@@ -1482,7 +1523,13 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       // 'allow' inside getBrandImageryOverridePolicy.
       const contractOptions =
         objectType === 'site'
-          ? { brandImageryOverridePolicy: await getBrandImageryOverridePolicy(getSiteIdentity().siteId, event) }
+          ? {
+              brandImageryOverridePolicy: await getBrandImageryOverridePolicy(
+                getSiteIdentity().siteId,
+                event,
+                requireBinding()
+              ),
+            }
           : {};
       return toolResult({ contract: buildObjectContract(objectType as ObjectType, contractOptions) });
     }
@@ -1507,7 +1554,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
   if (isMembershipTool(name)) {
     const run = () => callMembershipTool(event, name, input);
     return typeof input.idempotency_key === 'string'
-      ? withIdempotentToolCall(event, name, input.idempotency_key, run)
+      ? withBoundIdempotentToolCall(event, name, input.idempotency_key, run)
       : run();
   }
 
@@ -1525,12 +1572,12 @@ const callMembershipTool = async (event: LambdaEvent, name: string, input: Recor
     args,
     principal,
     deps: {
-      store: await getUsersBlobStore(event),
+      store: await getUsersBlobStore(event, requireBinding()),
       // no GoTrue admin token on an MCP request (it exists only on Identity-JWT
       // requests) — invitation e-mails still go out via the store record + the
       // next admin-UI action; identity deletes queue (T18.4).
-      oauthStore: async () => (await getGovernanceBlobStore(event)) as unknown as OAuthBlobStore,
-      objectStore: async () => (await getSiteObjectsBlobStore(event)) as never,
+      oauthStore: async () => (await getGovernanceBlobStore(event, requireBinding())) as unknown as OAuthBlobStore,
+      objectStore: async () => (await getSiteObjectsBlobStore(event, requireBinding())) as never,
     },
   });
   if (result.status >= 200 && result.status < 300) return toolResult(result.body);
@@ -1568,7 +1615,7 @@ const preflightToolCall = async (event: LambdaEvent, name: string) => {
   if (surface) {
     let blocked = false;
     try {
-      const policies = await resolveActivePolicies(await getGovernanceBlobStore(event));
+      const policies = await resolveActivePolicies(await getGovernanceBlobStore(event, requireBinding()));
       blocked = policies.surfaces?.[surface] === 'block';
     } catch {
       // A governance-store fault must never cut a surface that was never cut.
@@ -1595,7 +1642,7 @@ const preflightToolCall = async (event: LambdaEvent, name: string) => {
   if (!subject) return undefined;
 
   const verdict = await countWrite(
-    (await getGovernanceBlobStore(event).catch(() => undefined)) as RateLimitStore | undefined,
+    (await getGovernanceBlobStore(event, requireBinding()).catch(() => undefined)) as RateLimitStore | undefined,
     subject
   );
   if (verdict.allowed) return undefined;
@@ -1768,7 +1815,7 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
             oauth: {
               realm: getSiteIdentity().siteSlug,
               accepted_audiences: mcpResourceAudiences(event),
-              token_store_reachable: await getGovernanceBlobStore(event)
+              token_store_reachable: await getGovernanceBlobStore(event, requireBinding())
                 .then((store) => store.get('oauth/__health_probe__').then(() => true))
                 .catch(() => false),
             },
@@ -1785,7 +1832,7 @@ export const handler = async (rawEvent: LambdaEvent, context?: LambdaContext) =>
              */
             surface: {
               tools_digest: liveToolsDigest(),
-              manifest_version: await getPluginManifestBlobStore(event)
+              manifest_version: await getPluginManifestBlobStore(event, requireBinding())
                 .then((store) => getPluginManifestDoc(store))
                 .then((doc) => doc.active?.manifest_version ?? null)
                 .catch(() => null),

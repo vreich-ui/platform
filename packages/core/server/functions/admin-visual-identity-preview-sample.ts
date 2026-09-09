@@ -77,83 +77,81 @@ const parseBody = (event: LambdaEvent): unknown => {
   }
 };
 
-const buildHandlerImpl =
-  (_binding: SiteBinding) =>
-  async (event: LambdaEvent, context?: LambdaContext) => {
-    if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+  if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-    const access = await resolveAdminAccessFromEvent(event, context);
-    if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
-    if (!access.roles.some((role) => PREVIEW_SAMPLE_ROLES.has(role))) {
-      return jsonResponse(403, {
-        error: `${access.email ?? 'This account'} has no editing role on this publication, so it cannot preview a sample. Ask the owner for editor or publisher.`,
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
+  if (!access.authenticated) return jsonResponse(401, { error: access.error ?? 'Authentication is required.' });
+  if (!access.roles.some((role) => PREVIEW_SAMPLE_ROLES.has(role))) {
+    return jsonResponse(403, {
+      error: `${access.email ?? 'This account'} has no editing role on this publication, so it cannot preview a sample. Ask the owner for editor or publisher.`,
+    });
+  }
+
+  const payload = parseBody(event);
+  if (!isRecord(payload)) return jsonResponse(400, { error: 'Invalid request body.' });
+
+  const templateId = text(payload.templateId);
+  if (!templateId) return jsonResponse(400, { error: 'templateId is required.' });
+
+  try {
+    const siteId = getSiteIdentity().siteId;
+
+    const templateLookup = await callGetPdfTemplate(event, { site_id: siteId, template_id: templateId });
+    if ('isError' in templateLookup) {
+      const detail = templateLookup.structuredContent as Record<string, unknown>;
+      const status = typeof detail.statusCode === 'number' ? (detail.statusCode as number) : 404;
+      return jsonResponse(status, {
+        error: text(detail.error) ?? `No pdf template ${templateId} exists on this publication.`,
+        error_code: text(detail.error_code),
+      });
+    }
+    const sampleData = templateLookup.structuredContent.sampleData;
+    if (!isRecord(sampleData)) {
+      return jsonResponse(422, {
+        error: `Template ${templateId} has no sampleData to preview.`,
+        error_code: 'template_sample_data_missing',
       });
     }
 
-    const payload = parseBody(event);
-    if (!isRecord(payload)) return jsonResponse(400, { error: 'Invalid request body.' });
-
-    const templateId = text(payload.templateId);
-    if (!templateId) return jsonResponse(400, { error: 'templateId is required.' });
-
-    try {
-      const siteId = getSiteIdentity().siteId;
-
-      const templateLookup = await callGetPdfTemplate(event, { site_id: siteId, template_id: templateId });
-      if ('isError' in templateLookup) {
-        const detail = templateLookup.structuredContent as Record<string, unknown>;
-        const status = typeof detail.statusCode === 'number' ? (detail.statusCode as number) : 404;
-        return jsonResponse(status, {
-          error: text(detail.error) ?? `No pdf template ${templateId} exists on this publication.`,
-          error_code: text(detail.error_code),
-        });
-      }
-      const sampleData = templateLookup.structuredContent.sampleData;
-      if (!isRecord(sampleData)) {
-        return jsonResponse(422, {
-          error: `Template ${templateId} has no sampleData to preview.`,
-          error_code: 'template_sample_data_missing',
-        });
-      }
-
-      const previewed = await callPreviewPdfTemplate(event, {
-        site_id: siteId,
-        template_id: templateId,
-        data: sampleData,
+    const previewed = await callPreviewPdfTemplate(event, {
+      site_id: siteId,
+      template_id: templateId,
+      data: sampleData,
+    });
+    if ('isError' in previewed) {
+      const detail = previewed.structuredContent as Record<string, unknown>;
+      return jsonResponse(typeof detail.statusCode === 'number' ? (detail.statusCode as number) : 502, {
+        error: text(detail.error) ?? 'The preview could not be rendered.',
+        error_code: text(detail.error_code),
       });
-      if ('isError' in previewed) {
-        const detail = previewed.structuredContent as Record<string, unknown>;
-        return jsonResponse(typeof detail.statusCode === 'number' ? (detail.statusCode as number) : 502, {
-          error: text(detail.error) ?? 'The preview could not be rendered.',
-          error_code: text(detail.error_code),
-        });
-      }
-
-      event.log?.({
-        event: 'visual_identity_pdf_sample_previewed',
-        siteId,
-        templateId,
-      });
-
-      // Best-effort only — never fabricated: `preview_pdf_template`'s exact
-      // response shape is not yet proven against a live pdf-tool (see this
-      // file's header). When the body carries a `blobKey` shaped like a
-      // canonical Major Key, a servable preview URL is added alongside the
-      // raw body; otherwise nothing is guessed.
-      const blobKey = text(previewed.structuredContent.blobKey);
-      const previewUrl =
-        blobKey && MAJOR_KEY_ARTIFACT_REF_RE.test(blobKey) ? publicPathForArtifactRef(blobKey) : undefined;
-
-      return jsonResponse(200, {
-        template_id: templateId,
-        ...previewed.structuredContent,
-        ...(previewUrl ? { preview_url: previewUrl } : {}),
-      });
-    } catch (error) {
-      console.error('Visual identity PDF sample preview failed.', error);
-      return jsonResponse(500, { error: 'The preview could not be rendered.' });
     }
-  };
+
+    event.log?.({
+      event: 'visual_identity_pdf_sample_previewed',
+      siteId,
+      templateId,
+    });
+
+    // Best-effort only — never fabricated: `preview_pdf_template`'s exact
+    // response shape is not yet proven against a live pdf-tool (see this
+    // file's header). When the body carries a `blobKey` shaped like a
+    // canonical Major Key, a servable preview URL is added alongside the
+    // raw body; otherwise nothing is guessed.
+    const blobKey = text(previewed.structuredContent.blobKey);
+    const previewUrl =
+      blobKey && MAJOR_KEY_ARTIFACT_REF_RE.test(blobKey) ? publicPathForArtifactRef(blobKey) : undefined;
+
+    return jsonResponse(200, {
+      template_id: templateId,
+      ...previewed.structuredContent,
+      ...(previewUrl ? { preview_url: previewUrl } : {}),
+    });
+  } catch (error) {
+    console.error('Visual identity PDF sample preview failed.', error);
+    return jsonResponse(500, { error: 'The preview could not be rendered.' });
+  }
+};
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
 export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

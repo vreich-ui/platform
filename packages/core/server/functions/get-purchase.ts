@@ -46,7 +46,7 @@ const CONTENT_TYPES: Record<string, string> = {
   webp: 'image/webp',
 };
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'GET') return reply(405, { error: 'Method not allowed' });
 
   const secret = purchaseTokenSecret();
@@ -66,11 +66,11 @@ const handlerImpl = async (event: LambdaEvent) => {
   }
 
   try {
-    const commerce = await getCommerceBlobStore(event);
+    const commerce = await getCommerceBlobStore(event, binding);
     const order = await readOrder(commerce, verified.payload.order_key);
     if (!order) return reply(404, { error: 'No order found for this token.' });
 
-    const artifacts = await getArtifactBlobStore(event);
+    const artifacts = await getArtifactBlobStore(event, binding);
     const blob = (await (
       artifacts as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> }
     ).get(verified.payload.artifact_ref, { type: 'arrayBuffer' })) as ArrayBuffer | null;
@@ -79,7 +79,7 @@ const handlerImpl = async (event: LambdaEvent) => {
     // Filename from the product's CURRENT fulfillment; falls back to the ref's basename.
     let filename = verified.payload.artifact_ref.split('/').pop() || 'download';
     try {
-      const siteObjects = await getSiteObjectsBlobStore(event);
+      const siteObjects = await getSiteObjectsBlobStore(event, binding);
       const product = await loadPublishedProduct(siteObjects, order.product_id);
       if (product?.body.fulfillment.kind === 'download') filename = product.body.fulfillment.filename;
     } catch {
@@ -88,7 +88,7 @@ const handlerImpl = async (event: LambdaEvent) => {
 
     // Authoritative but best-effort: delivery never fails on event append.
     try {
-      const events = await getCommerceEventsBlobStore(event);
+      const events = await getCommerceEventsBlobStore(event, binding);
       await appendCommerceEvent(
         events,
         newCommerceEvent({
@@ -120,4 +120,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

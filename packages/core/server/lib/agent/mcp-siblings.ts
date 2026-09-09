@@ -43,6 +43,7 @@ import type { SiteBinding } from '../site-binding.js';
 export const ensureMcpSiblings = (binding: SiteBinding): void => {
   if (isMcpConfigured()) return;
   configureMcp({
+    binding,
     saveArtifactHandler: createSaveArtifactHandler(binding),
     objectStoreHandler: createObjectStoreHandler(binding),
     deployStatusHandler: createDeployStatusHandler(binding),

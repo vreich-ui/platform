@@ -77,7 +77,8 @@ const resolveDownloadFilename = async (
   blobKey: string,
   fallbackName: string,
   metadata: BlobMetadata | undefined,
-  event: LambdaEvent
+  event: LambdaEvent,
+  binding: SiteBinding
 ): Promise<string> => {
   const metadataName = nameFromMetadata(metadata);
   if (metadataName) return metadataName;
@@ -86,7 +87,7 @@ const resolveDownloadFilename = async (
   if (!pointer) return fallbackName;
 
   try {
-    const indexStore = (await getArtifactIndexBlobStore(event)) as unknown as ArtifactIndexStore;
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
     const reference = await readArtifactReference(indexStore, pointer.requestId, pointer.sha256);
     const indexName = toText(reference?.originalFilename) || toText(reference?.label);
     if (indexName) return indexName;
@@ -165,7 +166,7 @@ const buildContentDisposition = (
   return `${disposition}; filename="${asciiSafeName}"; filename*=UTF-8''${encodeRFC5987ValueChars(displayName)}`;
 };
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
@@ -177,7 +178,7 @@ const handlerImpl = async (event: LambdaEvent) => {
   }
 
   try {
-    const store = await getArtifactBlobStore(event);
+    const store = await getArtifactBlobStore(event, binding);
     const result = await (store as unknown as BinaryReadableBlobStoreWithMetadata).getWithMetadata(blobKey, {
       type: 'arrayBuffer',
     });
@@ -188,7 +189,7 @@ const handlerImpl = async (event: LambdaEvent) => {
 
     const buffer = Buffer.from(result.data);
     const fallbackName = blobKey.split('/').pop() || 'artifact.pdf';
-    const resolvedName = await resolveDownloadFilename(blobKey, fallbackName, result.metadata, event);
+    const resolvedName = await resolveDownloadFilename(blobKey, fallbackName, result.metadata, event, binding);
 
     return {
       statusCode: 200,
@@ -214,4 +215,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

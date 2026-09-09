@@ -103,6 +103,7 @@ import {
   searchArtifacts as searchArtifactsAdmin,
 } from '../mcp-artifact-admin.js';
 import { withIdempotentToolCall } from '../idempotency-store.js';
+import { getMcpBinding } from '../mcp-binding.js';
 
 export interface ToolContextDeps {
   objectStore: ObjectVerbStore;
@@ -191,12 +192,20 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   deploy_status: callDeployStatus,
   verify_article_images: callVerifyArticleImages,
   release_to_production: (event, args) =>
-    withIdempotentToolCall(event, 'release_to_production', args.idempotency_key, () =>
-      callReleaseToProduction(event, args)
+    withIdempotentToolCall(
+      event,
+      'release_to_production',
+      args.idempotency_key,
+      () => callReleaseToProduction(event, args),
+      getMcpBinding()
     ),
   create_agent_artifact_job: (event, args) =>
-    withIdempotentToolCall(event, 'create_agent_artifact_job', args.idempotency_key, () =>
-      callCreateAgentArtifactJob(event, args)
+    withIdempotentToolCall(
+      event,
+      'create_agent_artifact_job',
+      args.idempotency_key,
+      () => callCreateAgentArtifactJob(event, args),
+      getMcpBinding()
     ),
   get_agent_artifact_job_status: callGetAgentArtifactJobStatus,
   resume_agent_artifact_job: callResumeAgentArtifactJob,
@@ -206,12 +215,28 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   analyze_image_layout: callAnalyzeImageLayout,
   check_image_text: callCheckImageText,
   annotate_image: (event, args) =>
-    withIdempotentToolCall(event, 'annotate_image', args.idempotency_key, () => callAnnotateImage(event, args)),
+    withIdempotentToolCall(
+      event,
+      'annotate_image',
+      args.idempotency_key,
+      () => callAnnotateImage(event, args),
+      getMcpBinding()
+    ),
   preview_image_grid: (event, args) =>
-    withIdempotentToolCall(event, 'preview_image_grid', args.idempotency_key, () => callPreviewImageGrid(event, args)),
+    withIdempotentToolCall(
+      event,
+      'preview_image_grid',
+      args.idempotency_key,
+      () => callPreviewImageGrid(event, args),
+      getMcpBinding()
+    ),
   create_pdf_template: (event, args) =>
-    withIdempotentToolCall(event, 'create_pdf_template', args.idempotency_key, () =>
-      callCreatePdfTemplate(event, args)
+    withIdempotentToolCall(
+      event,
+      'create_pdf_template',
+      args.idempotency_key,
+      () => callCreatePdfTemplate(event, args),
+      getMcpBinding()
     ),
   list_pdf_templates: callListPdfTemplates,
   get_pdf_template: callGetPdfTemplate,
@@ -224,7 +249,13 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
   // W2 T2.3: the composite creates a paid render job and patches the article,
   // so it replicates create_agent_artifact_job's idempotency wrapping exactly.
   render_article_pdf: (event, args) =>
-    withIdempotentToolCall(event, 'render_article_pdf', args.idempotency_key, () => callRenderArticlePdf(event, args)),
+    withIdempotentToolCall(
+      event,
+      'render_article_pdf',
+      args.idempotency_key,
+      () => callRenderArticlePdf(event, args),
+      getMcpBinding()
+    ),
   validate_pdf_render_data: callValidatePdfRenderData,
   get_pdf_render_brand: callGetPdfRenderBrand,
   validate_pdf_template: callValidatePdfTemplate,
@@ -371,7 +402,7 @@ export const buildToolContext = (deps: ToolContextDeps): ToolContext => {
     ...(operationalEvent
       ? {
           idempotent: <T extends Record<string, unknown>>(toolName: string, key: string, run: () => Promise<T>) =>
-            withIdempotentToolCall(operationalEvent, toolName, key, run) as Promise<T>,
+            withIdempotentToolCall(operationalEvent, toolName, key, run, getMcpBinding()) as Promise<T>,
         }
       : {}),
     ...(membershipStore

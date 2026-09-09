@@ -43,10 +43,10 @@ const parseLimit = (event: LambdaEvent): number => {
   }
 };
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-  const adminState = await resolveAdminAccessFromEvent(event, context);
+  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
   if (!adminState.isAdmin) return jsonResponse(403, { error: 'Admin access required' });
 
@@ -54,11 +54,11 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   const generatedAtMs = Date.now();
 
   try {
-    const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore;
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore;
     // Runtime governance override (else committed) feeds requires_approval on
     // rows — the inbox itself is policy-independent, but we keep it consistent
     // with the rest of the admin surface.
-    const { approval } = await resolveActivePolicies(await getGovernanceBlobStore(event));
+    const { approval } = await resolveActivePolicies(await getGovernanceBlobStore(event, binding));
 
     const records = await listAllObjectRecords(store);
     const feed = buildAuditFeed(records, { limit });
@@ -72,4 +72,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

@@ -16,6 +16,7 @@
  */
 import { getSiteIdentity } from '../../../lib/site-identity.js';
 import { DEFAULT_MEMBERSHIP_POLICY, activeMembershipPolicyBase } from '../../../lib/membership-policy.js';
+import type { SiteBinding } from '../site-binding.js';
 import { getPolicy } from './write.js';
 import { KEYS, getMembershipStore, membershipPolicyOverrideSchema } from './store.js';
 
@@ -51,7 +52,7 @@ const committedOverrideKeys = (): string[] => {
     .sort();
 };
 
-export const getMembershipStatus = async (event: unknown): Promise<MembershipStatusReport> => {
+export const getMembershipStatus = async (event: unknown, binding?: SiteBinding): Promise<MembershipStatusReport> => {
   const site_id = getSiteIdentity().siteId;
   const committed = committedOverrideKeys();
 
@@ -59,7 +60,7 @@ export const getMembershipStatus = async (event: unknown): Promise<MembershipSta
   let storeKeys: string[] = [];
   let effective = activeMembershipPolicyBase();
   try {
-    const store = await getMembershipStore(event);
+    const store = await getMembershipStore(event, binding);
     const raw = await store.get(KEYS.policy());
     usersStore = 'reachable';
     if (raw) {

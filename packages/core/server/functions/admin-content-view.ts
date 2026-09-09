@@ -88,9 +88,9 @@ export const requestSchema = z.object({
   object_id: z.string().min(1),
 });
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context);
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin) return jsonResponse(403, { error: 'Admin access is required.' });
 
@@ -105,7 +105,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
   if (!request.success) return jsonResponse(400, { error: 'Invalid request fields.', issues: request.error.issues });
 
   try {
-    const store = (await getSiteObjectsBlobStore(event)) as unknown as ObjectLockStore;
+    const store = (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectLockStore;
     const key = objectRecordKey(request.data.object_type, request.data.object_id);
     const result = await objectLockStatus(store, key);
     if (result.status !== 200) return jsonResponse(result.status, result.body);

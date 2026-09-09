@@ -43,7 +43,7 @@ const reply = (statusCode: number, body: Record<string, unknown>) => ({
 const checkoutEventId = (session: { id?: string | null }): string | undefined =>
   typeof session.id === 'string' && session.id ? checkoutCompletedEventId(session.id) : undefined;
 
-const handlerImpl = async (event: LambdaEvent) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) => {
   if (event.httpMethod !== 'GET') return reply(405, { error: 'Method not allowed' });
 
   const sessionId = (event.queryStringParameters?.session_id ?? '').trim();
@@ -59,7 +59,7 @@ const handlerImpl = async (event: LambdaEvent) => {
     const paid = session.payment_status === 'paid';
     const commerceEventId = checkoutEventId(session);
 
-    const commerce = await getCommerceBlobStore(event);
+    const commerce = await getCommerceBlobStore(event, binding);
     const order = await readOrder(commerce, sessionId);
     if (!order) {
       // Webhook latency vs buyer patience (§8.8): tell the page to retry.
@@ -78,7 +78,7 @@ const handlerImpl = async (event: LambdaEvent) => {
     }
 
     const secret = purchaseTokenSecret();
-    const siteObjects = await getSiteObjectsBlobStore(event);
+    const siteObjects = await getSiteObjectsBlobStore(event, binding);
     const product = await loadPublishedProduct(siteObjects, order.product_id);
     if (!secret || product?.body.fulfillment.kind !== 'download') {
       // Fulfilled order but no mintable link right now — surface a support path.
@@ -117,4 +117,4 @@ const handlerImpl = async (event: LambdaEvent) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

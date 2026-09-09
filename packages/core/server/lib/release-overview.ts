@@ -28,6 +28,7 @@
 import { getSiteObjectsBlobStore } from './blob-store.js';
 import { handleObjectVerb, type ObjectVerbStore } from './object-verbs.js';
 import type { InventoryRow } from './object-inventory.js';
+import type { SiteBinding } from './site-binding.js';
 import {
   fetchRecentDeploys,
   getPublishedProductionDeploy,
@@ -110,13 +111,17 @@ export type ReleaseOverviewCaller = {
  * Throws `ReleaseOverviewUnavailableError` when the inventory sweep itself
  * fails — the caller decides the status code.
  */
-export const loadReleaseOverview = async (event: unknown, caller: ReleaseOverviewCaller): Promise<ReleaseOverview> => {
+export const loadReleaseOverview = async (
+  event: unknown,
+  caller: ReleaseOverviewCaller,
+  binding?: SiteBinding
+): Promise<ReleaseOverview> => {
   const key = memoKeyFor(caller.roles);
   const hit = memo.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.overview;
 
   const inventory = await handleObjectVerb(
-    (await getSiteObjectsBlobStore(event)) as unknown as ObjectVerbStore,
+    (await getSiteObjectsBlobStore(event, binding)) as unknown as ObjectVerbStore,
     { action: 'inventory', status: 'active' },
     { kind: 'human', id: caller.userId ?? '', email: caller.email },
     { roles: caller.roles as never }
@@ -124,9 +129,9 @@ export const loadReleaseOverview = async (event: unknown, caller: ReleaseOvervie
   if (inventory.status !== 200) throw new ReleaseOverviewUnavailableError('Publication state could not be loaded.');
   const rows = (inventory.body.objects ?? []) as InventoryRow[];
 
-  const lookupConfigured = isNetlifyDeployLookupConfigured();
+  const lookupConfigured = isNetlifyDeployLookupConfigured(binding?.env);
   const [publishedDeploy, recentDeploys] = lookupConfigured
-    ? await Promise.all([getPublishedProductionDeploy(), fetchRecentDeploys()])
+    ? await Promise.all([getPublishedProductionDeploy(binding?.env), fetchRecentDeploys(binding?.env)])
     : [undefined, [] as DeployReceipt[]];
   const latestProduction = recentDeploys.find((deploy) => !deploy.context || deploy.context === 'production');
   const publishedCommit = publishedDeploy?.commit || undefined;

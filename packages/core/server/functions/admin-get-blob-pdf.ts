@@ -1,4 +1,4 @@
-import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
+import { readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
 import { getHeader, type LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { getArtifactBlobStore } from '../lib/blob-store.js';
@@ -20,8 +20,8 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
 
 const toText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
-const hasValidNetlifyPublishSecret = (event: LambdaEvent) => {
-  const expected = toText(readBoundEnv(PLATFORM_ENV_NAMES.publishSecret));
+const hasValidNetlifyPublishSecret = (event: LambdaEvent, binding: SiteBinding) => {
+  const expected = toText(readBoundEnv(binding.env.publishSecret));
   if (!expected) return false;
 
   const provided = toText(getHeader(event.headers, 'x-publish-key'));
@@ -29,13 +29,13 @@ const hasValidNetlifyPublishSecret = (event: LambdaEvent) => {
   return Boolean(provided && provided === expected);
 };
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') {
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  if (!hasValidNetlifyPublishSecret(event)) {
-    const adminState = await resolveAdminAccessFromEvent(event, context);
+  if (!hasValidNetlifyPublishSecret(event, binding)) {
+    const adminState = await resolveAdminAccessFromEvent(event, context, binding);
     if (!adminState.authenticated) {
       return jsonResponse(401, {
         error: adminState.error || 'Authentication is required.',
@@ -58,7 +58,7 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
   }
 
   try {
-    const store = await getArtifactBlobStore(event);
+    const store = await getArtifactBlobStore(event, binding);
     const result = (await (
       store as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> }
     ).get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
@@ -88,4 +88,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);

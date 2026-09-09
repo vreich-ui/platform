@@ -487,10 +487,8 @@ export type RequestListRow = RequestIndexRow & { object_in_library?: boolean };
  * `undefined` back means nobody has looked and nothing entails an answer,
  * which `rowActions` renders as unconfirmed rather than as present.
  */
-export const libraryPresence = (
-  published: boolean,
-  memoed: ObjectProbeVerdict | undefined
-): boolean | undefined => (published ? true : memoed?.in_library);
+export const libraryPresence = (published: boolean, memoed: ObjectProbeVerdict | undefined): boolean | undefined =>
+  published ? true : memoed?.in_library;
 
 /**
  * Attach what the probe has actually seen. Three states survive to the wire —
@@ -514,10 +512,10 @@ export const withLibraryFacts = (
  * LAZILY — a poll with nothing to reconcile (the steady state) never opens the
  * store at all.
  */
-const siteObjectProbe = (event: LambdaEvent): ObjectExistenceProbe => {
+const siteObjectProbe = (event: LambdaEvent, binding?: SiteBinding): ObjectExistenceProbe => {
   let store: Promise<{ get(key: string): Promise<string | null> }> | undefined;
   return async (objectId) => {
-    store ??= getSiteObjectsBlobStore(event);
+    store ??= getSiteObjectsBlobStore(event, binding);
     const raw = await (await store).get(objectRecordKey('content_item', objectId));
     // C2b: the SAME read answers both questions — is the object there, and
     // does its record prove a publish. No extra fetch, so the cost profile is
@@ -526,14 +524,14 @@ const siteObjectProbe = (event: LambdaEvent): ObjectExistenceProbe => {
   };
 };
 
-const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const callerPrincipal: Principal = { kind: 'human', id: adminState.userId ?? '', email: adminState.email ?? '' };
   const callerRoles = await resolveRolesForPrincipalAsync(callerPrincipal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event), email),
+    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
   });
   if (!callerRoles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
 
@@ -550,7 +548,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
   const callerEmail = (adminState.email ?? '').trim().toLowerCase();
 
   try {
-    const store = await getEditorialRequestsBlobStore(event);
+    const store = await getEditorialRequestsBlobStore(event, binding);
 
     switch (request.data.action) {
       case 'list': {
@@ -570,7 +568,7 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         const nextCursor = start + limit < matched.length ? String(start + limit) : undefined;
         // C2: a finished row whose doc never recorded its object. Bounded and
         // one-shot — see the block above the handler for the three rules.
-        const backfilled = await backfillPageObjects(store, page, siteObjectProbe(event));
+        const backfilled = await backfillPageObjects(store, page, siteObjectProbe(event, binding));
         // `seq` is the index's write counter, so it is re-read on the one call
         // that actually wrote and left alone on every other.
         const seqNow = backfilled.wrote ? ((await loadIndex(store))?.seq ?? seq) : seq;
@@ -610,7 +608,13 @@ const buildHandlerImpl = (_binding: SiteBinding) => async (event: LambdaEvent, c
         // drawer opened — the detail view draws the same row actions.
         const reconciled =
           doc.status === 'done' && doc.object?.published === undefined
-            ? await reconcileOneObject(store, doc.request_id, siteObjectProbe(event), objectProbeMemo, Date.now())
+            ? await reconcileOneObject(
+                store,
+                doc.request_id,
+                siteObjectProbe(event, binding),
+                objectProbeMemo,
+                Date.now()
+              )
             : undefined;
         const settled = reconciled ?? doc;
         // W21.1 — this is also the RECOVERY door. `reconcileOneObject` never

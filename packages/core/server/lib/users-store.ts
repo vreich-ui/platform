@@ -34,6 +34,7 @@ import {
   type Membership,
   type MembershipStore,
 } from './membership/store.js';
+import type { SiteBinding } from './site-binding.js';
 
 export const USERS_SCHEMA_VERSION = 1;
 
@@ -194,4 +195,5 @@ export const withAuditEntry = (record: UserRecord, entry: UserAuditEntry): UserR
   audit: [...record.audit, entry],
 });
 
-export const getUsersBlobStore = (event: unknown): Promise<UsersBlobStore> => getMembershipStore(event);
+export const getUsersBlobStore = (event: unknown, binding?: SiteBinding): Promise<UsersBlobStore> =>
+  getMembershipStore(event, binding);

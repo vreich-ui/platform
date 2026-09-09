@@ -131,7 +131,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const method = event.httpMethod ?? 'GET';
   if (method !== 'GET' && method !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-  const access = await resolveAdminAccessFromEvent(event, context);
+  const access = await resolveAdminAccessFromEvent(event, context, binding);
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 
@@ -165,7 +165,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const doc = await getPluginManifestDoc(store);
 
     stage = 'approval';
-    const approval = await resolveApproval(event);
+    const approval = await resolveApproval(event, binding);
 
     stage = 'tool_surface';
     const liveTools = buildPluginTools(visibleToolDefinitions());
@@ -185,7 +185,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       const signals = await getInstallSignalsDoc(store as unknown as InstallSignalsStore);
 
       stage = 'summary';
-      const publishes = await recentPublishes(event);
+      const publishes = await recentPublishes(event, binding);
 
       return jsonResponse(200, {
         signals: signals.members,
@@ -368,12 +368,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         args: { email, role },
         principal: { kind: 'human', id: access.userId ?? '', email: access.email, via: 'admin_ui' },
         deps: {
-          store: (await getUsersBlobStore(event)) as never,
+          store: (await getUsersBlobStore(event, binding)) as never,
           identity: identityCtx,
           fetchImpl: (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
             fetch(url, init),
-          oauthStore: async () => (await getGovernanceBlobStore(event)) as never,
-          objectStore: async () => (await getSiteObjectsBlobStore(event)) as never,
+          oauthStore: async () => (await getGovernanceBlobStore(event, binding)) as never,
+          objectStore: async () => (await getSiteObjectsBlobStore(event, binding)) as never,
         },
       });
       if (invited.status < 200 || invited.status >= 300) return jsonResponse(invited.status, invited.body);
@@ -454,11 +454,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
  * board that is otherwise useful, and an operator can tell "no row" from
  * "everything is missing" at a glance.
  */
-const recentPublishes = async (event: LambdaEvent) => {
+const recentPublishes = async (event: LambdaEvent, binding?: SiteBinding) => {
   type Row = { object_id: string; surface: string | null; published_at: string; attribution: string | null };
   let rows: Row[] = [];
   try {
-    const objects = await getSiteObjectsBlobStore(event);
+    const objects = await getSiteObjectsBlobStore(event, binding);
     const keys = (await collectBlobListItems(await objects.list({ prefix: 'objects/content_item/by-id/' })))
       .map((item) => item.key)
       .slice(0, INSTALLERS_PUBLISH_SCAN_CAP);
@@ -488,9 +488,12 @@ const recentPublishes = async (event: LambdaEvent) => {
   return rows.sort((a, b) => b.published_at.localeCompare(a.published_at)).slice(0, 20);
 };
 
-const resolveApproval = async (event: LambdaEvent): Promise<{ master: string; overrides?: Record<string, string> }> => {
+const resolveApproval = async (
+  event: LambdaEvent,
+  binding?: SiteBinding
+): Promise<{ master: string; overrides?: Record<string, string> }> => {
   try {
-    const governance = await getGovernanceBlobStore(event);
+    const governance = await getGovernanceBlobStore(event, binding);
     const active = await resolveActivePolicies(governance);
     const approval = active.approval as unknown as { master: string; overrides?: Record<string, string> };
     return { master: approval.master, overrides: approval.overrides };

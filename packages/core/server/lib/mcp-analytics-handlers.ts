@@ -34,6 +34,7 @@ import {
 import { resolveDateWindow } from '../../lib/admin/analytics-logic.js';
 import { fetchOwnTrackerStats, ownTrackerMissingEnvVars, type OwnTrackerStatsWindow } from './own-tracker-stats.js';
 import { getSiteObjectsBlobStore } from './blob-store.js';
+import { getMcpBinding } from './mcp-binding.js';
 import { objectRecordKey, objectStatusIndexPrefix } from './object-store-keys.js';
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY } from './blob-list.js';
 import type { ObjectRecord } from '../../schema/object-record-v1.js';
@@ -107,7 +108,7 @@ const producersForObjects = async (
 
   let store: Awaited<ReturnType<typeof getSiteObjectsBlobStore>>;
   try {
-    store = await getSiteObjectsBlobStore(event);
+    store = await getSiteObjectsBlobStore(event, getMcpBinding());
   } catch {
     return {};
   }
@@ -256,7 +257,7 @@ export const callAnalyticsObject = async (event: LambdaEvent, input: Record<stri
   let recordObjectType: (typeof PRODUCER_OBJECT_TYPES)[number] | undefined;
   let store: Awaited<ReturnType<typeof getSiteObjectsBlobStore>> | undefined;
   try {
-    store = await getSiteObjectsBlobStore(event);
+    store = await getSiteObjectsBlobStore(event, getMcpBinding());
     for (const objectType of PRODUCER_OBJECT_TYPES) {
       const raw = await store.get(objectRecordKey(objectType, objectId));
       if (raw) {

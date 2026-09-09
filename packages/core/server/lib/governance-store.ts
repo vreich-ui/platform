@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { approvalPolicyConfigSchema, activeApprovalPolicy, type ApprovalPolicy } from '../../lib/approval-policy.js';
 import { creationPolicyConfigSchema, activeCreationPolicy, type CreationPolicy } from '../../lib/creation-policy.js';
 import { getNetlifyBlobStore } from './blob-store.js';
+import type { SiteBinding } from './site-binding.js';
 
 export const GOVERNANCE_DOC_KEY = 'overrides.v1';
 
@@ -160,5 +161,9 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
   };
 };
 
-export const getGovernanceBlobStore = (event: unknown): Promise<GovernanceBlobStore> =>
-  getNetlifyBlobStore({ name: 'governance', consistency: 'strong' }, event) as unknown as Promise<GovernanceBlobStore>;
+export const getGovernanceBlobStore = (event: unknown, binding?: SiteBinding): Promise<GovernanceBlobStore> =>
+  getNetlifyBlobStore(
+    { name: 'governance', consistency: 'strong' },
+    event,
+    binding
+  ) as unknown as Promise<GovernanceBlobStore>;

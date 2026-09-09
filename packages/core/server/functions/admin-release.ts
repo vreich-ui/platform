@@ -61,22 +61,26 @@ const parseOptions = (
   }
 };
 
-const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
   const adminState = await getAdminStateFromEvent(event, context);
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
   // T9.4: gate on resolved roles (users store + bootstrap owners), a superset
   // of the old ADMIN_EMAILS-only check.
-  const roles = await resolveRolesFromEvent(event, {
-    kind: 'human',
-    id: adminState.userId ?? '',
-    email: adminState.email ?? '',
-  });
+  const roles = await resolveRolesFromEvent(
+    event,
+    {
+      kind: 'human',
+      id: adminState.userId ?? '',
+      email: adminState.email ?? '',
+    },
+    binding
+  );
   if (!roles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
 
   try {
-    const result = await releaseToProduction(parseOptions(event));
+    const result = await releaseToProduction({ ...parseOptions(event), envNames: binding.env });
     // A configuration gap (no build hook / no deploy API) is a 400 the operator
     // must fix, not a 200 "released:false" the UI might read as "still building".
     // `building` is a 202: accepted, hook fired, go poll.
@@ -88,4 +92,4 @@ const handlerImpl = async (event: LambdaEvent, context?: LambdaContext) => {
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (_binding: SiteBinding) => handlerImpl;
+export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
