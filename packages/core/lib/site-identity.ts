@@ -101,7 +101,10 @@ export const assertAggressionCeiling = (value: unknown, source = 'site-identity 
 
 export const siteIdentityConfigSchema = z.strictObject({
   /** Object id of the site singleton (`site_<shortId>`), per the site export. */
-  siteId: nonEmpty.regex(/^site_[a-z0-9]+$/),
+  // Must match objectIdPatterns.site in packages/core/lib/object-ids.ts — the object-id law.
+  // A narrower copy here silently rejects any multi-word client slug: create-site's idsFor()
+  // maps 'a-b' to 'a_b', so every hyphenated tenant failed to build while single-word ones passed.
+  siteId: nonEmpty.regex(/^site_[a-z0-9]+(?:_[a-z0-9]+)*$/),
   /** Hyphenated machine slug: UA prefixes, default pdf-tool projectId. */
   siteSlug: nonEmpty.regex(/^[a-z0-9][a-z0-9-]*$/),
   /** The site export's `name` (drift-guarded). */

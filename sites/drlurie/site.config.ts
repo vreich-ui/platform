@@ -32,7 +32,7 @@ const redirectSchema = z.strictObject({
 });
 
 export const siteConfigSchema = z.strictObject({
-  siteId: z.string().regex(/^site_[a-z0-9]+$/),
+  siteId: z.string().regex(/^site_[a-z0-9]+(?:_[a-z0-9]+)*$/),
   /** Canonical public origin — astro.config `site` + config.yaml `site.site`. */
   canonicalHost: z.string().regex(/^https:\/\/[^\s/]+$/),
   /** Remote image optimization allowlist — astro.config `image.domains`. */

@@ -1,0 +1,54 @@
+---
+/**
+ * Object-page catch-all — a Page object an agent creates, publishes, and
+ * releases is served at its route by THIS file, no per-page loader needed.
+ * Site-owned rather than injected by the shell because it enumerates the
+ * file-owned routes NEXT TO IT with import.meta.glob, which only sees this
+ * directory.
+ */
+import type { InferGetStaticPropsType, GetStaticPaths } from 'astro';
+import { getCollection } from 'astro:content';
+
+import PageObjectRenderer from '~/components/cms/PageObjectRenderer.astro';
+import { fetchPosts } from '~/utils/blog';
+import { computeObjectPageRoutes } from '~/utils/object-page-routes';
+import { BLOG_BASE, CATEGORY_BASE, TAG_BASE } from '~/utils/permalinks';
+
+export const prerender = true;
+
+export const getStaticPaths = (async () => {
+  const routeFilePaths = Object.keys(import.meta.glob('./**/*.astro'));
+  const pageEntries = await getCollection('pageObject');
+  const posts = await fetchPosts();
+
+  const { paths, skipped } = computeObjectPageRoutes({
+    routeFilePaths,
+    pageExports: pageEntries.map((entry) => ({
+      objectId: entry.id,
+      route: entry.data.route,
+      pageType: entry.data.pageType,
+    })),
+    postPermalinks: posts.map((post) => post.permalink),
+    reservedPrefixes: [BLOG_BASE, CATEGORY_BASE, TAG_BASE, 'learn/topics', 'admin'],
+  });
+
+  for (const skip of skipped) {
+    if (skip.reason === 'file_route') continue;
+    if (skip.reason === 'loader_owned_page_type') continue;
+    console.warn(
+      `[objectPage] NOT serving ${skip.objectId} at ${skip.route} — ${skip.reason}. ` +
+        'The published page is store-backed but unreachable; pick a route nobody else owns.'
+    );
+  }
+
+  return paths.map((path) => ({
+    params: { objectPage: path.param || undefined },
+    props: { objectId: path.objectId },
+  }));
+}) satisfies GetStaticPaths;
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>;
+const { objectId } = Astro.props as Props;
+---
+
+<PageObjectRenderer objectId={objectId} />
