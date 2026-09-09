@@ -43,7 +43,9 @@ test('editorial_voice is the twelfth governed object type', () => {
   assert.ok((objectTypes as readonly string[]).includes('editorial_voice'));
   // 13 since the brand-imagery wave added visual_standard (BRIEF.md §3.1) — the
   // thirteenth object TYPE, but deliberately NOT a fourteenth GOVERNED one.
-  assert.equal(objectTypes.length, 13);
+  // 14 since Wolf's 2026-09-09 ruling added editorial_strategy, which — unlike
+  // visual_standard — IS governed: the thirteenth governed type.
+  assert.equal(objectTypes.length, 14);
 });
 
 test('the id shape is voice_<site> and nothing else', () => {

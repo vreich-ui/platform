@@ -35,6 +35,8 @@
  */
 import { z } from 'zod';
 
+import { baselineProvenanceSchema } from './baseline-provenance-v1.js';
+
 export const EDITORIAL_VOICE_SCHEMA_VERSION = 'editorial_voice.v1';
 
 /** Opaque, stable framework id — renaming a label must not break references. */
@@ -98,6 +100,17 @@ export const editorialVoiceShapeSchema = z
     frameworks: z.array(editorialFrameworkSchema).min(1),
     /** Must name one of `frameworks[]` — the shape used when nothing else is chosen. */
     default_framework: frameworkIdSchema,
+    /**
+     * The unset marker (Wolf, 2026-09-09) — see baseline-provenance-v1.ts.
+     * OPTIONAL here and required on `editorial_strategy`, because voices
+     * existed before the marker did: absence means "written before this block
+     * existed", which is an AUTHORED voice, so readers treat a missing
+     * provenance as `human` and never as a seeded default. Genesis writes
+     * `genesis_default` when it seeds a voice nobody supplied (W2), and that
+     * is the one value that makes `getEditorialVoice` report
+     * `voice_object_unconfigured`.
+     */
+    provenance: baselineProvenanceSchema.optional(),
   })
   .strict();
 

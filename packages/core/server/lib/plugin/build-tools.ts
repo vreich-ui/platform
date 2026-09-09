@@ -15,6 +15,7 @@
  * it must never be described as a permission boundary.
  */
 import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
+import { isGenesisPolicyTool } from '../mcp-tool-definitions-genesis.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import type { ManifestTool } from './manifest-types.js';
 
@@ -108,6 +109,16 @@ export const buildPluginTools = (definitions: readonly ToolDefinition[]): Manife
      * the tenant's member roster in a publishing plugin's charter.
      */
     .filter((tool) => !isMembershipTool(tool.name))
+    /**
+     * Wolf 2026-09-09: the genesis-policy family is out of the charter by NAME
+     * for the identical reason. `genesis_policy_get` is `read` class and would
+     * pass the class filter above, which would advertise the fleet's mint
+     * policy — and, through the same family, the shape of the write that
+     * changes it — on a publishing plugin's surface. Excluding it by class
+     * would be an accident waiting to be undone the first time somebody
+     * retyped its toolClass.
+     */
+    .filter((tool) => !isGenesisPolicyTool(tool.name))
     .map((tool) => ({
       name: tool.name,
       tool_class: tool.governance.toolClass as ManifestTool['tool_class'],

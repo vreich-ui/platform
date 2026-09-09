@@ -71,7 +71,8 @@ const VALID: VisualStandardBody = {
 
 test('visual_standard is a governed-surface object type but deliberately NOT a governed (publishable) one', () => {
   assert.ok((objectTypes as readonly string[]).includes('visual_standard'));
-  assert.equal(objectTypes.length, 13);
+  // 14 since Wolf's 2026-09-09 ruling added editorial_strategy.
+  assert.equal(objectTypes.length, 14);
   assert.ok(!(governedObjectTypes as readonly string[]).includes('visual_standard'));
 });
 

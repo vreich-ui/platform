@@ -3,7 +3,7 @@ import type { ObjectType } from '../schema/object-record-v1.js';
 
 export type ObjectIdValidationResult = NamingValidationResult;
 
-export const OBJECT_ID_CEILING_RE = /^(site|page|tpl|stpl|sec|nav|tax|thm|prod|req|trk|voice|vis)_[a-z0-9_]+$/;
+export const OBJECT_ID_CEILING_RE = /^(site|page|tpl|stpl|sec|nav|tax|thm|prod|req|trk|voice|vis|strat)_[a-z0-9_]+$/;
 export const SECTION_INSTANCE_ID_RE = /^s_[a-z0-9]+$/;
 
 const OBJECT_ID_PATTERNS = {
@@ -24,6 +24,9 @@ const OBJECT_ID_PATTERNS = {
   // `vis_<site>_<slug>` (template) — the same generic segment grammar; the
   // house/template distinction is a body-level (`kind`) fact, not an id shape.
   visual_standard: /^vis_[a-z0-9]+(?:_[a-z0-9]+)*$/,
+  // Wolf 2026-09-09: `strat_<site>` — the voice_/trk_/vis_ singleton
+  // convention, spelled short enough to type and long enough to read.
+  editorial_strategy: /^strat_[a-z0-9]+(?:_[a-z0-9]+)*$/,
 } satisfies Record<Exclude<ObjectType, 'content_item'>, RegExp>;
 
 const OBJECT_TYPE_PREFIXES = {
@@ -40,6 +43,7 @@ const OBJECT_TYPE_PREFIXES = {
   tracking_config: 'trk_',
   editorial_voice: 'voice_',
   visual_standard: 'vis_',
+  editorial_strategy: 'strat_',
 } satisfies Record<ObjectType, string>;
 
 export const isObjectIdWithinCeiling = (value: string): boolean => OBJECT_ID_CEILING_RE.test(value);
@@ -71,7 +75,8 @@ export const OBJECT_ID_MAX_LENGTH = 200;
  * The bare site slug an id convention is built from: `site_drlurie` →
  * `drlurie`. Several singleton ids are the site's own short id under a
  * different prefix — `voice_<site>` (editorial-voice-v1.ts), `trk_<site>`
- * (tracking-config-v1.ts) and `vis_<site>` (visual-standard-v1.ts, BRIEF R2)
+ * (tracking-config-v1.ts), `vis_<site>` (visual-standard-v1.ts, BRIEF R2) and
+ * `strat_<site>` (editorial-strategy-v1.ts)
  * — and each of those conventions was previously spelled out by hand at
  * every call site. Tolerates an already-short id (passing `drlurie` is a
  * no-op) so a caller that holds a slug rather than a site object id is not

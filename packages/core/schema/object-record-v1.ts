@@ -25,6 +25,12 @@ export const objectTypes = [
   // (unbounded). Deliberately NOT in approval-policy.ts governedObjectTypes —
   // never publishable; see schema/bodies/visual-standard-v1.ts.
   'visual_standard',
+  // Wolf 2026-09-09: the third genesis-seeded tenant singleton, beside
+  // editorial_voice and visual_standard. What the publication publishes FOR —
+  // offer, segments, topic weights, angle mix, funnel aggression — as governed
+  // data an agent reads through the ordinary object surface. Never rendered.
+  // See schema/bodies/editorial-strategy-v1.ts.
+  'editorial_strategy',
 ] as const;
 export type ObjectType = (typeof objectTypes)[number];
 

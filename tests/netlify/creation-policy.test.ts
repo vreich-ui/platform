@@ -53,6 +53,8 @@ test('the committed config parses: open master, the two singletons human/seed-on
     overrides: {
       tracking_config: { agents: ['object-conversion-roundtrip'] },
       editorial_voice: { agents: ['object-conversion-roundtrip'] },
+      // Wolf 2026-09-09: editorial_strategy joins the same rule.
+      editorial_strategy: { agents: ['object-conversion-roundtrip'] },
     },
   });
   assert.deepEqual(activeCreationPolicy(), policy);

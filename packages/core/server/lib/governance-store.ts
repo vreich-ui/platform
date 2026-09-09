@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import { approvalPolicyConfigSchema, activeApprovalPolicy, type ApprovalPolicy } from '../../lib/approval-policy.js';
 import { creationPolicyConfigSchema, activeCreationPolicy, type CreationPolicy } from '../../lib/creation-policy.js';
+import { activeGenesisPolicy, genesisPolicyConfigSchema, type GenesisPolicy } from '../../lib/genesis-policy.js';
 import { getNetlifyBlobStore } from './blob-store.js';
 import type { SiteBinding } from './site-binding.js';
 
@@ -34,6 +35,20 @@ export const governanceDocSchema = z.object({
   schema_version: z.literal('overrides.v1'),
   approval: approvalPolicyConfigSchema.optional(),
   creation: creationPolicyConfigSchema.optional(),
+  /**
+   * Wolf 2026-09-09 — the genesis policy override (`genesis_policy_set`,
+   * server/lib/genesis-policy-verbs.ts): which baseline artifacts a mint must
+   * supply. Validated with the SAME committed-config schema as its two
+   * neighbours above, so an invalid override can never resolve to something
+   * the committed layer would have rejected.
+   *
+   * A caveat worth carrying at the storage layer, not only at the verb: this
+   * document is PER-TENANT and the genesis policy is FLEET-wide. The override
+   * governs the surfaces that read this tenant's document; the repo-side CLI
+   * mint enforces the committed `FLEET_GENESIS_POLICY` because it births a
+   * tenant that has no store yet. See genesis-policy-verbs.ts's header.
+   */
+  genesis: genesisPolicyConfigSchema.optional(),
   /** Per chat-tool autonomy (auto/ask/off). Stored now; consumed by the chat loop in T9.13. */
   chat_tools: chatToolAutonomySchema.optional(),
   /** M2b: expensive candidate generation is explicitly Owner-governed and off by default. */
@@ -108,6 +123,8 @@ export type PolicyProvenance = 'override' | 'committed';
 export interface ActivePolicies {
   approval: ApprovalPolicy;
   creation: CreationPolicy;
+  /** Wolf 2026-09-09: the genesis policy in force — override when set, else the committed fleet default. */
+  genesis: GenesisPolicy;
   chat_tools?: GovernanceDoc['chat_tools'];
   learning_mode: boolean;
   /** Task 3: the runtime chat-registry override, when one is set. Callers
@@ -125,6 +142,7 @@ export interface ActivePolicies {
   provenance: {
     approval: PolicyProvenance;
     creation: PolicyProvenance;
+    genesis: PolicyProvenance;
     learning_mode: PolicyProvenance;
     brandImageryOverrides: PolicyProvenance;
   };
@@ -147,6 +165,12 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
   return {
     approval: doc?.approval ?? activeApprovalPolicy(),
     creation: doc?.creation ?? activeCreationPolicy(),
+    // Resolved through the same provider seam as its two neighbours. Unlike
+    // them, no site registers a provider for it and none should — the policy
+    // is fleet law with no per-site committed layer — so in practice this is
+    // the committed FLEET_GENESIS_POLICY. The seam exists so a host (or a
+    // test) can substitute one without this module knowing.
+    genesis: doc?.genesis ?? activeGenesisPolicy(),
     ...(doc?.surfaces ? { surfaces: doc.surfaces } : {}),
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
@@ -155,6 +179,7 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
     provenance: {
       approval: doc?.approval ? 'override' : 'committed',
       creation: doc?.creation ? 'override' : 'committed',
+      genesis: doc?.genesis ? 'override' : 'committed',
       learning_mode: doc?.learning_mode !== undefined ? 'override' : 'committed',
       brandImageryOverrides: doc?.brandImageryOverrides !== undefined ? 'override' : 'committed',
     },

@@ -68,7 +68,19 @@ export const INTERNAL_ONLY_TOOLS = new Set([
  * Ratified by Wolf 2026-09-08 (the "narrow split"): discoverable on /mcp,
  * still absent from a client's chat registry. The bounds did not move.
  */
-export const CHAT_HIDDEN_TOOLS = new Set(['create_capture_job', 'get_capture_job_status', 'get_capture_snapshot']);
+export const CHAT_HIDDEN_TOOLS = new Set([
+  'create_capture_job',
+  'get_capture_job_status',
+  'get_capture_snapshot',
+  // Wolf 2026-09-09: the fleet genesis-policy lever rides the SAME narrow
+  // split — discoverable on /mcp to an OAuth-bound human, absent from a
+  // client's chat registry. Not a hedge about the tools: the admin-chat card
+  // for this policy is a separate, later task, and a chat tool with no card
+  // behind it would put a fleet-wide governance write one auto-approval away
+  // from a run nobody is watching.
+  'genesis_policy_get',
+  'genesis_policy_set',
+]);
 
 /**
  * Legacy chat tool names → canonical MCP tool names. Used ONLY to canonicalize

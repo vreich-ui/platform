@@ -37,6 +37,7 @@ import { siteBodySchema } from '../../packages/core/schema/bodies/site-v1.js';
 import { taxonomyBodySchema } from '../../packages/core/schema/bodies/taxonomy-v1.js';
 import { templateBodySchema } from '../../packages/core/schema/bodies/template-v1.js';
 import { themeBodySchema } from '../../packages/core/schema/bodies/theme-v1.js';
+import { editorialStrategyBodySchema } from '../../packages/core/schema/bodies/editorial-strategy-v1.js';
 import { editorialVoiceBodySchema } from '../../packages/core/schema/bodies/editorial-voice-v1.js';
 import { visualStandardBodySchema } from '../../packages/core/schema/bodies/visual-standard-v1.js';
 import { productBodySchema } from '../../packages/core/schema/bodies/product-v1.js';
@@ -120,6 +121,10 @@ const BODIES: Record<ObjectType, { schema: { safeParse: (v: unknown) => { succes
   // wave, BRIEF.md §3.1): a mood board is never a reader-facing surface.
   // Covered by visual-standard.test.ts.
   visual_standard: { schema: visualStandardBodySchema, body: null },
+  // editorial_strategy likewise carries no tracking attribute (Wolf,
+  // 2026-09-09): a strategy is publishing law, never a reader-facing surface.
+  // Covered by editorial-strategy.test.ts.
+  editorial_strategy: { schema: editorialStrategyBodySchema, body: null },
 };
 
 test('the tracking shape parses on every attribute-carrying body; bodies without it still parse (additive guarantee)', () => {

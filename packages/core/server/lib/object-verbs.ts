@@ -811,7 +811,12 @@ const patchErrorStatus = (code: PatchApplyError['code']): number => {
  * and `vis_<site>` / `vis_<site>_<slug>` (visual-standard-v1.ts, BRIEF R2).
  * Seeding any of these from the body is always wrong — see seedForCreate.
  */
-const SITE_DERIVED_ID_TYPES = new Set<ObjectType>(['visual_standard', 'editorial_voice', 'tracking_config']);
+const SITE_DERIVED_ID_TYPES = new Set<ObjectType>([
+  'visual_standard',
+  'editorial_voice',
+  'editorial_strategy',
+  'tracking_config',
+]);
 
 /**
  * What a minted id for a brand-new object is DERIVED from — a human-meaningful
@@ -934,11 +939,75 @@ export const resolveSiteForMint = async (
 // singleton and a house create never conflicts with an existing template.
 // Module-scoped (not local to `create`) so the object_validate candidate-body
 // dry-run can report the same conflict a real object_create would hit.
+/**
+ * Keep the baseline-artifact unset marker honest across edits (Wolf,
+ * 2026-09-09).
+ *
+ * `provenance.set_by: 'genesis_default'` is the marker that makes every
+ * consumer say "this still needs to be set". If an editor could change a
+ * seeded strategy's offer, segments and funnel aggression and leave the marker
+ * reading `genesis_default`, the marker would rot into noise within a week —
+ * and the CMS-Agent-side `strategy_object_unconfigured` warning would go on
+ * firing at tenants who HAVE decided. So a patch that touches the body stamps
+ * the marker from the principal that made it: a human edit is `human`, an
+ * agent edit is `agent`.
+ *
+ * Two deliberate exemptions:
+ *   - A patch that SETS `provenance` itself is respected verbatim. That is the
+ *     seam the W2 backfill and genesis re-seed need: writing `genesis_default`
+ *     on purpose must not be immediately overwritten by the writer's own
+ *     identity.
+ *   - `editorial_voice` is stamped only when it ALREADY carries a provenance
+ *     block. Voices predate the marker, and absence there means "authored
+ *     before this existed" — adding a block on the next unrelated edit would
+ *     invent a provenance fact nobody asserted.
+ *
+ * Not a security control: `agent` vs `human` here is the same self-declared
+ * identity every other agent-facing surface carries (see the creation-policy
+ * caveat). The governed history is where a reader goes for proven attribution;
+ * this field is the fast body-level answer to "has anybody decided this yet".
+ */
+const stampBaselineProvenance = (
+  objectType: ObjectType,
+  record: ObjectRecord,
+  ops: readonly unknown[],
+  principal: Principal,
+  at: string
+): ObjectRecord => {
+  if (objectType !== 'editorial_strategy' && objectType !== 'editorial_voice') return record;
+  const explicit = ops.some(
+    (op) =>
+      isRecord(op) &&
+      (op.op === 'set_strategy_fields' || op.op === 'set_voice_fields') &&
+      isRecord(op.fields) &&
+      Object.prototype.hasOwnProperty.call(op.fields, 'provenance')
+  );
+  if (explicit) return record;
+  if (!isRecord(record.body)) return record;
+  if (objectType === 'editorial_voice' && !isRecord(record.body.provenance)) return record;
+  return {
+    ...record,
+    body: {
+      ...record.body,
+      provenance: { set_by: principal.kind === 'human' ? 'human' : 'agent', set_at: at },
+    },
+  };
+};
+
 const SINGLETON_TYPES: Partial<
   Record<ObjectType, { label: string; editOp: string; noun: string; appliesToBody?: (body: unknown) => boolean }>
 > = {
   tracking_config: { label: 'tracking_config', editOp: 'set_tracking_config_fields', noun: 'tracker registry' },
   editorial_voice: { label: 'editorial_voice', editOp: 'set_voice_fields', noun: 'declared editorial voice' },
+  // Wolf 2026-09-09: the same plain singleton as the voice — one declared
+  // strategy per tenant. A second one would make "the site's strategy"
+  // ambiguous at exactly the moment strategy-review needs one address to
+  // propose against.
+  editorial_strategy: {
+    label: 'editorial_strategy',
+    editOp: 'set_strategy_fields',
+    noun: 'declared editorial strategy',
+  },
   visual_standard: {
     label: 'visual_standard (house)',
     editOp: 'set_visual_standard_fields',
@@ -2373,6 +2442,13 @@ const dispatchObjectVerb = async (
           ...(options.privilegedOps ? { privilegedOps: options.privilegedOps } : {}),
         });
         appliedRecord = applied.record;
+        appliedRecord = stampBaselineProvenance(
+          request.object_type,
+          appliedRecord,
+          normalizedOps,
+          principal,
+          timestamp
+        );
       } catch (error) {
         if (error instanceof PatchApplyError) {
           return err(patchErrorStatus(error.code), {

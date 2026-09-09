@@ -82,6 +82,7 @@ import { productBodySchema } from '../../schema/bodies/product-v1.js';
 import { sectionBodySchema, type SectionInstance, type SectionType } from '../../schema/bodies/section-v1.js';
 import { sectionTemplateBodySchema } from '../../schema/bodies/section-template-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
+import { editorialStrategyBodySchema } from '../../schema/bodies/editorial-strategy-v1.js';
 import { editorialVoiceBodySchema } from '../../schema/bodies/editorial-voice-v1.js';
 import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
 import { findPromptFormattedText } from '../../lib/registry/voice-prose.js';
@@ -362,6 +363,7 @@ const BODY_SCHEMAS: Partial<Record<ObjectType, { safeParse: (v: unknown) => { su
     content_item: contentItemBodySchema,
     tracking_config: trackingConfigBodySchema,
     editorial_voice: editorialVoiceBodySchema,
+    editorial_strategy: editorialStrategyBodySchema,
     visual_standard: visualStandardBodySchema,
   };
 
@@ -1715,6 +1717,153 @@ export const checkEditorialVoice = (body: unknown, atPublish: boolean): Readines
   return criteria;
 };
 
+/**
+ * Editorial-strategy structural rules (Wolf, 2026-09-09).
+ *
+ * `strategy_not_a_prompt` is `voice_not_a_prompt`'s twin and it BLOCKS AT
+ * WRITE for the identical reason: a governed strategy is third-person data
+ * about what a publication publishes for, never instructions to a model.
+ * Prompt text inside an approved object is an injection the approval silently
+ * covered, so it must never land in the store — a warning at publish would be
+ * too late, because the body is already committed and readable by any agent
+ * that fetched it. Same marker catalog (lib/registry/voice-prose.ts), same
+ * array the object contract publishes, so the rule an agent reads is the rule
+ * that rejects it. The scan covers `private.notes` too: a private field is
+ * still read by models.
+ *
+ * `strategy_provenance_set` is the "needs to be set" surface (decision 2 of
+ * the 2026-09-09 ruling). A seeded default is LEGAL and never blocks — it is
+ * the whole point of seeding one — so this warns at draft AND at publish, and
+ * is deliberately never 'missing'. Publishing a thin genesis default is a
+ * legitimate act; publishing it without anybody being told is not.
+ *
+ * `strategy_angle_mix_sum` / `strategy_topic_weights_sum` warn when the sets drift
+ * far from summing to 1. Never blocks — see the schema header for why a sum
+ * invariant would teach editors to route around partial merges.
+ *
+ * `strategy_funnel_shape` warns when top-of-funnel aggression is not the
+ * lowest of the three stages. Inverting the Magnetic-Marketing scale is
+ * occasionally deliberate and usually a typo, and only the strategist can say
+ * which — so it is stated, not refused.
+ */
+export const checkEditorialStrategy = (body: unknown, atPublish: boolean): ReadinessCriterion[] => {
+  if (!isRecord(body)) {
+    return [
+      crit(
+        'strategy_not_a_prompt',
+        'Strategy is data, not a prompt',
+        'optional',
+        'Strategy body shape not recognized (see schema check).'
+      ),
+    ];
+  }
+
+  const criteria: ReadinessCriterion[] = [];
+
+  const promptFindings = findPromptFormattedText(body);
+  if (promptFindings.length === 0) {
+    criteria.push(crit('strategy_not_a_prompt', 'Strategy is data, not a prompt', 'complete', ''));
+  } else {
+    criteria.push(
+      crit(
+        'strategy_not_a_prompt',
+        'Strategy is data, not a prompt',
+        'missing',
+        `Prompt-formatted text is not storable in a governed strategy — state the strategy as a fact about the ` +
+          `publication, not as an instruction to a model: ` +
+          promptFindings
+            .slice(0, 3)
+            .map((finding) => `${finding.path} contains ${finding.markerLabel} ("${finding.excerpt}")`)
+            .join('; ') +
+          (promptFindings.length > 3 ? ` (+${promptFindings.length - 3} more)` : '')
+      )
+    );
+  }
+
+  const provenance = body.provenance;
+  const setBy = isRecord(provenance) ? provenance.set_by : undefined;
+  if (setBy === 'genesis_default') {
+    criteria.push(
+      crit(
+        'strategy_provenance_set',
+        'Strategy has been decided',
+        'warning',
+        'This strategy is still the seed genesis wrote (provenance.set_by = "genesis_default") — it is safe to ' +
+          'use and nothing is blocked, but nobody has decided this publication\'s offer, segments or funnel ' +
+          'aggression yet. Edit it via set_strategy_fields to make it the tenant\'s own.'
+      )
+    );
+  } else if (setBy === 'agent' || setBy === 'human') {
+    criteria.push(crit('strategy_provenance_set', 'Strategy has been decided', 'complete', ''));
+  } else {
+    criteria.push(
+      crit(
+        'strategy_provenance_set',
+        'Strategy has been decided',
+        'warning',
+        'No provenance block — a strategy must say who set it ("genesis_default", "agent" or "human"), because ' +
+          'that marker is the only way a consumer can tell a seeded default from a decided one.'
+      )
+    );
+  }
+
+  criteria.push(shareSumCriterion('strategy_angle_mix_sum', 'angle_mix', body.angle_mix, 'share'));
+  criteria.push(shareSumCriterion('strategy_topic_weights_sum', 'topic_weights', body.topic_weights, 'weight'));
+
+  const aggression = body.funnel_aggression;
+  if (isRecord(aggression)) {
+    const tofu = typeof aggression.tofu === 'number' ? aggression.tofu : undefined;
+    const mofu = typeof aggression.mofu === 'number' ? aggression.mofu : undefined;
+    const bofu = typeof aggression.bofu === 'number' ? aggression.bofu : undefined;
+    if (tofu !== undefined && mofu !== undefined && bofu !== undefined && (tofu > mofu || tofu > bofu)) {
+      criteria.push(
+        crit(
+          'strategy_funnel_shape',
+          'Funnel aggression rises down the funnel',
+          'warning',
+          `Top-of-funnel aggression (${tofu}) is not the lowest of the three (mofu ${mofu}, bofu ${bofu}). On the ` +
+            'Magnetic-Marketing scale a reader who has just arrived is sold to least; an inverted shape is legal ' +
+            'but is usually a transposed pair of numbers.'
+        )
+      );
+    } else {
+      criteria.push(crit('strategy_funnel_shape', 'Funnel aggression rises down the funnel', 'complete', ''));
+    }
+  }
+
+  // atPublish changes nothing here on purpose: every criterion above is either
+  // a write-time block (the prompt guard) or a permanent warning. A strategy is
+  // never withheld from publish for being thin — see the header.
+  void atPublish;
+  return criteria;
+};
+
+/**
+ * The shared "these shares drift far from 1" warning for `angle_mix[].share`
+ * and `topic_weights[].weight`. Tolerance is deliberately wide (±0.15): the
+ * point is to catch a set that was never balanced at all — three angles at
+ * 0.9 each — not to police rounding. An empty set is `optional`, because a
+ * strategy that has not yet named its angles is thin, not wrong.
+ */
+const shareSumCriterion = (id: string, field: string, value: unknown, key: string): ReadinessCriterion => {
+  const label = `${field} shares are balanced`;
+  if (!Array.isArray(value) || value.length === 0) {
+    return crit(id, label, 'optional', `No ${field} entries yet.`);
+  }
+  const total = value.reduce<number>((sum, entry) => {
+    const share = isRecord(entry) && typeof entry[key] === 'number' ? (entry[key] as number) : 0;
+    return sum + share;
+  }, 0);
+  if (Math.abs(total - 1) <= 0.15) return crit(id, label, 'complete', '');
+  return crit(
+    id,
+    label,
+    'warning',
+    `${field} ${key}s sum to ${total.toFixed(2)}, not ~1. Consumers normalize at read, so nothing breaks — but a ` +
+      'set this far from 1 usually means an entry was added without rebalancing the others.'
+  );
+};
+
 // ─── check 6c: navigation layout rules (T2.1, C§2.3-Navigation) ──────────────
 
 /** Canonical identity of a NavTarget for duplicate detection (key-order-free). */
@@ -2887,6 +3036,7 @@ const checkStructuralInvariantsByType = (
   if (objectType === 'section_template') return checkSectionTemplate(body, atPublish);
   if (objectType === 'theme') return checkTheme(body, atPublish);
   if (objectType === 'editorial_voice') return checkEditorialVoice(body, atPublish);
+  if (objectType === 'editorial_strategy') return checkEditorialStrategy(body, atPublish);
   if (objectType === 'navigation') return checkNavigationStructure(body, context, atPublish);
   if (objectType === 'product') return checkProduct(body, context, atPublish);
   if (objectType === 'content_item') return checkContentItemStructure(body, context, atPublish);

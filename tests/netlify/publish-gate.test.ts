@@ -70,6 +70,7 @@ const OBJECT_IDS: Record<GovernedObjectType, string> = {
   content_item: 'req_agent_probe_20260713_01',
   tracking_config: 'trk_drlurie',
   editorial_voice: 'voice_drlurie',
+  editorial_strategy: 'strat_drlurie',
 };
 
 const approveDecision = (contentRevision: number, publishAction?: { published_time: string | null }) => ({

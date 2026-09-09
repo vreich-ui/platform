@@ -47,6 +47,7 @@ import { CmsAgentClient, cmsAgentMissingEnvVars } from '../lib/agent/cms-agent-c
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { approvalPolicyConfigSchema, activeApprovalPolicy } from '../../lib/approval-policy.js';
 import { creationPolicyConfigSchema, activeCreationPolicy } from '../../lib/creation-policy.js';
+import { activeGenesisPolicy, genesisPolicyConfigSchema } from '../../lib/genesis-policy.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -82,6 +83,12 @@ export const requestSchema = z.discriminatedUnion('verb', [
     /** U2 (BRIEF §3.7/R5): the `style` override channel guardrail on
      *  create_agent_artifact_job. Unset resolves to 'allow' (governance-store.ts). */
     brandImageryOverrides: z.enum(['allow', 'lock']).optional(),
+    /** Wolf 2026-09-09: the genesis policy override — which baseline artifacts
+     *  a mint must supply. FLEET-wide by nature, per-tenant by storage; see
+     *  server/lib/genesis-policy-verbs.ts for the honest limit of what an
+     *  override here reaches. Same lever as the `genesis_policy_set` MCP verb,
+     *  same Owner bar, same doc field — this is the Identity-JWT door to it. */
+    genesis: genesisPolicyConfigSchema.optional(),
   }),
   z.object({
     verb: z.literal('revert'),
@@ -93,6 +100,7 @@ export const requestSchema = z.discriminatedUnion('verb', [
       'cms_agent_chat_mode',
       'chat_registry',
       'brandImageryOverrides',
+      'genesis',
       'all',
     ]),
   }),
@@ -112,7 +120,16 @@ const safeJsonParse = (event: LambdaEvent): { ok: true; value: unknown } | { ok:
 };
 
 const nowIso = () => new Date().toISOString();
-const committed = () => ({ approval: activeApprovalPolicy(), creation: activeCreationPolicy() });
+// Wolf 2026-09-09: `genesis` resolves through the same seam as its two
+// neighbours, but no site registers a provider for it and none should — it has
+// no per-site committed layer, which is precisely what makes it fleet-wide
+// (packages/core/lib/genesis-policy.ts's header says why). In practice this is
+// the committed FLEET_GENESIS_POLICY.
+const committed = () => ({
+  approval: activeApprovalPolicy(),
+  creation: activeCreationPolicy(),
+  genesis: activeGenesisPolicy(),
+});
 
 // ─── PF3: CMS-Agent bridge status (memoized health probe) ────────────────────
 
@@ -279,6 +296,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         req.learning_mode !== undefined && 'learning_mode',
         req.chat_registry !== undefined && `chat_registry=${req.chat_registry}`,
         req.brandImageryOverrides !== undefined && `brandImageryOverrides=${req.brandImageryOverrides}`,
+        req.genesis !== undefined && `genesis.requiredArtifacts=[${req.genesis.requiredArtifacts.join(', ')}]`,
       ]
         .filter(Boolean)
         .join(', ');
@@ -295,6 +313,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         ...(req.learning_mode !== undefined ? { learning_mode: req.learning_mode } : {}),
         ...(req.chat_registry !== undefined ? { chat_registry: req.chat_registry } : {}),
         ...(req.brandImageryOverrides !== undefined ? { brandImageryOverrides: req.brandImageryOverrides } : {}),
+        ...(req.genesis !== undefined ? { genesis: req.genesis } : {}),
         updated_by: email,
         updated_at: nowIso(),
         history: [...existing.history, { at: nowIso(), actor_email: email, action: 'set', detail: touched || 'none' }],
@@ -310,6 +329,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         delete next.cms_agent_chat_mode;
         delete next.chat_registry;
         delete next.brandImageryOverrides;
+        delete next.genesis;
       } else {
         delete next[req.target];
         if (req.target === 'chat_tools') delete next.chat_tools_migrated;

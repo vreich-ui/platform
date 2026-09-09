@@ -41,6 +41,10 @@ import { buildPlan } from '../../packages/core/cli/create-site.mjs';
 import {
   CANONICAL_PACKS,
   DATA_SITE_SUBDIRS,
+  FLEET_GENESIS_POLICY,
+  GENESIS_ARTIFACTS,
+  GENESIS_ARTIFACT_CLI_FLAGS,
+  GENESIS_ARTIFACT_INPUT_FIELDS,
   SCAFFOLD_GROUPS,
   NON_PUBLISHABLE_OBJECT_TYPES,
   SEED_MODULES,
@@ -369,5 +373,84 @@ test('every recorded gap was actually exercised, and every manifest todo is reco
       covered,
       `manifest entry '${entry.id}' carries todo ${entry.todo} but no KNOWN_GAPS row records what is actually missing`
     );
+  }
+});
+
+// ─── 5. the genesis POLICY mirror (Wolf, 2026-09-09) ────────────────────────
+//
+// The manifest carries a plain-.mjs copy of the genesis policy's vocabulary
+// (the closed artifact enum, the artifact -> input-field map, the CLI flags,
+// the committed fleet default), for the same reason it carries
+// NON_PUBLISHABLE_OBJECT_TYPES: the scaffold and drive scripts stay plain
+// .mjs with no TypeScript-interop dependency, and `create-site.mjs` needs the
+// policy at `buildPlan` time. The LAW is packages/core/lib/genesis-policy.ts.
+// This is what stops the copy rotting — the same source-text extraction the
+// publish-charter check above uses, asserted to have actually matched so a
+// refactor fails loudly instead of pinning nothing.
+//
+// The SAME vocabulary is mirrored a third time, in a repo that can import
+// neither file: CMS-Agent's src/agent/capture/genesisPolicy.ts, whose own
+// test spells it out identically. Change one, change all three.
+
+const genesisPolicySource = () =>
+  fs.readFileSync(path.join(repoRoot, 'packages', 'core', 'lib', 'genesis-policy.ts'), 'utf8');
+
+const extractTsList = (source, declaration) => {
+  const block = new RegExp(`export const ${declaration} = \\[([^\\]]*)\\]`).exec(source);
+  assert.ok(block, `could not find ${declaration} in genesis-policy.ts — update this test with it`);
+  return [...block[1].matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
+};
+
+const extractTsMap = (source, declaration) => {
+  const start = source.indexOf(`export const ${declaration}`);
+  assert.ok(start >= 0, `could not find ${declaration} in genesis-policy.ts — update this test with it`);
+  const open = source.indexOf('({', start);
+  const close = source.indexOf('});', open);
+  assert.ok(open >= 0 && close > open, `could not read ${declaration}'s object literal`);
+  return Object.fromEntries(
+    [...source.slice(open, close).matchAll(/(\w+):\s*'([^']+)'/g)].map((match) => [match[1], match[2]])
+  );
+};
+
+test("the manifest's genesis-policy mirror matches packages/core/lib/genesis-policy.ts", () => {
+  const source = genesisPolicySource();
+
+  const tsArtifacts = extractTsList(source, 'GENESIS_ARTIFACTS');
+  assert.equal(tsArtifacts.length, 5, `parsed only ${tsArtifacts.length} artifacts — bad extraction`);
+  assert.deepEqual([...GENESIS_ARTIFACTS], tsArtifacts, 'the .mjs artifact enum drifted from the .ts law');
+
+  assert.deepEqual(
+    { ...GENESIS_ARTIFACT_INPUT_FIELDS },
+    extractTsMap(source, 'GENESIS_ARTIFACT_INPUT_FIELDS'),
+    'the artifact -> INPUT FIELD map drifted; a refusal would name a field the caller cannot supply'
+  );
+  assert.deepEqual(
+    { ...GENESIS_ARTIFACT_CLI_FLAGS },
+    extractTsMap(source, 'GENESIS_ARTIFACT_CLI_FLAGS'),
+    'the artifact -> CLI flag map drifted'
+  );
+
+  // The committed fleet default: `[]` on both sides. Wolf flips the .ts; this
+  // asserts the mirror followed rather than being left behind at the old value.
+  assert.match(
+    source,
+    /export const FLEET_GENESIS_POLICY[\s\S]{0,200}?requiredArtifacts:\s*Object\.freeze\(\[\]\)/,
+    'the .ts fleet default is no longer an empty requiredArtifacts — update the .mjs mirror in the same change'
+  );
+  assert.deepEqual([...FLEET_GENESIS_POLICY.requiredArtifacts], []);
+});
+
+test('every artifact the policy can require has a CLI flag and an input field — no unsatisfiable refusal', () => {
+  // A closed enum whose members are not all supplyable would produce a
+  // refusal with one door instead of two, which is an outage wearing a
+  // policy's clothes. `create-site.mjs` must parse each flag.
+  const cli = fs.readFileSync(path.join(repoRoot, 'packages', 'core', 'cli', 'create-site.mjs'), 'utf8');
+  for (const artifact of GENESIS_ARTIFACTS) {
+    const field = GENESIS_ARTIFACT_INPUT_FIELDS[artifact];
+    const flag = GENESIS_ARTIFACT_CLI_FLAGS[artifact];
+    assert.ok(field, `${artifact} has no input field`);
+    assert.ok(flag, `${artifact} has no CLI flag`);
+    assert.ok(cli.includes(`'${flag}'`), `create-site.mjs does not parse ${flag}`);
+    assert.ok(cli.includes(`'${field}'`), `create-site.mjs does not map ${flag} to ${field}`);
   }
 });

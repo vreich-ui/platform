@@ -196,7 +196,7 @@
     ],
     "rawExportPath": "/export",
     "weightsEnvelopeKey": "experiments",
-    "mcpToolCount": 106
+    "mcpToolCount": 108
   },
   "cmsAgent": {
     "maxConversationTools": 99,
@@ -244,7 +244,7 @@
       "blobs_token",
       "materializationProof"
     ],
-    "mcpToolCount": 151,
+    "mcpToolCount": 152,
     "drLuriePublishSendsProducer": true,
     "platformPublishSendsProducer": true
   },

@@ -51,6 +51,11 @@ export const governedObjectTypes = [
   'content_item',
   'tracking_config',
   'editorial_voice',
+  // Wolf 2026-09-09: editorial_strategy is governed exactly like editorial_voice
+  // — publishable (it materializes to an audit-trail export), approvable, and
+  // creation-gated. Unlike visual_standard, which is deliberately outside the
+  // publish gate, a strategy IS a committed fact about the publication.
+  'editorial_strategy',
 ] as const;
 export type GovernedObjectType = (typeof governedObjectTypes)[number];
 
@@ -78,6 +83,7 @@ export const approvalPolicyConfigSchema = z.strictObject({
     content_item: z.enum(['require-approval', 'autonomous']).optional(),
     tracking_config: z.enum(['require-approval', 'autonomous']).optional(),
     editorial_voice: z.enum(['require-approval', 'autonomous']).optional(),
+    editorial_strategy: z.enum(['require-approval', 'autonomous']).optional(),
   }),
 });
 

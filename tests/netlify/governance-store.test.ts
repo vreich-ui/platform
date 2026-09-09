@@ -18,6 +18,7 @@ import {
 } from '../../packages/core/server/lib/governance-store.js';
 import { activeApprovalPolicy } from '../../packages/core/lib/approval-policy.js';
 import { activeCreationPolicy } from '../../packages/core/lib/creation-policy.js';
+import { FLEET_GENESIS_POLICY } from '../../packages/core/lib/genesis-policy.js';
 
 const memStore = (): GovernanceBlobStore & { map: Map<string, string> } => {
   const map = new Map<string, string>();
@@ -46,11 +47,16 @@ test('empty store → committed policy, provenance committed', async () => {
   assert.deepEqual(active.creation, activeCreationPolicy());
   assert.equal(active.learning_mode, false);
   assert.equal(active.brandImageryOverrides, 'allow');
+  // Wolf 2026-09-09: `genesis` resolves against a fleet CONSTANT rather than a
+  // provider, because the genesis policy has no per-site committed layer — see
+  // packages/core/lib/genesis-policy.ts's header for why it cannot have one.
+  assert.deepEqual(active.genesis, FLEET_GENESIS_POLICY);
   assert.deepEqual(active.provenance, {
     approval: 'committed',
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    genesis: 'committed',
   });
 });
 
@@ -61,7 +67,20 @@ test('undefined store → committed policy', async () => {
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    genesis: 'committed',
   });
+});
+
+test('Wolf 2026-09-09: the genesis policy override layers over the fleet default, and is an override only once written', async () => {
+  const store = memStore();
+  assert.deepEqual((await resolveActivePolicies(store)).genesis, FLEET_GENESIS_POLICY, 'unset -> the fleet default');
+
+  await putGovernanceDoc(store, doc({ genesis: { requiredArtifacts: ['editorial_strategy'] } }));
+  const overridden = await resolveActivePolicies(store);
+  assert.deepEqual(overridden.genesis.requiredArtifacts, ['editorial_strategy']);
+  assert.equal(overridden.provenance.genesis, 'override');
+  // The committed fleet default is untouched — the whole point of two layers.
+  assert.deepEqual(FLEET_GENESIS_POLICY.requiredArtifacts, []);
 });
 
 test('a valid approval override wins; creation without an override stays committed', async () => {
@@ -121,6 +140,7 @@ test('a corrupt governance doc falls back to committed (never applies)', async (
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    genesis: 'committed',
   });
 });
 
@@ -152,5 +172,6 @@ test('a store read that throws degrades to committed', async () => {
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    genesis: 'committed',
   });
 });

@@ -68,6 +68,7 @@ import { productBodySchema } from '../../schema/bodies/product-v1.js';
 import { sectionBodySchema, sectionTypes, type SectionType } from '../../schema/bodies/section-v1.js';
 import { sectionTemplateBodySchema } from '../../schema/bodies/section-template-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
+import { editorialStrategyBodySchema } from '../../schema/bodies/editorial-strategy-v1.js';
 import { editorialVoiceBodySchema } from '../../schema/bodies/editorial-voice-v1.js';
 import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
 import { promptMarkerSummary } from './voice-prose.js';
@@ -104,6 +105,7 @@ const BODY_SCHEMA: Partial<Record<ObjectType, z.ZodType>> = {
   content_item: contentItemBodySchema,
   tracking_config: trackingConfigBodySchema,
   editorial_voice: editorialVoiceBodySchema,
+  editorial_strategy: editorialStrategyBodySchema,
   visual_standard: visualStandardBodySchema,
 };
 
@@ -811,6 +813,62 @@ const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 
             'ordinary object surface: object_contract("editorial_voice") then object_get("voice_<project>"). No ' +
             'private side-channel exists, deliberately — a voice an engine can only learn out-of-band is a voice ' +
             'nobody can review.',
+        },
+      ];
+    case 'editorial_strategy':
+      return [
+        {
+          id: 'strategy_not_a_prompt',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'THE STRATEGY LAW, identical to voice_not_a_prompt and enforced by the SAME marker catalog: a governed ' +
+            'strategy is DATA — third-person facts about what this publication publishes for — never instructions ' +
+            'to a model. A write carrying prompt-formatted text is REFUSED (not warned at publish), including in ' +
+            'private.notes, because a private field is still read by models. Refused markers: ' +
+            promptMarkerSummary() +
+            '. Ordinary strategic prose ("Lead with the diagnostic, never the discount") is legitimate and passes.',
+        },
+        {
+          id: 'strategy_singleton',
+          severity: 'blocks_write',
+          enforced_live: true,
+          description:
+            'One strategy per site (strat_<project>, the site_/tax_/trk_/voice_/vis_ singleton convention) — ' +
+            'creating a second active editorial_strategy is refused (409); edit the existing one via ' +
+            'set_strategy_fields. Read it with the ordinary object surface: object_contract("editorial_strategy") ' +
+            'then object_get("strat_<project>").',
+        },
+        {
+          id: 'strategy_provenance_set',
+          severity: 'warns',
+          enforced_live: true,
+          description:
+            'provenance.set_by is the UNSET MARKER. A tenant minted with no strategy is seeded with a thin default ' +
+            'marked "genesis_default": it is legal, it is used, and NOTHING is blocked — but every consumer surfaces ' +
+            '"this still needs to be set" until somebody edits it, at which point the write path stamps "human" or ' +
+            '"agent". Never blocks, at draft or at publish: publishing a thin default is a legitimate act; ' +
+            'publishing it without anybody being told is not.',
+        },
+        {
+          id: 'strategy_shares_not_normalized',
+          severity: 'warns',
+          enforced_live: true,
+          description:
+            'topic_weights[].weight and angle_mix[].share are each bounded 0–1, and the SET is deliberately NOT ' +
+            'required to sum to 1 — a sum invariant would make the natural partial edit ("raise this one angle") ' +
+            'refuse until everything else was rebalanced by hand. Consumers normalize at read; a set far from 1 ' +
+            'warns (strategy_angle_mix_sum / strategy_topic_weights_sum) and a duplicate topic or angle blocks, ' +
+            'because a duplicate makes "the weight of X" ambiguous.',
+        },
+        {
+          id: 'strategy_funnel_shape',
+          severity: 'warns',
+          enforced_live: true,
+          description:
+            'funnel_aggression is the Magnetic-Marketing scale (0 = never sells, 1 = sells hard) as a per-stage ' +
+            'CEILING, with top-of-funnel expected lowest. An inverted shape warns rather than refuses — it is ' +
+            'occasionally deliberate and usually a transposed pair of numbers, and only the strategist can say which.',
         },
       ];
     case 'visual_standard':
