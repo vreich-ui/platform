@@ -333,6 +333,26 @@ export const TOOL_GLOSSARY: Record<string, ToolGlossaryEntry> = {
     detail:
       'Promotes another active member to Owner and demotes the departing Owner — by default yourself, to Admin. Both people must already be active members. Recorded in the audit trail on both sides. Always asks first.',
   },
+  /**
+   * Wolf 2026-09-09 — the fleet genesis-policy pair. These two are
+   * CHAT_HIDDEN today (/mcp only, no chat registry entry), so the coverage
+   * test does not yet demand them. They are written now anyway: the admin
+   * card for this policy is a later task, and the failure mode that made this
+   * whole glossary necessary was a tool shipping a nameless row because the
+   * copy was somebody else's job.
+   */
+  genesis_policy_get: {
+    label: 'Read what a new site must be given',
+    short: 'Reads which starting materials a brand-new site has to be given before it can be created.',
+    detail:
+      'Returns the fleet-wide rule for creating new sites: which starting materials — the editorial strategy, the voice, the visual standard, the logo, the tracking setup — must be handed over at creation time, and what a caller has to type to supply each one. As shipped, none of them are required: a new site is created with clearly-marked placeholders and everything downstream warns rather than stops. Read-only.',
+  },
+  genesis_policy_set: {
+    label: 'Change what a new site must be given',
+    short: 'Changes which starting materials are required before a brand-new site can be created. Owner only.',
+    detail:
+      'Sets the list of starting materials that must be supplied when a new site is created. Anything on the list becomes mandatory: a creation attempt that leaves it out is refused outright, before any files are written or anything is provisioned, and the refusal names exactly what is missing and the two ways forward — supply it now, or take it off this list. The list replaces the previous one rather than adding to it, so read the current one first. Owner only, and it always asks first.',
+  },
   membership_policy_set: {
     label: 'Change the access policy',
     short: 'Changes the site-wide rules for invitations, roles and Owner minimums. Owner only.',

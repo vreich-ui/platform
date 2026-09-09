@@ -90,6 +90,9 @@ export const TRACKABLE_ACTIVITIES_BY_TYPE: Record<string, readonly TrackingGoalA
   // Brand-imagery wave (BRIEF.md §3.1): a mood board is never a reader-facing
   // surface either — same exemption, same reason.
   visual_standard: [],
+  // Wolf 2026-09-09: a declared editorial strategy is publishing law — same
+  // exemption, same reason.
+  editorial_strategy: [],
 };
 
 /**
@@ -101,7 +104,14 @@ export const TRACKABLE_ACTIVITIES_BY_TYPE: Record<string, readonly TrackingGoalA
  * count ("all ten types") that silently becomes wrong the next time a type is
  * added. That restated count is exactly what broke when editorial_voice landed.
  */
-export const TRACKING_ATTRIBUTE_EXEMPT_TYPES = ['tracking_config', 'editorial_voice', 'visual_standard'] as const;
+export const TRACKING_ATTRIBUTE_EXEMPT_TYPES = [
+  'tracking_config',
+  'editorial_voice',
+  'visual_standard',
+  // Wolf 2026-09-09: a strategy is publishing law, never a reader-facing
+  // trackable surface — the same exemption, the same reason.
+  'editorial_strategy',
+] as const;
 
 export const carriesTrackingAttribute = (objectType: string): boolean =>
   !(TRACKING_ATTRIBUTE_EXEMPT_TYPES as readonly string[]).includes(objectType);

@@ -43,9 +43,23 @@
  *   node packages/core/cli/create-site.mjs --name acme --dry-run
  *   node packages/core/cli/create-site.mjs --name acme
  *   node packages/core/cli/create-site.mjs --name acme --niche 'veterinary clinic'
+ *   node packages/core/cli/create-site.mjs --name acme --editorial-strategy @strategy.json
  *   node packages/core/cli/create-site.mjs --name acme --netlify-token $NETLIFY_API_TOKEN
  *   node packages/core/cli/create-site.mjs --name acme --provision-only --netlify-token $NETLIFY_API_TOKEN \
  *     --known-tenant-site kugel-platform --known-tenant-site kugel-fernwell --known-tenant-site dr-lurie-root
+ *
+ * Genesis-input flags (Wolf 2026-09-09), each a PARTIAL body as inline JSON or
+ * `@path/to.json`, deep-merged onto the skeleton the scaffold would otherwise
+ * write: `--editorial-strategy`, `--editorial-voice`, `--visual-standard`,
+ * `--logo`, `--tracking-config`. Supplying one of the first four flips that
+ * baseline's `provenance.set_by` from "genesis_default" to "agent", which is
+ * what silences the "needs to be set" warning on every consumer.
+ *
+ * The FLEET GENESIS POLICY (packages/core/lib/genesis-policy.ts, mirrored in
+ * genesis-manifest.mjs) decides which of those a mint MUST supply. It ships
+ * empty — nothing required — and when Wolf requires one, `buildPlan` refuses
+ * with 422 `genesis_artifact_required` before a file is written or a Netlify
+ * site exists, naming the missing input fields and both ways out.
  *
  * `--json` (combinable with every mode above): replace the prose report with
  * ONE machine-readable create_site_result.v1 JSON document on stdout — the
@@ -80,7 +94,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { dataSiteSubdirs, scaffoldSeedFiles } from './genesis-manifest.mjs';
+import {
+  assertGenesisArtifactsSupplied,
+  dataSiteSubdirs,
+  scaffoldSeedFiles,
+} from './genesis-manifest.mjs';
 import { siteReaderRouteTemplates } from './site-reader-route-templates.mjs';
 import {
   buildHouseVisualStandardBody,
@@ -917,8 +935,19 @@ const houseVisualStandardFor = (ids, brandName, niche) => {
   return { brandImagery, body: buildHouseVisualStandardBody({ brandName, brandImagery, niche }) };
 };
 
-const siteSeedTemplate = (ids, brandName, canonicalHost, niche) => {
-  const { brandImagery, body: visualStandardBody } = houseVisualStandardFor(ids, brandName, niche);
+const siteSeedTemplate = (ids, brandName, canonicalHost, niche, suppliedVisualStandard, suppliedLogo) => {
+  const { brandImagery, body: derivedVisualStandard } = houseVisualStandardFor(ids, brandName, niche);
+  // Wolf 2026-09-09, genesis-input widening: a caller may supply the house
+  // visual_standard's body (partial) and the site's logo at mint. The DERIVED
+  // shape stays the base — a supplied partial that names only `styleSentence`
+  // must not wipe the brandImagery the palette produced — and the supplied
+  // keys win, arrays and scalars wholesale.
+  const visualStandardBody = mergeGenesisInput(derivedVisualStandard, suppliedVisualStandard ?? {});
+  // The logo is a TRUSTED artifact ref: create-site does not fetch, validate
+  // or rewrite it. It replaces the placeholder wordmark on the site
+  // singleton's visual identity, which is exactly what a client who already
+  // has a logo wants and what a client who does not never notices.
+  const logo = mergeGenesisInput({ text: brandName.toUpperCase() }, suppliedLogo ?? {});
   return `/**
  * Baseline site-singleton seed for '${ids.siteId}' (T11.7 create-site
  * scaffold). This is a STARTER body — placeholder branding an operator
@@ -935,9 +964,7 @@ export const SEED_SITE = '${ids.siteId}';
 
 export const siteBody = {
   name: '${brandName}',
-  logo: {
-    text: '${brandName.toUpperCase()}',
-  },
+  logo: ${JSON.stringify(logo, null, 2).replace(/\n/g, '\n  ')},
   urls: {
     base: '/',
     canonicalHost: '${canonicalHost}',
@@ -1292,16 +1319,49 @@ export const CONVERSION_SEEDS = [
 // unmistakable from a real one.
 const ONBOARDING_FILL_MARKER = 'onboarding: fill with the client';
 
-const voiceSeedTemplate = (ids, brandName) => `/**
+const voiceSkeletonBody = (brandName) => ({
+  name: `${brandName} — voice (${ONBOARDING_FILL_MARKER})`,
+  audience: `${ONBOARDING_FILL_MARKER} — who is this publication written for?`,
+  tone: [ONBOARDING_FILL_MARKER],
+  cadence: `${ONBOARDING_FILL_MARKER} — sentence/paragraph rhythm, person, tense.`,
+  lexicon: { prefer: [], avoid: [] },
+  claim_policy: `${ONBOARDING_FILL_MARKER} — what may this publication assert, and what evidence does a claim need?`,
+  cta_policy: `${ONBOARDING_FILL_MARKER} — what may this publication ask a reader to do, and how directly?`,
+  reader_safety_notes: `${ONBOARDING_FILL_MARKER} — reader-harm boundaries specific to this audience, if any.`,
+  frameworks: [
+    {
+      framework_id: 'fw_placeholder',
+      label: ONBOARDING_FILL_MARKER,
+      description: ONBOARDING_FILL_MARKER,
+      when_to_use: ONBOARDING_FILL_MARKER,
+      beats: [],
+    },
+  ],
+  default_framework: 'fw_placeholder',
+});
+
+const voiceSeedTemplate = (ids, brandName, supplied) => {
+  const body = {
+    ...mergeGenesisInput(voiceSkeletonBody(brandName), supplied ?? {}),
+    provenance: genesisProvenance(supplied),
+  };
+  return `/**
  * Editorial-voice SKELETON for '${ids.siteId}' (T16.1 create-site scaffold,
  * onboarding stage) — structurally valid (satisfies
  * packages/core/schema/bodies/editorial-voice-v1.ts) so the standard
  * round-trip/reconcile tooling works unmodified for any new client, but every
- * free-text field is a placeholder: genesis never invents a client's
- * editorial identity (Wolf's 2026-08-05 ruling; see
+ * free-text field left un-supplied is a placeholder: genesis never invents a
+ * client's editorial identity (Wolf's 2026-08-05 ruling; see
  * sites/drlurie/seeds/voice-seed-data.mjs for what a FILLED-IN voice looks
  * like). Replace every '${ONBOARDING_FILL_MARKER}' marker with the real
  * answer before this seed is ever driven into the store.
+ *
+ * Wolf 2026-09-09: the body now carries \`provenance\`, the UNSET MARKER. A
+ * scaffolded skeleton is \`genesis_default\` — legal, readable, and warned on
+ * by every consumer until somebody decides it. A voice supplied at mint
+ * (\`create-site --editorial-voice '<json>'\`) is \`agent\` and warns on nothing.
+ * The fallback path this replaces left a tenant with no voice object at all,
+ * which every consumer had to special-case.
  *
  * Driver contract for scripts/home-conversion-roundtrip.mjs:
  *   --site sites/${ids.clientSlug} --seeds sites/${ids.clientSlug}/seeds/voice-seed-data.mjs
@@ -1309,65 +1369,134 @@ const voiceSeedTemplate = (ids, brandName) => `/**
 
 export const SEED_SITE = '${ids.siteId}';
 
-export const voiceBody = {
-  name: '${brandName} — voice (${ONBOARDING_FILL_MARKER})',
-  audience: '${ONBOARDING_FILL_MARKER} — who is this publication written for?',
-  tone: ['${ONBOARDING_FILL_MARKER}'],
-  cadence: '${ONBOARDING_FILL_MARKER} — sentence/paragraph rhythm, person, tense.',
-  lexicon: {
-    prefer: [],
-    avoid: [],
-  },
-  claim_policy: '${ONBOARDING_FILL_MARKER} — what may this publication assert, and what evidence does a claim need?',
-  cta_policy: '${ONBOARDING_FILL_MARKER} — what may this publication ask a reader to do, and how directly?',
-  reader_safety_notes: '${ONBOARDING_FILL_MARKER} — reader-harm boundaries specific to this audience, if any.',
-  frameworks: [
-    {
-      framework_id: 'fw_placeholder',
-      label: '${ONBOARDING_FILL_MARKER}',
-      description: '${ONBOARDING_FILL_MARKER}',
-      when_to_use: '${ONBOARDING_FILL_MARKER}',
-      beats: [],
-    },
-  ],
-  default_framework: 'fw_placeholder',
-};
+export const voiceBody = ${JSON.stringify(body, null, 2)};
 
 export const CONVERSION_SEEDS = [{ objectType: 'editorial_voice', objectId: 'voice_${ids.clientId}', body: voiceBody }];
 `;
+};
 
-const trackingConfigSeedTemplate = (ids) => `/**
- * Tracking-config SKELETON for '${ids.siteId}' (T16.1 create-site scaffold,
- * onboarding stage) — structurally valid (satisfies
- * packages/core/schema/bodies/tracking-config-v1.ts) so the standard
- * round-trip/reconcile tooling works unmodified for any new client, but no
- * provider is enabled and every free-text field is a placeholder: genesis
- * never invents a client's analytics posture or copy (Wolf's 2026-08-05
- * ruling; see sites/drlurie/seeds/tracking-config-seed-data.mjs for what a
- * FILLED-IN config looks like). Replace every '${ONBOARDING_FILL_MARKER}'
- * marker — and pick a real consent posture — before this seed is ever driven
- * into the store.
+/**
+ * The epoch sentinel, not the scaffold time — the same reasoning as
+ * BOOTSTRAP_AT above. `set_at` means "when these values were decided" and
+ * nobody has decided them: a real timestamp would claim a decision that never
+ * happened, and it would make buildPlan non-deterministic (two calls a
+ * millisecond apart differ, which the idempotency test correctly catches).
+ * The moment an agent or a human supplies real values, the write path stamps a
+ * real instant along with the real `set_by`.
+ */
+const GENESIS_DEFAULT_SET_AT = '1970-01-01T00:00:00.000Z';
+
+/**
+ * Deep-merge a caller-supplied partial baseline body onto a skeleton (Wolf,
+ * 2026-09-09, genesis-input widening). Plain objects merge key by key; arrays
+ * and scalars REPLACE wholesale, which is the same posture
+ * `set_strategy_fields` / `set_voice_fields` take on the live object — a
+ * declared set (`angle_mix[]`, `frameworks[]`) is replaced, never appended to,
+ * because appending would silently produce a set nobody authored. Never
+ * mutates either argument.
+ */
+const mergeGenesisInput = (base, supplied) => {
+  if (!isPlainSeedObject(base) || !isPlainSeedObject(supplied)) return supplied === undefined ? base : supplied;
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(supplied)) {
+    merged[key] = isPlainSeedObject(value) && isPlainSeedObject(base[key]) ? mergeGenesisInput(base[key], value) : value;
+  }
+  return merged;
+};
+
+const isPlainSeedObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The provenance block a seeded baseline is born with. `genesis_default` is
+ * the UNSET MARKER; the moment a caller supplies values at mint, the same
+ * block records `agent` instead, and every consumer stops warning. See
+ * packages/core/schema/bodies/baseline-provenance-v1.ts.
+ */
+const genesisProvenance = (supplied) => ({
+  set_by: supplied === undefined ? 'genesis_default' : 'agent',
+  set_at: GENESIS_DEFAULT_SET_AT,
+});
+
+const strategySkeletonBody = (brandName, niche) => ({
+  name: `${brandName} — strategy (${ONBOARDING_FILL_MARKER})`,
+  goal: `${ONBOARDING_FILL_MARKER} — what is publishing FOR on this site?`,
+  offer: `${ONBOARDING_FILL_MARKER} — the offer (or offer architecture) the funnel sells.`,
+  audience_segments: [],
+  topic_weights: [],
+  angle_mix: [],
+  // The conservative FLOOR, not a recommendation: a publication nobody has
+  // interviewed sells least at the top of the funnel and only modestly at the
+  // bottom. Raised deliberately once the offer is real.
+  funnel_aggression: { tofu: 0, mofu: 0.2, bofu: 0.4 },
+  cadence: `${ONBOARDING_FILL_MARKER} — how often, and at what volume?`,
+  ...(niche ? { private: { notes: `Genesis was told this tenant publishes about: ${niche}.` } } : {}),
+});
+
+const strategySeedTemplate = (ids, brandName, niche, supplied) => {
+  const body = {
+    ...mergeGenesisInput(strategySkeletonBody(brandName, niche), supplied ?? {}),
+    provenance: genesisProvenance(supplied),
+  };
+  return `/**
+ * Editorial-strategy SKELETON for '${ids.siteId}' (Wolf, 2026-09-09) — the
+ * voice seed's twin, and it follows the same rule: structurally valid
+ * (satisfies packages/core/schema/bodies/editorial-strategy-v1.ts) so the
+ * standard round-trip/reconcile tooling works unmodified, but every free-text
+ * field left un-supplied is a placeholder. Genesis does NOT invent a client's
+ * offer, segments or funnel posture.
+ *
+ * What genesis DOES do, and why it is not a contradiction of the 2026-08-05
+ * types-not-instances ruling: it writes the object anyway, marked
+ * \`provenance.set_by: "genesis_default"\`. That marker is the whole point. A
+ * tenant with NO strategy object forces every consumer to special-case absence
+ * and gives the fleet no address to read; a tenant with a MARKED default gives
+ * every consumer one address, one honest "needs to be set" warning, and
+ * nothing blocked. When the caller supplies values at mint
+ * (\`create-site --editorial-strategy '<json>'\`), the same block reads
+ * \`set_by: "agent"\` instead and no warning fires.
+ *
+ * \`funnel_aggression\` is the Magnetic-Marketing scale (0 = never sells,
+ * 1 = sells hard) as a per-stage CEILING, top of funnel lowest. The seeded
+ * values are a conservative floor, not a recommendation.
+ *
+ * Replace every '${ONBOARDING_FILL_MARKER}' marker with the real answer — the
+ * write path stamps set_by/set_at for you on the first real edit.
  *
  * Driver contract for scripts/home-conversion-roundtrip.mjs:
- *   --site sites/${ids.clientSlug} --seeds sites/${ids.clientSlug}/seeds/tracking-config-seed-data.mjs
+ *   --site sites/${ids.clientSlug} --seeds sites/${ids.clientSlug}/seeds/strategy-seed-data.mjs
  */
 
 export const SEED_SITE = '${ids.siteId}';
 
-export const trackingConfigBody = {
-  // No analytics/ad provider is enabled by default — ${ONBOARDING_FILL_MARKER}
-  // (docs/cms-architecture/12-object-tracking-and-analytics.md §4 has the
-  // per-provider id shape when one is turned on).
+export const strategyBody = ${JSON.stringify(body, null, 2)};
+
+export const CONVERSION_SEEDS = [
+  { objectType: 'editorial_strategy', objectId: 'strat_${ids.clientId}', body: strategyBody },
+];
+`;
+};
+
+/**
+ * The tracking-config skeleton body. No provider enabled, a conservative
+ * consent posture, and placeholder copy — genesis never invents a client's
+ * analytics posture (Wolf's 2026-08-05 types-not-instances ruling).
+ *
+ * W3 turned this from a template literal into a real object for one reason:
+ * `--tracking-config` deep-merges a caller-supplied partial onto it, the same
+ * way `--editorial-strategy` merges onto the strategy skeleton, and you cannot
+ * merge onto a string. The per-field guidance the literal carried as inline
+ * comments moved into the seed file's header prose, where it is still the
+ * first thing an operator reads.
+ */
+const trackingConfigSkeletonBody = () => ({
   providers: {},
   consent: {
-    // ${ONBOARDING_FILL_MARKER} — pick the posture that matches this client's
-    // real audience geography: 'geo-adaptive' | 'consent-first' | 'us-first'.
     posture: 'consent-first',
     restricted_regions: [],
     honor_gpc: true,
     banner: {
       headline: 'Privacy choices',
-      body: '${ONBOARDING_FILL_MARKER} — describe what this site measures and what a visitor is consenting to.',
+      body: `${ONBOARDING_FILL_MARKER} — describe what this site measures and what a visitor is consenting to.`,
       accept_label: 'Accept all',
       reject_label: 'Decline',
       manage_label: 'Manage choices',
@@ -1383,12 +1512,54 @@ export const trackingConfigBody = {
     outbound_links: false,
     utm_capture: false,
   },
-};
+});
+
+const trackingConfigSeedTemplate = (ids, supplied) => {
+  const body = mergeGenesisInput(trackingConfigSkeletonBody(), supplied ?? {});
+  return `/**
+ * Tracking-config SKELETON for '${ids.siteId}' (T16.1 create-site scaffold,
+ * onboarding stage) — structurally valid (satisfies
+ * packages/core/schema/bodies/tracking-config-v1.ts) so the standard
+ * round-trip/reconcile tooling works unmodified for any new client, but no
+ * provider is enabled and every free-text field is a placeholder: genesis
+ * never invents a client's analytics posture or copy (Wolf's 2026-08-05
+ * ruling; see sites/drlurie/seeds/tracking-config-seed-data.mjs for what a
+ * FILLED-IN config looks like). Replace every '${ONBOARDING_FILL_MARKER}'
+ * marker — and pick a real consent posture — before this seed is ever driven
+ * into the store.
+ *
+ * What to decide, field by field:
+ *   providers        — empty means nothing is measured at all. The per-provider
+ *                      id shape is in
+ *                      docs/cms-architecture/12-object-tracking-and-analytics.md §4.
+ *   consent.posture  — 'geo-adaptive' | 'consent-first' | 'us-first'. Seeded
+ *                      'consent-first', the most restrictive of the three;
+ *                      pick the one that matches this client's real audience
+ *                      geography rather than leaving the safe default because
+ *                      it was already there.
+ *   consent.banner   — the words a visitor reads. Placeholder copy is not
+ *                      consent copy.
+ *
+ * Wolf 2026-09-09: \`create-site --tracking-config '<json>'\` deep-merges a
+ * partial body onto this skeleton at mint, so an agent that already knows the
+ * client's analytics posture can supply it instead of scaffolding placeholders
+ * for a human to find later. Unlike the strategy/voice/visual baselines this
+ * object carries no provenance marker, so a supplied config is simply the
+ * config.
+ *
+ * Driver contract for scripts/home-conversion-roundtrip.mjs:
+ *   --site sites/${ids.clientSlug} --seeds sites/${ids.clientSlug}/seeds/tracking-config-seed-data.mjs
+ */
+
+export const SEED_SITE = '${ids.siteId}';
+
+export const trackingConfigBody = ${JSON.stringify(body, null, 2)};
 
 export const CONVERSION_SEEDS = [
   { objectType: 'tracking_config', objectId: 'trk_${ids.clientId}', body: trackingConfigBody },
 ];
 `;
+};
 
 // ─── the per-site policy bundle (W14 T14.2) ───
 //
@@ -1942,6 +2113,26 @@ export const coreFunctionNames = () => {
 
 export const buildPlan = (opts) => {
   const clientSlug = validateClientSlug(opts.name);
+  // Wolf 2026-09-09 — the genesis policy's teeth, at the PLAN step.
+  //
+  // Here rather than in `writeFiles` on purpose. `buildPlan` is what every
+  // path runs first: `--dry-run`, `--json`, the real scaffold, and
+  // CMS-Agent's `site.duplicate` through the `--json` seam. Refusing here
+  // means a mint missing a required baseline is refused BEFORE a single file
+  // is written and long before any Netlify site exists — and that a dry run
+  // reports the same refusal the real run would, which is the only reason to
+  // trust a dry run at all.
+  //
+  // The policy consulted is the COMMITTED fleet default (or whatever a host
+  // registered through `setGenesisPolicyProvider`). It is not, and cannot be,
+  // a tenant's stored governance override: this call is minting a tenant that
+  // has no blob store, and reaching for some other tenant's would put a site
+  // literal in core. genesis-policy-verbs.ts says the same thing from the
+  // other side.
+  //
+  // Shipped default is `requiredArtifacts: []`, so this throws for nobody
+  // until Wolf says otherwise.
+  assertGenesisArtifactsSupplied(opts);
   const ids = idsFor(clientSlug);
   const brandName = opts.brandName || titleCase(clientSlug);
   const canonicalHost = opts.canonicalHost || `https://${clientSlug}.netlify.app`;
@@ -1954,14 +2145,19 @@ export const buildPlan = (opts) => {
     // P6: `--niche` (opts.niche) shapes the house visual_standard's
     // sampleSubjects; `siteSeedTemplate` falls back to a small generic set
     // whenever it is omitted.
-    'site-seed-data.mjs': () => siteSeedTemplate(ids, brandName, canonicalHost, opts.niche),
+    'site-seed-data.mjs': () =>
+      siteSeedTemplate(ids, brandName, canonicalHost, opts.niche, opts.visualStandard, opts.logo),
     'navigation-seed-data.mjs': () => navigationSeedTemplate(ids, brandName),
     'taxonomy-seed-data.mjs': () => taxonomySeedTemplate(ids),
     'themes-seed-data.mjs': () => themeSeedTemplate(ids),
     'section-templates-seed-data.mjs': () => sectionTemplatesSeedTemplate(ids),
     'templates-seed-data.mjs': () => templatesSeedTemplate(ids),
-    'voice-seed-data.mjs': () => voiceSeedTemplate(ids, brandName),
-    'tracking-config-seed-data.mjs': () => trackingConfigSeedTemplate(ids),
+    'voice-seed-data.mjs': () => voiceSeedTemplate(ids, brandName, opts.editorialVoice),
+    // Wolf 2026-09-09: `--niche` also lands in the strategy seed's private
+    // notes — the one thing genesis genuinely knows about the tenant, recorded
+    // where a strategist will read it and stripped from every export.
+    'strategy-seed-data.mjs': () => strategySeedTemplate(ids, brandName, opts.niche, opts.editorialStrategy),
+    'tracking-config-seed-data.mjs': () => trackingConfigSeedTemplate(ids, opts.trackingConfig),
   };
 
   const files = [
@@ -2584,6 +2780,26 @@ export const executeNetlifyProvisioning = async (
 
 // ─── CLI entry ───
 
+/**
+ * Read a genesis-input flag's value: inline JSON, or `@path` to a JSON file.
+ * Throws a readable error naming the flag — a mint that silently ignored a
+ * supplied baseline would produce a tenant marked `genesis_default` while its
+ * operator believed they had supplied one, which is the exact confusion the
+ * provenance marker exists to prevent.
+ */
+const readJsonArg = (flag, raw) => {
+  if (raw === undefined) throw new Error(`${flag} needs a value: inline JSON, or @path/to/file.json`);
+  const text = raw.startsWith('@') ? fs.readFileSync(raw.slice(1), 'utf8') : raw;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${flag} is not valid JSON: ${error.message}`);
+  }
+  if (!isPlainSeedObject(parsed)) throw new Error(`${flag} must be a JSON object (a partial body), not an array or scalar.`);
+  return parsed;
+};
+
 const parseArgs = (argv) => {
   const opts = { dryRun: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -2604,6 +2820,37 @@ const parseArgs = (argv) => {
       // scaffold is unaffected. Omitted, sampleSubjects falls back to a
       // small generic set.
       opts.niche = argv[i + 1];
+      i += 1;
+    } else if (
+      arg === '--editorial-strategy' ||
+      arg === '--editorial-voice' ||
+      arg === '--visual-standard' ||
+      arg === '--logo' ||
+      arg === '--tracking-config'
+    ) {
+      // Wolf 2026-09-09, genesis-input widening. Each takes a PARTIAL body as
+      // inline JSON or `@path/to.json`, deep-merged onto the skeleton the
+      // scaffold would otherwise write; supplying one flips that baseline's
+      // `provenance.set_by` from "genesis_default" to "agent", which is what
+      // silences the "needs to be set" warning on every consumer. Malformed
+      // JSON exits with the parse error and the flag name rather than
+      // scaffolding a tenant with a silently ignored input.
+      const key = {
+        '--editorial-strategy': 'editorialStrategy',
+        '--editorial-voice': 'editorialVoice',
+        '--visual-standard': 'visualStandard',
+        '--logo': 'logo',
+        // W3: the fifth genesis input. It exists so that every member of the
+        // genesis policy's CLOSED artifact enum is actually supplyable —
+        // a policy able to require something no flag can provide would
+        // produce a refusal with only one way out, which is not a refusal,
+        // it is an outage. Unlike its four neighbours it does NOT flip a
+        // provenance marker: tracking_config carries no provenance block
+        // (W1 added one to the three baselines that needed the unset marker),
+        // so a supplied tracking config is simply the config, merged.
+        '--tracking-config': 'trackingConfig',
+      }[arg];
+      opts[key] = readJsonArg(arg, argv[i + 1]);
       i += 1;
     } else if (arg === '--netlify-token') {
       opts.netlifyToken = argv[i + 1];
@@ -2679,6 +2926,27 @@ const safeNetlifyResult = (result) => ({
   teamInheritedOk: result.teamInheritedOk,
   secretsFailed: result.secretsFailed.map(({ name, message }) => ({ name, message })),
   storageParity: result.storageParity ? result.storageParity.rows : null,
+});
+
+/**
+ * The machine-readable form of a genesis-policy refusal (Wolf, 2026-09-09).
+ *
+ * Same `create_site_result.v1` contract as a successful run so a driver parses
+ * ONE shape, with `ok:false` and the same 422 / error_code / missing[] /
+ * ways_out quartet the MCP surface and CMS-Agent's `site.duplicate` return.
+ * Exported so the contract is testable without spawning a subprocess — the
+ * CLI entry point below is a two-line caller of this.
+ */
+export const genesisRefusalResult = (error) => ({
+  contract: 'create_site_result.v1',
+  ok: false,
+  status: error.status,
+  error_code: error.code,
+  error: error.message,
+  missing: error.missing,
+  ways_out: error.waysOut,
+  scaffolded: false,
+  netlify: null,
 });
 
 export const main = async (argv) => {
@@ -2816,6 +3084,16 @@ export const main = async (argv) => {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2)).catch((error) => {
+    // Wolf 2026-09-09: a policy refusal reaching a MACHINE caller has to be
+    // machine-readable, or CMS-Agent's site.duplicate learns about it as an
+    // unparseable stderr blob and reports "scaffold failed" — which is the
+    // one thing a catalogued, actionable refusal exists not to become. The
+    // document carries the same 422 / error_code / missing[] / ways_out
+    // triple the MCP surface returns, so a driver can render it verbatim.
+    if (error?.code === 'genesis_artifact_required' && process.argv.includes('--json')) {
+      console.log(JSON.stringify(genesisRefusalResult(error)));
+      process.exit(1);
+    }
     console.error(`[create-site] FAILED: ${error instanceof Error ? error.message : error}`);
     process.exit(1);
   });

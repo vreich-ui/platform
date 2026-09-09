@@ -193,6 +193,12 @@ import { handleMembershipVerb } from '../lib/membership/verbs.js';
 import { TOOL_DEFINITIONS_ANALYTICS } from '../lib/mcp-tool-definitions-analytics.js';
 import { callAnalyticsSummary, callAnalyticsTopContent, callAnalyticsObject } from '../lib/mcp-analytics-handlers.js';
 import { callerPrincipalFromMcpEvent } from '../lib/membership/caller-principal.js';
+import {
+  GENESIS_POLICY_TOOL_VERBS,
+  TOOL_DEFINITIONS_GENESIS,
+  isGenesisPolicyTool,
+} from '../lib/mcp-tool-definitions-genesis.js';
+import { handleGenesisPolicyVerb } from '../lib/genesis-policy-verbs.js';
 import { getUsersBlobStore } from '../lib/users-store.js';
 import { buildWhoami } from '../lib/whoami.js';
 import { recordWhoamiSignal } from '../lib/plugin/install-signals.js';
@@ -547,6 +553,9 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   ...TOOL_DEFINITIONS_PART2,
   // W18 T18.6b: listed only to OAuth HUMAN principals (visibleToolDefinitions).
   ...TOOL_DEFINITIONS_MEMBERSHIP,
+  // Wolf 2026-09-09: the fleet genesis-policy lever — same posture as the
+  // membership family, listed only to OAuth HUMAN principals.
+  ...TOOL_DEFINITIONS_GENESIS,
   // R12.3 / T21.20: read-only analytics over the own-tracker sink + this
   // tenant's object store — visible to every caller like PART1/PART2.
   ...TOOL_DEFINITIONS_ANALYTICS,
@@ -1547,6 +1556,15 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       break;
   }
 
+  // Wolf 2026-09-09: the genesis-policy family — one core, gated on a HUMAN
+  // principal exactly like membership below, and refused before any store read.
+  if (isGenesisPolicyTool(name)) {
+    const run = () => callGenesisPolicyTool(event, name, input);
+    return typeof input.idempotency_key === 'string'
+      ? withBoundIdempotentToolCall(event, name, input.idempotency_key, run)
+      : run();
+  }
+
   // W18 T18.6b: the membership family — one core, gated on a HUMAN principal.
   // `callerPrincipalFromMcpEvent` mints a human ONLY from an OAuth-bound
   // subject; everything else is an agent and the core answers 403
@@ -1559,6 +1577,31 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
   }
 
   return toolError(`Unknown tool: ${String(name)}`);
+};
+
+const callGenesisPolicyTool = async (event: LambdaEvent, name: string, input: Record<string, unknown>) => {
+  // The same principal mint the membership family uses: a human ONLY from an
+  // OAuth-bound subject. Nothing in the request body can change `kind`.
+  const principal = callerPrincipalFromMcpEvent(
+    { oauthPrincipal: event.oauthPrincipal, verifiedAgentName: event.verifiedAgentName, requestId: event.requestId },
+    input.agent_name
+  );
+  const { idempotency_key: _idem, agent_name: _agent, ...args } = input;
+  const result = await handleGenesisPolicyVerb({
+    verb: GENESIS_POLICY_TOOL_VERBS[name],
+    args,
+    principal,
+    deps: {
+      governance: await getGovernanceBlobStore(event, requireBinding()),
+      users: await getUsersBlobStore(event, requireBinding()),
+    },
+  });
+  if (result.status >= 200 && result.status < 300) return toolResult(result.body);
+  return toolError(String(result.body.error ?? 'Genesis-policy request failed.'), {
+    ...(result.body.error_code ? { error_code: result.body.error_code } : {}),
+    status: result.status,
+    ...Object.fromEntries(Object.entries(result.body).filter(([k]) => k !== 'error' && k !== 'error_code')),
+  });
 };
 
 const callMembershipTool = async (event: LambdaEvent, name: string, input: Record<string, unknown>) => {
@@ -1748,7 +1791,11 @@ export const visibleToolDefinitions = (event?: Pick<LambdaEvent, 'oauthPrincipal
       // W18 T18.6b: membership tools exist only for an OAuth-bound HUMAN —
       // shared-token / per-agent sessions never even see them (the core
       // refuses them anyway: defence in depth).
-      (!isMembershipTool(tool.name) || Boolean(event?.oauthPrincipal))
+      (!isMembershipTool(tool.name) || Boolean(event?.oauthPrincipal)) &&
+      // Wolf 2026-09-09: same rule, same reason — a fleet governance lever an
+      // agent can SEE is a lever an agent will try, and the refusal it gets
+      // back reads as a broken tenant rather than as policy.
+      (!isGenesisPolicyTool(tool.name) || Boolean(event?.oauthPrincipal))
   );
 
 export const _mcpInternal = {

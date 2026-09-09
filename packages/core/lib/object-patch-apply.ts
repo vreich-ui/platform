@@ -1092,6 +1092,12 @@ const applyOp = (objectType: ObjectType, body: UnknownRecord, op: PatchOp): Patc
     case 'set_voice_fields':
       return applyFieldsOp(op, body, op.fields as UnknownRecord);
 
+    // Wolf 2026-09-09: the editorial-strategy singleton — same open deep-merge
+    // idiom, same reason. `topic_weights[]`/`angle_mix[]`/`audience_segments[]`
+    // are arrays and replace wholesale, which is what a declared set wants.
+    case 'set_strategy_fields':
+      return applyFieldsOp(op, body, op.fields as UnknownRecord);
+
     // Brand-imagery wave (BRIEF.md §3.1): the visual-standard singleton/
     // template family — same open deep-merge idiom as set_voice_fields.
     case 'set_visual_standard_fields':
@@ -1317,6 +1323,7 @@ export const derivePatchInverse = (op: PatchOp, capture: PatchOpCapture): PatchO
     case 'update_blueprint_data':
     case 'set_tracking_config_fields':
     case 'set_voice_fields':
+    case 'set_strategy_fields':
     case 'set_visual_standard_fields':
     case 'set_theme_fields': {
       const fieldsCapture = expectCaptureKind(op, capture, 'fields');

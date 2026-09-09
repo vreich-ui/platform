@@ -34,6 +34,7 @@ import {
   TOOL_DEFINITIONS_MEMBERSHIP,
   isMembershipTool,
 } from '../mcp-tool-definitions-membership.js';
+import { TOOL_DEFINITIONS_GENESIS } from '../mcp-tool-definitions-genesis.js';
 import { TOOL_DEFINITIONS_ANALYTICS } from '../mcp-tool-definitions-analytics.js';
 import type { ToolDefinition } from '../../functions/mcp.js';
 import { compileSchema, type CompiledSchema } from './json-schema-lite.js';
@@ -70,6 +71,11 @@ const VISIBLE_DEFINITIONS: readonly ToolDefinition[] = [
   // like registry_get/commerce_orders, so client_manager can answer "what
   // should I write next?" with cited evidence.
   ...TOOL_DEFINITIONS_ANALYTICS,
+  // Wolf 2026-09-09: listed for completeness and then removed by the
+  // CHAT_HIDDEN_TOOLS filter below — the genesis-policy family is /mcp-only
+  // until its admin-chat card exists. Present here rather than omitted so the
+  // next person adding a chat surface for it edits one filter, not this list.
+  ...TOOL_DEFINITIONS_GENESIS,
 ].filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name) && !CHAT_HIDDEN_TOOLS.has(def.name));
 
 const MEMBERSHIP_UNAVAILABLE = {

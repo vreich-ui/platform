@@ -175,6 +175,10 @@ test('anti-drift coverage guard: contract types match objectTypes exactly', () =
         // deliberately NOT a fourteenth GOVERNED one (see the GOVERNED const
         // above and approval-policy.ts governedObjectTypes).
         'visual_standard',
+        // Wolf 2026-09-09: the fourteenth object type and the THIRTEENTH
+        // governed one — unlike visual_standard, a strategy is publishable,
+        // approvable and creation-gated (approval-policy.ts).
+        'editorial_strategy',
       ] as ObjectType[]),
     ].sort()
   );
@@ -224,9 +228,10 @@ test('W8.3b: creation_policy is served on every contract and reflects the inject
   for (const type of OBJECT_CONTRACT_TYPES) {
     const open = buildObjectContract(type).creation_policy;
     assert.equal(open.humans, 'always_allowed');
-    if (type === 'tracking_config' || type === 'editorial_voice') {
+    if (type === 'tracking_config' || type === 'editorial_voice' || type === 'editorial_strategy') {
       // W13/D1: human/seed-only singletons — the conversion-factory driver is
       // the one named seed identity (T13.10); casual agents stay excluded.
+      // Wolf 2026-09-09: editorial_strategy joins them on the same rule.
       assert.deepEqual(
         open.agents,
         { allowlist: ['object-conversion-roundtrip'] },

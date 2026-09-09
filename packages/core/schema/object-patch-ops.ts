@@ -668,6 +668,30 @@ const setVoiceFieldsSchema = z.strictObject({
   ...guard,
 });
 
+// ——— Editorial strategy (Wolf, 2026-09-09) ———
+
+// The set_voice_fields idiom, verbatim, and for the same reasons: ONE open
+// deep-merge op over the whole body (null unsets), no forbidKeys. A strategy's
+// repeated collections — `topic_weights[]`, `angle_mix[]`, `audience_segments[]`
+// — are small declared sets that replace wholesale, so upsert/move/remove ops
+// would be ceremony without a guarantee. The body schema (strict shape, unit
+// bounds, duplicate detection) and the `strategy_not_a_prompt` constraint gate
+// the MERGED result, so a partial edit can never leave a strategy in a shape
+// the whole-body rules refuse.
+//
+// Note what this op does NOT do: it never rewrites `provenance` on its own.
+// The write path stamps provenance from the principal that made the write (a
+// human edit makes it `human`, an agent edit `agent`), which is exactly why a
+// seeded default stops looking like one the moment somebody edits it — and why
+// an agent cannot silently mark its own boilerplate as human-decided.
+// Inverse = the captured before-tree. Agent-submittable; the type's publish
+// gate still applies.
+const setStrategyFieldsSchema = z.strictObject({
+  op: z.literal('set_strategy_fields'),
+  fields: fieldsSchema,
+  ...guard,
+});
+
 // ——— Visual standard (brand-imagery wave, BRIEF.md §3.1) ———
 
 // The set_voice_fields idiom, verbatim: ONE open deep-merge op over the whole
@@ -736,6 +760,7 @@ export const patchOpUnionSchema = z.discriminatedUnion('op', [
   setTrackingSchema,
   setTrackingConfigFieldsSchema,
   setVoiceFieldsSchema,
+  setStrategyFieldsSchema,
   setVisualStandardFieldsSchema,
 ]);
 
@@ -840,6 +865,9 @@ export const patchOpNamesByObjectType: Record<ObjectType, readonly PatchOpName[]
   // No set_tracking: a voice is authoring law, never a tracked surface (the
   // tracking_config precedent).
   editorial_voice: ['set_voice_fields'],
+  // No set_tracking either: a strategy is publishing law, never a tracked
+  // surface (the tracking_config/editorial_voice precedent).
+  editorial_strategy: ['set_strategy_fields'],
   // No set_tracking: a mood board is never a reader-facing surface (the same
   // exemption, same reason).
   visual_standard: ['set_visual_standard_fields'],

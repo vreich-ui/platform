@@ -37,5 +37,9 @@ export const creationPolicyConfig = {
     // D1 (2026-07-28): editorial_voice follows the same rule — seed/human-minted
     // singleton, agents edit it via set_voice_fields.
     editorial_voice: { agents: ['object-conversion-roundtrip'] },
+    // Wolf 2026-09-09: editorial_strategy is the voice's twin on this rule too
+    // — genesis/human mints the singleton, agents edit it via
+    // set_strategy_fields. Same seed identity, same reason.
+    editorial_strategy: { agents: ['object-conversion-roundtrip'] },
   },
 } satisfies CreationPolicyConfig;

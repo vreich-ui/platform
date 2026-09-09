@@ -36,6 +36,7 @@ import { taxonomyBodySchema } from '../../schema/bodies/taxonomy-v1.js';
 import { templateBodySchema } from '../../schema/bodies/template-v1.js';
 import { trackingConfigBodySchema } from '../../schema/bodies/tracking-config-v1.js';
 import { themeBodySchema } from '../../schema/bodies/theme-v1.js';
+import { editorialStrategyShapeSchema } from '../../schema/bodies/editorial-strategy-v1.js';
 import { editorialVoiceShapeSchema } from '../../schema/bodies/editorial-voice-v1.js';
 import { visualStandardShapeSchema } from '../../schema/bodies/visual-standard-v1.js';
 import type { ObjectType } from '../../schema/object-record-v1.js';
@@ -76,6 +77,10 @@ export const ASK_AI_BODY_SCHEMAS = {
   // refuses `.partial()` on a schema carrying `.refine()`, which
   // `visualStandardBodySchema` now does (status/sampleSubjects invariant).
   visual_standard: visualStandardShapeSchema,
+  // Wolf 2026-09-09: the unrefined SHAPE, for the same reason as the two above
+  // — the Ask-AI derivation partials every body schema and zod refuses
+  // `.partial()` on a schema carrying refinements.
+  editorial_strategy: editorialStrategyShapeSchema,
 } satisfies Record<AskAiObjectType, z.ZodType>;
 
 export const isAskAiObjectType = (value: string): value is AskAiObjectType =>

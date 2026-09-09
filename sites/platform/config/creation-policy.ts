@@ -15,5 +15,9 @@ export const creationPolicyConfig = {
     // registry is — agents EDIT the site's declared voice, they never mint a
     // second one and call it the house style.
     editorial_voice: { agents: ['object-conversion-roundtrip'] },
+    // Wolf 2026-09-09: editorial_strategy is the voice's twin on this rule too
+    // — genesis/human mints the singleton, agents edit it via
+    // set_strategy_fields. Same seed identity, same reason.
+    editorial_strategy: { agents: ['object-conversion-roundtrip'] },
   },
 } satisfies CreationPolicyConfig;

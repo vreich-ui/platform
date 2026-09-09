@@ -13,5 +13,9 @@ export const creationPolicyConfig = {
     tracking_config: { agents: ['object-conversion-roundtrip'] },
     // D1: seed-minted singleton — agents edit the declared voice, never mint one.
     editorial_voice: { agents: ['object-conversion-roundtrip'] },
+    // Wolf 2026-09-09: editorial_strategy is the voice's twin on this rule too
+    // — genesis/human mints the singleton, agents edit it via
+    // set_strategy_fields. Same seed identity, same reason.
+    editorial_strategy: { agents: ['object-conversion-roundtrip'] },
   },
 } satisfies CreationPolicyConfig;

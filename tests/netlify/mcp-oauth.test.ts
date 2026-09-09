@@ -604,12 +604,23 @@ const MEMBERSHIP_TOOL_NAMES = [
   'member_export',
 ];
 
-test('tools/list: the 16 membership tools are listed to an OAuth-bound human and HIDDEN from a shared-token session (snapshot)', async () => {
+/**
+ * Wolf 2026-09-09: the fleet genesis-policy pair rides the SAME human-only
+ * listing rule as the membership family (mcp.ts visibleToolDefinitions), for
+ * the same reason — an agent that can SEE a fleet governance lever will try
+ * it, and the 403 it gets back reads as a broken tenant rather than as policy.
+ * Listed here, not in a second test, because the assertion that matters is the
+ * DIFFERENCE between the two listings: it has to be exactly these two families
+ * and nothing else, and that is one statement about one pair of listings.
+ */
+const HUMAN_ONLY_TOOL_NAMES = ['genesis_policy_get', 'genesis_policy_set'];
+
+test('tools/list: the 16 membership tools + the genesis-policy pair are listed to an OAuth-bound human and HIDDEN from a shared-token session (snapshot)', async () => {
   process.env.MCP_HTTP_AUTH_TOKEN = 'the-shared-secret';
   const shared = await rpc({ authorization: 'Bearer the-shared-secret' }, 'tools/list');
   assert.equal(shared.response.statusCode, 200);
   const sharedNames = (shared.body.result?.tools as Array<{ name: string }>).map((t) => t.name);
-  for (const name of MEMBERSHIP_TOOL_NAMES)
+  for (const name of [...MEMBERSHIP_TOOL_NAMES, ...HUMAN_ONLY_TOOL_NAMES])
     assert.ok(!sharedNames.includes(name), `${name} must be hidden from the shared token`);
   assert.ok(sharedNames.includes('object_get'));
 
@@ -617,12 +628,12 @@ test('tools/list: the 16 membership tools are listed to an OAuth-bound human and
   const human = await rpc({ authorization: `Bearer ${token}` }, 'tools/list');
   assert.equal(human.response.statusCode, 200);
   const humanNames = (human.body.result?.tools as Array<{ name: string }>).map((t) => t.name);
-  for (const name of MEMBERSHIP_TOOL_NAMES)
+  for (const name of [...MEMBERSHIP_TOOL_NAMES, ...HUMAN_ONLY_TOOL_NAMES])
     assert.ok(humanNames.includes(name), `${name} must be listed to the OAuth human`);
   assert.deepEqual(
     humanNames.filter((n) => !sharedNames.includes(n)).sort(),
-    [...MEMBERSHIP_TOOL_NAMES].sort(),
-    'the ONLY difference between the two listings is the membership family'
+    [...MEMBERSHIP_TOOL_NAMES, ...HUMAN_ONLY_TOOL_NAMES].sort(),
+    'the ONLY difference between the two listings is the membership family and the genesis-policy pair'
   );
 });
 
@@ -669,4 +680,67 @@ test('tools/call: a shared-token session calling a membership tool gets 403 memb
   assert.equal(dryResult.structuredContent?.dry_run, true);
   assert.equal(dryResult.structuredContent?.would, 'invite');
   assert.equal(dryResult.structuredContent?.gotrue_email, false, 'no GoTrue admin token on an MCP request');
+});
+
+/**
+ * Wolf 2026-09-09 — the fleet genesis-policy pair over /mcp. Same shape as the
+ * membership test above and deliberately in the same file: the two families
+ * share one gate (`callerPrincipalFromMcpEvent` mints a human only from an
+ * OAuth-bound subject) and one listing rule, so they share the evidence.
+ *
+ * `genesis_policy_get` is the read half and it is the one worth exercising
+ * end-to-end: it is what an operator calls before deciding whether to require
+ * an artifact, so what it RETURNS is the contract — the committed fleet
+ * default, the artifact -> input-field map the refusal speaks, and the refusal
+ * itself with both ways out.
+ */
+test('tools/call: a shared-token session calling genesis_policy_get gets 403 genesis_policy_requires_human; the OAuth human reads the fleet policy, its vocabulary and the refusal contract', async () => {
+  process.env.MCP_HTTP_AUTH_TOKEN = 'the-shared-secret';
+  const refused = await rpc({ authorization: 'Bearer the-shared-secret' }, 'tools/call', {
+    name: 'genesis_policy_get',
+    arguments: { agent_name: 'owner@example.com' },
+  });
+  assert.equal(refused.response.statusCode, 200);
+  const refusedResult = refused.body.result as { isError?: boolean; structuredContent?: { error_code?: string } };
+  assert.equal(refusedResult.isError, true);
+  assert.equal(
+    refusedResult.structuredContent?.error_code,
+    'genesis_policy_requires_human',
+    'a self-declared agent_name must never mint a human principal'
+  );
+
+  const token = await oauthToken();
+  const read = await rpc({ authorization: `Bearer ${token}` }, 'tools/call', {
+    name: 'genesis_policy_get',
+    arguments: {},
+  });
+  const readResult = read.body.result as {
+    isError?: boolean;
+    structuredContent?: {
+      committed?: { requiredArtifacts?: string[] };
+      override?: unknown;
+      effective?: { requiredArtifacts?: string[] };
+      provenance?: string;
+      artifacts?: string[];
+      input_fields?: Record<string, string>;
+      refusal_contract?: { error_code?: string; example?: { ways_out?: string[] } };
+    };
+  };
+  assert.equal(readResult.isError, undefined, JSON.stringify(read.body).slice(0, 400));
+  const policy = readResult.structuredContent!;
+  // The shipped fleet default requires NOTHING — W3 changes no mint's outcome.
+  assert.deepEqual(policy.committed?.requiredArtifacts, []);
+  assert.deepEqual(policy.effective?.requiredArtifacts, []);
+  assert.equal(policy.override, null);
+  assert.equal(policy.provenance, 'committed');
+  assert.deepEqual(policy.artifacts, [
+    'editorial_strategy',
+    'editorial_voice',
+    'visual_standard',
+    'logo',
+    'tracking_config',
+  ]);
+  assert.equal(policy.input_fields?.editorial_strategy, 'editorialStrategy');
+  assert.equal(policy.refusal_contract?.error_code, 'genesis_artifact_required');
+  assert.equal(policy.refusal_contract?.example?.ways_out?.length, 2);
 });

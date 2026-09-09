@@ -8,6 +8,7 @@ import {
 } from './mcp-tool-definitions.js';
 import { TOOL_DEFINITIONS_PART2 } from './mcp-tool-definitions-2.js';
 import { TOOL_DEFINITIONS_MEMBERSHIP } from './mcp-tool-definitions-membership.js';
+import { TOOL_DEFINITIONS_GENESIS } from './mcp-tool-definitions-genesis.js';
 import { TOOL_DEFINITIONS_ANALYTICS } from './mcp-tool-definitions-analytics.js';
 import type { ToolDefinition } from '../functions/mcp.js';
 
@@ -16,11 +17,12 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   ...TOOL_DEFINITIONS_PART2,
   ...TOOL_DEFINITIONS_MEMBERSHIP,
   ...TOOL_DEFINITIONS_ANALYTICS,
+  ...TOOL_DEFINITIONS_GENESIS,
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 106 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 106, `Expected 106 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 108 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2, + genesis_policy_get / genesis_policy_set, W3 Wolf 2026-09-09)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 108, `Expected 108 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -100,6 +102,10 @@ describe('Tool definitions', () => {
       'member_purge',
       'ownership_transfer',
       'membership_policy_set',
+      // Wolf 2026-09-09: the fleet genesis-policy write. Privileged class, so
+      // the floor is mandatory anyway (the assertion above) — named here so
+      // the two lists are one statement rather than two that could diverge.
+      'genesis_policy_set',
     ]);
 
     const toolsWithFloorAsk = new Set(
@@ -124,7 +130,7 @@ describe('Tool definitions', () => {
    * The membership family and the two image-policy setters are UNCHANGED —
    * this set is what proves it.
    */
-  it('exactly these tools are chatDefaultOff: the two image-policy setters and the thirteen restricted membership tools — NOT delete_pdf_template', () => {
+  it('exactly these tools are chatDefaultOff: the two image-policy setters, the thirteen restricted membership tools and the genesis-policy pair — NOT delete_pdf_template', () => {
     const expectedDefaultOff = new Set([
       'set_image_search_policy',
       'set_image_model_policy',
@@ -142,6 +148,13 @@ describe('Tool definitions', () => {
       'ownership_transfer',
       'membership_policy_set',
       'member_export',
+      // Wolf 2026-09-09: both halves of the genesis-policy family are
+      // chatDefaultOff. They are also CHAT_HIDDEN today, which is the
+      // stronger statement; the flag stays declared so that lifting the
+      // hidden-ness (when the admin card lands) does not silently switch a
+      // fleet governance read on for every chat run.
+      'genesis_policy_get',
+      'genesis_policy_set',
     ]);
 
     const defaultOff = new Set(TOOL_DEFINITIONS.filter((t) => t.governance.chatDefaultOff).map((t) => t.name));

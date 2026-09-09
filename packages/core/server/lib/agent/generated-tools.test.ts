@@ -22,6 +22,7 @@ import { OPERATIONAL_BRIDGE_TOOL_NAMES } from './generated-tools.js';
 import { OPERATIONAL_HANDLER_NAMES } from './context.js';
 import { isMembershipTool, TOOL_DEFINITIONS_MEMBERSHIP } from '../mcp-tool-definitions-membership.js';
 import { TOOL_DEFINITIONS_ANALYTICS } from '../mcp-tool-definitions-analytics.js';
+import { TOOL_DEFINITIONS_GENESIS } from '../mcp-tool-definitions-genesis.js';
 import { CMS_AGENT_BOUNDS } from './cms-agent-client.js';
 import { fitToolsToCmsAgentBound } from './engine.js';
 import { PRESENT_CANDIDATES_TOOL_NAME } from './candidates.js';
@@ -32,6 +33,10 @@ const ALL_DEFINITIONS: readonly ToolDefinition[] = [
   ...TOOL_DEFINITIONS_PART2,
   ...TOOL_DEFINITIONS_MEMBERSHIP,
   ...TOOL_DEFINITIONS_ANALYTICS,
+  // Wolf 2026-09-09: declared on /mcp, CHAT_HIDDEN — so it adds nothing to
+  // `expectedVisible` below, and the chat-hidden loop at the end of the first
+  // test is what proves it stayed out of the registry.
+  ...TOOL_DEFINITIONS_GENESIS,
 ];
 
 // A minimal stub ToolContext; individual tests override only what they use.
@@ -622,8 +627,8 @@ test('compileSchema throws at compile time on an unsupported keyword', () => {
   );
 });
 
-test('every one of the 106 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 106);
+test('every one of the 108 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 108);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }

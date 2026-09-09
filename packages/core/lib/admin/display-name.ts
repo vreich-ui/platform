@@ -28,6 +28,7 @@ export const OBJECT_TYPE_LABELS: Record<ObjectType, string> = {
   tracking_config: 'Tracking config',
   editorial_voice: 'Editorial voice',
   visual_standard: 'Visual standard',
+  editorial_strategy: 'Editorial strategy',
 };
 
 export function objectTypeLabel(type: ObjectType): string {
@@ -330,6 +331,7 @@ export const VERB_PHRASES: Record<string, string> = {
   set_tracking: 'updated tracking settings',
   set_tracking_config_fields: 'updated the tracker registry',
   set_voice_fields: 'updated the editorial voice',
+  set_strategy_fields: 'updated the editorial strategy',
   // Visual standard (brand-imagery wave)
   set_visual_standard_fields: 'updated the visual standard',
 };

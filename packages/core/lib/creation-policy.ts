@@ -62,6 +62,9 @@ export const creationPolicyConfigSchema = z.strictObject({
     content_item: creationRuleSchema.optional(),
     tracking_config: creationRuleSchema.optional(),
     editorial_voice: creationRuleSchema.optional(),
+    // Wolf 2026-09-09: the same posture as editorial_voice — genesis seeds it,
+    // an agent may author it, and Wolf can reserve it by editing the config.
+    editorial_strategy: creationRuleSchema.optional(),
   }),
 });
 
