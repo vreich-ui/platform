@@ -602,7 +602,10 @@ const redirectSchema = z.strictObject({
 });
 
 export const siteConfigSchema = z.strictObject({
-  siteId: z.string().regex(/^site_[a-z0-9]+$/),
+  // Must match objectIdPatterns.site in packages/core/lib/object-ids.ts — the object-id law.
+  // A narrower copy here silently rejects any multi-word client slug: create-site's idsFor()
+  // maps 'a-b' to 'a_b', so every hyphenated tenant failed to build while single-word ones passed.
+  siteId: z.string().regex(/^site_[a-z0-9]+(?:_[a-z0-9]+)*$/),
   canonicalHost: z.string().regex(/^https:\\/\\/[^\\s/]+$/),
   imageDomains: z.array(z.string().min(1)),
   redirects: z.array(redirectSchema),
@@ -1862,6 +1865,7 @@ import { createHandler as createDeployStatusHandler } from '../../../../packages
 import { siteBinding } from '../../config/site-binding.js';
 
 configureMcp({
+  binding: siteBinding,
   saveArtifactHandler: createSaveArtifactHandler(siteBinding),
   objectStoreHandler: createObjectStoreHandler(siteBinding),
   deployStatusHandler: createDeployStatusHandler(siteBinding),

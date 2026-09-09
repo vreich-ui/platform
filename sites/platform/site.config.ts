@@ -27,7 +27,7 @@ const redirectSchema = z.strictObject({
 });
 
 export const siteConfigSchema = z.strictObject({
-  siteId: z.string().regex(/^site_[a-z0-9]+$/),
+  siteId: z.string().regex(/^site_[a-z0-9]+(?:_[a-z0-9]+)*$/),
   canonicalHost: z.string().regex(/^https:\/\/[^\s/]+$/),
   imageDomains: z.array(z.string().min(1)),
   redirects: z.array(redirectSchema),
