@@ -288,7 +288,7 @@
       "preferredImageFormat",
       "preferred_image_format"
     ],
-    "mcpToolCount": 32,
+    "mcpToolCount": 36,
     "grantOptionalTools": [
       "verify_agent_artifact",
       "health",
