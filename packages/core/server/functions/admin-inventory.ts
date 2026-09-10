@@ -26,8 +26,11 @@
  * `getManagedBlobStore`. There is no other code path in this file that turns a
  * caller-supplied string into a store handle.
  */
+import { createHash } from 'node:crypto';
+
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
+import { logDiagnostics, timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { isOwner } from '../lib/roles.js';
 import {
@@ -98,8 +101,34 @@ const jsonHeaders = {
 const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
   statusCode,
   headers: jsonHeaders,
-  body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body })),
 });
+
+/**
+ * T2.3 — the two read actions on this action-dispatched POST (`search`,
+ * `preview`); `delete-artifact`/`retag-artifact` mutate the artifact index
+ * and keep the plain `no-store` response above.
+ *
+ * Applied at the DISPATCH boundary rather than inside `handleSearch`/
+ * `handlePreview` themselves: both have several early-return branches
+ * (`handlePreview` alone fans out to three collection-specific previewers),
+ * and hashing the response they already built — the exact bytes this request
+ * would otherwise have sent — is both simpler and impossible to under-cover
+ * by missing a branch.
+ */
+const READ_ACTIONS = new Set(['search', 'preview']);
+const CACHE_CONTROL = 'private, no-cache';
+const etagForString = (raw: string): string => `"${createHash('sha1').update(raw).digest('hex')}"`;
+
+const withReadCaching = (event: LambdaEvent, action: string | undefined, response: ReturnType<typeof jsonResponse>) => {
+  if (!action || !READ_ACTIONS.has(action) || response.statusCode !== 200) return response;
+  const etag = timeSerialize(() => etagForString(response.body));
+  const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return { statusCode: 304, headers: { 'Cache-Control': CACHE_CONTROL, ETag: etag }, body: '' };
+  }
+  return { ...response, headers: { ...response.headers, 'Cache-Control': CACHE_CONTROL, ETag: etag } };
+};
 
 /**
  * Safety caps. A search fans out over every managed store, so it must be
@@ -176,6 +205,7 @@ const searchObjects = async (query: string, context: ActionContext): Promise<Inv
   const store = await openObjectStore(context.event, context.binding);
   const result = await handleObjectVerb(store, { action: 'inventory' }, context.principal);
   if (result.status < 200 || result.status >= 300) return [];
+  if ('index' in result.body) logDiagnostics('admin-inventory', result.body.index);
 
   const rows = Array.isArray(result.body.objects) ? (result.body.objects as InventoryRow[]) : [];
 
@@ -717,7 +747,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
+  const adminState = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
   if (!adminState.authenticated) {
     return jsonResponse(401, { error: adminState.error || 'Authentication is required.' });
   }
@@ -745,7 +775,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   const actor = adminState.email || adminState.userId || 'admin';
 
   try {
-    return await actionHandler(params, { event, principal, actor, binding });
+    const response = await actionHandler(params, { event, principal, actor, binding });
+    return withReadCaching(event, action, response);
   } catch (error) {
     console.error(`Admin_Inventory action "${action}" failed.`, error);
     return jsonResponse(500, { error: 'The inventory operation failed.' });
@@ -753,4 +784,5 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) =>
+  withServerTiming('admin-inventory', buildHandlerImpl(binding));

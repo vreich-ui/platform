@@ -191,6 +191,140 @@ test('admin-get-blob-image falls back to the original bytes when a rendition can
   assert.equal(responseBytes.length, bytes.length);
 });
 
+// ─── T1.5: caching headers (`Cache-Control`, `ETag`, `If-None-Match` → 304) ─
+//
+// A day-long `max-age` only helps within a browser's own HTTP cache; the
+// `ETag` is what makes a revisit (a fresh page load, a different tab) cheap
+// too — so both are tested together, and specifically THAT the ETag varies
+// with `w`: it is computed over the served (post-rendition) bytes, not the
+// source blob, precisely so a 96px cache entry can never be handed a 304
+// that actually means "still 512px".
+
+test('admin-get-blob-image sets a day-long private Cache-Control and a stable ETag', async () => {
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.CONTEXT = 'dev';
+
+  const requestId = `admin-image-etag-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const bytes = await pngBytes(200, 200, 30);
+  const reference = makeReference(requestId, bytes);
+  await setReference(requestId, reference);
+  await setArtifactBytes(reference, bytes);
+
+  const response = await readAdminBlobImage({ queryStringParameters: { contentType: 'image/png' } }, reference.blobKey);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['Cache-Control'], 'private, max-age=86400');
+  assert.ok(
+    (response.headers as Record<string, string>).ETag,
+    'a 200 must carry an ETag for the client to revalidate with'
+  );
+
+  const again = await readAdminBlobImage({ queryStringParameters: { contentType: 'image/png' } }, reference.blobKey);
+  assert.equal(
+    (again.headers as Record<string, string>).ETag,
+    (response.headers as Record<string, string>).ETag,
+    'the same request must produce the same ETag'
+  );
+});
+
+test('admin-get-blob-image returns 304 when If-None-Match matches, and never for a stale one', async () => {
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.CONTEXT = 'dev';
+
+  const requestId = `admin-image-304-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const bytes = await pngBytes(200, 200, 40);
+  const reference = makeReference(requestId, bytes);
+  await setReference(requestId, reference);
+  await setArtifactBytes(reference, bytes);
+
+  const first = await readAdminBlobImage({ queryStringParameters: { contentType: 'image/png' } }, reference.blobKey);
+  const etag = (first.headers as Record<string, string>).ETag as string;
+
+  const revalidated = await readAdminBlobImage(
+    { queryStringParameters: { contentType: 'image/png' }, headers: { 'if-none-match': etag } },
+    reference.blobKey
+  );
+  assert.equal(revalidated.statusCode, 304);
+  assert.equal((revalidated.headers as Record<string, string>).ETag, etag);
+  assert.equal(revalidated.headers['Cache-Control'], 'private, max-age=86400');
+  assert.equal(revalidated.body, '', 'a 304 must not repeat the bytes the client already has');
+
+  const staleEtag = await readAdminBlobImage(
+    { queryStringParameters: { contentType: 'image/png' }, headers: { 'if-none-match': '"stale-etag"' } },
+    reference.blobKey
+  );
+  assert.equal(staleEtag.statusCode, 200, 'a non-matching If-None-Match must still serve the bytes');
+});
+
+test("admin-get-blob-image's ETag varies with `w`, not just the source blob — a 96px cache entry must never 304 into a 512px response", async () => {
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.CONTEXT = 'dev';
+
+  const requestId = `admin-image-etag-width-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const bytes = await sharp({
+    create: { width: 1000, height: 1000, channels: 3, background: { r: 50, g: 60, b: 70 } },
+  })
+    .png()
+    .toBuffer();
+  const reference = makeReference(requestId, bytes);
+  await setReference(requestId, reference);
+  await setArtifactBytes(reference, bytes);
+
+  const small = await readAdminBlobImage(
+    { queryStringParameters: { contentType: 'image/png', w: '96' } },
+    reference.blobKey
+  );
+  const large = await readAdminBlobImage(
+    { queryStringParameters: { contentType: 'image/png', w: '512' } },
+    reference.blobKey
+  );
+  const original = await readAdminBlobImage({ queryStringParameters: { contentType: 'image/png' } }, reference.blobKey);
+
+  const etags = [
+    (small.headers as Record<string, string>).ETag,
+    (large.headers as Record<string, string>).ETag,
+    (original.headers as Record<string, string>).ETag,
+  ];
+  assert.equal(new Set(etags).size, 3, 'w=96, w=512 and the original must each carry a distinct ETag');
+
+  // An `If-None-Match` carried over from the 96px request must not satisfy the 512px one.
+  const crossWidth = await readAdminBlobImage(
+    {
+      queryStringParameters: { contentType: 'image/png', w: '512' },
+      headers: { 'if-none-match': (small.headers as Record<string, string>).ETag as string },
+    },
+    reference.blobKey
+  );
+  assert.equal(crossWidth.statusCode, 200, 'a 96px ETag must never validate a 512px request');
+});
+
+test('D1: readAdminTemplateThumbnail carries the same day-long Cache-Control, ETag and 304 behavior as the artifact path', async () => {
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.CONTEXT = 'dev';
+
+  const templateId = `tpl_etag_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const blobKey = `thumbnails/${templateId}/v1.png`;
+  const bytes = await pngBytes(800, 600, 60);
+  await setThumbnailBytes(blobKey, bytes);
+
+  const first = await readAdminTemplateThumbnail({ queryStringParameters: {} }, blobKey);
+  assert.equal(first.headers['Cache-Control'], 'private, max-age=86400');
+  assert.ok((first.headers as Record<string, string>).ETag);
+
+  const revalidated = await readAdminTemplateThumbnail(
+    {
+      queryStringParameters: {},
+      headers: { 'if-none-match': (first.headers as Record<string, string>).ETag as string },
+    },
+    blobKey
+  );
+  assert.equal(revalidated.statusCode, 304);
+  assert.equal(revalidated.body, '');
+});
 
 // ─── D1: PDF template thumbnails (`thumbnails/<templateId>/v<n>.png`) ───────
 //

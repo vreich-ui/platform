@@ -81,8 +81,12 @@ import {
   IconUser,
   type IconProps,
 } from './icons';
-import { ARTIFACT_PREVIEW_THUMBNAIL_WIDTH } from './ArtifactStagePreview';
-import { fetchMe } from '@core/lib/admin/users-client';
+import { ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH } from './ArtifactStagePreview';
+// T1.2 R4: role names used to come from a private `fetchMe` this page made
+// itself — now the shared, session-persisted `useCurrentUser` cache (primed
+// by the shell) instead, one less `users` call per visit.
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import { createFreeChat } from '@core/lib/admin/chat-client';
 import {
   browserDockedChatStorage,
@@ -344,12 +348,18 @@ function BytesPreview({
     (async () => {
       try {
         const token = await getToken();
-        const objectUrl = await previewLoader.load(cacheKey, endpoint, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const objectUrl = await previewLoader.load(
+          cacheKey,
+          endpoint,
+          { headers: { Authorization: `Bearer ${token}` } },
+          currentPageSignal()
+        );
         if (alive) setSource(objectUrl);
       } catch (error) {
         if (!alive) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the drawer preview exactly as it was.
+        if (isAbortError(error)) return;
         setErrorStatus(error instanceof ArtifactPreviewFetchError && error.status !== undefined ? error.status : null);
       }
     })();
@@ -461,8 +471,10 @@ function InventoryTypeThumb({ iconId, label }: { iconId: InventoryTypeIconId; la
  * resolves.
  */
 function InventoryThumb({ hit, plan }: { hit: InventoryHit; plan: InventoryPreviewPlan }) {
-  const thumbEndpoint = plan.mode === 'image' ? `${plan.endpoint}&w=${ARTIFACT_PREVIEW_THUMBNAIL_WIDTH}` : '';
-  const cacheKey = plan.mode === 'image' ? `${plan.cacheKey}#w=${ARTIFACT_PREVIEW_THUMBNAIL_WIDTH}` : '';
+  // T1.5: this row tile renders at 40px (`h-10 w-10` below) — the
+  // ROW-sized rendition, not `ArtifactStagePreview`'s 512px card rendition.
+  const thumbEndpoint = plan.mode === 'image' ? `${plan.endpoint}&w=${ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH}` : '';
+  const cacheKey = plan.mode === 'image' ? `${plan.cacheKey}#w=${ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH}` : '';
   const [source, setSource] = useState<string>();
   const [failed, setFailed] = useState(false);
 
@@ -474,15 +486,30 @@ function InventoryThumb({ hit, plan }: { hit: InventoryHit; plan: InventoryPrevi
     (async () => {
       try {
         const token = await getToken();
-        const objectUrl = await previewLoader.load(cacheKey, thumbEndpoint, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        // T1.1: THE call this whole mechanism exists for — a full inventory
+        // table issues one of these per image row (53 measured on
+        // `/admin/inventory`), and before this signal was threaded they all
+        // ran to completion on the NEXT page, competing with its own calls
+        // for the same Netlify function concurrency. `previewLoader` is a
+        // page-session-lifetime singleton, so this registers interest rather
+        // than cancelling outright: the underlying fetch only stops once
+        // every caller of the key has left (see artifact-preview-loader.ts).
+        const objectUrl = await previewLoader.load(
+          cacheKey,
+          thumbEndpoint,
+          { headers: { Authorization: `Bearer ${token}` } },
+          currentPageSignal()
+        );
         if (alive) setSource(objectUrl);
-      } catch {
+      } catch (error) {
+        if (!alive) return;
+        // Navigating away is not a failed thumbnail — leave the skeleton
+        // alone rather than flashing the type chip mid-transition.
+        if (isAbortError(error)) return;
         // A thumbnail that cannot be fetched degrades to the type chip — it
         // never becomes an error state for the row, and never a placeholder
         // image pretending to be the artifact.
-        if (alive) setFailed(true);
+        setFailed(true);
       }
     })();
     return () => {
@@ -598,8 +625,9 @@ function InventoryBody({ siteId }: { siteId: string }) {
   // ── HOOKS — every one of them, before any early return. ──────────────────
   const { toast } = useToast();
 
-  const [roleNames, setRoleNames] = useState<string[] | null>(null);
-  const [accessError, setAccessError] = useState<string | null>(null);
+  const currentUser = useCurrentUser();
+  const roleNames = currentUser.loading ? null : currentUser.roles;
+  const accessError = currentUser.error ?? null;
 
   const [queryText, setQueryText] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
@@ -643,21 +671,6 @@ function InventoryBody({ siteId }: { siteId: string }) {
   const isOwnerRole = roles.includes('owner');
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const me = await fetchMe(getToken);
-        if (alive) setRoleNames(me.roles ?? []);
-      } catch (error) {
-        if (alive) setAccessError(errorText(error, 'Could not verify access.'));
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  useEffect(() => {
     const timer = window.setTimeout(() => setActiveQuery(queryText.trim()), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [queryText]);
@@ -672,11 +685,15 @@ function InventoryBody({ siteId }: { siteId: string }) {
       setSearching(true);
       setSearchError(null);
       try {
-        const result = await searchInventory(getToken, {
-          query: activeQuery,
-          limit: PAGE_LIMIT,
-          ...(cursor ? { cursor } : {}),
-        });
+        const result = await searchInventory(
+          getToken,
+          {
+            query: activeQuery,
+            limit: PAGE_LIMIT,
+            ...(cursor ? { cursor } : {}),
+          },
+          currentPageSignal()
+        );
         // A follow-up page only sweeps the collections its cursor still names
         // (the server skips the exhausted ones rather than re-serving them),
         // so its `counts`/`truncated` cover only those. Carry the earlier
@@ -700,6 +717,9 @@ function InventoryBody({ siteId }: { siteId: string }) {
           return [...previous, ...result.hits.filter((hit) => !seen.has(hit.id))];
         });
       } catch (error) {
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the table exactly as it was.
+        if (isAbortError(error)) return;
         setSearchError(errorText(error, 'Inventory could not be searched.'));
         if (!cursor) {
           setHits([]);
@@ -751,10 +771,14 @@ function InventoryBody({ siteId }: { siteId: string }) {
     setPreviewLoading(true);
     (async () => {
       try {
-        const result = await previewInventoryHit(getToken, inspected.collection, inspected.id);
+        const result = await previewInventoryHit(getToken, inspected.collection, inspected.id, currentPageSignal());
         if (alive) setPreview(result);
       } catch (error) {
-        if (alive) setPreviewError(errorText(error, 'This preview could not be loaded.'));
+        if (!alive) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the drawer exactly as it was.
+        if (isAbortError(error)) return;
+        setPreviewError(errorText(error, 'This preview could not be loaded.'));
       } finally {
         if (alive) setPreviewLoading(false);
       }
@@ -770,10 +794,14 @@ function InventoryBody({ siteId }: { siteId: string }) {
     setDiagnosticsLoading(true);
     (async () => {
       try {
-        const result = await fetchDiagnostics(getToken);
+        const result = await fetchDiagnostics(getToken, currentPageSignal());
         if (alive) setDiagnostics(result.diagnostics);
       } catch (error) {
-        if (alive) setDiagnosticsError(errorText(error, 'Diagnostics could not be loaded.'));
+        if (!alive) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the card exactly as it was.
+        if (isAbortError(error)) return;
+        setDiagnosticsError(errorText(error, 'Diagnostics could not be loaded.'));
       } finally {
         if (alive) setDiagnosticsLoading(false);
       }

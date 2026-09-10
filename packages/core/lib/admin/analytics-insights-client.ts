@@ -10,6 +10,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { InsightsOverview } from './analytics-insights-logic.js';
+import { currentPageSignal } from './page-generation.js';
 
 const ENDPOINT = '/.netlify/functions/admin-analytics';
 const CACHE_TTL_MS = 60_000;
@@ -21,13 +22,19 @@ async function requestInsightsOverview(getToken: GetToken): Promise<InsightsOver
   const token = await getToken();
   const response = await fetch(`${ENDPOINT}?${new URLSearchParams({ source: 'insights' }).toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
+    // T1.1: a plain page-load read, no cross-navigation store — always rides
+    // the current page-generation signal.
+    signal: currentPageSignal(),
   });
   const body = (await response.json().catch(() => ({}))) as InsightsOverview & { error?: string };
   if (!response.ok) throw new Error(body.error || `Insights request failed (${response.status}).`);
   return body;
 }
 
-export async function fetchAnalyticsInsightsOverview(getToken: GetToken, opts?: { force?: boolean }): Promise<InsightsOverview> {
+export async function fetchAnalyticsInsightsOverview(
+  getToken: GetToken,
+  opts?: { force?: boolean }
+): Promise<InsightsOverview> {
   if (!opts?.force) {
     if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) return cache.overview;
     if (inflight) return inflight;

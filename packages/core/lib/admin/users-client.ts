@@ -41,12 +41,25 @@ export interface UserView {
   membership_source?: MembershipSource;
 }
 
-async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
+/**
+ * T1.1: `signal` is opt-in and per-call, threaded from the CALLER — never
+ * defaulted inside this module. This one function backs both page-load
+ * reads (`me`, `list`, …) and explicit user-triggered writes (`invite`,
+ * `suspend`, `remove`, …), so only a caller that actually wants "abort me
+ * when this page goes away" passes one. Crucially, `fetchMe`/`listUsers`
+ * are ALSO called from `use-current-user.ts`'s module-scope store, which is
+ * deliberately built to survive an Astro `ClientRouter` swap and must NOT
+ * be cut off by the very navigation it is meant to survive — that caller
+ * passes no signal at all. A page-scoped one-off caller (a component's own
+ * effect) passes `currentPageSignal()` explicitly instead.
+ */
+async function post<T>(getToken: GetToken, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const token = await getToken();
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
@@ -58,7 +71,7 @@ export interface OnboardingView {
   steps: { name?: string; password?: string; tour?: string };
 }
 
-export const fetchMe = (getToken: GetToken) =>
+export const fetchMe = (getToken: GetToken, signal?: AbortSignal) =>
   post<{
     user: UserView;
     bootstrap: boolean;
@@ -66,7 +79,7 @@ export const fetchMe = (getToken: GetToken) =>
     /** T18.5: null when the caller has no stored record (needs_grant / env-only before materialisation). */
     onboarding?: OnboardingView | null;
     policy?: { require_display_name: boolean };
-  }>(getToken, { verb: 'me' });
+  }>(getToken, { verb: 'me' }, signal);
 
 export const updateMe = async (
   getToken: GetToken,
@@ -77,8 +90,8 @@ export const updateMe = async (
   return result;
 };
 
-export const listUsers = (getToken: GetToken, opts: { include_removed?: boolean } = {}) =>
-  post<{ users: UserView[] }>(getToken, { verb: 'list', ...opts });
+export const listUsers = (getToken: GetToken, opts: { include_removed?: boolean } = {}, signal?: AbortSignal) =>
+  post<{ users: UserView[] }>(getToken, { verb: 'list', ...opts }, signal);
 
 export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
 export interface InvitationView {
@@ -125,13 +138,15 @@ export const revokeInvitation = (getToken: GetToken, ref: { invite_id?: string; 
     ...(reason ? { reason } : {}),
   });
 
-export const listInvitations = (getToken: GetToken, status?: InvitationStatus) =>
-  post<{ invitations: InvitationView[] }>(getToken, { verb: 'list_invitations', ...(status ? { status } : {}) });
+export const listInvitations = (getToken: GetToken, status?: InvitationStatus, signal?: AbortSignal) =>
+  post<{ invitations: InvitationView[] }>(getToken, { verb: 'list_invitations', ...(status ? { status } : {}) }, signal);
 
-export const listUnmanagedIdentities = (getToken: GetToken) =>
-  post<{ identities: UnmanagedIdentityView[]; error_code?: 'identity_admin_unavailable'; error?: string }>(getToken, {
-    verb: 'unmanaged_identities',
-  });
+export const listUnmanagedIdentities = (getToken: GetToken, signal?: AbortSignal) =>
+  post<{ identities: UnmanagedIdentityView[]; error_code?: 'identity_admin_unavailable'; error?: string }>(
+    getToken,
+    { verb: 'unmanaged_identities' },
+    signal
+  );
 
 /** Owner grants a role to a Netlify-UI identity that has no membership (plan §4.2). */
 export const grantRole = (getToken: GetToken, email: string, role: UserRole, user_id?: string) =>
@@ -164,12 +179,12 @@ export interface AuditEventView {
 }
 
 /** T18.3a: the audit stream for one person (Owner-only), newest first, plus the legacy per-record array. */
-export const memberAudit = (getToken: GetToken, email: string, limit?: number) =>
-  post<{ email: string; events: AuditEventView[]; legacy_audit: UserAuditEntry[] }>(getToken, {
-    verb: 'member_audit',
-    email,
-    ...(limit ? { limit } : {}),
-  });
+export const memberAudit = (getToken: GetToken, email: string, limit?: number, signal?: AbortSignal) =>
+  post<{ email: string; events: AuditEventView[]; legacy_audit: UserAuditEntry[] }>(
+    getToken,
+    { verb: 'member_audit', email, ...(limit ? { limit } : {}) },
+    signal
+  );
 
 /** T18.1: give an ADMIN_EMAILS member a stored Owner membership (so the env row can be emptied later). */
 export const promoteBootstrapOwner = (getToken: GetToken, email: string) =>
@@ -196,8 +211,8 @@ export interface MembershipPolicyServer {
   delete_identity_on_remove: boolean;
 }
 
-export const getMembershipPolicy = (getToken: GetToken) =>
-  post<{ policy: MembershipPolicyServer }>(getToken, { verb: 'policy_get' });
+export const getMembershipPolicy = (getToken: GetToken, signal?: AbortSignal) =>
+  post<{ policy: MembershipPolicyServer }>(getToken, { verb: 'policy_get' }, signal);
 
 /** T4.3: the GDPR-style export bundle (verb `export`, alias `export_person`; Owner-only) — Person + Memberships + audit + authored-history ids. */
 export interface PersonExportBundle {

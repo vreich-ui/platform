@@ -16,8 +16,11 @@
  * SECURITY INVARIANT (A§1.2): this identity path never reads or forwards the
  * publish key in any form.
  */
+import { createHash } from 'node:crypto';
+
 import type { SiteBinding } from '../lib/site-binding.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
 import {
   getAgentLearningBlobStore,
@@ -96,8 +99,43 @@ const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-s
 const jsonResponse = (status: number, body: Record<string, unknown>) => ({
   statusCode: status,
   headers: jsonHeaders,
-  body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: status >= 200 && status < 300, status, ...body })),
 });
+
+/**
+ * T2.3 — the four pure-read verbs on this action-dispatched POST
+ * (`list_chats`, `get_chat`, `export_preferences`, `list_profiles`); every
+ * other verb (`send`, `approve_tool`, `upsert_profile`, …) mutates a chat or
+ * profile doc and keeps the plain `no-store` `jsonResponse` above. Each of
+ * the four call sites below builds its own body object (already scoped to
+ * the caller — `list_chats`' visibility and `get_chat`'s `since_seq` window
+ * are BAKED INTO the body before this hashes it), so the etag varies with
+ * everything that varies the body without this needing to know why.
+ */
+const CACHE_CONTROL = 'private, no-cache';
+/**
+ * Hashes the ALREADY-SERIALIZED wire body, so a read response is
+ * `JSON.stringify`d exactly ONCE per request. The digest is identical to
+ * hashing the object (same input string), but the previous shape paid a
+ * second full stringify of the whole body on every read — on a latency
+ * branch, on this surface's hottest read paths.
+ */
+const etagForSerialized = (serialized: string): string =>
+  `"${createHash('sha1').update(serialized).digest('hex')}"`;
+
+const readJsonResponse = (event: LambdaEvent, body: Record<string, unknown>) => {
+  const serialized = timeSerialize(() => JSON.stringify({ ok: true, status: 200, ...body }));
+  const etag = etagForSerialized(serialized);
+  const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return { statusCode: 304, headers: { 'Cache-Control': CACHE_CONTROL, ETag: etag }, body: '' };
+  }
+  return {
+    statusCode: 200,
+    headers: { ...jsonHeaders, 'Cache-Control': CACHE_CONTROL, ETag: etag },
+    body: serialized,
+  };
+};
 
 const requestSchema = z.discriminatedUnion('action', [
   z.object({
@@ -303,7 +341,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // lambda is not the MCP shim, so it injects them itself from ITS binding.
   ensureMcpSiblings(binding);
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
-  const adminState = await getAdminStateFromEvent(event, context);
+  const adminState = await timeAuth(() => getAdminStateFromEvent(event, context));
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   // T9.4 house pattern: the wall is the RESOLVED role set (users store +
@@ -314,9 +352,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     id: adminState.userId ?? '',
     email: adminState.email ?? '',
   };
-  const callerRoles = await resolveRolesForPrincipalAsync(callerPrincipal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
-  });
+  const callerRoles = await timeAuth(() =>
+    resolveRolesForPrincipalAsync(callerPrincipal, {
+      getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
+    })
+  );
   if (!callerRoles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
 
   let parsedBody: unknown;
@@ -404,7 +444,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
           Boolean(request.data.include_all),
           isOwner(callerRoles)
         );
-        return jsonResponse(200, {
+        return readJsonResponse(event, {
           chats: visibleDocs.map((doc) => chatSummary(doc)),
         });
       }
@@ -424,7 +464,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
               () => undefined
             )
           : undefined;
-        return jsonResponse(200, {
+        return readJsonResponse(event, {
           ...chatSummary(doc),
           ...(boundRequest
             ? {
@@ -829,12 +869,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         const exported = await exportPreferencePairs(
           (await getAgentLearningBlobStore(event, binding)) as unknown as LearningEvidenceStore
         );
-        return jsonResponse(200, { ...exported });
+        return readJsonResponse(event, { ...exported });
       }
 
       case 'list_profiles': {
         const doc = await getProfilesDoc(await getAgentProfilesBlobStore(event, binding), nowIso());
-        return jsonResponse(200, { profiles: Object.values(doc.profiles), assignments: doc.assignments });
+        return readJsonResponse(event, { profiles: Object.values(doc.profiles), assignments: doc.assignments });
       }
 
       case 'upsert_profile':
@@ -893,4 +933,5 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. T11.6: threads dataRoot to the publish path. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) =>
+  withServerTiming('admin-agent-chat', buildHandlerImpl(binding));

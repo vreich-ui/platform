@@ -1,0 +1,27 @@
+---
+// Editorial workspace (T9.3) — rebuilt on AdminLayout + AdminShell. The
+// signed-in-admin experience is the AdminHome island (attention-first layout,
+// working Release card, quick actions). The auth gate and signed-out/forbidden
+// states live in AdminLayout; the server wall is unchanged.
+//
+// T1.6 (admin latency plan): this used to be what `/admin` rendered
+// directly. Editorial's `admin-editorial-view` call is the single slowest
+// call in the whole admin (16.0s cold / 9.8s warm — see
+// `editorial-view-client.ts`'s own header), so it no longer gets to be the
+// very first thing a fresh session waits on: `/admin` now redirects to
+// `/admin/requests` (see `admin/index.astro`), and Editorial moved here, to
+// its own route, unchanged otherwise.
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import AdminHome from '~/admin/AdminHome';
+
+// D2: resolve identity once, server-side, where process.env is real, and
+// pass it down explicitly — the island must not call getSiteIdentity()
+// itself (the browser has no process.env, so env overrides never reached it).
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Editorial">
+  <AdminHome client:load identity={identity} />
+</AdminLayout>

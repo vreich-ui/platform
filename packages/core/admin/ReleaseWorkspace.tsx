@@ -30,6 +30,7 @@ import {
 import { assertDecided, decide, decisionAvailability, type DecisionAction } from '@core/lib/admin/decisions';
 import { forceReleaseObjectLock } from '@core/lib/edit-mode/verbs-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -290,7 +291,10 @@ function ReleaseReviewGroupCard({
 function ReleaseWorkspaceContent() {
   const { toast } = useToast();
   const [overview, setOverview] = useState<ReleaseOverview>();
-  const [chats, setChats] = useState<ChatSummaryView[]>([]);
+  // T1.3: `null` means "hasn't loaded yet" — distinct from "loaded, no
+  // chats" — so the work-summary card below can tell the two apart and
+  // skeleton itself instead of flashing an empty state.
+  const [chats, setChats] = useState<ChatSummaryView[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string>();
@@ -303,21 +307,29 @@ function ReleaseWorkspaceContent() {
   const currentUser = useCurrentUser();
   const canForceRelease = currentUser.roles.includes('owner');
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { force?: boolean }) => {
+    // T5.1 R2 / T1.3: an explicit refresh (after a write, or while polling a
+    // build in progress) must bypass the module TTL for the same reason it
+    // already bypasses the inventory one — the human pressed Refresh, or
+    // just released. The initial mount does NOT force: it is content to
+    // reuse whatever the module cache / in-flight dedupe already has rather
+    // than pay for a cold server recompute (measured ~5.3s) on every page
+    // open — `fetchReleaseOverview`/`fetchInventoryRows` still hit the
+    // network on a cold cache either way, force only skips reusing a warm one.
+    const force = opts?.force ?? true;
     try {
-      const [nextOverview, rows, chatResult] = await Promise.all([
-        // T5.1 R2: this surface's explicit refresh must bypass the new
-        // module TTL for the same reason it already bypasses the inventory
-        // one — the human pressed Refresh, or just released.
-        fetchReleaseOverview(getToken, { force: true }),
-        fetchInventoryRows(getToken, { force: true }),
-        listChats(getToken).catch((): { chats: ChatSummaryView[] } => ({ chats: [] })),
+      const [nextOverview, rows] = await Promise.all([
+        fetchReleaseOverview(getToken, { force }),
+        fetchInventoryRows(getToken, { force }),
       ]);
       setOverview(nextOverview);
-      setChats(chatResult.chats);
       setError(undefined);
       return rows;
     } catch (reason) {
+      // T1.1: the page navigating away is why this fetch died, not a real
+      // failure — `undefined` tells every call site below to leave whatever
+      // is on screen alone instead of wiping it to an empty table.
+      if (isAbortError(reason)) return undefined;
       setError(reason instanceof Error ? reason.message : 'Release state could not be loaded.');
       return [];
     } finally {
@@ -326,17 +338,46 @@ function ReleaseWorkspaceContent() {
   }, []);
 
   const [rows, setRows] = useState<LibraryRow[]>([]);
+  const applyRows = useCallback((next: LibraryRow[] | undefined) => {
+    if (next) setRows(next);
+  }, []);
   useEffect(() => {
-    void refresh().then(setRows);
-  }, [refresh]);
+    void refresh({ force: false }).then(applyRows);
+  }, [refresh, applyRows]);
 
   useEffect(() => {
     if (!overview || !['queued', 'building', 'ready_not_published'].includes(overview.deploy.state)) return;
-    const timer = window.setInterval(() => void refresh().then(setRows), 6000);
+    const timer = window.setInterval(() => void refresh().then(applyRows), 6000);
     return () => window.clearInterval(timer);
-  }, [overview?.deploy.state, refresh]);
+  }, [overview?.deploy.state, refresh, applyRows]);
 
-  const work = useMemo(() => getWorkSummary(rows, chats), [rows, chats]);
+  /**
+   * T1.3: the work-summary card's own load, off the first-paint path.
+   * `listChats` reads every transcript (measured ~8.3s) purely to feed the
+   * "Needs you" / "Working" cards below — it has no bearing on whether the
+   * release content itself (deploy status, review groups, approvals) can be
+   * shown, so it no longer blocks `loading`. Failure degrades this card
+   * alone, same as `refresh` degrades the main content to its own error
+   * state rather than throwing.
+   */
+  const loadWork = useCallback(async () => {
+    try {
+      const { chats: list } = await listChats(getToken, false, currentPageSignal());
+      setChats(list);
+    } catch (err) {
+      // T1.1: the page navigating away is why this fetch died, not a real
+      // failure — leave whatever this card already shows alone.
+      if (isAbortError(err)) return;
+      setChats([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadWork();
+  }, [loadWork]);
+
+  const work = useMemo(() => getWorkSummary(rows, chats ?? []), [rows, chats]);
+  const workLoading = chats === null;
   const waiting = useMemo(() => overview?.objects.filter((object) => object.state === 'published') ?? [], [overview]);
   const approvals = useMemo(
     () => overview?.objects.filter((object) => object.review_state === 'open') ?? [],
@@ -384,7 +425,7 @@ function ReleaseWorkspaceContent() {
     );
     assertDecided(result);
     toast({ title: item.display_name, description: result.receipt, tone: 'success' });
-    setRows(await refresh());
+    applyRows(await refresh());
   };
 
   const runForceRelease = async (item: ReleaseObjectView) => {
@@ -407,7 +448,7 @@ function ReleaseWorkspaceContent() {
         : 'No lock was held — nothing to release.',
       tone: 'success',
     });
-    setRows(await refresh());
+    applyRows(await refresh());
   };
 
   const release = async () => {
@@ -421,7 +462,7 @@ function ReleaseWorkspaceContent() {
         description: result.reason,
         tone: result.released ? 'success' : 'info',
       });
-      setRows(await refresh());
+      applyRows(await refresh());
     } catch (reason) {
       toast({
         title: 'Release could not start',
@@ -575,27 +616,43 @@ function ReleaseWorkspaceContent() {
             <Card>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <h2 className="font-semibold text-[var(--adm-text-heading)]">Needs you</h2>
-                <Badge tone={work.needsYouCount ? 'warning' : 'neutral'}>{work.needsYouCount}</Badge>
-              </div>
-              <WorkList chats={work.needsYouChats} empty="No agent work needs a decision." />
-              {/* D3: the same objects, so the same decision controls — a
-                  needs-you list that only links out is exactly the text-only
-                  approval this task exists to delete. */}
-              <ApprovalDecisionList
-                items={approvals.filter(
-                  (approval) => !work.needsYouChats.some((chat) => chat.object_id === approval.object_id)
+                {/* T1.3: no count until the work summary has actually
+                    loaded — a badge showing an approvals-only count while
+                    `chats` is still in flight would just be wrong, not
+                    merely stale. */}
+                {workLoading ? null : (
+                  <Badge tone={work.needsYouCount ? 'warning' : 'neutral'}>{work.needsYouCount}</Badge>
                 )}
-                canForceRelease={canForceRelease}
-                onDecide={decideApproval}
-                onForceRelease={setForceTarget}
-              />
+              </div>
+              {workLoading ? (
+                <Skeleton variant="rect" height={120} />
+              ) : (
+                <>
+                  <WorkList chats={work.needsYouChats} empty="No agent work needs a decision." />
+                  {/* D3: the same objects, so the same decision controls — a
+                      needs-you list that only links out is exactly the
+                      text-only approval this task exists to delete. */}
+                  <ApprovalDecisionList
+                    items={approvals.filter(
+                      (approval) => !work.needsYouChats.some((chat) => chat.object_id === approval.object_id)
+                    )}
+                    canForceRelease={canForceRelease}
+                    onDecide={decideApproval}
+                    onForceRelease={setForceTarget}
+                  />
+                </>
+              )}
             </Card>
             <Card>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <h2 className="font-semibold text-[var(--adm-text-heading)]">Working</h2>
-                <Badge tone={work.workingCount ? 'info' : 'neutral'}>{work.workingCount}</Badge>
+                {workLoading ? null : <Badge tone={work.workingCount ? 'info' : 'neutral'}>{work.workingCount}</Badge>}
               </div>
-              <WorkList chats={work.working} empty="No agent work is running." />
+              {workLoading ? (
+                <Skeleton variant="rect" height={120} />
+              ) : (
+                <WorkList chats={work.working} empty="No agent work is running." />
+              )}
             </Card>
           </div>
         </>

@@ -115,11 +115,12 @@ export const wipeAll = (getToken: GetToken) =>
 export const getArtifactMetadata = (getToken: GetToken, blobKey: string) =>
   callManager<{ artifact: BlobArtifactMetadata }>(getToken, 'get-artifact-metadata', { blobKey });
 
-export const fetchDiagnostics = async (getToken: GetToken) => {
+export const fetchDiagnostics = async (getToken: GetToken, signal?: AbortSignal) => {
   const token = await getToken();
   const res = await fetch(DIAGNOSTICS_ENDPOINT, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    ...(signal ? { signal } : {}),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok || json.ok === false) throw new Error((json.error as string) || `Request failed (${res.status}).`);

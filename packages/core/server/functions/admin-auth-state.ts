@@ -4,6 +4,7 @@ import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { environmentRoleForEmail, isOwner } from '../lib/roles.js';
 import { getUsersBlobStore } from '../lib/users-store.js';
 import { ensureDefaultMembershipOnLogin } from '../lib/membership/invitations.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -18,7 +19,7 @@ const jsonHeaders = {
 const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
   statusCode,
   headers: jsonHeaders,
-  body: JSON.stringify(body),
+  body: timeSerialize(() => JSON.stringify(body)),
 });
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
@@ -32,7 +33,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // display endpoint can never disagree with what the functions underneath
   // it actually enforce. Still read-only display info; publish-gate.ts is
   // the sole enforcement point for publishing.
-  let adminState = await resolveAdminAccessFromEvent(event, context, binding);
+  let adminState = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
 
   // Wolf 2026-08-18: a signed-in human who resolves to NO role from any
   // source (not a bootstrap Owner, not on a ROLE_EMAILS_* allowlist, no
@@ -58,7 +59,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       new Date().toISOString()
     ).catch(() => null);
     if (defaulted) {
-      adminState = await resolveAdminAccessFromEvent(event, context, binding);
+      adminState = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     }
   }
 
@@ -75,5 +76,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   });
 };
 
-/** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+/** W11 T11.4: per-site factory — the site shim instantiates this with its binding.
+ *  T0.1: Server-Timing wrap — this is one of the shell trio investigated for
+ *  the 445 ms -> 5164 ms cold-start-vs-contention question. */
+export const createHandler = (binding: SiteBinding) => withServerTiming('admin-auth-state', buildHandlerImpl(binding));

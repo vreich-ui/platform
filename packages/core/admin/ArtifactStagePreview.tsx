@@ -5,6 +5,7 @@ import { IconLibrary } from './icons';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
 import { ArtifactPreviewFetchError, createArtifactPreviewLoader } from '@core/lib/admin/artifact-preview-loader';
 import { describeArtifactPreviewError } from '@core/lib/admin/artifact-preview-error';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -23,6 +24,21 @@ async function getToken(): Promise<string> {
  * without `size`, which stays 'full'.
  */
 export const ARTIFACT_PREVIEW_THUMBNAIL_WIDTH = 512;
+
+/**
+ * T1.5 — a 40px-ish list-row tile (the inventory table's `InventoryThumb`,
+ * `h-10 w-10`) is a different call site from the card-sized ones above and
+ * was, until this constant existed, requesting the SAME 512px rendition:
+ * measured on `/admin/inventory` at 53 `get-blob-image` calls / 1.4MB for
+ * tiles displayed at ~40px — more than 10x the pixels the tile can ever
+ * show. There is no device-pixel-ratio convention anywhere else in this
+ * codebase to key a 1x/2x request off (checked: no `devicePixelRatio` or
+ * `srcset` usage under `packages/core/admin` or `packages/core/lib/admin`),
+ * so this requests a flat width instead of two renditions: 128px covers a
+ * 40px tile at up to 3x DPR with one request, and the `<img>` box downscales
+ * it in CSS exactly as it already downscales the 512px rendition today.
+ */
+export const ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH = 128;
 
 /**
  * One loader for the whole admin page: every `ArtifactStagePreview` instance
@@ -78,12 +94,26 @@ export function ArtifactStagePreview({ artifact, size = 'full' }: ArtifactStageP
     (async () => {
       try {
         const token = await getToken();
-        const objectUrl = await previewLoader.load(cacheKey, fetchUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        // T1.1: `previewLoader` is a page-SESSION-lifetime singleton (shared
+        // cache + concurrency queue across remounts and navigations, by
+        // design — see the module comment above), so a navigation must not
+        // cancel it outright; instead this card registers its own interest
+        // via `signal` and the loader only actually cancels the underlying
+        // fetch once every caller of this exact key has left (see
+        // artifact-preview-loader.ts's `load`).
+        const objectUrl = await previewLoader.load(
+          cacheKey,
+          fetchUrl,
+          { headers: { Authorization: `Bearer ${token}` } },
+          currentPageSignal()
+        );
         if (alive) setSource(objectUrl);
       } catch (error) {
         if (!alive) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the card exactly as it was (no error tile flashed
+        // mid-transition).
+        if (isAbortError(error)) return;
         setErrorStatus(error instanceof ArtifactPreviewFetchError && error.status !== undefined ? error.status : null);
       }
     })();

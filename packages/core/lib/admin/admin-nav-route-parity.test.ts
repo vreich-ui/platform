@@ -98,6 +98,12 @@ test('every linked AdminShell nav href resolves to a real route (SHELL_ROUTES, O
  * NAV_ITEMS or added below with a reason.
  */
 const ADMIN_ROUTES_INTENTIONALLY_UNREACHED_FROM_NAV = new Set<string>([
+  // T1.6 (admin latency plan) — `/admin` is now a redirect to `/admin/requests`
+  // (`admin/index.astro`), not a page a nav link should point at directly;
+  // Editorial (the thing `/admin` used to render) moved to its own nav entry
+  // at `/admin/editorial`. Kept registered only as the redirect's own route,
+  // the same reasoning as `/admin/maintenance` below.
+  '/admin',
   '/admin/accept', // T18.0b — Identity e-mail token landing page, reached from an email link, not the sidebar
   '/admin/authorize', // W14 F10 — OAuth consent screen, reached mid-flow from an external client, not the sidebar
   '/admin/welcome', // T18.5 — one-time onboarding redirect target, not a place you navigate back to
@@ -132,4 +138,48 @@ test('routeMatchesPattern: bracket segments match any literal, everything else m
   assert.equal(routeMatchesPattern('/admin/requests', '/admin/requests'), true);
   assert.equal(routeMatchesPattern('/admin/requests', '/admin/request'), false);
   assert.equal(routeMatchesPattern('/admin/content/[objectId]', '/admin/content/obj_abc/extra'), false);
+});
+
+// ─── T1.6: the landing-page swap + menu regroup ────────────────────────────
+
+test('NAV_ITEMS is grouped Work / Insight / Site / People / Developer, in that order', () => {
+  assert.deepEqual(
+    NAV_ITEMS.map((group) => group.label),
+    ['Work', 'Insight', 'Site', 'People', 'Developer']
+  );
+});
+
+test('Requests is the first item overall — the new /admin landing target', () => {
+  const first = NAV_ITEMS[0]?.items[0];
+  assert.equal(first?.label, 'Requests');
+  assert.equal(first?.href, '/admin/requests');
+});
+
+test('Editorial no longer links to the bare /admin path', () => {
+  const editorial = allNavItems().find((item) => item.label === 'Editorial');
+  assert.equal(editorial?.href, '/admin/editorial');
+});
+
+test('Developer is the last group — no collapsible-group support in NavList to default it collapsed', () => {
+  assert.equal(NAV_ITEMS.at(-1)?.label, 'Developer');
+  assert.deepEqual(
+    NAV_ITEMS.at(-1)?.items.map((item) => item.label),
+    ['Inventory', 'Component kit']
+  );
+});
+
+test('the retired Email (soon) item is gone — it had no route', () => {
+  assert.equal(
+    allNavItems().some((item) => item.label === 'Email' || item.href === '/admin/settings/email'),
+    false
+  );
+});
+
+test('every group in the new structure has the right items, in order', () => {
+  const byGroup = Object.fromEntries(NAV_ITEMS.map((group) => [group.label, group.items.map((item) => item.label)]));
+  assert.deepEqual(byGroup['Work'], ['Requests', 'Editorial', 'Objects', 'Release']);
+  assert.deepEqual(byGroup['Insight'], ['Analytics', 'Variants']);
+  assert.deepEqual(byGroup['Site'], ['Visual identity', 'Guardrails', 'Agents', 'Plugins']);
+  assert.deepEqual(byGroup['People'], ['Admins', 'Profile']);
+  assert.deepEqual(byGroup['Developer'], ['Inventory', 'Component kit']);
 });

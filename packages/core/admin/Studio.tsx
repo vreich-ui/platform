@@ -26,6 +26,12 @@ import type { SiteIdentity } from '@core/lib/site-identity';
 // deferring) — safe to import statically so the very first render can read
 // whatever was cached, instead of racing a dynamic import against paint.
 import { peekCachedStudioData, STUDIO_PERSISTED_MAX_AGE_MS } from '@core/lib/admin/studio-client';
+// T1.2 R4: ownership used to come from a PRIVATE `fetchMe` this component
+// made itself — one more `me` call on top of the shell's own, part of the
+// "2-3 users calls per page" T1.2 measured. It now reads the shared,
+// deduped, session-persisted `useCurrentUser` cache instead.
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { isAbortError } from '@core/lib/admin/page-generation';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -533,31 +539,13 @@ function StudioBody({ identity }: { identity: SiteIdentity }) {
   // immediately — this just controls the small inline "refreshing…"
   // indicator instead of the big per-gallery skeletons.
   const [refreshing, setRefreshing] = useState(initialData !== null);
-  const [owner, setOwner] = useState(false);
+  const { roles } = useCurrentUser();
+  const owner = roles.includes('owner');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      // D1(b): fetchMe() used to be awaited BEFORE the recipe-loading call
-      // started, adding a full extra round-trip to the waterfall. It doesn't
-      // need to — fetchMe hits a different endpoint (admin-users, not
-      // admin-object) and its only effect here is gating the theme "Apply
-      // theme…" button behind Owner (setOwner below); nothing in the recipe
-      // loads reads it. It's genuinely independent, so it now runs
-      // concurrently with fetchStudioData() instead of ahead of it. Its own
-      // try/catch is kept nested (rather than folded into the outer one) so
-      // a fetchMe failure still degrades to "not owner" instead of blanking
-      // the whole page — the same behaviour as before.
-      const fetchOwner = (async () => {
-        try {
-          const { fetchMe } = await import('@core/lib/admin/users-client');
-          const me = await fetchMe(getToken);
-          if (alive) setOwner(me.roles.includes('owner'));
-        } catch {
-          /* ignore */
-        }
-      })();
       try {
         const { fetchStudioData } = await import('@core/lib/admin/studio-client');
         // Never force here — a fresh in-memory/TTL cache (e.g. populated by
@@ -571,17 +559,18 @@ function StudioBody({ identity }: { identity: SiteIdentity }) {
           setRefreshing(false);
         }
       } catch (loadError) {
-        if (alive) {
-          // If we already have cached data on screen, a failed background
-          // refresh shouldn't blow away a working view — just stop spinning.
-          if (initialData !== null) {
-            setRefreshing(false);
-          } else {
-            setError(loadError instanceof Error ? loadError.message : 'Could not load the recipe family.');
-          }
+        if (!alive) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the view exactly as it was.
+        if (isAbortError(loadError)) return;
+        // If we already have cached data on screen, a failed background
+        // refresh shouldn't blow away a working view — just stop spinning.
+        if (initialData !== null) {
+          setRefreshing(false);
+        } else {
+          setError(loadError instanceof Error ? loadError.message : 'Could not load the recipe family.');
         }
       }
-      await fetchOwner;
     })();
     return () => {
       alive = false;

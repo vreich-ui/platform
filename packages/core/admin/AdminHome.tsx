@@ -7,11 +7,21 @@ import { IconExternalLink, IconFilePlus, IconLibrary, IconPalette, IconSparkles 
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
 import { rowStatus, type LibraryRow } from '@core/lib/admin/library-logic';
-import { fetchEditorialView, type EditorialSlotView, type EditorialView } from '@core/lib/admin/editorial-view-client';
+import {
+  fetchEditorialView,
+  peekCachedEditorialView,
+  EDITORIAL_VIEW_PERSISTED_MAX_AGE_MS,
+  type EditorialSlotView,
+  type EditorialView,
+} from '@core/lib/admin/editorial-view-client';
 import { EDITORIAL_STATE_PRESENTATION } from '@core/lib/admin/editorial-state';
 import { chatWorkLabel } from '@core/lib/admin/work-summary';
 import { agentStarterHref } from '@core/lib/admin/agent-starters';
 import { governedMediaCountLabel } from '@core/lib/admin/media-counts';
+// T1.1: a page-load read backs this page's own fetch, and (T1.2 R6) a
+// cached snapshot seeds first paint below the same way Studio.tsx's
+// `peekCachedStudioData()` does.
+import { isAbortError } from '@core/lib/admin/page-generation';
 
 async function token(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -124,9 +134,28 @@ export interface AdminHomeProps {
   identity: SiteIdentity;
 }
 
+// T1.2 R6: synchronous, no-network read of the last known publication map —
+// the same stale-while-revalidate pattern Studio.tsx uses with
+// `peekCachedStudioData()`/`STUDIO_PERSISTED_MAX_AGE_MS`. A repeat visit (or
+// a reload within the window) paints immediately from the persisted
+// snapshot instead of the blocking skeleton, while the effect below still
+// fires a normal `fetchEditorialView()` to refresh it in the background.
+function initialCachedEditorialView(): EditorialView | null {
+  if (typeof window === 'undefined') return null;
+  const cached = peekCachedEditorialView();
+  if (!cached) return null;
+  if (Date.now() - cached.fetchedAt > EDITORIAL_VIEW_PERSISTED_MAX_AGE_MS) return null;
+  return cached.view;
+}
+
 export default function AdminHome({ identity }: AdminHomeProps) {
-  const [view, setView] = useState<EditorialView>();
-  const [loading, setLoading] = useState(true);
+  const [initialView] = useState(initialCachedEditorialView);
+  const [view, setView] = useState<EditorialView | null>(initialView);
+  const [loading, setLoading] = useState(initialView === null);
+  // A background refetch always runs, even when cached data painted
+  // immediately — this only controls the small inline "refreshing…"
+  // indicator instead of the blocking skeleton.
+  const [refreshing, setRefreshing] = useState(initialView !== null);
   const [error, setError] = useState<string>();
 
   /**
@@ -137,15 +166,32 @@ export default function AdminHome({ identity }: AdminHomeProps) {
    * and the whole chat list — and block paint on all three, so the slowest of
    * them gated the page. Everything below renders three object rows and eight
    * integers, and that is now exactly what comes back.
+   *
+   * T1.2 R6: when `initialView` seeded first paint from the persisted cache,
+   * this effect's job is only to revalidate in the background — a failure
+   * here leaves the cached view on screen instead of blanking the page.
    */
   useEffect(() => {
     let live = true;
     fetchEditorialView(token)
       .then((next) => {
-        if (live) setView(next);
+        if (live) {
+          setView(next);
+          setRefreshing(false);
+        }
       })
       .catch((err) => {
-        if (live) setError(err instanceof Error ? err.message : 'Could not load the publication map.');
+        if (!live) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the view exactly as it was.
+        if (isAbortError(err)) return;
+        if (initialView !== null) {
+          // A cached view is already on screen — don't blow it away over a
+          // failed background refresh, just stop the "refreshing…" indicator.
+          setRefreshing(false);
+        } else {
+          setError(err instanceof Error ? err.message : 'Could not load the publication map.');
+        }
       })
       .finally(() => {
         if (live) setLoading(false);
@@ -185,6 +231,15 @@ export default function AdminHome({ identity }: AdminHomeProps) {
             </a>
           </div>
         </header>
+        {refreshing ? (
+          <p
+            className="flex items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="inline-block animate-pulse">●</span> Refreshing…
+          </p>
+        ) : null}
         {loading ? (
           <Skeleton variant="rect" height={420} />
         ) : error ? (

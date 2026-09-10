@@ -217,6 +217,22 @@
   to = "/admin/analytics/object/__object"
   status = 200
 
+# T2.1 (admin latency): /admin has no surface of its own — it is the shell's
+# entry, and the workspace it opens on is Requests. This is an EXACT-path rule,
+# so it matches /admin (and /admin/) ONLY: Netlify prefix-matches a `from` just
+# when it carries a splat or a :placeholder, which is why /admin/content's own
+# 301 below can coexist with the /admin/content/:objectId rewrite above and why
+# this one cannot swallow /admin/requests, /admin/objects, or any other
+# /admin/* page. force=true for the same reason as its neighbours: routes/admin/
+# index.astro is a REAL built page (it carries a <meta http-equiv="refresh"> as
+# the belt-and-braces fallback for any context that never sees this rule) and
+# would otherwise be served instead of redirecting.
+[[redirects]]
+  from = "/admin"
+  to = "/admin/requests"
+  status = 302
+  force = true
+
 # T2.1 D1(a): the objects plane is now canonical — Templates/Media/Content
 # collapse into one library at /admin/objects. force=true because each of
 # these still has a real built page (the S1 rewrite above intentionally

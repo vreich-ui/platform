@@ -26,6 +26,7 @@
  */
 import { callObjectVerb, type GetToken } from '../edit-mode/verbs-client.js';
 import { getSiteIdentity } from '../site-identity.js';
+import { currentPageSignal } from './page-generation.js';
 import type { ObjectRecord, ObjectType } from '../../schema/object-record-v1.js';
 
 export type { GetToken };
@@ -105,7 +106,11 @@ export function peekCachedStudioData(): CachedStudioData | null {
 }
 
 async function loadType(getToken: GetToken, type: ObjectType): Promise<StudioRecord[]> {
-  const listed = await callObjectVerb(getToken, { action: 'list', object_type: type });
+  // T1.1: a page-load read (the module doc above is explicit — this is a
+  // remount-time-only cache, not a cross-navigation poll like
+  // `requests-store.ts`), so it rides the current page-generation signal.
+  const signal = currentPageSignal();
+  const listed = await callObjectVerb(getToken, { action: 'list', object_type: type }, signal);
   if (listed.status !== 200) {
     throw new Error((listed.body?.error as string) || `Listing ${type} failed (${listed.status}).`);
   }
@@ -116,7 +121,7 @@ async function loadType(getToken: GetToken, type: ObjectType): Promise<StudioRec
   // could paint anything. `Promise.all` collapses that to one round trip's
   // worth of latency regardless of how many recipes exist.
   const results = await Promise.all(
-    ids.map((id) => callObjectVerb(getToken, { action: 'get', object_type: type, object_id: id }))
+    ids.map((id) => callObjectVerb(getToken, { action: 'get', object_type: type, object_id: id }, signal))
   );
   return results.filter((res) => res.status === 200 && res.body.record).map((res) => res.body.record as StudioRecord);
 }

@@ -13,6 +13,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { AnalyticsRangeKey, AnalyticsOverview } from './analytics-logic.js';
+import { currentPageSignal } from './page-generation.js';
 
 /** Re-exported for existing importers — the shape itself now lives in `analytics-logic.ts` (R6.1's panel resolver is pure and needs it without this module's I/O). */
 export type { AnalyticsErrorCode, AnalyticsOverview } from './analytics-logic.js';
@@ -48,16 +49,29 @@ const buildQuery = (opts: FetchAnalyticsOptions): string => {
   return params.toString();
 };
 
-async function requestAnalytics(getToken: GetToken, opts: FetchAnalyticsOptions): Promise<AnalyticsOverview> {
+async function requestAnalytics(
+  getToken: GetToken,
+  opts: FetchAnalyticsOptions,
+  signal: AbortSignal
+): Promise<AnalyticsOverview> {
   const token = await getToken();
   const response = await fetch(`${ENDPOINT}?${buildQuery(opts)}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal,
   });
   const body = (await response.json().catch(() => ({}))) as AnalyticsOverview & { error?: string };
   if (!response.ok) throw new Error(body.error || `Analytics data request failed (${response.status}).`);
   return body;
 }
 
+/**
+ * T1.1: a plain page-load read (no module-scope store keeps this warm across
+ * a navigation the way `requests-store.ts`/`use-current-user.ts` do), so it
+ * always rides the current page-generation signal — no caller needs to pass
+ * one. The in-flight de-dupe below means every awaiter of the SAME range on
+ * the SAME page shares one fetch and, correctly, one abort: they are all
+ * leaving together.
+ */
 export async function fetchAnalyticsOverview(
   getToken: GetToken,
   opts: FetchAnalyticsOptions
@@ -71,7 +85,7 @@ export async function fetchAnalyticsOverview(
     if (existing) return existing;
   }
 
-  const thisFetch = requestAnalytics(getToken, opts).then((overview) => {
+  const thisFetch = requestAnalytics(getToken, opts, currentPageSignal()).then((overview) => {
     cache.set(key, { overview, fetchedAt: Date.now() });
     return overview;
   });

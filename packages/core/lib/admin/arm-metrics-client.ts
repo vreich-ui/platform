@@ -9,6 +9,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { ArmMetricsOverview } from './variant-arm-metrics.js';
+import { currentPageSignal } from './page-generation.js';
 
 export type { ArmMetricsOverview } from './variant-arm-metrics.js';
 
@@ -20,8 +21,11 @@ let inflight: Promise<ArmMetricsOverview> | undefined;
 
 async function requestArmMetrics(getToken: GetToken): Promise<ArmMetricsOverview> {
   const token = await getToken();
+  // T1.1: a plain page-load read, no cross-navigation store — always rides
+  // the current page-generation signal.
   const response = await fetch(`${ENDPOINT}?${new URLSearchParams({ source: 'arm_metrics' })}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: currentPageSignal(),
   });
   const body = (await response.json().catch(() => ({}))) as ArmMetricsOverview & { error?: string };
   if (!response.ok) throw new Error(body.error || `Arm metrics request failed (${response.status}).`);

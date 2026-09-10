@@ -92,6 +92,7 @@ import {
   type ReleaseConfirmation,
 } from '@core/lib/admin/release-confirmation';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import {
   isAuthExpired,
   SESSION_EXPIRED_MESSAGE,
@@ -878,13 +879,22 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
       // either; the recovery effect below restarts it.
       if (isAuthExpired()) return;
       try {
-        const result = await listRequests(getToken, {
-          ...(quickFilterToStatuses(quickFilter) ? { status: quickFilterToStatuses(quickFilter) } : {}),
-          ...(kindFilter ? { kind: [kindFilter] as RequestKind[] } : {}),
-          ...(mine ? { mine: true } : {}),
-          ...(quickFilter === 'archived' ? { archived: true } : {}),
-          ...(query.trim() ? { q: query.trim() } : {}),
-        });
+        // T1.1: this chain's own page-load/poll read — rides the current
+        // page-generation signal so a tick that lands after navigating away
+        // is cancelled outright, not just discarded by the `current()` check
+        // below (which only ever protected against a STALE result, never
+        // against the request itself still running on the next page).
+        const result = await listRequests(
+          getToken,
+          {
+            ...(quickFilterToStatuses(quickFilter) ? { status: quickFilterToStatuses(quickFilter) } : {}),
+            ...(kindFilter ? { kind: [kindFilter] as RequestKind[] } : {}),
+            ...(mine ? { mine: true } : {}),
+            ...(quickFilter === 'archived' ? { archived: true } : {}),
+            ...(query.trim() ? { q: query.trim() } : {}),
+          },
+          currentPageSignal()
+        );
         if (!current()) return;
         setCustomRows(result.requests);
         setCustomError(undefined);
@@ -897,6 +907,23 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
         if (delay !== undefined) customTimerRef.current = setTimeout(() => void loadCustom(generation), delay);
       } catch (loadError) {
         if (!current()) return;
+        // T1.1: the page navigating away is why this tick died, not a real
+        // failure — leave the list exactly as it was, and no error banner.
+        //
+        // It still re-arms: `astro:before-preparation` fires when a
+        // navigation BEGINS, and Astro can abandon that navigation without
+        // ever swapping the document (a newer navigation aborts the
+        // preparation and itself early-returns — see `transition()` in
+        // astro/dist/transitions/router.js). This component is then still
+        // mounted, and a chain that stopped here would leave the list frozen
+        // with nothing to restart it. When the page IS really leaving, the
+        // effect's cleanup bumps the generation and clears the timer long
+        // before it fires, so the re-arm costs nothing.
+        if (isAbortError(loadError)) {
+          if (customTimerRef.current) clearTimeout(customTimerRef.current);
+          customTimerRef.current = setTimeout(() => void loadCustom(generation), 20_000);
+          return;
+        }
         setCustomRows((rowsNow) => rowsNow ?? []);
         // C3: an expired session is not a load error — the banner says it once,
         // in words, and no retry is armed because retrying cannot help.

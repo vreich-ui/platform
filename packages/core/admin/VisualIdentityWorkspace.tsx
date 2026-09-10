@@ -43,6 +43,8 @@ import type { StudioRecord } from '@core/lib/admin/studio-client';
 import { fetchStudioData } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { fetchGovernance } from '@core/lib/admin/governance-client';
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import { createFreeChat, sendChatMessage, type ChatStatus } from '@core/lib/admin/chat-client';
 import type { Blockage } from '@core/lib/admin/blockage';
 import {
@@ -75,8 +77,8 @@ async function getToken(): Promise<string> {
   return (await auth.getAccessToken()) ?? '';
 }
 
-async function fetchSite(siteId: string): Promise<StudioRecord> {
-  const result = await callObjectVerb(getToken, { action: 'get', object_type: 'site', object_id: siteId });
+async function fetchSite(siteId: string, signal?: AbortSignal): Promise<StudioRecord> {
+  const result = await callObjectVerb(getToken, { action: 'get', object_type: 'site', object_id: siteId }, signal);
   if (result.status !== 200 || !result.body.record) {
     throw new Error(String(result.body.error ?? 'The publication identity could not be loaded.'));
   }
@@ -90,14 +92,14 @@ async function fetchSite(siteId: string): Promise<StudioRecord> {
  * type (or an unavailable store) yields an empty list rather than failing the
  * whole page: the identity tab must still paint.
  */
-async function fetchVisualStandards(): Promise<StudioRecord[]> {
-  const listed = await callObjectVerb(getToken, { action: 'list', object_type: 'visual_standard' });
+async function fetchVisualStandards(signal?: AbortSignal): Promise<StudioRecord[]> {
+  const listed = await callObjectVerb(getToken, { action: 'list', object_type: 'visual_standard' }, signal);
   if (listed.status !== 200 || !Array.isArray(listed.body.objects)) return [];
   const ids = (listed.body.objects as Array<{ object_id?: string }>)
     .map((row) => row.object_id)
     .filter((id): id is string => Boolean(id));
   const records = await Promise.all(
-    ids.map((id) => callObjectVerb(getToken, { action: 'get', object_type: 'visual_standard', object_id: id }))
+    ids.map((id) => callObjectVerb(getToken, { action: 'get', object_type: 'visual_standard', object_id: id }, signal))
   );
   return records
     .filter((result) => result.status === 200 && result.body.record)
@@ -410,6 +412,11 @@ function VisualIdentityBody({
    */
   onRefreshReady?: (load: () => void) => void;
 }) {
+  // T1.4 (perf): ownership no longer comes from a `fetchMe` this component
+  // makes itself — it reads the shared `useCurrentUser` cache (AdminShell
+  // already primes it), so resolving it never adds a round trip ahead of the
+  // loads below, and repeat mounts within a session can resolve it for free.
+  const currentUser = useCurrentUser();
   const [owner, setOwner] = useState<boolean | null>(null);
   const [model, setModel] = useState<VisualIdentityViewModel | null>(null);
   const [site, setSite] = useState<StudioRecord | undefined>(undefined);
@@ -421,21 +428,30 @@ function VisualIdentityBody({
   const [tab, setTab] = useState<VisualIdentityTab>('identity');
   const [pendingIntent, setPendingIntent] = useState<VisualIdentityChatIntent | undefined>(undefined);
 
+  /**
+   * T1.4 (perf): this used to `await fetchMe` FIRST and only then fire the
+   * site/studio/editorial/standards/policy reads — one full serial round
+   * trip ahead of the five that actually paint the page, on every mount.
+   * Ownership is resolved separately below (`currentUser`), so this fires
+   * unconditionally and in parallel with it rather than behind it. A
+   * confirmed non-owner still never SEES this data (the render gate below
+   * checks `owner` before `loading`/`model`); the calls that go out in the
+   * rare case someone reaches this Owner-only route without the role are the
+   * same reads `object`/`studio`/`governance` already gate server-side.
+   */
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // T1.1: this page's own load — rides the current page-generation
+    // signal, minted once per call so every leg of the parallel fetch below
+    // shares one cancellation.
+    const signal = currentPageSignal();
     try {
-      const { fetchMe } = await import('@core/lib/admin/users-client');
-      const me = await fetchMe(getToken);
-      const isOwner = me.roles.includes('owner');
-      setOwner(isOwner);
-      onOwnerChange?.(isOwner);
-      if (!isOwner) return;
       const [siteRecord, studio, editorial, visualStandards, policy] = await Promise.all([
-        fetchSite(identity.siteId),
+        fetchSite(identity.siteId, signal),
         fetchStudioData(getToken),
         fetchEditorialAssets(getToken),
-        fetchVisualStandards(),
+        fetchVisualStandards(signal),
         fetchOverridePolicy(),
       ]);
       setSite(siteRecord);
@@ -451,15 +467,28 @@ function VisualIdentityBody({
         })
       );
     } catch (reason) {
+      // T1.1: the page navigating away is why this fetch died, not a real
+      // failure — leave the view exactly as it was.
+      if (isAbortError(reason)) return;
       setError(reason instanceof Error ? reason.message : 'Visual identity could not be loaded.');
     } finally {
       setLoading(false);
     }
-  }, [identity.brandName, identity.siteId, onOwnerChange]);
+  }, [identity.brandName, identity.siteId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // T1.4: the ownership half of what `load` used to do inline, now driven by
+  // the shared `useCurrentUser` cache instead of a private `fetchMe`. Fires
+  // whenever that cache settles, independent of `load`'s own request.
+  useEffect(() => {
+    if (currentUser.loading) return;
+    const isOwner = currentUser.roles.includes('owner');
+    setOwner(isOwner);
+    onOwnerChange?.(isOwner);
+  }, [currentUser.loading, currentUser.roles, onOwnerChange]);
 
   useEffect(() => {
     onRefreshReady?.(load);
@@ -547,7 +576,11 @@ function VisualIdentityBody({
     [assets, identity, load, model, overridePolicy, owner, runIntent, site, standards]
   );
 
-  if (loading || owner === null) {
+  // T1.4: `owner === null` (still waiting on `useCurrentUser`) is checked
+  // BEFORE `loading` (the identity/standards/assets fetch) — the two now
+  // resolve independently, and a confirmed non-owner must reach the
+  // Owner-only empty state without waiting on a fetch it will never render.
+  if (owner === null) {
     return (
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
@@ -563,6 +596,16 @@ function VisualIdentityBody({
         title="Visual identity is Owner-only"
         message="Ask a publication Owner to review or change this visual system."
       />
+    );
+  }
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-3" role="status" aria-live="polite">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+          Loading the publication’s visual system…
+        </p>
+        <Skeleton variant="rect" height={420} />
+      </div>
     );
   }
   if (error || !model) {
@@ -620,8 +663,18 @@ function VisualIdentityBody({
  * hook is only the effect that performs it, and its hook list stays flat and
  * unconditional (one reducer, one effect, one callback — no hook behind a
  * branch or an early return).
+ *
+ * T1.4 (perf): a chat with no cached id is a BRAND NEW conversation — minting
+ * one sends the seeded prompt straight into an agent run, so that must never
+ * happen just because this route mounted (it was doing exactly that: every
+ * owner who loaded this page with an empty `sessionStorage` slot got an
+ * unrequested run, polled every 1.2s for its whole duration). `opened` is the
+ * human actually asking for the dock — the collapse toggle, or a page button
+ * that routes through `rail.open` — and gates minting/seeding on top of the
+ * existing `enabled`. Attaching to an ALREADY-cached chat is unaffected: that
+ * is a read, not a run, so it still happens on mount regardless of `opened`.
  */
-function useDockedVisualIdentityChat(siteId: string, enabled: boolean) {
+function useDockedVisualIdentityChat(siteId: string, enabled: boolean, opened: boolean) {
   const [session, dispatch] = useReducer(dockedChatReducer, undefined, initialDockedChatSession);
   const generation = session.attempt;
 
@@ -637,6 +690,10 @@ function useDockedVisualIdentityChat(siteId: string, enabled: boolean) {
       dispatch({ type: 'attached', chatId: cached });
       return;
     }
+    // Nothing cached and the human has not opened the dock yet — do NOT
+    // mint. The control that fires `reset` only renders once the dock is
+    // already open, so this never blocks a genuine "start over".
+    if (!opened) return;
     let cancelled = false;
     dispatch({ type: 'minting' });
     const seed = dockedChatSeed('visual-identity', 'Visual identity');
@@ -647,6 +704,9 @@ function useDockedVisualIdentityChat(siteId: string, enabled: boolean) {
         writeDockedChatId(storage, key, created.chat_id);
         if (cancelled) return;
         dispatch({ type: 'minted', chatId: created.chat_id });
+        // First open of a genuinely new conversation only — an attach above
+        // (cached id, or a later `opened` toggle once this has minted) never
+        // re-enters this branch, so the seeded prompt goes out exactly once.
         if (seed.prompt) await sendChatMessage(getToken, created.chat_id, seed.prompt);
       })
       .catch((reason) => {
@@ -655,7 +715,7 @@ function useDockedVisualIdentityChat(siteId: string, enabled: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, generation, siteId]);
+  }, [enabled, opened, generation, siteId]);
 
   const reset = useCallback(() => {
     clearDockedChatId(browserDockedChatStorage(), dockedChatStorageKey(VISUAL_IDENTITY_CHAT_SCOPE, siteId));
@@ -675,12 +735,26 @@ export default function VisualIdentityWorkspace({
   const dockNeeded = !externalRail;
   // Gates the docked rail on the SAME owner check `VisualIdentityBody`
   // already gates its own tabs on (see that prop's own comment) — `null`
-  // until the first `fetchMe` resolves, so the dock stays unmounted rather
-  // than flashing on for a viewer who turns out not to be an Owner.
+  // until that body's own `useCurrentUser` resolves, so the dock stays
+  // unmounted rather than flashing on for a viewer who turns out not to be
+  // an Owner.
   const [ownerKnown, setOwnerKnown] = useState<boolean | null>(null);
   const onOwnerChange = useCallback((next: boolean) => setOwnerKnown(next), []);
   const dockActive = dockNeeded && ownerKnown === true;
-  const { session: chatSession, reset: startNewChat } = useDockedVisualIdentityChat(identity.siteId, dockActive);
+  // T1.4 (perf): the dock mounts collapsed (a spine, via `AgentRail`'s own
+  // toggle) — merely reaching this page must never itself mint a chat and
+  // fire the seeded prompt into a run. `dockOpen` is the human's own request
+  // for the dock, either the toggle below or a page button that routes
+  // through `rail.open` (see `dockedRail` below); it is what
+  // `useDockedVisualIdentityChat` waits for before minting a brand-new
+  // conversation. An already-cached conversation from an earlier open in
+  // this tab still attaches on mount regardless — a read, not a run.
+  const [dockOpen, setDockOpen] = useState(false);
+  const { session: chatSession, reset: startNewChat } = useDockedVisualIdentityChat(
+    identity.siteId,
+    dockActive,
+    dockOpen
+  );
   const chat = useChat(getToken, chatSession.chatId);
   const [composerSeed, setComposerSeed] = useState<{ key: string; text: string } | undefined>(undefined);
 
@@ -707,7 +781,14 @@ export default function VisualIdentityWorkspace({
 
   const dockedRail: VisualIdentityRailSeam = useMemo(
     () => ({
-      open: (intent) => setComposerSeed({ key: `${intent.tool}:${Date.now()}`, text: intent.prompt }),
+      open: (intent) => {
+        // T1.4: a page button (Retheme, or an ImageryBoard/PdfTemplatesPanel
+        // intent) is exactly as much "the human asked for the dock" as the
+        // collapse toggle — it must open a collapsed dock rather than
+        // silently seeding a composer nobody can see.
+        setDockOpen(true);
+        setComposerSeed({ key: `${intent.tool}:${Date.now()}`, text: intent.prompt });
+      },
       // D6: only while the dock is actually mounted. Handing the board a chat
       // id for a panel nobody can see would write notes into a transcript with
       // no reader — and the card's "or just tell the agent" hint would point at
@@ -723,7 +804,10 @@ export default function VisualIdentityWorkspace({
 
   return (
     <AdminShell currentPath="/admin/settings/visual-identity" title="Visual identity" identity={identity} wide>
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      {/* `_auto` (not a fixed `22rem`) so a collapsed dock's column shrinks to
+          its spine instead of leaving a blank 22rem gutter — same fix
+          `ObjectWorkspace`'s own collapsible dock already made. */}
+      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <VisualIdentityBody
             identity={identity}
@@ -732,15 +816,23 @@ export default function VisualIdentityWorkspace({
           />
         </div>
         {dockActive ? (
-          <div className="sticky top-4 self-start" aria-label="Visual identity agent dock">
-            {/* REVIEW: this dock only mounts once `fetchMe` has confirmed an
-                Owner (see `dockActive`), so the rail's Owner-only provider
-                error detail belongs on. `isOwner` defaults to false, which
-                silently hid it from the only role that can reach this page. */}
+          <div
+            className={`sticky top-4 self-start ${dockOpen ? 'w-full lg:w-[22rem]' : 'w-12'}`}
+            aria-label="Visual identity agent dock"
+          >
+            {/* REVIEW: this dock only mounts once ownership is confirmed (see
+                `dockActive`), so the rail's Owner-only provider error detail
+                belongs on. `isOwner` defaults to false, which silently hid it
+                from the only role that can reach this page. */}
             <AgentRail
               chat={chat}
               focus="the publication’s visual identity"
               isOwner
+              // T1.4: closed by default (see `dockOpen` above) — opening it is
+              // the one gesture that is allowed to mint a chat and fire the
+              // seeded prompt.
+              collapsed={!dockOpen}
+              onToggleCollapsed={() => setDockOpen((value) => !value)}
               // The way out of a dead conversation: clears the cached id,
               // mints a fresh chat, re-seeds the visual-identity starter. The
               // rail header is the one place this control appears now (see

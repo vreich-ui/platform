@@ -55,7 +55,7 @@ import { useRequestNotifications } from './useRequestNotifications';
 import { SeverityCountPill } from './severity';
 import { NeedsYouMenu } from './NeedsYouMenu';
 import { ADMIN_COMPACT_NAV_CLASS, ADMIN_EXPANDED_NAV_CLASS } from '@core/lib/admin/responsive-workspace';
-import { settingsNavigationLabel, visibleNavGroups } from '@core/lib/admin/admin-navigation';
+import { visibleNavGroups } from '@core/lib/admin/admin-navigation';
 import { NAV_ITEMS, type NavIconName } from '@core/lib/admin/admin-nav-items';
 
 async function shellToken(): Promise<string> {
@@ -118,6 +118,11 @@ export const NAV: NavGroup[] = NAV_ITEMS.map((group) => ({
 }));
 
 function isActive(currentPath: string, href: string): boolean {
+  // T1.6 moved Editorial off the bare `/admin` (which now redirects to
+  // `/admin/requests`), so no nav item carries this href today. The guard
+  // stays as the safety net it always was: without it, an item at `/admin`
+  // would light up on EVERY admin page, since the prefix rule below matches
+  // the whole section.
   if (href === '/admin') return currentPath === '/admin' || currentPath === '/admin/';
   return currentPath === href || currentPath.startsWith(`${href}/`);
 }
@@ -126,13 +131,11 @@ function NavList({
   currentPath,
   owner,
   admin,
-  settingsLabel,
   onNavigate,
 }: {
   currentPath: string;
   owner: boolean;
   admin: boolean;
-  settingsLabel: string;
   onNavigate?: () => void;
 }) {
   const groups = visibleNavGroups(NAV, owner, admin);
@@ -142,7 +145,7 @@ function NavList({
         <div key={group.label ?? `group-${gi}`} className="flex flex-col gap-1">
           {group.label ? (
             <p className="px-3 pb-1 text-[length:var(--adm-text-xs)] font-semibold uppercase tracking-wide text-[var(--adm-text-muted)]">
-              {group.label === 'Settings' ? settingsLabel : group.label}
+              {group.label}
             </p>
           ) : null}
           {group.items.map((item) => {
@@ -336,7 +339,15 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const onLogout = () => {
     import('@core/lib/admin/goTrueClient')
       .then((m) => m.logout())
-      .then(() => window.dispatchEvent(new CustomEvent('cms:logout')))
+      .then(async () => {
+        // T1.2 R1: the shell's instant-paint cache holds this person's
+        // resolved roles and e-mail, and `sessionStorage` survives the hard
+        // reload below — so it is dropped explicitly, not left for the next
+        // person at the keyboard.
+        const { clearCachedAdminAccessState } = await import('@core/lib/admin/admin-access-client');
+        clearCachedAdminAccessState();
+        window.dispatchEvent(new CustomEvent('cms:logout'));
+      })
       .catch(() => {})
       .finally(() => window.location.assign('/admin'));
   };
@@ -395,7 +406,6 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             currentPath={currentPath}
             owner={owner}
             admin={isAdmin}
-            settingsLabel={settingsNavigationLabel(identity.brandName)}
           />
           <a
             href="/"
@@ -551,7 +561,6 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
             currentPath={currentPath}
             owner={owner}
             admin={isAdmin}
-            settingsLabel={settingsNavigationLabel(identity.brandName)}
             onNavigate={() => setMobileNav(false)}
           />
         </Drawer>

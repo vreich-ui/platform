@@ -91,3 +91,26 @@ test('admin-auth-state reports no roles when unauthenticated', async () => {
   assert.equal(body.authenticated, false);
   assert.deepEqual(body.roles, []);
 });
+
+// T0.1 — this is one of the shell trio the perf investigation targets: the
+// header must be present on every response shape (200 here, 401/405
+// elsewhere), name all four metrics, and carry a real (non-negative,
+// finite) `auth;dur=` — proving `timeAuth`'s wrap around
+// `resolveAdminAccessFromEvent` actually measured something rather than
+// silently no-op'ing outside a `withServerTiming`-wrapped invocation.
+test('admin-auth-state carries a Server-Timing header with cold/auth/work/serialize', async () => {
+  const response = await handler({ httpMethod: 'GET' }, contextFor('someone@example.com'));
+  const header = response.headers['Server-Timing'];
+  assert.ok(header, 'Server-Timing header must be present');
+  for (const metric of ['cold', 'auth', 'work', 'serialize']) {
+    assert.match(header, new RegExp(`${metric};dur=\\d+(\\.\\d+)?`), `missing ${metric} metric in "${header}"`);
+  }
+  const authDur = Number(header.match(/auth;dur=([\d.]+)/)?.[1]);
+  assert.ok(Number.isFinite(authDur) && authDur >= 0, `auth;dur must be a real, non-negative number, got ${authDur}`);
+});
+
+test('admin-auth-state Server-Timing survives a 405 (Method Not Allowed)', async () => {
+  const response = await handler({ httpMethod: 'DELETE' });
+  assert.equal(response.statusCode, 405);
+  assert.ok(response.headers['Server-Timing'], 'Server-Timing header must survive a non-200 response');
+});

@@ -16,11 +16,14 @@
  * write here. `agent_keys_create` is the ONLY response that ever carries a
  * raw token — it is minted here and returned exactly once.
  */
+import { createHash } from 'node:crypto';
+
 import type { SiteBinding } from '../lib/site-binding.js';
 import { z } from 'zod';
 
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import { resolveRolesFromEvent } from '../lib/request-roles.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import { isOwner } from '../lib/roles.js';
 import {
   getGovernanceBlobStore,
@@ -60,8 +63,42 @@ const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-s
 const jsonResponse = (status: number, body: Record<string, unknown>) => ({
   statusCode: status,
   headers: jsonHeaders,
-  body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: status >= 200 && status < 300, status, ...body })),
 });
+
+/**
+ * T2.3 — `get` and `agent_keys_list` are this function's only two read verbs
+ * (`agent_keys_list` never returns a token hash; the read bar for it is
+ * Admin, same as `get` — see the file header). Every other verb (`set`,
+ * `revert`, `agent_keys_create`, `agent_keys_revoke`) writes the governance
+ * or agent-keys doc and keeps the plain `no-store` `jsonResponse` above —
+ * `agent_keys_create` in particular must NEVER be cacheable, since its body
+ * is the one place a raw token is ever returned.
+ */
+const CACHE_CONTROL = 'private, no-cache';
+/**
+ * Hashes the ALREADY-SERIALIZED wire body, so a read response is
+ * `JSON.stringify`d exactly ONCE per request. The digest is identical to
+ * hashing the object (same input string), but the previous shape paid a
+ * second full stringify of the whole body on every read — on a latency
+ * branch, on this surface's hottest read paths.
+ */
+const etagForSerialized = (serialized: string): string =>
+  `"${createHash('sha1').update(serialized).digest('hex')}"`;
+
+const readJsonResponse = (event: LambdaEvent, body: Record<string, unknown>) => {
+  const serialized = timeSerialize(() => JSON.stringify({ ok: true, status: 200, ...body }));
+  const etag = etagForSerialized(serialized);
+  const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return { statusCode: 304, headers: { 'Cache-Control': CACHE_CONTROL, ETag: etag }, body: '' };
+  }
+  return {
+    statusCode: 200,
+    headers: { ...jsonHeaders, 'Cache-Control': CACHE_CONTROL, ETag: etag },
+    body: serialized,
+  };
+};
 
 // Exported for admin-governance.test.ts — the request CONTRACT is worth
 // testing directly; the owner-gating wiring around it is checked by a
@@ -212,11 +249,13 @@ const chatToolsCatalog = [
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
-  const adminState = await getAdminStateFromEvent(event, context);
+  const adminState = await timeAuth(() => getAdminStateFromEvent(event, context));
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const email = (adminState.email ?? '').trim().toLowerCase();
-  const roles = await resolveRolesFromEvent(event, { kind: 'human', id: adminState.userId ?? '', email }, binding);
+  const roles = await timeAuth(() =>
+    resolveRolesFromEvent(event, { kind: 'human', id: adminState.userId ?? '', email }, binding)
+  );
   if (!roles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
   const owner = isOwner(roles);
 
@@ -231,7 +270,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
     if (req.verb === 'get') {
       const doc = await getGovernanceDoc(store);
-      return jsonResponse(200, {
+      return readJsonResponse(event, {
         doc,
         committed: committed(),
         active: await resolveActivePolicies(store),
@@ -242,7 +281,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
     if (req.verb === 'agent_keys_list') {
       const doc = await getAgentKeysDoc(store as unknown as AgentKeysBlobStore);
-      return jsonResponse(200, { keys: describeAgentKeys(doc) });
+      return readJsonResponse(event, { keys: describeAgentKeys(doc) });
     }
 
     if (req.verb === 'agent_keys_create' || req.verb === 'agent_keys_revoke') {
@@ -351,4 +390,5 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) =>
+  withServerTiming('admin-governance', buildHandlerImpl(binding));

@@ -130,11 +130,22 @@ export type EmailMode = 'immediate' | 'daily' | 'off';
  * Every helper in this file goes through this function. Scattering the check
  * over the call sites is exactly what let the hole open in the first place.
  */
+/**
+ * T1.1: `signal` is opt-in and per-call, threaded from the CALLER — never
+ * defaulted inside this module. `listRequests`/`listRequestsIfChanged` back
+ * BOTH `requests-store.ts`'s module-scope poll (deliberately built to
+ * survive an Astro `ClientRouter` swap — see that module's header — and so
+ * must NOT be cut off by the very navigation it exists to survive) and a
+ * page's own one-off calls (`RequestsWorkspace`'s `mine`/`archived`/`q`
+ * queries, per its own module comment). Only the latter passes
+ * `currentPageSignal()`; the store's own `tick()` passes nothing.
+ */
 async function authorizedFetch(
   getToken: GetToken,
   endpoint: string,
   body: unknown,
-  extraHeaders: Record<string, string> = {}
+  extraHeaders: Record<string, string> = {},
+  signal?: AbortSignal
 ): Promise<Response> {
   const token = await getToken();
   if (!token) {
@@ -145,6 +156,7 @@ async function authorizedFetch(
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (isAuthExpiredStatus(res.status)) {
     markAuthExpired();
@@ -166,13 +178,13 @@ const jsonOrThrow = async (res: Response): Promise<Record<string, unknown>> => {
   return json;
 };
 
-async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
-  const res = await authorizedFetch(getToken, ENDPOINT, body);
+async function post<T>(getToken: GetToken, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+  const res = await authorizedFetch(getToken, ENDPOINT, body, {}, signal);
   return (await jsonOrThrow(res)) as T;
 }
 
-export const listRequests = (getToken: GetToken, filters: RequestListFiltersInput = {}) =>
-  post<RequestListView>(getToken, { action: 'list', ...filters });
+export const listRequests = (getToken: GetToken, filters: RequestListFiltersInput = {}, signal?: AbortSignal) =>
+  post<RequestListView>(getToken, { action: 'list', ...filters }, signal);
 
 /**
  * The conditional form of `listRequests` (T5.1 R8, T0.2 F12).
@@ -194,13 +206,15 @@ export const listRequests = (getToken: GetToken, filters: RequestListFiltersInpu
 export async function listRequestsIfChanged(
   getToken: GetToken,
   filters: RequestListFiltersInput,
-  etag: string | undefined
+  etag: string | undefined,
+  signal?: AbortSignal
 ): Promise<{ unchanged: true; etag: string | undefined } | { unchanged: false; view: RequestListView; etag?: string }> {
   const res = await authorizedFetch(
     getToken,
     ENDPOINT,
     { action: 'list', ...filters },
-    etag ? { 'If-None-Match': etag } : {}
+    etag ? { 'If-None-Match': etag } : {},
+    signal
   );
   if (res.status === 304) return { unchanged: true, etag: res.headers.get('etag') ?? etag };
   const json = await jsonOrThrow(res);
@@ -208,8 +222,8 @@ export async function listRequestsIfChanged(
   return { unchanged: false, view: json as unknown as RequestListView, ...(nextEtag ? { etag: nextEtag } : {}) };
 }
 
-export const getRequest = (getToken: GetToken, requestId: string) =>
-  post<{ request: RequestDetailView }>(getToken, { action: 'get', request_id: requestId });
+export const getRequest = (getToken: GetToken, requestId: string, signal?: AbortSignal) =>
+  post<{ request: RequestDetailView }>(getToken, { action: 'get', request_id: requestId }, signal);
 
 export const archiveRequest = (getToken: GetToken, requestId: string) =>
   post<{ request: RequestDetailView }>(getToken, { action: 'archive', request_id: requestId });
@@ -388,9 +402,10 @@ export interface ActivityResponse {
 
 export const getRequestActivity = async (
   getToken: GetToken,
-  target: { request_id?: string; run_id?: string }
+  target: { request_id?: string; run_id?: string },
+  signal?: AbortSignal
 ): Promise<ActivityResponse> => {
-  const res = await authorizedFetch(getToken, ACTIVITY_ENDPOINT, target);
+  const res = await authorizedFetch(getToken, ACTIVITY_ENDPOINT, target, {}, signal);
   return (await jsonOrThrow(res)) as unknown as ActivityResponse;
 };
 
@@ -416,11 +431,12 @@ export interface ActivityViewResponse extends ActivityResponse {
 export async function getRequestActivityIfChanged(
   getToken: GetToken,
   target: { request_id?: string; run_id?: string },
-  etag: string | undefined
+  etag: string | undefined,
+  signal?: AbortSignal
 ): Promise<
   { unchanged: true; etag: string | undefined } | { unchanged: false; view: ActivityViewResponse; etag?: string }
 > {
-  const res = await authorizedFetch(getToken, VIEW_ENDPOINT, target, etag ? { 'If-None-Match': etag } : {});
+  const res = await authorizedFetch(getToken, VIEW_ENDPOINT, target, etag ? { 'If-None-Match': etag } : {}, signal);
   if (res.status === 304) return { unchanged: true, etag: res.headers.get('etag') ?? etag };
   const json = await jsonOrThrow(res);
   const nextEtag = res.headers.get('etag');

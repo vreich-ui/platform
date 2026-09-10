@@ -16,9 +16,11 @@ import type {
   AnalyticsViewInput,
 } from './analytics-views-logic.js';
 import type { AnnotationMarker } from './analytics-annotations-logic.js';
+import { currentPageSignal } from './page-generation.js';
 
 const ENDPOINT = '/.netlify/functions/admin-analytics';
 
+/** T1.1: `signal` rides `init` (it's already a `RequestInit`) — a read passes `currentPageSignal()`, a write passes nothing. */
 async function request<T>(getToken: GetToken, init: RequestInit & { query: Record<string, string> }): Promise<T> {
   const token = await getToken();
   const { query, ...rest } = init;
@@ -36,6 +38,7 @@ export async function fetchAnalyticsViews(getToken: GetToken): Promise<Analytics
   const result = await request<{ views: AnalyticsSavedView[] }>(getToken, {
     query: { resource: 'views' },
     method: 'GET',
+    signal: currentPageSignal(),
   });
   return result.views;
 }
@@ -67,6 +70,7 @@ export async function fetchAnnotationMarkers(
   const result = await request<{ markers: AnnotationMarker[] }>(getToken, {
     query: { resource: 'annotations', from: range.from, to: range.to },
     method: 'GET',
+    signal: currentPageSignal(),
   });
   return result.markers;
 }
@@ -78,6 +82,7 @@ export async function fetchAnalyticsNotes(
   const result = await request<{ notes: AnalyticsNote[] }>(getToken, {
     query: { resource: 'notes', ...(range ?? {}) },
     method: 'GET',
+    signal: currentPageSignal(),
   });
   return result.notes;
 }

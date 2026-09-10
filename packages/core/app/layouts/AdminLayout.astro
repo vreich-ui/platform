@@ -113,7 +113,27 @@ const { brandName } = getSiteIdentity();
   // for a validly signed-in admin on every cold load.
   import '@site/config/policy-bindings';
   import { currentUser, getAccessToken, handleOAuthCallback } from '@core/lib/admin/goTrueClient';
-  import { fetchAdminAccessState } from '@core/lib/admin/admin-access-client';
+  import {
+    clearCachedAdminAccessState,
+    fetchAdminAccessState,
+    peekCachedAdminAccessState,
+  } from '@core/lib/admin/admin-access-client';
+  import { beginNewPageGeneration } from '@core/lib/admin/page-generation';
+
+  // T1.1: one page-generation AbortSignal, minted here and read everywhere
+  // else via `currentPageSignal()`/`usePageSignal()`. `astro:before-preparation`
+  // fires the instant a same-origin navigation begins — before the next
+  // page's HTML is even requested — so this is the earliest possible point
+  // to abort the outgoing page's in-flight reads instead of letting them run
+  // to completion and compete with the next page's own calls for the same
+  // Netlify function concurrency. Registered once globally, not per gate
+  // instance — every `/admin/*` navigation goes through exactly one of these.
+  if (!window.__cmsPageGenerationListener) {
+    window.__cmsPageGenerationListener = true;
+    document.addEventListener('astro:before-preparation', () => {
+      beginNewPageGeneration();
+    });
+  }
 
   (() => {
     const initializeAdminLayoutGate = () => {
@@ -174,7 +194,17 @@ const { brandName } = getSiteIdentity();
       // being no. `checkFailed: true` marks that distinction for the caller.
       const getAdminStateForUser = async () => fetchAdminAccessState(await getAccessToken());
 
-      const renderAuthState = async () => {
+      // T1.2 R1: `renderAuthState` always fetches and always applies whatever
+      // it gets back, so a downgrade (or upgrade) between what was painted
+      // from cache and what the server actually answers self-corrects on the
+      // very next line below — the server enforces access regardless, this
+      // is only ever about how long the shell stays hidden waiting to paint.
+      // `hadCachedPaint` only softens a TRANSIENT check failure: once the
+      // shell is already showing (from cache), a network blip revalidating
+      // in the background must not yank it away and replace it with the
+      // generic error panel — the stale cached state stays on screen instead,
+      // exactly as it would if this revalidation had simply not run yet.
+      const renderAuthState = async (hadCachedPaint = false) => {
         const user = currentUser();
         if (!user) {
           setAuthState('signed-out');
@@ -182,7 +212,7 @@ const { brandName } = getSiteIdentity();
         }
         const adminState = await getAdminStateForUser();
         if (adminState.checkFailed) {
-          setAuthState('error');
+          if (!hadCachedPaint) setAuthState('error');
           return;
         }
         if (tierLabel) tierLabel.textContent = tierLabelFor(adminState.roles);
@@ -190,11 +220,26 @@ const { brandName } = getSiteIdentity();
       };
 
       const initializeIdentityAuth = async () => {
-        setAuthState('checking');
+        // T1.2 R1: the shell trio (auth-state + requests list + users me)
+        // re-fires on every navigation and used to keep the WHOLE shell
+        // `hidden` until this auth-state round trip answered — a 1-2.5s
+        // floor before the section's own data even starts loading. A cache
+        // hit lets the shell paint immediately from the last known access
+        // state while the real check runs in the background; only a cache
+        // MISS still gates paint behind "Checking editor access…".
+        const cachedUser = currentUser();
+        const cachedState = cachedUser ? peekCachedAdminAccessState(cachedUser.token.access_token) : null;
+        const paintedFromCache = Boolean(cachedState && !cachedState.checkFailed);
+        if (paintedFromCache && cachedState) {
+          if (tierLabel) tierLabel.textContent = tierLabelFor(cachedState.roles);
+          setAuthState(cachedState.isAdmin ? 'signed-in' : 'forbidden');
+        } else {
+          setAuthState('checking');
+        }
         try {
           const oauthUser = await handleOAuthCallback();
           if (oauthUser) window.__cmsLoginModal?.close();
-          await renderAuthState();
+          await renderAuthState(paintedFromCache);
           document.addEventListener('cms:login', () => {
             renderAuthState().catch((error) => {
               console.error('Auth refresh failed.', error);
@@ -202,6 +247,10 @@ const { brandName } = getSiteIdentity();
             });
           });
           document.addEventListener('cms:logout', () => {
+            // T1.2 R1: the instant-paint cache is this person's resolved
+            // roles and e-mail. Signing out drops it rather than leaving it
+            // in the tab for whoever sits down next.
+            clearCachedAdminAccessState();
             renderAuthState().catch((error) => {
               console.error('Auth refresh failed.', error);
               setAuthState('error');

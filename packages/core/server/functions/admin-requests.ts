@@ -23,6 +23,7 @@ import { CmsAgentClient, isCmsAgentConfigured } from '../lib/agent/cms-agent-cli
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import { getEditorialRequestsBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import { objectRecordKey } from '../lib/object-store-keys.js';
 import { isOwner, resolveRolesForPrincipalAsync, type Role } from '../lib/roles.js';
 import { getUsersBlobStore, getUserRecord } from '../lib/users-store.js';
@@ -66,7 +67,7 @@ const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-s
 const jsonResponse = (status: number, body: Record<string, unknown>, extraHeaders: Record<string, string> = {}) => ({
   statusCode: status,
   headers: { ...jsonHeaders, ...extraHeaders },
-  body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: status >= 200 && status < 300, status, ...body })),
 });
 
 /**
@@ -526,13 +527,15 @@ const siteObjectProbe = (event: LambdaEvent, binding?: SiteBinding): ObjectExist
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
-  const adminState = await getAdminStateFromEvent(event, context);
+  const adminState = await timeAuth(() => getAdminStateFromEvent(event, context));
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const callerPrincipal: Principal = { kind: 'human', id: adminState.userId ?? '', email: adminState.email ?? '' };
-  const callerRoles = await resolveRolesForPrincipalAsync(callerPrincipal, {
-    getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
-  });
+  const callerRoles = await timeAuth(() =>
+    resolveRolesForPrincipalAsync(callerPrincipal, {
+      getUserRecord: async (email) => getUserRecord(await getUsersBlobStore(event, binding), email),
+    })
+  );
   if (!callerRoles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
 
   let parsedBody: unknown;
@@ -709,4 +712,4 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) => withServerTiming('admin-requests', buildHandlerImpl(binding));

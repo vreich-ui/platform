@@ -23,7 +23,6 @@ import {
   listArtifactIndexKeys,
   listArtifactReferencesForRequest,
   readArtifactReference,
-  requestArtifactReferenceKey,
   resolveArtifactPointer,
   writeArtifactReferenceIndexes,
   type ArtifactIndexStore,
@@ -33,12 +32,17 @@ import {
   artifactReferenceLimits,
   isArtifactReference,
   isDeletedArtifactReference,
-  isSafeArtifactText,
   normalizeArtifactBlobKey,
   reconcileArtifactReference,
   safePathSegment,
   type ArtifactReference,
 } from './artifacts.js';
+import {
+  normalizeArtifactSha256Input,
+  restoreArtifactReference,
+  softDeleteArtifactReference,
+  writeArtifactReferenceForAdminMutation,
+} from './artifact-soft-delete.js';
 import { validateRequestId } from '../../lib/agents-naming.js';
 import { getAdminStateFromEvent } from './admin-auth.js';
 import { resolveAdminAccessFromEvent } from './request-roles.js';
@@ -393,51 +397,6 @@ export const normalizeArtifactKindInput = (value: unknown, required: boolean) =>
   }
 
   return { ok: true as const, artifactKind };
-};
-
-const normalizeArtifactSha256Input = (value: unknown) => {
-  const sha256 = toNonEmptyString(value)?.toLowerCase();
-  if (!sha256) return { ok: false as const, error: 'sha256 is required.' };
-  if (!/^[a-f0-9]{64}$/.test(sha256)) return { ok: false as const, error: 'sha256 must be a 64-character hex digest.' };
-
-  return { ok: true as const, sha256 };
-};
-
-const loadArtifactReferenceForAdminMutation = async (store: ArtifactIndexStore, requestId: string, sha256: string) => {
-  const artifact = await parseJsonBlob(store, requestArtifactReferenceKey(requestId, sha256));
-
-  if (!artifact) return { ok: false as const, error: 'Artifact reference was not found.' };
-  if (!isArtifactReference(artifact)) return { ok: false as const, error: 'Artifact reference JSON is invalid.' };
-
-  return { ok: true as const, artifact };
-};
-
-const writeArtifactReferenceForAdminMutation = async (
-  store: ArtifactIndexStore,
-  requestId: string,
-  artifact: ArtifactReference
-) => {
-  await store.setJSON(requestArtifactReferenceKey(requestId, artifact.sha256), artifact, {
-    metadata: {
-      requestId,
-      sha256: artifact.sha256,
-      contentType: artifact.contentType,
-      ...(artifact.deletedAtISO ? { deletedAtISO: artifact.deletedAtISO } : {}),
-    },
-  });
-};
-
-const normalizeDeletedByInput = (value: unknown, fallback: string) => {
-  const deletedBy = toNonEmptyString(value) ?? fallback;
-
-  if (!isSafeArtifactText(deletedBy, artifactReferenceLimits.label)) {
-    return {
-      ok: false as const,
-      error: `deletedBy must be a safe string up to ${artifactReferenceLimits.label} characters.`,
-    };
-  }
-
-  return { ok: true as const, deletedBy };
 };
 
 const getArtifactReferencesForRequest = async (event: LambdaEvent, requestId: string): Promise<ArtifactReference[]> => {
@@ -889,56 +848,47 @@ export const migrateArtifactIndexes = async (event: LambdaEvent, input: Record<s
   });
 };
 
+/**
+ * MCP `soft_delete_artifact`: the admin gate and the tool envelope. The store
+ * mutation itself is in the leaf `artifact-soft-delete.ts` so that
+ * `functions/admin-users.ts` (shell trio, every admin navigation) can reach it
+ * without dragging this file — and therefore mcp.ts — into its cold start.
+ */
 export const softDeleteArtifact = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const unauthorized = await requireAdminToolAccess(event);
   if (unauthorized) return unauthorized;
 
   const adminState = await getAdminToolState(event);
-
-  const requestId = toNonEmptyString(input.requestId);
-  if (!requestId) return toolError('requestId is required.');
-
-  const sha256 = normalizeArtifactSha256Input(input.sha256);
-  if (!sha256.ok) return toolError(sha256.error);
-
-  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
-  const loaded = await loadArtifactReferenceForAdminMutation(store, requestId, sha256.sha256);
-  if (!loaded.ok) return toolError(loaded.error);
-
   const adminEmail = !('isError' in adminState) ? adminState.email : undefined;
   const adminUserId = !('isError' in adminState) ? adminState.userId : undefined;
-  const deletedBy = normalizeDeletedByInput(input.deletedBy, adminEmail ?? adminUserId ?? 'admin');
-  if (!deletedBy.ok) return toolError(deletedBy.error);
 
-  const deletedArtifact: ArtifactReference = {
-    ...loaded.artifact,
-    deletedAtISO: loaded.artifact.deletedAtISO ?? new Date().toISOString(),
-    deletedBy: loaded.artifact.deletedBy ?? deletedBy.deletedBy,
-  };
+  const result = await softDeleteArtifactReference(
+    event,
+    {
+      requestId: input.requestId,
+      sha256: input.sha256,
+      deletedBy: input.deletedBy,
+      deletedByFallback: adminEmail ?? adminUserId ?? 'admin',
+    },
+    getMcpBinding()
+  );
+  if (!result.ok) return toolError(result.error);
 
-  await writeArtifactReferenceForAdminMutation(store, requestId, deletedArtifact);
-
-  return toolResult({ artifact: deletedArtifact, deleted: true });
+  return toolResult({ artifact: result.artifact, deleted: true });
 };
 
 export const restoreArtifact = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const unauthorized = await requireAdminToolAccess(event);
   if (unauthorized) return unauthorized;
 
-  const requestId = toNonEmptyString(input.requestId);
-  if (!requestId) return toolError('requestId is required.');
+  const result = await restoreArtifactReference(
+    event,
+    { requestId: input.requestId, sha256: input.sha256 },
+    getMcpBinding()
+  );
+  if (!result.ok) return toolError(result.error);
 
-  const sha256 = normalizeArtifactSha256Input(input.sha256);
-  if (!sha256.ok) return toolError(sha256.error);
-
-  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
-  const loaded = await loadArtifactReferenceForAdminMutation(store, requestId, sha256.sha256);
-  if (!loaded.ok) return toolError(loaded.error);
-
-  const { deletedAtISO, deletedBy, ...restoredArtifact } = loaded.artifact;
-  await writeArtifactReferenceForAdminMutation(store, requestId, restoredArtifact);
-
-  return toolResult({ artifact: restoredArtifact, restored: Boolean(deletedAtISO || deletedBy) });
+  return toolResult({ artifact: result.artifact, restored: result.changed });
 };
 
 export const reconcileArtifactIndexes = async (event: LambdaEvent, input: Record<string, unknown>) => {
