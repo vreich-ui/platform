@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
+
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import {
   getImageArtifactReadDiagnostics,
   reconcileImageArtifactReference,
@@ -196,8 +199,37 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
     'Content-Type': 'application/json',
     'Cache-Control': 'no-store',
   },
-  body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body })),
 });
+
+// T1.5: served bytes are private (admin-only, authenticated read) but stable
+// once written — an artifact's bytes at a given blobKey+width never change
+// underneath the same key, so a full day of browser-side caching is safe,
+// unlike the 5-minute ceiling this replaces. `ETag` + `If-None-Match` on top
+// of that turns a revisit into a 304 (headers only) instead of a full
+// re-render-and-re-download, which is the actual point: max-age alone only
+// helps within one page session, not across the reloads admin actually does.
+const CACHE_CONTROL = 'private, max-age=86400';
+
+/** Same shape as every other admin function's `etagFor` (grep `etagFor` — this
+ *  is deliberately not a shared import; each caller hashes its own body). */
+const etagFor = (body: unknown): string => `"${createHash('sha1').update(JSON.stringify(body)).digest('hex')}"`;
+
+/**
+ * The ETag is computed over the ACTUAL RESPONSE BYTES (post-rendition, base64
+ * — the same string the body sends), never over the source blob alone: a 512px
+ * rendition and a 96px rendition of the same artifact are different response
+ * bodies and MUST carry different ETags, or a browser holding the 96px
+ * `If-None-Match` would get served a 304 that means "still 512px" instead of
+ * the fresh, smaller request it actually made. Content type is not part of
+ * the input on purpose — a decoded image's bytes and format are already fixed
+ * together upstream of this call, so content type never varies independently
+ * of the bytes it is computed from.
+ */
+const etagForResponseBytes = (base64Body: string): string => etagFor(base64Body);
+
+const ifNoneMatchFrom = (event: LambdaEvent): string | undefined =>
+  event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
 
 const toText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
@@ -388,14 +420,21 @@ export const readAdminTemplateThumbnail = async (event: LambdaEvent, blobKey: st
       ? await renderBoundedRendition(bytes, decodedFormat, renditionWidth)
       : undefined;
     const responseBytes = renditionBytes ?? bytes;
+    const bodyBase64 = responseBytes.toString('base64');
+    const etag = etagForResponseBytes(bodyBase64);
+
+    if (ifNoneMatchFrom(event) === etag) {
+      return { statusCode: 304, headers: { 'Cache-Control': CACHE_CONTROL, ETag: etag }, body: '' };
+    }
 
     return {
       statusCode: 200,
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': CACHE_CONTROL,
+        ETag: etag,
       },
-      body: responseBytes.toString('base64'),
+      body: bodyBase64,
       isBase64Encoded: true,
     };
   } catch (error) {
@@ -513,14 +552,21 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string, bi
       ? await renderBoundedRendition(buffer, decodedFormat, renditionWidth)
       : undefined;
     const responseBytes = renditionBytes ?? buffer;
+    const bodyBase64 = responseBytes.toString('base64');
+    const etag = etagForResponseBytes(bodyBase64);
+
+    if (ifNoneMatchFrom(event) === etag) {
+      return { statusCode: 304, headers: { 'Cache-Control': CACHE_CONTROL, ETag: etag }, body: '' };
+    }
 
     return {
       statusCode: 200,
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': CACHE_CONTROL,
+        ETag: etag,
       },
-      body: responseBytes.toString('base64'),
+      body: bodyBase64,
       isBase64Encoded: true,
     };
   } catch (error) {
@@ -556,7 +602,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
-  const adminState = await resolveAdminAccessFromEvent(event, context, binding);
+  const adminState = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
   if (!adminState.authenticated) {
     return jsonResponse(401, {
       error: adminState.error || 'Authentication is required.',
@@ -582,5 +628,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     : readAdminBlobImage(event, blobKey, binding);
 };
 
-/** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+/** W11 T11.4: per-site factory — the site shim instantiates this with its binding.
+ *  T0.1: Server-Timing wrap only — the ETag work on the binary read paths
+ *  below (`readAdminTemplateThumbnail`/`readAdminBlobImage`) is another
+ *  agent's and is left untouched; `serialize` here only covers the JSON
+ *  error/4xx responses `jsonResponse` builds, not the base64 image bodies. */
+export const createHandler = (binding: SiteBinding) =>
+  withServerTiming('admin-get-blob-image', buildHandlerImpl(binding));

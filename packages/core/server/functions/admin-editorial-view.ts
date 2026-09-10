@@ -58,6 +58,7 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { loadReleaseOverview, ReleaseOverviewUnavailableError } from '../lib/release-overview.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import { getAgentChatBlobStore, listChatDocs } from '../lib/agent/chat-store.js';
 import { visibleChatDocs } from '../lib/agent/chat-visibility.js';
 import type { InventoryRow } from '../lib/object-inventory.js';
@@ -76,7 +77,7 @@ const jsonResponse = (
 ) => ({
   statusCode,
   headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extraHeaders },
-  body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body })),
 });
 
 const CACHE_CONTROL = 'private, no-cache';
@@ -140,7 +141,7 @@ const slotRow = (row: InventoryRow): EditorialSlotRow => ({
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context, binding);
+  const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
   const email = access.email;
@@ -231,4 +232,5 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   }
 };
 
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) =>
+  withServerTiming('admin-editorial-view', buildHandlerImpl(binding));

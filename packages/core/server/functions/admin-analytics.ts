@@ -48,6 +48,7 @@ import { createHash } from 'node:crypto';
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import {
   fetchTrafficAnalytics,
   fetchNotFoundAndCountries,
@@ -119,7 +120,7 @@ const jsonResponse = (
 ) => ({
   statusCode,
   headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extraHeaders },
-  body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body })),
 });
 
 const isRangeKey = (value: string | undefined): value is AnalyticsRangeKey =>
@@ -154,7 +155,7 @@ const cachedResponse = (entry: MemoEntry, ifNoneMatch: string | undefined) => {
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': CACHE_CONTROL, ETag: entry.etag },
-    body: JSON.stringify(entry.body),
+    body: timeSerialize(() => JSON.stringify(entry.body)),
   };
 };
 
@@ -434,6 +435,22 @@ const rawExportResourceResponse = async (params: Record<string, string | undefin
  * independently, so this never 500s just because e.g. deploy lookup isn't
  * configured for this tenant.
  */
+/**
+ * T2.3 — this GET-shaped resource had no validator at all (T0.2's "zero
+ * ETags anywhere in `server/functions/`" finding, before the rest of this
+ * file closed the gap resource by resource). `from`/`to` are the only inputs
+ * and both are already part of `markers`' derivation, so hashing the exact
+ * response body — not a separately-built cache key — is enough for the etag
+ * to vary with everything that varies it.
+ *
+ * Deliberately `private, no-cache` (always revalidate), NOT this file's own
+ * `CACHE_CONTROL` (`max-age=60, stale-while-revalidate=240`): annotations
+ * back the chart an operator is actively adding notes/markers to in the same
+ * session (`?resource=notes`, right below), so the read after that write
+ * must not still be within a 60s client-side max-age window.
+ */
+const ANNOTATIONS_CACHE_CONTROL = 'private, no-cache';
+
 const annotationsResourceResponse = async (binding: SiteBinding, event: LambdaEvent) => {
   const params = event.queryStringParameters ?? {};
   if (!params.from || !params.to) return jsonResponse(400, { error: 'from and to are required (ISO timestamps).' });
@@ -448,7 +465,13 @@ const annotationsResourceResponse = async (binding: SiteBinding, event: LambdaEv
     from: params.from,
     to: params.to,
   });
-  return jsonResponse(200, { markers });
+  const body = { markers };
+  const etag = timeSerialize(() => etagFor(body));
+  const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return { statusCode: 304, headers: { 'Cache-Control': ANNOTATIONS_CACHE_CONTROL, ETag: etag }, body: '' };
+  }
+  return jsonResponse(200, body, { 'Cache-Control': ANNOTATIONS_CACHE_CONTROL, ETag: etag });
 };
 
 const noteInputFromBody = (body: Record<string, unknown>): AnalyticsNoteInput | { error: string } => {
@@ -637,7 +660,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   // gate this replaces exactly for every request that doesn't name one of
   // these resources.
   if (params.resource === 'views') {
-    const access = await resolveAdminAccessFromEvent(event, context, binding);
+    const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return viewsResourceResponse(binding, event);
@@ -645,7 +668,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.resource === 'raw_export') {
     if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-    const access = await resolveAdminAccessFromEvent(event, context, binding);
+    const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return rawExportResourceResponse(params);
@@ -653,14 +676,14 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.resource === 'annotations') {
     if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-    const access = await resolveAdminAccessFromEvent(event, context, binding);
+    const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return annotationsResourceResponse(binding, event);
   }
 
   if (params.resource === 'notes') {
-    const access = await resolveAdminAccessFromEvent(event, context, binding);
+    const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return notesResourceResponse(binding, event, access.email);
@@ -668,14 +691,14 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.resource === 'object_identity') {
     if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-    const access = await resolveAdminAccessFromEvent(event, context, binding);
+    const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
     return objectIdentityResourceResponse(binding, event);
   }
 
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context, binding);
+  const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 
@@ -787,4 +810,4 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   }
 };
 
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) => withServerTiming('admin-analytics', buildHandlerImpl(binding));

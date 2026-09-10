@@ -93,6 +93,8 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
     { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
     { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200 },
+    // T2.1: /admin is the shell entry, not a surface — it opens on Requests.
+    { from: '/admin', to: '/admin/requests', status: 302 },
     // T2.1 D1(a): Templates/Media/Content collapse into /admin/objects.
     { from: '/admin/content', to: '/admin/objects', status: 301 },
     { from: '/admin/templates', to: '/admin/objects?type=template,section_template', status: 301 },

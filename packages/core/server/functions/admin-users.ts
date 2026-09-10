@@ -40,7 +40,7 @@ import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/sto
 import { handleMembershipVerb } from '../lib/membership/verbs.js';
 import { getNetlifyBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import type { OAuthBlobStore } from '../lib/oauth-store.js';
-import { softDeleteArtifact } from '../lib/mcp-artifact-admin.js';
+import { softDeleteArtifactReference } from '../lib/artifact-soft-delete.js';
 import type { Principal } from '../../schema/object-record-v1.js';
 import { friendlyNameFromEmail } from '../../lib/admin/display-name.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
@@ -237,11 +237,20 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         binding
       ) as unknown as Promise<OAuthBlobStore>;
     const objectStore = () => getSiteObjectsBlobStore(event, binding);
-    // avatar ref is image/<requestId>/<sha256>.<ext> (isTrustedAvatarRef) → soft-delete that artifact
+    // avatar ref is image/<requestId>/<sha256>.<ext> (isTrustedAvatarRef) → soft-delete that artifact.
+    // T2.1: this calls the LEAF mutation (lib/artifact-soft-delete.ts), not the MCP
+    // `soft_delete_artifact` tool. The tool's own admin gate would be redundant here —
+    // this request is already past `roles.includes('admin')` above — and reaching it
+    // pulled mcp-artifact-admin → functions/mcp.ts (the whole MCP tool surface, sharp
+    // and stripe seams included) into this shell-trio function's cold start.
     const softDeleteAvatar = async (ref: string) => {
       const m = /^image\/([^/]+)\/([0-9a-f]{64})\./i.exec(ref);
       if (!m) return;
-      await softDeleteArtifact(event as never, { requestId: m[1], sha256: m[2], deletedBy: email });
+      await softDeleteArtifactReference(
+        event,
+        { requestId: m[1], sha256: m[2], deletedBy: email, deletedByFallback: email },
+        binding
+      );
     };
 
     const req = request.data;

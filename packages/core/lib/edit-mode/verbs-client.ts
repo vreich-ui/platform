@@ -21,12 +21,27 @@ export type GetToken = () => Promise<string>;
 
 export type VerbResult = { status: number; body: Record<string, unknown> };
 
-export const callObjectVerb = async (getToken: GetToken, body: Record<string, unknown>): Promise<VerbResult> => {
+/**
+ * T1.1: `signal` is opt-in and per-call, threaded from the CALLER — never
+ * defaulted inside this module. `callObjectVerb` is the one primitive behind
+ * every object-workspace read (`get`/`list`/`inventory`) AND every write
+ * (`patch`/`publish_by_time`/`checkin`/`review_decide`/…), including the
+ * lock-lifecycle and record-version bookkeeping `EditSession` does internally
+ * as part of an explicit checkout/save the user triggered — none of that may
+ * be cut off by a navigation. Only a caller that is unambiguously a page-load
+ * read (e.g. `studio-client.ts`'s recipe galleries) passes one.
+ */
+export const callObjectVerb = async (
+  getToken: GetToken,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<VerbResult> => {
   const token = await getToken();
   const response = await fetch(OBJECT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   return { status: response.status, body: (await response.json().catch(() => ({}))) as Record<string, unknown> };
 };
@@ -55,9 +70,10 @@ export const canExecutePublish = (roles: string[] | undefined): boolean =>
 export const getObjectRecord = async (
   getToken: GetToken,
   objectType: string,
-  objectId: string
+  objectId: string,
+  signal?: AbortSignal
 ): Promise<{ status: number; record?: Record<string, unknown> }> => {
-  const result = await callObjectVerb(getToken, { action: 'get', object_type: objectType, object_id: objectId });
+  const result = await callObjectVerb(getToken, { action: 'get', object_type: objectType, object_id: objectId }, signal);
   return { status: result.status, record: result.body.record as Record<string, unknown> | undefined };
 };
 
@@ -114,8 +130,12 @@ export type PendingObjectRow = {
   lock: { held: boolean; owner_label?: string; expires_at?: string };
 };
 
-export const fetchPendingObjects = async (getToken: GetToken): Promise<PendingObjectRow[]> => {
-  const result = await callObjectVerb(getToken, { action: 'inventory', pending_changes: true, status: 'active' });
+export const fetchPendingObjects = async (getToken: GetToken, signal?: AbortSignal): Promise<PendingObjectRow[]> => {
+  const result = await callObjectVerb(
+    getToken,
+    { action: 'inventory', pending_changes: true, status: 'active' },
+    signal
+  );
   if (result.status !== 200 || !Array.isArray(result.body.objects)) return [];
   return result.body.objects as PendingObjectRow[];
 };

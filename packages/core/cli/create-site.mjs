@@ -654,6 +654,8 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
     { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
     { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200 },
+    // T2.1: /admin is the shell entry, not a surface — it opens on Requests.
+    { from: '/admin', to: '/admin/requests', status: 302 },
   ],
 });
 
@@ -868,6 +870,19 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
   from = "/admin/analytics/object/:objectId"
   to = "/admin/analytics/object/__object"
   status = 200
+
+# T2.1 (admin latency): /admin has no surface of its own — it is the shell's
+# entry, and the workspace it opens on is Requests. EXACT-path rule, so it
+# matches /admin (and /admin/) ONLY — Netlify prefix-matches a \`from\` just when
+# it carries a splat or a :placeholder, so this cannot swallow /admin/requests
+# or any other /admin/* page. force=true because routes/admin/index.astro is a
+# REAL built page (it keeps a <meta http-equiv="refresh"> as a fallback) and
+# would otherwise be served instead of redirecting.
+[[redirects]]
+  from = "/admin"
+  to = "/admin/requests"
+  status = 302
+  force = true
 `;
 
 const packageJsonTemplate = (ids) =>

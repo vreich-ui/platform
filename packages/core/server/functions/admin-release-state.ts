@@ -28,6 +28,7 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { loadReleaseOverview, ReleaseOverviewUnavailableError } from '../lib/release-overview.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -41,7 +42,7 @@ const jsonResponse = (
 ) => ({
   statusCode,
   headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extraHeaders },
-  body: JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, ...body })),
 });
 
 /** R8: authenticated data that is polled — revalidate always, but ALLOW revalidation. */
@@ -51,7 +52,7 @@ const etagFor = (body: unknown): string => `"${createHash('sha1').update(JSON.st
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
-  const access = await resolveAdminAccessFromEvent(event, context, binding);
+  const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
   if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
   if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
 
@@ -88,4 +89,5 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   }
 };
 
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+export const createHandler = (binding: SiteBinding) =>
+  withServerTiming('admin-release-state', buildHandlerImpl(binding));

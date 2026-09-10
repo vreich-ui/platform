@@ -92,6 +92,40 @@ describe('admin-governance source wiring — agent_keys_create/revoke are Owner-
   });
 });
 
+describe('admin-governance source wiring — T2.3 ETag only on the two read verbs', () => {
+  it('get and agent_keys_list respond via readJsonResponse (ETag); every write verb keeps plain jsonResponse', () => {
+    let root = path.dirname(fileURLToPath(import.meta.url));
+    while (root !== path.dirname(root)) {
+      if (existsSync(path.join(root, 'netlify.toml')) && existsSync(path.join(root, 'packages/core/admin'))) break;
+      root = path.dirname(root);
+    }
+    const source = readFileSync(path.join(root, 'packages/core/server/functions/admin-governance.ts'), 'utf8');
+
+    assert.match(
+      source,
+      /req\.verb === 'get'\)\s*\{[\s\S]{0,80}return readJsonResponse\(event, \{/,
+      "verb 'get' must respond via readJsonResponse, not the plain no-store jsonResponse"
+    );
+    assert.match(
+      source,
+      /req\.verb === 'agent_keys_list'\)\s*\{[\s\S]{0,120}return readJsonResponse\(event, \{ keys:/,
+      "verb 'agent_keys_list' must respond via readJsonResponse, not the plain no-store jsonResponse"
+    );
+    // agent_keys_create is the ONE response that ever carries a raw token — it
+    // must never be reachable through the cacheable/ETag'd path.
+    assert.match(
+      source,
+      /return jsonResponse\(200, \{ token, record: recordWithoutHash \}\);/,
+      'agent_keys_create must keep returning via the plain no-store jsonResponse, never readJsonResponse'
+    );
+    assert.doesNotMatch(
+      source,
+      /token,\s*record: recordWithoutHash[\s\S]{0,40}readJsonResponse/,
+      'agent_keys_create must never be routed through readJsonResponse (would cache a one-time secret)'
+    );
+  });
+});
+
 describe('admin-governance requestSchema — PF5 permanent Client Manager cutover', () => {
   it('rejects every retired mode write but keeps the cleanup revert target', () => {
     for (const mode of ['off', 'fallback', 'required']) {

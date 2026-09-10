@@ -135,6 +135,15 @@ describe('the two rules this endpoint must not regress', () => {
       'the departure from chat-visibility must stay commented, so nobody "fixes" it back'
     );
   });
+
+  // T0.1 — this is one of the shell trio the perf investigation targets.
+  it('createHandler wraps buildHandlerImpl in withServerTiming', () => {
+    assert.match(
+      source,
+      /createHandler = \(binding: SiteBinding\) => withServerTiming\('admin-requests', buildHandlerImpl\(binding\)\)/,
+      'admin-requests.ts must be wrapped in withServerTiming so its Server-Timing header keeps firing'
+    );
+  });
 });
 
 

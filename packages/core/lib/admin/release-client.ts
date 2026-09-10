@@ -22,6 +22,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { EditorialObjectState } from './editorial-state.js';
+import { currentPageSignal } from './page-generation.js';
 
 const STATE_ENDPOINT = '/.netlify/functions/admin-release-state';
 const RELEASE_ENDPOINT = '/.netlify/functions/admin-release';
@@ -82,7 +83,10 @@ let memoryCache: { overview: ReleaseOverview; fetchedAt: number } | null = null;
 let inflight: Promise<ReleaseOverview> | null = null;
 
 async function requestReleaseOverview(getToken: GetToken): Promise<ReleaseOverview> {
-  const response = await fetch(STATE_ENDPOINT, { headers: await authorized(getToken) });
+  // T1.1: a page-load/poll read — rides the current page-generation signal.
+  // Safe to abort unconditionally: a dropped fetch just leaves the module
+  // cache as it was, and the next call (this page or another) refetches.
+  const response = await fetch(STATE_ENDPOINT, { headers: await authorized(getToken), signal: currentPageSignal() });
   const body = (await response.json().catch(() => ({}))) as ReleaseOverview & { error?: string };
   if (!response.ok) throw new Error(body.error || `Release state request failed (${response.status}).`);
   return body;

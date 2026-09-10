@@ -190,7 +190,7 @@ const { variant = 'desktop', adminLinks = [] } = Astro.props;
     shouldRouteToAccept,
     acceptRouteFor,
   } from '@core/lib/admin/goTrueClient';
-  import { fetchAdminAccessState } from '@core/lib/admin/admin-access-client';
+  import { clearCachedAdminAccessState, fetchAdminAccessState } from '@core/lib/admin/admin-access-client';
   import { fetchMe } from '@core/lib/admin/users-client';
 
   (() => {
@@ -331,6 +331,11 @@ const { variant = 'desktop', adminLinks = [] } = Astro.props;
 
     const signOut = async () => {
       await logout();
+      // T1.2 R1: AdminLayout paints its shell from a `sessionStorage` copy of
+      // the resolved access state. Signing out from the SITE header (this
+      // control exists on public pages too, where that layout's own
+      // `cms:logout` handler is not loaded) has to drop it here.
+      clearCachedAdminAccessState();
       await renderAuthState();
       closeAllMenus();
       document.dispatchEvent(new CustomEvent('cms:logout'));

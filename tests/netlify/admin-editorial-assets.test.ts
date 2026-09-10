@@ -76,11 +76,23 @@ test('admin editorial assets returns sanitized PDF templates and indexed media',
   });
   globalThis.fetch = fetchImpl;
   try {
-    const response = await handler(
-      { httpMethod: 'GET', headers: {} },
-      { clientContext: { user: { sub: 'owner-1', email: 'owner@example.com' } } }
-    );
+    const authContext = { clientContext: { user: { sub: 'owner-1', email: 'owner@example.com' } } };
+    const response = await handler({ httpMethod: 'GET', headers: {} }, authContext);
     assert.equal(response.statusCode, 200);
+
+    // T2.3 — ETag + `Cache-Control: private, no-cache`, honoring `If-None-Match` with a 304.
+    const responseHeaders = response.headers as Record<string, string> | undefined;
+    const etag = responseHeaders?.['ETag'];
+    assert.ok(etag, 'ETag must be present');
+    assert.equal(responseHeaders?.['Cache-Control'], 'private, no-cache');
+    const revalidated = await handler({ httpMethod: 'GET', headers: { 'if-none-match': etag } }, authContext);
+    assert.equal(revalidated.statusCode, 304);
+    assert.equal(revalidated.body, '');
+
+    // T0.1 — Server-Timing on the same success response.
+    const serverTiming = responseHeaders?.['Server-Timing'];
+    assert.ok(serverTiming, 'Server-Timing header must be present');
+    assert.match(serverTiming, /cold;dur=\d.*auth;dur=[\d.]+.*work;dur=[\d.]+.*serialize;dur=[\d.]+/);
     const body = JSON.parse(response.body) as {
       pdf_templates: Array<Record<string, unknown>>;
       artifacts: Array<Record<string, unknown>>;

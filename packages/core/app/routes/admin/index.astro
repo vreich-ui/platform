@@ -1,19 +1,41 @@
 ---
-// Admin workspace home (T9.3) — rebuilt on AdminLayout + AdminShell. The
-// signed-in-admin experience is the AdminHome island (attention-first layout,
-// working Release card, quick actions). The auth gate and signed-out/forbidden
-// states live in AdminLayout; the server wall is unchanged.
-import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
-import { getSiteIdentity } from '@core/lib/site-identity';
-import AdminLayout from '~/layouts/AdminLayout.astro';
-import AdminHome from '~/admin/AdminHome';
-
-// D2: resolve identity once, server-side, where process.env is real, and
-// pass it down explicitly — the island must not call getSiteIdentity()
-// itself (the browser has no process.env, so env overrides never reached it).
-const identity = getSiteIdentity();
+/**
+ * `/admin` used to render Editorial directly (T9.3, AdminHome). T1.6 (admin
+ * latency plan): Editorial's `admin-editorial-view` call is the single
+ * slowest call in the whole admin (16.0s cold / 9.8s warm — see
+ * `editorial-view-client.ts`'s own header), so the very first thing a fresh
+ * session painted was a 10-16s blank. Requests is the cheapest section
+ * (5.6s, almost entirely the shell trio) and the surface with the "needs
+ * you" pills — the one an operator actually wants first.
+ *
+ * Editorial moved to its own route, `/admin/editorial` (same AdminLayout +
+ * AdminHome this file used to render — see that route file). This one is
+ * now a redirect to `/admin/requests`, in the same static
+ * meta-refresh-plus-canonical shape `/admin/maintenance` uses for its own
+ * retirement redirect (`admin/maintenance.astro`), for the same reason:
+ * `output: 'static'` (site-astro-config.ts) means there is no server at
+ * request time to issue a real 3xx from an Astro page, so this is the
+ * fallback the build can produce on its own. A `force=true` rule in
+ * netlify.toml (the `/admin/maintenance`, `/admin/content`,
+ * `/admin/templates`… precedent) would turn this into a true HTTP redirect
+ * and would be a good, low-risk follow-up — out of scope here (T1.6's file
+ * allow-list does not include netlify.toml).
+ *
+ * `shell-routes.ts` still registers `/admin` (required — it is a
+ * bookmarked, typed-in-the-address-bar entry point) and
+ * `admin-nav-route-parity.test.ts` lists it as intentionally unreached from
+ * the sidebar, the same way it already does for `/admin/maintenance`.
+ */
 ---
 
-<AdminLayout title="Admin — Workspace">
-  <AdminHome client:load identity={identity} />
-</AdminLayout>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="refresh" content="0; url=/admin/requests" />
+    <link rel="canonical" href="/admin/requests" />
+    <title>Redirecting to Requests</title>
+  </head>
+  <body>
+    <p>Taking you to <a href="/admin/requests">Requests</a>.</p>
+  </body>
+</html>

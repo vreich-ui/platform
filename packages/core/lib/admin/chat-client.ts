@@ -110,12 +110,19 @@ export interface ChatView extends ChatSummaryView {
   blockage_origin?: 'page' | 'chat';
 }
 
-async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
+/**
+ * T1.1: `signal` is opt-in and per-call, threaded from the CALLER — never
+ * defaulted inside this module. This one function backs page-load/poll
+ * reads (`list_chats`, `get_chat`, …) AND explicit user-triggered writes
+ * (`send_message`, `approve_tool`, `deny_tool`, …); only a read passes one.
+ */
+async function post<T>(getToken: GetToken, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const token = await getToken();
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
@@ -138,16 +145,30 @@ export const createFreeChat = (getToken: GetToken, title?: string) =>
     ...(title ? { title } : {}),
   });
 
-export const listChats = (getToken: GetToken, includeAll = false) =>
-  post<{ chats: ChatSummaryView[] }>(getToken, { action: 'list_chats', ...(includeAll ? { include_all: true } : {}) });
+export const listChats = (getToken: GetToken, includeAll = false, signal?: AbortSignal) =>
+  post<{ chats: ChatSummaryView[] }>(
+    getToken,
+    { action: 'list_chats', ...(includeAll ? { include_all: true } : {}) },
+    signal
+  );
 
-export const getChat = (getToken: GetToken, chatId: string, sinceSeq?: number, wantRequest?: boolean) =>
-  post<ChatView>(getToken, {
-    action: 'get_chat',
-    chat_id: chatId,
-    ...(sinceSeq ? { since_seq: sinceSeq } : {}),
-    ...(wantRequest ? { want_request: true } : {}),
-  });
+export const getChat = (
+  getToken: GetToken,
+  chatId: string,
+  sinceSeq?: number,
+  wantRequest?: boolean,
+  signal?: AbortSignal
+) =>
+  post<ChatView>(
+    getToken,
+    {
+      action: 'get_chat',
+      chat_id: chatId,
+      ...(sinceSeq ? { since_seq: sinceSeq } : {}),
+      ...(wantRequest ? { want_request: true } : {}),
+    },
+    signal
+  );
 
 export const sendChatMessage = (
   getToken: GetToken,
@@ -272,8 +293,12 @@ export interface AgentAssignmentsView {
   site_default?: string;
 }
 
-export const listProfiles = (getToken: GetToken) =>
-  post<{ profiles: AgentProfileView[]; assignments: AgentAssignmentsView }>(getToken, { action: 'list_profiles' });
+export const listProfiles = (getToken: GetToken, signal?: AbortSignal) =>
+  post<{ profiles: AgentProfileView[]; assignments: AgentAssignmentsView }>(
+    getToken,
+    { action: 'list_profiles' },
+    signal
+  );
 
 export interface ProfileUpsertInput {
   profile_id?: string;

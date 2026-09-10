@@ -381,3 +381,178 @@ test('createArtifactPreviewLoader never caches a failed load, so the next call r
   await assert.rejects(() => drive(() => loader.load('blobKeyA', 'https://example.test/a'), timers));
   assert.equal(calls, 4, 'a fresh call after a failure retries from scratch rather than reusing a cached failure');
 });
+
+// ─── T1.1: per-caller cancellation via `signal`, reference-counted ─────────
+
+/** A fetch that never resolves on its own — only ever settles via the request's own `signal` aborting. */
+function makeAbortTrackingFetch() {
+  const counts = { aborts: 0, calls: 0 };
+  const fetchFn = ((_url: string, init?: RequestInit) => {
+    counts.calls += 1;
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      const onAbort = () => {
+        counts.aborts += 1;
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }) as typeof fetch;
+  return { fetchFn, counts };
+}
+
+/** A fetch that settles only when the test explicitly calls `resolve()` — lets a test prove a fetch stayed ALIVE across an abort. */
+function makeControllableFetch() {
+  const counts = { aborts: 0, calls: 0 };
+  let settle: ((response: Response) => void) | undefined;
+  const fetchFn = ((_url: string, init?: RequestInit) => {
+    counts.calls += 1;
+    return new Promise<Response>((resolve, reject) => {
+      settle = resolve;
+      const signal = init?.signal;
+      const onAbort = () => {
+        counts.aborts += 1;
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }) as typeof fetch;
+  return { fetchFn, counts, resolve: () => settle?.(okResponse()) };
+}
+
+test('createArtifactPreviewLoader.load cancels the underlying fetch when its sole caller aborts', async () => {
+  const { fetchFn, counts } = makeAbortTrackingFetch();
+  const loader = createArtifactPreviewLoader({ fetchFn, createObjectUrl: () => 'blob:unused', revokeObjectUrl: () => {} });
+  const controller = new AbortController();
+
+  const promise = loader.load('key', 'https://example.test/a', undefined, controller.signal);
+  await Promise.resolve();
+  await Promise.resolve();
+  controller.abort();
+
+  await assert.rejects(promise);
+  assert.equal(counts.aborts, 1);
+});
+
+test('an already-aborted signal passed to load() cancels immediately, without a wasted retry cycle', async () => {
+  const { fetchFn, counts } = makeAbortTrackingFetch();
+  const loader = createArtifactPreviewLoader({ fetchFn, createObjectUrl: () => 'blob:unused', revokeObjectUrl: () => {} });
+  const controller = new AbortController();
+  controller.abort();
+
+  const promise = loader.load('key', 'https://example.test/a', undefined, controller.signal);
+  await assert.rejects(promise);
+  assert.equal(counts.calls, 1, 'one attempt, not the full retry budget');
+});
+
+test('one of two callers aborting does not cancel a fetch a sibling still wants — they share one in-flight promise', async () => {
+  const { fetchFn, counts, resolve } = makeControllableFetch();
+  const loader = createArtifactPreviewLoader({ fetchFn, createObjectUrl: () => 'blob:shared', revokeObjectUrl: () => {} });
+  const controllerA = new AbortController();
+  const controllerB = new AbortController();
+
+  const first = loader.load('key', 'https://example.test/shared', undefined, controllerA.signal);
+  const second = loader.load('key', 'https://example.test/shared', undefined, controllerB.signal);
+  assert.equal(first, second, 'both callers share the same in-flight promise');
+
+  await Promise.resolve();
+  controllerA.abort();
+  await Promise.resolve();
+  assert.equal(counts.aborts, 0, 'a sibling still waiting must keep the fetch alive');
+
+  resolve();
+  assert.equal(await first, 'blob:shared');
+});
+
+test('createArtifactPreviewLoader cancels the underlying fetch once the LAST interested caller aborts', async () => {
+  const { fetchFn, counts } = makeAbortTrackingFetch();
+  const loader = createArtifactPreviewLoader({ fetchFn, createObjectUrl: () => 'blob:unused', revokeObjectUrl: () => {} });
+  const controllerA = new AbortController();
+  const controllerB = new AbortController();
+
+  const shared = loader.load('key', 'https://example.test/last', undefined, controllerA.signal);
+  loader.load('key', 'https://example.test/last', undefined, controllerB.signal);
+  await Promise.resolve();
+
+  controllerA.abort();
+  await Promise.resolve();
+  assert.equal(counts.aborts, 0, 'controllerB is still interested');
+
+  controllerB.abort();
+  await assert.rejects(shared);
+  assert.equal(counts.aborts, 1, 'cancelled exactly once, only once nobody is left waiting');
+});
+
+test('an unsignaled caller keeps a shared fetch alive even if every signaled caller aborts', async () => {
+  const { fetchFn, counts, resolve } = makeControllableFetch();
+  const loader = createArtifactPreviewLoader({ fetchFn, createObjectUrl: () => 'blob:mixed', revokeObjectUrl: () => {} });
+  const controllerA = new AbortController();
+
+  // No signal at all — an existing call site that has not been converted yet.
+  const unsignaled = loader.load('key', 'https://example.test/mixed');
+  loader.load('key', 'https://example.test/mixed', undefined, controllerA.signal);
+  await Promise.resolve();
+
+  controllerA.abort();
+  await Promise.resolve();
+  assert.equal(counts.aborts, 0, 'an unsignaled caller has no way to say it left, so the fetch must survive');
+
+  resolve();
+  assert.equal(await unsignaled, 'blob:mixed');
+});
+
+test('an abort listener left over from a SETTLED load never cancels the next load of the same key', async () => {
+  // The page-generation signal outlives any single fetch: every card on the
+  // page shares one, and it fires on navigation — long after a load that
+  // already settled. The listener that load registered must be inert by then,
+  // or it decrements (and can zero out) the waiter count of whatever task
+  // holds the key next — cancelling a fetch an unsignaled caller still wants.
+  let call = 0;
+  let settleSecond: ((response: Response) => void) | undefined;
+  const counts = { aborts: 0 };
+  const fetchFn = ((_url: string, init?: RequestInit) => {
+    call += 1;
+    if (call === 1) return Promise.resolve(new Response('nope', { status: 404 }));
+    return new Promise<Response>((resolve, reject) => {
+      settleSecond = resolve;
+      init?.signal?.addEventListener(
+        'abort',
+        () => {
+          counts.aborts += 1;
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        },
+        { once: true }
+      );
+    });
+  }) as typeof fetch;
+
+  const loader = createArtifactPreviewLoader({
+    fetchFn,
+    createObjectUrl: () => 'blob:second',
+    revokeObjectUrl: () => {},
+  });
+  const pageSignal = new AbortController();
+
+  // First load, signaled, fails non-retryably and is cleaned up.
+  await assert.rejects(loader.load('key', 'https://example.test/a', undefined, pageSignal.signal));
+
+  // Second load of the SAME key, with no signal of its own (the download
+  // path in InventoryPage.tsx) — nothing may cancel it but itself.
+  const unsignaled = loader.load('key', 'https://example.test/a');
+  await Promise.resolve();
+
+  pageSignal.abort();
+  await Promise.resolve();
+  assert.equal(counts.aborts, 0, 'the settled first load’s listener must not touch the second load');
+
+  settleSecond?.(okResponse());
+  assert.equal(await unsignaled, 'blob:second');
+});

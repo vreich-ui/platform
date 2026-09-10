@@ -44,6 +44,7 @@ import { ActionRow } from './approval';
 import { Popover, useToast } from './overlays';
 import { decide, type DecisionAction } from '@core/lib/admin/decisions';
 import { isAuthExpired, isAuthExpiredError, subscribeAuthExpiry } from '@core/lib/admin/auth-expiry';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import { SeverityIcon } from './severity';
 import { IconChevronDown, IconChevronRight, IconInfo } from './icons';
 import { cn } from './utils';
@@ -663,7 +664,13 @@ export function RequestActivity({
                 ? { request_id: requestId }
                 : {}),
           },
-          etagRef.current
+          etagRef.current,
+          // T1.1: this poll is per-component (a `generation` ref, not a
+          // module-scope store), so it should die with the page — pass the
+          // shared page signal so navigating away cancels the in-flight
+          // request instead of leaving it to compete with the next page's
+          // own calls for the same Netlify function concurrency.
+          currentPageSignal()
         );
         if (!current()) return;
 
@@ -718,6 +725,22 @@ export function RequestActivity({
         }
       } catch (loadError) {
         if (!current()) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — no error state, the last good view stays on screen.
+        //
+        // It still re-arms. `astro:before-preparation` fires when a
+        // navigation BEGINS, and Astro can abandon that navigation without
+        // ever swapping the document (a newer navigation aborts the
+        // preparation and itself early-returns — see `transition()` in
+        // astro/dist/transitions/router.js). This card is then still mounted
+        // watching a live run, and a chain that stopped here would never
+        // restart. When the page IS really leaving, `current()` goes false
+        // and the effect's cleanup clears the timer well before it fires.
+        if (isAbortError(loadError)) {
+          if (timerRef.current) clearTimeout(timerRef.current);
+          if (!hidden()) timerRef.current = setTimeout(() => void load(generation), UNREACHABLE_POLL_MS);
+          return;
+        }
         // The last good view stays on screen — blanking it costs the editor the
         // only picture they had of a run that is almost certainly still fine.
         setError(loadError instanceof Error ? loadError.message : 'Could not read the run.');

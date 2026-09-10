@@ -64,7 +64,6 @@ import {
 } from '@core/lib/admin/admin-user-presentation';
 import { IconDots, IconPlus, IconUser, IconCheck, IconSearch } from './icons';
 import {
-  fetchMe,
   listUsers,
   inviteUser,
   setUserRole,
@@ -88,6 +87,15 @@ import {
   type InvitationView,
   type UnmanagedIdentityView,
 } from '@core/lib/admin/users-client';
+// T1.2 R4/R5: identity + roles now come from the shared, session-persisted
+// `useCurrentUser` cache instead of a private `fetchMe` call this page made
+// itself — one less `users` call per visit, and `listUsers` below no longer
+// waits behind it.
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
+// T1.1: the initial members-list fetch below is a page-load read — rides
+// the current page-generation signal so leaving the page cancels it instead
+// of letting it land after navigation.
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -200,18 +208,26 @@ function RolePicker({
 
 export function AdminUsersBody() {
   const { toast } = useToast();
-  const [meEmail, setMeEmail] = useState<string>('');
-  const [me, setMe] = useState<Pick<UserView, 'email' | 'display_name'> | null>(null);
-  const [roles, setRoles] = useState<string[]>([]);
+  // T1.2 R4: `me`/`roles` are the shared `useCurrentUser` cache (the shell
+  // already primes it) rather than a private `fetchMe` this component made
+  // itself.
+  const currentUser = useCurrentUser();
+  const meEmail = currentUser.user?.email ?? '';
+  const me = currentUser.user;
+  const roles = currentUser.roles;
   const [users, setUsers] = useState<UserView[]>([]);
   const [showRemoved, setShowRemoved] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // T1.2 R5: the members list used to be gated behind `me` resolving AND
+  // finding an admin/owner role; it now fires in parallel with `me` (below),
+  // so it gets its own loading/error state instead of sharing one with it.
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   // T4.3: the compiled-in default until `policy_get` answers (Owner+Admin
-  // tier — fetched right after `me`); keeps the role picker's "who may I
-  // grant this to" gate accurate on a site whose committed policy override
-  // (`config/membership-policy.ts`) differs from the fleet default.
+  // tier — fetched once `me` resolves an admin/owner role); keeps the role
+  // picker's "who may I grant this to" gate accurate on a site whose
+  // committed policy override (`config/membership-policy.ts`) differs from
+  // the fleet default.
   const [policy, setPolicy] = useState<MembershipPolicyView>(DEFAULT_POLICY_VIEW);
 
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -240,45 +256,57 @@ export function AdminUsersBody() {
   const owner = roles.includes('owner');
   const canInvite = grantableTiers(roles, policy).length > 0;
 
-  const refresh = async (includeRemoved = showRemoved) => {
-    const { users } = await listUsers(getToken, includeRemoved ? { include_removed: true } : {});
+  const refresh = async (includeRemoved = showRemoved, signal?: AbortSignal) => {
+    const { users } = await listUsers(getToken, includeRemoved ? { include_removed: true } : {}, signal);
     setUsers(users);
   };
 
   useEffect(() => {
     setNow(Date.now());
+  }, []);
+
+  // T1.2 R5: `listUsers` is admin-tier (the server 403s anyone else, same as
+  // before) but no longer waits for `me` to resolve first — it fires here in
+  // parallel with the shared `useCurrentUser` fetch above. A non-admin
+  // visitor's 403 is swallowed into `usersError` and never shown: the render
+  // gate below checks the role BEFORE `usersError`, so "Owner access
+  // required" wins instead of a generic load-failure flashing first.
+  useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const res = await fetchMe(getToken);
-        if (!alive) return;
-        setMeEmail(res.user.email);
-        setMe(res.user);
-        setRoles(res.roles);
-        // T18.6a: `list` is admin-tier (read-only for Admins); Owners get the actions.
-        if (res.roles.includes('admin')) {
-          await refresh(false);
-          // T4.3: best-effort — `policy_get` is admin-tier too, but a site
-          // that cannot answer it (or an older deploy without the verb) just
-          // keeps DEFAULT_POLICY_VIEW; never blocks the page on this.
-          getMembershipPolicy(getToken)
-            .then((policyRes) => {
-              if (alive) setPolicy(policyRes.policy);
-            })
-            .catch(() => undefined);
-        }
-        if (alive) setLoading(false);
+        await refresh(false, currentPageSignal());
       } catch (err) {
-        if (alive) {
-          setError(errorMessage(err, 'Could not load members.'));
-          setLoading(false);
-        }
+        if (!alive) return;
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the list exactly as it was.
+        if (isAbortError(err)) return;
+        setUsersError(errorMessage(err, 'Could not load members.'));
+      } finally {
+        if (alive) setUsersLoading(false);
       }
     })();
     return () => {
       alive = false;
     };
   }, []);
+
+  // T4.3: best-effort — `policy_get` is admin-tier too, but a site that
+  // cannot answer it (or an older deploy without the verb) just keeps
+  // DEFAULT_POLICY_VIEW; never blocks the page. Fires once the shared `me`
+  // cache resolves an admin/owner role, independent of the list fetch above.
+  useEffect(() => {
+    if (currentUser.loading || !roles.includes('admin')) return;
+    let alive = true;
+    getMembershipPolicy(getToken)
+      .then((policyRes) => {
+        if (alive) setPolicy(policyRes.policy);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [currentUser.loading, roles]);
 
   useEffect(() => {
     if (!inviteOpen) return;
@@ -422,14 +450,17 @@ export function AdminUsersBody() {
     [visibleUsers, search, roleFilter, statusFilter]
   );
 
-  if (loading) return <Skeleton variant="rect" height={280} />;
-  if (error) {
+  if (currentUser.loading) return <Skeleton variant="rect" height={280} />;
+  if (currentUser.error) {
     return (
       <Card>
-        <EmptyState severity="error" title="Couldn't load members" message={error} />
+        <EmptyState severity="error" title="Couldn't load members" message={currentUser.error} />
       </Card>
     );
   }
+  // T1.2 R5: checked BEFORE `usersError` — `listUsers` fires in parallel with
+  // `me` now, so a non-admin visitor's 403 on it must not flash a generic
+  // load-failure card ahead of this one.
   if (!owner && !roles.includes('admin')) {
     return (
       <Card>
@@ -438,6 +469,14 @@ export function AdminUsersBody() {
           title="Owner access required"
           message="Only Owners manage members; Admins can view the list. Ask an Owner to change your role."
         />
+      </Card>
+    );
+  }
+  if (usersLoading) return <Skeleton variant="rect" height={280} />;
+  if (usersError) {
+    return (
+      <Card>
+        <EmptyState severity="error" title="Couldn't load members" message={usersError} />
       </Card>
     );
   }

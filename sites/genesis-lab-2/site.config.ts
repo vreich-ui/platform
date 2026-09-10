@@ -58,6 +58,8 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/admin/content/:objectId', to: '/admin/content/__workspace', status: 200 },
     { from: '/admin/requests/:requestId', to: '/admin/requests/__request', status: 200 },
     { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200 },
+    // T2.1: /admin is the shell entry, not a surface — it opens on Requests.
+    { from: '/admin', to: '/admin/requests', status: 302 },
   ],
 });
 

@@ -88,6 +88,27 @@ export class ArtifactPreviewFetchError extends Error {
   }
 }
 
+/**
+ * T1.1: combines any number of signals into one that aborts the instant any
+ * INPUT does — `undefined` entries are skipped. Manual (not `AbortSignal.any`)
+ * so this stays consistent with the rest of this file's dependency-free,
+ * fully-injectable style. Used to let an attempt's own timeout controller
+ * (`fetchOnce`) and a caller-supplied cancel signal (`init?.signal`, see
+ * `createArtifactPreviewLoader`) both abort the same underlying fetch.
+ */
+function anySignal(signals: ReadonlyArray<AbortSignal | undefined>): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (!signal) continue;
+    if (signal.aborted) {
+      controller.abort();
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  return controller.signal;
+}
+
 const fetchOnce = async (
   fetchFn: typeof fetch,
   url: string,
@@ -97,8 +118,14 @@ const fetchOnce = async (
 ): Promise<Response> => {
   const controller = new AbortController();
   const timer = clock.setTimeout(() => controller.abort(), timeoutMs);
+  // `init?.signal` (when set) is the caller's own cancel signal — carried
+  // through unchanged everywhere else in this module, but here it must be
+  // COMBINED with the per-attempt timeout controller rather than overwritten
+  // by it (a bare `{...init, signal: controller.signal}` would silently drop
+  // whatever signal the caller passed).
+  const signal = init?.signal ? anySignal([init.signal, controller.signal]) : controller.signal;
   try {
-    return await fetchFn(url, { ...init, signal: controller.signal });
+    return await fetchFn(url, { ...init, signal });
   } finally {
     clock.clearTimeout(timer);
   }
@@ -140,6 +167,11 @@ export async function fetchWithRetry(
       if (error instanceof ArtifactPreviewFetchError && error.status !== undefined && !isRetryableStatus(error.status)) {
         throw error;
       }
+      // T1.1: the CALLER's own signal aborting (as opposed to this attempt's
+      // per-attempt timeout, which IS worth retrying) means nobody wants
+      // this fetch anymore — spending the backoff delay on a request already
+      // dead would only slow down reporting that it is gone.
+      if (init?.signal?.aborted) throw error;
       lastError = error;
     }
 
@@ -260,8 +292,17 @@ export interface ArtifactPreviewLoader {
    * lifetime. Concurrent callers for the same `key` share one in-flight
    * fetch. A failed load is never cached, so the next call (an automatic
    * remount or the user's "Try again") starts a fresh retry cycle.
+   *
+   * T1.1: `signal`, when given, marks THIS caller as no longer interested if
+   * it aborts (a card unmounting on navigation). Because the underlying
+   * fetch is shared and de-duped across every caller of the same `key`
+   * (mood-board cards rarely collide, but the library picker and a mood
+   * board CAN want the same artifact at once), the real network request is
+   * only actually cancelled once EVERY caller currently waiting on this key
+   * has aborted — one card leaving early must never cancel a still-wanted
+   * fetch out from under a sibling card or the next page's own mount.
    */
-  load(key: string, url: string, init?: RequestInit): Promise<string>;
+  load(key: string, url: string, init?: RequestInit, signal?: AbortSignal): Promise<string>;
   /** Revokes every cached object URL exactly once. Call on full teardown (mainly for tests — the .tsx keeps one page-lifetime singleton). */
   dispose(): void;
 }
@@ -283,27 +324,67 @@ export function createArtifactPreviewLoader(options: ArtifactPreviewLoaderOption
   const queue = options.queue ?? createConcurrencyQueue(options.concurrency ?? DEFAULT_CONCURRENCY_LIMIT);
   const cache = createObjectUrlCache(revokeObjectUrl);
   const inFlight = new Map<string, Promise<string>>();
+  /** How many still-interested callers are waiting on each in-flight key — the underlying fetch is cancelled only when this reaches 0. */
+  const waiters = new Map<string, number>();
+  /** One cancel controller per in-flight key, combined into the actual fetch via `fetchOnce`'s `anySignal`. */
+  const cancelControllers = new Map<string, AbortController>();
 
-  const load = (key: string, url: string, init?: RequestInit): Promise<string> => {
+  const load = (key: string, url: string, init?: RequestInit, signal?: AbortSignal): Promise<string> => {
     const cached = cache.get(key);
     if (cached !== undefined) return Promise.resolve(cached);
 
-    const existing = inFlight.get(key);
-    if (existing) return existing;
+    let task = inFlight.get(key);
+    if (!task) {
+      const freshController = new AbortController();
+      cancelControllers.set(key, freshController);
+      waiters.set(key, 0);
+      task = queue
+        .run(() => fetchWithRetry(url, { ...init, signal: freshController.signal }, { fetchFn, clock, random, policy }))
+        .then(async (response) => {
+          const blob = await response.blob();
+          const objectUrl = createObjectUrl(blob);
+          cache.set(key, objectUrl);
+          return objectUrl;
+        })
+        .finally(() => {
+          inFlight.delete(key);
+          waiters.delete(key);
+          cancelControllers.delete(key);
+        });
+      inFlight.set(key, task);
+    }
 
-    const task = queue
-      .run(() => fetchWithRetry(url, init, { fetchFn, clock, random, policy }))
-      .then(async (response) => {
-        const blob = await response.blob();
-        const objectUrl = createObjectUrl(blob);
-        cache.set(key, objectUrl);
-        return objectUrl;
-      })
-      .finally(() => {
-        inFlight.delete(key);
-      });
+    // Every caller counts, signaled or not — an unsignaled caller has no way
+    // to say "I'm gone" and so must never be treated as having left; only a
+    // caller that PASSED a signal can ever decrement this below the count of
+    // still-implicitly-interested unsignaled callers.
+    waiters.set(key, (waiters.get(key) ?? 0) + 1);
 
-    inFlight.set(key, task);
+    if (signal) {
+      // The controller for the task THIS caller just joined. An `AbortSignal`
+      // outlives the fetch it cancelled (the page-generation signal is shared
+      // by every card on the page and fires long after a fast load settled),
+      // so without this identity check a listener left over from a SETTLED
+      // task would fire later and decrement — or resurrect a deleted entry
+      // in — the bookkeeping of whatever task holds the key by then. Two
+      // real consequences that closes: a `waiters` map that grows a dead
+      // entry per key per navigation, and (worse) a stale listener driving a
+      // live task's count to 0 and cancelling a fetch an unsignaled caller —
+      // `downloadHit` in InventoryPage.tsx — is still waiting on.
+      const joined = cancelControllers.get(key);
+      const onAbort = () => {
+        if (!joined || cancelControllers.get(key) !== joined) return;
+        const remaining = (waiters.get(key) ?? 1) - 1;
+        waiters.set(key, remaining);
+        // Only the LAST interested caller leaving actually cancels the
+        // network request — a sibling card (or the next page, if it happens
+        // to want the same artifact) may still be waiting on it.
+        if (remaining <= 0) joined.abort();
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+
     return task;
   };
 

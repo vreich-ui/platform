@@ -128,12 +128,24 @@ export interface RetagArtifactResult {
   removed: string[];
 }
 
-async function callInventory<T>(getToken: GetToken, action: string, payload: Record<string, unknown> = {}) {
+/**
+ * T1.1: `signal` is opt-in and per-call, threaded from the CALLER — never
+ * defaulted inside this module. This one function backs both page-load/
+ * search reads and mutations (`delete-artifact`, `retag-artifact`); only a
+ * read passes one.
+ */
+async function callInventory<T>(
+  getToken: GetToken,
+  action: string,
+  payload: Record<string, unknown> = {},
+  signal?: AbortSignal
+) {
   const token = await getToken();
   const res = await fetch(INVENTORY_ENDPOINT, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload }),
+    ...(signal ? { signal } : {}),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok || json.ok === false) throw new Error((json.error as string) || `Request failed (${res.status}).`);
@@ -146,17 +158,26 @@ async function callInventory<T>(getToken: GetToken, action: string, payload: Rec
  * server names the query parameter `q`; that spelling is this wrapper's whole
  * reason to exist, so no call site has to remember it.
  */
-export const searchInventory = (getToken: GetToken, params: SearchParams = {}) =>
-  callInventory<SearchResult>(getToken, 'search', {
-    q: params.query ?? '',
-    collections: params.collections ?? (['objects', 'artifacts', 'stores'] as InventoryCollection[]),
-    ...(params.cursor ? { cursor: params.cursor } : {}),
-    limit: params.limit ?? 50,
-  });
+export const searchInventory = (getToken: GetToken, params: SearchParams = {}, signal?: AbortSignal) =>
+  callInventory<SearchResult>(
+    getToken,
+    'search',
+    {
+      q: params.query ?? '',
+      collections: params.collections ?? (['objects', 'artifacts', 'stores'] as InventoryCollection[]),
+      ...(params.cursor ? { cursor: params.cursor } : {}),
+      limit: params.limit ?? 50,
+    },
+    signal
+  );
 
 /** Fetches the Drawer inspector's trimmed preview for a single hit. */
-export const previewInventoryHit = (getToken: GetToken, collection: InventoryCollection, id: string) =>
-  callInventory<PreviewResult>(getToken, 'preview', { collection, id });
+export const previewInventoryHit = (
+  getToken: GetToken,
+  collection: InventoryCollection,
+  id: string,
+  signal?: AbortSignal
+) => callInventory<PreviewResult>(getToken, 'preview', { collection, id }, signal);
 
 /**
  * Deletes one artifact. The server refuses per-item (throws with the

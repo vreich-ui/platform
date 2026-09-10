@@ -66,19 +66,27 @@ export interface GovernanceState {
   chat_tools_catalog?: ChatToolCatalogEntry[];
 }
 
-async function post<T>(getToken: GetToken, body: Record<string, unknown>): Promise<T> {
+/**
+ * T1.1: `signal` is opt-in and per-call, threaded from the CALLER — never
+ * defaulted inside this module. This one function backs both the page-load
+ * read (`fetchGovernance`) and every Owner-triggered write below; only the
+ * read passes one.
+ */
+async function post<T>(getToken: GetToken, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const token = await getToken();
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error((json.error as string) || `Request failed (${res.status}).`);
   return json as T;
 }
 
-export const fetchGovernance = (getToken: GetToken) => post<GovernanceState>(getToken, { verb: 'get' });
+export const fetchGovernance = (getToken: GetToken, signal?: AbortSignal) =>
+  post<GovernanceState>(getToken, { verb: 'get' }, signal);
 
 export const setApprovalOverride = (getToken: GetToken, approval: ApprovalConfig) =>
   post<GovernanceState>(getToken, { verb: 'set', approval });

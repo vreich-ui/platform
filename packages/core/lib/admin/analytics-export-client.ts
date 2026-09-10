@@ -13,6 +13,7 @@
  */
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import { rawExportFilename } from './analytics-export-logic.js';
+import { currentPageSignal } from './page-generation.js';
 
 const ENDPOINT = '/.netlify/functions/admin-analytics';
 
@@ -38,7 +39,14 @@ export async function fetchAnalyticsRawExport(
   let response: Response;
   try {
     const token = await getToken();
-    response = await fetch(`${ENDPOINT}?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    // T1.1: a read (the export the button downloads), and this already
+    // degrades any fetch failure — abort included — to a named unavailable
+    // state below rather than throwing, so no AbortError-specific handling
+    // is needed at the call site.
+    response = await fetch(`${ENDPOINT}?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: currentPageSignal(),
+    });
   } catch {
     return { available: false, message: 'Could not reach the server.' };
   }

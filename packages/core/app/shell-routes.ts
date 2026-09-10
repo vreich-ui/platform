@@ -41,7 +41,11 @@ const ROUTES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'rout
 
 /** `pattern` → entrypoint file, relative to `packages/core/app/routes/`. */
 export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
+  // T1.6 (admin latency plan): `/admin` used to render Editorial directly;
+  // it is now a redirect to `/admin/requests` (see `admin/index.astro`'s own
+  // comment for why) and Editorial lives at its own route below.
   { pattern: '/admin', entry: 'admin/index.astro' },
+  { pattern: '/admin/editorial', entry: 'admin/editorial.astro' },
   // T18.0b: where every Netlify Identity e-mail token lands (invite /
   // confirmation / recovery / email change). No auth gate — the person has
   // no session yet; the page creates one.

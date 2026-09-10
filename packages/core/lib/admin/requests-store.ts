@@ -188,12 +188,34 @@ async function tick(getToken: GetToken, myGeneration: number): Promise<void> {
   }
 }
 
+/**
+ * T1.2 R2: how fresh the snapshot already on hand must be for a remount to
+ * skip its immediate re-fetch. `AdminShell`'s pill and `RequestsWorkspace`
+ * both mount fresh on every navigation (T0.2 F7's "shell trio" firing on
+ * every click); a snapshot fetched within this window is trusted as-is and
+ * the chain just schedules its NEXT tick at the normal cadence instead of
+ * spending a request to confirm what was just confirmed a moment ago.
+ * Deliberately short — it only needs to absorb back-to-back navigations
+ * within the same few seconds, not to replace the real poll cadence
+ * (`requestPollIntervalFor`, 5-30s) for anything actually stale.
+ */
+export const REQUESTS_INDEX_FRESH_MS = 5_000;
+
 /** Ref-counted: the chain runs while at least one page has a subscriber, and stops the moment the last one goes away. */
 export function startRequestsIndexPoll(getToken: GetToken): () => void {
   subscriberCount += 1;
   if (subscriberCount === 1) {
     generation += 1;
-    void tick(getToken, generation);
+    const freshEnough =
+      snapshot.rows !== null &&
+      !snapshot.error &&
+      snapshot.fetchedAtMs !== undefined &&
+      Date.now() - snapshot.fetchedAtMs < REQUESTS_INDEX_FRESH_MS;
+    if (freshEnough) {
+      schedule(getToken, generation, requestPollIntervalFor(snapshot.rows ?? []));
+    } else {
+      void tick(getToken, generation);
+    }
   }
   return () => {
     subscriberCount = Math.max(0, subscriberCount - 1);
@@ -203,6 +225,23 @@ export function startRequestsIndexPoll(getToken: GetToken): () => void {
       timer = undefined;
     }
   };
+}
+
+/**
+ * Test-only: back to the pristine `EMPTY` snapshot with no pending timer —
+ * so one test's fetched rows (and their very recent `fetchedAtMs`) can never
+ * suppress the NEXT test's own expected initial fetch via the freshness
+ * check above. Module state here is a deliberate singleton (it must survive
+ * an Astro `ClientRouter` swap in production); tests that mount more than
+ * one subscriber across `it()` blocks must call this between them.
+ */
+export function resetRequestsIndexForTests(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+  generation += 1;
+  subscriberCount = 0;
+  lastEtag = undefined;
+  snapshot = EMPTY;
 }
 
 /** Re-fetch outside the timer's own cadence — after a mutation (archive/cancel/mute), so the change is visible on the click, not on the next tick. */

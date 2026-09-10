@@ -1605,7 +1605,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
         <div className="min-w-0">
           <Breadcrumbs
             items={[
-              { label: 'Editorial', href: '/admin' },
+              { label: 'Editorial', href: '/admin/editorial' },
               { label: 'Objects', href: '/admin/objects' },
               { label: objectTypeLabel(record.object_type) },
             ]}

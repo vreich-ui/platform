@@ -51,6 +51,13 @@ import {
   describeBrandImageryGuardrail,
   currentAutonomyForCatalog,
 } from '@core/lib/admin/governance-presentation';
+// T1.2 R4: ownership used to come from a PRIVATE `fetchMe` this component
+// made itself, fetched serially ahead of the governance/profiles reads
+// below. It now reads the shared, deduped, session-persisted
+// `useCurrentUser` cache instead, and the governance/profiles fetch runs
+// unconditionally in parallel with it.
+import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 
 async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
@@ -76,8 +83,9 @@ function GovernanceBody({
   analyticsIdMode: AnalyticsIdMode | undefined;
 }) {
   const { toast } = useToast();
+  const { roles } = useCurrentUser();
+  const owner = roles.includes('owner');
   const [gov, setGov] = useState<GovernanceState | null>(null);
-  const [owner, setOwner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ApprovalConfig | null>(null);
@@ -85,8 +93,8 @@ function GovernanceBody({
   const [profiles, setProfiles] = useState<AgentProfileView[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
 
-  const refresh = async () => {
-    const state = await fetchGovernance(getToken);
+  const refresh = async (signal?: AbortSignal) => {
+    const state = await fetchGovernance(getToken, signal);
     setGov(state);
     setDraft(JSON.parse(JSON.stringify(state.active.approval)) as ApprovalConfig);
   };
@@ -94,16 +102,21 @@ function GovernanceBody({
   useEffect(() => {
     (async () => {
       try {
-        const { fetchMe } = await import('@core/lib/admin/users-client');
-        const [me, profileResult] = await Promise.all([
-          fetchMe(getToken),
-          listProfiles(getToken).catch(() => undefined),
+        // T1.2 R4/R5: `me` no longer gates this — it resolves independently
+        // through `useCurrentUser` above, so the governance state and the
+        // agent-profile list fetch in parallel instead of behind it.
+        // T1.1: this is the page-load read, so it rides the current
+        // page-generation signal.
+        const [profileResult] = await Promise.all([
+          listProfiles(getToken, currentPageSignal()).catch(() => undefined),
+          refresh(currentPageSignal()),
         ]);
-        setOwner(me.roles.includes('owner'));
         setProfiles(profileResult?.profiles ?? []);
         setProfilesLoaded(Boolean(profileResult));
-        await refresh();
       } catch (err) {
+        // T1.1: the page navigating away is why this fetch died, not a real
+        // failure — leave the view exactly as it was.
+        if (isAbortError(err)) return;
         setError(err instanceof Error ? err.message : 'Could not load guardrails.');
       } finally {
         setLoading(false);

@@ -16,3 +16,10 @@ test('admin-editorial-view requires an authenticated admin', async () => {
   assert.ok(response.statusCode === 401 || response.statusCode === 403);
   assert.equal(parseBody(response).ok, false);
 });
+
+// T0.1 — Server-Timing must be present even on a 401.
+test('admin-editorial-view carries a Server-Timing header on a 401', async () => {
+  const response = await handler({ httpMethod: 'GET' });
+  assert.ok(response.headers?.['Server-Timing'], 'Server-Timing header must be present');
+  assert.match(response.headers['Server-Timing'], /cold;dur=\d.*auth;dur=[\d.]+.*work;dur=[\d.]+.*serialize;dur=[\d.]+/);
+});

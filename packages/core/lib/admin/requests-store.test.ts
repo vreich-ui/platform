@@ -38,6 +38,8 @@ import {
   beginDecisionOverlay,
   decisionOverlaySnapshot,
   refreshRequestsIndexNow,
+  REQUESTS_INDEX_FRESH_MS,
+  resetRequestsIndexForTests,
   settleDecisionOverlay,
   startRequestsIndexPoll,
 } from './requests-store.js';
@@ -95,11 +97,17 @@ let activeFetch: ReturnType<typeof mockFetch> | undefined;
 afterEach(() => {
   // Unsubscribe FIRST — it clears the store's pending poll timer — then
   // restore fetch, so no leftover chain from one test can call into the next
-  // test's (or no) mock.
+  // test's (or no) mock. Then reset the module-scope snapshot itself: it is
+  // a deliberate singleton (must survive an Astro ClientRouter swap in
+  // production), so without this a fresh, recently-fetched snapshot left
+  // over by one test would satisfy the T1.2 R2 freshness check on the very
+  // next test's `startRequestsIndexPoll` call and suppress its expected
+  // initial fetch.
   activeStop?.();
   activeStop = undefined;
   activeFetch?.restore();
   activeFetch = undefined;
+  resetRequestsIndexForTests();
 });
 
 describe('the optimistic overlay — the real store, not a recorder', () => {
@@ -130,6 +138,80 @@ describe('refreshRequestsIndexNow — ref-counted, real store', () => {
     activeFetch = fetchMock;
     refreshRequestsIndexNow(getToken);
     assert.deepEqual(fetchMock.calls, []);
+  });
+});
+
+describe('startRequestsIndexPoll — T1.2 R2: a fresh snapshot skips the immediate re-fetch on remount', () => {
+  it('a cold start (no prior snapshot) still fetches immediately', async () => {
+    const fetchMock = mockFetch({ [REQUESTS_URL]: () => ({ body: emptyRequestsBody }) });
+    activeFetch = fetchMock;
+    activeStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => fetchMock.countOf(REQUESTS_URL) === 1);
+    assert.equal(fetchMock.countOf(REQUESTS_URL), 1);
+  });
+
+  it('a remount within the freshness window reuses the existing snapshot instead of re-fetching', async () => {
+    const fetchMock = mockFetch({
+      [REQUESTS_URL]: () => ({
+        body: { ...emptyRequestsBody, requests: [{ request_id: 'req_fresh_1', status: 'queued' }], total: 1 },
+      }),
+    });
+    activeFetch = fetchMock;
+    // First mount: a real fetch lands and populates the snapshot.
+    const firstStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => fetchMock.countOf(REQUESTS_URL) === 1);
+    firstStop(); // subscriberCount back to 0 — but the snapshot itself is untouched
+
+    // Second mount (the "next navigation"), well inside REQUESTS_INDEX_FRESH_MS.
+    activeStop = startRequestsIndexPoll(getToken);
+    // Give any wrongly-issued fetch a real chance to land before asserting its absence.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(fetchMock.countOf(REQUESTS_URL), 1, 'the remount must not have issued a second fetch');
+  });
+
+  it('a remount past the freshness window fetches again, exactly as a cold start would', async () => {
+    let calls = 0;
+    const fetchMock = mockFetch({
+      [REQUESTS_URL]: () => {
+        calls += 1;
+        return { body: emptyRequestsBody };
+      },
+    });
+    activeFetch = fetchMock;
+    const firstStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => calls === 1);
+    firstStop();
+
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() + REQUESTS_INDEX_FRESH_MS + 1;
+      activeStop = startRequestsIndexPoll(getToken);
+      await waitFor(() => calls === 2);
+    } finally {
+      Date.now = realNow;
+    }
+    assert.equal(calls, 2);
+  });
+
+  it('a snapshot left in an error state is never treated as fresh — the remount retries', async () => {
+    let calls = 0;
+    const fetchMock = mockFetch({
+      [REQUESTS_URL]: () => {
+        calls += 1;
+        if (calls === 1) throw new Error('network down');
+        return { body: emptyRequestsBody };
+      },
+    });
+    activeFetch = fetchMock;
+    const firstStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => calls === 1);
+    // The failed first attempt schedules its own retry (20s) — stop the
+    // chain so only the deliberate second mount below issues the next call.
+    firstStop();
+
+    activeStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => calls === 2);
+    assert.equal(calls, 2, 'an errored snapshot must not suppress the remount fetch');
   });
 });
 

@@ -121,6 +121,17 @@ export const CANONICAL_INFRA_REDIRECTS = [
   // R11.4 (T21.30): the same single-segment, UNFORCED form for the object
   // analytics drill-down — /admin/analytics must keep serving its own page.
   { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200, force: false },
+  // T2.1 (admin latency): /admin is the shell's ENTRY, not a surface of its
+  // own — it opens on Requests. Fleet law, not an editorial choice, which is
+  // why it belongs here and the legacy admin 301s (/admin/content →
+  // /admin/objects and friends) do not: those exist only for tenants that
+  // once had those pages. EXACT path, so it matches /admin (and /admin/)
+  // only — Netlify prefix-matches a `from` just when it carries a splat or a
+  // :placeholder — and therefore cannot swallow the /admin/* pages above or
+  // below it. FORCED, unlike the three rewrites above: routes/admin/
+  // index.astro is a real built page (it keeps a <meta http-equiv="refresh">
+  // as the belt-and-braces fallback) and would otherwise win.
+  { from: '/admin', to: '/admin/requests', status: 302, force: true },
 ];
 
 /**

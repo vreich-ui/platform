@@ -36,6 +36,13 @@ import {
 } from '@core/lib/admin/chat-client';
 import type { CandidateOptionView, CandidateSetView } from '@core/lib/admin/candidate-choice';
 import type { GetToken } from '@core/lib/edit-mode/verbs-client';
+// T1.1: `currentPageSignal()` is read fresh on every poll tick — never
+// minted or aborted from here. This hook's own "abort" for a component-
+// local remount (switching `chatId`, another chat opening in the docked
+// panel) stays exactly what it always was: `liveRef.current` discards a
+// stale response without cancelling its fetch, so the docked chat is never
+// killed by anything but a real page navigation.
+import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import {
   brandImageryApplyPrompt,
   brandImageryApprovalPreview,
@@ -220,13 +227,37 @@ export function useChat(getToken: GetToken, chatId: string | undefined): UseChat
     try {
       // Keep asking for the request binding until we have one: the job is
       // registered mid-run, after this chat's first poll.
-      const view = await getChat(getToken, chatId, seqRef.current, !requestRef.current);
+      //
+      // T1.1: rides the current page-generation signal so a tick that lands
+      // after navigating away is cancelled outright, instead of completing
+      // unseen (the `liveRef.current` checks below only ever discarded a
+      // stale RESULT, never stopped the request itself). Read fresh on every
+      // call — this poll never mints or aborts a generation itself, so a
+      // chatId switch (a component-local remount) never touches it; only an
+      // actual page navigation does.
+      const view = await getChat(getToken, chatId, seqRef.current, !requestRef.current, currentPageSignal());
       if (!liveRef.current) return;
       ingest(view);
       setError(undefined);
       timerRef.current = setTimeout(poll, pollIntervalFor(view.status));
     } catch (pollError) {
       if (!liveRef.current) return;
+      // T1.1: the page navigating away is why this poll died, not a real
+      // failure — leave the chat panel exactly as it was, no error banner.
+      //
+      // It still re-arms. `astro:before-preparation` fires when a navigation
+      // BEGINS, and Astro can then abandon that navigation without ever
+      // swapping the document (a newer navigation aborts the preparation and
+      // itself early-returns — `transition()` in astro/dist/transitions/
+      // router.js returns silently on `prepEvent.signal.aborted`). In that
+      // case this component stays mounted, and a chain that stopped here
+      // would leave the transcript frozen mid-run with nothing to restart
+      // it. When the page IS really leaving, this effect's cleanup clears
+      // the timer long before it fires, so the re-arm costs nothing.
+      if (isAbortError(pollError)) {
+        timerRef.current = setTimeout(poll, 6000);
+        return;
+      }
       setError(pollError instanceof Error ? pollError.message : 'Polling failed.');
       timerRef.current = setTimeout(poll, 6000);
     }

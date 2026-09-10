@@ -14,6 +14,7 @@
 import type { GetToken } from '../edit-mode/verbs-client.js';
 import type { AnalyticsRangeKey, AnalyticsFilters } from './analytics-logic.js';
 import type { OwnAnalyticsOverview } from './own-analytics-logic.js';
+import { currentPageSignal } from './page-generation.js';
 
 /** Re-exported for existing importers — the shape itself now lives in `own-analytics-logic.ts` (the panel resolver is pure and needs it without this module's I/O). */
 export type { OwnAnalyticsErrorCode, OwnAnalyticsOverview } from './own-analytics-logic.js';
@@ -57,8 +58,11 @@ const inflight = new Map<string, Promise<OwnAnalyticsOverview>>();
 
 async function requestOwnAnalytics(getToken: GetToken, opts: FetchOwnAnalyticsOptions): Promise<OwnAnalyticsOverview> {
   const token = await getToken();
+  // T1.1: a plain page-load read, no cross-navigation store — always rides
+  // the current page-generation signal.
   const response = await fetch(`${ENDPOINT}?${buildQuery(opts)}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: currentPageSignal(),
   });
   const body = (await response.json().catch(() => ({}))) as OwnAnalyticsOverview & { error?: string };
   if (!response.ok) throw new Error(body.error || `Own-tracker analytics request failed (${response.status}).`);
@@ -109,7 +113,7 @@ export async function fetchAnalyticsObjectIdentity(
   const token = await getToken();
   const response = await fetch(
     `${ENDPOINT}?${new URLSearchParams({ resource: 'object_identity', id: objectId }).toString()}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` }, signal: currentPageSignal() }
   );
   const body = (await response.json().catch(() => ({}))) as AnalyticsObjectIdentityResult & { error?: string };
   if (!response.ok) throw new Error(body.error || `Object identity request failed (${response.status}).`);

@@ -25,6 +25,7 @@
 import { callObjectVerb, type GetToken } from '../edit-mode/verbs-client.js';
 import type { LibraryRow } from './library-logic.js';
 import { getSiteIdentity } from '../site-identity.js';
+import { currentPageSignal } from './page-generation.js';
 
 export type { GetToken };
 
@@ -102,7 +103,10 @@ export function freshCachedInventoryRows(nowMs = Date.now()): LibraryRow[] | nul
 }
 
 async function requestInventory(getToken: GetToken): Promise<LibraryRow[]> {
-  const { status, body } = await callObjectVerb(getToken, { action: 'inventory' });
+  // T1.1: a page-load read — rides the current page-generation signal.
+  // Safe to abort unconditionally: a dropped fetch just leaves the module
+  // cache as it was, and the next call (this page or another) refetches.
+  const { status, body } = await callObjectVerb(getToken, { action: 'inventory' }, currentPageSignal());
   if (status !== 200) {
     throw new Error((body?.error as string) || `Inventory request failed (${status}).`);
   }
