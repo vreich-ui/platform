@@ -504,6 +504,36 @@ const NARROWER_CALL: Record<string, string> = {
 };
 
 /**
+ * Drop the duplicated text copy of an oversized-but-recoverable tool result.
+ *
+ * Returns the slimmed envelope when the structured payload on its own fits
+ * inside the budget, and `undefined` when it does not (leaving the caller to
+ * refuse as before). Error envelopes are never slimmed — their `content` text
+ * IS the message, and they are small by construction.
+ */
+const slimOversizedToolResult = (result: unknown) => {
+  const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (!isPlainRecord(result)) return undefined;
+  if (result.isError) return undefined;
+  if (!('structuredContent' in result) || !('content' in result)) return undefined;
+
+  const payloadBytes = Buffer.byteLength(JSON.stringify(result.structuredContent) ?? '', 'utf8');
+  if (payloadBytes > MAX_TOOL_RESULT_BYTES) return undefined;
+
+  const slimmed = {
+    ...result,
+    content: textContent(
+      `Result body omitted from \`content\` (${Math.round(payloadBytes / 1024)} KB); ` +
+        "it would have exceeded this endpoint's wire budget when sent twice. " +
+        'Read the full result from `structuredContent`.'
+    ),
+  };
+  const slimmedBytes = Buffer.byteLength(JSON.stringify(slimmed) ?? '', 'utf8');
+  return slimmedBytes <= MAX_TOOL_RESULT_BYTES ? slimmed : undefined;
+};
+
+/**
  * Refuse an oversized result as a TOOL ERROR rather than letting the platform
  * refuse the request as a 502. The distinction matters to the caller: a tool
  * error is something a model can read and act on; a 502 is something it retries.
@@ -512,6 +542,27 @@ export const guardToolResultSize = (name: string, result: unknown) => {
   const serialized = JSON.stringify(result);
   const bytes = Buffer.byteLength(serialized ?? '', 'utf8');
   if (bytes <= MAX_TOOL_RESULT_BYTES) return result;
+
+  /**
+   * W7.5 follow-up (2026-09-10): before refusing, try dropping the DUPLICATE.
+   *
+   * `toolResult` writes the payload twice — once as `content[].text`, once as
+   * `structuredContent` — so a result whose real size is just over half the cap
+   * is refused for no reason but its own echo. That is not hypothetical: the
+   * zilberman capture crawl completed, then `get_capture_snapshot` came back
+   * 955 KB against the 879 KB cap (`bytes: 978071`) and blocked the whole
+   * capture_conductor run at `capture_crawl`, deterministically, with no
+   * narrower call available — a capture snapshot has no projection to ask for.
+   *
+   * So: if the payload ALONE fits, return it with the text copy replaced by a
+   * pointer to it. Every in-house MCP client already reads
+   * `result.structuredContent` (see pdf-tool-client.ts:126-135), and this path
+   * is only ever reached where the alternative was a hard `too_large` error,
+   * so no working call can regress. A payload too big even once is still
+   * refused below, exactly as before.
+   */
+  const slimmed = slimOversizedToolResult(result);
+  if (slimmed) return slimmed;
 
   return toolError(
     `The result of "${name}" is ${Math.round(bytes / 1024)} KB, over this endpoint's ${Math.round(MAX_TOOL_RESULT_BYTES / 1024)} KB limit, so it was refused instead of failing the request. ${NARROWER_CALL[name] ?? 'Request less: narrow the filter, lower the limit, or ask for one item at a time.'}`,
