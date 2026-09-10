@@ -403,3 +403,54 @@ test('a blocked surface is cut off — but can still ask WHY', async (t) => {
 
   await rm(LOCAL_BLOBS_ROOT, { recursive: true, force: true });
 });
+
+/**
+ * 2026-09-10: the doubled-envelope rescue. `toolResult` writes the payload
+ * twice, so a result just over half the cap was refused for nothing but its
+ * own echo — which deterministically blocked the zilberman capture run at
+ * get_capture_snapshot (955 KB against an 879 KB cap, bytes: 978071), a tool
+ * with no narrower call to offer.
+ */
+test('a result oversized ONLY by its duplicated text copy keeps its structuredContent', () => {
+  const payload = { blob: 'y'.repeat(Math.round(MAX_TOOL_RESULT_BYTES * 0.6)) };
+  const doubled = { content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload };
+  assert.ok(Buffer.byteLength(JSON.stringify(doubled), 'utf8') > MAX_TOOL_RESULT_BYTES);
+
+  const guarded = guardToolResultSize('get_capture_snapshot', doubled) as {
+    isError?: boolean;
+    structuredContent?: { blob?: string };
+    content?: { text: string }[];
+  };
+
+  assert.equal(guarded.isError, undefined);
+  assert.deepEqual(guarded.structuredContent, payload);
+  assert.match(String(guarded.content?.[0]?.text), /structuredContent/);
+  assert.ok(Buffer.byteLength(JSON.stringify(guarded), 'utf8') <= MAX_TOOL_RESULT_BYTES);
+});
+
+test('a payload too big even once is still refused as a tool error', () => {
+  const payload = { blob: 'y'.repeat(MAX_TOOL_RESULT_BYTES + 1) };
+  const doubled = { content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload };
+
+  const guarded = guardToolResultSize('object_get', doubled) as {
+    isError?: boolean;
+    structuredContent?: Record<string, unknown>;
+  };
+
+  assert.equal(guarded.isError, true);
+  assert.equal(guarded.structuredContent?.error_code, 'too_large');
+});
+
+test('an error envelope is never slimmed — its text IS the message', () => {
+  const err = {
+    isError: true,
+    content: [{ type: 'text', text: 'z'.repeat(MAX_TOOL_RESULT_BYTES) }],
+    structuredContent: { error: 'boom' },
+  };
+
+  const guarded = guardToolResultSize('object_get', err) as {
+    structuredContent?: Record<string, unknown>;
+  };
+
+  assert.equal(guarded.structuredContent?.error_code, 'too_large');
+});
