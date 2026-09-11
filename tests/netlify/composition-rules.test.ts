@@ -144,6 +144,29 @@ test('structure_region_capacity and structure_viewport_budget pass today — and
   }
 });
 
+test('a malformed section never throws out of validation — it fails it', () => {
+  // validateObject runs the structural group even when the schema check
+  // already failed, so object_validate's candidate-body mode reaches
+  // checkComposition with whatever the caller sent. Before T1.3 the only
+  // consumers of effectiveSectionType sat behind a resolved PageType
+  // constraint; now every section on every page write is typed, so a
+  // data-less shared_ref would have turned a 422 into a 500.
+  for (const malformed of [
+    { id: 's', type: 'shared_ref' },
+    { id: 's', type: 'shared_ref', data: null },
+    { id: 's', type: 'shared_ref', data: {} },
+    { id: 's', type: 'shared_ref', data: { section: 42 } },
+    { id: 's', type: 'not_a_real_kind', data: {} },
+    { id: 's', type: 'hero', data: null },
+  ]) {
+    const criteria = run([malformed], true);
+    assert.equal(criteria.length, COMPOSITION_RULES.length, JSON.stringify(malformed));
+  }
+  // …including a body whose `sections` is not an array at all.
+  assert.equal(checkComposition({ sections: 'nope' }, ctx, true).length, COMPOSITION_RULES.length);
+  assert.equal(checkComposition(null, ctx, true).length, COMPOSITION_RULES.length);
+});
+
 test('an unresolvable shared_ref is skipped, never guessed', () => {
   // No resolveSharedSectionType: the type is unknown, so no rule may fire on it.
   const criteria = run([section('shared_ref', { section: 'sec_x' }), section('shared_ref', { section: 'sec_y' })], true);
