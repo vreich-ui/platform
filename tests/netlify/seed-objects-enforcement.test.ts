@@ -91,10 +91,31 @@ const makeStore = (objects: SeedObject[]) => {
   } as never;
 };
 
+/**
+ * Exports that are KNOWN to be unreachable, with the blocker each one must
+ * still produce (W0 T0.3, KNOWN_ISSUES #40).
+ *
+ * Not an exemption from the rule — the rule finding what it was written to
+ * find. `page_shop` published onto `/shop` while `sites/drlurie/site.config.ts`
+ * (and the root `netlify.toml` it is drift-guarded against) 301s `/shop` to
+ * `/solutions/shop-preview`; toml redirects beat every static file, so no
+ * reader has ever reached that page. Until the object's route is changed
+ * THROUGH THE OBJECT VERBS — the export is generated and must never be
+ * hand-edited — this records the blocker instead of pretending the export is
+ * clean.
+ *
+ * Each entry is asserted to still fire, so fixing the object without deleting
+ * the line fails too: a stale exemption is as much a lie as a missing one.
+ */
+const KNOWN_UNREACHABLE: Record<string, RegExp> = {
+  page_shop: /^structure_route: route "\/shop" is the source of a site redirect/,
+};
+
 test('every committed object export validates with zero blockers under the live resolvers', async () => {
   const objects = await loadSeedObjects();
   assert.ok(objects.length >= 10, 'expected the seeded page/section/nav exports to be present');
   const store = makeStore(objects);
+  const knownSeen = new Set<string>();
 
   for (const o of objects) {
     const context = await buildStoreValidationContext(store, { selfObjectId: o.id, selfObjectType: o.type });
@@ -104,10 +125,24 @@ test('every committed object export validates with zero blockers under the live 
       { ...context, publishIntent: true }
     );
     const summary = summarizeValidation(groups);
-    assert.deepEqual(
-      summary.blockers.map((b) => `${b.id}: ${b.message}`),
-      [],
-      `${o.type} ${o.id} must have zero blockers at publish`
-    );
+    const blockers = summary.blockers.map((b) => `${b.id}: ${b.message}`);
+    const known = KNOWN_UNREACHABLE[o.id];
+    if (known) {
+      assert.equal(
+        blockers.length,
+        1,
+        `${o.id}: expected exactly the recorded blocker, got ${JSON.stringify(blockers)}`
+      );
+      assert.match(blockers[0], known, `${o.id}: the recorded blocker changed shape`);
+      knownSeen.add(o.id);
+      continue;
+    }
+    assert.deepEqual(blockers, [], `${o.type} ${o.id} must have zero blockers at publish`);
   }
+
+  assert.deepEqual(
+    Object.keys(KNOWN_UNREACHABLE).filter((id) => !knownSeen.has(id)),
+    [],
+    'a KNOWN_UNREACHABLE entry no longer blocks (or no longer exists) — delete the line'
+  );
 });

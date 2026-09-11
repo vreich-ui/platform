@@ -83,7 +83,10 @@ follow-on.
 
 - Node **literal** changes require `npm run nodes:update` + redeploy. A new node is a literal change.
 - Per-milestone commits; each task ships its own acceptance test.
-- The publish charter (`section_template`/`template`/`theme`/`site`) is never widened.
+- The publish charter (`section_template`/`template`/`theme`/`site`) is never widened. Since W0 (D4,
+  2026-09-11) it is also enforced on `/mcp`, not just the Actions façade: creating one of those four
+  types from a `plugin:*` surface is refused with `object_type_not_in_plugin_charter`
+  (`packages/core/server/lib/plugin/charter-gate.ts`).
 - Mechanical publish tests must run through the main pipeline tools — a test-only wrapper tool is not
   a valid test (ruling 2026-08-27).
 - The CMS-Agent workspace MCP is **not** the publishing backend; it drives the tenant MCP verbs

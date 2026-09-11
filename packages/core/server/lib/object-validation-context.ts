@@ -22,6 +22,14 @@ import { MAJOR_KEY_ARTIFACT_REF_RE, PUBLIC_ARTIFACT_PATH_RE, rawArtifactRefForPu
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY, type BlobListItem } from './blob-list.js';
 import { isBlobCredentialsConfigured } from './blob-store.js';
 import { loadContentItemIds } from './content-item-index.js';
+import { loadSiteRedirects, type SiteRedirectsStore } from './site-redirects.js';
+import {
+  articlePathsFor,
+  createRouteResolver,
+  reservedPrefixesFromSiteBlog,
+  type RouteOwner,
+} from './route-resolver.js';
+import { activeRouteOwnership } from '../../lib/route-ownership.js';
 import type { ArtifactRefResolution, ObjectValidationContext, PageTypeConstraint } from './object-validate.js';
 import type { DocumentContentCheck } from './pdf-content-inspection.js';
 import { loadPdfContentChecks } from './pdf-content-check-store.js';
@@ -310,14 +318,94 @@ export const buildStoreValidationContext = async (
     return body.blueprint.type as SectionType;
   };
 
-  const isRouteTaken: ObjectValidationContext['isRouteTaken'] = (route) => {
-    for (const [key, record] of records) {
-      if (!key.startsWith('page:')) continue;
-      if (record.object_id === self.selfObjectId) continue;
-      if (isRecord(record.body) && record.body.route === route) return true;
-    }
-    return false;
+  /**
+   * W0 T0.3 (KNOWN_ISSUES #40): ONE resolver over all four path namespaces.
+   * `isRouteTaken` / `isArticleSlugTaken` below are thin adapters over it, so
+   * there is a single implementation of "who owns this path" and a caller that
+   * only knows the old field names still gets the wider answer.
+   *
+   * The redirect table is read here — the one extra store round trip this
+   * wave adds — because the validator had no reader for it at all, which is
+   * how `page_shop` published onto a route every reader is redirected off.
+   * An unreadable table degrades to "no redirects" (`loadSiteRedirects` never
+   * throws), exactly like every other resolver in this file.
+   */
+  let redirectSources: string[] = [];
+  try {
+    redirectSources = (await loadSiteRedirects(store as unknown as SiteRedirectsStore))
+      /**
+       * W1 review: a retire writes the forwarding rule for the route it just
+       * removed and stamps the rule with `retired_object_id`. Dropping that id
+       * here would break the resolver's own self-exclusion contract — the
+       * retired object's route would be owned by ITS OWN redirect, so every
+       * later patch to it (including un-retiring it, which W14 F6 ruling 1
+       * makes explicitly reversible) would fail `structure_route`. Both
+       * drlurie and fernwell carry exactly such a rule today.
+       */
+      .filter((redirect) => !(self.selfObjectId && redirect.retired_object_id === self.selfObjectId))
+      .map((redirect) => redirect.from);
+  } catch {
+    // Same stance as the per-type listing above: a namespace that cannot be
+    // read contributes nothing rather than failing the whole context build.
+  }
+
+  const siteRecord = [...records].find(([key]) => key.startsWith('site:'))?.[1];
+  const reservedPrefixes = reservedPrefixesFromSiteBlog(
+    isRecord(siteRecord?.body) ? (siteRecord.body as Record<string, unknown>).blog : undefined
+  );
+
+  const resolveRouteOwner = createRouteResolver(
+    {
+      pages: [...records]
+        .filter(([key]) => key.startsWith('page:'))
+        .map(([, record]) => ({
+          objectId: record.object_id,
+          route: isRecord(record.body) && typeof record.body.route === 'string' ? record.body.route : '',
+        })),
+      articles: [
+        ...[...records]
+          .filter(([key]) => key.startsWith('content_item:'))
+          .map(([, record]) => ({
+            objectId: record.object_id,
+            slug: isRecord(record.body) && typeof record.body.slug === 'string' ? record.body.slug : '',
+          })),
+        // The committed legacy posts: their filename stem IS their slug, and
+        // the id is the stem, so the object id doubles as the owner name.
+        ...[...(contentItemIds ?? [])].map((slug) => ({ objectId: slug, slug })),
+      ],
+      redirectSources,
+      // The infrastructure table lives in `sites/<client>/site.config.ts`, so
+      // it reaches core only through the provider seam (#40 case (b): the
+      // published `page_shop` sits under a 301 nobody could see from here).
+      infraRedirects: activeRouteOwnership().infraRedirectSources,
+      reservedPrefixes,
+    },
+    self.selfObjectId
+  );
+
+  /**
+   * An article is checked against its PERMALINK path only — the one the
+   * pattern produces. Deliberately NOT against the `<blog base>/<slug>` form
+   * the resolver also records for it: the blog base is a reserved prefix, and
+   * an article living under its own library base is not a collision, it is the
+   * point. (Checking both is how a first cut of this reported all 34 committed
+   * drlurie/platform articles as colliding with their own library.)
+   */
+  const resolveArticleSlugOwner = (slug: string): RouteOwner | undefined => {
+    const owner = resolveRouteOwner(`/${articlePathsFor(slug)[0]}`);
+    /**
+     * A PAGE that has taken an article's permalink is not the article's
+     * problem: `computeObjectPageRoutes` skips that page as `blog_slug` at
+     * build, so the article is what readers actually get. Refusing the article
+     * here would block edits to the live, correct object and leave the broken
+     * one writable — exactly backwards. The page's own `structure_route` check
+     * reports the same collision to whoever writes the page.
+     */
+    return owner?.kind === 'page' ? undefined : owner;
   };
+
+  const isRouteTaken: ObjectValidationContext['isRouteTaken'] = (route) =>
+    resolveRouteOwner(route) !== undefined;
 
   // The /shop/<slug> analogue of isRouteTaken (06-shop-module-plan §1),
   // scanning product records instead of page routes.
@@ -332,14 +420,8 @@ export const buildStoreValidationContext = async (
 
   // Article slugs share ONE permalink space across content_item objects and
   // the committed legacy posts (their filename stems ARE their slugs). W7.3.
-  const isArticleSlugTaken: ObjectValidationContext['isArticleSlugTaken'] = (slug) => {
-    for (const [key, record] of records) {
-      if (!key.startsWith('content_item:')) continue;
-      if (record.object_id === self.selfObjectId) continue;
-      if (isRecord(record.body) && record.body.slug === slug) return true;
-    }
-    return contentItemIds?.has(slug) ?? false;
-  };
+  const isArticleSlugTaken: ObjectValidationContext['isArticleSlugTaken'] = (slug) =>
+    resolveArticleSlugOwner(slug) !== undefined;
 
   // Artifact existence: sweep the request payload + every loaded record body
   // for Major-Key refs (raw or public-path form) and pre-resolve exactly those
@@ -426,6 +508,8 @@ export const buildStoreValidationContext = async (
     resolveSharedSectionType,
     resolveSharedSectionName,
     resolveSectionTemplateType,
+    resolveRouteOwner,
+    resolveArticleSlugOwner,
     isRouteTaken,
     isSlugTaken,
     isArticleSlugTaken,

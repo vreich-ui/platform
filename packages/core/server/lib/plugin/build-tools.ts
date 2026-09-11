@@ -8,11 +8,26 @@
  * bundle cannot drift from the tool surface, and `x-openai-isConsequential` in
  * the W3.2 export is computed (`toolClass !== 'read'`) rather than hand-set.
  *
- * HONESTY ABOUT ENFORCEMENT: this list is ADVISORY. `visibleToolDefinitions`
- * filters on internal-only / optional-handler / membership-OAuth and nothing
- * else, so the server will still answer a tool the plugin was told not to call.
- * For a human-driven plugin that is the correct trade (the editor is the gate);
- * it must never be described as a permission boundary.
+ * ENFORCEMENT (Wolf, D4, 2026-09-11 — supersedes the "ADVISORY" note this
+ * header carried until W0). The promoted manifest's tool list is enforced on
+ * BOTH doors:
+ *   - `/api/plugin/*` — `plugin-actions.ts:158`, 403 `tool_not_in_plugin_charter`
+ *     before auth resolution;
+ *   - `/mcp` — `charter-gate.ts`, called from `mcp.ts:preflightToolCall`, same
+ *     `error_code`, for any principal whose `surface` is `plugin:*`.
+ * `/mcp` additionally refuses `object_create` / create-mode `object_validate`
+ * for the four site-design object types (`PLUGIN_FORBIDDEN_CREATE_TYPES`) with
+ * `object_type_not_in_plugin_charter` — a rule that is NOT derived from this
+ * list, because `object_create` itself must stay in charter for the plugin to
+ * write articles at all.
+ *
+ * Two honest limits remain, both documented in `charter-gate.ts`: a tenant
+ * with no promoted manifest, and an unreadable manifest store, disable the
+ * TOOL-NAME rule (they are logged as `mcp_charter_unenforced`, never treated
+ * as a pass). `visibleToolDefinitions` still filters only on internal-only /
+ * optional-handler / membership-OAuth, so `tools/list` may advertise a tool
+ * the charter then refuses — a listed-but-refused tool is the intended shape,
+ * because the list is the tenant's surface and the charter is this install's.
  */
 import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
 import { isGenesisPolicyTool } from '../mcp-tool-definitions-genesis.js';

@@ -428,9 +428,18 @@ with `%PDF-` (`mcp-tool-definitions.ts:1110`, `image-validation.ts`).
 exactly one privileged tool (`release_to_production`), minus a named `PLUGIN_TOOL_DENYLIST`
 (commerce, `site_apply_theme`, `trigger_netlify_build`, template authoring, `object_review_decide`,
 `object_retire`, `set_voice_fields`), minus every membership tool by name; `whoami` is always in
-charter. On `/mcp` itself this list is **advisory only** — `visibleToolDefinitions` filters on
-internal-only / optional-handler / membership-OAuth and nothing else
-(`build-tools.ts:11-16`). The façade is where the allow-list becomes real.
+charter. Since W0 (Wolf, D4, 2026-09-11) the list is **enforced on `/mcp` too**, not only on the
+façade: `plugin/charter-gate.ts`, called from `mcp.ts:preflightToolCall`, refuses any tool outside
+the promoted manifest for a principal whose `surface` is `plugin:*`, with the same
+`error_code: tool_not_in_plugin_charter`. `/mcp` adds one rule the manifest does not carry —
+`object_create`, and `object_validate` in candidate-body mode, are refused for `template`,
+`section_template`, `theme` and `site` with `error_code: object_type_not_in_plugin_charter` — because
+`object_create` itself has to stay in charter for the plugin to write articles. Two documented gaps:
+a tenant with **no promoted manifest** (`whoami` answers `manifest_version: null` — true of four of
+five tenants on 2026-09-11) and an **unreadable manifest store** disable the tool-name rule rather
+than cut every plugin call off; both log `mcp_charter_unenforced`. The object-type rule binds
+regardless. `tools/list` is unchanged, so a tool may be listed and then refused: the list is the
+tenant's surface, the charter is this install's.
 
 **Install endpoint.** `plugin-install.ts` serves `GET /api/plugin-install` — public install facts,
 with **member-gated** bundle downloads (`editor` floor, `resolveAdminAccessFromEvent`). It is
