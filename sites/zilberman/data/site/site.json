@@ -1,14 +1,43 @@
 {
   "__generated": {
-    "at": "2026-08-24T15:30:08.533Z",
+    "at": "2026-09-11T10:13:59.301Z",
     "from": "objects/site/by-id/site_zilberman.json",
-    "record_version": 19
+    "record_version": 30
   },
   "blog": {
     "categoryBase": "category",
     "listPath": "learn/library",
     "postsPerPage": 6,
     "tagBase": "tag"
+  },
+  "brandImagery": {
+    "aspectRatios": {
+      "article_body": "16:9",
+      "article_header": "21:9"
+    },
+    "composition": {
+      "cropRule": "clean, intentional crops with focus on storytelling elements",
+      "depthOfField": "shallow to moderate depth of field—subject in focus, cinematic separation where appropriate",
+      "subjectScale": "mix of medium and wide shots that tell a story or set a mood"
+    },
+    "medium": "photograph",
+    "negative": [
+      "clip-art or cartoonish illustration",
+      "obvious stock photo tropes",
+      "over-saturated colors",
+      "distracting text overlays or watermarks",
+      "smiling handshake office stock",
+      "gimmicky film reel or camera icons"
+    ],
+    "palette": [
+      "#181717",
+      "#DED5BE",
+      "#718690",
+      "#AC2E32"
+    ],
+    "seedBase": 104947,
+    "styleSentence": "Cinematic and editorial photography with a focus on authentic moments, natural light, muted palettes, elevated contrast, and meticulous composition. The look should evoke the spirit and craft of filmmaking—intimate, reflective, and inspiring.",
+    "version": 1
   },
   "brandTokens": {
     "colors": {
