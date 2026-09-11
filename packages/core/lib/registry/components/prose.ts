@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const proseDefinition: SectionComponentDefinition<'prose', EmptyResolved> = {
   type: 'prose',
   schema: sectionVariantDataSchema('prose'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Prose',
     icon: 'tabler:align-left',

@@ -10,6 +10,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const comparisonTableDefinition: SectionComponentDefinition<'comparison_table', EmptyResolved> = {
   type: 'comparison_table',
   schema: sectionVariantDataSchema('comparison_table'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Comparison table',
     icon: 'tabler:table',

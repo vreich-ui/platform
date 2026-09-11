@@ -18,6 +18,7 @@
 import { z } from 'zod';
 
 import { sectionInstanceSchema, type SectionInstance } from '../../../schema/bodies/section-v1.js';
+import type { RegionId } from '../region-ids.js';
 
 export type SectionType = SectionInstance['type'];
 
@@ -154,11 +155,44 @@ export type SectionRenderProps<TData, TResolved> = {
   ctx: RenderCtx;
 };
 
+/**
+ * WHERE a section type is allowed to live, and how much of the viewport it
+ * takes when it lives at an edge (W1 T1.1).
+ *
+ * The reader side of a page is not one list — it is a header, an optional
+ * announcement strip, the ordered flow of sections, and (reserved for later
+ * waves) sticky/floating/overlay layers. Until this type existed, every
+ * section kind was implicitly `flow` and nothing said so, so the first sticky
+ * kind would have had to invent the vocabulary at the same time as the
+ * behaviour. Declaring it now, while the answer is `flow` for all 25 kinds,
+ * is what makes the region table derivable rather than hand-authored.
+ *
+ * `footprint` is REQUIRED: `region-registry.ts` keys a total `Record` off the
+ * registered-type list, so a new kind cannot be added without saying where it
+ * goes.
+ */
+export type SectionFootprint = {
+  /** The region this kind may be placed in. Every kind bound today is `flow`. */
+  region: RegionId;
+  /** For an edge-pinned kind: which edge. Meaningless (and absent) in `flow`. */
+  edge?: 'top' | 'bottom';
+  /**
+   * The share of a small viewport an edge-pinned kind occupies, as a band
+   * rather than a number — xs ≈ 8 %, s ≈ 12 %, m ≈ 20 %. Feeds
+   * `structure_viewport_budget`, which is a no-op while no kind declares one.
+   */
+  heightClass?: 'xs' | 's' | 'm';
+  /** At most one instance of this kind per page (`structure_singletons`). */
+  singleton?: boolean;
+};
+
 /** The pure (node-testable) part of a per-type registry module. */
 export type SectionComponentDefinition<TType extends SectionType, TResolved> = {
   type: TType;
   schema: z.ZodType<unknown>;
   editor: ComponentEditorHints<TType>;
+  /** Where this kind may be placed — see SectionFootprint. Required since W1 T1.1. */
+  footprint: SectionFootprint;
   /** Renderer hook (T3.6): computes TResolved from data. Absent = no references. */
   resolveRefs?: (data: SectionDataOf<TType>, ctx: RenderCtx) => Promise<TResolved>;
   /**

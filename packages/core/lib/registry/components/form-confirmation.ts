@@ -10,6 +10,7 @@ import { sectionVariantDataSchema, type HeroResolved, type SectionComponentDefin
 export const formConfirmationDefinition: SectionComponentDefinition<'form_confirmation', HeroResolved> = {
   type: 'form_confirmation',
   schema: sectionVariantDataSchema('form_confirmation'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Form confirmation',
     icon: 'tabler:circle-check',

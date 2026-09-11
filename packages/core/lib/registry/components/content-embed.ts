@@ -10,6 +10,7 @@ import { sectionVariantDataSchema, type ContentEmbedResolved, type SectionCompon
 export const contentEmbedDefinition: SectionComponentDefinition<'content_embed', ContentEmbedResolved> = {
   type: 'content_embed',
   schema: sectionVariantDataSchema('content_embed'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Content embed',
     icon: 'tabler:article',

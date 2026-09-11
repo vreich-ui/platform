@@ -11,6 +11,7 @@ import { sectionVariantDataSchema, type ProductPreviewResolved, type SectionComp
 export const productPreviewDefinition: SectionComponentDefinition<'product_preview', ProductPreviewResolved> = {
   type: 'product_preview',
   schema: sectionVariantDataSchema('product_preview'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Product preview',
     icon: 'tabler:shopping-bag',

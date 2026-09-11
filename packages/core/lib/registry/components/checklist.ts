@@ -7,6 +7,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const checklistDefinition: SectionComponentDefinition<'checklist', EmptyResolved> = {
   type: 'checklist',
   schema: sectionVariantDataSchema('checklist'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Checklist',
     icon: 'tabler:checklist',

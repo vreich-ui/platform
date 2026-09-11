@@ -7,11 +7,30 @@
 import { getSiteIdentity } from '../../site-identity.js';
 import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefinition } from './types.js';
 
-const { assetHost, assetFolder } = getSiteIdentity();
+/**
+ * The asset-host example in the portrait help string, resolved defensively.
+ *
+ * This used to be a bare module-scope `getSiteIdentity()` destructure, which
+ * made merely IMPORTING this registry module throw wherever no tenant has
+ * bound its policy providers. That was invisible until W1 T1.1, when
+ * `object-validate.ts` started reading the component footprints and therefore
+ * loading every definition: fleet-law validation code, and its own co-located
+ * tests, do not bind a site. A HELP STRING must never be able to fail a
+ * module load.
+ */
+const assetUrlExample = (): string => {
+  try {
+    const { assetHost, assetFolder } = getSiteIdentity();
+    return `${assetHost}/${assetFolder}/…`;
+  } catch {
+    return 'your site asset host';
+  }
+};
 
 export const bioDefinition: SectionComponentDefinition<'bio', EmptyResolved> = {
   type: 'bio',
   schema: sectionVariantDataSchema('bio'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Bio',
     icon: 'tabler:user',
@@ -24,7 +43,7 @@ export const bioDefinition: SectionComponentDefinition<'bio', EmptyResolved> = {
         label: 'Portrait',
         help:
           'Optional photo shown under the heading (image URL + alt text). Use a site asset URL ' +
-          `(${assetHost}/${assetFolder}/… or a first-party /images/… path). NEVER link ` +
+          `(${assetUrlExample()} or a first-party /images/… path). NEVER link ` +
           'repository files (raw.githubusercontent.com, images.weserv.nl or other proxies of the repo): ' +
           'the deploy secrets scanner blocks EVERY production deploy when the repo slug appears in ' +
           'published content.',

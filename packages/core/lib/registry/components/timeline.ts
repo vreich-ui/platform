@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const timelineDefinition: SectionComponentDefinition<'timeline', EmptyResolved> = {
   type: 'timeline',
   schema: sectionVariantDataSchema('timeline'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Timeline',
     icon: 'tabler:timeline',

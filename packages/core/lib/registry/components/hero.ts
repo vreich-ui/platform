@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type HeroResolved, type SectionComponentDefin
 export const heroDefinition: SectionComponentDefinition<'hero', HeroResolved> = {
   type: 'hero',
   schema: sectionVariantDataSchema('hero'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Hero',
     icon: 'tabler:sparkles',

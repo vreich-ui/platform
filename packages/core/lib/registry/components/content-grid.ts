@@ -11,6 +11,7 @@ import { sectionVariantDataSchema, type ContentGridResolved, type SectionCompone
 export const contentGridDefinition: SectionComponentDefinition<'content_grid', ContentGridResolved> = {
   type: 'content_grid',
   schema: sectionVariantDataSchema('content_grid'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Content grid',
     icon: 'tabler:layout-grid',
