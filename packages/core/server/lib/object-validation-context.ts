@@ -423,6 +423,32 @@ export const buildStoreValidationContext = async (
   const isArticleSlugTaken: ObjectValidationContext['isArticleSlugTaken'] = (slug) =>
     resolveArticleSlugOwner(slug) !== undefined;
 
+  /**
+   * W1 T1.4 — who breaks if this shared section changes.
+   *
+   * A shared `section` object is edited in isolation but renders on every page
+   * that points at it, and nothing told the editor how many that was. This
+   * walks the SAME preloaded snapshot (no extra store read) for `shared_ref`
+   * sections whose `data.section` is the id, and returns the page ids sorted
+   * so the answer is stable between calls.
+   */
+  const referencingPages: ObjectValidationContext['referencingPages'] = (sectionObjectId) => {
+    const pages: string[] = [];
+    for (const [key, record] of records) {
+      if (!key.startsWith('page:')) continue;
+      const sections = isRecord(record.body) && Array.isArray(record.body.sections) ? record.body.sections : [];
+      const references = sections.some(
+        (section) =>
+          isRecord(section) &&
+          section.type === 'shared_ref' &&
+          isRecord(section.data) &&
+          section.data.section === sectionObjectId
+      );
+      if (references) pages.push(record.object_id);
+    }
+    return pages.sort();
+  };
+
   // Artifact existence: sweep the request payload + every loaded record body
   // for Major-Key refs (raw or public-path form) and pre-resolve exactly those
   // against the artifact index, so the sync resolver can answer during
@@ -510,6 +536,7 @@ export const buildStoreValidationContext = async (
     resolveSectionTemplateType,
     resolveRouteOwner,
     resolveArticleSlugOwner,
+    referencingPages,
     isRouteTaken,
     isSlugTaken,
     isArticleSlugTaken,

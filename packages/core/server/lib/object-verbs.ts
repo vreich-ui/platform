@@ -62,6 +62,7 @@ import {
 import { retireObject } from './object-retire.js';
 import { purgeArchivedObjects } from './object-purge.js';
 import { loadSiteRedirects } from './site-redirects.js';
+import { SHARED_SECTION_IMPACT_WARN_ABOVE } from '../../lib/registry/composition-rules.js';
 import { objectTypeFromId, siteShortId, validateObjectIdForType } from '../../lib/object-ids.js';
 import { mintId, MintIdError, opaqueSeed, visualStandardSeed } from '../../lib/object-ids-mint.js';
 import { applyPatchOps, PatchApplyError } from '../../lib/object-patch-apply.js';
@@ -2510,11 +2511,41 @@ const dispatchObjectVerb = async (
         );
       }
 
+      /**
+       * W1 T1.4 — the blast radius of a shared-section edit.
+       *
+       * A shared `section` object is edited in isolation and renders on every
+       * page that points at it. Nothing said how many that was, so "fix the
+       * wording on this CTA" and "change this CTA on eleven pages" were the
+       * same call with the same result. This is a READ over the validation
+       * context's existing snapshot — no new store, no extra round trip — and
+       * it is reported, never enforced: editing a widely-shared section is a
+       * legitimate thing to do, it just should not be a surprise.
+       *
+       * Over five referencing pages the summary gains a warning, so a model
+       * that reads only `validation_summary` still sees it.
+       */
+      const referencingPages =
+        request.object_type === 'section' ? (context.referencingPages?.(request.object_id) ?? undefined) : undefined;
+      const impact = referencingPages ? { referencing_pages: referencingPages } : undefined;
+      const impactWarning =
+        referencingPages && referencingPages.length > SHARED_SECTION_IMPACT_WARN_ABOVE
+          ? {
+              id: 'shared_ref_impact',
+              label: 'Shared section impact',
+              status: 'warning' as const,
+              message: `This section renders on ${referencingPages.length} pages (${referencingPages.slice(0, 5).join(', ')}${referencingPages.length > 5 ? ', …' : ''}); every one of them changes.`,
+            }
+          : undefined;
+
       return ok({
         version: appliedRecord.version,
         content_revision: appliedRecord.content_revision,
         minted,
-        validation_summary: summary,
+        validation_summary: impactWarning
+          ? { ...summary, level: summary.level === 'ready' ? 'warning' : summary.level, warnings: [...summary.warnings, impactWarning] }
+          : summary,
+        ...(impact ? { impact } : {}),
       });
     }
 
