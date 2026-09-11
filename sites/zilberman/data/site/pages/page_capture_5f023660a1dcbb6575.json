@@ -1,8 +1,9 @@
 {
   "__generated": {
-    "at": "2026-08-25T12:34:58.572Z",
+    "at": "2026-09-11T09:53:06.894Z",
+    "attribution": "publish_key",
     "from": "objects/page/by-id/page_capture_5f023660a1dcbb6575.json",
-    "record_version": 30
+    "record_version": 67
   },
   "pageType": "clone",
   "route": "/book-online",
