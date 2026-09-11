@@ -113,6 +113,61 @@ test('the scale is declared once and emitted for every tenant', () => {
   assert.match(custom, /const layerCss = layerTokenCss\(\);/);
 });
 
+/**
+ * B4 — every consumer carries the token's own value as the CSS fallback.
+ *
+ * Latent, not broken: `Layout.astro` renders `CustomStyles.astro`
+ * unconditionally and every layout (`PageLayout`, `MarkdownLayout`,
+ * `AdminLayout`) nests inside it, so the vars are always defined today. The
+ * cost of being wrong is silent and ugly — an undefined `--dl-layer-behind`
+ * resolves `z-index` to `auto`, and WidgetWrapper's decorative fill
+ * (`ui/WidgetWrapper.astro`) paints over the content it sits behind.
+ *
+ * A fallback rather than a test that every layout renders CustomStyles,
+ * because one of these consumers is not in a layout at all: the consent banner
+ * (`lib/tracking/consent/banner-html.ts`) builds its markup as a string, and a
+ * grep-based "every layout renders CustomStyles" lint would never see it. It
+ * also matches the convention theme-tokens.ts already
+ * states for the axis vars — "each tier there reads `var(--dl-…, <literal>)`
+ * with the SAME literal as fallback". The layer block was the one family
+ * breaking its own file's rule.
+ *
+ * Parsed from the token table, so the fallbacks cannot drift from the scale.
+ */
+test('every layer-token consumer carries the token value as its CSS fallback', () => {
+  const tokens = readFileSync(abs(TOKEN_FILE), 'utf8');
+  const scale = new Map([...tokens.matchAll(/'(--dl-layer-[a-z]+)': '(-?\d+)'/g)].map((m) => [m[1], m[2]]));
+  assert.equal(scale.size, 7, 'expected the seven layer tokens');
+
+  const files = READER_SIDE_ROOTS.flatMap((root) => walk(abs(root), ['.astro', '.ts', '.tsx', '.css']));
+  const bare = [];
+  const wrong = [];
+  let total = 0;
+  for (const file of files) {
+    const rel = path.relative(ROOT, file);
+    if (rel === TOKEN_FILE) continue;
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .forEach((line, index) => {
+        for (const use of line.matchAll(/var\((--dl-layer-[a-z]+)\s*(?:,\s*(-?\d+))?\s*\)/g)) {
+          total += 1;
+          const [, name, fallback] = use;
+          assert.ok(scale.has(name), `${rel}:${index + 1}: ${name} is not in the scale`);
+          if (fallback === undefined) bare.push(`${rel}:${index + 1} ${name}`);
+          else if (fallback !== scale.get(name))
+            wrong.push(`${rel}:${index + 1} ${name} falls back to ${fallback}, scale says ${scale.get(name)}`);
+        }
+      });
+  }
+  assert.ok(total >= 9, `expected the layer-token consumers to be found, got ${total}`);
+  assert.deepEqual(
+    bare,
+    [],
+    `write the token's own value as the fallback, e.g. z-[var(--dl-layer-behind,-1)]:\n${bare.join('\n')}`
+  );
+  assert.deepEqual(wrong, [], `fallback disagrees with theme-tokens.ts:\n${wrong.join('\n')}`);
+});
+
 test('the layer scale is NOT a brand token — nothing an agent writes can reorder the page', () => {
   const tokens = readFileSync(abs(TOKEN_FILE), 'utf8');
   // The axis tables are the agent-writable surface; a layer var appearing in

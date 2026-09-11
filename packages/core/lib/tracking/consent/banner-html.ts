@@ -28,7 +28,7 @@ export const buildConsentBannerHtml = (copy: ConsentBannerCopy): string => {
     : '';
   return (
     `<div id="trk-consent-banner" hidden role="dialog" aria-live="polite" aria-label="${escapeHtml(copy.headline)}"` +
-    ` class="fixed inset-x-0 bottom-0 z-[var(--dl-layer-overlay)] border-t border-gray-200 bg-page px-4 py-4 shadow-lg sm:px-6 dark:border-gray-800">` +
+    ` class="fixed inset-x-0 bottom-0 z-[var(--dl-layer-overlay,50)] border-t border-gray-200 bg-page px-4 py-4 shadow-lg sm:px-6 dark:border-gray-800">` +
     `<div class="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">` +
     `<div class="max-w-2xl">` +
     `<p class="text-sm font-semibold text-heading">${escapeHtml(copy.headline)}</p>` +

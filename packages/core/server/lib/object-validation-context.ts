@@ -325,8 +325,8 @@ export const buildStoreValidationContext = async (
    * only knows the old field names still gets the wider answer.
    *
    * The redirect table is read here — the one extra store round trip this
-   * wave adds — because the validator had no reader for it at all, which is
-   * how `page_shop` published onto a route every reader is redirected off.
+   * wave adds — because the validator had no reader for it at all: nothing
+   * stopped a page publishing onto a route every reader is redirected off.
    * An unreadable table degrades to "no redirects" (`loadSiteRedirects` never
    * throws), exactly like every other resolver in this file.
    */
@@ -375,8 +375,8 @@ export const buildStoreValidationContext = async (
       ],
       redirectSources,
       // The infrastructure table lives in `sites/<client>/site.config.ts`, so
-      // it reaches core only through the provider seam (#40 case (b): the
-      // published `page_shop` sits under a 301 nobody could see from here).
+      // it reaches core only through the provider seam (#40 case (b): a page
+      // published under a 301 that nothing here could otherwise see).
       infraRedirects: activeRouteOwnership().infraRedirectSources,
       reservedPrefixes,
     },

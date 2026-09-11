@@ -32,10 +32,13 @@ import type { ReadinessCriterion } from '../../packages/core/lib/admin/readiness
  * namespace that hands out a reader path.
  *
  * The live evidence this closes: `page_skincare_is_not_self_worth` published
- * onto an article's permalink, and `page_shop` published onto a route a 301
- * forwards away from. Both passed write-time validation because page routes,
- * article slugs, the redirect tables and the reserved families were four
- * separate answers to one question.
+ * onto an article's permalink and is unreachable to this day. It passed
+ * write-time validation because page routes, article slugs, the redirect
+ * tables and the reserved families were four separate answers to one
+ * question. (The `page_shop` export this comment used to cite alongside it was
+ * never published at all — pre-object residue, removed in B1, KNOWN_ISSUES
+ * #69. The redirect-table arm of the rule is exercised by the fixtures below,
+ * not by that file.)
  */
 
 /**

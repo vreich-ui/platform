@@ -70,7 +70,7 @@ npm ci
 npm run check            # astro check (drlurie config) + eslint + prettier
 npm test                 # full suite, ~3 min, offline (includes docs invariants + inventory freshness)
 node scripts/docs/inventory.mjs --write   # after adding a function / tool / schema / env var / tenant
-npm run build            # drlurie, 107 pages; prebuild image gate; postbuild dims push no-ops without env
+npm run build            # drlurie, 106 pages; prebuild image gate; postbuild dims push no-ops without env
 npx astro build --config sites/<client>/astro.config.ts   # any other tenant → sites/<client>/dist
 npm run fleet:parity     # repo-only parity audit
 ```
