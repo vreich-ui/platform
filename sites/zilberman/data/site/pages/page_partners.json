@@ -1,8 +1,9 @@
 {
   "__generated": {
-    "at": "2026-08-25T12:34:14.621Z",
+    "at": "2026-09-11T09:53:25.743Z",
+    "attribution": "publish_key",
     "from": "objects/page/by-id/page_partners.json",
-    "record_version": 89
+    "record_version": 178
   },
   "pageType": "clone",
   "route": "/partners",
@@ -12,7 +13,7 @@
         "actions": [],
         "heading": "OUR PARTNERS"
       },
-      "id": "s_b58bb35d3b",
+      "id": "s_3bf9b659b0",
       "type": "lede"
     },
     {
@@ -23,15 +24,15 @@
         "images": [
           {
             "alt": "Audience In Theater",
-            "src": "/img/req_capture_zilberman_20260825_03/c4bb924a319a75064c8af12fd97e51401f2a02bd81028accc1405908b5e7b1d6.jpg"
+            "src": "/img/req_capture_zilberman_20260910_05/c4bb924a319a75064c8af12fd97e51401f2a02bd81028accc1405908b5e7b1d6.jpg"
           },
           {
             "alt": "Young Vic logo",
-            "src": "/img/req_capture_zilberman_20260825_03/d60a243b27614aae425b290a312a315c056fb58bd987683af98279055c4fc699.png"
+            "src": "/img/req_capture_zilberman_20260910_05/d60a243b27614aae425b290a312a315c056fb58bd987683af98279055c4fc699.png"
           }
         ]
       },
-      "id": "s_d4aa65c59e",
+      "id": "s_35a5ff7e93",
       "type": "content_split"
     },
     {
@@ -62,11 +63,11 @@
         "images": [
           {
             "alt": "Bafta_edited_edited.jpg",
-            "src": "/img/req_capture_zilberman_20260825_03/480207f87089129e9fafdca59f5d2893a69e89642655a7f96b43801434551a4b.jpg"
+            "src": "/img/req_capture_zilberman_20260910_05/480207f87089129e9fafdca59f5d2893a69e89642655a7f96b43801434551a4b.jpg"
           }
         ]
       },
-      "id": "s_d1299808a0",
+      "id": "s_c4231af4b6",
       "type": "composition"
     },
     {
@@ -84,11 +85,11 @@
         "images": [
           {
             "alt": "donmar logo",
-            "src": "/img/req_capture_zilberman_20260825_03/afdcfc0a90d7355a2dca5e7c84b8e4b8423071a6205f72735bc2f5ac13c212ed.png"
+            "src": "/img/req_capture_zilberman_20260910_05/afdcfc0a90d7355a2dca5e7c84b8e4b8423071a6205f72735bc2f5ac13c212ed.png"
           }
         ]
       },
-      "id": "s_507276e77f",
+      "id": "s_8d1b67616f",
       "type": "composition"
     },
     {
@@ -106,11 +107,11 @@
         "images": [
           {
             "alt": "7 Parnassiens",
-            "src": "/img/req_capture_zilberman_20260825_03/7406c499a2024950dd652947a8f95adf18b17bc0eb892ac586774b81fdfa17af.jpg"
+            "src": "/img/req_capture_zilberman_20260910_05/7406c499a2024950dd652947a8f95adf18b17bc0eb892ac586774b81fdfa17af.jpg"
           }
         ]
       },
-      "id": "s_7e41481581",
+      "id": "s_147c556f95",
       "type": "composition"
     }
   ],
