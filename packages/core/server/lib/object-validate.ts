@@ -1174,7 +1174,19 @@ const collectSections = (body: unknown): SectionInstance[] => {
 
 const effectiveSectionType = (section: SectionInstance, context: ObjectValidationContext): SectionType | undefined => {
   if (section.type === 'shared_ref') {
-    return context.resolveSharedSectionType?.(section.data.section);
+    /**
+     * W1 review: `data` is read DEFENSIVELY, not through the narrowed type.
+     * `collectSections` admits any `{type: string}` object and `validateObject`
+     * runs the structural group even when `checkSchema` failed, so
+     * `object_validate`'s candidate-body mode can reach here with
+     * `{type:'shared_ref'}` and no `data` at all. That used to be unreachable
+     * (the only callers sat behind a resolved PageType constraint); since
+     * T1.3's `checkComposition` types EVERY section on EVERY page write, a
+     * missing `data` would throw out of validation instead of failing it.
+     */
+    const data: unknown = (section as { data?: unknown }).data;
+    const target = isRecord(data) ? data.section : undefined;
+    return typeof target === 'string' ? context.resolveSharedSectionType?.(target) : undefined;
   }
   return section.type;
 };
