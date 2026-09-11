@@ -52,13 +52,8 @@ import {
   writeArtifactReferenceForAdminMutation,
   type ArtifactByteStore,
 } from './artifact-soft-delete.js';
-import {
-  dedupeArtifactsBySha,
-  sweepOrphanArtifacts,
-  type ArtifactSweepListStore,
-} from './artifact-dedupe-sweep.js';
+import { dedupeArtifactsBySha, sweepOrphanArtifacts, type ArtifactSweepListStore } from './artifact-dedupe-sweep.js';
 import { validateRequestId } from '../../lib/agents-naming.js';
-import { getAdminStateFromEvent } from './admin-auth.js';
 import { resolveAdminAccessFromEvent } from './request-roles.js';
 
 import {
@@ -286,8 +281,30 @@ const listArtifactsFromPointerPrefixes = async (
   return toolResult(paginateArtifacts(filteredArtifacts, options.limit, options.cursor));
 };
 
+/**
+ * T-ASSET-IDENTITY: this used to call `getAdminStateFromEvent(event)`
+ * directly — the OLDER, ADMIN_EMAILS-only resolver `resolveAdminAccessFromEvent`
+ * exists specifically to replace (see request-roles.ts's own doc comment,
+ * and `requireAdminToolAccess` below, which was already fixed for the
+ * destructive/migration tools under QA-W16-3). This was exactly the "a
+ * dozen-plus call sites had quietly re-implemented the shallow check"
+ * scenario that fix's own comment warns about, just not yet caught here: a
+ * human admin granted the tier ONLY through a `users` store invite (not
+ * present in the static `ADMIN_EMAILS` bootstrap list) clears
+ * admin-agent-chat.ts's own top-of-request gate (which already resolves the
+ * full store-aware role set) and is then silently DENIED the moment the
+ * chat agent calls `search_artifacts` / `list_artifacts_by_kind` /
+ * `list_artifacts_by_request` through the operational bridge — the SAME
+ * already-verified identity gets re-derived here from scratch with a
+ * narrower resolver and downgraded to "not authorized". Switching to
+ * `resolveAdminAccessFromEvent` (env bootstrap owners UNION the store tier)
+ * closes that gap and makes this gate agree with `requireAdminToolAccess`
+ * instead of silently disagreeing with it. This still reads nothing from the
+ * caller-supplied tool input — only the server-verified event/session — so
+ * it cannot be widened by anything a caller passes in `args`.
+ */
 const getAdminToolState = async (event: LambdaEvent) => {
-  const adminState = await getAdminStateFromEvent(event);
+  const adminState = await resolveAdminAccessFromEvent(event, undefined, getMcpBinding());
 
   if (!adminState.authenticated) {
     return toolError(adminState.error || 'A valid admin session token is required.', { error_code: 'admin_required' });
@@ -485,6 +502,35 @@ export const listArtifactsByRequest = async (event: LambdaEvent, input: Record<s
   return listArtifactsFromPointerPrefixes(event, [prefix], options);
 };
 
+/**
+ * T-ASSET-IDENTITY Part 2: `search_artifacts` used to collapse three
+ * different outcomes into the identical `{ artifacts: [], ... }` shape —
+ * "you are not permitted to see this", "no such tag was ever used", and
+ * "the tag exists but nothing currently matches" were indistinguishable to
+ * the caller. Forbidden was ALREADY distinct (the `requireArtifactBrowseAccess`
+ * check above returns a `toolError` with `error_code: 'admin_required'`, not
+ * an empty success) — what was missing is the split on the SUCCESS side.
+ *
+ * The additive `outcome` field on a successful result now says which of:
+ *   - `'ok'`                         — at least one artifact matched.
+ *   - `'empty'`                      — the tag (or kind) is real and has been
+ *                                       used, but nothing currently matches
+ *                                       (e.g. every match is soft-deleted, or
+ *                                       falls outside createdAfter/Before).
+ *   - `'unknown_tag'`                — this exact tag has never been applied
+ *                                       to any artifact, but the tenant DOES
+ *                                       have other tagged artifacts (a likely
+ *                                       typo).
+ *   - `'no_tags_recorded_for_tenant'`— no artifact in this tenant has EVER
+ *                                       been tagged. Zero tenant-wide tag
+ *                                       usage is a fact about the tenant's
+ *                                       data, not a wrong query — the
+ *                                       `remedy` field says so and names how
+ *                                       tags get set.
+ * `remedy` accompanies every non-`'ok'` outcome with a human-actionable next
+ * step. Purely additive: `artifacts`/`limit`/`cursor`/`nextCursor` are
+ * unchanged, so existing callers reading only those fields see no difference.
+ */
 export const searchArtifacts = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const unauthorized = await requireArtifactBrowseAccess(event);
   if (unauthorized) return unauthorized;
@@ -496,11 +542,43 @@ export const searchArtifacts = async (event: LambdaEvent, input: Record<string, 
   const normalizedTag = tag ? safePathSegment(tag) : undefined;
   if (tag && !normalizedTag) return toolError('tag must contain at least one safe path character.');
 
+  if (normalizedTag) {
+    const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
+    const tagKeys = await listArtifactIndexKeys(store, `by-tag/${normalizedTag}/`);
+
+    if (tagKeys.length === 0) {
+      // A second, cheap list to tell "this tag is a typo" apart from "this
+      // tenant has never tagged anything" — both currently 404 the SAME way
+      // from the caller's point of view, and they call for different next
+      // steps (fix the spelling vs. stop expecting tags to exist at all).
+      const anyTagsRecorded = (await listArtifactIndexKeys(store, 'by-tag/')).length > 0;
+
+      return toolResult({
+        artifacts: [],
+        limit: options.limit,
+        cursor: String(options.cursor),
+        nextCursor: null,
+        outcome: anyTagsRecorded ? ('unknown_tag' as const) : ('no_tags_recorded_for_tenant' as const),
+        remedy: anyTagsRecorded
+          ? `No artifact carries the tag "${tag}". Other tags ARE in use on this tenant — check the spelling, or call search_artifacts without a tag filter to browse everything.`
+          : 'No artifact in this tenant has ever been tagged. Tags are set at upload time (the `tags` argument on the artifact write tools) or later through metadata reconciliation — this reports an empty tenant-wide tag index, not a failed or mistyped query.',
+      });
+    }
+  }
+
   const prefixes = normalizedTag
     ? [`by-tag/${normalizedTag}/`]
     : artifactKindValues.map((artifactKind) => `by-kind/${artifactKind}/`);
 
-  return listArtifactsFromPointerPrefixes(event, prefixes, options);
+  const result = await listArtifactsFromPointerPrefixes(event, prefixes, options);
+  const page = result.structuredContent as {
+    artifacts: unknown[];
+    limit: number;
+    cursor: string;
+    nextCursor: string | null;
+  };
+
+  return toolResult({ ...page, outcome: page.artifacts.length === 0 ? ('empty' as const) : ('ok' as const) });
 };
 
 const requestArtifactKeyPattern = /^request-artifacts\/([^/]+)\/([a-f0-9]{64})\.json$/i;
@@ -943,7 +1021,11 @@ export const artifactRequestRegisterOwner = async (event: LambdaEvent, input: Re
   });
 
   if (!result.ok) {
-    return toolError(result.error, { error_code: result.errorCode, statusCode: result.statusCode, ...(result.owner ? { owner: result.owner } : {}) });
+    return toolError(result.error, {
+      error_code: result.errorCode,
+      statusCode: result.statusCode,
+      ...(result.owner ? { owner: result.owner } : {}),
+    });
   }
 
   return toolResult({ requestId, owner: result.owner, registered: result.changed });
