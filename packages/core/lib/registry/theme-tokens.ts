@@ -84,6 +84,47 @@ export const FALLBACK_FONTS: Record<string, string> = {
   mono: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
 };
 
+// ─── Layer scale (W1 T1.2) ───────────────────────────────────────────────────
+//
+// One ordering for everything that stacks, as custom properties rather than
+// as numbers typed into class lists. Before this, a sticky header said `z-40`
+// in one file and a search overlay said `z-50` in another, and the ONLY way
+// to know whether a future sticky CTA belonged above or below either was to
+// grep for numbers — which is how a "z-index war" starts.
+//
+// DELIBERATELY NOT AGENT-WRITABLE. These are not `brandTokens`: they are not
+// in the theme schema, no patch op reaches them, `site_apply_theme` does not
+// touch them, and `resolveAxisVars` does not emit them. Stacking order is a
+// rendering invariant — a tenant that could lower `--dl-layer-overlay` below
+// `--dl-layer-sticky` would put its own header on top of its own mobile menu.
+// CustomStyles.astro emits the whole set unconditionally, always the same
+// bytes, for every tenant.
+//
+// The VALUES are the literals already in use (sticky 40, overlay 50), so the
+// migration is byte-neutral in rendered output; `modal` and `toast` sit above
+// them for the two layers that must never be covered. `behind` is the one
+// negative tier, for decorative fills painted under their own container.
+//
+// Tailwind's `@layer base/components/utilities` in tailwind.css is the
+// AT-RULE of the same name and an unrelated mechanism; native CSS cascade
+// layers are deliberately NOT introduced here (W1 brief) — this scale is the
+// ordering mechanism.
+export const LAYER_TOKENS: Readonly<Record<string, string>> = {
+  '--dl-layer-behind': '-1',
+  '--dl-layer-base': '0',
+  '--dl-layer-raised': '10',
+  '--dl-layer-sticky': '40',
+  '--dl-layer-overlay': '50',
+  '--dl-layer-modal': '60',
+  '--dl-layer-toast': '70',
+};
+
+/** The layer block exactly as CustomStyles.astro emits it, one declaration per line. */
+export const layerTokenCss = (indent = '    '): string =>
+  Object.entries(LAYER_TOKENS)
+    .map(([name, value]) => `${indent}${name}: ${value};\n`)
+    .join('');
+
 // ─── Theme token axes (T10.1, 11-platformization-plan §1.1) ──────────────────
 //
 // Bounded enum axes widening brandTokens beyond colors + fonts: spacing
