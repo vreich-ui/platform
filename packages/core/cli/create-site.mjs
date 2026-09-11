@@ -1678,6 +1678,8 @@ import {
 } from '../../../packages/core/lib/media-policy.js';
 import { setSiteIdentityConfigProvider } from '../../../packages/core/lib/site-identity.js';
 import { setActiveMembershipPolicyProvider } from '../../../packages/core/lib/membership-policy.js';
+import { siteConfig } from '../site.config.js';
+import { setRouteOwnershipProvider } from '../../../packages/core/lib/route-ownership.js';
 
 let approvalPolicy: ApprovalPolicy | undefined;
 setActiveApprovalPolicyProvider((): ApprovalPolicy => (approvalPolicy ??= resolveApprovalPolicy(approvalPolicyConfig)));
@@ -1694,6 +1696,12 @@ setSiteIdentityConfigProvider((): unknown => siteIdentityConfig);
 
 // W18 T18.7: the committed membership-policy override (runtime store overrides layer on top).
 setActiveMembershipPolicyProvider(() => membershipPolicyConfig);
+
+// W0 T0.3 (KNOWN_ISSUES #40): the infrastructure redirect table is CODE — the
+// array netlify.toml is drift-guarded against — so the write-time route
+// resolver can only see it through a provider. Sources only: the resolver asks
+// "who owns this path", never "where does it go".
+setRouteOwnershipProvider(() => ({ infraRedirectSources: siteConfig.redirects.map((redirect) => redirect.from) }));
 `;
 
 // ─── W14 T14.1/T14.2: the BUILD ENTRY ───

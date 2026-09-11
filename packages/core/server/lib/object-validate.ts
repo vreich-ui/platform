@@ -58,6 +58,8 @@ import {
 } from './aggression-score.js';
 import { AGGRESSION_CEILING_DIALS, getSiteIdentity, type AggressionCeiling } from '../../lib/site-identity.js';
 import type { CriterionStatus, ReadinessCriterion, ReadinessGroup } from '../../lib/admin/readiness-criteria.js';
+import { describeRouteOwner, type RouteOwner } from './route-resolver.js';
+import { LOADER_OWNED_PAGE_TYPES } from '../../app/utils/object-page-routes.js';
 import { validateObjectIdForType, validateSectionInstanceId } from '../../lib/object-ids.js';
 import { isRequestId } from '../../lib/agents-naming.js';
 import { contentItemRoute, DEFAULT_POST_PERMALINK_PATTERN } from '../../lib/tracking/experiments/arms.js';
@@ -203,8 +205,26 @@ export type ObjectValidationContext = {
    */
   componentTypeExists?: (type: string) => boolean;
   /**
+   * W0 T0.3 (KNOWN_ISSUES #40): who owns this reader path, across ALL FOUR
+   * namespaces — page routes, article permalinks, the site redirect table and
+   * the reserved prefixes — excluding the object under validation. This is the
+   * ONE resolver; `isRouteTaken` / `isArticleSlugTaken` below are thin
+   * adapters over it (`object-validation-context.ts`) kept so a caller that
+   * injects only one namespace still works. Absent → the adapters answer.
+   */
+  resolveRouteOwner?: (route: string) => RouteOwner | undefined;
+  /**
+   * The article-slug face of the SAME resolver. Separate because a slug is not
+   * a route: it becomes one through the tenant's permalink pattern, and an
+   * article owns more than one path (see `articlePathsFor`). Absent →
+   * `isArticleSlugTaken` answers.
+   */
+  resolveArticleSlugOwner?: (slug: string) => RouteOwner | undefined;
+  /**
    * Whether a page `route` is already taken by a DIFFERENT page (the resolver
    * excludes the object under validation). Absent → uniqueness not verified.
+   * Superseded by `resolveRouteOwner`, which sees the other three namespaces
+   * too; still consulted when only this one is supplied.
    */
   isRouteTaken?: (route: string) => boolean;
   /**
@@ -2611,7 +2631,17 @@ const checkContentItemStructure = (
       : crit('article_node_ids', 'Node id uniqueness', 'missing', `Duplicate node ids: ${[...duplicates].join(', ')}.`)
   );
 
-  if (context.isArticleSlugTaken) {
+  const articleRouteOwner = context.resolveArticleSlugOwner?.(article.slug);
+  if (articleRouteOwner) {
+    // The same resolver the page route uses: an article slug that lands on a
+    // page route, a redirect source or a reserved prefix is as unreachable as
+    // one that duplicates another article's.
+    criteria.push(
+      crit('article_slug', 'Article slug uniqueness', 'missing', describeRouteOwner(article.slug, articleRouteOwner, 'slug'))
+    );
+  } else if (context.resolveArticleSlugOwner) {
+    criteria.push(crit('article_slug', 'Article slug uniqueness', 'complete', ''));
+  } else if (context.isArticleSlugTaken) {
     criteria.push(
       context.isArticleSlugTaken(article.slug)
         ? crit(
@@ -3133,6 +3163,36 @@ const checkStructuralInvariantsByType = (
     criteria.push(crit('structure_route', 'Route shape', 'missing', `route "${route}" must start with "/".`));
   } else if (!route) {
     criteria.push(crit('structure_route', 'Route shape', 'missing', 'route is required.'));
+  } else if (
+    isRecord(body) &&
+    typeof body.pageType === 'string' &&
+    LOADER_OWNED_PAGE_TYPES.has(body.pageType)
+  ) {
+    // A loader-owned page's `route` is a FAMILY PATTERN, not a path it owns —
+    // `/category/[category]`, `/%slug%`, `/learn/library`. The build-time
+    // catch-all skips these before any ownership test
+    // (`object-page-routes.ts`), and so must this: checking them would refuse
+    // every listing page on every tenant against the very prefix that serves
+    // it.
+    criteria.push(
+      crit(
+        'structure_route',
+        'Route uniqueness',
+        'info',
+        `pageType "${body.pageType}" binds to a dedicated loader; "${route}" is a family pattern, not a path this object owns.`
+      )
+    );
+  } else if (context.resolveRouteOwner) {
+    // ONE resolver across every namespace that hands out a reader path — a
+    // route that collides with an article permalink, a redirect source or a
+    // reserved family is just as unreachable as one that collides with
+    // another page, and all four used to pass here (#40).
+    const owner = context.resolveRouteOwner(route);
+    criteria.push(
+      owner
+        ? crit('structure_route', 'Route uniqueness', 'missing', describeRouteOwner(route, owner))
+        : crit('structure_route', 'Route uniqueness', 'complete', '')
+    );
   } else if (context.isRouteTaken) {
     criteria.push(
       context.isRouteTaken(route)

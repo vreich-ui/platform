@@ -827,7 +827,28 @@ are self-identifying test residue (`smoke-t3-inline-image-only`,
 that mistakes them for live media.
 **Direction:** delete the two trees in one change once #38 no longer points at them.
 
-### 40. Two published page objects are unreachable because route ownership is not checked across namespaces
+### 40. Two published page objects are unreachable because route ownership is not checked across namespaces — FIXED
+
+**Status:** CLOSED by #NNN (W0 T0.3). One resolver,
+`packages/core/server/lib/route-resolver.ts`, now answers "who owns this reader path" across all
+four namespaces — page routes, article permalinks, BOTH redirect tables (the agent-written
+`redirects.json` and the infrastructure table in `site.config.ts`, reached through the new
+`lib/route-ownership.ts` provider each tenant registers) and the reserved prefixes. It is wired into
+`object-validate.ts`'s `structure_route` and the article-slug criterion through
+`object-validation-context.ts`, where `isRouteTaken` / `isArticleSlugTaken` survive only as thin
+adapters over it. Pages whose `pageType` is `listing` or `content_detail` are exempt (their `route`
+is a family pattern, not a path), mirroring `computeObjectPageRoutes`.
+
+**What this means for the two objects below:** both now FAIL write-time validation until their
+routes are changed, which is the fix working. `page_skincare_is_not_self_worth` must move off the
+article's permalink; `page_shop` must move off the 301'd `/shop`. The ARTICLE side is deliberately
+not blocked by a colliding page — the build already resolves that fight in the article's favour
+(`blog_slug`), so refusing the article would block the object readers actually get.
+
+**Residual, tracked here rather than reopened:** at write time the resolver has no `fileRoutes` —
+a tenant's static `.astro` files are a build-time glob the serverless validator cannot see, so a
+collision with a hand-written route file is still caught only at build, where the catch-all warns.
+The original analysis follows.
 
 **Category:** content-contract-drift · **Severity:** medium · **Sources:** CA#8, CA#9
 **Evidence:** (a) `sites/drlurie/data/site/pages/page_skincare_is_not_self_worth.json` has
@@ -1189,6 +1210,26 @@ only `admin-visual-identity-import.ts` mints such ids, and no validator checks t
 **Direction:** record the key prefix in the namespace table (done) and decide at the next store
 migration whether jobs deserve their own namespace.
 
+### 68. `site.chrome.announcement` is declared and validated but never rendered
+
+**Category:** dead-code · **Severity:** low · **Sources:** W0 T0.1 recon
+**Evidence:** `packages/core/schema/bodies/site-v1.ts:224-230` declares
+`chrome.announcement { enabled, sectionRef? }` and `object-validate.ts:670-672` enforces
+reference integrity on `sectionRef` (`requireObject('section', …)`), but nothing under
+`packages/core/app/**` or `packages/core/components/**` reads it:
+`app/layouts/PageLayout.astro:28` destructures `site.chrome` for `showRssFeed` /
+`showThemeToggle` only, and its default literal omits `announcement` entirely.
+`sites/drlurie/seeds/site-seed-data.mjs:35` still says "chrome.announcement is deferred (B3) and
+omitted". The `<Fragment slot="announcement">` lines in `sites/drlurie/app/pages/homes/*.astro`
+are inherited AstroWind template slots on two orphaned demo pages (#59), unrelated to
+`site.chrome`.
+**Impact:** an agent can point `sectionRef` at a real section, pass validation, publish, release —
+and nothing appears. The failure is silent in every surface: no build warning, no validation
+warning, no admin signal.
+**Direction:** either render the announcement region (the reader-regions wave keeps the
+`announcement` row in the region registry for exactly this) or drop the field from the schema. The
+W1 region registry lists it as an unrendered region rather than pretending either way.
+
 ## Summary table
 
 Sorted by severity, then by id.
@@ -1227,7 +1268,7 @@ Sorted by severity, then by id.
 | 37 | medium | dead-code | Every validating verb round-trips GitHub for an empty dir | CI#18 |
 | 38 | medium | build-deploy-mismatch | Prebuild image gate scans directories that no longer exist | CA#6 |
 | 39 | medium | stale-generated-files | 139 orphaned committed upload assets | A#1, CA#7 |
-| 40 | medium | content-contract-drift | Two published pages unreachable; route ownership unchecked | CA#8, CA#9 |
+| 40 | medium | content-contract-drift | ~~Two published pages unreachable; route ownership unchecked~~ **CLOSED** (#NNN) | CA#8, CA#9 |
 | 42 | medium | data-quality | 10 of 26 published articles carry no taxonomy | CA#12 |
 | 43 | medium | data-quality | Two demo articles live in production | CA#18 |
 | 46 | medium | content-contract-drift | Reader-safety blocks the words "private"/"strategy" | CA#20 |
@@ -1254,3 +1295,4 @@ Sorted by severity, then by id.
 | 64 | low | obsolete-docs | `docs/history/` archives contain repo-slug forms the rule forbids (owner decision) | Codex #691 |
 | 65 | low | content-contract-drift | `reference_import_request_ids` declared `blocks_write` but not enforced | correction pass |
 | 66 | low | ambiguous-canonical-source | Examples job records live in the `artifact-index` store | correction pass |
+| 68 | low | dead-code | `site.chrome.announcement` is validated but never rendered | W0 T0.1 |

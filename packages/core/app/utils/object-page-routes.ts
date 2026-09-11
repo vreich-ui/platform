@@ -68,8 +68,18 @@ export type ObjectPageRoutes = {
 
 const trimSlashes = (value: string) => value.replace(/^\/+/, '').replace(/\/+$/, '');
 
-/** PageTypes whose objects bind to dedicated loader files, never the catch-all (W6). */
-const LOADER_OWNED_PAGE_TYPES = new Set(['listing', 'content_detail']);
+/**
+ * PageTypes whose objects bind to dedicated loader files, never the catch-all
+ * (W6).
+ *
+ * Exported since W0 T0.3: the WRITE-time route resolver must skip the same
+ * page types for the same reason. Their `route` fields are family patterns
+ * (`/category/[category]`, `/%slug%`, `/learn/library`), not standalone paths,
+ * so every one of them "collides" with the reserved prefix that owns its
+ * family — by design. A uniqueness rule that did not know this would refuse
+ * every existing listing page on every tenant.
+ */
+export const LOADER_OWNED_PAGE_TYPES: ReadonlySet<string> = new Set(['listing', 'content_detail']);
 
 /**
  * '/sites/acme/app/pages/solutions/early-access.astro' | './index.astro'
