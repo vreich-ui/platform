@@ -1,3 +1,7 @@
+// buildStoreValidationContext reaches the site-identity provider through the
+// page-type registry; every test that builds a real context registers the
+// bindings first (seed-objects-enforcement.test.ts does the same).
+import '../../sites/drlurie/config/policy-bindings.js';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -14,6 +18,7 @@ import {
   type RouteNamespaces,
 } from '../../packages/core/server/lib/route-resolver.js';
 import { checkStructuralInvariants } from '../../packages/core/server/lib/object-validate.js';
+import { buildStoreValidationContext } from '../../packages/core/server/lib/object-validation-context.js';
 import { computeObjectPageRoutes, LOADER_OWNED_PAGE_TYPES } from '../../packages/core/app/utils/object-page-routes.js';
 import {
   activeRouteOwnership,
@@ -256,6 +261,60 @@ test('the old isRouteTaken callback still answers when it is the only one inject
     statusOf(checkStructuralInvariants('page', 'page_new', pageBody('/x'), {}, false), 'structure_route'),
     'optional'
   );
+});
+
+// ─── the retire round trip ───────────────────────────────────────────────────
+
+test('a retired object is not blocked by the redirect its own retirement wrote', async () => {
+  // object-retire.ts writes the forwarding rule for the route it just removed
+  // and stamps it with `retired_object_id`. Reading the table by `from` alone
+  // made the archived object's route owned by ITS OWN redirect, so every later
+  // patch to it — including un-retiring it, which W14 F6 ruling 1 makes
+  // explicitly reversible — would have failed structure_route with a 422.
+  // drlurie and fernwell each carry exactly such a rule today.
+  const records = new Map<string, string>([
+    [
+      'objects/page/by-id/page_retired.json',
+      JSON.stringify({
+        object_id: 'page_retired',
+        object_type: 'page',
+        body: { route: '/gone', pageType: 'standard', title: 'Gone', sections: [] },
+        publication: { published_time: null },
+      }),
+    ],
+    [
+      'site/redirects.v1.json',
+      JSON.stringify([
+        { from: '/gone', to: '/', status: 301, retired_object_id: 'page_retired' },
+        { from: '/somebody-elses', to: '/', status: 301, retired_object_id: 'page_other' },
+      ]),
+    ],
+  ]);
+  const store = {
+    async get(key: string) {
+      return records.get(key) ?? null;
+    },
+    async list({ prefix }: { prefix: string }) {
+      return {
+        blobs: [...records.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+        directories: [],
+      };
+    },
+    async setJSON() {},
+  } as never;
+
+  const own = await buildStoreValidationContext(store, { selfObjectId: 'page_retired', selfObjectType: 'page' });
+  assert.equal(own.resolveRouteOwner?.('/gone'), undefined, 'its own retirement redirect must not own its route');
+  // …and the rest of the table is still a namespace, not dropped along with it.
+  assert.deepEqual(own.resolveRouteOwner?.('/somebody-elses'), { kind: 'redirect', id: '/somebody-elses' });
+
+  // A DIFFERENT object writing to that route is still blocked. It is reported
+  // as the PAGE rather than the redirect because the archived record is still
+  // in the store (retire archives, it does not delete — W14 F6 ruling 1) and
+  // `page` outranks `redirect`. Either owner refuses the write; naming the
+  // page is the more actionable of the two.
+  const other = await buildStoreValidationContext(store, { selfObjectId: 'page_new', selfObjectType: 'page' });
+  assert.deepEqual(other.resolveRouteOwner?.('/gone'), { kind: 'page', id: 'page_retired' });
 });
 
 // ─── the per-tenant seam ─────────────────────────────────────────────────────
