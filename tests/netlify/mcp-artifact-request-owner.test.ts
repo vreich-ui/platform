@@ -23,7 +23,12 @@
  *
  * "Passes" is asserted the way the sibling mismatch test asserts "refused":
  * by whether pdf-tool was reached at all. A scope refusal never reaches the
- * network, so a non-zero fetch count IS the resolver saying yes.
+ * network, so reaching pdf-tool IS the resolver saying yes.
+ *
+ * Count the JOB create, not every upstream fetch: an image-generation job also
+ * reads this project's image-model routing policy (`get_image_model_policy`)
+ * before it creates anything, so a passing call makes two upstream requests,
+ * not one. A refusal still makes zero — the scope wall precedes both.
  */
 import '../../sites/drlurie/config/policy-bindings.js';
 import assert from 'node:assert/strict';
@@ -174,7 +179,11 @@ const callBridge = async (requestId: string) => {
       filename: 'owner.webp',
       wait: false,
     });
-    return { result, upstreamCalls: calls.length };
+    return {
+      result,
+      upstreamCalls: calls.length,
+      jobCalls: calls.filter((call) => call.tool === 'create_agent_artifact_job').length,
+    };
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -184,11 +193,11 @@ test('a content_item that owns its request id still resolves, with no owner poin
   await resetStores();
   await seedContentItem();
 
-  const { result, upstreamCalls } = await callBridge(CONTENT_ITEM_REQUEST_ID);
+  const { result, jobCalls } = await callBridge(CONTENT_ITEM_REQUEST_ID);
 
   // The resolver's verdict is "was pdf-tool reached", not "did the whole job
   // succeed": a scope refusal never reaches the network at all.
-  assert.equal(upstreamCalls, 1, 'the resolver passed and pdf-tool was reached');
+  assert.equal(jobCalls, 1, 'the resolver passed and pdf-tool was reached');
   assert.equal(scopeErrorCode(result), undefined);
 });
 
@@ -201,9 +210,9 @@ test('a registered ACTIVE page owner resolves a request no content_item answers 
     site: 'site_drlurie',
   });
 
-  const { result, upstreamCalls } = await callBridge(CAPTURE_REQUEST_ID);
+  const { result, jobCalls } = await callBridge(CAPTURE_REQUEST_ID);
 
-  assert.equal(upstreamCalls, 1, 'the page owner passed the wall');
+  assert.equal(jobCalls, 1, 'the page owner passed the wall');
   assert.equal(scopeErrorCode(result), undefined);
 });
 
