@@ -323,6 +323,62 @@ test('save-artifact single-shot uploads dedupe by checksum', async () => {
   assert.deepEqual(indexedReference, first.json.artifact);
 });
 
+test('save-artifact dedupes identical bytes ACROSS request ids, keeping each request its own path', async () => {
+  process.env.NETLIFY_PUBLISH_SECRET = publishSecret;
+  process.env.PUBLISH_SECRET = publishSecret;
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+
+  // W2 T2.4 parity for the direct-upload endpoint: saveArtifactBytes was not the
+  // only byte writer. This path used to store a fresh blob for bytes that already
+  // existed under another request, and never registered a by-sha entry either.
+  const payload = (await createImageBytes('png')).toString('base64');
+
+  const requestA = uniqueRequestId('artifact-xreq-a');
+  const first = await postArtifact({ ...makeBaseInput(requestA), encoding: 'base64', payload });
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(first.json.deduped, false);
+
+  const firstArtifact = first.json.artifact as { blobKey: string; sha256: string; storageKey?: string };
+  assert.equal(firstArtifact.storageKey, undefined, 'the first request owns its bytes; no redirect');
+
+  const requestB = uniqueRequestId('artifact-xreq-b');
+  const second = await postArtifact({ ...makeBaseInput(requestB), encoding: 'base64', payload });
+
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json.deduped, true);
+  assert.equal(second.json.dedupedFrom, requestA);
+
+  const secondArtifact = second.json.artifact as { blobKey: string; sha256: string; storageKey?: string };
+
+  // blobKey is IDENTITY: request B keeps its own key and therefore its own
+  // /img/<requestB>/<sha>.png public path. Only the read side is redirected.
+  assert.ok(secondArtifact.blobKey.includes(requestB));
+  assert.notEqual(secondArtifact.blobKey, firstArtifact.blobKey);
+  assert.equal(secondArtifact.storageKey, firstArtifact.blobKey);
+  assert.equal(secondArtifact.sha256, firstArtifact.sha256);
+
+  const artifactStore = await getArtifactBlobStore({});
+
+  assert.deepEqual(
+    (await artifactStore.list({ prefix: `image/${requestB}/` })).blobs.map((blob) => blob.key),
+    [],
+    'no second copy of the bytes was written'
+  );
+  assert.deepEqual(
+    (await artifactStore.list({ prefix: `image/${requestA}/` })).blobs.map((blob) => blob.key),
+    [firstArtifact.blobKey]
+  );
+
+  const indexStore = await getArtifactIndexBlobStore({});
+  const shaEntryText = await indexStore.get(`by-sha/image/${firstArtifact.sha256}.json`);
+  const shaEntry = shaEntryText ? (JSON.parse(shaEntryText) as { storageKey: string; firstRequestId: string }) : null;
+
+  assert.equal(shaEntry?.storageKey, firstArtifact.blobKey);
+  assert.equal(shaEntry?.firstRequestId, requestA);
+});
+
 test('save-artifact accepts a valid JPEG upload with matching expected size and sha256', async () => {
   process.env.NETLIFY_PUBLISH_SECRET = publishSecret;
   process.env.PUBLISH_SECRET = publishSecret;

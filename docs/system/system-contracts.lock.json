@@ -142,7 +142,8 @@
       "metadata",
       "deletedAtISO",
       "deletedBy",
-      "materializationProof"
+      "materializationProof",
+      "storageKey"
     ],
     "grantStores": {
       "artifacts": "artifacts",
@@ -196,7 +197,7 @@
     ],
     "rawExportPath": "/export",
     "weightsEnvelopeKey": "experiments",
-    "mcpToolCount": 108
+    "mcpToolCount": 111
   },
   "cmsAgent": {
     "maxConversationTools": 99,

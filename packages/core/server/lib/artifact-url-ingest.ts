@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 import { getDirectArtifactUploadMaxBytes, saveArtifactBytes, type SaveArtifactBytesResult } from './artifact-upload.js';
+import { type ArtifactRequestOwnerType } from './artifact-index.js';
 import { type ArtifactKind } from './artifacts.js';
 import { sha256Hex } from './crypto.js';
 
@@ -17,6 +18,12 @@ export type SaveArtifactFromUrlInput = {
   tags?: string[];
   metadata?: Record<string, unknown>;
   event?: unknown;
+  /**
+   * W1 T1.3: the CMS object that owns this request id. Forwarded verbatim to
+   * `saveArtifactBytes`, which registers the pointer once the bytes are
+   * stored. Omitting it is today's behaviour — no pointer is written.
+   */
+  owner?: { object_type: ArtifactRequestOwnerType; object_id: string };
 };
 
 export type SaveArtifactFromUrlResult = SaveArtifactBytesResult & {
@@ -276,6 +283,8 @@ export const saveArtifactFromUrl = async (input: SaveArtifactFromUrlInput): Prom
       bytes: bytes,
       metadata: input.metadata,
       event: input.event,
+      owner: input.owner,
+      ownerRegisteredBy: 'create_artifact_from_url',
     });
 
     return {

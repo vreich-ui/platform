@@ -5,6 +5,7 @@ import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import {
+  artifactStorageKey,
   getImageArtifactReadDiagnostics,
   reconcileImageArtifactReference,
   type ArtifactReference,
@@ -471,10 +472,17 @@ export const readAdminBlobImage = async (event: LambdaEvent, blobKey: string, bi
       createdAtISO: new Date(0).toISOString(),
     };
     const store = await getArtifactBlobStore(event, binding);
+    // W2 T2.3: read the BYTES through the storage key. When the reference is
+    // deduplicated (storageKey !== blobKey) reconciliation runs against the blob that
+    // actually holds them, and the index is NOT handed in — a "correction" there would
+    // rewrite the request-scoped blobKey, which W2 forbids.
+    const storageKey = artifactStorageKey(reference);
+    const isRedirected = storageKey !== reference.blobKey;
+    const { storageKey: _storageKey, ...referenceWithoutStorageKey } = reference;
     const reconciliation = await reconcileImageArtifactReference(
-      reference,
+      isRedirected ? { ...referenceWithoutStorageKey, blobKey: storageKey } : reference,
       store,
-      indexedReference ? indexStore : undefined
+      indexedReference && !isRedirected ? indexStore : undefined
     );
 
     if (reconciliation.status === 'missing') {

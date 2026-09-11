@@ -62,7 +62,33 @@ export type ArtifactReference = {
    * it is present.
    */
   materializationProof?: string;
+  /**
+   * W2 T2.2: the key the BYTES actually live under in the tenant artifact store,
+   * when it differs from `blobKey`.
+   *
+   * `blobKey` stays the request-scoped identity of this reference and the only
+   * thing the public `/img/<requestId>/<sha256>.<ext>` path is derived from — it
+   * is never rewritten, so no existing page `src`, no `MAJOR_KEY_ARTIFACT_REF_RE`
+   * match and no trust-index entry changes meaning. `storageKey` is purely a
+   * read-side redirect: identical bytes uploaded under a second request id get
+   * their own reference and their own public path, but point at the FIRST
+   * request's blob instead of storing the payload twice.
+   *
+   * Absent on every reference written before this field existed, and absent
+   * whenever it would equal `blobKey` — which is why `artifactStorageKey()`,
+   * not a raw property read, is the only correct way to resolve bytes.
+   * NO MIGRATION: a reference without it reads exactly as it always did.
+   */
+  storageKey?: string;
 };
+
+/**
+ * W2 T2.3: the ONE way to turn an ArtifactReference into the key its bytes are
+ * stored under. Every byte read in the fleet must go through this — a raw
+ * `reference.blobKey` read 404s on any deduplicated artifact.
+ */
+export const artifactStorageKey = (reference: Pick<ArtifactReference, 'blobKey' | 'storageKey'>): string =>
+  reference.storageKey ?? reference.blobKey;
 
 export type ReadableArtifactBlobStore = {
   get(key: string, options: { type: 'arrayBuffer' }): Promise<Buffer | ArrayBuffer | string | null>;
@@ -362,6 +388,8 @@ export const allowedArtifactReferenceKeys = new Set([
   'deletedBy',
   // S-20: opaque materialization attestation — stored, never interpreted here.
   'materializationProof',
+  // W2 T2.2: byte-storage redirect for sha-deduplicated artifacts. See ArtifactReference.storageKey.
+  'storageKey',
 ]);
 
 export const safePathSegment = (value: string): string => {
@@ -538,6 +566,7 @@ export const getArtifactReferenceIssue = (value: unknown): string | undefined =>
     deletedAtISO,
     deletedBy,
     materializationProof,
+    storageKey,
   } = value;
   if (typeof blobKey !== 'string' || !blobKey.trim()) return 'blobKey must be a non-empty string';
   if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) return 'sha256 must be a 64-character hex string';
@@ -599,6 +628,15 @@ export const getArtifactReferenceIssue = (value: unknown): string | undefined =>
       artifactReferenceLimits.materializationProof
     );
     if (issue) return issue;
+  }
+  if (storageKey !== undefined) {
+    // Held to exactly the same shape law as blobKey, against the SAME sha256:
+    // deduplication only ever redirects to another request's blob for the same
+    // bytes, so a storageKey whose digest disagrees is corruption, not a pointer.
+    if (typeof storageKey !== 'string' || !storageKey.trim()) return 'storageKey must be a non-empty string';
+    if (!isValidArtifactBlobKey(storageKey, sha256)) {
+      return 'storageKey must match the server ArtifactReference path format for this sha256';
+    }
   }
 
   return undefined;

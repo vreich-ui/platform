@@ -16,17 +16,25 @@
  * evaluation completes for both files before either's exported functions
  * are invoked by a real request).
  */
-import { getArtifactBlobStore, getArtifactIndexBlobStore, getWorkflowBlobStore } from './blob-store.js';
+import {
+  getArtifactBlobStore,
+  getArtifactIndexBlobStore,
+  getSiteObjectsBlobStore,
+  getWorkflowBlobStore,
+} from './blob-store.js';
 import { getMcpBinding } from './mcp-binding.js';
 import { collectBlobListItems } from './blob-list.js';
 import {
   listArtifactIndexKeys,
   listArtifactReferencesForRequest,
+  normalizeArtifactRequestOwnerInput,
   readArtifactReference,
   resolveArtifactPointer,
   writeArtifactReferenceIndexes,
+  writeRequestOwner,
   type ArtifactIndexStore,
 } from './artifact-index.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import {
   artifactKindValues,
   artifactReferenceLimits,
@@ -42,7 +50,13 @@ import {
   restoreArtifactReference,
   softDeleteArtifactReference,
   writeArtifactReferenceForAdminMutation,
+  type ArtifactByteStore,
 } from './artifact-soft-delete.js';
+import {
+  dedupeArtifactsBySha,
+  sweepOrphanArtifacts,
+  type ArtifactSweepListStore,
+} from './artifact-dedupe-sweep.js';
 import { validateRequestId } from '../../lib/agents-naming.js';
 import { getAdminStateFromEvent } from './admin-auth.js';
 import { resolveAdminAccessFromEvent } from './request-roles.js';
@@ -869,12 +883,70 @@ export const softDeleteArtifact = async (event: LambdaEvent, input: Record<strin
       sha256: input.sha256,
       deletedBy: input.deletedBy,
       deletedByFallback: adminEmail ?? adminUserId ?? 'admin',
+      // W2: opt-in, and even then guarded by the by-sha refcount — bytes another
+      // live reference's storageKey still points at are never removed.
+      removeBytes: input.removeBytes === true,
     },
     getMcpBinding()
   );
   if (!result.ok) return toolError(result.error);
 
-  return toolResult({ artifact: result.artifact, deleted: true });
+  return toolResult({
+    artifact: result.artifact,
+    deleted: true,
+    ...(result.bytes ? { bytes: result.bytes } : {}),
+  });
+};
+
+/**
+ * MCP `artifact_request_register_owner` (W1 T1.4): points an artifact request
+ * id at the CMS object that owns it.
+ *
+ * WHY IT IS ADMIN-ONLY, gated exactly like `soft_delete_artifact`. The owner
+ * pointer is half of the authorization decision
+ * `resolveArtifactBridgeScope` makes about whose site bytes may be written
+ * into. The WRITE tools (`create_artifact_from_url`,
+ * `create_artifact_upload_intent`, `save_artifact`) let their caller declare
+ * an owner for a request it is creating artifacts under in the same breath,
+ * which is self-describing and harmless. Registering an owner for an
+ * ARBITRARY request id — including one another agent already uses — is not,
+ * so that verb sits behind the publish secret or a real admin session, and
+ * stays out of tool discovery via INTERNAL_ONLY_TOOLS.
+ *
+ * It is not an override: a request already owned by a DIFFERENT object comes
+ * back 409 `artifact_request_owner_conflict` here too. Re-registering the
+ * same owner is a no-op, so this is safe to re-run.
+ */
+export const artifactRequestRegisterOwner = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const unauthorized = await requireAdminToolAccess(event);
+  if (unauthorized) return unauthorized;
+
+  const requestId = toNonEmptyString(input.request_id);
+  if (!requestId) return toolError('request_id is required.');
+
+  const owner = normalizeArtifactRequestOwnerInput({
+    object_type: input.object_type,
+    object_id: input.object_id,
+  });
+  if (!owner.ok) return toolError(owner.error);
+  if (!owner.owner) return toolError('object_type and object_id are required.');
+
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
+  const adminState = await getAdminToolState(event);
+  const registeredBy = !('isError' in adminState) ? (adminState.email ?? adminState.userId ?? 'admin') : 'admin';
+
+  const result = await writeRequestOwner(store, requestId, {
+    object_type: owner.owner.object_type,
+    object_id: owner.owner.object_id,
+    site: getSiteIdentity().siteId,
+    registered_by: registeredBy,
+  });
+
+  if (!result.ok) {
+    return toolError(result.error, { error_code: result.errorCode, statusCode: result.statusCode, ...(result.owner ? { owner: result.owner } : {}) });
+  }
+
+  return toolResult({ requestId, owner: result.owner, registered: result.changed });
 };
 
 export const restoreArtifact = async (event: LambdaEvent, input: Record<string, unknown>) => {
@@ -926,5 +998,129 @@ export const reconcileArtifactIndexes = async (event: LambdaEvent, input: Record
     ambiguous,
     skipped,
     results,
+  });
+};
+
+/**
+ * W2 T2.6 — MCP `artifact_dedupe_by_sha`.
+ *
+ * Admin-only, idempotent, cursor-paged compaction of blobs that already exist more
+ * than once for the same tenant. Keeps the OLDEST blob per sha and repoints every
+ * other reference's `storageKey` at it; the references themselves, their blobKeys
+ * and therefore every `/img|/pdf` public path are untouched (T2.5 is what keeps
+ * those paths serving after the duplicate bytes are gone).
+ *
+ * `dry_run` DEFAULTS TO TRUE: only an explicit `dry_run: false` deletes anything.
+ */
+export const artifactDedupeBySha = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const unauthorized = await requireAdminToolAccess(event);
+  if (unauthorized) return unauthorized;
+
+  const limit = normalizeArtifactReconcileLimit(input.limit);
+  if (!limit.ok) return toolError(limit.error);
+
+  const cursor = normalizeArtifactBrowseCursor(input.cursor);
+  if (!cursor.ok) return toolError(cursor.error);
+
+  const artifactKind = normalizeArtifactKindInput(input.artifact_kind ?? input.artifactKind, false);
+  if (!artifactKind.ok) return toolError(artifactKind.error);
+
+  // Default true — the destructive direction must be asked for by name.
+  const dryRun = (input.dry_run ?? input.dryRun) !== false;
+
+  const indexStore = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
+  const artifactStore = (await getArtifactBlobStore(event, getMcpBinding())) as unknown as ArtifactByteStore;
+
+  const result = await dedupeArtifactsBySha(indexStore, artifactStore, {
+    dryRun,
+    ...(artifactKind.artifactKind ? { artifactKind: artifactKind.artifactKind } : {}),
+    limit: limit.value,
+    cursor: cursor.value,
+  });
+
+  console.info('Artifact by-sha dedupe checkpoint.', {
+    dryRun,
+    groups: result.groups,
+    blobsDeleted: result.blobsDeleted,
+    bytesFreed: result.bytesFreed,
+    ...result.checkpoint,
+  });
+
+  return toolResult({
+    dry_run: result.dryRun,
+    groups: result.groups,
+    blobs_deleted: result.blobsDeleted,
+    bytes_freed: result.bytesFreed,
+    scanned: result.scanned,
+    checkpoint: result.checkpoint,
+    details: result.details,
+  });
+};
+
+/**
+ * W2 T2.7 — MCP `artifact_orphan_sweep`.
+ *
+ * Collects every artifact key cited by EVERY active object of EVERY object type
+ * (full projection, no field allowlist) plus slot pointers, then soft-deletes the
+ * live references nothing cites. Bytes are left in place — restore must stay
+ * possible — and dangling references (an object citing an artifact that is not
+ * there) are REPORTED, never repaired: rewriting governed object bodies to hide a
+ * broken reference would destroy the evidence of the real defect.
+ *
+ * `dry_run` DEFAULTS TO TRUE; the dry-run report lists what it would delete,
+ * grouped per request id.
+ */
+export const artifactOrphanSweep = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const unauthorized = await requireAdminToolAccess(event);
+  if (unauthorized) return unauthorized;
+
+  const limit = normalizeArtifactReconcileLimit(input.limit);
+  if (!limit.ok) return toolError(limit.error);
+
+  const cursor = normalizeArtifactBrowseCursor(input.cursor);
+  if (!cursor.ok) return toolError(cursor.error);
+
+  const dryRun = (input.dry_run ?? input.dryRun) !== false;
+  const requestPrefix = toNonEmptyString(input.request_prefix ?? input.requestPrefix);
+
+  const olderThanInput = toNonEmptyString(input.older_than ?? input.olderThan);
+  if (olderThanInput && Number.isNaN(Date.parse(olderThanInput))) {
+    return toolError('older_than must be an ISO 8601 date-time string.');
+  }
+
+  const adminState = await getAdminToolState(event);
+  const deletedBy = !('isError' in adminState)
+    ? (adminState.email ?? adminState.userId ?? 'artifact_orphan_sweep')
+    : 'artifact_orphan_sweep';
+
+  const indexStore = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
+  const objectsStore = (await getSiteObjectsBlobStore(event, getMcpBinding())) as unknown as ArtifactSweepListStore;
+
+  const result = await sweepOrphanArtifacts(indexStore, objectsStore, {
+    dryRun,
+    ...(requestPrefix ? { requestPrefix } : {}),
+    ...(olderThanInput ? { olderThan: olderThanInput } : {}),
+    deletedBy,
+    limit: limit.value,
+    cursor: cursor.value,
+  });
+
+  console.info('Artifact orphan sweep checkpoint.', {
+    dryRun,
+    orphans: result.orphans,
+    softDeleted: result.softDeleted,
+    dangling: result.dangling.length,
+    ...result.checkpoint,
+  });
+
+  return toolResult({
+    dry_run: result.dryRun,
+    scanned: result.scanned,
+    referenced_keys: result.referencedKeys,
+    orphans: result.orphans,
+    soft_deleted: result.softDeleted,
+    by_request: result.byRequest,
+    dangling: result.dangling,
+    checkpoint: result.checkpoint,
   });
 };

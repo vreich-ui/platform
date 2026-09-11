@@ -20,14 +20,19 @@
  * `wait: true` (create_agent_artifact_job's own inline-wait budget) means a
  * single call usually comes back with the finished artifact already.
  *
- * NO OWNING CONTENT_ITEM. A template sample belongs to no article, so this
- * mints its own throwaway request id and hands `callCreateAgentArtifactJob`
- * a `presolvedScope` — the exact mechanism the visual-standard example
- * generator's platform-internal jobs already use
- * (mcp-tool-handlers.ts's `createVisualStandardExampleJob`) to skip the
- * content_item-ownership check that has nothing to check against here. The
- * id is never trusted FROM the browser — it is minted here, server-side,
- * from the template id and the clock.
+ * NO OWNING OBJECT. A template sample belongs to no article, so this mints
+ * its own throwaway request id and hands `callCreateAgentArtifactJob` a
+ * `presolvedScope`, skipping an ownership check that has nothing to check
+ * against here. The id is never trusted FROM the browser — it is minted
+ * here, server-side, from the template id and the clock.
+ *
+ * W1: this is now the LAST `presolvedScope` caller. The visual-standard
+ * example generator, which used the same mechanism, registers a
+ * `visual_standard` owner instead and goes through the real wall; a
+ * `pdf_template` is deliberately not in `ARTIFACT_REQUEST_OWNER_TYPES`, so
+ * this path has no equivalent owner to declare. Registering the SITE as the
+ * owner of a template sample would retire the bypass entirely — left to a
+ * wave that can exercise this admin path end to end.
  *
  * WHY THIS CONFIGURES MCP. `callCreateAgentArtifactJob` looks up the site
  * record for brand injection on every PDF job (D-3), through

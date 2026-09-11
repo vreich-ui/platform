@@ -97,7 +97,23 @@ import {
   type DocumentContentCheck,
 } from './pdf-content-inspection.js';
 import { recordPdfContentCheck } from './pdf-content-check-store.js';
-import { readArtifactReferenceResult, type ArtifactIndexStore } from './artifact-index.js';
+import {
+  ARTIFACT_REQUEST_OWNER_TYPES,
+  normalizeArtifactRequestOwnerInput,
+  readArtifactReferenceResult,
+  readRequestOwner,
+  resolveArtifactStorageKeyForBlobKey,
+  writeRequestOwner,
+  type ArtifactIndexStore,
+} from './artifact-index.js';
+
+/**
+ * Re-exported here because this module is where the artifact bridge's
+ * ownership rule lives: a reader asking "what may own a request id?" reads
+ * `resolveArtifactBridgeScope`, not the index module underneath it. One list,
+ * defined in the leaf, surfaced where it is enforced.
+ */
+export { ARTIFACT_REQUEST_OWNER_TYPES };
 import type { DocumentContentRequirement } from '../../lib/pdf/document-content-check.js';
 import {
   CAPTURE_BRIDGE_MAX_PAGES,
@@ -603,10 +619,55 @@ const createRequiredArtifactUploadHeaders = (input: {
   ...(input.tags?.length ? { 'X-Artifact-Tags': input.tags.join(',') } : {}),
 });
 
+/**
+ * W1 T1.3. Registers the request-owner pointer for an artifact WRITE tool.
+ *
+ * Non-fatal by design, and for the same reason on both callers: the pointer
+ * is a routing fact about a request id, not a precondition of storing bytes.
+ * An owner conflict means the request already belongs to another object —
+ * keep the FIRST owner, log it, and never let it fail a call whose actual
+ * work (an upload intent, an uploaded artifact) has already succeeded.
+ *
+ * The owner object is NOT required to exist yet; existence, `status: active`
+ * and site are `resolveArtifactBridgeScope`'s job at media-op time.
+ */
+const registerArtifactRequestOwner = async (
+  event: LambdaEvent,
+  requestId: string,
+  owner: { object_type: (typeof ARTIFACT_REQUEST_OWNER_TYPES)[number]; object_id: string } | undefined,
+  registeredBy: string
+) => {
+  if (!owner) return;
+
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding()).catch(() => undefined)) as unknown as
+    | ArtifactIndexStore
+    | undefined;
+  if (!store) return;
+
+  const result = await writeRequestOwner(store, requestId, {
+    object_type: owner.object_type,
+    object_id: owner.object_id,
+    site: getSiteIdentity().siteId,
+    registered_by: registeredBy,
+  }).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+
+  if (!result.ok) {
+    console.warn(`[artifact-owner] request owner not registered for ${requestId}: ${result.error}`);
+  }
+};
+
 export const callCreateArtifactUploadIntent = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const normalized = normalizeArtifactUploadIntentInput(input);
   if (!normalized.ok)
     return toolError(normalized.error, 'maxBytes' in normalized ? { maxBytes: normalized.maxBytes } : {});
+
+  // Registered at INTENT time rather than when the bytes land: the direct
+  // upload endpoint is reached with the scoped token alone and carries no
+  // owner argument, and an intent that is never completed leaves a pointer
+  // that is harmless — the owner object still has to exist and be active
+  // before any media op on this request resolves.
+  const owner = normalizeArtifactRequestOwnerInput(input.owner);
+  if (!owner.ok) return toolError(owner.error);
 
   const expiresAt = Date.now() + defaultArtifactUploadTokenTtlMs;
 
@@ -623,6 +684,13 @@ export const callCreateArtifactUploadIntent = async (event: LambdaEvent, input: 
       expiresAt,
     });
 
+    await registerArtifactRequestOwner(
+      event,
+      normalized.value.requestId,
+      owner.owner,
+      'create_artifact_upload_intent'
+    );
+
     return toolResult({
       ok: true,
       uploadUrl: getArtifactUploadBaseUrl(event),
@@ -637,9 +705,19 @@ export const callCreateArtifactUploadIntent = async (event: LambdaEvent, input: 
 };
 
 export const callArtifactUpload = async (event: LambdaEvent, payload: Record<string, unknown>) => {
-  const result = await invokeSaveArtifact(event, payload);
+  // `owner` is a PLATFORM-side pointer, not part of the save-artifact upload
+  // contract: strip it before forwarding so the sibling function's schema
+  // never has to know about it, and write the pointer here on success.
+  const { owner: ownerInput, ...uploadPayload } = payload;
+  const owner = normalizeArtifactRequestOwnerInput(ownerInput);
+  if (!owner.ok) return toolError(owner.error);
+
+  const result = await invokeSaveArtifact(event, uploadPayload);
 
   if ('isError' in result) return result;
+
+  const requestId = toNonEmptyString(payload.requestId);
+  if (requestId) await registerArtifactRequestOwner(event, requestId, owner.owner, 'save_artifact');
 
   return toolResult(result);
 };
@@ -717,6 +795,25 @@ const invokeObjectStore = async (event: LambdaEvent, payload: Record<string, unk
 
 type ArtifactBridgeScope = { siteId: string; requestId: string };
 
+/**
+ * Reads this request's registered owner pointer, or `undefined`.
+ *
+ * Fails SOFT on every store problem (binding missing, blob read error,
+ * unparseable record): an unreadable pointer means "no registered owner",
+ * which falls through to the not-found answer below. It can never turn into a
+ * pass, and it must never turn a media op into a 500 — the artifact-index
+ * store being briefly unreachable is not the caller's fault and not an
+ * authorization decision.
+ */
+const readArtifactRequestOwner = async (event: LambdaEvent, requestId: string) => {
+  const store = (await getArtifactIndexBlobStore(event, getMcpBinding()).catch(() => undefined)) as unknown as
+    | ArtifactIndexStore
+    | undefined;
+  if (!store) return undefined;
+
+  return readRequestOwner(store, requestId).catch(() => undefined);
+};
+
 const resolveArtifactBridgeScope = async (
   event: LambdaEvent,
   input: Record<string, unknown>
@@ -741,35 +838,82 @@ const resolveArtifactBridgeScope = async (
     };
   }
 
+  // ── Step 1: the content_item identity (unchanged) ───────────────────────
+  // An article owns its request id IMPLICITLY — the request id IS the
+  // content_item's object id — and writes no owner pointer. This branch must
+  // stay byte-for-byte equivalent to what it always did, including the
+  // scope-mismatch answer for a content_item that exists on another site.
   const lookup = await invokeObjectStore(event, {
     action: 'get',
     object_type: 'content_item',
     object_id: requestId,
   });
-  if ('isError' in lookup) {
-    return {
-      ok: false,
-      result: toolError(
-        `Artifact request mapping is absent: content_item ${requestId} does not exist on ${siteId}. Create or select the owning content object before requesting artifacts.`,
-        { error_code: 'artifact_request_not_found' }
-      ),
-    };
+  if (!('isError' in lookup)) {
+    const record =
+      lookup.record && typeof lookup.record === 'object' && !Array.isArray(lookup.record)
+        ? (lookup.record as Record<string, unknown>)
+        : undefined;
+    if (!record || record.object_id !== requestId || record.site !== siteId) {
+      return {
+        ok: false,
+        result: toolError(`Artifact scope mismatch: ${requestId} is not owned by ${siteId}.`, {
+          error_code: 'artifact_request_scope_mismatch',
+        }),
+      };
+    }
+
+    return { ok: true, scope: { siteId, requestId } };
   }
 
-  const record =
-    lookup.record && typeof lookup.record === 'object' && !Array.isArray(lookup.record)
-      ? (lookup.record as Record<string, unknown>)
-      : undefined;
-  if (!record || record.object_id !== requestId || record.site !== siteId) {
-    return {
-      ok: false,
-      result: toolError(`Artifact scope mismatch: ${requestId} is not owned by ${siteId}.`, {
-        error_code: 'artifact_request_scope_mismatch',
-      }),
-    };
+  // ── Step 2: a REGISTERED owner of any allowlisted type (W1 T1.2) ────────
+  // No content_item answers for this request. That used to end the story, and
+  // it is why every capture page's imagery and every visual_standard example
+  // failed the wall: neither is an article, and neither ever could be. A
+  // request id is a name; `request-owner/<id>.json` says which governed object
+  // answers for it.
+  //
+  // The owner is held to the SAME bar the content_item branch holds an article
+  // to — it must exist, it must be `status: active`, and it must live on this
+  // site — because this resolver is the authorization wall for writing bytes
+  // into a tenant, not a convenience lookup.
+  const owner = await readArtifactRequestOwner(event, requestId);
+  if (owner) {
+    const ownerLookup = await invokeObjectStore(event, {
+      action: 'get',
+      object_type: owner.object_type,
+      object_id: owner.object_id,
+    });
+    if (!('isError' in ownerLookup)) {
+      const ownerRecord = getRecordValue((ownerLookup as { record?: unknown }).record);
+      if (ownerRecord && ownerRecord.object_id === owner.object_id) {
+        // A registered owner on ANOTHER site is a scope mismatch, not a
+        // missing request: the request is real and its owner is known, the
+        // caller is simply pointed at the wrong deployment. Saying
+        // "not found" there would send an operator hunting for an object
+        // that exists.
+        if (ownerRecord.site !== siteId) {
+          return {
+            ok: false,
+            result: toolError(
+              `Artifact scope mismatch: ${requestId} is owned by ${owner.object_type} ${owner.object_id} on ${String(ownerRecord.site)}, not ${siteId}.`,
+              { error_code: 'artifact_request_scope_mismatch' }
+            ),
+          };
+        }
+        if (ownerRecord.status === 'active') {
+          return { ok: true, scope: { siteId, requestId } };
+        }
+      }
+    }
   }
 
-  return { ok: true, scope: { siteId, requestId } };
+  return {
+    ok: false,
+    result: toolError(
+      `No content object owns request ${requestId} on ${siteId}. Register an owner (page, content_item, visual_standard...) or create the owning object first.`,
+      { error_code: 'artifact_request_not_found' }
+    ),
+  };
 };
 
 // ── perf/drop-verify-hop-cache-scope, Change 2 ──────────────────────────────
@@ -1292,6 +1436,10 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
   const artifactStore = (await getArtifactBlobStore(event, getMcpBinding())) as {
     get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null>;
   };
+  const artifactIndexStore = (await getArtifactIndexBlobStore(
+    event,
+    getMcpBinding()
+  )) as unknown as ArtifactIndexStore;
   const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
 
   const result = await proposeBrandImagery(proposeInput, {
@@ -1299,7 +1447,10 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
     resolveBlobUrl: (blobKey) => `${baseUrl}${publicPathForArtifactRef(blobKey)}`,
     readBlobBytes: async (blobKey) => {
       try {
-        const raw = await artifactStore.get(blobKey, { type: 'arrayBuffer' });
+        // W2 T2.3: the caller hands us a request-scoped blobKey; the BYTES may be
+        // deduplicated onto another request's blob. Fails open to the raw key.
+        const storageKey = await resolveArtifactStorageKeyForBlobKey(artifactIndexStore, blobKey);
+        const raw = await artifactStore.get(storageKey, { type: 'arrayBuffer' });
         return raw ? Buffer.from(raw) : undefined;
       } catch {
         return undefined;
@@ -1348,19 +1499,26 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
 };
 
 /**
- * REVIEW (brand-imagery wave): `presolvedScope` is the ONE way a job can skip
- * `resolveArtifactBridgeScope`, and it is reachable only from inside this
- * module — mcp.ts's dispatch calls this with `(event, input)` and nothing
- * else, so no tool argument can forge it and the content_item-ownership wall
- * every agent-reachable call hits is untouched.
+ * `presolvedScope` is the ONE way a job can skip `resolveArtifactBridgeScope`,
+ * and it is reachable only from inside this package — mcp.ts's dispatch calls
+ * this with `(event, input)` and nothing else, so no tool argument can forge
+ * it and the ownership wall every agent-reachable call hits is untouched.
  *
- * It exists because X1's example generator is a PLATFORM-INTERNAL caller with
- * no content_item to own its artifacts: it mints its own
- * `req_visimg_<standard>_<context>_<date>_<nn>` request id, and the ownership
- * lookup therefore failed with `artifact_request_not_found` on every single
- * example job — which is why not one example image was ever produced, on any
- * trigger. The check it skips is an authorization check on the CALLER's claim
- * to a request; a scope this module computed itself has no claim to check.
+ * W1 T1.7 removed its ORIGINAL reason and its main user. It existed because
+ * the wall could see nothing but `content_item`s, so the visual-standard
+ * example generator — which owns its artifacts with a `visual_standard` —
+ * failed `artifact_request_not_found` on every single job, which is why not
+ * one example image was ever produced on any trigger. That caller now
+ * registers its owner and goes through the front door
+ * (`createVisualStandardExampleJob` below).
+ *
+ * EXACTLY ONE caller is left: `functions/admin-visual-identity-render-sample.ts`,
+ * which renders a pdf_template's own sampleData under a throwaway minted
+ * request id. A template sample belongs to no article and `pdf_template` is
+ * deliberately NOT in `ARTIFACT_REQUEST_OWNER_TYPES`, so there is still no
+ * ownership claim there to check. Registering the site as its owner would
+ * close this out; it is left for a wave that can exercise that admin path,
+ * rather than widened here on inference. Do not add a third caller.
  */
 export const callCreateAgentArtifactJob = async (
   event: LambdaEvent,
@@ -2147,7 +2305,7 @@ const refuseCallerSuppliedBridgeCredentials = (
   );
 };
 
-type AnnotationSourceArtifact = { blobKey: string; sha256: string; publicPath: string };
+type AnnotationSourceArtifact = { blobKey: string; sha256: string; publicPath: string; storageKey?: string };
 
 /**
  * Resolve the image artifact a bridge call is about, from the identifiers a
@@ -2227,7 +2385,23 @@ const resolveAnnotationSourceArtifact = async (
         ),
       };
     }
-    return { ok: true, source: { blobKey, sha256, publicPath } };
+    // W2 T2.3: the public-path branch never opens the index, so resolve the byte key
+    // here — pdf-tool reads the tenant store by the key we hand it (fails open).
+    const publicPathIndexStore = (await getArtifactIndexBlobStore(
+      event,
+      getMcpBinding()
+    )) as unknown as ArtifactIndexStore;
+    const publicPathStorageKey = await resolveArtifactStorageKeyForBlobKey(publicPathIndexStore, blobKey);
+
+    return {
+      ok: true,
+      source: {
+        blobKey,
+        sha256,
+        publicPath,
+        ...(publicPathStorageKey !== blobKey ? { storageKey: publicPathStorageKey } : {}),
+      },
+    };
   }
 
   const store = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
@@ -2265,6 +2439,9 @@ const resolveAnnotationSourceArtifact = async (
       blobKey: read.reference.blobKey,
       sha256: read.reference.sha256,
       publicPath: publicPathForArtifactRef(read.reference.blobKey),
+      // W2 T2.3: carried separately so the PUBLIC path stays request-scoped while the
+      // bridge hands pdf-tool the key the bytes are really under.
+      ...(read.reference.storageKey ? { storageKey: read.reference.storageKey } : {}),
     },
   };
 };
@@ -2382,7 +2559,11 @@ export const callAnnotateImage = async (event: LambdaEvent, input: Record<string
 
   const annotated = await annotatePlatformImage(grant, {
     requestId: scope.requestId,
-    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    source: {
+      blobKey: source.blobKey,
+      sha256: source.sha256,
+      ...(source.storageKey ? { storageKey: source.storageKey } : {}),
+    },
     spec: forwardedSpec,
     format: input.format,
     quality: input.quality,
@@ -2425,7 +2606,11 @@ export const callAnalyzeImageLayout = async (event: LambdaEvent, input: Record<s
 
   const analyzed = await analyzePlatformImageLayout(grant, {
     requestId: scope.requestId,
-    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    source: {
+      blobKey: source.blobKey,
+      sha256: source.sha256,
+      ...(source.storageKey ? { storageKey: source.storageKey } : {}),
+    },
   });
   if (!analyzed.ok) return pdfToolBridgeError(analyzed);
 
@@ -2447,7 +2632,11 @@ export const callPreviewImageGrid = async (event: LambdaEvent, input: Record<str
 
   const preview = await previewPlatformImageGrid(grant, {
     requestId: scope.requestId,
-    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    source: {
+      blobKey: source.blobKey,
+      sha256: source.sha256,
+      ...(source.storageKey ? { storageKey: source.storageKey } : {}),
+    },
     filename: input.filename,
     tags: input.tags,
     label: input.label,
@@ -2495,7 +2684,11 @@ export const callCheckImageText = async (event: LambdaEvent, input: Record<strin
 
   const checked = await checkPlatformImageText(grant, {
     requestId: scope.requestId,
-    source: { blobKey: source.blobKey, sha256: source.sha256 },
+    source: {
+      blobKey: source.blobKey,
+      sha256: source.sha256,
+      ...(source.storageKey ? { storageKey: source.storageKey } : {}),
+    },
     mode: input.mode,
     expect: input.expect,
     languages: input.languages,
@@ -3900,14 +4093,33 @@ const createVisualStandardExampleJob = async (
   event: LambdaEvent,
   input: Record<string, unknown>
 ): Promise<{ ok: boolean; blobKey?: string; reason?: string }> => {
-  // The scope is this module's OWN (see callCreateAgentArtifactJob's
-  // `presolvedScope`): an example belongs to a visual_standard, never to a
-  // content_item, so there is no ownership claim to verify — and verifying
-  // one is what silently killed every example job before this.
-  const result = await callCreateAgentArtifactJob(event, input, {
-    siteId: toNonEmptyString(input.site_id) ?? getSiteIdentity().siteId,
-    requestId: toNonEmptyString(input.request_id) ?? '',
-  });
+  // W1 T1.7. This used to hand `callCreateAgentArtifactJob` a scope it had
+  // computed itself, skipping the ownership wall entirely — the only bypass
+  // in the module. It existed because an example belongs to a
+  // `visual_standard` and the wall could only see `content_item`s, so every
+  // example job died on `artifact_request_not_found` and not one example
+  // image was ever produced, on any trigger.
+  //
+  // The wall can now see a visual_standard, so this caller no longer passes
+  // a presolved scope and goes through the SAME check every agent-reachable
+  // call does. It
+  // simply declares the owner first: the standard exists (this whole flow
+  // runs against an existing one, and checks it out to persist the results),
+  // it is on this site, and it is the honest owner of these bytes. A
+  // registration that fails leaves the job to be refused by the wall with a
+  // reported reason, which is the correct outcome — not a silent bypass.
+  const visualStandardId = toNonEmptyString(getRecordValue(input.style)?.visualStandardId);
+  const requestId = toNonEmptyString(input.request_id);
+  if (requestId && visualStandardId) {
+    await registerArtifactRequestOwner(
+      event,
+      requestId,
+      { object_type: 'visual_standard', object_id: visualStandardId },
+      'visual_standard_examples'
+    );
+  }
+
+  const result = await callCreateAgentArtifactJob(event, input);
   if ('isError' in result) {
     const structured = getRecordValue((result as { structuredContent?: unknown }).structuredContent);
     return {

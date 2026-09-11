@@ -23,11 +23,16 @@
  * added here is paid for on every admin page load. The bundle-cap test in
  * tests/netlify/function-bundle-budget.test.ts is what makes that stick.
  */
-import { getArtifactIndexBlobStore } from './blob-store.js';
+import { getArtifactBlobStore, getArtifactIndexBlobStore } from './blob-store.js';
 import { getMcpBinding } from './mcp-binding.js';
-import { requestArtifactReferenceKey, type ArtifactIndexStore } from './artifact-index.js';
+import {
+  listArtifactIndexKeys,
+  requestArtifactReferenceKey,
+  type ArtifactIndexStore,
+} from './artifact-index.js';
 import {
   artifactReferenceLimits,
+  artifactStorageKey,
   isArtifactReference,
   isSafeArtifactText,
   type ArtifactReference,
@@ -105,8 +110,107 @@ export const writeArtifactReferenceForAdminMutation = async (
 export const openArtifactIndexStoreForAdminMutation = async (event: unknown, binding?: SiteBinding) =>
   (await getArtifactIndexBlobStore(event, binding ?? getMcpBinding())) as unknown as ArtifactIndexStore;
 
+/** A blob store this module can read a size from and delete by key. */
+export type ArtifactByteStore = {
+  get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | Buffer | string | null>;
+  del: (key: string) => Promise<unknown>;
+};
+
+export type ArtifactStorageRefcount = {
+  storageKey: string;
+  /** Live (non-soft-deleted) references whose bytes resolve to `storageKey`. */
+  liveReferences: number;
+  /** `request-artifacts/<requestId>/<sha>.json` owners of those references, for the report. */
+  requestIds: string[];
+};
+
+/**
+ * W2 soft-delete safety: count the LIVE references that share one blob.
+ *
+ * Before W2 every reference owned its own bytes, so "delete the reference" and
+ * "delete the bytes" could never disagree. With `storageKey`, N requests can share
+ * one blob — so removing the bytes behind one soft-deleted reference would silently
+ * 404 every OTHER request's public path for the same picture.
+ *
+ * Only references carrying this exact sha256 can point at this blob (the key embeds
+ * the digest), so scanning `request-artifacts/**\/<sha>.json` is a complete count, not
+ * a sample. `excludeRequestId` drops the reference being deleted from its own count.
+ */
+export const countLiveReferencesForStorageKey = async (
+  indexStore: ArtifactIndexStore,
+  storageKey: string,
+  sha256: string,
+  options: { excludeRequestId?: string } = {}
+): Promise<ArtifactStorageRefcount> => {
+  const suffix = `/${sha256.toLowerCase()}.json`;
+  const keys = (await listArtifactIndexKeys(indexStore, 'request-artifacts/')).filter((key) =>
+    key.toLowerCase().endsWith(suffix)
+  );
+
+  const requestIds: string[] = [];
+
+  for (const key of keys) {
+    const requestId = key.split('/')[1] ? decodeURIComponent(key.split('/')[1]) : '';
+    if (options.excludeRequestId && requestId === options.excludeRequestId) continue;
+
+    const reference = await parseJsonBlob(indexStore, key);
+    if (!isArtifactReference(reference)) continue;
+    if (reference.deletedAtISO) continue;
+    if (artifactStorageKey(reference) !== storageKey) continue;
+
+    requestIds.push(requestId);
+  }
+
+  return { storageKey, liveReferences: requestIds.length, requestIds: requestIds.sort() };
+};
+
+export type ArtifactByteRemoval = {
+  removed: boolean;
+  storageKey: string;
+  reason: 'removed' | 'shared' | 'absent';
+  sizeBytes: number;
+  sharedWith: string[];
+};
+
+/**
+ * Delete one artifact's bytes ONLY when no other live reference resolves to them.
+ * Never called implicitly: soft-delete keeps bytes by default (that is what makes it
+ * soft), and this runs only when a caller explicitly asks for byte removal.
+ */
+export const removeArtifactBytesIfUnreferenced = async (
+  indexStore: ArtifactIndexStore,
+  artifactStore: ArtifactByteStore,
+  reference: ArtifactReference,
+  options: { excludeRequestId?: string; dryRun?: boolean } = {}
+): Promise<ArtifactByteRemoval> => {
+  const storageKey = artifactStorageKey(reference);
+  const refcount = await countLiveReferencesForStorageKey(indexStore, storageKey, reference.sha256, {
+    excludeRequestId: options.excludeRequestId,
+  });
+
+  if (refcount.liveReferences > 0) {
+    return {
+      removed: false,
+      storageKey,
+      reason: 'shared',
+      sizeBytes: 0,
+      sharedWith: refcount.requestIds,
+    };
+  }
+
+  const bytes = await artifactStore.get(storageKey, { type: 'arrayBuffer' });
+  if (!bytes) return { removed: false, storageKey, reason: 'absent', sizeBytes: 0, sharedWith: [] };
+
+  const sizeBytes =
+    typeof bytes === 'string' ? Buffer.byteLength(bytes) : 'byteLength' in bytes ? bytes.byteLength : 0;
+
+  if (!options.dryRun) await artifactStore.del(storageKey);
+
+  return { removed: !options.dryRun, storageKey, reason: 'removed', sizeBytes, sharedWith: [] };
+};
+
 export type ArtifactMutationResult =
-  | { ok: true; artifact: ArtifactReference; changed: boolean }
+  | { ok: true; artifact: ArtifactReference; changed: boolean; bytes?: ArtifactByteRemoval }
   | { ok: false; error: string };
 
 /**
@@ -120,7 +224,19 @@ export type ArtifactMutationResult =
  */
 export const softDeleteArtifactReference = async (
   event: unknown,
-  input: { requestId: unknown; sha256: unknown; deletedBy: unknown; deletedByFallback: string },
+  input: {
+    requestId: unknown;
+    sha256: unknown;
+    deletedBy: unknown;
+    deletedByFallback: string;
+    /**
+     * W2: opt-in byte removal. Default (absent/false) keeps bytes exactly as this
+     * function always has. When true, bytes are removed ONLY if no other live
+     * reference's `storageKey` still resolves to them - see
+     * `removeArtifactBytesIfUnreferenced`.
+     */
+    removeBytes?: unknown;
+  },
   binding?: SiteBinding
 ): Promise<ArtifactMutationResult> => {
   const requestId = trimmedOrUndefined(input.requestId);
@@ -144,7 +260,14 @@ export const softDeleteArtifactReference = async (
 
   await writeArtifactReferenceForAdminMutation(store, requestId, deletedArtifact);
 
-  return { ok: true, artifact: deletedArtifact, changed: true };
+  if (input.removeBytes !== true) return { ok: true, artifact: deletedArtifact, changed: true };
+
+  const artifactStore = (await getArtifactBlobStore(event, binding ?? getMcpBinding())) as unknown as ArtifactByteStore;
+  const bytes = await removeArtifactBytesIfUnreferenced(store, artifactStore, deletedArtifact, {
+    excludeRequestId: requestId,
+  });
+
+  return { ok: true, artifact: deletedArtifact, changed: true, bytes };
 };
 
 /** Clear `deletedAtISO`/`deletedBy`. `changed` is false when the reference was not deleted to begin with. */
