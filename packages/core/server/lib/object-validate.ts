@@ -65,7 +65,19 @@ import { isRequestId } from '../../lib/agents-naming.js';
 import { contentItemRoute, DEFAULT_POST_PERMALINK_PATTERN } from '../../lib/tracking/experiments/arms.js';
 import { applyPatchOps, PatchApplyError } from '../../lib/object-patch-apply.js';
 import { navigationBodySchema, type NavigationBody } from '../../schema/bodies/navigation-v1.js';
-import { navActionCapacity, type CapacityRule } from '../../lib/registry/structural-capacity.js';
+import { navActionCapacity, type CapacityRule } from '../../lib/registry/region-registry.js';
+import { REGION_REGISTRY } from '../../lib/registry/region-registry.js';
+import { sectionFootprint } from '../../lib/registry/components/definitions.js';
+import {
+  ADJACENCY_EXEMPT_TYPES,
+  COMPOSITION_RULES,
+  CTA_DENSITY_MAX,
+  CTA_DENSITY_TYPES,
+  OPENER_TYPES,
+  SINGLETON_SECTION_TYPES,
+  VIEWPORT_BUDGET,
+  type CompositionSeverity,
+} from '../../lib/registry/composition-rules.js';
 import { splitRichTextBlocks, splitRichTextParagraphs } from '../../lib/richtext/paragraphs.js';
 import {
   PROSE_GRAMMAR,
@@ -220,6 +232,12 @@ export type ObjectValidationContext = {
    * `isArticleSlugTaken` answers.
    */
   resolveArticleSlugOwner?: (slug: string) => RouteOwner | undefined;
+  /**
+   * W1 T1.4: page object ids whose sections shared_ref this section object.
+   * A read over the SAME preloaded record snapshot every other resolver here
+   * uses — no new store, no extra round trip. Absent → impact not reported.
+   */
+  referencingPages?: (sectionObjectId: string) => string[];
   /**
    * Whether a page `route` is already taken by a DIFFERENT page (the resolver
    * excludes the object under validation). Absent → uniqueness not verified.
@@ -1919,7 +1937,7 @@ const navItems = (value: unknown): NavItemish[] => (Array.isArray(value) ? value
  */
 /**
  * Structural-capacity criterion for a role's `actions[]` slot (T-guardrail).
- * Reads the fixed bounds from the structural-capacity registry so the rule
+ * Reads the fixed bounds from the region registry so the rule
  * lives as inspectable data, not logic buried here. Within bounds → complete;
  * out of bounds → the rule's level ('warning' always advises; 'missing' warns
  * while drafting and hard-blocks at publish, the established nav idiom). No
@@ -3038,6 +3056,178 @@ const checkTrackingConfig = (
   return [crit('tracking_config_ready', label, 'complete', '')];
 };
 
+// ─── composition lints (W1 T1.3) ─────────────────────────────────────────────
+//
+// Every rule's id, severity and parameters come from
+// `lib/registry/composition-rules.ts`; this function only evaluates them. The
+// contract publishes the same rows, so what an agent is TOLD and what refuses
+// its write cannot drift.
+//
+// All seven run on a page body and each emits exactly one criterion, passing
+// or failing — never absent — because a silent rule is one an agent will
+// assume does not exist.
+
+const compositionStatus = (severity: CompositionSeverity, atPublish: boolean): CriterionStatus => {
+  if (severity === 'warns') return 'warning';
+  if (severity === 'blocks_publish') return atPublish ? 'missing' : 'warning';
+  return 'missing';
+};
+
+const compositionCriterion = (
+  id: string,
+  problem: string | undefined,
+  atPublish: boolean
+): ReadinessCriterion => {
+  const rule = COMPOSITION_RULES.find((candidate) => candidate.id === id);
+  const label = rule?.label ?? id;
+  if (!rule || !problem) return crit(id, label, 'complete', '');
+  return crit(id, label, compositionStatus(rule.severity, atPublish), problem);
+};
+
+export const checkComposition = (
+  body: unknown,
+  context: ObjectValidationContext,
+  atPublish: boolean
+): ReadinessCriterion[] => {
+  const sections = collectSections(body);
+  // A shared_ref whose target cannot be resolved contributes `undefined`: the
+  // rules skip it rather than guessing, the same stance every other resolver
+  // in this file takes on an unreadable reference.
+  const types = sections.map((section) => effectiveSectionType(section, context));
+
+  // 1. Region capacity. Today every bound kind is `flow` (unbounded), so this
+  //    fires only for a kind whose footprint names a bounded or reserved
+  //    region — which is exactly the check the first sticky kind will need.
+  const perRegion = new Map<string, number>();
+  const unplaceable: string[] = [];
+  for (const type of types) {
+    if (!type) continue;
+    const footprint = sectionFootprint(type);
+    if (!footprint) continue;
+    const row = REGION_REGISTRY[footprint.region];
+    if (row.allowed.kind === 'reserved' || row.allowed.kind === 'code_owned') {
+      unplaceable.push(`${type} → ${footprint.region}`);
+      continue;
+    }
+    perRegion.set(footprint.region, (perRegion.get(footprint.region) ?? 0) + 1);
+  }
+  const overCapacity = [...perRegion]
+    .map(([region, count]) => ({ region, count, max: REGION_REGISTRY[region as keyof typeof REGION_REGISTRY].occupancy.max }))
+    .filter((entry) => entry.max !== undefined && entry.count > entry.max)
+    .map((entry) => `${entry.region} holds ${entry.count}, max ${entry.max}`);
+  const capacityProblem =
+    unplaceable.length > 0 || overCapacity.length > 0
+      ? [
+          ...(unplaceable.length > 0
+            ? [`No object may target these regions yet: ${unplaceable.join(', ')}.`]
+            : []),
+          ...(overCapacity.length > 0 ? [`Region over capacity: ${overCapacity.join('; ')}.`] : []),
+        ].join(' ')
+      : undefined;
+
+  // 2. Openers belong first. A second hero halfway down a page reads as a new
+  //    page starting, and the reader treats everything above it as over.
+  const lateOpeners = types
+    .map((type, index) => ({ type, index }))
+    .filter((entry) => entry.index > 0 && entry.type && OPENER_TYPES.includes(entry.type))
+    .map((entry) => `${entry.type} at position ${entry.index}`);
+  const openerProblem =
+    lateOpeners.length > 0 ? `${lateOpeners.join(', ')} — hero/lede open a page and belong at position 0.` : undefined;
+
+  // 3. Singletons, counted THROUGH shared_ref: an inline newsletter form plus
+  //    a shared one pointing at another newsletter form is two forms on the
+  //    page, and duplicate form ids break the second one's submission.
+  const counts = new Map<string, number>();
+  for (const type of types) if (type) counts.set(type, (counts.get(type) ?? 0) + 1);
+  const duplicatedSingletons = SINGLETON_SECTION_TYPES.filter((type) => (counts.get(type) ?? 0) > 1).map(
+    (type) => `${type} ×${counts.get(type)}`
+  );
+  const singletonProblem =
+    duplicatedSingletons.length > 0
+      ? `${duplicatedSingletons.join(', ')} — at most one per page; the reader cannot tell which is the real one.`
+      : undefined;
+
+  // 4. Adjacent repeats.
+  const adjacent: string[] = [];
+  for (let index = 1; index < types.length; index += 1) {
+    const type = types[index];
+    if (!type || type !== types[index - 1]) continue;
+    if (ADJACENCY_EXEMPT_TYPES.includes(type)) continue;
+    adjacent.push(`${type} at positions ${index - 1} and ${index}`);
+  }
+  const adjacencyProblem =
+    adjacent.length > 0 ? `${adjacent.join(', ')} — merge them or put something between.` : undefined;
+
+  // 5. CTA density.
+  const askCount = types.filter((type) => type && CTA_DENSITY_TYPES.includes(type)).length;
+  const ctaProblem =
+    askCount > CTA_DENSITY_MAX
+      ? `${askCount} asking sections (${CTA_DENSITY_TYPES.join('/')}) — at most ${CTA_DENSITY_MAX} per page.`
+      : undefined;
+
+  // 6. DOM ids. Two fields become one: `anchor` (a URL target) and `formName`
+  //    (which NewsletterSignup/ContactForm derive their input ids from). Only
+  //    INLINE sections are checked — a shared_ref's anchor and form name live
+  //    on the target object, which this body does not own.
+  const duplicatesIn = (field: 'anchor' | 'formName'): string[] => {
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const section of sections) {
+      // These fields are declared on several variants but not all, and the
+      // union narrows to the intersection — read them as data, which is what
+      // they are.
+      const data = section.data as Record<string, unknown> | undefined;
+      const raw = data?.[field];
+      const value = typeof raw === 'string' ? raw.trim() : '';
+      if (!value) continue;
+      if (seen.has(value)) duplicates.add(value);
+      seen.add(value);
+    }
+    return [...duplicates];
+  };
+  const duplicateAnchors = duplicatesIn('anchor');
+  const duplicateForms = duplicatesIn('formName');
+  const anchorProblem =
+    duplicateAnchors.length > 0 || duplicateForms.length > 0
+      ? [
+          ...(duplicateAnchors.length > 0
+            ? [
+                `Duplicate anchor(s): ${duplicateAnchors.join(', ')} — an anchor is a DOM id and a URL target; the second one is unreachable.`,
+              ]
+            : []),
+          ...(duplicateForms.length > 0
+            ? [
+                `Duplicate formName(s): ${duplicateForms.join(', ')} — the form's input ids are derived from it, so the second form's label points at the first form's field.`,
+              ]
+            : []),
+        ].join(' ')
+      : undefined;
+
+  // 7. Viewport budget. A no-op until a kind declares an `edge`; kept live so
+  //    the first one lands against a number that already has a test.
+  let spent = 0;
+  for (const type of types) {
+    if (!type) continue;
+    const footprint = sectionFootprint(type);
+    if (!footprint?.edge || !footprint.heightClass) continue;
+    spent += VIEWPORT_BUDGET.percentByHeightClass[footprint.heightClass];
+  }
+  const viewportProblem =
+    spent > VIEWPORT_BUDGET.maxPercentOfSmallViewport
+      ? `Edge-pinned sections would cover ${spent}% of a small viewport; the budget is ${VIEWPORT_BUDGET.maxPercentOfSmallViewport}%.`
+      : undefined;
+
+  return [
+    compositionCriterion('structure_region_capacity', capacityProblem, atPublish),
+    compositionCriterion('structure_opener', openerProblem, atPublish),
+    compositionCriterion('structure_singletons', singletonProblem, atPublish),
+    compositionCriterion('structure_adjacency', adjacencyProblem, atPublish),
+    compositionCriterion('structure_cta_density', ctaProblem, atPublish),
+    compositionCriterion('structure_anchor_unique', anchorProblem, atPublish),
+    compositionCriterion('structure_viewport_budget', viewportProblem, atPublish),
+  ];
+};
+
 export const checkStructuralInvariants = (
   objectType: ObjectType,
   objectId: string,
@@ -3145,6 +3335,10 @@ const checkStructuralInvariantsByType = (
           `Section type(s) with no standalone component: ${notPlaceable.join(', ')} — placing them directly on a page breaks the build (a card composes only inside a content_grid cards source).`
         )
   );
+
+  // W1 T1.3: the composition lints — seven rules about the ARRANGEMENT of
+  // kinds, as opposed to the PageType rules about which kinds are allowed.
+  criteria.push(...checkComposition(body, context, atPublish));
 
   // PageType constraint, resolved up front: the ≥N-visible rule below is
   // per-PageType since W6 (content_detail publishes with zero sections — the
