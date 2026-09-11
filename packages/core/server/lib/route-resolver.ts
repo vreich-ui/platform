@@ -11,10 +11,13 @@
  *   - file routes + reserved  `[...objectPage].astro` → build time only
  *
  * So `page_skincare_is_not_self_worth` published with `route:"/skincare-is-
- * not-self-worth"` while an article already owned that slug, and `page_shop`
- * published with `route:"/shop"` while a `netlify.toml` redirect sent every
- * reader elsewhere. Both passed write-time validation, both released, and
- * neither is reachable — one of them without even a build warning.
+ * not-self-worth"` while an article already owned that slug. It passed
+ * write-time validation, released, and is not reachable: the build says so
+ * every time (`[objectPage] NOT serving page_skincare_is_not_self_worth …
+ * blog_slug`, `docs/DEPLOYMENT.md` §Verification run log) and nothing stops
+ * the next one. The redirect-table case is the same hole one namespace over —
+ * a page published onto a path `netlify.toml` forwards away from would be
+ * just as invisible, and nothing read that table either.
  *
  * WHAT THIS IS. A pure function over a SNAPSHOT of the four namespaces. It
  * answers "who owns this path", not "is it taken", because the two callers

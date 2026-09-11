@@ -208,22 +208,75 @@ test('(d) mermaid blocks that have a docs/diagrams/*.mmd copy match it byte-for-
   );
 });
 
-// ─── (e) KNOWN_ISSUES.md has no duplicate "## N." numbers ───
+// ─── (e) KNOWN_ISSUES.md entry ids are unique, and every citation resolves ───
 
-test('(e) docs/KNOWN_ISSUES.md has no duplicate numbered "## N." headings', () => {
-  const text = readFileSync(abs('docs/KNOWN_ISSUES.md'), 'utf8');
-  const re = /^## (\d+)\./gm;
-  const seen = new Map(); // number -> first line
+/**
+ * Entry headings, id -> line. BOTH levels on purpose: entries 1-6 predate the
+ * 2026-09-05 documentation pass and are `## N.`; everything from 7 up is
+ * `### N.`. The original check matched `^## (\d+)\.` only, so it had been
+ * looking at six of sixty-nine entries (B2, 2026-09-11).
+ */
+function knownIssueHeadings(text) {
+  const re = /^(#{2,3}) (\d+)\./gm;
+  const headings = new Map();
   const dupes = [];
   let m;
   while ((m = re.exec(text))) {
-    const n = m[1];
+    const id = m[2];
     const line = lineNumberAt(text, m.index);
-    if (seen.has(n)) {
-      dupes.push(`## ${n}. appears at line ${line} (first seen at line ${seen.get(n)})`);
+    if (headings.has(id)) {
+      dupes.push(`${m[1]} ${id}. appears at line ${line} (first seen at line ${headings.get(id)})`);
     } else {
-      seen.set(n, line);
+      headings.set(id, line);
     }
   }
-  assert.equal(dupes.length, 0, `duplicate "## N." numbers in docs/KNOWN_ISSUES.md:\n${dupes.join('\n')}`);
+  return { headings, dupes };
+}
+
+test('(e) docs/KNOWN_ISSUES.md has no duplicate numbered entry headings', () => {
+  const text = readFileSync(abs('docs/KNOWN_ISSUES.md'), 'utf8');
+  const { headings, dupes } = knownIssueHeadings(text);
+  assert.ok(headings.size > 50, `expected the KNOWN_ISSUES entries to be found, got ${headings.size}`);
+  assert.equal(dupes.length, 0, `duplicate entry numbers in docs/KNOWN_ISSUES.md:\n${dupes.join('\n')}`);
+});
+
+/**
+ * (f) A citation that resolves to nothing.
+ *
+ * `docs/AI_CONTEXT.md` and six sibling documents cited `KNOWN_ISSUES.md #67`
+ * for five days while the file jumped 66 -> 68 and (e) saw nothing, because a
+ * missing entry is not a duplicate one. A reader following the citation lands
+ * on no entry at all, which is worse than an uncited gap: the citation asserts
+ * that the gap was recorded.
+ *
+ * Only the EXPLICIT form counts — the `KNOWN_ISSUES` token, then `#N`. A bare
+ * `#NNN` is this repo's sanctioned way to reference one of its own pull
+ * requests (AGENTS.md §3.7, the secrets-scanner rule), and KNOWN_ISSUES.md is
+ * full of them: `Codex #691`, `PR #529`, `(#688)`. Matching those would make
+ * every PR reference a broken citation.
+ */
+const CITATION_SOURCES = [...DOC_PATHS, 'AGENTS.md', 'CLAUDE.md'];
+
+test('(f) every KNOWN_ISSUES citation resolves to an existing entry', () => {
+  const { headings } = knownIssueHeadings(readFileSync(abs('docs/KNOWN_ISSUES.md'), 'utf8'));
+  const re = /KNOWN_ISSUES(?:\.md)?`?[,;]?\s*#(\d+)/g;
+  const dangling = [];
+  let cited = 0;
+  for (const relPath of CITATION_SOURCES) {
+    if (!existsSync(abs(relPath))) continue;
+    const text = readFileSync(abs(relPath), 'utf8');
+    let m;
+    while ((m = re.exec(text))) {
+      cited += 1;
+      if (!headings.has(m[1])) {
+        dangling.push(`${relPath}:${lineNumberAt(text, m.index)} cites #${m[1]}, which has no entry`);
+      }
+    }
+  }
+  assert.ok(cited > 5, `expected KNOWN_ISSUES citations to be found, got ${cited}`);
+  assert.equal(
+    dangling.length,
+    0,
+    `${dangling.length} citation(s) resolve to no KNOWN_ISSUES entry — write the entry or repoint the citation:\n${dangling.join('\n')}`
+  );
 });

@@ -185,9 +185,11 @@ test('the real committed exports emit ZERO paths today — every page object is 
     postPermalinks: [],
     reservedPrefixes: RESERVED,
   });
-  // S2 made `page_shop` the first catch-all-served export; W5 (2026-07-12)
-  // converted the last three hand-coded routes the same way — their route
-  // files are deleted and the objects own the routes, zero code each.
+  // W5 (2026-07-12) converted the last hand-coded routes to catch-all
+  // serving — their route files are deleted and the objects own the routes,
+  // zero code each. (S2's `page_shop` was the first such export and used to
+  // head this list; it was pre-object residue with no record behind it and
+  // was removed in B1 — KNOWN_ISSUES #69.)
   // 2026-07-13: `page_object_showcase` (a QA/dev surface, standard pageType on
   // a free route, robots-noindex, unwired from nav) is served the same way.
   // BASELINE_FREE_ROUTES is the permanent regression check for these — a
@@ -205,7 +207,6 @@ test('the real committed exports emit ZERO paths today — every page object is 
     { objectId: 'page_object_showcase', route: '/object-showcase', param: 'object-showcase' },
     { objectId: 'page_pricing', route: '/pricing', param: 'pricing' },
     { objectId: 'page_services', route: '/services', param: 'services' },
-    { objectId: 'page_shop', route: '/shop', param: 'shop' },
     { objectId: 'page_shop_preview', route: '/solutions/shop-preview', param: 'solutions/shop-preview' },
   ];
   const sortedPaths = [...paths].sort((a, b) => a.route.localeCompare(b.route));

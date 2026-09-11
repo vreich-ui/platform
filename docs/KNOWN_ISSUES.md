@@ -1210,6 +1210,28 @@ only `admin-visual-identity-import.ts` mints such ids, and no validator checks t
 **Direction:** record the key prefix in the namespace table (done) and decide at the next store
 migration whether jobs deserve their own namespace.
 
+### 67. W21 tracking content is not audited by the architecture docs
+
+**Category:** obsolete-docs · **Severity:** medium · **Sources:** correction pass 2026-09-06 (#694)
+**Evidence:** the 2026-09-06 correction pass was verified against `420afbd` and then rebased onto
+`99fb369` (#694, W21 tracking) with `docs/generated/INVENTORY.md`, tests and builds refreshed — but
+the prose itself was not re-read against W21. The gap is stated inline at
+`docs/ARCHITECTURE.md:176` and `docs/TRACKING_ARCHITECTURE.md:6`, and the status line of every
+verified doc (`AI_CONTEXT.md`, `ARCHITECTURE.md`, `CONTENT_ARCHITECTURE.md`, `DATA_CONTRACTS.md`,
+`DEPLOYMENT.md`, `GLOSSARY.md`, `TRACKING_ARCHITECTURE.md`) cites this entry.
+**Impact:** those documents are stale wherever they touch the `exposure` event kind,
+`experiment_id` / `variant_id` on events, edge-served variants
+(`netlify/edge-functions/variant-serve.ts`, `[[edge_functions]]` on every tenant,
+`scripts/tracking-experiments-build.mjs`), the three analytics MCP tools
+(`server/lib/mcp-tool-definitions-analytics.ts`), the analytics read side
+(views / insights / annotations / export, per-object drill-down), `npm run env:audit`, or the tool
+surface. Counts in `generated/INVENTORY.md` are current at `99fb369`; the prose is not.
+**Direction:** run a correction pass over the seven documents against W21 and drop the two `⚠`
+blocks and the eight status-line citations together. Until then the citations are the honest
+marker — this entry exists so they resolve. The entry was cited from eight places for five days
+before it was written (B2, 2026-09-11); `tests/scripts/docs-invariants.test.mjs` now fails on a
+citation that resolves to nothing.
+
 ### 68. `site.chrome.announcement` is declared and validated but never rendered
 
 **Category:** dead-code · **Severity:** low · **Sources:** W0 T0.1 recon
@@ -1229,6 +1251,39 @@ warning, no admin signal.
 **Direction:** either render the announcement region (the reader-regions wave keeps the
 `announcement` row in the region registry for exactly this) or drop the field from the schema. The
 W1 region registry lists it as an unrendered region rather than pretending either way.
+
+### 69. Committed exports and store records drift apart in both directions, undetected
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** B1 follow-up 2026-09-11
+**Evidence:** `sites/<client>/data/site/**` is written by `object-publish.ts` →
+`materializers/*.ts` → `object-git-committer.ts`, and removed only by `object-retire.ts`, which
+deletes the export and writes the redirect in one commit (the `page_qa_canvas_test_wolf` row in
+`sites/drlurie/data/site/redirects.json` is that path working correctly). Neither side ever asks
+the inverse question: *does every committed export still have a record, and does every record
+still have an export?* `tests/netlify/seed-objects-enforcement.test.ts` validates every export's
+**body** but builds its store FROM those same exports, so an export with no record validates
+exactly like one that has a record.
+Diffing drlurie's `page` exports against `object_list` (active + archived, 2026-09-11) found three
+drifts in one namespace:
+
+| export | record | how |
+|---|---|---|
+| `page_shop.json` | none, ever | hand-added in `c7b93d8d` (S2, "from mock products"), renamed unchanged in `a6221a3d` (T11.6), never published. Removed in B1 |
+| `page_product_detail.json` | none, ever | identical provenance — same two commits, never published — but **load-bearing**: `sites/drlurie/app/pages/shop/[slug].astro:49` calls `loadRoutePageObject('page_product_detail')` for every product page |
+| — | `page_fieldtest`, active, `published_time` 2026-07-08 | its export was published in `de6b1a35` and then hand-deleted in `da653a41` ("Cleanup: delete the throwaway field-test objects") without retiring the record |
+
+**Impact:** an export with no record is committed, built, served and invisible to every offline
+check — and `page_product_detail` shows the trap in the fix: an orphan can be exactly what a route
+loader depends on, so "delete the orphan" is not a safe blanket rule. In the other direction, an
+active record with no export is a page the store says is published and the build does not produce,
+and it will stay that way until someone retires it through the verbs.
+**Direction:** the check has to run against the store, so it cannot live in the offline suite. Add
+it to the credentialed fleet probe (`scripts/fleet-capability-probe.mjs` or a sibling): per
+namespace, list `objects/<type>/by-id/`, diff against the committed export filenames, and report
+both directions. Fixing the three rows above needs separate decisions —
+`page_product_detail` wants a real record created from its seed before anything is deleted, and
+`page_fieldtest` wants `object_retire`, not another hand-deletion. Until then this drift is caught
+only by someone reading git history.
 
 ## Summary table
 
@@ -1280,6 +1335,7 @@ Sorted by severity, then by id.
 | 55 | medium | obsolete-docs | Agent instruction files carry superseded operational rules | CI#12/13/17 |
 | 56 | medium | obsolete-docs | README + `package.json` still describe AstroWind and a retired flow | A#6, DE#5 |
 | 63 | medium | data-quality | Drill traffic tag `x-trk-test` dropped at the relay, unknown to the sink | correction pass |
+| 67 | medium | obsolete-docs | W21 tracking content is not audited by the architecture docs | correction pass (#694) |
 | 20 | low | dead-code | `data-cms-buy-product` classified, never emitted | TR#7 |
 | 21 | low | security | `/stats` called with a write bearer it ignores | TR#13 |
 | 34 | low | build-deploy-mismatch | Root `postbuild` pushes drlurie's dims regardless of tenant | CA#17, TR#15, DE#6 |
@@ -1296,3 +1352,4 @@ Sorted by severity, then by id.
 | 65 | low | content-contract-drift | `reference_import_request_ids` declared `blocks_write` but not enforced | correction pass |
 | 66 | low | ambiguous-canonical-source | Examples job records live in the `artifact-index` store | correction pass |
 | 68 | low | dead-code | `site.chrome.announcement` is validated but never rendered | W0 T0.1 |
+| 69 | low | ambiguous-canonical-source | Committed exports and store records drift apart in both directions, undetected | B1 follow-up |

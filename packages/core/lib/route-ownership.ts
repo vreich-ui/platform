@@ -7,8 +7,10 @@
  * infrastructure redirect table — the array that `netlify.toml`'s
  * `[[redirects]]` is drift-guarded against. Those rules OWN reader paths and
  * beat every static file: `/shop` on drlurie is a 301 to
- * `/solutions/shop-preview`, which is why the published `page_shop` object has
- * never been reachable. The write-time validator could not see any of it,
+ * `/solutions/shop-preview`, so no page object can ever hold that route.
+ * (The `page_shop` EXPORT that used to sit there was never a published object
+ * at all — hand-committed pre-object residue, removed in B1; KNOWN_ISSUES #69.
+ * The rule stands without it.) The write-time validator could not see any of it,
  * because core must never import a tenant file
  * (`tests/scripts/core-no-site-literals.test.mjs`) and this table is not in
  * the object store.

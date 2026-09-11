@@ -96,20 +96,22 @@ const makeStore = (objects: SeedObject[]) => {
  * still produce (W0 T0.3, KNOWN_ISSUES #40).
  *
  * Not an exemption from the rule — the rule finding what it was written to
- * find. `page_shop` published onto `/shop` while `sites/drlurie/site.config.ts`
- * (and the root `netlify.toml` it is drift-guarded against) 301s `/shop` to
- * `/solutions/shop-preview`; toml redirects beat every static file, so no
- * reader has ever reached that page. Until the object's route is changed
- * THROUGH THE OBJECT VERBS — the export is generated and must never be
- * hand-edited — this records the blocker instead of pretending the export is
- * clean.
+ * find. An entry belongs here only when a REAL record, published through the
+ * object verbs, lands on a route that infrastructure already owns; the blocker
+ * is then recorded rather than pretended away, because the fix has to go
+ * through the verbs (the export is generated and must never be hand-edited).
+ *
+ * Empty since B1 (2026-09-11). The sole entry, `page_shop`, was removed with
+ * the export it described: that file was never published at all — it was
+ * hand-committed in `c7b93d8d` (S2) and renamed in `a6221a3d` (T11.6), and no
+ * `page_shop` record has ever existed in drlurie's store (KNOWN_ISSUES #69).
+ * It made this rule look exercised while pinning a blocker no publish could
+ * ever produce.
  *
  * Each entry is asserted to still fire, so fixing the object without deleting
  * the line fails too: a stale exemption is as much a lie as a missing one.
  */
-const KNOWN_UNREACHABLE: Record<string, RegExp> = {
-  page_shop: /^structure_route: route "\/shop" is the source of a site redirect/,
-};
+const KNOWN_UNREACHABLE: Record<string, RegExp> = {};
 
 test('every committed object export validates with zero blockers under the live resolvers', async () => {
   const objects = await loadSeedObjects();
