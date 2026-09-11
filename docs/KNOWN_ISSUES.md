@@ -829,7 +829,7 @@ that mistakes them for live media.
 
 ### 40. Two published page objects are unreachable because route ownership is not checked across namespaces — FIXED
 
-**Status:** CLOSED by #NNN (W0 T0.3). One resolver,
+**Status:** CLOSED by #730 (W0 T0.3). One resolver,
 `packages/core/server/lib/route-resolver.ts`, now answers "who owns this reader path" across all
 four namespaces — page routes, article permalinks, BOTH redirect tables (the agent-written
 `redirects.json` and the infrastructure table in `site.config.ts`, reached through the new
@@ -1268,7 +1268,7 @@ Sorted by severity, then by id.
 | 37 | medium | dead-code | Every validating verb round-trips GitHub for an empty dir | CI#18 |
 | 38 | medium | build-deploy-mismatch | Prebuild image gate scans directories that no longer exist | CA#6 |
 | 39 | medium | stale-generated-files | 139 orphaned committed upload assets | A#1, CA#7 |
-| 40 | medium | content-contract-drift | ~~Two published pages unreachable; route ownership unchecked~~ **CLOSED** (#NNN) | CA#8, CA#9 |
+| 40 | medium | content-contract-drift | ~~Two published pages unreachable; route ownership unchecked~~ **CLOSED** (#730) | CA#8, CA#9 |
 | 42 | medium | data-quality | 10 of 26 published articles carry no taxonomy | CA#12 |
 | 43 | medium | data-quality | Two demo articles live in production | CA#18 |
 | 46 | medium | content-contract-drift | Reader-safety blocks the words "private"/"strategy" | CA#20 |
