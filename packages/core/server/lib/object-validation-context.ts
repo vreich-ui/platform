@@ -332,9 +332,18 @@ export const buildStoreValidationContext = async (
    */
   let redirectSources: string[] = [];
   try {
-    redirectSources = (await loadSiteRedirects(store as unknown as SiteRedirectsStore)).map(
-      (redirect) => redirect.from
-    );
+    redirectSources = (await loadSiteRedirects(store as unknown as SiteRedirectsStore))
+      /**
+       * W1 review: a retire writes the forwarding rule for the route it just
+       * removed and stamps the rule with `retired_object_id`. Dropping that id
+       * here would break the resolver's own self-exclusion contract — the
+       * retired object's route would be owned by ITS OWN redirect, so every
+       * later patch to it (including un-retiring it, which W14 F6 ruling 1
+       * makes explicitly reversible) would fail `structure_route`. Both
+       * drlurie and fernwell carry exactly such a rule today.
+       */
+      .filter((redirect) => !(self.selfObjectId && redirect.retired_object_id === self.selfObjectId))
+      .map((redirect) => redirect.from);
   } catch {
     // Same stance as the per-type listing above: a namespace that cannot be
     // read contributes nothing rather than failing the whole context build.
