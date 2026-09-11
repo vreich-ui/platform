@@ -204,6 +204,7 @@ import { buildWhoami } from '../lib/whoami.js';
 import { recordWhoamiSignal } from '../lib/plugin/install-signals.js';
 import { buildPluginTools, toolSurfaceDigest } from '../lib/plugin/build-tools.js';
 import { getPluginManifestBlobStore, getPluginManifestDoc } from '../lib/plugin/manifest-store.js';
+import { charterRefusal, isPluginSurface } from '../lib/plugin/charter-gate.js';
 import { countWrite, type RateLimitStore } from '../lib/write-rate-limit.js';
 import { resolveActivePolicies } from '../lib/governance-store.js';
 import {
@@ -1702,7 +1703,7 @@ const ALWAYS_ANSWERABLE_TOOLS = new Set(['ping', 'whoami']);
  * happens to be over its write budget — the reverse order would tell a
  * suspended surface it was merely busy.
  */
-const preflightToolCall = async (event: LambdaEvent, name: string) => {
+const preflightToolCall = async (event: LambdaEvent, name: string, args: Record<string, unknown>) => {
   if (ALWAYS_ANSWERABLE_TOOLS.has(name)) return undefined;
 
   const surface = toNonEmptyString(event.pluginSurface) ?? event.oauthPrincipal?.surface;
@@ -1721,6 +1722,56 @@ const preflightToolCall = async (event: LambdaEvent, name: string) => {
         `This tenant has disabled the "${surface}" surface. Every tool except ping and whoami is refused from it until an owner re-enables it in the admin — this is a decision about the chat app, not about you or your account.`,
         { error_code: 'surface_blocked', surface }
       );
+    }
+  }
+
+  /**
+   * D4 (Wolf, 2026-09-11): the publishing-plugin charter now bites here, not
+   * only on the Actions façade. Runs BEFORE the write budget on purpose — a
+   * tool this install may never call should say so, not report that it is
+   * merely busy — and AFTER the kill switch, which is the stronger statement.
+   *
+   * The manifest read costs one blob `get`, and only on a plugin surface: a
+   * human OAuth session, an agent token and the publish key skip it entirely.
+   */
+  if (isPluginSurface(surface)) {
+    let charter: string[] | null = null;
+    let manifestVersion: string | null = null;
+    let unreadable: string | undefined;
+    try {
+      const active = (await getPluginManifestDoc(await getPluginManifestBlobStore(event, requireBinding()))).active;
+      if (active) {
+        charter = active.tools.map((tool) => tool.name);
+        manifestVersion = active.manifest_version;
+      } else {
+        unreadable = 'no_active_manifest';
+      }
+    } catch {
+      // Fail-soft by design — see charter-gate.ts's header. A blob outage
+      // degrades enforcement, it never cuts a tenant's plugin off.
+      unreadable = 'manifest_store_unavailable';
+    }
+    if (unreadable) {
+      event.log?.({
+        event: 'mcp_charter_unenforced',
+        rpcMethod: 'tools/call',
+        slug: null,
+        toolName: name,
+        surface,
+        reason: unreadable,
+      });
+    }
+    const refusal = charterRefusal({ surface, toolName: name, args, charter, manifestVersion });
+    if (refusal) {
+      event.log?.({
+        event: 'mcp_charter_refused',
+        rpcMethod: 'tools/call',
+        slug: null,
+        toolName: name,
+        surface,
+        errorCode: String(refusal.payload.error_code),
+      });
+      return toolError(refusal.message, refusal.payload);
     }
   }
 
@@ -1800,7 +1851,11 @@ const handleRpcRequest = async (event: LambdaEvent, request: JsonRpcRequest): Pr
     case 'tools/call': {
       event.log?.({ event: 'rpc_tool_call_started', rpcMethod, slug, toolName: request.params?.name });
       const toolName = typeof request.params?.name === 'string' ? request.params.name : '';
-      const refused = toolName ? await preflightToolCall(event, toolName) : undefined;
+      const toolArgs =
+        request.params?.arguments && typeof request.params.arguments === 'object'
+          ? (request.params.arguments as Record<string, unknown>)
+          : {};
+      const refused = toolName ? await preflightToolCall(event, toolName, toolArgs) : undefined;
       if (refused) return rpcResponse(request.id, refused);
       /**
        * W7.5: the result passes a size guard on the way out. An oversized body
