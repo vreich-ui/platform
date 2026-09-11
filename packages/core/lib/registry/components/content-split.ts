@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type ContentSplitResolved, type SectionCompon
 export const contentSplitDefinition: SectionComponentDefinition<'content_split', ContentSplitResolved> = {
   type: 'content_split',
   schema: sectionVariantDataSchema('content_split'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Content split',
     icon: 'tabler:layout-columns',

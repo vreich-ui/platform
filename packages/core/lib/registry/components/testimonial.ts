@@ -12,6 +12,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const testimonialDefinition: SectionComponentDefinition<'testimonial', EmptyResolved> = {
   type: 'testimonial',
   schema: sectionVariantDataSchema('testimonial'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Testimonial',
     icon: 'tabler:quote',

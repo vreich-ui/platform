@@ -14,7 +14,7 @@
 
 | You need… | Go to | Notes |
 |---|---|---|
-| The object envelope | `packages/core/schema/object-record-v1.ts` (`objectRecordSchema`, `objectTypes`, `publishReceiptSchema`, `producerContextSchema`) | 13 object types, 12 governed by the publish gate (`lib/approval-policy.ts:governedObjectTypes`; `visual_standard` excluded); `version` (every write) vs `content_revision` (body writes only) |
+| The object envelope | `packages/core/schema/object-record-v1.ts` (`objectRecordSchema`, `objectTypes`, `publishReceiptSchema`, `producerContextSchema`) | 14 object types, 13 governed by the publish gate (`lib/approval-policy.ts:governedObjectTypes`; `visual_standard` excluded — it is never publishable); `version` (every write) vs `content_revision` (body writes only) |
 | Body schemas | `packages/core/schema/bodies/<type>-v1.ts` | Zod v4, `.strict()`; version literal `<type>.v1` inside each file |
 | Article model | `schema/bodies/content-item-v1.ts` (+ imports from `schema/article-content-v1.ts`), `packages/core/lib/richtext/rich-text-v1.ts` | node envelope outside, Rich Text inside; `private.*` never reaches export or page |
 | Patch grammar | `packages/core/schema/object-patch-ops.ts` | 44 ops, every op invertible |

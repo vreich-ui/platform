@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const stepsDefinition: SectionComponentDefinition<'steps', EmptyResolved> = {
   type: 'steps',
   schema: sectionVariantDataSchema('steps'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Steps',
     icon: 'tabler:list-numbers',

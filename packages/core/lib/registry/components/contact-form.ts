@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const contactFormDefinition: SectionComponentDefinition<'contact_form', EmptyResolved> = {
   type: 'contact_form',
   schema: sectionVariantDataSchema('contact_form'),
+  footprint: { region: 'flow', singleton: true },
   editor: {
     label: 'Contact form',
     icon: 'tabler:mail',

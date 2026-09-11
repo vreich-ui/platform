@@ -12,6 +12,7 @@ import { sectionVariantDataSchema, type CompositionResolved, type SectionCompone
 export const compositionDefinition: SectionComponentDefinition<'composition', CompositionResolved> = {
   type: 'composition',
   schema: sectionVariantDataSchema('composition'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Composition',
     icon: 'tabler:layout-list',

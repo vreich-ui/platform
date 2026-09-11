@@ -7,6 +7,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const faqDefinition: SectionComponentDefinition<'faq', EmptyResolved> = {
   type: 'faq',
   schema: sectionVariantDataSchema('faq'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'FAQ',
     icon: 'tabler:help-circle',

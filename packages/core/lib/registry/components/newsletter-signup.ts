@@ -12,6 +12,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const newsletterSignupDefinition: SectionComponentDefinition<'newsletter_signup', EmptyResolved> = {
   type: 'newsletter_signup',
   schema: sectionVariantDataSchema('newsletter_signup'),
+  footprint: { region: 'flow', singleton: true },
   editor: {
     label: 'Newsletter signup',
     icon: 'tabler:mail',

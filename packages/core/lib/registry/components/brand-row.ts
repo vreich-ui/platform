@@ -13,6 +13,7 @@ export type BrandRowResolved = { logoHrefs: (string | undefined)[] };
 export const brandRowDefinition: SectionComponentDefinition<'brand_row', BrandRowResolved> = {
   type: 'brand_row',
   schema: sectionVariantDataSchema('brand_row'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Brand row',
     icon: 'tabler:building-store',

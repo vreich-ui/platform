@@ -9,6 +9,7 @@ import { sectionVariantDataSchema, type HeroResolved, type SectionComponentDefin
 export const ledeDefinition: SectionComponentDefinition<'lede', HeroResolved> = {
   type: 'lede',
   schema: sectionVariantDataSchema('lede'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Lede',
     icon: 'tabler:text-caption',

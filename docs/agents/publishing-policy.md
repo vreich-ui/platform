@@ -68,6 +68,7 @@ Call the right tool once instead of probing the write path. This table is the to
 | Does this object exist? Live version, lock holder, review state, unpublished changes | `object_inventory` (filters: `object_type, object_id, status, requires_approval, review_state, pending_changes`); thin listing via `object_list {object_type, status?}`; `object_get` → 404 `{not_found:true}` |
 | Would this exact patch/create pass? | `object_validate {object_type, object_id, candidate_patch}` (dry-run, no lock, no write); create-family verbs also accept `dry_run:true` → returns `id_available` + would-be `object_id` without persisting |
 | Section/component vocabulary, page types | `registry_get {registry: 'component'|'page_type'}` |
+| Regions, footprints, composition rules (where a section may live, and which arrangements warn or block) | `object_contract {object_type:'page'}` → `regions` + the `structure_*` rows in `constraints`; `registry_get {registry:'component'}` → each kind's `footprint` |
 | Taxonomy terms available right now | `object_get`/`object_inventory` on `taxonomy`/`tax_drlurie` (§8.4) |
 | Current media budget / preferred format / over-budget behavior | `object_contract` → `media_policy` (do not hardcode; §6.1 values are the committed defaults) |
 | Is publishing gated for this type right now? Which denial codes? | `object_contract` → `publish_policy` (computed from live policy) |

@@ -8,6 +8,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const searchDefinition: SectionComponentDefinition<'search', EmptyResolved> = {
   type: 'search',
   schema: sectionVariantDataSchema('search'),
+  footprint: { region: 'flow', singleton: true },
   editor: {
     label: 'Search',
     icon: 'tabler:search',

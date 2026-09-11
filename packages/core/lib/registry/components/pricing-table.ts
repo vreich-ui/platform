@@ -10,6 +10,7 @@ import { sectionVariantDataSchema, type PricingTableResolved, type SectionCompon
 export const pricingTableDefinition: SectionComponentDefinition<'pricing_table', PricingTableResolved> = {
   type: 'pricing_table',
   schema: sectionVariantDataSchema('pricing_table'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Pricing table',
     icon: 'tabler:report-money',

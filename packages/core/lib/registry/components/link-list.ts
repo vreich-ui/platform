@@ -10,6 +10,7 @@ import { sectionVariantDataSchema, type LinkListResolved, type SectionComponentD
 export const linkListDefinition: SectionComponentDefinition<'link_list', LinkListResolved> = {
   type: 'link_list',
   schema: sectionVariantDataSchema('link_list'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Link list',
     icon: 'tabler:list',

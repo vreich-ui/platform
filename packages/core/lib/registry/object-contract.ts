@@ -7,7 +7,7 @@
  * DERIVE, NEVER HAND-AUTHOR. Every field here is generated from the same code
  * that ENFORCES it — the live zod body schemas (`z.toJSONSchema`), the section
  * discriminated union, the exported `patchOpNamesByObjectType` allowlist, the
- * component registry's editor hints, the structural-capacity table, and
+ * component registry's editor hints, the region registry, and
  * `activeApprovalPolicy()`. So the contract cannot drift from enforcement (the
  * opposite of the article tools' hand-maintained `contentSourceV1JsonSchema`).
  * Adding a section type, patch op, or object type flows through automatically;
@@ -32,35 +32,12 @@ import { activeCreationPolicy, creationRuleFor, type CreationPolicy } from '../c
 import { activeMediaPolicy, type MediaPolicy } from '../media-policy.js';
 import type { PatchApplyErrorCode } from '../object-patch-apply.js';
 import { childRuleFor } from './block-tree.js';
-import { bioDefinition } from './components/bio.js';
-import { checklistDefinition } from './components/checklist.js';
-import { contactFormDefinition } from './components/contact-form.js';
-import { contentEmbedDefinition } from './components/content-embed.js';
-import { contentGridDefinition } from './components/content-grid.js';
-import { compositionDefinition } from './components/composition.js';
-import { contentSplitDefinition } from './components/content-split.js';
-import { ctaBannerDefinition } from './components/cta-banner.js';
-import { faqDefinition } from './components/faq.js';
-import { heroDefinition } from './components/hero.js';
-import { ledeDefinition } from './components/lede.js';
-import { linkListDefinition } from './components/link-list.js';
-import { newsletterSignupDefinition } from './components/newsletter-signup.js';
-import { pricingTableDefinition } from './components/pricing-table.js';
-import { productPreviewDefinition } from './components/product-preview.js';
-import { proseDefinition } from './components/prose.js';
+import { SECTION_DEFINITIONS } from './components/definitions.js';
 import { isRegisteredSectionType } from './components/registered-types.js';
-import { formConfirmationDefinition } from './components/form-confirmation.js';
-import { searchDefinition } from './components/search.js';
-import { stepsDefinition } from './components/steps.js';
-import { brandRowDefinition } from './components/brand-row.js';
-import { comparisonTableDefinition } from './components/comparison-table.js';
-import { mediaDefinition } from './components/media.js';
-import { statsDefinition } from './components/stats.js';
-import { timelineDefinition } from './components/timeline.js';
-import { testimonialDefinition } from './components/testimonial.js';
-import { sectionVariantDataSchema } from './components/types.js';
+import { sectionVariantDataSchema, type ComponentEditorHints, type SectionFootprint } from './components/types.js';
 import { listPageTypeDefinitions } from './page-types.js';
-import { navActionCapacity } from './structural-capacity.js';
+import { navActionCapacity, REGION_ROWS, type RegionRow } from './region-registry.js';
+import { COMPOSITION_RULES } from './composition-rules.js';
 import { THEME_AXES, THEME_AXIS_GROUPS } from './theme-tokens.js';
 import { contentItemBodySchema } from '../../schema/bodies/content-item-v1.js';
 import { pageBodySchema } from '../../schema/bodies/page-v1.js';
@@ -111,33 +88,20 @@ const BODY_SCHEMA: Partial<Record<ObjectType, z.ZodType>> = {
 
 // ─── section-type editor hints (only the component-bound types carry them) ───
 
-const SECTION_EDITORS = {
-  hero: heroDefinition.editor,
-  lede: ledeDefinition.editor,
-  prose: proseDefinition.editor,
-  checklist: checklistDefinition.editor,
-  content_grid: contentGridDefinition.editor,
-  bio: bioDefinition.editor,
-  newsletter_signup: newsletterSignupDefinition.editor,
-  testimonial: testimonialDefinition.editor,
-  cta_banner: ctaBannerDefinition.editor,
-  faq: faqDefinition.editor,
-  link_list: linkListDefinition.editor,
-  product_preview: productPreviewDefinition.editor,
-  contact_form: contactFormDefinition.editor,
-  search: searchDefinition.editor,
-  content_embed: contentEmbedDefinition.editor,
-  form_confirmation: formConfirmationDefinition.editor,
-  steps: stepsDefinition.editor,
-  content_split: contentSplitDefinition.editor,
-  composition: compositionDefinition.editor,
-  pricing_table: pricingTableDefinition.editor,
-  media: mediaDefinition.editor,
-  brand_row: brandRowDefinition.editor,
-  stats: statsDefinition.editor,
-  timeline: timelineDefinition.editor,
-  comparison_table: comparisonTableDefinition.editor,
-} as const;
+/**
+ * Editor hints and footprints, DERIVED from the one pure definitions map
+ * (`components/definitions.ts`). This used to be a hand-written list of the
+ * same 25 names; W1 T1.1 needed a second per-kind fact (footprint) and two
+ * parallel hand-written lists of the same names is exactly the drift this
+ * registry exists to prevent.
+ */
+const SECTION_EDITORS = Object.fromEntries(
+  Object.entries(SECTION_DEFINITIONS).map(([type, definition]) => [type, definition.editor])
+) as Record<string, ComponentEditorHints<SectionType>>;
+
+const SECTION_FOOTPRINTS = Object.fromEntries(
+  Object.entries(SECTION_DEFINITIONS).map(([type, definition]) => [type, definition.footprint])
+) as Record<string, SectionFootprint>;
 
 /**
  * The registry editor's `defaultData` for a component-bound section type
@@ -155,7 +119,13 @@ export type SectionTypeContract = {
   type: SectionType;
   component_bound: boolean;
   data_schema: JsonSchema;
-  editor?: (typeof SECTION_EDITORS)[keyof typeof SECTION_EDITORS];
+  editor?: ComponentEditorHints<SectionType>;
+  /**
+   * WHERE this kind may be placed (W1 T1.1) — the region, and for an
+   * edge-pinned kind its edge and viewport band. Absent for `card` /
+   * `shared_ref`, which are not standalone-placeable.
+   */
+  footprint?: SectionFootprint;
   /**
    * Block-tree bounds (docs/cms-architecture/block-tree.md): which child block
    * types this type may contain, and how many. Present only on container types;
@@ -173,7 +143,8 @@ export const listSectionTypeContracts = (): SectionTypeContract[] =>
       type,
       component_bound: isRegisteredSectionType(type),
       data_schema: toJson(sectionVariantDataSchema(type)),
-      ...(type in SECTION_EDITORS ? { editor: SECTION_EDITORS[type as keyof typeof SECTION_EDITORS] } : {}),
+      ...(type in SECTION_EDITORS ? { editor: SECTION_EDITORS[type] } : {}),
+      ...(type in SECTION_FOOTPRINTS ? { footprint: SECTION_FOOTPRINTS[type] } : {}),
       ...(childRule
         ? {
             allowed_children: childRule.allowedChildren,
@@ -390,6 +361,18 @@ const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 
             'Leaf-only types (card) compose ONLY inside a content_grid cards source — placed directly they parse ' +
             'but break the site build (W8, closes the Session-K gap).',
         },
+        /**
+         * W1 T1.3 — the composition lints, published from the SAME rows the
+         * validator evaluates (`lib/registry/composition-rules.ts`). Where the
+         * PageType rules say which kinds are allowed, these say whether the
+         * arrangement of them is a page a reader can use.
+         */
+        ...COMPOSITION_RULES.map((rule) => ({
+          id: rule.id,
+          severity: rule.severity,
+          enforced_live: rule.enforced_live,
+          description: rule.description,
+        })),
       ];
     case 'section':
       return [
@@ -1240,6 +1223,15 @@ export type ObjectContract = {
   summary: string;
   body_schema: JsonSchema | { note: string };
   section_types?: SectionTypeContract[];
+  /**
+   * The reader-side regions a page is assembled from (W1 T1.1), with each
+   * region's occupancy, allow-list and severity. Emitted alongside
+   * `section_types` so a composing agent can read WHERE things go before it
+   * reads WHAT they contain. Derived from `region-registry.ts` — the flow
+   * region's allow-list comes from the kinds' own declared footprints, never
+   * from a hand-kept list.
+   */
+  regions?: RegionRow[];
   page_types?: ReturnType<typeof listPageTypeDefinitions>;
   patch_ops: PatchOpContract[];
   constraints: Constraint[];
@@ -1318,7 +1310,7 @@ export const buildObjectContract = (
                     'privileged site_apply_brand_imagery tool. NOT publishable — object_publish on it is refused.'
                   : `Everything an agent needs to create and edit a ${objectType} object: body schema, patch ops, constraints, publish policy, and required side-data.`,
     body_schema: schema ? toJson(schema) : { note: `${objectType} has no generic body schema.` },
-    ...(includesSections ? { section_types: listSectionTypeContracts() } : {}),
+    ...(includesSections ? { section_types: listSectionTypeContracts(), regions: REGION_ROWS } : {}),
     ...(objectType === 'page' ? { page_types: listPageTypeDefinitions() } : {}),
     patch_ops: patchOpContracts(objectType),
     // tracking_config, editorial_voice and visual_standard do not carry the

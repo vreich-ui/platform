@@ -11,6 +11,7 @@ import { sectionVariantDataSchema, type EmptyResolved, type SectionComponentDefi
 export const mediaDefinition: SectionComponentDefinition<'media', EmptyResolved> = {
   type: 'media',
   schema: sectionVariantDataSchema('media'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'Media',
     icon: 'tabler:photo',

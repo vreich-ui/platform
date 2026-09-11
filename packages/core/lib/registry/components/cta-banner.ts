@@ -10,6 +10,7 @@ import { sectionVariantDataSchema, type HeroResolved, type SectionComponentDefin
 export const ctaBannerDefinition: SectionComponentDefinition<'cta_banner', HeroResolved> = {
   type: 'cta_banner',
   schema: sectionVariantDataSchema('cta_banner'),
+  footprint: { region: 'flow' },
   editor: {
     label: 'CTA banner',
     icon: 'tabler:speakerphone',

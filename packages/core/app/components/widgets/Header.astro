@@ -80,7 +80,7 @@ const searchTitle = searchBrand ? `Search ${searchBrand}` : 'Search';
 <header
   class:list={[
     { sticky: isSticky, relative: !isSticky, dark: isDark },
-    'top-0 z-40 flex-none mx-auto w-full border-b border-gray-50/0 transition-[transform,opacity] duration-300 ease-in-out',
+    'top-0 z-[var(--dl-layer-sticky)] flex-none mx-auto w-full border-b border-gray-50/0 transition-[transform,opacity] duration-300 ease-in-out',
   ]}
   {...isSticky ? { 'data-aw-sticky-header': true } : {}}
   {...id ? { id } : {}}
@@ -305,7 +305,7 @@ const searchTitle = searchBrand ? `Search ${searchBrand}` : 'Search';
 
 <div
   id="header-search-overlay"
-  class="fixed inset-0 z-50 hidden bg-slate-950/35 px-4 py-6 backdrop-blur-sm sm:px-6"
+  class="fixed inset-0 z-[var(--dl-layer-overlay)] hidden bg-slate-950/35 px-4 py-6 backdrop-blur-sm sm:px-6"
   role="dialog"
   aria-modal="true"
   aria-labelledby="header-search-title"

@@ -1,7 +1,7 @@
 ---
 import '@fontsource-variable/inter';
 
-import { FALLBACK_COLORS, FALLBACK_FONTS, resolveAxisVars } from '@core/lib/registry/theme-tokens';
+import { FALLBACK_COLORS, FALLBACK_FONTS, layerTokenCss, resolveAxisVars } from '@core/lib/registry/theme-tokens';
 import { getSiteObject } from '~/utils/site-object';
 
 // 'DM Sans'
@@ -56,9 +56,15 @@ const axisCss = Object.entries(axisVars)
   .map(([name, value]) => `    ${name}: ${value};\n`)
   .join('');
 
+// W1 T1.2: the layer scale. Unconditional and identical on every tenant —
+// unlike the axis vars above, these are NOT brandTokens and nothing an agent
+// writes can change them (see theme-tokens.ts on why stacking order is a
+// rendering invariant rather than a design choice).
+const layerCss = layerTokenCss();
+
 const css = `
   :root {
-${axisCss}    --aw-font-sans: ${font('sans')};
+${layerCss}${axisCss}    --aw-font-sans: ${font('sans')};
     --aw-font-serif: ${font('serif')};
     --aw-font-heading: ${font('heading')};
     --aw-font-mono: ${font('mono')};

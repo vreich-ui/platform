@@ -393,6 +393,84 @@ reserved_prefix | loader_owned_page_type | invalid_route`, and every non-benign 
 Sections resolve through `lib/renderer/resolve.ts` + `resolve-content-grid.ts` and dispatch via
 `lib/registry/components/index.ts`; identity chips come from `lib/renderer/section-annotations.ts`.
 
+## 7b. Regions and composition rules
+
+Added W1 (reader-side regions wave). Two registries, both **derived** — the tables below are rendered
+from them, never hand-kept, and both reach an agent through `object_contract` /
+`registry_get {registry:'component'}`.
+
+### Regions — `packages/core/lib/registry/region-registry.ts`
+
+A reader-side page is not one list of sections. Naming the regions while the honest answer for all 25
+placeable kinds is `flow` is what makes the first sticky kind a table row instead of a new concept.
+
+| region | occupancy | allowed | level | rendered |
+|---|---|---|---|---|
+| `header` | 1 navigation; ≤3 top-level `actions` | navigation object | warning | yes |
+| `announcement` | ≤1 | `cta_banner` via `site.chrome.announcement.sectionRef` | warning | **no** — `KNOWN_ISSUES` #68 |
+| `flow` | unbounded, ordered | every standalone-placeable kind (derived from the footprints) | — | yes |
+| `sticky_bottom` | ≤1 | **code-owned and occupied** — the tracking consent banner | missing | yes |
+| `floating` | ≤1 per corner | reserved; empty allow-list today | missing | no |
+| `overlay` | code-owned | — (the mobile menu) | — | yes |
+| `footer` | 1 navigation | navigation object | missing | yes |
+
+Every registry component module declares a required `footprint: { region, edge?, heightClass?,
+singleton? }` (`lib/registry/components/types.ts`), and the map is TOTAL over
+`REGISTERED_SECTION_TYPES` — a new kind cannot be added without saying where it goes. `announcement`
+is listed as **declared but not rendered** rather than quietly omitted: a site object may point
+`sectionRef` at a real section, pass validation, publish, release, and show nothing.
+
+`sticky_bottom` is the row the brief got wrong, and the z-index lint found it: the tracking consent
+banner (`lib/tracking/consent/banner-html.ts`) is a `fixed inset-x-0 bottom-0` element on every
+tenant, so the bottom edge is **already occupied by code**. A future `sticky_cta` has to coexist with
+it — `occupancy.max: 1` is why it cannot simply be added.
+
+Two different questions, deliberately kept apart: `footprint.region` answers *where an instance of
+this kind may be placed*; a region's `allowed` answers *what this region holds*. A `cta_banner` is
+flow-placeable **and** referenceable by the announcement region; those are not in conflict.
+
+**Layer scale.** Stacking order is one scale of custom properties —
+`--dl-layer-behind|base|raised|sticky|overlay|modal|toast` in `lib/registry/theme-tokens.ts`, emitted
+unconditionally by `app/components/CustomStyles.astro`. It is **not** a brand token: no patch op
+reaches it and `site_apply_theme` does not touch it, because a tenant that could lower
+`--dl-layer-overlay` below `--dl-layer-sticky` would put its own header on top of its own mobile
+menu. `tests/scripts/layer-tokens.test.mjs` pins that no raw `z-index` survives under
+`packages/core/app/**` and that `packages/core/components/sections/**` carries no stacking order at
+all — a section never decides its own layer. Native CSS cascade layers are deliberately not adopted;
+`tailwind.css`'s `@layer base/components/utilities` is the unrelated Tailwind at-rule.
+
+### Composition rules — `packages/core/lib/registry/composition-rules.ts`
+
+Where the PageType rules say which kinds are allowed, these say whether the *arrangement* of them is
+a page a reader can use. Each is evaluated by `object-validate.ts:checkComposition` and published in
+`object_contract.constraints` from the same row, so the rule an agent is told about and the rule that
+refuses its write are the same one.
+
+| check id | rule | severity |
+|---|---|---|
+| `structure_region_capacity` | per-region occupancy from the table above; a kind whose footprint names a reserved region cannot be placed | blocks_publish |
+| `structure_opener` | `hero` / `lede` only at position 0 | warns |
+| `structure_singletons` | `newsletter_signup`, `contact_form`, `search` ≤1 per page, counted through `shared_ref` | warns |
+| `structure_adjacency` | no two adjacent sections of the same kind, except `prose` and `media` | warns |
+| `structure_cta_density` | ≤3 of `cta_banner`, `pricing_table`, `product_preview` per page | warns |
+| `structure_anchor_unique` | `anchor` **and** `formName` values each unique per page — both become DOM ids | blocks_write |
+| `structure_viewport_budget` | edge-pinned kinds ≤25 % of a small viewport (xs 8 %, s 12 %, m 20 %) | blocks_publish |
+
+The singleton list and the viewport bands are derived from the footprints, not typed a second time: a
+kind is a singleton because its own registry module says so. `structure_singletons` **warns** rather
+than blocks, corrected against the committed data: drlurie's `page_object_showcase` carries two
+newsletter forms on purpose, with different `formName` values, and renders correctly —
+`NewsletterSignup.astro` derives its input ids from `formName`, so a second form only breaks when it
+duplicates the first one's identity. That failure blocks, under `structure_anchor_unique`. `structure_region_capacity` and
+`structure_viewport_budget` pass on every real page today — no kind declares an `edge` — and are kept
+live so the first sticky kind meets an enforced rule rather than a commented-out one.
+
+**Shared-section impact.** `object_patch` on a `section` object returns
+`impact: { referencing_pages: [ids] }`, and above five pages the validation summary gains a
+`shared_ref_impact` warning. It is a read over the validation context's existing snapshot — no new
+store — and it is reported, never enforced: editing a widely-shared section is legitimate, it just
+should not be a surprise.
+
 ## 8. Assets & images
 
 **Two families:**
