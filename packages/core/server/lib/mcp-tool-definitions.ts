@@ -11,6 +11,7 @@
  * descriptions and inputSchemas byte-for-byte identical to how they read as
  * one array -- this is a mechanical relocation, not a rewrite.
  */
+import { ARTIFACT_REQUEST_OWNER_TYPES } from './artifact-index.js';
 import { artifactKindValues, artifactReferenceLimits } from './artifacts.js';
 import { objectTypes } from '../../schema/object-record-v1.js';
 
@@ -38,10 +39,19 @@ export const INTERNAL_ONLY_TOOLS = new Set([
   'create_artifact_from_url',
   'save_artifact',
   'soft_delete_artifact',
+  // W1 T1.4: same rationale as its neighbours. The WRITE tools let a caller
+  // declare the owner of a request it is already creating artifacts under;
+  // re-pointing an ARBITRARY request id is an authorization change, so it is
+  // admin-gated and absent from agent discovery.
+  'artifact_request_register_owner',
   'restore_artifact',
   'migrate_artifact_indexes',
   'wipe_blob_stores',
   'reconcile_artifact_indexes',
+  // W2 T2.6/T2.7: storage maintenance passes. Same rationale as their siblings —
+  // operational, destructive in the apply direction, and noise in agent planning.
+  'artifact_dedupe_by_sha',
+  'artifact_orphan_sweep',
   // T16.5: an operational diagnostic (per-family env-gate truth), not part of
   // normal agent object editing — callable (the fleet capability probe uses
   // it) but not advertised, same rationale as the tools above it.
@@ -189,10 +199,19 @@ export const ARTIFACT_TEMPLATE_ERROR_CODES: Record<string, { http: number; meani
   },
   artifact_scope_required: { http: 400, meaning: 'site_id and request_id are both required for the artifact bridge.' },
   artifact_site_mismatch: { http: 403, meaning: 'site_id does not match this deployment.' },
-  artifact_request_not_found: { http: 404, meaning: 'No content_item exists for the given request_id.' },
+  artifact_request_not_found: {
+    http: 404,
+    meaning:
+      'No content object on this site owns the given request_id — neither a content_item of that id nor a registered owner that exists and is active. Create the owning object, or register one with artifact_request_register_owner.',
+  },
   artifact_request_scope_mismatch: {
     http: 403,
-    meaning: 'The request_id exists but is not owned by the supplied site_id.',
+    meaning: "The request_id exists but its owning object lives on a different site — use that site's own connector.",
+  },
+  artifact_request_owner_conflict: {
+    http: 409,
+    meaning:
+      'The request_id is already owned by a different object. An owner pointer is immutable; re-registering the SAME owner is a no-op, re-pointing it is refused.',
   },
   artifact_job_scope_mismatch: {
     http: 403,
@@ -274,6 +293,32 @@ const expectedSha256JsonSchema = {
   description: 'Optional expected complete artifact SHA-256 hex digest for upload integrity checks.',
 };
 
+/**
+ * W1 T1.3: the optional owner pointer every artifact WRITE tool accepts.
+ *
+ * A request id is a NAME, and this says which governed object answers for it.
+ * Omitting it is the historical behaviour exactly: an article owns its
+ * request implicitly (the request id IS the content_item id) and no pointer
+ * is written. Anything that is not an article — a captured page, a
+ * visual_standard — has to say so once, here or through
+ * `artifact_request_register_owner`, or its later media ops cannot resolve.
+ */
+const artifactRequestOwnerJsonSchema = {
+  type: 'object',
+  description:
+    'Optional. The CMS object that owns this request id, for requests not named after a content_item (a captured page, a visual_standard). Registered once and immutable: re-registering the same owner is a no-op, a different one is refused. The object does not have to exist yet — capture ingests a page\'s imagery before the page is created — but it must exist, be active and be on this site before any media op on this request will resolve.',
+  properties: {
+    object_type: {
+      type: 'string',
+      enum: [...ARTIFACT_REQUEST_OWNER_TYPES],
+      description: 'Object type of the owner.',
+    },
+    object_id: stringSchema('Object id of the owner, e.g. page_home.'),
+  },
+  required: ['object_type', 'object_id'],
+  additionalProperties: false,
+};
+
 const artifactUploadIntentInputSchema = () =>
   objectSchema(
     {
@@ -288,6 +333,7 @@ const artifactUploadIntentInputSchema = () =>
       expectedSha256: expectedSha256JsonSchema,
       label: artifactLabelJsonSchema,
       tags: artifactTagsJsonSchema,
+      owner: artifactRequestOwnerJsonSchema,
     },
     ['requestId', 'artifactKind', 'contentType', 'expectedSizeBytes', 'expectedSha256']
   );
@@ -305,7 +351,7 @@ const artifactUploadIntentInputSchema = () =>
  */
 const annotationSiteIdJsonSchema = stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.');
 const annotationRequestIdJsonSchema = stringSchema(
-  'The content_item request id that owns the image artifact. The image must belong to THIS request; a cross-request reference is refused.'
+  'The request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner), which owns the image artifact. The image must belong to THIS request; a cross-request reference is refused.'
 );
 const annotationPublicPathJsonSchema = {
   type: 'string',
@@ -544,7 +590,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'create_agent_artifact_job',
     description:
-      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and content-item request_id; Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. For a PDF OF AN ARTICLE prefer render_article_pdf, which runs this call with the render-data mapper, the poll and the attach; if you do call this directly, omit `data` (Platform maps the article), and pass `kind` when the render is not an article — `kind` picks the template from site.pdf.byKind and gates the article-shaped requirements default (see the field). If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). OVERRIDE CHANNEL (`style`, BRIEF §3.4/D4): pass `style.visualStandardId` and/or `style.override` to point THIS job at a different visual_standard or a one-off partial brandImagery instead of the site's own — see the `style` field's own description for the full resolution order and the guardrail. requirements.image.usageContext not recognized by this project's image-model routing policy (get_image_model_policy's `contexts`) is coerced to article_body and reported in the response's `warnings` (never an error); when requirements.image.size is omitted, the effective brandImagery's aspectRatios[usageContext] (site's own, or from the resolved style) maps to the nearest of pdf-tool's 5 allowed sizes. EDIT JOBS: pass operation:\"edit\" together with `sourceArtifact` ({artifactReference, expectedSha256} of the artifact being edited) and `editMode` — plus `maskRef` for a masked_edit and optional `editInstructions`. All five are TOP-LEVEL arguments of THIS call; none of them belongs under `requirements`, and a job that puts them there (or omits them) is failed by pdf-tool with \"edit jobs require sourceArtifact.artifactReference … expectedSha256 … editMode\". MODEL ROUTING DEFAULT: an image job that omits `model` runs on the model this site's image-model policy names for its requirements.image.usageContext; a job that names NO usageContext runs on the model that policy gives article_body (get_image_model_policy shows both), never on pdf-tool's own gpt-image-1 fallback — Platform states this site's default explicitly on every image job. Omitting usageContext is still worth fixing and is reported as the warning \"usageContext_missing\" in the response's `warnings` (a warning, never an error); \"image_model_default_unresolved\" there means this site's policy named no model at all (unreadable, or empty), so pdf-tool's own default decided instead — fix the policy. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response, and pdf_no_template_configured (a pdf job on a site whose site object declares neither pdf.byKind.<kind> nor pdf.defaultTemplateId — the SITE is unconfigured, not the article: pass template_id or set the site's pdf defaults) — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
+      "Create a pdf-tool artifact job through THIS site's trusted Platform bridge. Pass the owning site_id and the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner); Platform resolves the canonical pdf-tool project, verifies request ownership, mints and forwards a fresh short-lived storage grant server-side, and never returns the grant — never attempt to supply your own grant/storage/token argument, it is always minted for you. Do not call pdf-tool directly or guess projectId. The job is asynchronous, BUT this call itself waits briefly (a few seconds, budget permitting) for it to finish: with a warm worker and a fast render the job is often already done before you could poll, so a SINGLE completing create call may come back with the terminal artifactReference, public_path, and verified fields already populated — check for those before polling. jobId and polling instructions are ALWAYS present in the response regardless, so it is always safe to poll get_agent_artifact_job_status with the returned jobId if the job is still running (status will not be complete yet) or if you prefer to ignore the inline result; do not recreate the job. Pass wait:false to skip the inline wait and get the old fire-and-forget 202-style response immediately. For template-driven PDFs pass template_id + data (+ optional assets) instead of a prompt. For a PDF OF AN ARTICLE prefer render_article_pdf, which runs this call with the render-data mapper, the poll and the attach; if you do call this directly, omit `data` (Platform maps the article), and pass `kind` when the render is not an article — `kind` picks the template from site.pdf.byKind and gates the article-shaped requirements default (see the field). If this call itself times out or 502s (ambiguous whether the job was created), retry with the SAME idempotency_key to get back the original jobId instead of creating a second job. BRAND-AWARE IMAGE GENERATION (W16 C4): for an image-GENERATION job (artifact_kind image, operation generate) on a site that has declared a brandImagery contract, `prompt` is the image SUBJECT ONLY — never describe style, medium, lighting, or mood. Platform reads the site's brandImagery and assembles the full generation request server-side: the site's styleSentence is prepended to your subject, its hex palette and (if declared) composition notes are appended as trailing clauses, its negative list is merged into the negative prompt, a seed is deterministically derived from the site's seedBase, and its lora (if any) is forwarded. Any of seed/loras you supply are OVERRIDDEN (never erroring — silently stripped and replaced) when the site has brandImagery; the response's overriddenFields lists which of your fields lost, so you learn not to resupply them next time. negative_prompt is always MERGED with (never replaces) the site's negative list. A site with no brandImagery leaves every field exactly as you sent it (unchanged, pass-through). OVERRIDE CHANNEL (`style`, BRIEF §3.4/D4): pass `style.visualStandardId` and/or `style.override` to point THIS job at a different visual_standard or a one-off partial brandImagery instead of the site's own — see the `style` field's own description for the full resolution order and the guardrail. requirements.image.usageContext not recognized by this project's image-model routing policy (get_image_model_policy's `contexts`) is coerced to article_body and reported in the response's `warnings` (never an error); when requirements.image.size is omitted, the effective brandImagery's aspectRatios[usageContext] (site's own, or from the resolved style) maps to the nearest of pdf-tool's 5 allowed sizes. EDIT JOBS: pass operation:\"edit\" together with `sourceArtifact` ({artifactReference, expectedSha256} of the artifact being edited) and `editMode` — plus `maskRef` for a masked_edit and optional `editInstructions`. All five are TOP-LEVEL arguments of THIS call; none of them belongs under `requirements`, and a job that puts them there (or omits them) is failed by pdf-tool with \"edit jobs require sourceArtifact.artifactReference … expectedSha256 … editMode\". MODEL ROUTING DEFAULT: an image job that omits `model` runs on the model this site's image-model policy names for its requirements.image.usageContext; a job that names NO usageContext runs on the model that policy gives article_body (get_image_model_policy shows both), never on pdf-tool's own gpt-image-1 fallback — Platform states this site's default explicitly on every image job. Omitting usageContext is still worth fixing and is reported as the warning \"usageContext_missing\" in the response's `warnings` (a warning, never an error); \"image_model_default_unresolved\" there means this site's policy named no model at all (unreadable, or empty), so pdf-tool's own default decided instead — fix the policy. Error codes (error_code field) this bridge and pdf-tool can return: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response, and pdf_no_template_configured (a pdf job on a site whose site object declares neither pdf.byKind.<kind> nor pdf.defaultTemplateId — the SITE is unconfigured, not the article: pass template_id or set the site's pdf defaults) — see this platform's docs for the full artifact/template error catalog (meaning + what to do for each).",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id, e.g. site_acme. Must match this deployment.'),
@@ -686,7 +732,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The same content_item request id used to create the job.'),
+        request_id: stringSchema('The same request id used to create the job — owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         job_id: stringSchema('Job id returned by create_agent_artifact_job.'),
       },
       ['site_id', 'request_id', 'job_id']
@@ -700,7 +746,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The same content_item request id used to create the job.'),
+        request_id: stringSchema('The same request id used to create the job — owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         job_id: stringSchema('Job id returned by create_agent_artifact_job.'),
         resume_token: stringSchema("The resume token from the blocked job's status (resume.input.resumeToken)."),
         approval_token: stringSchema('The operator approval secret authorizing this job to proceed.'),
@@ -716,7 +762,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('Existing content_item request id.'),
+        request_id: stringSchema('Existing request id — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         slot: stringSchema('The exact slot used when the job was created.'),
       },
       ['site_id', 'request_id', 'slot']
@@ -1156,7 +1202,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The content_item request id this search is sourcing images for.'),
+        request_id: stringSchema('The request id this search is sourcing images for — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         query: stringSchema('Search prompt describing the desired image.'),
         count: {
           type: 'number',
@@ -1192,7 +1238,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The content_item request id whose image search bank to read.'),
+        request_id: stringSchema('The request id whose image search bank to read — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         limit: intSchema('Optional max candidates to return (default all, max 200).'),
         cursor: stringSchema('Optional pagination cursor from a previous get_image_search_bank call.'),
       },
@@ -1207,7 +1253,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The content_item request id that owns the candidate.'),
+        request_id: stringSchema('The request id that owns the candidate — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         candidate_id: stringSchema('The candidate id from get_image_search_bank.'),
         state: {
           type: 'string',
@@ -1232,7 +1278,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The content_item request id this import is scoped to.'),
+        request_id: stringSchema('The request id this import is scoped to — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         url: stringSchema('https URL of the image to import.'),
         filename: stringSchema('Optional target filename; derived from the URL if omitted.'),
         slot: stringSchema('Optional safe slot so the artifact is retrievable via get_agent_artifact_by_slot.'),
@@ -1272,7 +1318,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The content_item request id this import batch is scoped to.'),
+        request_id: stringSchema('The request id this import batch is scoped to — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
         urls: arraySchema(
           { type: 'string', minLength: 1 },
           'https URLs: direct images, zip archives, or folder/index pages (max 50).'
@@ -1390,6 +1436,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         label: artifactLabelJsonSchema,
         tags: artifactTagsJsonSchema,
         metadata: artifactMetadataJsonSchema,
+        owner: artifactRequestOwnerJsonSchema,
       },
       ['requestId', 'artifactKind', 'contentType', 'sourceUrl', 'expectedSizeBytes', 'expectedSha256']
     ),
@@ -1418,6 +1465,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         label: artifactLabelJsonSchema,
         tags: artifactTagsJsonSchema,
         metadata: artifactMetadataJsonSchema,
+        owner: artifactRequestOwnerJsonSchema,
       },
       ['requestId', 'artifactKind', 'contentType', 'payload']
     ),
@@ -1493,15 +1541,78 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'soft_delete_artifact',
     description:
-      'Admin-only soft delete for an ArtifactReference. Marks request-artifacts/{requestId}/{sha256}.json with deletedAtISO/deletedBy and leaves binary artifact bytes in place.',
+      'Admin-only soft delete for an ArtifactReference. Marks request-artifacts/{requestId}/{sha256}.json with deletedAtISO/deletedBy and leaves binary artifact bytes in place unless removeBytes is true — and even then the bytes are removed only when no other live reference still resolves to them (references deduplicated by sha share one blob through storageKey).',
     inputSchema: objectSchema(
       {
         requestId: stringSchema('Workflow request id that owns the artifact reference.'),
         sha256: expectedSha256JsonSchema,
         deletedBy: artifactDeletedByJsonSchema,
+        removeBytes: {
+          type: 'boolean',
+          default: false,
+          description:
+            'When true, also delete the artifact bytes — but ONLY if no other live (non-soft-deleted) reference shares this blob through its storageKey. Defaults to false: soft delete keeps bytes so restore_artifact stays possible.',
+        },
       },
       ['requestId', 'sha256']
     ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'artifact_request_register_owner',
+    description:
+      'Admin-only. Points an artifact request id at the CMS object that owns it, so media ops on requests NOT named after a content_item resolve. Writes artifact-index/request-owner/{request_id}.json. Immutable once set: re-registering the same owner is a no-op, a different owner is refused with artifact_request_owner_conflict. The owner object does not have to exist yet, but it must exist, be active and be on this site before any media op on the request will resolve.',
+    inputSchema: objectSchema(
+      {
+        request_id: stringSchema('Artifact request id to register an owner for.'),
+        object_type: {
+          type: 'string',
+          enum: [...ARTIFACT_REQUEST_OWNER_TYPES],
+          description: 'Object type of the owner.',
+        },
+        object_id: stringSchema('Object id of the owner, e.g. page_home.'),
+      },
+      ['request_id', 'object_type', 'object_id']
+    ),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'artifact_dedupe_by_sha',
+    description:
+      'Admin-only, idempotent, cursor-paged storage compaction: groups live ArtifactReferences by sha256, keeps the OLDEST blob per group as the storageKey for all of them, and deletes the other blobs\' bytes. References are NOT rewritten — every request keeps its own blobKey and its own /img|/pdf public path, which keep serving through the storageKey redirect. Returns { groups, blobs_deleted, bytes_freed } plus a per-group breakdown and a checkpoint cursor. dry_run defaults to TRUE: only an explicit dry_run:false deletes anything.',
+    inputSchema: objectSchema({
+      dry_run: {
+        type: 'boolean',
+        default: true,
+        description: 'When true or omitted, report what would be compacted without repointing references or deleting any bytes.',
+      },
+      artifact_kind: {
+        type: 'string',
+        enum: [...artifactKindValues],
+        description: 'Optional artifact kind to restrict the pass to.',
+      },
+      limit: artifactReconcileLimitJsonSchema,
+      cursor: artifactListCursorJsonSchema,
+    }),
+    governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'artifact_orphan_sweep',
+    description:
+      'Admin-only, cursor-paged orphan sweep: collects every /img and image/ (and /pdf, pdf/) artifact reference cited by EVERY active object of every object type — full projection, no field allowlist — plus slot pointers, then soft-deletes the live ArtifactReferences nothing cites. Bytes are left in place so restore_artifact still works. Dangling references (an active object citing an artifact that no longer exists) are REPORTED, never repaired. dry_run defaults to TRUE and its report lists what would be deleted, grouped per request id.',
+    inputSchema: objectSchema({
+      dry_run: {
+        type: 'boolean',
+        default: true,
+        description: 'When true or omitted, report the orphan candidates and dangling references without soft-deleting anything.',
+      },
+      request_prefix: stringSchema('Optional request-id prefix to restrict the sweep to.'),
+      older_than: isoDateStringSchema(
+        'Optional ISO 8601 cut-off; only references created strictly before it are considered orphans.'
+      ),
+      limit: artifactReconcileLimitJsonSchema,
+      cursor: artifactListCursorJsonSchema,
+    }),
     governance: { toolClass: 'privileged', autonomyFloor: 'ask', preview: { kind: 'input_echo' } },
   },
   {

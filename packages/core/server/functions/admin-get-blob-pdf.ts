@@ -1,7 +1,8 @@
 import { readBoundEnv, type SiteBinding } from '../lib/site-binding.js';
 import { getHeader, type LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
-import { getArtifactBlobStore } from '../lib/blob-store.js';
+import { getArtifactBlobStore, getArtifactIndexBlobStore } from '../lib/blob-store.js';
+import { resolveArtifactStorageKeyForBlobKey, type ArtifactIndexStore } from '../lib/artifact-index.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -59,9 +60,19 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   try {
     const store = await getArtifactBlobStore(event, binding);
-    const result = (await (
-      store as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> }
-    ).get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+    const reader = store as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> };
+    let result = (await reader.get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+
+    if (!result) {
+      // W2 T2.3/T2.5: a deduplicated reference keeps its own request-scoped blobKey
+      // but its bytes live under the FIRST request's blob. Only on a miss, so the
+      // ordinary (non-deduplicated) read costs nothing extra.
+      const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
+      const storageKey = await resolveArtifactStorageKeyForBlobKey(indexStore, blobKey);
+      if (storageKey !== blobKey) {
+        result = (await reader.get(storageKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+      }
+    }
 
     if (!result) {
       return jsonResponse(404, { error: 'PDF artifact not found.' });

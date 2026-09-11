@@ -26,9 +26,14 @@ import { restoreArtifact, softDeleteArtifact } from '../../packages/core/server/
 
 const DESTRUCTIVE_ADMIN_TOOLS = [
   'soft_delete_artifact',
+  // W1 T1.4: writes the request-owner pointer, which is half of the
+  // artifact bridge's authorization decision — same gate, same parity.
+  'artifact_request_register_owner',
   'restore_artifact',
   'migrate_artifact_indexes',
   'reconcile_artifact_indexes',
+  'artifact_dedupe_by_sha',
+  'artifact_orphan_sweep',
 ] as const;
 
 const IDENTITY_BASE = 'https://identity.test.invalid/.netlify/identity';

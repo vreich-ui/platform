@@ -21,8 +21,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 108 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2, + genesis_policy_get / genesis_policy_set, W3 Wolf 2026-09-09)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 108, `Expected 108 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 111 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2, + genesis_policy_get / genesis_policy_set, W3 Wolf 2026-09-09, + artifact_dedupe_by_sha / artifact_orphan_sweep, W2 T2.6/T2.7, + artifact_request_register_owner, W1 T1.4)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 111, `Expected 111 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -86,8 +86,13 @@ describe('Tool definitions', () => {
       'set_image_model_policy',
       'delete_pdf_template',
       'soft_delete_artifact',
+      // W1 T1.4: the request-owner pointer is half of an authorization
+      // decision, so its write verb is privileged like its neighbours.
+      'artifact_request_register_owner',
       'migrate_artifact_indexes',
       'reconcile_artifact_indexes',
+      'artifact_dedupe_by_sha',
+      'artifact_orphan_sweep',
       'wipe_blob_stores',
       'product_set_price',
       'order_reissue',

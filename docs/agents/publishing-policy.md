@@ -114,6 +114,37 @@ the old order died on its first tool call. **Fail-closed is unchanged and is not
 it means no publish without the media the article promises (§6.1 step 5), not that media is produced
 first. Any doc or skill still ordering media before the create is stale against this line.
 
+**The capture/page case — W1, 2026-09-11.** The rule above is about ARTICLES, and it is unchanged
+for them. It was never a claim that an artifact request must name a `content_item`; that was merely
+the only ownership the resolver could see. A request id is a NAME, and any allowlisted CMS object
+may now answer for it — `content_item`, `page`, `section`, `site`, `visual_standard`, `product`
+(`ARTIFACT_REQUEST_OWNER_TYPES`, `artifact-index.ts`).
+
+This matters because a captured site inverts the ordering by construction. A page's body cannot be
+written until its imagery is a first-party artifact reference (§6.3 — a raw or remote URL in a
+renderable field is a write-blocker), so the capture emitter MUST ingest bytes before the page
+exists. It declares the owner at ingest time instead:
+
+- `create_artifact_from_url` / `create_artifact_upload_intent` / `save_artifact` take an optional
+  `owner: { object_type, object_id }` and write `artifact-index/request-owner/<request_id>.json`.
+  The owner object does NOT have to exist yet — only its type is checked at write time.
+- Ownership is then enforced where it actually matters, at media-op time: the owner must exist, be
+  `status: active`, and be on this site, or the media op is refused exactly as an absent article is.
+- An owner on ANOTHER site is `artifact_request_scope_mismatch`, not `artifact_request_not_found` —
+  the request is real, the caller is on the wrong deployment.
+- The pointer is immutable. Re-registering the SAME owner is a free no-op (capture re-runs do it on
+  every pass); a DIFFERENT owner is `artifact_request_owner_conflict` (409), because re-pointing a
+  request would hand over every artifact already stored under it. An operator with the publish
+  secret or an admin session can register a pointer directly with `artifact_request_register_owner`.
+- Omitting `owner` is the historical behaviour exactly: no pointer is written, and an article still
+  owns its request implicitly.
+
+So the ordering rule now reads in full: **media for an ARTICLE still cannot precede its
+`object_create`** (the article is its own owner and there is nothing to register), while media for a
+PAGE may, provided the ingest call names the page that will own it. Nothing is fail-open — the wall
+moved from "does a content_item with this id exist" to "does the object that claimed this request
+exist, and is it live on this site".
+
 `object_checkin` moved ahead of `release_to_production` for the same reason it appears late in the
 tool contract: publish deliberately KEEPS the lock, and holding it across a batch release locks the
 article to everyone else for the rest of the lease.
@@ -208,8 +239,8 @@ One routing note that has wasted probes before: `object_patch` **does** edit con
 
 ### 6.1 Production (fail-closed, server-bridged)
 
-0. **The content_item must already exist.** The artifact job is scoped to the request id and is refused when no such article exists on the site (see the correction note in §4). Create the article first, then ask for its media.
-1. Call Platform `create_agent_artifact_job` with the owning `site_id` and existing content-item `request_id`; Platform resolves the canonical PDF-Tool project and injects the grant server-side. The raw grant RPC is removed, so grants and tokens never enter agent context (`docs/agents/pdf-tool-storage-grant.md`).
+0. **The owning object must already exist.** The artifact job is scoped to the request id and is refused when nothing on this site owns it (see the correction note in §4). For an article that means the `content_item` — create it first, then ask for its media. For a request owned by something else (a captured page, a `visual_standard`), it means the registered owner must exist, be `status: active`, and be on this site by the time the media op runs; registering the pointer earlier, at ingest, is allowed and is how capture works.
+1. Call Platform `create_agent_artifact_job` with the owning `site_id` and an existing `request_id` — one owned by a content object on this site (a `content_item`, or a page/`visual_standard` registered as owner); Platform resolves the canonical PDF-Tool project and injects the grant server-side. The raw grant RPC is removed, so grants and tokens never enter agent context (`docs/agents/pdf-tool-storage-grant.md`).
 2. Poll Platform `get_agent_artifact_job_status` without recreating the job. Request `requirements.image.outputFormat:'webp'` and `requirements.maxBytes` within budget (may lower the cap, never raise it).
 3. Image formats: **JPEG/PNG/WebP only** (server-decoded by sharp; GIF/AVIF/SVG rejected — `image-validation.ts:19`). Budget: committed defaults `maxImageBytes` 153,600 (~150 KB), `preferredImageFormat` webp, over-budget **warns** (`src/config/media-policy.ts`) — read the live values from `object_contract.media_policy`, and treat the warning as a defect to fix, not noise.
 4. PDF jobs require a **published** PDF template — preflight `list_pdf_templates`, else `create_pdf_template` → `publish_pdf_template`. **For an article PDF specifically, skip this whole flow and call `render_article_pdf` instead — see §6.4.**

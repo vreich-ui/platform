@@ -289,6 +289,33 @@ export const getPlatformArtifactBySlot = (
   options: PdfToolClientOptions = {}
 ) => postPdfTool('get-agent-artifact-by-slot', projectPayload(grant, { requestId, slot }), options);
 
+/**
+ * W2 T2.3 — THE pdf-tool BYTE HANDOFF.
+ *
+ * pdf-tool does not read artifact bytes through platform: it is handed a short-lived
+ * storage grant for the TENANT store and reads the key it was given, itself. So the key
+ * it is given must be the key the bytes are actually under — `storageKey`, not the
+ * request-scoped `blobKey` — or every deduplicated artifact 404s inside pdf-tool
+ * (ANNOTATE_ARTIFACT_NOT_FOUND / ARTIFACT_NOT_VERIFIED) even though the same artifact
+ * serves fine at its public /img path.
+ *
+ * `storageKey` is ALSO stripped rather than forwarded: pdf-tool runs its own
+ * `isArtifactReference` allowlist over the reference it receives and rejects unknown
+ * top-level keys, so shipping the new field would fail the call outright on every
+ * pdf-tool build that predates it. Projecting it onto `blobKey` needs nothing from
+ * pdf-tool at all — the storage key is itself a well-formed `<kind>/<requestId>/<sha>.<ext>`
+ * Major Key for the SAME sha256, so pdf-tool's own shape and digest checks still pass.
+ *
+ * The platform-side reference is untouched: this is a projection made at the wire, and
+ * the artifact's own blobKey, public path and index entries never change.
+ */
+export const toPdfToolArtifactReference = (reference: Record<string, unknown>): Record<string, unknown> => {
+  const { storageKey, ...rest } = reference;
+  if (typeof storageKey !== 'string' || !storageKey.trim()) return rest;
+
+  return { ...rest, blobKey: storageKey };
+};
+
 export const verifyPlatformArtifact = (
   grant: PdfToolStorageGrant,
   requestId: string,
@@ -298,7 +325,11 @@ export const verifyPlatformArtifact = (
 ) =>
   postPdfTool(
     'verify-agent-artifact',
-    projectPayload(grant, { requestId, artifactReference, materializationProof }),
+    projectPayload(grant, {
+      requestId,
+      artifactReference: toPdfToolArtifactReference(artifactReference),
+      materializationProof,
+    }),
     options
   );
 
@@ -315,7 +346,12 @@ export const inspectPlatformArtifact = (
   requestId: string,
   artifactReference: Record<string, unknown>,
   options: PdfToolClientOptions = {}
-) => postPdfTool('inspect-pdf-artifact', projectPayload(grant, { requestId, artifactReference }), options);
+) =>
+  postPdfTool(
+    'inspect-pdf-artifact',
+    projectPayload(grant, { requestId, artifactReference: toPdfToolArtifactReference(artifactReference) }),
+    options
+  );
 
 /**
  * T-IMG: the four image-annotation bridge calls — `annotate_image`,
@@ -346,7 +382,7 @@ export const inspectPlatformArtifact = (
  * paths; re-typing them here would only let the two drift and would turn a
  * useful upstream refusal into a generic platform one.
  */
-export type PlatformImageArtifactRef = { blobKey: string; sha256: string };
+export type PlatformImageArtifactRef = { blobKey: string; sha256: string; storageKey?: string };
 
 export type PlatformAnnotateImageInput = {
   requestId: string;
@@ -364,7 +400,9 @@ export type PlatformAnnotateImageInput = {
 
 const annotationSourcePayload = (requestId: string, source: PlatformImageArtifactRef) => ({
   requestId,
-  blobKey: source.blobKey,
+  // W2 T2.3: pdf-tool reads these bytes itself, from the tenant store, by THIS key —
+  // so it must be the storage key. See toPdfToolArtifactReference above.
+  blobKey: source.storageKey ?? source.blobKey,
   sha256: source.sha256,
 });
 

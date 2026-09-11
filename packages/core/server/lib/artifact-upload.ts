@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   artifactKindSet,
   artifactReferenceLimits,
+  artifactStorageKey,
   createArtifactReference,
   isSafeArtifactFilename,
   isSafeArtifactText,
@@ -10,7 +11,16 @@ import {
   type ArtifactReference,
 } from './artifacts.js';
 import { validateFilename, validateRequestId } from '../../lib/agents-naming.js';
-import { readArtifactReference, writeArtifactReferenceIndexes, type ArtifactIndexStore } from './artifact-index.js';
+import {
+  readArtifactByShaIndex,
+  readArtifactReference,
+  writeArtifactByShaIndex,
+  writeArtifactReferenceIndexes,
+  writeRequestOwner,
+  type ArtifactIndexStore,
+  type ArtifactRequestOwnerType,
+} from './artifact-index.js';
+import { getSiteIdentity } from '../../lib/site-identity.js';
 import { getArtifactBlobStore, getArtifactIndexBlobStore } from './blob-store.js';
 import { sha256Hex } from './crypto.js';
 import { ImageValidationError, validatePublishImageBytes } from './image-validation.js';
@@ -44,10 +54,36 @@ export type SaveArtifactBytesInput = Omit<ArtifactUploadTokenClaims, 'expiresAt'
   metadata?: Record<string, unknown>;
   event?: unknown;
   binding?: SiteBinding;
+  /**
+   * W1 T1.3. Optional: the CMS object that owns this request id. Omitting it
+   * is today's behaviour exactly — no pointer is written, and a content_item
+   * whose id IS the request id still owns its artifacts implicitly.
+   *
+   * The owner object is NOT required to exist yet. Capture ingests a page's
+   * imagery before the page object is created (a materialized artifact
+   * reference is the only legal value a page's asset field can hold), so
+   * demanding existence here would recreate the ordering deadlock this wave
+   * removes. Existence, `status: active` and site are checked at media-op
+   * time by `resolveArtifactBridgeScope`.
+   */
+  owner?: { object_type: ArtifactRequestOwnerType; object_id: string };
+  /** Attribution stamped on the owner record; names the tool that registered it. */
+  ownerRegisteredBy?: string;
 };
 
 export type SaveArtifactBytesResult =
-  | { ok: true; artifact: ArtifactReference; deduped: boolean; restored?: boolean }
+  | {
+      ok: true;
+      artifact: ArtifactReference;
+      deduped: boolean;
+      restored?: boolean;
+      /**
+       * W2 T2.4: set when these exact bytes were ALREADY stored for this tenant under a
+       * different request, so this upload wrote a reference (and its own public path)
+       * but no second copy of the payload. Names the request that owns the blob.
+       */
+      dedupedFrom?: string;
+    }
   | { ok: false; statusCode: number; error: string };
 
 type BlobStore = Awaited<ReturnType<typeof getArtifactBlobStore>>;
@@ -349,10 +385,56 @@ const validateArtifactBytes = async (
 };
 
 const existingBytesMatch = async (store: BlobStore, reference: ArtifactReference) => {
-  const existingBytes = await getArrayBuffer(store, reference.blobKey);
+  // W2 T2.3: a deduplicated reference's bytes live under another request's blob.
+  const existingBytes = await getArrayBuffer(store, artifactStorageKey(reference));
   if (!existingBytes) return false;
 
   return existingBytes.byteLength === reference.sizeBytes && sha256Hex(existingBytes) === reference.sha256;
+};
+
+/**
+ * Writes the request-owner pointer for a successfully stored artifact.
+ *
+ * Deliberately NON-FATAL. The bytes are already stored and indexed by the
+ * time this runs, so turning an owner conflict into a failed upload would
+ * report a saved artifact as lost. A conflict means the request already
+ * belongs to someone else — the conservative outcome is to keep the FIRST
+ * owner and say so in the log, never to re-point the request.
+ */
+const recordArtifactRequestOwner = async (indexStore: ArtifactIndexStore, input: SaveArtifactBytesInput) => {
+  if (!input.owner) return;
+
+  const result = await writeRequestOwner(indexStore, input.requestId, {
+    object_type: input.owner.object_type,
+    object_id: input.owner.object_id,
+    site: getSiteIdentity().siteId,
+    registered_by: input.ownerRegisteredBy ?? 'save_artifact_bytes',
+  });
+
+  if (!result.ok) {
+    console.warn(`[artifact-upload] request owner not registered for ${input.requestId}: ${result.error}`);
+  }
+};
+
+/** First-write-wins by-sha entry for a reference whose bytes live at its OWN blobKey. */
+const recordArtifactShaIndex = async (
+  indexStore: ArtifactIndexStore,
+  input: SaveArtifactBytesInput,
+  reference: ArtifactReference
+) => {
+  try {
+    await writeArtifactByShaIndex(indexStore, input.artifactKind, reference.sha256, {
+      storageKey: reference.blobKey,
+      contentType: reference.contentType,
+      sizeBytes: reference.sizeBytes,
+      firstRequestId: input.requestId,
+      createdAtISO: reference.createdAtISO,
+    });
+  } catch (error) {
+    // Best effort: a missing by-sha entry only costs a future duplicate blob. It must
+    // never fail an upload whose bytes and reference are already written correctly.
+    console.warn('[artifact-upload] by-sha index write failed.', { sha256: reference.sha256, error });
+  }
 };
 
 export const saveArtifactBytes = async (input: SaveArtifactBytesInput): Promise<SaveArtifactBytesResult> => {
@@ -404,16 +486,59 @@ export const saveArtifactBytes = async (input: SaveArtifactBytesInput): Promise<
     const { deletedAtISO: _deletedAtISO, deletedBy: _deletedBy, ...restoredReference } = existingReference;
 
     await writeArtifactReferenceIndexes(indexStore, input.requestId, restoredReference);
+    await recordArtifactRequestOwner(indexStore, input);
     return { ok: true, artifact: restoredReference, deduped: true, ...(restored ? { restored } : {}) };
   }
 
-  const existingBytes = await getArrayBuffer(artifactStore, reference.blobKey);
+  // ── W2 T2.4: cross-request content dedupe. ───────────────────────────────────
+  // The same-request checks above are untouched (including both 409s): they answer
+  // "did THIS request already upload this sha", and their answer is the reference.
+  // This answers a different question — "does this TENANT already store these exact
+  // bytes, under any request" — and its answer is a byte-storage redirect.
+  //
+  // The request still gets its own reference and therefore its own request-scoped
+  // blobKey and its own /img/<requestId>/<sha>.<ext> public path. Nothing existing
+  // is rewritten; only the second copy of the payload is skipped.
+  const shaHit = await readArtifactByShaIndex(indexStore, input.artifactKind, reference.sha256);
+  if (shaHit && shaHit.storageKey !== reference.blobKey) {
+    const hitBytes = await getArrayBuffer(artifactStore, shaHit.storageKey);
+
+    // VERIFY, never trust the index: a by-sha entry pointing at bytes that are gone or
+    // wrong must not be allowed to produce a reference that 404s. On any mismatch this
+    // falls through to the ordinary write path, which stores the payload under this
+    // request's own key — the safe outcome, at the cost of one duplicate blob.
+    if (hitBytes && hitBytes.byteLength === reference.sizeBytes && sha256Hex(hitBytes) === reference.sha256) {
+      const dedupedReference: ArtifactReference = { ...reference, storageKey: shaHit.storageKey };
+
+      await writeArtifactReferenceIndexes(indexStore, input.requestId, dedupedReference);
+      // The request is new even though the bytes are not, so its owner pointer is
+      // still owed — a deduped artifact must resolve through the ownership wall
+      // exactly like a freshly stored one.
+      await recordArtifactRequestOwner(indexStore, input);
+      return {
+        ok: true,
+        artifact: dedupedReference,
+        deduped: true,
+        dedupedFrom: shaHit.firstRequestId,
+      };
+    }
+
+    console.warn('[artifact-upload] by-sha index hit did not verify; storing bytes under this request.', {
+      sha256: reference.sha256,
+      storageKey: shaHit.storageKey,
+      firstRequestId: shaHit.firstRequestId,
+    });
+  }
+
+  const existingBytes = await getArrayBuffer(artifactStore, artifactStorageKey(reference));
   if (existingBytes) {
     if (existingBytes.byteLength !== reference.sizeBytes || sha256Hex(existingBytes) !== reference.sha256) {
       return { ok: false, statusCode: 409, error: 'Artifact blob already exists with different bytes.' };
     }
 
+    await recordArtifactShaIndex(indexStore, input, reference);
     await writeArtifactReferenceIndexes(indexStore, input.requestId, reference);
+    await recordArtifactRequestOwner(indexStore, input);
     return { ok: true, artifact: reference, deduped: true };
   }
 
@@ -429,11 +554,15 @@ export const saveArtifactBytes = async (input: SaveArtifactBytesInput): Promise<
     },
   });
 
-  const storedBytes = await getArrayBuffer(artifactStore, reference.blobKey);
+  const storedBytes = await getArrayBuffer(artifactStore, artifactStorageKey(reference));
   if (!storedBytes || storedBytes.byteLength !== reference.sizeBytes || sha256Hex(storedBytes) !== reference.sha256) {
     return { ok: false, statusCode: 500, error: 'Artifact blob write failed integrity verification.' };
   }
 
+  // T2.1: the by-sha entry is written on the FIRST byte write for this sha and never
+  // rewritten, so `firstRequestId` stays the request whose blob everyone else redirects to.
+  await recordArtifactShaIndex(indexStore, input, reference);
   await writeArtifactReferenceIndexes(indexStore, input.requestId, reference);
+  await recordArtifactRequestOwner(indexStore, input);
   return { ok: true, artifact: reference, deduped: false };
 };

@@ -177,6 +177,7 @@ import {
   type ArtifactKind,
 } from '../lib/artifacts.js';
 import { saveArtifactFromUrl } from '../lib/artifact-url-ingest.js';
+import { normalizeArtifactRequestOwnerInput } from '../lib/artifact-index.js';
 import { withIdempotentToolCall } from '../lib/idempotency-store.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
 import { buildObjectContract, OBJECT_CONTRACT_TYPES } from '../../lib/registry/object-contract.js';
@@ -207,6 +208,9 @@ import { getPluginManifestBlobStore, getPluginManifestDoc } from '../lib/plugin/
 import { countWrite, type RateLimitStore } from '../lib/write-rate-limit.js';
 import { resolveActivePolicies } from '../lib/governance-store.js';
 import {
+  artifactDedupeBySha,
+  artifactOrphanSweep,
+  artifactRequestRegisterOwner,
   getArtifactMetadata,
   listArtifactsByKind,
   listArtifactsByRequest,
@@ -1239,6 +1243,14 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
 
       const metadata = getRecordValue(input.metadata);
 
+      // W1 T1.3. An artifact request id no longer has to name a content_item;
+      // naming the object that DOES own it is what lets a later media op on
+      // this request resolve at all. Validated against the closed owner-type
+      // allowlist, but NOT required to exist — capture ingests a page's
+      // imagery before the page object is created.
+      const owner = normalizeArtifactRequestOwnerInput(input.owner);
+      if (!owner.ok) return toolError(owner.error);
+
       const result = await saveArtifactFromUrl({
         requestId,
         artifactKind: artifactKind as ArtifactKind,
@@ -1251,6 +1263,7 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         tags,
         metadata,
         event,
+        owner: owner.owner,
       });
 
       if (!result.ok) {
@@ -1278,6 +1291,9 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
         label: input.label,
         tags: input.tags,
         metadata: input.metadata,
+        // W1 T1.3: stripped from the forwarded upload payload by
+        // callArtifactUpload and turned into the request-owner pointer there.
+        owner: input.owner,
       });
     case 'list_artifacts_for_request':
       return listArtifactsForRequest(event, input.requestId);
@@ -1291,6 +1307,8 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return searchArtifacts(event, input);
     case 'soft_delete_artifact':
       return softDeleteArtifact(event, input);
+    case 'artifact_request_register_owner':
+      return artifactRequestRegisterOwner(event, input);
     case 'restore_artifact':
       return restoreArtifact(event, input);
     case 'migrate_artifact_indexes':
@@ -1299,6 +1317,10 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
       return wipeBlobStores(event, input);
     case 'reconcile_artifact_indexes':
       return reconcileArtifactIndexes(event, input);
+    case 'artifact_dedupe_by_sha':
+      return artifactDedupeBySha(event, input);
+    case 'artifact_orphan_sweep':
+      return artifactOrphanSweep(event, input);
 
     // ── Object verbs (T0.9) → object-store.ts (publish key injected). ──
     case 'object_get':

@@ -15,6 +15,7 @@ import {
   ArtifactKind,
   artifactReferenceLimits,
   artifactKindValues,
+  artifactStorageKey,
   createArtifactReference,
   isSafeArtifactFilename,
   isSafeArtifactText,
@@ -22,7 +23,9 @@ import {
   type ArtifactUploadInput,
 } from '../lib/artifacts.js';
 import {
+  readArtifactByShaIndex,
   readArtifactReference,
+  writeArtifactByShaIndex,
   writeArtifactReferenceIndexes,
   type ArtifactIndexStore,
 } from '../lib/artifact-index.js';
@@ -317,10 +320,14 @@ const readStoredBytes = async (store: BlobStore, key: string, options: { retry?:
 };
 
 const validateStoredBytes = async (store: BlobStore, reference: ArtifactReference) => {
-  const storedBytes = await readStoredBytes(store, reference.blobKey);
+  // W2 T2.3: bytes may live under another request's blob (storageKey). The clean-up
+  // `del` below is therefore gated on us OWNING the blob — never delete a shared one.
+  const storageKey = artifactStorageKey(reference);
+  const ownsBytes = storageKey === reference.blobKey;
+  const storedBytes = await readStoredBytes(store, storageKey);
 
   if (!storedBytes) {
-    await store.del(reference.blobKey);
+    if (ownsBytes) await store.del(storageKey);
 
     return jsonResponse(500, { error: 'Artifact blob write failed: stored bytes could not be read back.' });
   }
@@ -329,7 +336,7 @@ const validateStoredBytes = async (store: BlobStore, reference: ArtifactReferenc
   const storedSha256 = sha256Hex(storedBytes);
 
   if (storedSizeBytes !== reference.sizeBytes || storedSha256 !== reference.sha256) {
-    await store.del(reference.blobKey);
+    if (ownsBytes) await store.del(storageKey);
 
     return jsonResponse(500, {
       error: `Artifact blob write failed integrity verification: expected ${reference.sizeBytes} bytes/${reference.sha256}, stored ${storedSizeBytes} bytes/${storedSha256}.`,
@@ -339,13 +346,96 @@ const validateStoredBytes = async (store: BlobStore, reference: ArtifactReferenc
   return undefined;
 };
 
-const saveFinalArtifact = async (store: BlobStore, reference: ArtifactReference, bytes: Buffer) => {
-  if (await readStoredBytes(store, reference.blobKey, { retry: false })) {
+/**
+ * W2 T2.4 parity for the direct-upload endpoint.
+ *
+ * `saveArtifactBytes` in artifact-upload.ts is not the only byte writer — this
+ * function is the second one, and until now it wrote a fresh blob for bytes
+ * that already existed under another request AND never registered a by-sha
+ * entry, so its blobs could never become a dedupe target either. Both halves
+ * are fixed here, with the same rule as the other path: VERIFY the candidate
+ * bytes before reusing them, and on any mismatch fall through to an ordinary
+ * write rather than mint a reference that would 404.
+ *
+ * Returns `storageKey` when the bytes were reused from another request; the
+ * caller must stamp it onto the reference it writes to the index.
+ */
+const dedupeFinalArtifactBySha = async (
+  store: BlobStore,
+  indexStore: ArtifactIndexStore,
+  artifactKind: ArtifactKind,
+  reference: ArtifactReference
+): Promise<{ storageKey: string; dedupedFrom: string } | undefined> => {
+  const hit = await readArtifactByShaIndex(indexStore, artifactKind, reference.sha256);
+  if (!hit || hit.storageKey === reference.blobKey) return undefined;
+
+  const hitBytes = await readStoredBytes(store, hit.storageKey, { retry: false });
+
+  if (hitBytes && hitBytes.byteLength === reference.sizeBytes && sha256Hex(hitBytes) === reference.sha256) {
+    return { storageKey: hit.storageKey, dedupedFrom: hit.firstRequestId };
+  }
+
+  console.warn('[save-artifact] by-sha index hit did not verify; storing bytes under this request.', {
+    sha256: reference.sha256,
+    storageKey: hit.storageKey,
+    firstRequestId: hit.firstRequestId,
+  });
+
+  return undefined;
+};
+
+/** First-write-wins by-sha entry for bytes that live at this reference's OWN blobKey. */
+const recordFinalArtifactShaIndex = async (
+  indexStore: ArtifactIndexStore,
+  artifactKind: ArtifactKind,
+  requestId: string,
+  reference: ArtifactReference
+) => {
+  try {
+    await writeArtifactByShaIndex(indexStore, artifactKind, reference.sha256, {
+      storageKey: reference.blobKey,
+      contentType: reference.contentType,
+      sizeBytes: reference.sizeBytes,
+      firstRequestId: requestId,
+      createdAtISO: reference.createdAtISO,
+    });
+  } catch (error) {
+    // Best effort: a missing by-sha entry only costs a future duplicate blob. It must
+    // never fail an upload whose bytes and reference are already written correctly.
+    console.warn('[save-artifact] by-sha index write failed.', { sha256: reference.sha256, error });
+  }
+};
+
+const saveFinalArtifact = async (
+  store: BlobStore,
+  indexStore: ArtifactIndexStore,
+  artifactKind: ArtifactKind,
+  requestId: string,
+  reference: ArtifactReference,
+  bytes: Buffer
+): Promise<{
+  deduped: boolean;
+  integrityError?: ReturnType<typeof jsonResponse>;
+  storageKey?: string;
+  dedupedFrom?: string;
+}> => {
+  if (await readStoredBytes(store, artifactStorageKey(reference), { retry: false })) {
     const existingIntegrityError = await validateStoredBytes(store, reference);
 
     if (existingIntegrityError) return { deduped: true, integrityError: existingIntegrityError };
 
     return { deduped: true };
+  }
+
+  const shaHit = await dedupeFinalArtifactBySha(store, indexStore, artifactKind, reference);
+
+  if (shaHit) {
+    const dedupedReference: ArtifactReference = { ...reference, storageKey: shaHit.storageKey };
+    const integrityError = await validateStoredBytes(store, dedupedReference);
+
+    if (integrityError) return { deduped: true, integrityError };
+
+    return { deduped: true, storageKey: shaHit.storageKey, dedupedFrom: shaHit.dedupedFrom };
   }
 
   await store.set(reference.blobKey, bytes, {
@@ -364,6 +454,8 @@ const saveFinalArtifact = async (store: BlobStore, reference: ArtifactReference,
   });
 
   const integrityError = await validateStoredBytes(store, reference);
+
+  if (!integrityError) await recordFinalArtifactShaIndex(indexStore, artifactKind, requestId, reference);
 
   return { deduped: false, integrityError };
 };
@@ -409,17 +501,28 @@ export const finalizeUpload = async (
 
   const artifactStore = await getArtifactBlobStore(event, binding);
   const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
-  const { deduped, integrityError } = await saveFinalArtifact(artifactStore, reference, finalBytes);
+  const { deduped, integrityError, storageKey, dedupedFrom } = await saveFinalArtifact(
+    artifactStore,
+    indexStore,
+    input.artifactKind,
+    input.requestId,
+    reference,
+    finalBytes
+  );
 
   if (integrityError) return integrityError;
 
+  // Cross-request dedupe: the bytes live under another request's blob, so the
+  // reference we persist has to carry the redirect. blobKey is IDENTITY and is
+  // never rewritten — this request keeps its own public path.
   const existingReference = deduped
     ? await readArtifactReference(indexStore, input.requestId, reference.sha256)
     : undefined;
-  const mergedReference =
+  const merged =
     existingReference?.blobKey === reference.blobKey
       ? mergeArtifactReferenceDisplayFields(existingReference, reference)
       : reference;
+  const mergedReference: ArtifactReference = storageKey ? { ...merged, storageKey } : merged;
   const { reference: responseReference, restored } = stripSoftDeleteMarkers(mergedReference);
 
   await writeArtifactReferenceIndexes(indexStore, input.requestId, responseReference);
@@ -434,6 +537,7 @@ export const finalizeUpload = async (
     ok: true,
     complete: true,
     deduped,
+    ...(dedupedFrom ? { dedupedFrom } : {}),
     ...(restored ? { restored } : {}),
     artifact: responseReference,
   });

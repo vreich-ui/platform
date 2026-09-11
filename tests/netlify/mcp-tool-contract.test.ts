@@ -50,10 +50,13 @@ test('agent discovery omits artifact upload, deletion, and maintenance actions',
     'create_artifact_from_url',
     'save_artifact',
     'soft_delete_artifact',
+    'artifact_request_register_owner',
     'restore_artifact',
     'migrate_artifact_indexes',
     'wipe_blob_stores',
     'reconcile_artifact_indexes',
+    'artifact_dedupe_by_sha',
+    'artifact_orphan_sweep',
   ]) {
     assert.equal(names.has(name), false, `${name} must stay out of agent discovery`);
   }

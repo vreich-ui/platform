@@ -384,6 +384,82 @@ test('media is deduped, hash-enriched, scoped to its owning page, and portable f
   assert.equal(report.createdArtifacts.length, uploads.length);
 });
 
+test('every create_artifact_from_url names the page that owns the capture request', async () => {
+  // W1: a capture request id (`req_capture_*`) names no content_item and
+  // never will, so without an owner on the ingest call every later media op
+  // on that request fails the artifact bridge's ownership wall. The owner
+  // must be on EVERY upload, not most of them — one unowned request is one
+  // page whose imagery can never be operated on again.
+  const plan = await fixturePlan();
+  const mapping = await fixture('zilberman.mapping.v1.redacted.json');
+  const transport = mockTransport();
+  await executeEmission({
+    plan,
+    mapping,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: fixtureProbe,
+  });
+
+  const uploads = transport.calls.filter((call) => call.verb === 'create_artifact_from_url');
+  assert.ok(uploads.length > 0, 'fixture must actually ingest artifacts for this to assert anything');
+  for (const call of uploads) {
+    assert.equal(call.args.owner?.object_type, 'page', `no page owner on ${call.args.requestId}`);
+    assert.match(String(call.args.owner?.object_id ?? ''), /^page_capture_[0-9a-f]{18}$/);
+  }
+
+  // The owner must be the page that OWNS this request id, not merely some
+  // page: the two are keyed by the same pageRef and must not drift apart.
+  const ownerByRequestId = new Map(uploads.map((call) => [call.args.requestId, call.args.owner.object_id]));
+  for (const pageRef of plan.pageRefs) {
+    const requestId = captureRequestId(plan, pageRef);
+    if (!ownerByRequestId.has(requestId)) continue;
+    const pagePlan = plan.creates.find((operation) => operation.objectType === 'page' && operation.pageRef === pageRef);
+    assert.equal(ownerByRequestId.get(requestId), pagePlan.requestedId);
+  }
+});
+
+test('the owner is the EXISTING page id when the route is reused, never the requested one', async () => {
+  // The reason this matters at all. `requestedId('page_capture', ...)` is a
+  // REQUEST: when the route already exists this emitter patches the existing
+  // page (T12.28 reuse) and no `page_capture_<sha18>` object is ever created.
+  // That is the normal shape of a re-run, and it is why the live tenant's
+  // pages are called `page_home` / `page_filmography` / `page_partners`.
+  // Registering the requested id there would point every capture request at
+  // an object that does not exist, which is exactly the failure W1 removes.
+  const plan = await fixturePlan();
+  const mapping = await fixture('zilberman.mapping.v1.redacted.json');
+  const ownedPageRef = plan.media[0].pageRef;
+  const ownedPagePlan = plan.creates.find(
+    (operation) => operation.objectType === 'page' && operation.pageRef === ownedPageRef
+  );
+  const transport = mockTransport({ pageRoute: ownedPagePlan.body.route, pageRouteInDetail: true });
+  await executeEmission({
+    plan,
+    mapping,
+    transport,
+    projectPolicyResolver: async (target) => projectPolicy(target, MEDIA_ALLOWED),
+    assetProbe: fixtureProbe,
+  });
+
+  const reusedRequestId = captureRequestId(plan, ownedPageRef);
+  const uploads = transport.calls.filter(
+    (call) => call.verb === 'create_artifact_from_url' && call.args.requestId === reusedRequestId
+  );
+  assert.ok(uploads.length > 0);
+  for (const call of uploads) {
+    assert.deepEqual(call.args.owner, { object_type: 'page', object_id: 'page_existing' });
+  }
+
+  // Pages whose route did NOT collide still get their requested id.
+  const untouched = transport.calls.filter(
+    (call) => call.verb === 'create_artifact_from_url' && call.args.requestId !== reusedRequestId
+  );
+  for (const call of untouched) {
+    assert.match(String(call.args.owner?.object_id ?? ''), /^page_capture_[0-9a-f]{18}$/);
+  }
+});
+
 test('artifact request ids use the real req flow/topic/date/ordinal grammar', async () => {
   const plan = await fixturePlan();
   assert.match(captureRequestId(plan, plan.pageRefs[0]), /^req_capture_zilberman_20260813_01$/);

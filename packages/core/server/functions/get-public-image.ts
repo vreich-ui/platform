@@ -18,8 +18,9 @@
  * the cache header is aggressive.
  */
 import type { SiteBinding } from '../lib/site-binding.js';
-import { getArtifactBlobStore } from '../lib/blob-store.js';
+import { getArtifactBlobStore, getArtifactIndexBlobStore } from '../lib/blob-store.js';
 import { normalizeArtifactBlobKey } from '../lib/artifacts.js';
+import { requestArtifactReferenceKey, type ArtifactIndexStore } from '../lib/artifact-index.js';
 
 type LambdaEvent = {
   httpMethod?: string;
@@ -62,6 +63,47 @@ const getBlobKeyFromPublicImageValue = (value: string) => {
   return pathMatch ? `image/${pathMatch[1]}` : '';
 };
 
+/**
+ * W2 T2.5: the deduplicated-artifact fallback.
+ *
+ * The public path is and stays request-scoped — `/img/<requestId>/<sha256>.<ext>` — but a
+ * reference created by the T2.4 dedupe path has NO blob of its own: its bytes live under
+ * the first request's key, named by `storageKey`. This reads that one reference JSON
+ * (`request-artifacts/<requestId>/<sha256>.json`) and returns its storage key.
+ *
+ * Only ever called on a BLOB MISS, so today's artifacts — which all hit directly — pay
+ * nothing for it, and it fails open (any error ⇒ the ordinary 404).
+ *
+ * The redirect is re-validated here rather than trusted: the stored key must be a
+ * servable image key AND must carry the SAME sha256 as the requested path, so a corrupt
+ * or hostile index entry cannot make this endpoint serve bytes from another artifact.
+ */
+const resolveDedupedStorageKey = async (event: LambdaEvent, binding: SiteBinding, blobKey: string) => {
+  const [, requestId = '', filename = ''] = blobKey.split('/');
+  const sha256 = filename.match(/^[a-f0-9]{64}/i)?.[0]?.toLowerCase();
+  if (!requestId || !sha256) return '';
+
+  try {
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
+    const text = await indexStore.get(requestArtifactReferenceKey(requestId, sha256));
+    if (!text) return '';
+
+    const reference = JSON.parse(text) as Record<string, unknown>;
+    if (reference.blobKey !== blobKey) return '';
+    if (typeof reference.storageKey !== 'string') return '';
+
+    const storageKey = normalizeArtifactBlobKey(reference.storageKey);
+    if (storageKey === blobKey) return '';
+    if (!allowedImageBlobKeyPattern.test(storageKey)) return '';
+    if (!storageKey.split('/').pop()?.toLowerCase().startsWith(sha256)) return '';
+
+    return storageKey;
+  } catch (error) {
+    console.warn('Public image dedupe fallback could not read the artifact index.', { blobKey, error });
+    return '';
+  }
+};
+
 const getRequestedBlobKey = (event: LambdaEvent) =>
   getBlobKeyFromPublicImageValue(toText(event.queryStringParameters?.blobKey)) ||
   getBlobKeyFromPublicImageValue(toText(event.path)) ||
@@ -80,9 +122,13 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent) =>
 
   try {
     const store = await getArtifactBlobStore(event, binding);
-    const result = (await (
-      store as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> }
-    ).get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+    const reader = store as { get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null> };
+    let result = (await reader.get(blobKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+
+    if (!result) {
+      const storageKey = await resolveDedupedStorageKey(event, binding, blobKey);
+      if (storageKey) result = (await reader.get(storageKey, { type: 'arrayBuffer' })) as ArrayBuffer | null;
+    }
 
     if (!result) {
       return jsonResponse(404, { error: 'Image artifact not found.' });

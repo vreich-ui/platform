@@ -19,13 +19,24 @@ const validJpegBytes = Buffer.from(
 );
 const validJpegSha256 = createHash('sha256').update(validJpegBytes).digest('hex');
 
-const createImageBytes = (format: 'jpeg' | 'png' | 'webp') => {
+/**
+ * A 2x2 solid image. `seed` varies the pixel colour, and therefore the bytes and
+ * their sha256.
+ *
+ * W2 T2.4: this suite shares ONE real local blob store across its tests (see
+ * `uniqueRequestId` below), and dedupe is now keyed on content — identical bytes
+ * are stored once no matter which request id carries them. A fixture shared by
+ * two tests therefore makes the second upload a 200 dedupe of the first test's
+ * blob instead of the 201 create it is asserting. Give every test that expects a
+ * create its own seed; pass the SAME seed twice only where dedupe is the point.
+ */
+const createImageBytes = (format: 'jpeg' | 'png' | 'webp', seed = 0) => {
   const image = sharp({
     create: {
       width: 2,
       height: 2,
       channels: 3,
-      background: { r: 80, g: 100, b: 120 },
+      background: { r: (80 + seed * 37) % 256, g: (100 + seed * 53) % 256, b: (120 + seed * 71) % 256 },
     },
   });
 
@@ -293,7 +304,7 @@ test('save-artifact single-shot uploads dedupe by checksum', async () => {
 
   const requestId = uniqueRequestId('artifact');
   const baseInput = makeBaseInput(requestId);
-  const payload = (await createImageBytes('png')).toString('base64');
+  const payload = (await createImageBytes('png', 1)).toString('base64');
   const first = await postArtifact({ ...baseInput, encoding: 'base64', payload });
 
   assert.equal(first.statusCode, 201);
@@ -321,6 +332,62 @@ test('save-artifact single-shot uploads dedupe by checksum', async () => {
   const indexedReference = indexedReferenceText ? (JSON.parse(indexedReferenceText) as unknown) : null;
 
   assert.deepEqual(indexedReference, first.json.artifact);
+});
+
+test('save-artifact dedupes identical bytes ACROSS request ids, keeping each request its own path', async () => {
+  process.env.NETLIFY_PUBLISH_SECRET = publishSecret;
+  process.env.PUBLISH_SECRET = publishSecret;
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+
+  // W2 T2.4 parity for the direct-upload endpoint: saveArtifactBytes was not the
+  // only byte writer. This path used to store a fresh blob for bytes that already
+  // existed under another request, and never registered a by-sha entry either.
+  const payload = (await createImageBytes('png', 2)).toString('base64');
+
+  const requestA = uniqueRequestId('artifact-xreq-a');
+  const first = await postArtifact({ ...makeBaseInput(requestA), encoding: 'base64', payload });
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(first.json.deduped, false);
+
+  const firstArtifact = first.json.artifact as { blobKey: string; sha256: string; storageKey?: string };
+  assert.equal(firstArtifact.storageKey, undefined, 'the first request owns its bytes; no redirect');
+
+  const requestB = uniqueRequestId('artifact-xreq-b');
+  const second = await postArtifact({ ...makeBaseInput(requestB), encoding: 'base64', payload });
+
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json.deduped, true);
+  assert.equal(second.json.dedupedFrom, requestA);
+
+  const secondArtifact = second.json.artifact as { blobKey: string; sha256: string; storageKey?: string };
+
+  // blobKey is IDENTITY: request B keeps its own key and therefore its own
+  // /img/<requestB>/<sha>.png public path. Only the read side is redirected.
+  assert.ok(secondArtifact.blobKey.includes(requestB));
+  assert.notEqual(secondArtifact.blobKey, firstArtifact.blobKey);
+  assert.equal(secondArtifact.storageKey, firstArtifact.blobKey);
+  assert.equal(secondArtifact.sha256, firstArtifact.sha256);
+
+  const artifactStore = await getArtifactBlobStore({});
+
+  assert.deepEqual(
+    (await artifactStore.list({ prefix: `image/${requestB}/` })).blobs.map((blob) => blob.key),
+    [],
+    'no second copy of the bytes was written'
+  );
+  assert.deepEqual(
+    (await artifactStore.list({ prefix: `image/${requestA}/` })).blobs.map((blob) => blob.key),
+    [firstArtifact.blobKey]
+  );
+
+  const indexStore = await getArtifactIndexBlobStore({});
+  const shaEntryText = await indexStore.get(`by-sha/image/${firstArtifact.sha256}.json`);
+  const shaEntry = shaEntryText ? (JSON.parse(shaEntryText) as { storageKey: string; firstRequestId: string }) : null;
+
+  assert.equal(shaEntry?.storageKey, firstArtifact.blobKey);
+  assert.equal(shaEntry?.firstRequestId, requestA);
 });
 
 test('save-artifact accepts a valid JPEG upload with matching expected size and sha256', async () => {
@@ -366,8 +433,8 @@ test('save-artifact accepts valid PNG and WebP uploads', async () => {
   process.env.NETLIFY = 'false';
   process.env.NETLIFY_SITE_ID = '';
 
-  const pngBytes = await createImageBytes('png');
-  const webpBytes = await createImageBytes('webp');
+  const pngBytes = await createImageBytes('png', 3);
+  const webpBytes = await createImageBytes('webp', 4);
   const pngRequestId = uniqueRequestId('pngvalid');
   const webpRequestId = uniqueRequestId('webpvalid');
 
@@ -411,21 +478,25 @@ test('save-artifact accepts localSizeBytes and localSha256 as integrity aliases'
   process.env.NETLIFY_SITE_ID = '';
 
   const requestId = uniqueRequestId('jpeglocalalias');
+  // Its own bytes, not the shared `validJpegBytes`: those are already stored by
+  // the matching-integrity test above, and content dedupe would answer 200 here.
+  const jpegBytes = await createImageBytes('jpeg', 6);
+  const jpegSha256 = sha256(jpegBytes);
   const response = await postArtifact({
     ...makeBaseInput(requestId),
     contentType: 'image/jpeg',
     filename: 'photo.jpg',
     encoding: 'base64',
-    localSizeBytes: validJpegBytes.byteLength,
-    localSha256: validJpegSha256,
-    payload: validJpegBytes.toString('base64'),
+    localSizeBytes: jpegBytes.byteLength,
+    localSha256: jpegSha256,
+    payload: jpegBytes.toString('base64'),
   });
 
-  assert.equal(response.statusCode, 201);
+  assert.equal(response.statusCode, 201, response.body);
   const artifact = response.json.artifact as { sha256: string; sizeBytes: number };
 
-  assert.equal(artifact.sizeBytes, validJpegBytes.byteLength);
-  assert.equal(artifact.sha256, validJpegSha256);
+  assert.equal(artifact.sizeBytes, jpegBytes.byteLength);
+  assert.equal(artifact.sha256, jpegSha256);
 });
 
 test('save-artifact rejects a truncated JPEG without writing final artifact or index records', async () => {
@@ -631,7 +702,7 @@ test('save-artifact saves safe ArtifactReference display fields and rejects unsa
   process.env.NETLIFY_SITE_ID = '';
 
   const requestId = uniqueRequestId('schemareject');
-  const bytes = await createImageBytes('png');
+  const bytes = await createImageBytes('png', 5);
   const validResponse = await postArtifact({
     ...makeBaseInput(requestId),
     filename: 'hero safe.png',

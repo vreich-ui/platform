@@ -80,7 +80,13 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import type { Role } from '../lib/roles.js';
-import { getSiteObjectsBlobStore, getArtifactBlobStore, getIdempotencyBlobStore } from '../lib/blob-store.js';
+import {
+  getSiteObjectsBlobStore,
+  getArtifactBlobStore,
+  getArtifactIndexBlobStore,
+  getIdempotencyBlobStore,
+} from '../lib/blob-store.js';
+import { resolveArtifactStorageKeyForBlobKey, type ArtifactIndexStore } from '../lib/artifact-index.js';
 import {
   handleObjectVerb,
   objectVerbRequestSchema,
@@ -460,13 +466,17 @@ const buildHandlerImpl =
       const artifactStore = (await getArtifactBlobStore(event, binding)) as unknown as {
         get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null>;
       };
+      const artifactIndexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
 
       const result = await proposeBrandImagery(proposeInput, {
         cmsAgent: bridge,
         resolveBlobUrl: (blobKey) => `${baseUrl}${publicPathForArtifactRef(blobKey)}`,
         readBlobBytes: async (blobKey) => {
           try {
-            const raw = await artifactStore.get(blobKey, { type: 'arrayBuffer' });
+            // W2 T2.3: deduplicated artifacts store their bytes under another
+            // request's blob; resolve through the index, failing open to the key.
+            const storageKey = await resolveArtifactStorageKeyForBlobKey(artifactIndexStore, blobKey);
+            const raw = await artifactStore.get(storageKey, { type: 'arrayBuffer' });
             return raw ? Buffer.from(raw) : undefined;
           } catch {
             return undefined;
