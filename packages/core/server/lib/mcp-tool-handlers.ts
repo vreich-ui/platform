@@ -106,6 +106,11 @@ import {
   writeRequestOwner,
   type ArtifactIndexStore,
 } from './artifact-index.js';
+import {
+  adoptLegacyArtifactOwnership,
+  type LegacyAdoptionResult,
+} from './artifact-legacy-adopt.js';
+import type { ArtifactSweepListStore } from './artifact-dedupe-sweep.js';
 
 /**
  * Re-exported here because this module is where the artifact bridge's
@@ -814,6 +819,53 @@ const readArtifactRequestOwner = async (event: LambdaEvent, requestId: string) =
   return readRequestOwner(store, requestId).catch(() => undefined);
 };
 
+/**
+ * Self-healing ownership (this change).
+ *
+ * `artifact-legacy-adopt.ts` (#733) could already DERIVE the owner of a
+ * pre-#308 capture request — same full-projection scan `artifact_orphan_sweep`
+ * runs — but nothing called it, so every legacy request still needed a human
+ * with the publish secret to run `artifact_request_register_owner` by hand,
+ * per tenant, from a list of ids someone had to assemble. That is not a
+ * mechanism, it is a chore, and it does not exist for a tenant nobody has
+ * audited yet.
+ *
+ * Adoption is a pure derivation over data the tenant already holds: it writes
+ * the pointer the live objects already prove. So it belongs on the resolver's
+ * MISS path, where the cost is paid once per request id and never again.
+ *
+ * NEVER throws and never fails the caller differently than before: any
+ * infrastructure problem degrades to `undefined`, and the resolver then
+ * answers exactly the `artifact_request_not_found` it answered before this
+ * existed. Adoption's own refusals are safe by construction — it never
+ * re-points an existing owner, never guesses between multiple citing objects,
+ * and stamps the site from THIS deployment rather than from the caller.
+ *
+ * Cost note: the expensive object walk runs only after adoption's own cheap
+ * precondition (this request has live artifact references) passes, so a
+ * bogus request id costs one index list, not a fleet scan.
+ */
+const adoptLegacyArtifactOwner = async (
+  event: LambdaEvent,
+  requestId: string,
+  siteId: string
+): Promise<LegacyAdoptionResult | undefined> => {
+  try {
+    const binding = getMcpBinding();
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
+    const objectsStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ArtifactSweepListStore;
+
+    return await adoptLegacyArtifactOwnership(
+      { indexStore, objectsStore, site: siteId, registeredBy: 'artifact_bridge_legacy_adoption' },
+      requestId
+    );
+  } catch (error) {
+    console.warn('[artifact-bridge] legacy ownership adoption failed; answering as unowned.', { requestId, error });
+
+    return undefined;
+  }
+};
+
 const resolveArtifactBridgeScope = async (
   event: LambdaEvent,
   input: Record<string, unknown>
@@ -876,42 +928,82 @@ const resolveArtifactBridgeScope = async (
   // to — it must exist, it must be `status: active`, and it must live on this
   // site — because this resolver is the authorization wall for writing bytes
   // into a tenant, not a convenience lookup.
-  const owner = await readArtifactRequestOwner(event, requestId);
-  if (owner) {
+  //
+  // Held to the SAME bar whether the pointer was registered by hand, written
+  // at ingest, or derived by adoption below — one check, one place.
+  const verifyOwner = async (candidate: { object_type: string; object_id: string }) => {
     const ownerLookup = await invokeObjectStore(event, {
       action: 'get',
-      object_type: owner.object_type,
-      object_id: owner.object_id,
+      object_type: candidate.object_type,
+      object_id: candidate.object_id,
     });
-    if (!('isError' in ownerLookup)) {
-      const ownerRecord = getRecordValue((ownerLookup as { record?: unknown }).record);
-      if (ownerRecord && ownerRecord.object_id === owner.object_id) {
-        // A registered owner on ANOTHER site is a scope mismatch, not a
-        // missing request: the request is real and its owner is known, the
-        // caller is simply pointed at the wrong deployment. Saying
-        // "not found" there would send an operator hunting for an object
-        // that exists.
-        if (ownerRecord.site !== siteId) {
-          return {
-            ok: false,
-            result: toolError(
-              `Artifact scope mismatch: ${requestId} is owned by ${owner.object_type} ${owner.object_id} on ${String(ownerRecord.site)}, not ${siteId}.`,
-              { error_code: 'artifact_request_scope_mismatch' }
-            ),
-          };
-        }
-        if (ownerRecord.status === 'active') {
-          return { ok: true, scope: { siteId, requestId } };
-        }
-      }
+    if ('isError' in ownerLookup) return { usable: false as const };
+
+    const ownerRecord = getRecordValue((ownerLookup as { record?: unknown }).record);
+    if (!ownerRecord || ownerRecord.object_id !== candidate.object_id) return { usable: false as const };
+
+    // A registered owner on ANOTHER site is a scope mismatch, not a
+    // missing request: the request is real and its owner is known, the
+    // caller is simply pointed at the wrong deployment. Saying
+    // "not found" there would send an operator hunting for an object
+    // that exists.
+    if (ownerRecord.site !== siteId) {
+      return { usable: false as const, otherSite: String(ownerRecord.site) };
+    }
+
+    return { usable: ownerRecord.status === 'active' };
+  };
+
+  const owner = await readArtifactRequestOwner(event, requestId);
+  if (owner) {
+    const verdict = await verifyOwner(owner);
+    if (verdict.otherSite) {
+      return {
+        ok: false,
+        result: toolError(
+          `Artifact scope mismatch: ${requestId} is owned by ${owner.object_type} ${owner.object_id} on ${verdict.otherSite}, not ${siteId}.`,
+          { error_code: 'artifact_request_scope_mismatch' }
+        ),
+      };
+    }
+    if (verdict.usable) return { ok: true, scope: { siteId, requestId } };
+  }
+
+  // ── Step 3: DERIVE the owner from the tenant's own live objects ─────────
+  // Only when no pointer exists at all. A pointer that exists but is archived
+  // or absent is a curation problem, not a missing derivation — adoption
+  // refuses to re-point it anyway (`already_owned`), so asking would only
+  // burn a scan.
+  const adoption = owner ? undefined : await adoptLegacyArtifactOwner(event, requestId, siteId);
+  if (adoption?.status === 'adopted') {
+    const verdict = await verifyOwner(adoption.owner);
+    if (verdict.usable) {
+      console.info('[artifact-bridge] adopted legacy owner from live evidence.', {
+        requestId,
+        owner: `${adoption.owner.object_type}/${adoption.owner.object_id}`,
+        pageOwnershipOnly: adoption.pageOwnershipOnly,
+      });
+
+      return { ok: true, scope: { siteId, requestId } };
     }
   }
+
+  // Adoption's blocker is the most actionable thing anyone has about an
+  // unowned request, so it rides on the error rather than being logged and
+  // lost: `ambiguous_evidence` names the candidates, and a caller that sees
+  // `no_recorded_evidence` knows the media is cited by nothing live and that
+  // registering an owner by hand is a decision, not a repair.
+  const blocked = adoption?.status === 'blocked' ? adoption : undefined;
 
   return {
     ok: false,
     result: toolError(
-      `No content object owns request ${requestId} on ${siteId}. Register an owner (page, content_item, visual_standard...) or create the owning object first.`,
-      { error_code: 'artifact_request_not_found' }
+      `No content object owns request ${requestId} on ${siteId}.${blocked ? ` ${blocked.detail}` : ''} Register an owner (page, content_item, visual_standard...) or create the owning object first.`,
+      {
+        error_code: 'artifact_request_not_found',
+        ...(blocked ? { adoption_blocker: blocked.blocker } : {}),
+        ...(blocked?.shortlist?.length ? { adoption_candidates: blocked.shortlist } : {}),
+      }
     ),
   };
 };

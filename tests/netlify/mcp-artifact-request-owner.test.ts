@@ -38,8 +38,18 @@ import test from 'node:test';
 
 import { handler } from '../../netlify/functions/mcp.js';
 import { createLocalBlobStore, setLocalBlobsRootForTesting } from '../../packages/core/server/lib/local-blobs.js';
-import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
-import { requestOwnerKey, type ArtifactIndexStore } from '../../packages/core/server/lib/artifact-index.js';
+import {
+  OBJECT_STORE_MARKER_VALUE,
+  objectRecordKey,
+  objectStatusIndexKey,
+} from '../../packages/core/server/lib/object-store-keys.js';
+import {
+  readRequestOwner,
+  requestOwnerKey,
+  writeArtifactReferenceIndexes,
+  type ArtifactIndexStore,
+} from '../../packages/core/server/lib/artifact-index.js';
+import type { ArtifactReference } from '../../packages/core/server/lib/artifacts.js';
 import { stubPdfToolMcp } from './pdf-tool-mcp-fetch-stub.js';
 
 const CONTENT_ITEM_REQUEST_ID = 'req_agent_owner_content_item_20260910_01';
@@ -138,6 +148,58 @@ const seedContentItem = async () => {
   });
   assert.ok(!created.isError, JSON.stringify(created.structuredContent));
 };
+
+
+/**
+ * Self-healing ownership: the resolver derives an owner from the tenant's own
+ * live objects when no pointer exists. These helpers stage the two halves of
+ * that evidence — an artifact stored under the request, and an active object
+ * whose body cites it.
+ */
+const ADOPT_SHA = 'c'.repeat(64);
+const adoptBlobKey = (requestId: string) => `image/${requestId}/${ADOPT_SHA}.webp`;
+
+const seedArtifactForRequest = async (requestId: string) => {
+  const store = createLocalBlobStore('artifact-index') as unknown as ArtifactIndexStore;
+  const reference: ArtifactReference = {
+    blobKey: adoptBlobKey(requestId),
+    sizeBytes: 1234,
+    sha256: ADOPT_SHA,
+    contentType: 'image/webp',
+    createdAtISO: '2026-09-10T00:00:00.000Z',
+    artifactKind: 'image' as ArtifactReference['artifactKind'],
+  };
+  await writeArtifactReferenceIndexes(store, requestId, reference);
+};
+
+const seedCitingPage = async (objectId: string, requestId: string, site = 'site_drlurie') => {
+  const store = createLocalBlobStore('site-objects');
+  // The evidence scan (collectReferencedArtifactKeys) walks
+  // `objects/<type>/index/by-status/active/` and only THEN reads the record,
+  // so a fixture that writes the record alone is invisible to it — which is
+  // exactly what the first run of these tests proved.
+  await store.set(objectStatusIndexKey('page', 'active', objectId), OBJECT_STORE_MARKER_VALUE);
+  await store.setJSON(objectRecordKey('page', objectId), {
+    object_id: objectId,
+    object_type: 'page',
+    schema_version: 'page.v1',
+    site,
+    created_at: '2026-09-10T00:00:00.000Z',
+    updated_at: '2026-09-10T00:00:00.000Z',
+    status: 'active',
+    body: {
+      route: `/${objectId}`,
+      sections: [{ id: 's1', type: 'hero', image: { src: `/img/${requestId}/${ADOPT_SHA}.webp` } }],
+    },
+    publication: { published_time: null },
+    history: [],
+    version: 1,
+    content_revision: 1,
+  });
+};
+
+const storedOwner = async (requestId: string) =>
+  readRequestOwner(createLocalBlobStore('artifact-index') as unknown as ArtifactIndexStore, requestId);
 
 const SCOPE_ERROR_CODES = new Set([
   'artifact_scope_required',
@@ -276,4 +338,66 @@ test('no owner at all: not_found, and the message says what to do about it', asy
   assert.match(message, /site_drlurie/);
   assert.match(message, /Register an owner/);
   assert.equal(upstreamCalls, 0);
+});
+
+
+test('ADOPTION: a legacy capture request with exactly one citing page resolves, and the pointer is written once', async () => {
+  await resetStores();
+  await seedArtifactForRequest(CAPTURE_REQUEST_ID);
+  await seedCitingPage('page_adopted', CAPTURE_REQUEST_ID);
+
+  assert.equal(await storedOwner(CAPTURE_REQUEST_ID), undefined, 'precondition: nothing owns it yet');
+
+  const { result, jobCalls } = await callBridge(CAPTURE_REQUEST_ID);
+
+  assert.equal(scopeErrorCode(result), undefined, JSON.stringify(result.structuredContent));
+  assert.equal(jobCalls, 1, 'the bridge reached pdf-tool, so the wall let it through');
+
+  // The derivation is PERSISTED, so the scan is paid once and never again.
+  const owner = await storedOwner(CAPTURE_REQUEST_ID);
+  assert.equal(owner?.object_type, 'page');
+  assert.equal(owner?.object_id, 'page_adopted');
+  assert.equal(owner?.site, 'site_drlurie');
+});
+
+test('ADOPTION refuses to guess: two citing objects stay not_found, with the shortlist on the error', async () => {
+  await resetStores();
+  await seedArtifactForRequest(CAPTURE_REQUEST_ID);
+  await seedCitingPage('page_one', CAPTURE_REQUEST_ID);
+  await seedCitingPage('page_two', CAPTURE_REQUEST_ID);
+
+  const { result, upstreamCalls } = await callBridge(CAPTURE_REQUEST_ID);
+
+  assert.equal(result.structuredContent?.error_code, 'artifact_request_not_found');
+  assert.equal(result.structuredContent?.adoption_blocker, 'ambiguous_evidence');
+  assert.equal((result.structuredContent?.adoption_candidates as unknown[])?.length, 2);
+  assert.equal(upstreamCalls, 0);
+  assert.equal(await storedOwner(CAPTURE_REQUEST_ID), undefined, 'an ambiguous request is never adopted');
+});
+
+test('ADOPTION says so when nothing cites the media: no_recorded_evidence, not a silent miss', async () => {
+  await resetStores();
+  await seedArtifactForRequest(CAPTURE_REQUEST_ID);
+
+  const { result } = await callBridge(CAPTURE_REQUEST_ID);
+
+  assert.equal(result.structuredContent?.error_code, 'artifact_request_not_found');
+  assert.equal(result.structuredContent?.adoption_blocker, 'no_recorded_evidence');
+  assert.equal(await storedOwner(CAPTURE_REQUEST_ID), undefined);
+});
+
+test('ADOPTION never re-points an existing owner: an ARCHIVED pointer is left exactly as registered', async () => {
+  await resetStores();
+  await seedArtifactForRequest(CAPTURE_REQUEST_ID);
+  await seedCitingPage('page_adopted', CAPTURE_REQUEST_ID);
+  await seedObject('page', 'page_retired', 'site_drlurie', 'archived');
+  await seedRequestOwner(CAPTURE_REQUEST_ID, { object_type: 'page', object_id: 'page_retired', site: 'site_drlurie' });
+
+  const { result } = await callBridge(CAPTURE_REQUEST_ID);
+
+  assert.equal(result.structuredContent?.error_code, 'artifact_request_not_found');
+  assert.equal(result.structuredContent?.adoption_blocker, undefined, 'adoption is not even attempted');
+
+  const owner = await storedOwner(CAPTURE_REQUEST_ID);
+  assert.equal(owner?.object_id, 'page_retired', 'the curated pointer survives, live evidence notwithstanding');
 });
