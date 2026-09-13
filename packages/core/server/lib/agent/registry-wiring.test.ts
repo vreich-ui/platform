@@ -195,7 +195,7 @@ describe('generated registry — wiring', () => {
 // ─── legacy registry: unchanged wire list ───────────────────────────────────────
 
 describe('legacy registry — wiring', () => {
-  it('chat_registry legacy wires the 30 legacy tools (+ present_candidates in learning mode)', async () => {
+  it('chat_registry legacy wires the 33 legacy tools (+ present_candidates in learning mode)', async () => {
     const chatStore = memoryStore();
     await saveChatDoc(chatStore, idleDoc());
     const protocol: ProtocolDeps = { chatStore, toolContext: toolContext(), nowIso: () => T0 };
@@ -225,8 +225,11 @@ describe('legacy registry — wiring', () => {
     // W19 T19.8 added the four editorial-request tools to CHAT_TOOLS, so the
     // legacy registry carries them too — they ride the request store, not the
     // object verbs, and are registry-agnostic. P3 added apply_brand_imagery
-    // alongside apply_theme.
-    assert.equal(names.filter((name) => name !== 'present_candidates').length, 30);
+    // alongside apply_theme. A3 added list_operations/get_operation/
+    // preflight_operation (CMS-Agent A2's read-only operation catalog) — all
+    // three are `toolClass: 'read'`, registry-agnostic like the request-store
+    // tools, so the legacy registry wires them too: 30 + 3 = 33.
+    assert.equal(names.filter((name) => name !== 'present_candidates').length, 33);
     assert.ok(names.includes('present_candidates'));
     assert.ok(names.includes('patch'));
     assert.ok(!names.includes('object_patch'), 'the legacy registry must never wire a canonical generated name');

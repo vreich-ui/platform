@@ -33,6 +33,15 @@ import { fetchPublicationOutputs } from '../requests/publication-outputs.js';
 import { nodeLabel } from '../../../lib/admin/request-logic.js';
 import { buildLostReleaseResult } from '../../../lib/release/release-async.js';
 import { objectTypeSchema, type ObjectType } from '../../../schema/object-record-v1.js';
+import type { RequestKind } from '../requests/store.js';
+import {
+  needsDurableRegistration,
+  operationRequestKind,
+  parseOperationGet,
+  parseOperationList,
+  parseOperationPreflight,
+  requestKindForWorkflow,
+} from './operation-catalog.js';
 
 /** W18 T18.6a: `membership` tools are `ask`-class by construction (autonomyFloor 'ask'; definitions in T18.6b). */
 export type ToolClass = 'read' | 'draft' | 'creation' | 'publication' | 'privileged' | 'membership';
@@ -118,7 +127,7 @@ export interface ToolContext {
     archive?(requestId: string): Promise<Record<string, unknown> | undefined>;
     register(input: {
       request_id: string;
-      kind: 'article' | 'page' | 'section' | 'theme' | 'media' | 'capture' | 'other';
+      kind: 'article' | 'page' | 'section' | 'theme' | 'media' | 'capture' | 'other' | 'pdf';
       title: string;
       brief_excerpt?: string;
       workflow?: { run_id: string; workflow_id: string; project_id: string; node_total?: number };
@@ -840,13 +849,172 @@ const listWorkspaceNodes: ChatTool = {
   describe: () => 'List workspace nodes',
 };
 
+// A3 — the registered operation catalog (CMS-Agent A2, read-only). Three
+// tools mirror the live contract 1:1 so a standard intent routes to a
+// catalog operation instead of a guessed workflow_id; raw verbs are untouched.
+const listOperationsTool: ChatTool = {
+  name: 'list_operations',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'List every registered catalog operation (CMS-Agent A2): id, version, purpose, input shape, effects/risk, and matching intent phrases. Check this FIRST for a standard job (PDF family, document render, asset lookup+adopt, visual identity change, site inventory, image template revision) before a raw verb. Read-only.',
+  input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  parse: zodParse(z.object({})),
+  execute: async (ctx) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    const result = await ctx.cmsAgent.callTool<Record<string, unknown>>('operation_list', {});
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    return { content: json({ operations: parseOperationList(result.data) }), is_error: false };
+  },
+  describe: () => 'List registered operations',
+};
+
+const getOperationTool: ChatTool = {
+  name: 'get_operation',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    'Get one registered operation descriptor by operation_id (latest, or a pinned version). An unregistered id comes back naming the registered alternatives, never as though the string were now usable. Read-only.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      operation_id: { type: 'string' },
+      version: { type: 'integer', minimum: 1, description: 'Pin a specific registered version; omit for latest.' },
+    },
+    required: ['operation_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ operation_id: z.string().min(1), version: z.number().int().positive().optional() })),
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    const result = await ctx.cmsAgent.callTool<Record<string, unknown>>('operation_get', {
+      operationId: args.operation_id,
+      ...(args.version !== undefined ? { version: args.version } : {}),
+    });
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    const parsed = parseOperationGet(result.data);
+    return { content: json(parsed ?? { known: false, registeredOperationIds: [] }), is_error: false };
+  },
+  describe: (args) => `Get operation ${args.operation_id}`,
+};
+
+const preflightOperationTool: ChatTool = {
+  name: 'preflight_operation',
+  toolClass: 'read',
+  discloseResult: true,
+  description:
+    "Read-only preflight for one operation: resolves defaults, validates input against the operation's inputSchema, reports capability gaps. Zero writes, zero probes. Use to check a run_workspace_workflow(operation_id: …) call before sending it. tenantId is always this site's own project; any tenantId in input is ignored.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      operation_id: { type: 'string' },
+      input: { type: 'object', description: "The operation's own input; tenantId is set automatically." },
+    },
+    required: ['operation_id'],
+    additionalProperties: false,
+  },
+  parse: zodParse(z.object({ operation_id: z.string().min(1), input: z.record(z.string(), z.unknown()).optional() })),
+  execute: async (ctx, args) => {
+    if (!ctx.cmsAgent) return CMS_AGENT_UNAVAILABLE;
+    const modelInput = (args.input ?? {}) as Record<string, unknown>;
+    const result = await ctx.cmsAgent.callTool<Record<string, unknown>>('operation_preflight', {
+      operationId: args.operation_id,
+      tenantId: ctx.cmsAgent.projectId,
+      input: { ...modelInput, tenantId: ctx.cmsAgent.projectId },
+    });
+    if (!result.ok) return { content: json({ error: result.message, code: result.code }), is_error: true };
+    const parsed = parseOperationPreflight(result.data);
+    if (!parsed) {
+      return {
+        content: json({ error: 'operation_preflight returned an unreadable result.', code: 'operation_preflight_unreadable' }),
+        is_error: true,
+      };
+    }
+    return {
+      content: json({ ...parsed, needs_durable_registration: needsDurableRegistration(parsed.effects) }),
+      is_error: false,
+    };
+  },
+  describe: (args) => `Preflight operation ${args.operation_id}`,
+};
+
+// A3 — resolve a MODEL-PROPOSED operation_id against CMS-Agent's live catalog
+// before dispatch: operation_get (unregistered id refused, alternatives
+// named, never treated as a usable workflow id) then operation_preflight
+// (bounded validation/defaults; tenantId is cmsAgent.projectId, applied LAST
+// so the model can never widen scope). missingRequired/blockers hard-refuse;
+// capabilityGaps are surfaced but not yet wired to a capability-status
+// source, so they do not block (follow-up wave, named in the delivery report).
+type CatalogOperationSelection =
+  | { ok: true; workflowId: string; kind: RequestKind; title?: string; input: Record<string, unknown> }
+  | { ok: false; content: string };
+
+const resolveCatalogOperation = async (
+  cmsAgent: NonNullable<ToolContext['cmsAgent']>,
+  operationId: string,
+  modelInput: Record<string, unknown>
+): Promise<CatalogOperationSelection> => {
+  const got = await cmsAgent.callTool<Record<string, unknown>>('operation_get', { operationId });
+  if (!got.ok) return { ok: false, content: json({ error: got.message, code: got.code }) };
+  const result = parseOperationGet(got.data);
+  if (!result || !result.known) {
+    return {
+      ok: false,
+      content: json({
+        error: `"${operationId}" is not a registered operation.`,
+        code: 'operation_not_found',
+        ...(result && !result.known ? { registered_operation_ids: result.registeredOperationIds } : {}),
+      }),
+    };
+  }
+  const descriptor = result.descriptor;
+  const preflightInput = { ...modelInput, tenantId: cmsAgent.projectId };
+  const preflight = await cmsAgent.callTool<Record<string, unknown>>('operation_preflight', {
+    operationId: descriptor.operationId,
+    tenantId: cmsAgent.projectId,
+    input: preflightInput,
+  });
+  if (!preflight.ok) return { ok: false, content: json({ error: preflight.message, code: preflight.code }) };
+  const pf = parseOperationPreflight(preflight.data);
+  if (!pf) {
+    return {
+      ok: false,
+      content: json({
+        error: 'operation_preflight returned an unreadable result.',
+        code: 'operation_preflight_unreadable',
+      }),
+    };
+  }
+  const blockers = pf.blockers ?? [];
+  const missingRequired = pf.missingRequired ?? [];
+  if (blockers.length > 0 || missingRequired.length > 0) {
+    return {
+      ok: false,
+      content: json({
+        error: 'This operation is not ready to run yet.',
+        code: 'operation_not_ready',
+        missing_required: missingRequired,
+        blockers,
+        capability_gaps: pf.capabilityGaps ?? [],
+      }),
+    };
+  }
+  return {
+    ok: true,
+    workflowId: descriptor.operationId,
+    kind: operationRequestKind(descriptor.operationId),
+    title: descriptor.title,
+    input: { ...(pf.appliedDefaults ?? {}), ...modelInput, tenantId: cmsAgent.projectId },
+  };
+};
+
 const runWorkspaceWorkflow: ChatTool = {
   name: 'run_workspace_workflow',
   toolClass: 'privileged',
   autonomyFloor: 'ask',
   discloseResult: true,
   description:
-    'THE way a new ARTICLE is written (ART-1). Start a workspace publishing workflow run — this is what researches, drafts and annotates a content_item, and what produces the sourcing, claim, compliance and score record an article needs before it can publish, plus the aggression-ceiling clamp that exists nowhere else. Use this whenever an editor asks for a new article, post or piece of content; object_create is refused for content_item in chat. Pass the editor’s brief VERBATIM as input.instructions (never summarised), set trafficSource and awarenessStage, and carry any media requirement into input.mediaRequest. Also advances an existing run by run_id. Long executions never block the chat — poll with get_workspace_run, then check_workspace_run_readiness → publish_workspace_run → release_workspace_run. Publishing itself always remains a separate human decision on the workspace surface.',
+    'THE way a new ARTICLE is written (ART-1) — omit operation_id for this. Starts a workspace publishing workflow run producing the sourcing/claim/compliance/score record an article needs plus the aggression-ceiling clamp. Use for a new article/post; object_create is refused for content_item in chat. Pass the brief VERBATIM as input.instructions, set trafficSource/awarenessStage, carry media needs in input.mediaRequest. FOR A NON-ARTICLE JOB (PDF family, document render, asset lookup+adopt, visual identity change, site inventory, image template revision) check list_operations/get_operation and pass operation_id instead — resolved from CMS-Agent’s own catalog, never guessed; preflight_operation previews refusals first. Also advances an existing run by run_id, or RESUMES a request by request_id alone (no input), never duplicating or re-asking. Poll with get_workspace_run, then check_workspace_run_readiness → publish_workspace_run → release_workspace_run. Publishing stays a separate human decision.',
   input_schema: {
     type: 'object',
     properties: {
@@ -862,7 +1030,12 @@ const runWorkspaceWorkflow: ChatTool = {
       request_id: {
         type: 'string',
         description:
-          'Reuse THIS request id (req_<flow>_<topic>_<yyyymmdd>_<nn>). Omit to have one minted from slug/title.',
+          'Reuse THIS request id (req_<flow>_<topic>_<yyyymmdd>_<nn>; omit to mint one from slug/title) when starting a new run, OR pass it ALONE (no input/run_id/operation_id) to RESUME that durable request without duplicating or re-asking.',
+      },
+      operation_id: {
+        type: 'string',
+        description:
+          "Run a registered catalog operation (see list_operations/get_operation) instead of the article workflow. Re-verified/preflighted against CMS-Agent's live catalog; an unregistered id is refused. Mutually exclusive with workflow_id.",
       },
       slug: {
         type: 'string',
@@ -894,6 +1067,7 @@ const runWorkspaceWorkflow: ChatTool = {
           .string()
           .regex(REQUEST_ID_RE, 'request_id must match req_<flow>_<topic>_<yyyymmdd>_<nn>')
           .optional(),
+        operation_id: z.string().min(1).optional(),
         slug: z.string().min(1).optional(),
         entrypoint: z.literal('article_body').optional(),
         article_body: z.record(z.string(), z.unknown()).optional(),
@@ -904,9 +1078,20 @@ const runWorkspaceWorkflow: ChatTool = {
       .refine((value) => !value.article_body || Boolean(value.entrypoint), {
         message: 'article_body is only meaningful with entrypoint: "article_body".',
       })
-      .refine((value) => Boolean(value.run_id) !== Boolean(value.input), {
-        message: 'Provide exactly one of: input (start a new run) or run_id (advance an existing run).',
+      .refine((value) => !value.operation_id || !value.workflow_id, {
+        message: 'Provide operation_id or workflow_id, never both — a catalog operation already resolves its own workflow.',
       })
+      .refine(
+        // Exactly one of: input (start) / run_id (advance) / bare request_id
+        // (resume — see execute()).
+        (value) =>
+          Boolean(value.run_id) !== Boolean(value.input) ||
+          (Boolean(value.request_id) && !value.run_id && !value.input && !value.operation_id),
+        {
+          message:
+            'Provide exactly one of: input (start a new run), run_id (advance an existing run), or request_id ALONE (resume that durable request).',
+        }
+      )
       .safeParse(args);
     return parsed.success
       ? { ok: true, value: parsed.data }
@@ -923,6 +1108,35 @@ const runWorkspaceWorkflow: ChatTool = {
       });
       if (!advanced.ok) return { content: json({ error: advanced.message, code: advanced.code }), is_error: true };
       return { content: json(projectWorkspaceRun(advanced.data)), is_error: false };
+    }
+    // A3 resume-without-duplication: request_id ALONE (parse's refine
+    // enforces no input/run_id/operation_id) advances the SAME run via
+    // workflow_run_all (never workflow_start_dry_run, which would restart
+    // already-passed nodes) and never calls ctx.requests.register — the
+    // record already exists, so resuming it can never create a second one.
+    if (args.request_id && !args.input && !args.operation_id) {
+      if (!ctx.requests?.get) return REQUESTS_UNAVAILABLE;
+      const doc = await ctx.requests.get(args.request_id as string);
+      if (!doc) return { content: json({ error: `No request ${args.request_id}.` }), is_error: true };
+      const workflow = doc.workflow as { run_id?: string } | undefined;
+      if (!workflow?.run_id) {
+        return {
+          content: json({
+            error: `Request ${args.request_id} has no workflow run to resume.`,
+            code: 'no_workflow_run',
+          }),
+          is_error: true,
+        };
+      }
+      const advanced = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_run_all', {
+        runId: workflow.run_id,
+        budgetMs: WORKSPACE_RUN_BUDGET_MS,
+      });
+      if (!advanced.ok) return { content: json({ error: advanced.message, code: advanced.code }), is_error: true };
+      return {
+        content: json({ ...projectWorkspaceRun(advanced.data), request_id: args.request_id, resumed: true }),
+        is_error: false,
+      };
     }
     // D2a: CMS-Agent's workflow_start_dry_run REQUIRES a caller request id
     // for openai runs — mint one here (req_agent_<slug>_<yyyymmdd>_<nn>,
@@ -943,24 +1157,43 @@ const runWorkspaceWorkflow: ChatTool = {
         is_error: true,
       };
     }
+    // A3 — resolve a catalog operation BEFORE dispatching. A refusal here
+    // (unregistered id, missing input, a blocker) returns before
+    // workflow_start_dry_run/ctx.requests.register run, so a rejected
+    // operation never leaves a phantom running request behind.
+    let workflowId = args.workflow_id as string | undefined;
+    let resolvedKind: RequestKind = requestKindForWorkflow(workflowId);
+    let operationTitle: string | undefined;
+    let dispatchInput: unknown = args.input;
+    if (args.operation_id) {
+      const selection = await resolveCatalogOperation(
+        ctx.cmsAgent,
+        args.operation_id as string,
+        (args.input ?? {}) as Record<string, unknown>
+      );
+      if (!selection.ok) return { content: selection.content, is_error: true };
+      workflowId = selection.workflowId;
+      resolvedKind = selection.kind;
+      operationTitle = selection.title;
+      dispatchInput = selection.input;
+    }
+
     const requestId = (args.request_id as string | undefined) ?? (await mintWorkspaceRequestId(ctx, args));
     const started = await ctx.cmsAgent.callTool<Record<string, unknown>>('workflow_start_dry_run', {
       projectId: ctx.cmsAgent.projectId,
-      input: args.input,
+      input: dispatchInput,
       requestId,
-      ...(args.workflow_id ? { workflowId: args.workflow_id } : {}),
+      ...(workflowId ? { workflowId } : {}),
       ...(args.budget_usd !== undefined ? { budgetUsd: args.budget_usd } : {}),
       ...(args.execution_mode ? { executionMode: args.execution_mode } : {}),
       ...(args.entrypoint ? { entrypoint: args.entrypoint, articleBody: args.article_body } : {}),
     });
     if (!started.ok) return { content: json({ error: started.message, code: started.code }), is_error: true };
-    // W19 T19.1: register the job the instant it starts, so the record exists
-    // even if this chat turn ends on caps two minutes from now. Deliberately
-    // scoped to THIS tool in the T19.1–T19.4 delivery: it is the only chat
-    // tool that starts work an editor then waits on. Plan D7's non-workflow
-    // creators (template instantiation, retheme, media jobs) complete inline
-    // and have no `req_…` id of their own yet; they register when their id
-    // minting is designed, alongside the T19.10 backfill.
+    // W19 T19.1 / A3: register the job the instant it starts, under its
+    // RESOLVED kind — fixes the bug where every registration hardcoded
+    // `kind: 'article'` regardless of what actually ran (a PDF operation
+    // included). Plan D7's non-workflow creators complete inline and have no
+    // `req_…` id yet; they register alongside the T19.10 backfill.
     const startedRun = projectWorkspaceRun(started.data);
     const briefInput = (args.input ?? {}) as Record<string, unknown>;
     // A run id we did not actually get back is NOT a workflow block: a record
@@ -969,14 +1202,14 @@ const runWorkspaceWorkflow: ChatTool = {
     const startedRunId = typeof startedRun.run_id === 'string' ? startedRun.run_id : '';
     await ctx.requests?.register({
       request_id: requestId,
-      kind: 'article',
-      title: requestTitleFrom(briefInput, requestId),
+      kind: resolvedKind,
+      title: requestTitleFrom(briefInput, operationTitle ?? requestId),
       ...(typeof briefInput.instructions === 'string' ? { brief_excerpt: briefInput.instructions.slice(0, 240) } : {}),
       ...(startedRunId
         ? {
             workflow: {
               run_id: startedRunId,
-              workflow_id: (args.workflow_id as string | undefined) ?? 'publishing_conductor',
+              workflow_id: workflowId ?? 'publishing_conductor',
               project_id: ctx.cmsAgent.projectId,
               ...(Array.isArray(startedRun.nodes) ? { node_total: startedRun.nodes.length } : {}),
             },
@@ -996,10 +1229,15 @@ const runWorkspaceWorkflow: ChatTool = {
   // the human approves exactly the bytes that will be sent.
   dryRun: async (_ctx, args) => ({
     dry_run: true,
-    action: args.run_id ? 'advance_existing_run' : 'start_dry_run_workflow',
+    action: args.run_id
+      ? 'advance_existing_run'
+      : args.request_id && !args.input && !args.operation_id
+        ? 'resume_request'
+        : 'start_dry_run_workflow',
     ...(args.run_id ? { run_id: args.run_id } : {}),
     ...(args.input !== undefined ? { input_echo: args.input } : {}),
     ...(args.workflow_id ? { workflow_id: args.workflow_id } : {}),
+    ...(args.operation_id ? { operation_id: args.operation_id } : {}),
     ...(args.budget_usd !== undefined ? { budget_usd: args.budget_usd } : {}),
     ...(args.request_id ? { request_id: args.request_id } : {}),
     ...(args.slug ? { slug: args.slug } : {}),
@@ -1008,7 +1246,13 @@ const runWorkspaceWorkflow: ChatTool = {
     note: 'A dry-run workflow has no publishing side effects; publishing remains a separate human decision (publish_workspace_run, ask-gated).',
   }),
   describe: (args) =>
-    args.run_id ? `Advance workspace run ${args.run_id}` : 'Start a workspace publishing workflow (dry-run)',
+    args.run_id
+      ? `Advance workspace run ${args.run_id}`
+      : args.request_id && !args.input && !args.operation_id
+        ? `Resume request ${args.request_id}`
+        : args.operation_id
+          ? `Run operation ${args.operation_id}`
+          : 'Start a workspace publishing workflow (dry-run)',
 };
 
 const getWorkspaceRun: ChatTool = {
@@ -1879,6 +2123,9 @@ export const CHAT_TOOLS: readonly ChatTool[] = [
   applyTheme,
   applyBrandImagery,
   listWorkspaceNodes,
+  listOperationsTool,
+  getOperationTool,
+  preflightOperationTool,
   runWorkspaceWorkflow,
   getWorkspaceRun,
   checkWorkspaceRunReadiness,

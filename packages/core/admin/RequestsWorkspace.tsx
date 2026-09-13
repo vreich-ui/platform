@@ -188,6 +188,7 @@ const KIND_LABELS: Record<RequestKind, string> = {
   media: 'Media',
   capture: 'Capture',
   other: 'Other',
+  pdf: 'PDF',
 };
 
 /** A live row gets a spinner, not a dot — an editor must be able to tell "moving" from "parked" at a glance. */
