@@ -375,6 +375,11 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
     ...(chatStatus ? { chat: { status: chatStatus } } : {}),
     now: now(),
     ...(deps.config ? { config: deps.config } : {}),
+    // The only clock a request with NO RUN has. Passed only when the doc
+    // genuinely carries no run id: a request that has one but whose run read
+    // came back empty is a bridge fact, not a never-dispatched job, and must
+    // not be told it was never started (see `DeriveInput`).
+    ...(doc.workflow?.run_id ? {} : { queuedSince: doc.created_at }),
   });
 
   const approvals = doc.workflow ? approvalsFrom(derived, doc.workflow, nowIso) : undefined;

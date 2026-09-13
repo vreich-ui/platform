@@ -115,6 +115,7 @@ const ADMIN_ROUTES_INTENTIONALLY_UNREACHED_FROM_NAV = new Set<string>([
   '/admin/requests/[requestId]', // W19 T19.4 — deep link only; /admin/requests is the nav entry
   '/admin/content/[objectId]', // deep link only; /admin/objects is the nav entry
   '/admin/analytics/object/[objectId]', // T21.30 — deep link only, reached from a ranking row's drill-down icon; /admin/analytics is the nav entry
+  '/admin/not-found', // the admin shell's own 404 — arrived at by mistake (netlify.toml's unmatched-/admin/* rewrite), never navigated to
 ]);
 
 test('every registered /admin/* shell route is reached from AdminShell nav, or is a documented exception', () => {

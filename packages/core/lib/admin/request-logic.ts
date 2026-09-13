@@ -296,6 +296,45 @@ export const quickFilterToStatuses = (filter: RequestQuickFilter): RequestStatus
 };
 
 /**
+ * What an empty quick-filter tab is allowed to SAY.
+ *
+ * The "Needs you" empty state used to assert, unconditionally, that
+ * "everything in flight is moving on its own" — a sentence about the whole
+ * running set written by a tab that only knows its own set is empty. On
+ * `site_zilberman` (2026-09-13) it sat above two runs parked at step 0 for one
+ * and four days. An empty tab may only report ITS OWN emptiness; anything it
+ * says about the rest of the desk has to be derived from the rest of the desk,
+ * which is what `summary` (`summarizeRequestRows` over the unfiltered active
+ * set) is for. Absent — a caller that has no such set — the copy stays silent
+ * about what else is happening rather than guessing.
+ */
+export const requestsEmptyState = (
+  filter: RequestQuickFilter,
+  summary?: { working: number; blocked: number }
+): { title: string; message: string } => {
+  if (filter === 'archived') {
+    return { title: 'Nothing archived', message: 'Archived requests appear here once someone files them away.' };
+  }
+  if (filter !== DEFAULT_REQUEST_QUICK_FILTER) {
+    return {
+      title: 'Nothing here',
+      message: 'Ask the agent for an article and it will appear here while it is being written.',
+    };
+  }
+  const working = summary?.working ?? 0;
+  const blocked = summary?.blocked ?? 0;
+  const elsewhere: string[] = [];
+  if (working > 0) elsewhere.push(`${working} ${working === 1 ? 'job is' : 'jobs are'} in flight (Running)`);
+  if (blocked > 0) elsewhere.push(`${blocked} ${blocked === 1 ? 'has' : 'have'} stopped (Blocked)`);
+  return {
+    title: 'Nothing here',
+    message: elsewhere.length
+      ? `Nothing is waiting on you on this tab — ${elsewhere.join(' and ')}. Open those tabs to check on them.`
+      : 'Nothing needs you right now, and nothing else is in flight.',
+  };
+};
+
+/**
  * Human labels for the `publishing_conductor` nodes, so a row reads
  * "researching" rather than "research". An unknown node falls back to its raw
  * id — hiding a node we do not recognise would be worse than showing it.
@@ -411,6 +450,54 @@ export const rowMetaLine = (
     primary: live ? undefined : progressPhrase(row.progress, row.current_node),
     secondary: [row.created_by, relativeAge(row.updated_at, nowMs)],
   };
+};
+
+/**
+ * THE FACTS A SINGLE REQUEST'S DETAIL MUST STATE.
+ *
+ * The detail pane used to render four things — title, status word, kind badge
+ * and "Open chat" — and nothing else. For a run parked at step 0 for four days
+ * (`site_zilberman`, 2026-09-13) that is the screen you open to find out WHY,
+ * and it had no id, no timestamps, no step, no workflow, no run id and no
+ * reason. Every one of those facts was already on the index row or on the
+ * activity poll this pane was already making; none of it reached the eye.
+ *
+ * Pure and label-first so the pane is a `<dl>` and the wording is test-pinned.
+ * A fact with nothing behind it is OMITTED rather than rendered as "—": an
+ * empty row teaches the reader to stop reading the list.
+ */
+export interface RequestFact {
+  label: string;
+  value: string;
+  /** True for machine identifiers — the pane renders these monospace and selectable. */
+  mono?: boolean;
+}
+
+export const requestFacts = (
+  row: {
+    request_id: string;
+    kind: string;
+    status: RequestStatusName;
+    status_reason?: string;
+    progress?: { done: number; total: number };
+    current_node?: string;
+    created_by: string;
+    updated_at: string;
+  },
+  nowMs: number,
+  run?: { run_id?: string; workflow_id?: string }
+): RequestFact[] => {
+  const facts: RequestFact[] = [{ label: 'Request', value: row.request_id, mono: true }];
+  const step = progressPhrase(row.progress, row.current_node);
+  if (step) facts.push({ label: 'Step', value: step });
+  const age = relativeAge(row.updated_at, nowMs);
+  // "Last moved" and not "Updated": on a stuck run the whole question is when
+  // it last did anything, and the answer being "4d" is the finding.
+  if (age) facts.push({ label: 'Last moved', value: `${age} ago (${row.updated_at})` });
+  if (row.created_by) facts.push({ label: 'Asked by', value: row.created_by });
+  if (run?.workflow_id) facts.push({ label: 'Workflow', value: run.workflow_id, mono: true });
+  if (run?.run_id) facts.push({ label: 'Run', value: run.run_id, mono: true });
+  return facts;
 };
 
 // ─── B1: the row's actions, as data ─────────────────────────────────────────

@@ -37,6 +37,7 @@ import {
   STORE_READ_CONCURRENCY,
   type BlobListResponse,
 } from '../blob-list.js';
+import { reconcileRequestKind } from './request-kind.js';
 
 export const EDITORIAL_REQUEST_SCHEMA_VERSION = 'editorial-request.v1';
 export const REQUEST_INDEX_SCHEMA_VERSION = 'editorial-request-index.v1';
@@ -236,7 +237,12 @@ export const projectIndexRow = (doc: EditorialRequest): RequestIndexRow => {
   const lastChat = doc.chats[doc.chats.length - 1];
   return {
     request_id: doc.request_id,
-    kind: doc.kind,
+    // #734 fixed the stamping bug forward; this is what reaches the records it
+    // could not. `reconcileRequestKind` only ever corrects the uninformative
+    // `'article'` default, and only on the evidence of the request's own id
+    // (`request-kind.ts`) — so every tenant's inbox converges on the truth as
+    // its rows are rewritten, with no migration and nothing to run per tenant.
+    kind: reconcileRequestKind(doc),
     title: doc.title,
     status: doc.status,
     ...(doc.status_reason !== undefined ? { status_reason: doc.status_reason } : {}),
@@ -500,7 +506,10 @@ export const createRequest = async (
   const doc: EditorialRequest = {
     schema_version: EDITORIAL_REQUEST_SCHEMA_VERSION,
     request_id: input.request_id,
-    kind: input.kind,
+    // The same reconciliation at the source: a caller that registers a
+    // `req_capture_*` job as an article is corrected here rather than storing
+    // a wrong stamp for the projection to keep correcting.
+    kind: reconcileRequestKind({ kind: input.kind, request_id: input.request_id }),
     title: input.title,
     ...(input.brief_excerpt !== undefined ? { brief_excerpt: input.brief_excerpt.slice(0, BRIEF_EXCERPT_MAX) } : {}),
     created_by: input.created_by,

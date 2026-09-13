@@ -13,8 +13,10 @@ import {
   pendingNotifications,
   QUICK_FILTERS,
   quickFilterToStatuses,
+  requestFacts,
   requestObjectHref,
   requestSeverityLevel,
+  requestsEmptyState,
   requestStatusLabel,
   retryReceipt,
   rowMetaLine,
@@ -574,5 +576,81 @@ describe('decisionDisabledReason — C3b: session outranks rights', () => {
 
   it('signed in and holding the right: enabled — no reason at all', () => {
     assert.equal(decisionDisabledReason(false, true, DENIED), undefined);
+  });
+});
+
+describe('requestsEmptyState', () => {
+  it('an empty Needs you above a working desk names the other tabs instead of claiming all is well', () => {
+    const state = requestsEmptyState('needsYou', { working: 2, blocked: 0 });
+    assert.match(state.message, /2 jobs are in flight \(Running\)/);
+    assert.doesNotMatch(state.message, /moving on its own/);
+  });
+
+  it('names the blocked set too when there is one', () => {
+    const state = requestsEmptyState('needsYou', { working: 1, blocked: 3 });
+    assert.match(state.message, /1 job is in flight \(Running\)/);
+    assert.match(state.message, /3 have stopped \(Blocked\)/);
+  });
+
+  it('only claims a quiet desk when the whole active set is genuinely empty', () => {
+    assert.match(
+      requestsEmptyState('needsYou', { working: 0, blocked: 0 }).message,
+      /nothing else is in flight/
+    );
+  });
+
+  it('says nothing about the rest of the desk when it has no view of it', () => {
+    const state = requestsEmptyState('needsYou');
+    assert.match(state.message, /nothing else is in flight/);
+  });
+
+  it('keeps the archive and the other tabs on their own copy', () => {
+    assert.equal(requestsEmptyState('archived').title, 'Nothing archived');
+    assert.match(requestsEmptyState('running', { working: 0, blocked: 0 }).message, /Ask the agent/);
+  });
+});
+
+describe('requestFacts', () => {
+  const NOW = Date.parse('2026-09-13T12:00:00.000Z');
+  const stuck = {
+    request_id: 'req_capture_zilberman_20260910_01',
+    kind: 'capture',
+    status: 'queued' as const,
+    status_reason: 'This job was accepted but has not started a single step.',
+    progress: { done: 0, total: 25 },
+    current_node: 'input_triage',
+    created_by: 'owner@example.com',
+    updated_at: '2026-09-09T12:00:00.000Z',
+  };
+
+  it('states the id, the step, when it last moved and who asked', () => {
+    const facts = requestFacts(stuck, NOW);
+    assert.deepEqual(
+      facts.map((fact) => fact.label),
+      ['Request', 'Step', 'Last moved', 'Asked by']
+    );
+    assert.equal(facts[0].value, 'req_capture_zilberman_20260910_01');
+    assert.equal(facts[0].mono, true);
+    assert.match(facts[1].value, /^0 \/ 25 · /);
+    assert.match(facts[2].value, /^4d ago \(2026-09-09T12:00:00\.000Z\)$/);
+  });
+
+  it('adds the run and workflow only once they are known', () => {
+    const labels = requestFacts(stuck, NOW, { run_id: 'run_17_abc', workflow_id: 'publishing_conductor' }).map(
+      (fact) => fact.label
+    );
+    assert.ok(labels.includes('Run'));
+    assert.ok(labels.includes('Workflow'));
+  });
+
+  it('omits a fact it has nothing for rather than rendering an empty row', () => {
+    const bare = requestFacts(
+      { ...stuck, created_by: '', updated_at: 'not-a-date', progress: undefined, current_node: undefined },
+      NOW
+    );
+    assert.deepEqual(
+      bare.map((fact) => fact.label),
+      ['Request']
+    );
   });
 });

@@ -56,7 +56,7 @@ import { BlockageCard } from './BlockageCard';
 import { resolveBlockage, type Blockage, type RemedyButton } from '@core/lib/admin/blockage';
 import { resolveBlockage as resolveChatBlockage } from '@core/lib/admin/chat-client';
 import { Input, Textarea } from './forms';
-import { Dialog } from './overlays';
+import { Dialog, Popover } from './overlays';
 import { IconAlertTriangle, IconLock, IconPlus, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import type { EditorialArtifact } from '@core/lib/admin/editorial-assets';
@@ -100,6 +100,7 @@ import {
   exampleArtifact,
   moodBoardArtifact,
   parseImportUrls,
+  proposeFromBoardAvailability,
   referenceWeightLabel,
   regionFromDrag,
   regionScopeLabel,
@@ -726,6 +727,11 @@ export function ImageryBoard({
   );
 
   const selected = model.selected;
+  /** Whether the propose button can run at all — see `proposeFromBoardAvailability`. */
+  const propose = useMemo(
+    () => proposeFromBoardAvailability({ referenceCount: selected?.referenceCount ?? 0, brief }),
+    [selected?.referenceCount, brief]
+  );
   const importPreview = useMemo(() => parseImportUrls(importText), [importText]);
   /** The selected standard's RAW brandImagery — what a clone copies verbatim. */
   const selectedImagery = useMemo(() => {
@@ -1289,9 +1295,22 @@ export function ImageryBoard({
                 applied {model.applied.appliedAt}
               </span>
             ) : null}
+            {/* "applied <date>" alone reads as a claim about NOW. Where the
+                source standard has moved on, say so in the same breath —
+                `appliedImageryDrift` owns the sentence. */}
+            {model.applied.drift ? (
+              <Badge tone="warning">
+                {model.applied.drift.contractDiffers ? 'Out of date' : 'Edited since'}
+              </Badge>
+            ) : null}
           </span>
         }
       >
+        {model.applied.drift ? (
+          <p className="mb-3 rounded-[var(--adm-radius-md)] border border-[var(--adm-warning)] bg-[var(--adm-warning-soft)] px-3 py-2 text-[length:var(--adm-text-xs)] text-[var(--adm-warning-text)]">
+            {model.applied.drift.note} This panel shows the copy the publication is actually serving.
+          </p>
+        ) : null}
         <ContractBody contract={model.applied} />
       </Card>
 
@@ -1350,14 +1369,32 @@ export function ImageryBoard({
             title={selected.label}
             actions={
               <span className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void runPropose()}
-                  disabled={busy || proposing}
-                >
-                  <IconSparkles size={15} /> {proposing ? 'Proposing…' : 'Write contract from mood board'}
-                </Button>
+                {/* An empty board with no brief is a 422 the server refuses
+                    before it spends a model call — so the control says so
+                    rather than offering a click that cannot work. Typing a
+                    brief below lifts it (`proposeFromBoardAvailability`). */}
+                {propose.disabled ? (
+                  <Popover
+                    mode="hover"
+                    content={propose.reason ?? ''}
+                    trigger={(a11y) => (
+                      <span {...a11y} className="inline-flex">
+                        <Button variant="secondary" size="sm" disabled>
+                          <IconSparkles size={15} /> Write contract from mood board
+                        </Button>
+                      </span>
+                    )}
+                  />
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void runPropose()}
+                    disabled={busy || proposing}
+                  >
+                    <IconSparkles size={15} /> {proposing ? 'Proposing…' : 'Write contract from mood board'}
+                  </Button>
+                )}
                 <Button size="sm" onClick={() => void previewApply()} disabled={busy || !model.canApply}>
                   Make this the site&rsquo;s imagery
                 </Button>
