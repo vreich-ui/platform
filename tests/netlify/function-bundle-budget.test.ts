@@ -149,6 +149,17 @@ const firstPartyBundle = (fn: string) => {
  * here. Nothing to cut: the new module IS the feature, and it drags no new
  * subtree behind it.
  *
+ * Media compaction (W4, 2026-09-13) raised it 3352 -> 3356, measured at
+ * 3353 KB. NO new module and NO new import edge: the grace window
+ * (`minAgeMs`/`skippedRecent`) and its rationale comment land inside
+ * lib/artifact-dedupe-sweep.ts, which the artifact_orphan_sweep /
+ * artifact_dedupe_by_sha tools already drag into this bundle, plus the
+ * verb's `skipped_recent` passthrough in mcp-artifact-admin.ts. The
+ * scheduled function that uses them (server/functions/media-compaction-sweep.ts)
+ * is NOT reachable from here and costs this bundle nothing. Nothing to cut:
+ * the delta is the safeguard that keeps an unattended sweep from retiring a
+ * capture's artifacts before capture has written the pages citing them.
+ *
  * Re-measured 2026-09-13, after the shell coalescing (T-shell):
  *   admin-auth-state 216 · admin-requests 367 · admin-users 438 · admin-shell 369
  */
@@ -162,7 +173,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3352,
+  'admin-agent-chat': 3356,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

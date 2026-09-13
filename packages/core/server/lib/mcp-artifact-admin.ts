@@ -1192,6 +1192,7 @@ export const artifactOrphanSweep = async (event: LambdaEvent, input: Record<stri
     orphans: result.orphans,
     softDeleted: result.softDeleted,
     dangling: result.dangling.length,
+    skippedRecent: result.skippedRecent.length,
     ...result.checkpoint,
   });
 
@@ -1203,6 +1204,9 @@ export const artifactOrphanSweep = async (event: LambdaEvent, input: Record<stri
     soft_deleted: result.softDeleted,
     by_request: result.byRequest,
     dangling: result.dangling,
+    // Always empty here: the verb runs with no grace window (a human reads the
+    // report before applying). The scheduled sweep is what passes one.
+    skipped_recent: result.skippedRecent,
     checkpoint: result.checkpoint,
   });
 };
