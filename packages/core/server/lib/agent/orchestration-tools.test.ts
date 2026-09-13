@@ -354,6 +354,28 @@ const PDF_DESCRIPTOR = {
   effects: [{ kind: 'render', riskLevel: 'write' }],
 };
 
+// #313 dispatch fix: the bound workflow id is DELIBERATELY not
+// PDF_DESCRIPTOR.operationId — every test below that expects a successful
+// dispatch must prove workflow_start_dry_run receives THIS string, never the
+// operation id, or it isn't actually exercising the fix.
+const PDF_BINDING = { workflowId: 'pdf_family_conductor' };
+
+// The one operation with a real binding in production: operationId and
+// workflowId are genuinely different strings, and its inputMapping renames
+// tenantId (the scoping field EVERY operation carries) alongside an
+// operation-specific field — exactly the shape the scope-guarantee tests
+// below need to exercise.
+const VISUAL_IDENTITY_DESCRIPTOR = {
+  operationId: 'visual_identity_review_change',
+  version: 1,
+  title: 'Visual identity review change',
+  effects: [{ kind: 'apply', riskLevel: 'write' }],
+};
+const VISUAL_IDENTITY_BINDING = {
+  workflowId: 'visual_identity',
+  inputMapping: { tenantId: 'projectId', autoApply: 'apply' },
+};
+
 /** A per-tool-name responder, for tests that need operation_get/operation_preflight to differ from workflow_start_dry_run. */
 const namedCtx = (
   respond: (
@@ -397,6 +419,8 @@ test('run_workspace_workflow(operation_id: pdf_template_family) registers the re
             appliedDefaults: {},
             missingRequired: [],
             blockers: [],
+            executable: true,
+            binding: PDF_BINDING,
           },
         };
       return {
@@ -419,7 +443,19 @@ test('run_workspace_workflow(operation_id: pdf_template_family) registers the re
   assert.equal(registered.length, 1);
   assert.equal(registered[0]!.kind, 'pdf');
   assert.notEqual(registered[0]!.kind, 'article');
-  assert.equal((registered[0]!.workflow as { workflow_id: string }).workflow_id, 'pdf_template_family');
+
+  // #313 dispatch fix: the DISPATCHED workflow id is the binding's, never
+  // the operation id — an operation is not a workflow, and this is the
+  // string that would silently misroute to publishing_conductor if it stayed
+  // PDF_DESCRIPTOR.operationId.
+  assert.equal(
+    (registered[0]!.workflow as { workflow_id: string }).workflow_id,
+    PDF_BINDING.workflowId,
+    'the registered workflow_id must be the BOUND workflow id, not the operation id'
+  );
+  assert.notEqual((registered[0]!.workflow as { workflow_id: string }).workflow_id, 'pdf_template_family');
+  const dispatchedStart = calls.find((c) => c.name === 'workflow_start_dry_run')!.args;
+  assert.equal(dispatchedStart.workflowId, PDF_BINDING.workflowId);
 
   // A durable id exists and is what the caller gets back — not merely an
   // in-memory echo — so it can be looked up again after this turn ends.
@@ -436,7 +472,14 @@ test('run_workspace_workflow(operation_id) sets tenantId from the SITE, never fr
     if (name === 'operation_preflight')
       return {
         ok: true,
-        data: { operationId: 'pdf_template_family', selectedVersion: 1, missingRequired: [], blockers: [] },
+        data: {
+          operationId: 'pdf_template_family',
+          selectedVersion: 1,
+          missingRequired: [],
+          blockers: [],
+          executable: true,
+          binding: PDF_BINDING,
+        },
       };
     return { ok: true, data: { run: { runId: 'run_pdf_2', status: 'created' } } };
   }, calls);
@@ -753,6 +796,7 @@ test('run_workspace_workflow(operation_id) does NOT refuse on a "not_configured"
               { capability: 'image_search', reason: 'not_configured', remedy: 'Configure image search.' },
             ],
             executable: true,
+            binding: PDF_BINDING,
           },
         };
       return { ok: true, data: { run: { runId: 'run_ok', status: 'created' } } };
@@ -785,7 +829,7 @@ test('run_workspace_workflow(operation_id) dispatches exactly as before when exe
             blockers: [],
             capabilityGaps: [],
             executable: true,
-            binding: { workflowId: 'pdf_family_conductor' },
+            binding: PDF_BINDING,
           },
         };
       return { ok: true, data: { run: { runId: 'run_ok_2', status: 'created' } } };
@@ -801,6 +845,144 @@ test('run_workspace_workflow(operation_id) dispatches exactly as before when exe
   assert.equal(calls.map((c) => c.name).join(','), 'operation_get,operation_preflight,workflow_start_dry_run');
   assert.equal(registered.length, 1);
   assert.equal(registered[0]!.kind, 'pdf');
+  assert.equal(calls.find((c) => c.name === 'workflow_start_dry_run')!.args.workflowId, PDF_BINDING.workflowId);
+});
+
+// ─── the dispatch-bound-workflow-id fix: binding.inputMapping + the
+// tenant-scope guarantee surviving the rename ────────────────────────────────
+
+test("run_workspace_workflow(operation_id) applies the binding's inputMapping renames to the dispatched input, passing through unmapped fields unchanged", async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get')
+        return { ok: true, data: { known: true, descriptor: VISUAL_IDENTITY_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'visual_identity_review_change',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            executable: true,
+            binding: VISUAL_IDENTITY_BINDING,
+          },
+        };
+      return { ok: true, data: { run: { runId: 'run_vi_1', status: 'created' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'visual_identity_review_change',
+    input: { autoApply: true, changeSummary: 'Swap accent color' },
+  });
+  assert.equal(result.is_error, false);
+  const dispatched = calls.find((c) => c.name === 'workflow_start_dry_run')!.args;
+  assert.equal(dispatched.workflowId, 'visual_identity', 'dispatched under the BOUND workflow id, not the operation id');
+  const dispatchedInput = dispatched.input as Record<string, unknown>;
+  // autoApply -> apply: renamed, and the original key does not also survive.
+  assert.equal(dispatchedInput.apply, true);
+  assert.equal('autoApply' in dispatchedInput, false);
+  // No mapping entry for changeSummary: passes through under its own name.
+  assert.equal(dispatchedInput.changeSummary, 'Swap accent color');
+  // tenantId -> projectId, and forced to the SITE's own project id.
+  assert.equal(dispatchedInput.projectId, 'platform');
+  assert.equal('tenantId' in dispatchedInput, false);
+});
+
+test('run_workspace_workflow(operation_id) never lets a model-supplied value survive under the tenant-scoping key — pre-rename (raw tenantId) or post-rename (the mapped-to name supplied directly)', async () => {
+  for (const binding of [
+    VISUAL_IDENTITY_BINDING, // tenantId -> projectId
+    { workflowId: 'visual_identity' }, // no mapping at all: the key stays tenantId
+  ]) {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const ctx = namedCtx((name) => {
+      if (name === 'operation_get')
+        return { ok: true, data: { known: true, descriptor: VISUAL_IDENTITY_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'visual_identity_review_change',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            executable: true,
+            binding,
+          },
+        };
+      return { ok: true, data: { run: { runId: 'run_vi_2', status: 'created' } } };
+    }, calls);
+
+    await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+      operation_id: 'visual_identity_review_change',
+      input: {
+        autoApply: true,
+        // Pre-rename spoof: the model's own tenantId, supplied directly.
+        tenantId: 'attacker-tenant-raw',
+        // Post-rename spoof: the model guesses the workflow's own field name
+        // (what tenantId maps to when a mapping exists) and supplies THAT
+        // directly, trying to bypass the rename entirely.
+        projectId: 'attacker-tenant-mapped',
+      },
+    });
+    const dispatchedInput = (calls.find((c) => c.name === 'workflow_start_dry_run')!.args.input ??
+      {}) as Record<string, unknown>;
+    const tenantScopeKey = (binding as { inputMapping?: Record<string, string> }).inputMapping?.tenantId ?? 'tenantId';
+    assert.equal(
+      dispatchedInput[tenantScopeKey],
+      'platform',
+      `cmsAgent.projectId must win under the scope key "${tenantScopeKey}", regardless of mapping`
+    );
+    if (tenantScopeKey !== 'tenantId') {
+      assert.equal('tenantId' in dispatchedInput, false, 'the pre-rename key must not also survive');
+    }
+  }
+});
+
+test('run_workspace_workflow(operation_id) refuses when preflight clears every check but the binding carries no workflowId — never dispatches, never registers, never falls back to the operation id', async () => {
+  for (const binding of [undefined, null]) {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const registered: Array<Record<string, unknown>> = [];
+    const ctx = namedCtx(
+      (name) => {
+        if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+        if (name === 'operation_preflight')
+          return {
+            ok: true,
+            data: {
+              operationId: 'pdf_template_family',
+              selectedVersion: 1,
+              missingRequired: [],
+              blockers: [],
+              capabilityGaps: [],
+              executable: true,
+              binding,
+            },
+          };
+        return { ok: true, data: { run: { runId: 'should_never_start' } } };
+      },
+      calls,
+      registered
+    );
+    const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+      operation_id: 'pdf_template_family',
+      input: {},
+    });
+    assert.equal(result.is_error, true, `binding: ${JSON.stringify(binding)}`);
+    assert.equal(
+      calls.map((c) => c.name).join(','),
+      'operation_get,operation_preflight',
+      'workflow_start_dry_run must never be called without a bound workflow id'
+    );
+    assert.equal(registered.length, 0, 'an operation with no bound workflow must never register a running request');
+    const body = JSON.parse(result.content) as { code: string; error: string };
+    assert.equal(body.code, 'operation_not_ready');
+    assert.match(body.error, /no implementing workflow/i);
+  }
 });
 
 test('run_workspace_workflow: the plain workflow_id path (no operation_id) sends an arbitrary workflowId straight to workflow_start_dry_run — NOT covered by this fix', async () => {

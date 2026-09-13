@@ -144,6 +144,45 @@ test('parseOperationPreflight tolerates a payload with neither executable nor bi
   assert.equal(result?.binding, undefined);
 });
 
+// dispatch-bound-workflow-id: binding.workflowId is the ONLY thing
+// resolveCatalogOperation (tools.ts) may dispatch — an operation id is not a
+// workflow id. These pin the typed shape (previously z.unknown()).
+test('parseOperationPreflight reads a full binding — workflowId, operationId and an inputMapping', () => {
+  const result = parseOperationPreflight({
+    operationId: 'visual_identity_review_change',
+    selectedVersion: 1,
+    executable: true,
+    binding: {
+      workflowId: 'visual_identity',
+      operationId: 'visual_identity_review_change',
+      inputMapping: { tenantId: 'projectId', autoApply: 'apply' },
+    },
+  });
+  assert.deepEqual(result?.binding, {
+    workflowId: 'visual_identity',
+    operationId: 'visual_identity_review_change',
+    inputMapping: { tenantId: 'projectId', autoApply: 'apply' },
+  });
+});
+
+test('parseOperationPreflight accepts a binding with only workflowId — operationId and inputMapping are optional', () => {
+  const result = parseOperationPreflight({
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    binding: { workflowId: 'pdf_family_conductor' },
+  });
+  assert.deepEqual(result?.binding, { workflowId: 'pdf_family_conductor' });
+});
+
+test('parseOperationPreflight rejects the WHOLE payload when a present binding is malformed (missing workflowId) — never silently drops it to "no binding"', () => {
+  const result = parseOperationPreflight({
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    binding: { inputMapping: { tenantId: 'projectId' } }, // no workflowId
+  });
+  assert.equal(result, undefined, 'a malformed binding must fail loud, not be silently treated as absent');
+});
+
 // ─── highestEffectRisk / needsDurableRegistration ────────────────────────────
 
 test('highestEffectRisk picks the worst of several effects, publish over write over read', () => {

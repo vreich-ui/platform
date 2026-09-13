@@ -942,9 +942,10 @@ const preflightOperationTool: ChatTool = {
 // before dispatch: operation_get (unregistered id refused, alternatives
 // named, never treated as a usable workflow id) then operation_preflight
 // (bounded validation/defaults; tenantId is cmsAgent.projectId, applied LAST
-// so the model can never widen scope). missingRequired/blockers hard-refuse,
-// and so does an operation that isn't executable: pf.executable === false,
-// OR any capabilityGap with reason "not_supported" — checked even when
+// — after the binding's inputMapping rename, see below — so the model can
+// never widen scope). missingRequired/blockers hard-refuse, and so does an
+// operation that isn't executable: pf.executable === false, OR any
+// capabilityGap with reason "not_supported" — checked even when
 // `executable` is absent (older CMS-Agent, predates it) so a missing field
 // is never read as "true" and this fails safe. That refusal carries the
 // gap's own remedy and its evidence's implementingTask, so the editor is
@@ -952,6 +953,8 @@ const preflightOperationTool: ChatTool = {
 // reason "not_configured" is left alone, surfaced only: every operation
 // reports one whenever the caller passes no configuredCapabilities, so
 // refusing on it would block every operation, including working ones.
+// #313: an operation id is NOT a workflow id — the workflow to dispatch, and
+// the input rename for it, come ONLY from pf.binding; see below.
 type CatalogOperationSelection =
   | { ok: true; workflowId: string; kind: RequestKind; title?: string; input: Record<string, unknown> }
   | { ok: false; content: string };
@@ -1021,12 +1024,49 @@ const resolveCatalogOperation = async (
       }),
     };
   }
+  // #313: descriptor.operationId (e.g. `visual_identity_review_change`) is
+  // NOT the workflow id CMS-Agent's workflowRegistry knows (e.g.
+  // `visual_identity`) — dispatching it there is the defect CMS-Agent #317
+  // now refuses loudly instead of mis-routing to publishing_conductor. Fail
+  // safe like the checks above: cleared readiness but no binding.workflowId
+  // still refuses here, never a guessed fallback.
+  const workflowId = pf.binding?.workflowId;
+  if (!workflowId) {
+    return {
+      ok: false,
+      content: json({
+        error: 'This operation has no implementing workflow bound yet.',
+        code: 'operation_not_ready',
+        missing_required: missingRequired,
+        blockers,
+        capability_gaps: capabilityGaps,
+      }),
+    };
+  }
+  // binding.inputMapping is TRUSTED (CMS-Agent's own table, not model input):
+  // rename this operation's field names to the target workflow's entry-node
+  // names (e.g. tenantId -> projectId, autoApply -> apply). No entry = passes
+  // through unchanged.
+  const inputMapping = pf.binding?.inputMapping ?? {};
+  const mergedInput: Record<string, unknown> = { ...(pf.appliedDefaults ?? {}), ...modelInput };
+  const mappedInput: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(mergedInput)) {
+    mappedInput[inputMapping[key] ?? key] = value;
+  }
+  // tenantId is cmsAgent.projectId, applied LAST — AFTER the rename — so the
+  // model can never widen scope under ANY key. Without this, a mapping that
+  // renames tenantId -> projectId would let a model-supplied `projectId`
+  // (raw, or via a spoofed `tenantId` that got renamed there) reach the
+  // workflow. Forcing it here, unconditionally, after mappedInput is built,
+  // closes both paths regardless of which the model tried.
+  const tenantScopeKey = inputMapping.tenantId ?? 'tenantId';
+  mappedInput[tenantScopeKey] = cmsAgent.projectId;
   return {
     ok: true,
-    workflowId: descriptor.operationId,
+    workflowId,
     kind: operationRequestKind(descriptor.operationId),
     title: descriptor.title,
-    input: { ...(pf.appliedDefaults ?? {}), ...modelInput, tenantId: cmsAgent.projectId },
+    input: mappedInput,
   };
 };
 
