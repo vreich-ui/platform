@@ -540,10 +540,18 @@ export const computeAdminParity = (target) => {
     if (!/\[functions\."membership-sweep"\]\s*\n\s*schedule = /.test(toml)) {
       fnProblems.push('membership-sweep schedule not declared (invitations never expire, removed members never purge)');
     }
+    // W4 (Wolf 2026-09-13): the daily media compaction sweep. Without this block the
+    // tenant's artifact store grows forever — orphaned references are never retired
+    // and byte-duplicates keep their own copies. Fix the mechanism, not the tenant.
+    if (!/\[functions\."media-compaction-sweep"\]\s*\n\s*schedule = /.test(toml)) {
+      fnProblems.push(
+        'media-compaction-sweep schedule not declared (orphaned artifacts never retired, duplicate blobs never collapsed)'
+      );
+    }
   }
   add(
     'netlify-functions-config',
-    'netlify.toml declares the functions directory and the mcp-keepalive + membership-sweep schedules',
+    'netlify.toml declares the functions directory and the mcp-keepalive + membership-sweep + media-compaction-sweep schedules',
     'scaffold (create-site) | migrate-site --admin-parity',
     fnProblems.length ? 'GAP' : 'PASS',
     fnProblems.length ? fnProblems.join('; ') : 'functions directory + keepalive schedule declared'
@@ -947,6 +955,11 @@ export const planAdminParityFixes = (siteDir, { write = false } = {}) => {
     if (!/\[functions\."membership-sweep"\]/.test(toml)) {
       note('netlify-functions-config', 'append the membership-sweep schedule block', target.tomlPath);
       toml = `${toml.trimEnd()}\n\n# W18 T18.4: daily membership housekeeping (invitation expiry, purge) — a scheduled function only runs if DECLARED here.\n[functions."membership-sweep"]\n  schedule = "17 3 * * *"\n`;
+      changed = true;
+    }
+    if (!/\[functions\."media-compaction-sweep"\]/.test(toml)) {
+      note('netlify-functions-config', 'append the media-compaction-sweep schedule block', target.tomlPath);
+      toml = `${toml.trimEnd()}\n\n# W4: daily media compaction (orphan sweep + by-sha dedupe) — a scheduled function only runs if DECLARED here.\n[functions."media-compaction-sweep"]\n  schedule = "41 3 * * *"\n`;
       changed = true;
     }
 

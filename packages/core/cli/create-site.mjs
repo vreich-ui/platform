@@ -761,6 +761,13 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [functions."membership-sweep"]
   schedule = "17 3 * * *"
 
+# W4: daily media compaction — soft-delete artifact references nothing cites (bytes
+# kept, restore still works), then collapse byte-duplicates onto one blob per sha.
+# References younger than 24 h are never swept. Without this block the tenant's
+# artifact store grows forever.
+[functions."media-compaction-sweep"]
+  schedule = "41 3 * * *"
+
 # W19 T19.3: the editorial-request sweep — derives every running request's
 # status from CMS-Agent's run state, appends progress to the attached chats,
 # and nudges a genuinely dead driver at most three times. Without this block

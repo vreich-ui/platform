@@ -344,12 +344,19 @@ test('planAdminParityFixes repairs a degraded older-scaffold site, idempotently'
           "{ from: '/admin/content/*', to: '/admin/content/__workspace', status: 200 },"
         )
     );
-    // (c) missing keepalive schedule;
+    // (c) missing keepalive schedule, and (c2) missing the W4 media-compaction
+    //     schedule — the shape EVERY site had before the sweep was declared:
+    //     the function deploys, nothing ever runs it, the artifact store grows.
     fs.writeFileSync(
       tomlPath,
       fs
         .readFileSync(tomlPath, 'utf8')
         .replace(/\[functions\."mcp-keepalive"\]\n {2}schedule = "\*\/5 \* \* \* \*"\n/, '')
+        .replace(/\[functions\."media-compaction-sweep"\]\n {2}schedule = "41 3 \* \* \*"\n/, '')
+    );
+    assert.ok(
+      !fs.readFileSync(tomlPath, 'utf8').includes('media-compaction-sweep'),
+      'the scaffold must have written the media-compaction-sweep schedule for this degradation to mean anything'
     );
     // (d) missing reader blog loaders (the real fernwell gap, W14 F11).
     fs.rmSync(path.join(dir, 'app', 'pages', '[...blog]'), { recursive: true });

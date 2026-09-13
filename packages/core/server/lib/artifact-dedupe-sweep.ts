@@ -406,6 +406,12 @@ export type ArtifactOrphanSweepResult = {
   byRequest: Array<{ requestId: string; count: number; artifacts: OrphanCandidate[] }>;
   /** REPORTED, NEVER FIXED — see the note on the sweep itself. */
   dangling: DanglingReference[];
+  /**
+   * Unreferenced artifacts too YOUNG to judge, held back by `minAgeMs`. Reported so a
+   * run is legible ("30 swept, 4 too new"), never soft-deleted. Empty when `minAgeMs`
+   * is 0, which is what the admin verb passes.
+   */
+  skippedRecent: OrphanCandidate[];
   checkpoint: { cursor: string; nextCursor: string | null; processed: number; totalKeys: number };
 };
 
@@ -420,6 +426,13 @@ export type ArtifactOrphanSweepResult = {
  * the deliverable; the repair is a human decision.
  *
  * `dryRun` defaults true at the verb boundary; this core takes it explicitly.
+ *
+ * GRACE WINDOW (`minAgeMs`) — capture writes artifacts BEFORE it writes the pages that
+ * cite them (the artifact loop in `capture/emit.mjs` runs first), so for a few minutes
+ * a perfectly good upload is cited by nothing and looks exactly like an orphan. Any
+ * unattended caller MUST pass a `minAgeMs` wider than that gap; references younger than
+ * it are reported as `skippedRecent` and left alone. The admin verb passes 0 — a human
+ * running it by hand is looking at the report before applying anything.
  */
 export const sweepOrphanArtifacts = async (
   indexStore: ArtifactIndexStore,
@@ -428,6 +441,10 @@ export const sweepOrphanArtifacts = async (
     dryRun: boolean;
     requestPrefix?: string;
     olderThan?: string;
+    /** Never treat a reference younger than this as an orphan. Default 0 (no window). */
+    minAgeMs?: number;
+    /** Clock, for tests and for one consistent "now" across a paged run. */
+    now?: string;
     deletedBy: string;
     limit: number;
     cursor: number;
@@ -449,7 +466,10 @@ export const sweepOrphanArtifacts = async (
   const loaded = (await loadReferences(indexStore, pageKeys)).filter((entry) => !entry.reference.deletedAtISO);
 
   const candidates: OrphanCandidate[] = [];
+  const skippedRecent: OrphanCandidate[] = [];
   const liveKeysOnPage = new Set<string>();
+  const minAgeMs = Math.max(0, options.minAgeMs ?? 0);
+  const nowMs = Date.parse(options.now ?? new Date().toISOString());
 
   for (const entry of loaded) {
     liveKeysOnPage.add(entry.reference.blobKey);
@@ -457,7 +477,7 @@ export const sweepOrphanArtifacts = async (
     if (referenced.has(entry.reference.blobKey)) continue;
     if (options.olderThan && entry.reference.createdAtISO >= options.olderThan) continue;
 
-    candidates.push({
+    const candidate: OrphanCandidate = {
       requestId: entry.requestId,
       sha256: entry.sha256,
       blobKey: entry.reference.blobKey,
@@ -465,12 +485,22 @@ export const sweepOrphanArtifacts = async (
       sizeBytes: entry.reference.sizeBytes,
       createdAtISO: entry.reference.createdAtISO,
       artifactKind: referenceKind(entry.reference),
-    });
+    };
+
+    // Too young to judge: a capture that has not finished writing its pages yet.
+    // An unparseable createdAtISO is treated as young — held back, never deleted.
+    const createdMs = Date.parse(candidate.createdAtISO);
+    if (minAgeMs > 0 && (!Number.isFinite(createdMs) || nowMs - createdMs < minAgeMs)) {
+      skippedRecent.push(candidate);
+      continue;
+    }
+
+    candidates.push(candidate);
   }
 
   let softDeleted = 0;
   if (!options.dryRun) {
-    const deletedAtISO = new Date().toISOString();
+    const deletedAtISO = options.now ?? new Date().toISOString();
 
     for (const entry of loaded) {
       if (!candidates.some((candidate) => candidate.blobKey === entry.reference.blobKey)) continue;
@@ -513,6 +543,7 @@ export const sweepOrphanArtifacts = async (
     softDeleted,
     byRequest,
     dangling: dangling.sort((left, right) => left.blobKey.localeCompare(right.blobKey)),
+    skippedRecent,
     checkpoint: {
       cursor: String(options.cursor),
       nextCursor: options.cursor + pageKeys.length < scoped.length ? String(options.cursor + pageKeys.length) : null,
