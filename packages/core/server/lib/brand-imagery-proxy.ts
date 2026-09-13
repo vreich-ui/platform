@@ -43,6 +43,8 @@ import type sharpType from 'sharp';
 import { z } from 'zod';
 
 import { brandImagerySchema } from '../../schema/bodies/site-v1.js';
+import type { VisualStandardBody, VisualStandardReference } from '../../schema/bodies/visual-standard-v1.js';
+import { mintId } from '../../lib/object-ids-mint.js';
 import { parseBlockage, type Blockage } from '../../lib/admin/blockage.js';
 
 const toNonEmptyString = (value: unknown): string | undefined => {
@@ -422,7 +424,7 @@ const resolveImageRefs = async (
 // SAME schema every other producer uses (never forked, R1); the surrounding
 // envelope fields are checked too, since a proposal missing e.g.
 // sampleSubjects is just as unusable as one with a malformed brandImagery. ──
-const brandImageryProposalSchema = z.object({
+export const brandImageryProposalSchema = z.object({
   artifact: z.literal('brand_imagery_proposal.v1'),
   mode: z.enum(['house', 'template']),
   brandImagery: brandImagerySchema,
@@ -432,6 +434,90 @@ const brandImageryProposalSchema = z.object({
   label: z.string().min(1).max(80),
   whenToUse: z.string().min(1).max(400).optional(),
 });
+export type BrandImageryProposal = z.infer<typeof brandImageryProposalSchema>;
+
+// ─── G3: the producer-side adapter, proposal → `visual_standard.v1` body ────
+//
+// The proposal envelope and the body schema DELIBERATELY differ: the writer
+// emits `mode`, the body wants `kind`; the body additionally requires
+// `version: 1`, a `references[]` array and a `status`, none of which a
+// proposal carries. Until now nothing bridged the two — the Apply turn handed
+// the agent PROSE and asked it to hand-assemble a `.strict()` body, and every
+// attempt failed identically (`version: Invalid input: expected 1`, `kind:
+// Invalid option`, `references: expected array, received undefined`, plus
+// unrecognized keys the agent invented). `visual_standard_materializer`, the
+// node that prose pointed at first, is named in prompts and comments and
+// implemented nowhere.
+//
+// So the PRODUCER converts, deterministically, and ships the finished body
+// alongside the proposal. Pure by design: it mints no OBJECT id (that needs
+// the site short id this proxy never sees) and runs no validation of its own
+// — every write path re-validates against `visualStandardBodySchema`, and the
+// unit test asserts that schema accepts exactly what this emits.
+export const toVisualStandardBody = (
+  proposal: BrandImageryProposal,
+  options: { references: VisualStandardReference[] }
+): VisualStandardBody => ({
+  version: 1,
+  kind: proposal.mode,
+  label: proposal.label,
+  ...(proposal.whenToUse ? { whenToUse: proposal.whenToUse } : {}),
+  brandImagery: proposal.brandImagery,
+  references: options.references,
+  sampleSubjects: proposal.sampleSubjects,
+  // What the Apply prose used to ask the agent to set by hand; kept here so
+  // replacing that prose loses nothing.
+  derivedFrom: { method: 'writer' },
+  // Always a draft: filing a proposal writes a PROPOSAL, and `active` would
+  // additionally have to satisfy the sampleSubjects floor a human has not
+  // reviewed yet.
+  status: 'draft',
+});
+
+/** Key-sorted JSON, so a reference's minted id never depends on key order.
+ *  Duplicated per-module by repo convention (object-verbs.ts, agent/loop.ts,
+ *  brand-imagery-examples.ts each carry their own). */
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const bag = value as Record<string, unknown>;
+    return `{${Object.keys(bag)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(bag[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+};
+
+const isUnitFraction = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+
+/**
+ * The mood board as `visual_standard.v1` stores it. A propose call's
+ * `references[]` is the LOOSER writer-input shape (blobKey OR url, never an
+ * id); the body schema requires a blobKey and a `ref_<...>` id, so a url-only
+ * entry — nothing in this site's artifact store to point at — is dropped
+ * rather than emitted as a reference the create would reject. Ids are minted
+ * deterministically from the entry's own payload: the same idiom, and the
+ * same id, `set_visual_standard_fields` mints for an id-less entry
+ * (object-verbs.ts), so filing the same board twice is idempotent.
+ */
+export const toVisualStandardReferences = (
+  references: readonly BrandImageryReferenceInput[]
+): VisualStandardReference[] =>
+  references.flatMap((reference) => {
+    const blobKey = toNonEmptyString(reference.blobKey);
+    if (!blobKey) return [];
+    const note = toNonEmptyString(reference.note);
+    const region = reference.region;
+    const entry = {
+      blobKey,
+      ...(region && [region.x, region.y, region.w, region.h].every(isUnitFraction) ? { region } : {}),
+      ...(note ? { note } : {}),
+      ...(isUnitFraction(reference.weight) ? { weight: reference.weight } : {}),
+    };
+    return [{ id: mintId({ kind: 'visual_standard_reference' }, stableStringify(entry)), ...entry }];
+  });
 
 const describeZodError = (error: z.ZodError): string =>
   error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
@@ -842,6 +928,13 @@ export const proposeBrandImagery = async (
     status: 200,
     body: {
       ...parsed.data,
+      // G3: the ready-to-write `object_create` body. Emitted ALONGSIDE the
+      // proposal (never instead of it — the approval card reads `mode`,
+      // `rationale` and `confidence`), so "file this proposal" is a copy, not
+      // a hand-assembly the agent gets wrong every time.
+      visualStandardBody: toVisualStandardBody(parsed.data, {
+        references: toVisualStandardReferences(references),
+      }),
       ...(unresolvedReferences.length > 0 ? { unresolvedReferences } : {}),
       ...(upstreamWarnings.length > 0 ? { prefetchWarnings: upstreamWarnings } : {}),
     },

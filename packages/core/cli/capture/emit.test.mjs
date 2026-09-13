@@ -137,7 +137,10 @@ function mockTransport({
         return { objects: pageRoute ? [{ object_id: 'page_existing', object_type: 'page', status: 'active', ...(pageRouteInDetail ? {} : { route: pageRoute }) }] : [] };
       if (verb === 'object_inventory' && args.object_type === 'section_template') return { objects: recipeSummary ? [{ recipe_summary: { name: recipeSummary } }] : [] };
       if (verb === 'object_inventory' && args.object_type === 'navigation')
-        return { objects: navRole ? [{ object_id: 'nav_existing', object_type: 'navigation', status: 'active', role: navRole }] : [] };
+        // Realistic InventoryRow shape: a summary row never carries `role` (only recipe types get a
+        // body-derived summary) — the reuse match can only work through the `navRoleRows` object_get
+        // probe below, exactly like a page's route.
+        return { objects: navRole ? [{ object_id: 'nav_existing', object_type: 'navigation', status: 'active' }] : [] };
       if (verb === 'object_get' && args.object_type === 'navigation' && args.object_id === 'nav_existing')
         return { record: { object_id: 'nav_existing', record_version: 3, body: { role: navRole, groups: [{ id: 'g_seed', items: [] }] } } };
       if (verb === 'object_inventory') return { objects: [] };

@@ -5,7 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { writeJson } from './snapshot-v1.mjs';
+import { normalizeCrawlUrl, writeJson } from './snapshot-v1.mjs';
 
 export const CAPTURE_MAP_SCHEMA_VERSION = 'capture-map.v1';
 export const DEFAULT_CONFIDENCE_THRESHOLD = 0.72;
@@ -730,13 +730,37 @@ function blockHeadings(page, block) {
     .map((node) => ({ text: clean(node.text), level: node.level }));
 }
 
-function linkTarget(href, origin) {
-  const url = new URL(href);
+// T15.x — a captured `route` href is resolved through the CRAWL's own redirect knowledge before it
+// is ever written down. Without this, a link whose source-page href 301s to a page the crawler
+// captured under a DIFFERENT path (the common case: a hero action pointing at a legacy URL that
+// redirects to the real one) survived into the mapping verbatim and 404s on the clone — the crawler
+// already knew the real destination (either as the page's own `requestedUrl` vs. `url`, when that
+// URL was the first one reached, or as a `duplicate_redirect_target` skip record, when a later link
+// reached an already-captured page by a different path); this is the ONLY place that knowledge is
+// read back.
+function buildRedirectMap(snapshot) {
+  const map = new Map();
+  const record = (from, to) => {
+    const key = normalizeCrawlUrl(from);
+    if (key && to) map.set(key, to);
+  };
+  for (const page of snapshot.pages ?? []) {
+    if (page.requestedUrl && page.url && page.requestedUrl !== page.url) record(page.requestedUrl, page.url);
+  }
+  for (const entry of snapshot.diagnostics?.skipped ?? []) {
+    if (entry?.reason === 'duplicate_redirect_target' && entry.finalUrl) record(entry.url, entry.finalUrl);
+  }
+  return map;
+}
+
+function linkTarget(href, origin, redirectMap) {
+  const redirected = redirectMap?.get(normalizeCrawlUrl(href) ?? href);
+  const url = new URL(redirected ?? href);
   if (url.origin === origin) return { kind: 'route', href: `${url.pathname}${url.search}${url.hash}` || '/' };
   return { kind: 'external', href: url.href };
 }
 
-function linkActions(block, origin) {
+function linkActions(block, origin, redirectMap) {
   const seen = new Set();
   return (block.links ?? []).flatMap((link, index) => {
     const label = clean(link.label);
@@ -744,7 +768,7 @@ function linkActions(block, origin) {
     const key = `${label}\0${link.href}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ label, target: linkTarget(link.href, origin), style: index === 0 ? 'primary' : 'link' }];
+    return [{ label, target: linkTarget(link.href, origin, redirectMap), style: index === 0 ? 'primary' : 'link' }];
   });
 }
 
@@ -1657,7 +1681,7 @@ function screenshotRef(block) {
   return block.screenshots?.find((screenshot) => screenshot.captured)?.path ?? null;
 }
 
-function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed) {
+function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed, redirectMap) {
   const origin = snapshot.capture.origin;
   // T12.29: every captured page is a CLONE, including the one at '/'. Typing it 'home' put it under
   // the DTC homepage family, which allows neither `media` nor `content_split` — so a cloned
@@ -1670,7 +1694,7 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
   const gaps = [];
   for (const [index, block] of reconciled.blocks.entries()) {
     const headings = blockHeadings(page, block);
-    const actions = linkActions(block, origin);
+    const actions = linkActions(block, origin, redirectMap);
     const bindings = assetBindings(page, block);
     // T14.2 FAULT 2: the slot an image ends up in is a fraction of the block's own measured width,
     // and the WIDEST viewport is the one that exposes the stretch — the defect block measured 1440
@@ -1845,7 +1869,7 @@ function mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAll
   };
 }
 
-function dedupeNavItems(items, origin) {
+function dedupeNavItems(items, origin, redirectMap) {
   const seen = new Set();
   return items.flatMap((item) => {
     const label = clean(item.label);
@@ -1853,14 +1877,14 @@ function dedupeNavItems(items, origin) {
     const key = `${label}\0${item.href}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ id: `i_${hash(key, 10)}`, label, target: linkTarget(item.href, origin) }];
+    return [{ id: `i_${hash(key, 10)}`, label, target: linkTarget(item.href, origin, redirectMap) }];
   });
 }
 
-function mapNavigation(snapshot) {
+function mapNavigation(snapshot, redirectMap) {
   const first = snapshot.pages[0];
   if (!first) return [];
-  const primaryItems = dedupeNavItems(first.navigation?.primary ?? [], snapshot.capture.origin);
+  const primaryItems = dedupeNavItems(first.navigation?.primary ?? [], snapshot.capture.origin, redirectMap);
   const footerText = clean((first.outline ?? []).find((node) => node.tag === 'footer')?.text);
   const candidates = [];
   if (primaryItems.length > 0) {
@@ -1908,10 +1932,11 @@ export function mapSnapshot(snapshot, options = {}) {
   // re-reads the TARGET project registry's rights before binding anything, so a
   // media asset has to clear both the source authorization and the target's.
   const mediaRetentionAllowed = snapshot.capture?.policy?.rights?.media === MEDIA_RETENTION_RIGHT;
+  const redirectMap = buildRedirectMap(snapshot);
   const pages = snapshot.pages.map((page) =>
-    mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed)
+    mapPage(page, snapshot, threshold, assistanceByBlock, mediaRetentionAllowed, redirectMap)
   );
-  const navigationCandidates = mapNavigation(snapshot);
+  const navigationCandidates = mapNavigation(snapshot, redirectMap);
   const allCandidates = pages.flatMap((page) => page.candidates);
   const allGaps = pages.flatMap((page) => page.gaps);
   return {

@@ -368,14 +368,21 @@ export function brandImageryProposalPresentation(event: ChatEventView): BrandIma
 /**
  * The "Apply" CTA's follow-up turn — a precise, deterministic instruction
  * naming the exact tools (never style words of its own, R4), matching the
- * pattern `visual-identity-imagery.ts`'s intents already use. Materializing
- * first is required (§3.5): the proposal itself writes nothing, so there is
- * no `visual_standard` for `site_apply_brand_imagery` to point at until
- * `visual_standard_materializer` has run.
+ * pattern `visual-identity-imagery.ts`'s intents already use. Filing the
+ * standard first is required (§3.5): the proposal itself writes nothing, so
+ * there is no `visual_standard` for `site_apply_brand_imagery` to point at.
+ *
+ * G3: this used to DESCRIBE the body field by field (and to name
+ * `visual_standard_materializer`, a node nothing implements), which meant the
+ * agent hand-assembled a `.strict()` body and failed on the fields prose
+ * never mentioned — `version`, `references`, `kind` vs `mode`. The proposal
+ * now ships a ready `visualStandardBody` (brand-imagery-proxy.ts's
+ * `toVisualStandardBody`), so the prose points at that payload instead of
+ * re-specifying the schema.
  */
 export const brandImageryApplyPrompt = (
   presentation: Pick<BrandImageryProposalPresentation, 'mode' | 'label'>
 ): string =>
-  `Apply the "${presentation.label}" ${presentation.mode} proposal you just returned. First file it as a visual_standard: run visual_standard_materializer with apply: false if that node is available to you, and otherwise do it with the ordinary object tools — object_create a visual_standard (kind ${
-    presentation.mode === 'house' ? '"house", id vis_<site>' : '"template", id vis_<site>_<slug>'
-  }, derivedFrom.method "writer", status "draft") carrying this proposal's brandImagery and sampleSubjects, or check out the existing standard and patch it with set_visual_standard_fields. Then run site_apply_brand_imagery as a dry run so I can see before/after, and wait for my approval before applying.`;
+  `Apply the "${presentation.label}" ${presentation.mode} proposal you just returned. First file it as a visual_standard: object_create a visual_standard with id ${
+    presentation.mode === 'house' ? 'vis_<site>' : 'vis_<site>_<slug>'
+  } and the proposal's visualStandardBody field as the body, verbatim and unedited — it is already a complete, valid body. If the standard already exists, check it out and patch it with set_visual_standard_fields instead, passing that same payload's fields. Then run site_apply_brand_imagery as a dry run so I can see before/after, and wait for my approval before applying.`;
