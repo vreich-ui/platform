@@ -19,7 +19,7 @@ import { navigate } from 'astro:transitions/client';
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { cn } from './utils';
-import { Badge, Button, IconButton, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, IconButton, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { Input, Select } from './forms';
 import { DropdownMenu, type MenuItem } from './menus';
 import { ConfirmDialog, useToast } from './overlays';
@@ -570,15 +570,7 @@ function ObjectsPlaneBody({ roles }: { roles: readonly string[] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {refreshing ? (
-        <p
-          className="flex items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
-          role="status"
-          aria-live="polite"
-        >
-          <span className="inline-block animate-pulse">●</span> Refreshing…
-        </p>
-      ) : null}
+      <RefreshingChip active={refreshing} />
 
       <TypeFacetChips rows={rows} selection={typeFacet} onChange={setTypeFacet} />
 

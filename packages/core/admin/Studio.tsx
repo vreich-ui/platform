@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { Input } from './forms';
 import { Dialog, ConfirmDialog, useToast } from './overlays';
 import { IconPalette, IconSparkles } from './icons';
@@ -585,15 +585,7 @@ function StudioBody({ identity }: { identity: SiteIdentity }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {refreshing ? (
-        <p
-          className="flex items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
-          role="status"
-          aria-live="polite"
-        >
-          <span className="inline-block animate-pulse">●</span> Refreshing…
-        </p>
-      ) : null}
+      <RefreshingChip active={refreshing} />
       <section>
         <h2 className="mb-3 text-[length:var(--adm-text-lg)] font-semibold text-[var(--adm-text-heading)]">
           Page templates

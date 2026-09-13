@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { IconExternalLink, IconFilePlus, IconLibrary, IconPalette, IconSparkles } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { createFreeChat, sendChatMessage } from '@core/lib/admin/chat-client';
@@ -231,15 +231,7 @@ export default function AdminHome({ identity }: AdminHomeProps) {
             </a>
           </div>
         </header>
-        {refreshing ? (
-          <p
-            className="flex items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
-            role="status"
-            aria-live="polite"
-          >
-            <span className="inline-block animate-pulse">●</span> Refreshing…
-          </p>
-        ) : null}
+        <RefreshingChip active={refreshing} />
         {loading ? (
           <Skeleton variant="rect" height={420} />
         ) : error ? (

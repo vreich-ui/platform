@@ -54,8 +54,8 @@ const { brandName } = getSiteIdentity();
     <div data-admin-forbidden-prompt hidden class="admin-gate-panel">
       <p class="admin-gate-kicker">Access restricted</p>
       <p class="admin-gate-message">
-        You're signed in, but no workspace role has been granted to this email yet — ask an Owner to grant one. For
-        now your tier is <strong data-admin-tier-label>Member</strong> of {brandName}.
+        You're signed in, but no workspace role has been granted to this email yet — ask an Owner to grant one. For now
+        your tier is <strong data-admin-tier-label>Member</strong> of {brandName}.
       </p>
       <a class="btn-primary admin-gate-btn" href="/">Go to {brandName} home</a>
     </div>
@@ -113,11 +113,8 @@ const { brandName } = getSiteIdentity();
   // for a validly signed-in admin on every cold load.
   import '@site/config/policy-bindings';
   import { currentUser, getAccessToken, handleOAuthCallback } from '@core/lib/admin/goTrueClient';
-  import {
-    clearCachedAdminAccessState,
-    fetchAdminAccessState,
-    peekCachedAdminAccessState,
-  } from '@core/lib/admin/admin-access-client';
+  import { clearCachedAdminAccessState, peekCachedAdminAccessState } from '@core/lib/admin/admin-access-client';
+  import { fetchAdminAccessStateViaShell } from '@core/lib/admin/admin-shell-client';
   import { beginNewPageGeneration } from '@core/lib/admin/page-generation';
 
   // T1.1: one page-generation AbortSignal, minted here and read everywhere
@@ -192,7 +189,18 @@ const { brandName } = getSiteIdentity();
       // ("not listed in ADMIN_EMAILS") told a legitimate admin they lacked
       // access when the real cause was the CHECK failing, not the answer
       // being no. `checkFailed: true` marks that distinction for the caller.
-      const getAdminStateForUser = async () => fetchAdminAccessState(await getAccessToken());
+      //
+      // T-shell: the same contract, through the COALESCED call. The
+      // `Server-Timing` wave measured `admin-auth-state` doing 0.02 ms of
+      // server work for 242-683 ms on the wire — the per-click floor was
+      // three round trips' fixed overhead, not three functions being slow —
+      // so this now takes the `access` section out of one `admin-shell`
+      // response that also carries the requests index and `me`, and falls
+      // back to `admin-auth-state` verbatim whenever the shell cannot answer
+      // (an older deploy's 404, an abort, a section error). Nothing below
+      // this line changed: it is still one call returning one
+      // `AdminAccessState`, cached the same way for the same instant paint.
+      const getAdminStateForUser = async () => fetchAdminAccessStateViaShell(await getAccessToken());
 
       // T1.2 R1: `renderAuthState` always fetches and always applies whatever
       // it gets back, so a downgrade (or upgrade) between what was painted

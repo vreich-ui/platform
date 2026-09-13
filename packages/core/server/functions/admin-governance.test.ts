@@ -103,7 +103,12 @@ describe('admin-governance source wiring — T2.3 ETag only on the two read verb
 
     assert.match(
       source,
-      /req\.verb === 'get'\)\s*\{[\s\S]{0,80}return readJsonResponse\(event, \{/,
+      // Window widened from 80 (T-perf): the `get` branch now opens with the
+      // single doc read + CMS-Agent probe it runs concurrently, which is
+      // several lines of comment and code before the response is built. The
+      // assertion still says the same thing — `get` answers through
+      // readJsonResponse, never the plain no-store jsonResponse.
+      /req\.verb === 'get'\)\s*\{[\s\S]{0,400}return readJsonResponse\(event, \{/,
       "verb 'get' must respond via readJsonResponse, not the plain no-store jsonResponse"
     );
     assert.match(
@@ -137,5 +142,68 @@ describe('admin-governance requestSchema — PF5 permanent Client Manager cutove
   it('also rejects unknown mode values', () => {
     assert.strictEqual(requestSchema.safeParse({ verb: 'set', cms_agent_chat_mode: 'reqired' }).success, false);
     assert.strictEqual(requestSchema.safeParse({ verb: 'set', cms_agent_chat_mode: 'on' }).success, false);
+  });
+});
+
+/**
+ * T-perf — `get` was the slowest read on this surface (2126 ms of `work` on
+ * the live admin). Two causes, both in this branch:
+ *
+ *   1. `overrides.v1` was read TWICE in one request — once for the `doc`
+ *      field, then again inside `resolveActivePolicies(store)` for `active`,
+ *      the second read strictly after the first.
+ *   2. The CMS-Agent `agent_resolve` probe — a real cross-service HTTP round
+ *      trip on a cold container — was awaited AFTER both of those, only
+ *      because the wire shape carries one doc-derived field next to it.
+ *
+ * The fix is one read plus one `Promise.all`, so the branch costs
+ * max(doc read, probe) instead of doc + doc + probe. Asserted at the source
+ * level for the same reason the wiring above is: neither the read count nor
+ * the concurrency is observable from the response body.
+ */
+describe('admin-governance source wiring — T-perf: one doc read, probe in parallel', () => {
+  const governanceSource = () => {
+    let root = path.dirname(fileURLToPath(import.meta.url));
+    while (root !== path.dirname(root)) {
+      if (existsSync(path.join(root, 'netlify.toml')) && existsSync(path.join(root, 'packages/core/admin'))) break;
+      root = path.dirname(root);
+    }
+    return readFileSync(path.join(root, 'packages/core/server/functions/admin-governance.ts'), 'utf8');
+  };
+
+  it('the get branch reads the governance doc once and starts the CMS-Agent probe alongside it', () => {
+    const source = governanceSource();
+    assert.match(
+      source,
+      /const \[doc, probe\] = await Promise\.all\(\[getGovernanceDoc\(store\), cmsAgentProbe\(binding\)\]\);/,
+      'the get branch must start the doc read and the CMS-Agent probe together'
+    );
+  });
+
+  it('the get branch resolves `active` from the doc it already read, never with a second store read', () => {
+    const source = governanceSource();
+    const getBranch = source.slice(
+      source.indexOf("req.verb === 'get'"),
+      source.indexOf("req.verb === 'agent_keys_list'")
+    );
+    assert.match(getBranch, /active: activePoliciesFromDoc\(doc\)/, '`active` must come from the doc already in hand');
+    assert.doesNotMatch(
+      getBranch,
+      /resolveActivePolicies\(store\)/,
+      'resolveActivePolicies(store) re-reads overrides.v1 — the get branch must not pay for the same blob twice'
+    );
+    assert.doesNotMatch(
+      getBranch,
+      /await getGovernanceDoc\(store\)[\s\S]*await getGovernanceDoc\(store\)/,
+      'overrides.v1 must be read exactly once per get'
+    );
+  });
+
+  it('the CMS-Agent probe takes nothing from the governance doc, so it can start before the doc is read', () => {
+    const source = governanceSource();
+    const probe = source.slice(source.indexOf('const cmsAgentProbe'), source.indexOf('const cmsAgentStatus'));
+    assert.doesNotMatch(probe, /\bdoc\b|legacyOverride/, 'cmsAgentProbe must not depend on the governance doc');
+    // The doc-derived field still exists — it just moved to the pure assembler.
+    assert.match(source, /legacy_mode_override_ignored: legacyOverride/, 'the legacy-override field must survive');
   });
 });

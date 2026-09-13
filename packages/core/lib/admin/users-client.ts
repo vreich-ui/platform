@@ -78,7 +78,16 @@ export const fetchMe = (getToken: GetToken, signal?: AbortSignal) =>
     roles: string[];
     /** T18.5: null when the caller has no stored record (needs_grant / env-only before materialisation). */
     onboarding?: OnboardingView | null;
-    policy?: { require_display_name: boolean };
+    /**
+     * T-shell: the WHOLE membership policy, not just `require_display_name`.
+     * `me` already read the policy record to answer that one field, so the
+     * rest rides along for free and `/admin/settings/admins` no longer spends
+     * a third `admin-users` round trip on `policy_get` for data this response
+     * was already holding. Optional: a server older than this change sends
+     * only `require_display_name`, and every reader falls back to
+     * `DEFAULT_POLICY_VIEW` as it did before.
+     */
+    policy?: MembershipPolicyServer;
   }>(getToken, { verb: 'me' }, signal);
 
 export const updateMe = async (
@@ -139,7 +148,11 @@ export const revokeInvitation = (getToken: GetToken, ref: { invite_id?: string; 
   });
 
 export const listInvitations = (getToken: GetToken, status?: InvitationStatus, signal?: AbortSignal) =>
-  post<{ invitations: InvitationView[] }>(getToken, { verb: 'list_invitations', ...(status ? { status } : {}) }, signal);
+  post<{ invitations: InvitationView[] }>(
+    getToken,
+    { verb: 'list_invitations', ...(status ? { status } : {}) },
+    signal
+  );
 
 export const listUnmanagedIdentities = (getToken: GetToken, signal?: AbortSignal) =>
   post<{ identities: UnmanagedIdentityView[]; error_code?: 'identity_admin_unavailable'; error?: string }>(
@@ -211,6 +224,19 @@ export interface MembershipPolicyServer {
   delete_identity_on_remove: boolean;
 }
 
+/**
+ * T-shell: this wrapper has NO caller left in the admin UI — `me` carries the
+ * whole policy now (see `fetchMe`), which is what removed the third
+ * `admin-users` round trip from `/admin/settings/admins`.
+ *
+ * Kept rather than deleted because it is the only browser binding for a verb
+ * that is very much alive: `policy_get` is still served (admin tier,
+ * `membership/verbs.ts`) and still reached by `membership_policy_get` over
+ * `/mcp` and by `policy_set`'s own read-back — both of which run SERVER-side
+ * and do not come through this file. So this is the client seam for a live
+ * contract with no current browser consumer, not a wrapper around something
+ * retired; delete it only together with the verb.
+ */
 export const getMembershipPolicy = (getToken: GetToken, signal?: AbortSignal) =>
   post<{ policy: MembershipPolicyServer }>(getToken, { verb: 'policy_get' }, signal);
 

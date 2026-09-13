@@ -6,10 +6,11 @@ import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { getArtifactIndexBlobStore } from '../lib/blob-store.js';
 import { listArtifactIndexKeys, resolveArtifactPointer, type ArtifactIndexStore } from '../lib/artifact-index.js';
 import { isArtifactReference, type ArtifactReference } from '../lib/artifacts.js';
+import { mapWithConcurrency, STORE_READ_CONCURRENCY } from '../lib/blob-list.js';
 import { buildPdfToolStorageGrant } from '../lib/pdf-tool-storage-grant.js';
 import { listPlatformPdfTemplates } from '../lib/pdf-tool-client.js';
 import { projectEditorialArtifact, projectPdfTemplate } from '../../lib/admin/editorial-assets.js';
-import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
+import { timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -48,10 +49,42 @@ const parseJson = async (store: ArtifactIndexStore, key: string): Promise<unknow
   }
 };
 
-async function listKind(store: ArtifactIndexStore, kind: 'image' | 'pdf'): Promise<ArtifactReference[]> {
+/**
+ * The `by-kind/` sweep, bounded.
+ *
+ * Every key under `by-kind/<kind>/` costs TWO blob reads: the pointer, then
+ * the full `request-artifacts/<requestId>/<sha>.json` reference the pointer
+ * names (the pointer's ONLY job here is to supply that `requestId` — see
+ * `ArtifactPointer` in lib/artifact-index.ts). Firing all of them through a
+ * single `Promise.all` put `2 x A` reads in flight at once against one
+ * Netlify Blobs store, which is precisely the fan-out the 2026-08-06 hotfix
+ * comment on `STORE_READ_CONCURRENCY` (lib/blob-list.ts) was written about:
+ * a burst that large does not go faster, it goes THROTTLED, and one rejected
+ * read there aborts the whole listing.
+ *
+ * `mapWithConcurrency` is the repo's one helper for this and preserves input
+ * order, so the dedupe/sort/slice below sees exactly the sequence it always
+ * did.
+ *
+ * NOT fixed here, deliberately: this still reads every record to return at
+ * most 100. The sort key (`createdAtISO`) and the liveness flag
+ * (`deletedAtISO`) exist ONLY on the full reference — the `by-kind/` key
+ * carries a sha256 and the pointer body carries `{ requestId, sha256,
+ * artifactKind }` — so nothing available before the read can decide which
+ * 100 records are the newest. Slicing before the read needs those two fields
+ * on the pointer, i.e. an artifact-index schema bump, which is not this
+ * change.
+ *
+ * Exported for tests/netlify/admin-editorial-assets.test.ts, which PINS the
+ * read count for a fixture — the cost this function is judged on is "how
+ * many blob reads per listed artifact", and that is not observable from the
+ * handler's wire response. (Same reason `requestSchema` is exported from
+ * admin-governance.ts.)
+ */
+export async function listKind(store: ArtifactIndexStore, kind: 'image' | 'pdf'): Promise<ArtifactReference[]> {
   const pointerKeys = await listArtifactIndexKeys(store, `by-kind/${kind}/`);
-  const references = await Promise.all(
-    pointerKeys.map(async (key) => resolveArtifactPointer(store, await parseJson(store, key)))
+  const references = await mapWithConcurrency(pointerKeys, STORE_READ_CONCURRENCY, async (key) =>
+    resolveArtifactPointer(store, await parseJson(store, key))
   );
   const unique = new Map<string, ArtifactReference>();
   for (const reference of references) {
@@ -84,18 +117,33 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   try {
     const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
-    const [images, pdfs] = await Promise.all([listKind(indexStore, 'image'), listKind(indexStore, 'pdf')]);
+
+    /**
+     * The two halves of this response are INDEPENDENT: the media listing is a
+     * blob sweep of this tenant's artifact index, the template listing is one
+     * cross-site HTTP POST to pdf-tool's `/mcp`. Running them back to back
+     * paid for both in series on every load of the asset picker, and the
+     * remote leg has no timeout of its own (lib/pdf-tool-client.ts) — a slow
+     * pdf-tool cold start was added straight onto the sweep.
+     *
+     * `timeSection` splits the resulting `work` by QUESTION ASKED, so the
+     * next Server-Timing read says which half is slow instead of leaving it
+     * to another investigation.
+     */
+    const grant = buildPdfToolStorageGrant();
+    const [images, pdfs, listed] = await Promise.all([
+      timeSection('artifacts_image', () => listKind(indexStore, 'image')),
+      timeSection('artifacts_pdf', () => listKind(indexStore, 'pdf')),
+      // Same short-circuit as before: no grant, no call to pdf-tool at all.
+      grant.ok ? timeSection('pdf_templates', () => listPlatformPdfTemplates(grant.grant, { limit: 100 })) : undefined,
+    ]);
+
     const artifacts = [...images, ...pdfs]
       .map(projectEditorialArtifact)
       .filter((artifact) => artifact !== undefined)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-    const grant = buildPdfToolStorageGrant();
-    if (!grant.ok) {
-      return respond({ pdf_templates: [], artifacts, pdf_templates_available: false });
-    }
-    const listed = await listPlatformPdfTemplates(grant.grant, { limit: 100 });
-    if (!listed.ok) {
+    if (!grant.ok || !listed || !listed.ok) {
       return respond({ pdf_templates: [], artifacts, pdf_templates_available: false });
     }
     const rawTemplates = Array.isArray(listed.body.templates) ? listed.body.templates : [];

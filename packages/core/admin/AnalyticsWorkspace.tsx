@@ -40,7 +40,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { Input, Textarea } from './forms';
 import { Tabs, DropdownMenu, type TabItem } from './menus';
 import { Dialog, useToast } from './overlays';
@@ -48,6 +48,7 @@ import { UplotTrendChart, BarList } from './AnalyticsCharts';
 import { IconBookmark, IconChartBar, IconChevronDown, IconDownload, IconNote, IconTrash, IconX } from './icons';
 import { cn } from './utils';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
+import { useCachedResource } from '@core/lib/admin/use-cached-resource';
 import { fetchAnalyticsOverview, type AnalyticsOverview } from '@core/lib/admin/analytics-client';
 import { fetchOwnAnalyticsOverview, type OwnAnalyticsOverview } from '@core/lib/admin/own-analytics-client';
 import { resolveOwnAnalyticsPanel, type ObjectRowsSort } from '@core/lib/admin/own-analytics-logic';
@@ -968,36 +969,30 @@ function OwnAnalyticsTab({
   /** R11.2 — lifts the resolved panel up to the page header's "Export report" action, which needs it regardless of which tab is scrolled into view. */
   onPanelChange?: (state: AnalyticsPanelState) => void;
 }) {
-  const [overview, setOverview] = useState<OwnAnalyticsOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const filterKey = JSON.stringify(filters);
 
-  useEffect(() => {
-    if (!windowResult.ok) return;
-    let alive = true;
-    setLoading(true);
-    setError(null);
-    fetchOwnAnalyticsOverview(getToken, { range: rangeKey, custom, filters })
-      .then((result) => {
-        if (alive) setOverview(result);
-      })
-      .catch((err: unknown) => {
-        if (alive) setError(err instanceof Error ? err.message : 'Could not load analytics data.');
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-    // `windowKey` is the resolved-window signal (re-fires exactly when
-    // `resolveDateWindow` produces a new from/to); `filterKey` is `filters`'
-    // stable dependency form. `exhaustive-deps` is not enabled in this repo
-    // (see eslint.config.js) — `rangeKey`/`custom` are captured by value at
-    // fetch time, which is correct since they only ever change in lockstep
-    // with `windowKey`.
-  }, [windowKey, filterKey]);
+  /**
+   * T5.2 — the own feed as a cached per-panel resource.
+   *
+   * The fetch shape is unchanged; what changed is what a viewer sees while it
+   * runs. The key carries everything the request varies on (`windowKey` is
+   * the resolved-window signal, `filterKey` the stable form of `filters`), so
+   * returning to a window this tab has already shown paints its KPIs and
+   * charts synchronously with a `RefreshingChip` instead of the five-card
+   * skeleton, and a failed revalidation leaves the numbers that are already
+   * on screen exactly where they are.
+   */
+  const resource = useCachedResource<OwnAnalyticsOverview>(
+    `analytics:own:${windowKey ?? 'invalid'}:${filterKey}`,
+    // `rangeKey`/`custom` are captured by value at fetch time, which is
+    // correct since they only ever change in lockstep with `windowKey`.
+    () => fetchOwnAnalyticsOverview(getToken, { range: rangeKey, custom, filters }),
+    undefined,
+    { enabled: windowResult.ok }
+  );
+  const overview = resource.value ?? null;
+  const loading = resource.loading;
+  const error = resource.value ? null : (resource.error ?? null);
 
   const panel = useMemo(
     () =>
@@ -1027,6 +1022,7 @@ function OwnAnalyticsTab({
         suppress it.
       </p>
       <FilterChips filters={filters} onRemove={onFilterRemove} />
+      <RefreshingChip active={resource.refreshing} />
       <AnalyticsPanel
         state={panel}
         notConfiguredTitle="Own tracker isn't connected"
@@ -1114,7 +1110,11 @@ function NetlifyAnalyticsTab({
 // vocabulary" still holds — just not the same panel shape, because the data
 // itself has no shared window to hang a chart on.
 
-function EvidenceLine({ evidence }: { evidence: { windowStart?: string | null; windowEnd?: string | null; n?: number | null } }) {
+function EvidenceLine({
+  evidence,
+}: {
+  evidence: { windowStart?: string | null; windowEnd?: string | null; n?: number | null };
+}) {
   const formatted = formatEvidence(evidence);
   return (
     <span
@@ -1187,7 +1187,9 @@ function ProposalRow({ row }: { row: OptimizerProposalRow }) {
       <p className="mt-1 text-[length:var(--adm-text-sm)] text-[var(--adm-text-heading)]">{row.title}</p>
       <div className="mt-1 flex items-center justify-between gap-2">
         <EvidenceLine evidence={row.evidence} />
-        {row.nodeId ? <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{row.nodeId}</span> : null}
+        {row.nodeId ? (
+          <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">{row.nodeId}</span>
+        ) : null}
       </div>
     </li>
   );
@@ -1289,31 +1291,18 @@ function InsightsPanel({ state }: { state: InsightsPanelState }) {
 }
 
 function InsightsTab() {
-  const [overview, setOverview] = useState<InsightsOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   // No range/window dependency (unlike the other two tabs) — this fetches
   // once when the tab mounts, exactly like the object drill-down's
-  // identity lookup fetches independently of the range picker.
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setError(null);
+  // identity lookup fetches independently of the range picker. T5.2 makes
+  // that fetch a cached resource: the tab is only ever mounted when someone
+  // selects it, and re-selecting it repaints the last answer immediately
+  // rather than re-skeletoning the whole four-card grid.
+  const resource = useCachedResource<InsightsOverview>('analytics:insights', () =>
     fetchAnalyticsInsightsOverview(getToken)
-      .then((result) => {
-        if (alive) setOverview(result);
-      })
-      .catch((err: unknown) => {
-        if (alive) setError(err instanceof Error ? err.message : 'Could not load insights.');
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  );
+  const overview = resource.value ?? null;
+  const loading = resource.loading;
+  const error = resource.value ? null : (resource.error ?? null);
 
   const panel = useMemo(() => resolveInsightsPanel({ loading, error, overview }), [loading, error, overview]);
 
@@ -1323,6 +1312,7 @@ function InsightsTab() {
         How the articles on this site have actually performed once published, and what we&rsquo;ve learned from it.
         Read-only — there&rsquo;s nothing to change here.
       </p>
+      <RefreshingChip active={resource.refreshing} />
       <InsightsPanel state={panel} />
     </div>
   );
@@ -1368,11 +1358,14 @@ function AnalyticsBody({ identity }: { identity: SiteIdentity }) {
   const [ownPanelState, setOwnPanelState] = useState<AnalyticsPanelState>({ kind: 'loading' });
   const [netlifyPanelState, setNetlifyPanelState] = useState<AnalyticsPanelState>({ kind: 'loading' });
 
-  // R11.3 — the merged release/publish/note marker list every chart draws
-  // ticks from, site-wide (not per tracking-source) — fetched once per
-  // window and shared by both tabs rather than duplicated per feed.
-  const [markers, setMarkers] = useState<AnnotationMarker[]>([]);
   const [noteDialogDate, setNoteDialogDate] = useState<string | null>(null);
+  /**
+   * R11.3 — a note this operator just added, held until the marker list is
+   * re-read. Scoped to the window it was added under (`key`), because the
+   * server list it augments is per-window: a tick for a day outside the
+   * window now on screen would be a wrong value, not a stale one.
+   */
+  const [addedNote, setAddedNote] = useState<{ key: string; markers: AnnotationMarker[] }>({ key: '', markers: [] });
 
   useEffect(() => {
     let alive = true;
@@ -1611,58 +1604,66 @@ function AnalyticsBody({ identity }: { identity: SiteIdentity }) {
   // while its tab is mounted (`Tabs` unmounts the inactive panel's content),
   // which is new: parking on the Netlify tab no longer pays for a sink call
   // nobody is looking at.
-  const [netlifyOverview, setNetlifyOverview] = useState<AnalyticsOverview | null>(null);
-  const [netlifyLoading, setNetlifyLoading] = useState(true);
-  const [netlifyError, setNetlifyError] = useState<string | null>(null);
+  /**
+   * T5.2 — the Netlify feed as a cached per-panel resource, keyed by the
+   * resolved window. Same request, same degradation; what changes is that a
+   * window this page has already shown repaints synchronously instead of
+   * blanking to the skeleton, and a failed revalidation leaves the numbers
+   * on screen. `enabled` is the old effect's `hydrated`/`windowResult.ok`
+   * guard — a disabled resource still paints what it has cached, it just
+   * does not go to the network until the URL has been read and the window
+   * resolves.
+   */
+  const netlifyResource = useCachedResource<AnalyticsOverview>(
+    `analytics:netlify:${windowKey ?? 'invalid'}`,
+    () => fetchAnalyticsOverview(getToken, { range: rangeKey, custom: rangeKey === 'custom' ? custom : undefined }),
+    undefined,
+    { enabled: hydrated && windowResult.ok }
+  );
+  const netlifyOverview = netlifyResource.value ?? null;
+  const netlifyLoading = netlifyResource.loading;
+  const netlifyError = netlifyResource.value ? null : (netlifyResource.error ?? null);
 
-  useEffect(() => {
-    if (!hydrated || !windowResult.ok) return;
-    let alive = true;
-    setNetlifyLoading(true);
-    setNetlifyError(null);
-    fetchAnalyticsOverview(getToken, { range: rangeKey, custom: rangeKey === 'custom' ? custom : undefined })
-      .then((result) => {
-        if (alive) setNetlifyOverview(result);
-      })
-      .catch((err: unknown) => {
-        if (alive) setNetlifyError(err instanceof Error ? err.message : 'Could not load analytics data.');
-      })
-      .finally(() => {
-        if (alive) setNetlifyLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [hydrated, rangeKey, windowKey]);
-
-  // R11.3 — release/publish/note markers for the current window, shared by
-  // both tabs' charts. Degrades to an empty list on failure (a toast for a
-  // decorative chart annotation would be noise) — a chart with no ticks
-  // reads as "nothing shipped this window", never a broken page.
-  useEffect(() => {
-    if (!hydrated || !windowResult.ok) return;
-    let alive = true;
-    fetchAnnotationMarkersRequest(getToken, {
-      from: new Date(windowResult.window.from).toISOString(),
-      to: new Date(windowResult.window.to).toISOString(),
-    })
-      .then((result) => {
-        if (alive) setMarkers(result);
-      })
-      .catch(() => {
-        if (alive) setMarkers([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [hydrated, windowKey]);
+  /**
+   * R11.3 — the merged release/publish/note marker list every chart draws
+   * ticks from, site-wide (not per tracking-source) — read once per window
+   * and shared by both tabs rather than duplicated per feed.
+   *
+   * T5.2: this is the slowest call on the page, and it has never gated
+   * anything — a chart simply draws without ticks until it answers, and an
+   * outright failure degrades to no ticks rather than a toast (a decorative
+   * chart annotation is not worth an error). Making it a cached resource
+   * keeps that exactly, and adds the one thing it was missing: a window this
+   * page has already drawn gets its ticks back immediately instead of
+   * re-earning them on every visit.
+   */
+  const markersResource = useCachedResource<AnnotationMarker[]>(
+    `analytics:markers:${windowKey ?? 'invalid'}`,
+    () =>
+      fetchAnnotationMarkersRequest(getToken, {
+        from: new Date(windowResult.ok ? windowResult.window.from : 0).toISOString(),
+        to: new Date(windowResult.ok ? windowResult.window.to : 0).toISOString(),
+      }),
+    undefined,
+    { enabled: hydrated && windowResult.ok }
+  );
+  const markers = useMemo(
+    () => [...(markersResource.value ?? []), ...(addedNote.key === windowKey ? addedNote.markers : [])],
+    [markersResource.value, addedNote, windowKey]
+  );
 
   const handleDayClick = (isoDate: string) => setNoteDialogDate(isoDate.slice(0, 10));
 
   const handleSaveNote = async (date: string, text: string) => {
     try {
       const note = await addAnalyticsNoteRequest(getToken, { date, text });
-      setMarkers((prev) => [...prev, { id: note.id, at: note.date, kind: 'note', label: note.text }]);
+      setAddedNote((prev) => ({
+        key: windowKey ?? '',
+        markers: [
+          ...(prev.key === windowKey ? prev.markers : []),
+          { id: note.id, at: note.date, kind: 'note', label: note.text },
+        ],
+      }));
       setNoteDialogDate(null);
       toast.toast({ title: 'Note added', description: date, tone: 'success' });
     } catch (error) {

@@ -36,7 +36,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ArtifactStagePreview } from './ArtifactStagePreview';
+import { ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH, ArtifactStagePreview } from './ArtifactStagePreview';
 import { Badge, Button, Card, EmptyState } from './primitives';
 import { Select } from './forms';
 import { IconAlertTriangle } from './icons';
@@ -90,7 +90,17 @@ function TemplateThumbnail({ row }: { row: PdfTemplateRow }) {
           family: 'documents',
           label: `${row.label} thumbnail`,
           filename: `${row.id}.png`,
-          preview_url: row.thumbnailUrl,
+          // PERF: this card renders at `max-h-40` (~160px) — the same
+          // row-tile display size `ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH`
+          // already exists for (see `InventoryPage.tsx`'s `InventoryThumb`).
+          // With no `size` prop, `ArtifactStagePreview` requests the
+          // full-size original — worse than the 512px thumbnail case, since
+          // this is a synthetic artifact whose `preview_url` IS the
+          // `admin-get-blob-image` endpoint already, so the row width is
+          // baked into that URL directly (default `size="full"` then passes
+          // it through unmodified) rather than through the component's own
+          // 512px `size="thumbnail"`, which this box does not need.
+          preview_url: `${row.thumbnailUrl}&w=${ARTIFACT_PREVIEW_ROW_THUMBNAIL_WIDTH}`,
           created_at: '',
           size_bytes: 0,
           tags: [],

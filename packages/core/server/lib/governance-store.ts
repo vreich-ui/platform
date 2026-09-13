@@ -149,19 +149,17 @@ export interface ActivePolicies {
 }
 
 /**
- * The one resolution the verb paths call: store override if present (already
- * validated on read), else the committed config. Store read failure degrades
- * to committed — a broken governance store can never brick publishing/creation.
+ * The resolution itself, over a doc the caller has ALREADY read — pure, no
+ * store, no I/O.
+ *
+ * Split out of `resolveActivePolicies` so a caller that needs BOTH the raw
+ * doc and the resolved policies in one response (admin-governance.ts's `get`
+ * verb returns `doc` next to `active`) can answer with a single read of
+ * `overrides.v1` instead of reading the same blob twice in one request. Same
+ * mapping either way: `resolveActivePolicies` below is now this function plus
+ * the read.
  */
-export const resolveActivePolicies = async (store: GovernanceBlobStore | undefined): Promise<ActivePolicies> => {
-  let doc: GovernanceDoc | null = null;
-  if (store) {
-    try {
-      doc = await getGovernanceDoc(store);
-    } catch {
-      doc = null;
-    }
-  }
+export const activePoliciesFromDoc = (doc: GovernanceDoc | null): ActivePolicies => {
   return {
     approval: doc?.approval ?? activeApprovalPolicy(),
     creation: doc?.creation ?? activeCreationPolicy(),
@@ -184,6 +182,23 @@ export const resolveActivePolicies = async (store: GovernanceBlobStore | undefin
       brandImageryOverrides: doc?.brandImageryOverrides !== undefined ? 'override' : 'committed',
     },
   };
+};
+
+/**
+ * The one resolution the verb paths call: store override if present (already
+ * validated on read), else the committed config. Store read failure degrades
+ * to committed — a broken governance store can never brick publishing/creation.
+ */
+export const resolveActivePolicies = async (store: GovernanceBlobStore | undefined): Promise<ActivePolicies> => {
+  let doc: GovernanceDoc | null = null;
+  if (store) {
+    try {
+      doc = await getGovernanceDoc(store);
+    } catch {
+      doc = null;
+    }
+  }
+  return activePoliciesFromDoc(doc);
 };
 
 export const getGovernanceBlobStore = (event: unknown, binding?: SiteBinding): Promise<GovernanceBlobStore> =>

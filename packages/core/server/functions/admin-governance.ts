@@ -29,6 +29,7 @@ import {
   getGovernanceBlobStore,
   getGovernanceDoc,
   putGovernanceDoc,
+  activePoliciesFromDoc,
   resolveActivePolicies,
   chatToolAutonomySchema,
   type GovernanceDoc,
@@ -176,22 +177,23 @@ const cmsAgentHealthClient = new CmsAgentClient();
  *  cache removes the whole cross-tenant-staleness class outright. */
 const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string, unknown> }>();
 
-/** Config + permanent mode + a memoized live `agent_resolve` probe. Env NAMES
- *  only, never values; the probe is read-only and cached for a minute so the
- *  governance page cannot hammer the service. */
-const cmsAgentStatus = async (
-  binding: SiteBinding,
-  legacyOverride?: 'off' | 'fallback' | 'required'
-): Promise<Record<string, unknown>> => {
+type CmsAgentProbe = { missing: string[]; health?: Record<string, unknown> };
+
+/**
+ * The SLOW half — env check plus the memoized live `agent_resolve` probe.
+ * Env NAMES only, never values; the probe is read-only and cached for a
+ * minute so the governance page cannot hammer the service.
+ *
+ * Deliberately takes NOTHING from the governance doc. On a cold container
+ * this is a real cross-service HTTP round trip, and it used to be awaited
+ * only AFTER the doc read had already returned — purely because the wire
+ * shape carries one doc-derived field (`legacy_mode_override_ignored`).
+ * Separating the probe from the field lets the `get` verb start both at once
+ * (`Promise.all`) and pay for the slower one, not for both in series.
+ */
+const cmsAgentProbe = async (binding: SiteBinding): Promise<CmsAgentProbe> => {
   const missing = cmsAgentMissingEnvVars(binding.env);
-  const status: Record<string, unknown> = {
-    configured: missing.length === 0,
-    ...(missing.length > 0 ? { missing_env: missing } : {}),
-    mode: 'required',
-    mode_source: 'permanent_default',
-    ...(legacyOverride ? { legacy_mode_override_ignored: legacyOverride } : {}),
-  };
-  if (missing.length > 0) return status;
+  if (missing.length > 0) return { missing };
   const projectId = getSiteIdentity().cmsAgentProjectId;
   const now = Date.now();
   const cached = cmsAgentHealthCache.get(projectId);
@@ -202,7 +204,24 @@ const cmsAgentStatus = async (
       health: probe.ok ? { ok: true, agent_ref: probe.data } : { ok: false, code: probe.code, message: probe.message },
     });
   }
-  return { ...status, health: cmsAgentHealthCache.get(projectId)!.health };
+  return { missing, health: cmsAgentHealthCache.get(projectId)!.health };
+};
+
+/** Config + permanent mode + the probe's outcome, in the key order this
+ *  object has always been serialized in (the ETag hashes the wire body). */
+const cmsAgentStatus = (
+  probe: CmsAgentProbe,
+  legacyOverride?: 'off' | 'fallback' | 'required'
+): Record<string, unknown> => {
+  const status: Record<string, unknown> = {
+    configured: probe.missing.length === 0,
+    ...(probe.missing.length > 0 ? { missing_env: probe.missing } : {}),
+    mode: 'required',
+    mode_source: 'permanent_default',
+    ...(legacyOverride ? { legacy_mode_override_ignored: legacyOverride } : {}),
+  };
+  if (probe.health === undefined) return status;
+  return { ...status, health: probe.health };
 };
 
 /** The chat-tool catalog for the guardrails table — the SINGLE source is
@@ -269,13 +288,16 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const req = request.data;
 
     if (req.verb === 'get') {
-      const doc = await getGovernanceDoc(store);
+      // ONE read of `overrides.v1` (this used to read the same blob twice —
+      // once here and once inside resolveActivePolicies — then wait for the
+      // CMS-Agent probe on top of both, all in series).
+      const [doc, probe] = await Promise.all([getGovernanceDoc(store), cmsAgentProbe(binding)]);
       return readJsonResponse(event, {
         doc,
         committed: committed(),
-        active: await resolveActivePolicies(store),
+        active: activePoliciesFromDoc(doc),
         chat_tools_catalog: chatToolsCatalog,
-        cms_agent: await cmsAgentStatus(binding, doc?.cms_agent_chat_mode),
+        cms_agent: cmsAgentStatus(probe, doc?.cms_agent_chat_mode),
       });
     }
 
