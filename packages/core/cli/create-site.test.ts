@@ -855,6 +855,17 @@ test('the emitted netlify.toml carries an ignore command covering both the site 
   assert.match(ignoreLine, /sites\/acme\b/, "ignore command must reference this site's own dir");
   assert.match(ignoreLine, /packages\/core\b/, 'ignore command must reference the shared packages/core workspace');
   assert.match(ignoreLine, /diff --quiet/, 'ignore command must use git diff --quiet semantics (0 = skip, 1 = build)');
+
+  // G7 (wave 1) widened the four existing sites/<slug>/netlify.toml files but not this
+  // template, so every site minted afterwards would have been born with the old, narrow
+  // line again. The build command runs ../../scripts/*.mjs and `npm ci --prefix ../..`
+  // off the ROOT lockfile: a root-only change to either must rebuild the site.
+  for (const rootPath of ['scripts', 'package.json', 'package-lock.json']) {
+    assert.ok(
+      ignoreLine.includes(` ${rootPath}`),
+      `ignore command must reference root ${rootPath} — the build command depends on it`,
+    );
+  }
 });
 
 test('re-running against an existing sites/<client>/ is a no-op plan-wise (the caller checks existence before writeFiles)', () => {
