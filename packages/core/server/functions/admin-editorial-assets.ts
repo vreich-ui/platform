@@ -4,7 +4,14 @@ import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { getArtifactIndexBlobStore } from '../lib/blob-store.js';
-import { listArtifactIndexKeys, resolveArtifactPointer, type ArtifactIndexStore } from '../lib/artifact-index.js';
+import {
+  listArtifactIndexKeys,
+  parseArtifactPointer,
+  repairArtifactPointer,
+  resolveArtifactPointer,
+  type ArtifactIndexStore,
+  type ArtifactPointer,
+} from '../lib/artifact-index.js';
 import { isArtifactReference, type ArtifactReference } from '../lib/artifacts.js';
 import { mapWithConcurrency, STORE_READ_CONCURRENCY } from '../lib/blob-list.js';
 import { buildPdfToolStorageGrant } from '../lib/pdf-tool-storage-grant.js';
@@ -36,8 +43,7 @@ const CACHE_CONTROL = 'private, no-cache';
  * second full stringify of the whole body on every read — on a latency
  * branch, on this surface's hottest read paths.
  */
-const etagForSerialized = (serialized: string): string =>
-  `"${createHash('sha1').update(serialized).digest('hex')}"`;
+const etagForSerialized = (serialized: string): string => `"${createHash('sha1').update(serialized).digest('hex')}"`;
 
 const parseJson = async (store: ArtifactIndexStore, key: string): Promise<unknown> => {
   const raw = await store.get(key);
@@ -49,49 +55,123 @@ const parseJson = async (store: ArtifactIndexStore, key: string): Promise<unknow
   }
 };
 
+const RESULT_LIMIT = 100;
+
+type PointerCandidate = {
+  key: string;
+  pointer: ArtifactPointer;
+  createdAtISO: string;
+  /** Already in hand when the record had to be read to place the pointer at all. */
+  reference?: ArtifactReference;
+};
+
 /**
- * The `by-kind/` sweep, bounded.
+ * The `by-kind/` sweep — bounded fan-out, and now bounded READS.
  *
- * Every key under `by-kind/<kind>/` costs TWO blob reads: the pointer, then
- * the full `request-artifacts/<requestId>/<sha>.json` reference the pointer
- * names (the pointer's ONLY job here is to supply that `requestId` — see
- * `ArtifactPointer` in lib/artifact-index.ts). Firing all of them through a
- * single `Promise.all` put `2 x A` reads in flight at once against one
- * Netlify Blobs store, which is precisely the fan-out the 2026-08-06 hotfix
- * comment on `STORE_READ_CONCURRENCY` (lib/blob-list.ts) was written about:
- * a burst that large does not go faster, it goes THROTTLED, and one rejected
- * read there aborts the whole listing.
+ * The shape of the problem: `by-kind/<kind>/<sha>.json` names a reference, and
+ * the listing wants the newest 100 live ones. Netlify's blob `list()` answers
+ * `{ key, etag }` with no metadata channel (lib/blob-list.ts), so the only way
+ * to learn a record's `createdAtISO` used to be to READ the record — every
+ * record, for every artifact in the store, to return 100 rows. That is the
+ * 3.6s `sec.artifacts_image` this function was measured at.
  *
- * `mapWithConcurrency` is the repo's one helper for this and preserves input
- * order, so the dedupe/sort/slice below sees exactly the sequence it always
- * did.
+ * `ArtifactPointer` now mirrors `createdAtISO`/`deletedAtISO` (W3 T1), so the
+ * sort and the slice happen on the pointers and only the rows that are
+ * actually returned cost a full-record read. The reads that remain:
  *
- * NOT fixed here, deliberately: this still reads every record to return at
- * most 100. The sort key (`createdAtISO`) and the liveness flag
- * (`deletedAtISO`) exist ONLY on the full reference — the `by-kind/` key
- * carries a sha256 and the pointer body carries `{ requestId, sha256,
- * artifactKind }` — so nothing available before the read can decide which
- * 100 records are the newest. Slicing before the read needs those two fields
- * on the pointer, i.e. an artifact-index schema bump, which is not this
- * change.
+ *   1. one pointer read per `by-kind/` key — unchanged, and unavoidable;
+ *   2. one full-record read per UNREPAIRED pointer. A pointer with no
+ *      `createdAtISO` cannot be placed in the sort at all, so it is read
+ *      exactly as it always was — and REPAIRED in place, so it is the last
+ *      time that pointer costs anything;
+ *   3. one full-record read per row returned, for pointers that carried their
+ *      own `createdAtISO`.
+ *
+ * On a fully repaired store that is 100 record reads however large the store
+ * is. On a store where nothing has been repaired it is exactly what it was
+ * (plus the repair writes). On any mix it is correct, because the undated
+ * pointers are read FIRST and their real `createdAtISO` is merged into the
+ * same sort as the dated ones — the answer is never "the newest 100 of the
+ * repaired ones".
+ *
+ * Liveness is still decided by the RECORD, never by the pointer: the pointer's
+ * `deletedAtISO` only skips a read that would have been thrown away, and every
+ * row that survives to the result has had its record read and re-checked. That
+ * is what makes a stale-live pointer (a torn write, a delete racing this
+ * sweep) cost a read instead of returning a deleted artifact.
  *
  * Exported for tests/netlify/admin-editorial-assets.test.ts, which PINS the
- * read count for a fixture — the cost this function is judged on is "how
- * many blob reads per listed artifact", and that is not observable from the
+ * read count for a fixture — the cost this function is judged on is "how many
+ * blob reads per listed artifact", and that is not observable from the
  * handler's wire response. (Same reason `requestSchema` is exported from
  * admin-governance.ts.)
  */
 export async function listKind(store: ArtifactIndexStore, kind: 'image' | 'pdf'): Promise<ArtifactReference[]> {
   const pointerKeys = await listArtifactIndexKeys(store, `by-kind/${kind}/`);
-  const references = await mapWithConcurrency(pointerKeys, STORE_READ_CONCURRENCY, async (key) =>
-    resolveArtifactPointer(store, await parseJson(store, key))
-  );
-  const unique = new Map<string, ArtifactReference>();
-  for (const reference of references) {
-    if (!reference || !isArtifactReference(reference) || reference.deletedAtISO) continue;
-    if (!unique.has(reference.sha256)) unique.set(reference.sha256, reference);
+  const pointers = await mapWithConcurrency(pointerKeys, STORE_READ_CONCURRENCY, async (key) => {
+    const stored = await parseJson(store, key);
+    return { key, stored, pointer: parseArtifactPointer(stored) };
+  });
+
+  const dated: PointerCandidate[] = [];
+  const undated: { key: string; stored: unknown; pointer: ArtifactPointer }[] = [];
+
+  for (const entry of pointers) {
+    if (!entry.pointer) continue;
+    // Only a delete path writes this; the read-repair below deliberately never
+    // does. So a pointer that says "deleted" was told so by the writer that
+    // deleted it, and skipping its record is skipping a row we would drop.
+    if (entry.pointer.deletedAtISO) continue;
+    if (entry.pointer.createdAtISO) {
+      dated.push({ key: entry.key, pointer: entry.pointer, createdAtISO: entry.pointer.createdAtISO });
+    } else {
+      undated.push({ key: entry.key, stored: entry.stored, pointer: entry.pointer });
+    }
   }
-  return [...unique.values()].sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO)).slice(0, 100);
+
+  // Unplaceable without their record — read them all, then repair so this is
+  // the last sweep that has to.
+  const resolvedUndated = await mapWithConcurrency(undated, STORE_READ_CONCURRENCY, async (entry) => {
+    const reference = await resolveArtifactPointer(store, entry.pointer);
+    if (reference) await repairArtifactPointer(store, entry.key, entry.stored, reference);
+    return { entry, reference };
+  });
+
+  const candidates: PointerCandidate[] = [...dated];
+  for (const { entry, reference } of resolvedUndated) {
+    if (!reference || !isArtifactReference(reference) || reference.deletedAtISO) continue;
+    candidates.push({ key: entry.key, pointer: entry.pointer, createdAtISO: reference.createdAtISO, reference });
+  }
+
+  candidates.sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+
+  /**
+   * Refill rather than one `slice(0, RESULT_LIMIT)`: a dated candidate can still
+   * turn out to be soft-deleted or unreadable once its record is open (a pointer
+   * is a cache, and this sweep is not the only writer). Taking the next-newest in
+   * its place is exactly what reading everything and slicing afterwards used to
+   * do, so the returned ROWS are identical either way.
+   */
+  const unique = new Map<string, ArtifactReference>();
+  let cursor = 0;
+
+  while (unique.size < RESULT_LIMIT && cursor < candidates.length) {
+    const batch = candidates.slice(cursor, cursor + (RESULT_LIMIT - unique.size));
+    cursor += batch.length;
+
+    const references = await mapWithConcurrency(
+      batch,
+      STORE_READ_CONCURRENCY,
+      async (candidate) => candidate.reference ?? (await resolveArtifactPointer(store, candidate.pointer))
+    );
+
+    for (const reference of references) {
+      if (!reference || !isArtifactReference(reference) || reference.deletedAtISO) continue;
+      if (!unique.has(reference.sha256)) unique.set(reference.sha256, reference);
+    }
+  }
+
+  return [...unique.values()].sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
 }
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {

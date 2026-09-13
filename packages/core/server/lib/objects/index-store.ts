@@ -64,7 +64,29 @@ import {
 } from '../../../lib/approval-policy.js';
 import { objectTypes, type ObjectRecord, type ObjectType } from '../../../schema/object-record-v1.js';
 
-export const OBJECT_INDEX_SCHEMA_VERSION = 'object-inventory-index.v1';
+/**
+ * ## The version, and why a bump is a hard break
+ *
+ * `v2` (W4.1): the ROW shape grew a `content` summary on `content_item` rows
+ * (`object-inventory.ts`), so `/admin/variants` groups a family from the
+ * listing instead of reading every record. A `v1` entry's `row` would still
+ * PARSE — `row` is deliberately loose — and would then serve a row with no
+ * `content` key, indistinguishable from an article that declares no parent.
+ *
+ * So the version is a `z.literal` in `objectIndexSchema` and `loadObjectIndex`
+ * answers `undefined` for anything else: a `v1` blob is detected on the first
+ * read after deploy and rebuilt in place by the same read-repair path that
+ * already handles a corrupt or absent index. No script, no per-tenant
+ * remediation. It costs one sweep, once, on one request per site, and
+ * `stats.rebuilt` reports it (the idiom `requests/list-snapshot.ts` uses).
+ *
+ * The tolerant alternative is what `requests/store.ts` chose for
+ * `object_published`, and its comment says why it could: that field's absence
+ * has one honest reading (`false`). A missing `content` summary has none, so
+ * tolerance would ship wrong variant families until something touched each
+ * record.
+ */
+export const OBJECT_INDEX_SCHEMA_VERSION = 'object-inventory-index.v2';
 export const OBJECT_INDEX_KEY = 'objects/index.json';
 
 /**
@@ -107,24 +129,34 @@ export interface ObjectIndexStore {
 /** An etag is usable only when the store actually reported one (`local-blobs.ts` reports `''`). */
 const usableEtag = (etag: string | undefined): etag is string => typeof etag === 'string' && etag.length > 0;
 
-/** `undefined` when absent, unreadable, unparseable, or written by a different schema version — the caller then rebuilds. */
-export const loadObjectIndex = async (store: ObjectIndexStore): Promise<ObjectIndex | undefined> => {
+/**
+ * The index, plus WHY it is missing when it is. `superseded` means a blob was
+ * there and could not be used — unparseable, or a schema version this build no
+ * longer reads. That is a REBUILD; an absent key is merely a cold store.
+ */
+const readObjectIndex = async (
+  store: ObjectIndexStore
+): Promise<{ index: ObjectIndex | undefined; superseded: boolean }> => {
   let raw: string | null;
   try {
     raw = await store.get(OBJECT_INDEX_KEY);
   } catch {
-    return undefined;
+    return { index: undefined, superseded: false };
   }
-  if (!raw) return undefined;
+  if (!raw) return { index: undefined, superseded: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return undefined;
+    return { index: undefined, superseded: true };
   }
   const result = objectIndexSchema.safeParse(parsed);
-  return result.success ? result.data : undefined;
+  return result.success ? { index: result.data, superseded: false } : { index: undefined, superseded: true };
 };
+
+/** `undefined` when absent, unreadable, unparseable, or written by a different schema version — the caller then rebuilds. */
+export const loadObjectIndex = async (store: ObjectIndexStore): Promise<ObjectIndex | undefined> =>
+  (await readObjectIndex(store)).index;
 
 /** The one place an entry is derived from a record, so a cached row can never drift from the live projection's shape. */
 export const projectIndexEntry = (key: string, etag: string, record: ObjectRecord, atMs: number): ObjectIndexEntry => {
@@ -165,6 +197,8 @@ export type InventorySweepResult = {
     read: number;
     /** True when the index was (re)written this call. */
     wrote: boolean;
+    /** True when a stored index was found and DISCARDED (old schema version, or unparseable) and rebuilt from records. A cold store is not a rebuild. */
+    rebuilt: boolean;
   };
 };
 
@@ -205,7 +239,7 @@ export const sweepInventoryRows = async (
   );
   const items = perTypeItems.flat();
 
-  const index = await loadObjectIndex(store);
+  const { index, superseded } = await readObjectIndex(store);
   const byKey = new Map<string, ObjectIndexEntry>((index?.entries ?? []).map((entry) => [entry.key, entry]));
 
   const stale: BlobListItem[] = [];
@@ -259,7 +293,13 @@ export const sweepInventoryRows = async (
 
   return {
     rows,
-    stats: { listed: items.length, cached: items.length - stale.length, read: stale.length, wrote },
+    stats: {
+      listed: items.length,
+      cached: items.length - stale.length,
+      read: stale.length,
+      wrote,
+      rebuilt: superseded,
+    },
   };
 };
 
@@ -271,7 +311,11 @@ export const sweepInventoryRows = async (
  *
  * Concurrency: last write wins, which is safe here for the same reason it is
  * safe in `requests/store.ts` — this is a regenerable projection, so a lost
- * write costs the next reader one extra sweep and nothing else.
+ * write costs the next reader one extra sweep and nothing else. The same
+ * reasoning covers a PARTIAL sweep that is the first read after a schema bump:
+ * `existing` is undefined, so it writes only its own type and the other types'
+ * entries are gone. Nothing stale is ever served — every row in that response
+ * was read live — and the next full sweep re-projects the rest.
  */
 const writeIndexIfChanged = async (
   store: ObjectIndexStore,

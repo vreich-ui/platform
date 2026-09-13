@@ -222,11 +222,17 @@ describe('clearCachedAdminAccessState (sign-out)', () => {
 // imports React. Pointing the import edge the other way would have shipped
 // React to readers to serve an admin-only optimisation.
 import {
+  ADMIN_SHELL_HANDOFF_MS,
   fetchAdminAccessStateViaShell,
   isAdminShellUnavailable,
   resetAdminShellClientForTests,
   takeAdminShellSection,
 } from './admin-shell-client.js';
+// The coalescing is keyed to the page generation, and CI has no DOM stack to
+// fire `astro:before-preparation` on — so the tests below drive the generation
+// counter at its seam, which is the same one `AdminLayout.astro`'s listener
+// drives in a browser.
+import { beginNewPageGeneration, resetPageGenerationForTests } from './page-generation.js';
 // A 401 from the shell raises the session-expiry flag, which is module scope
 // for the same ClientRouter reason everything else here is — so a case that
 // exercises one must put it back.
@@ -396,15 +402,16 @@ describe('fetchAdminAccessStateViaShell — the one fallback path', () => {
    * The three consumers do not wake in the same tick in production — the gate
    * runs in `AdminLayout`'s inline script and the two stores run when their
    * React islands mount — so a failed attempt has already settled by the time
-   * the second and third ask. Without a remembered failure each of them starts
-   * its OWN shell fetch and then makes its own fallback call anyway: six
-   * requests, where this module's contract is "worst case, the old three".
+   * the second and third ask. Without the spent-attempt rule each of them
+   * starts its OWN shell fetch and then makes its own fallback call anyway:
+   * six requests, where this module's contract is "worst case, the old three".
    *
    * A 401 is the live case (an expired session, where every endpoint 401s), so
-   * it is the one pinned here; the same window covers a 500, a network error
-   * and an unreadable body.
+   * it is the one pinned here; the same rule covers a 500, a network error and
+   * an unreadable body. What it must NOT cover is the next navigation — that
+   * is the generation-keyed case below.
    */
-  it('remembers a failed load for one window, so a failing shell is not re-probed per consumer', async () => {
+  it('spends one attempt per generation, so a failing shell is not re-probed per consumer', async () => {
     const token = tokenFor('user-1');
     const mock = mockShellFetch((url) =>
       url.endsWith('admin-shell')
@@ -421,10 +428,177 @@ describe('fetchAdminAccessStateViaShell — the one fallback path', () => {
     assert.equal(
       mock.urls.filter((url) => url.endsWith('admin-shell')).length,
       1,
-      `one failed attempt per window, got: ${mock.urls.join(', ')}`
+      `one failed attempt per generation, got: ${mock.urls.join(', ')}`
     );
     // A failure is NOT the sticky 404: the next window may try again.
     assert.equal(isAdminShellUnavailable(), false);
     resetAuthExpiryForTests();
+  });
+});
+
+/**
+ * T-shell R2 — the handoff is keyed to the PAGE GENERATION, not to a clock.
+ *
+ * The coalescing shipped and worked on only every OTHER click. Measured live:
+ *
+ *   /admin/editorial  admin-shell n=1 max=476              ← coalesced
+ *   /admin/objects    admin-requests n=4 [cold] | admin-auth-state n=1 [cold]
+ *                     | admin-users n=1 [cold]             ← three fallbacks
+ *   /admin/requests   admin-shell n=1 max=493              ← coalesced
+ *
+ * `ADMIN_SHELL_HANDOFF_MS` was doing two different jobs with one number. A
+ * navigation that began inside the 5 s window found the PREVIOUS navigation's
+ * payload still "fresh", so no new load started — and then found all three of
+ * its sections already taken, so all three consumers fell back. That is worse
+ * than never coalescing: almost all shell traffic goes through `admin-shell`
+ * now, so the three dedicated functions are COLD whenever the fallback fires
+ * (1037-2471 ms against 476 ms), and operators click faster than 5 s, which
+ * made the fallback the common case rather than the corner.
+ *
+ * What the window is genuinely right for is the steady state: `requests-store`
+ * polls every 5-30 s WITHOUT navigating, and a poll must never ask through the
+ * shell. That is the one-shot-per-section rule, and it needs no clock — a poll
+ * is the same generation asking twice.
+ *
+ * CI has no DOM stack, so `astro:before-preparation` cannot be fired here.
+ * These drive the generation counter directly instead, which is the seam
+ * `AdminLayout.astro`'s listener drives in a browser.
+ */
+describe('takeAdminShellSection — one coalesced load per page generation', () => {
+  beforeEach(() => resetAdminShellClientForTests());
+  afterEach(() => {
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+  });
+
+  const shellCalls = (urls: string[]): number => urls.filter((url) => url.endsWith('admin-shell')).length;
+
+  it('coalesces the NEXT navigation too, however fast the operator clicked', async () => {
+    const token = tokenFor('user-1');
+    const mock = mockShellFetch(() => ({ status: 200, body: shellBody() }));
+    restoreFetch = mock.restore;
+
+    assert.notEqual(await takeAdminShellSection(token, 'requests'), null);
+    assert.notEqual(await takeAdminShellSection(token, 'me'), null);
+
+    // The click. Well inside ADMIN_SHELL_HANDOFF_MS — which is how fast admins
+    // actually navigate, and precisely the case that used to fall back three
+    // times into three cold functions.
+    beginNewPageGeneration();
+
+    assert.notEqual(await takeAdminShellSection(token, 'requests'), null, 'a new navigation is owed a new load');
+    assert.notEqual(await takeAdminShellSection(token, 'me'), null);
+    assert.deepEqual(
+      mock.urls,
+      ['/.netlify/functions/admin-shell', '/.netlify/functions/admin-shell'],
+      'one shell load per navigation, and NOT one dedicated call per consumer'
+    );
+  });
+
+  it('a second consumer of the same navigation joins the payload — it does not load again', async () => {
+    const token = tokenFor('user-1');
+    const mock = mockShellFetch(() => ({ status: 200, body: shellBody() }));
+    restoreFetch = mock.restore;
+
+    // Sequentially, exactly as the three arrive in production: the gate runs
+    // in the layout's inline script, the two stores when their islands mount.
+    assert.equal((await fetchAdminAccessStateViaShell(token)).isAdmin, true);
+    assert.notEqual(await takeAdminShellSection(token, 'requests'), null);
+    assert.notEqual(await takeAdminShellSection(token, 'me'), null);
+    assert.equal(shellCalls(mock.urls), 1, `three answers, one request, got: ${mock.urls.join(', ')}`);
+  });
+
+  it('a poll whose generation’s payload has gone stale falls back — it does not re-probe the shell', async () => {
+    const token = tokenFor('user-1');
+    const mock = mockShellFetch(() => ({ status: 200, body: shellBody() }));
+    restoreFetch = mock.restore;
+    const realNow = Date.now;
+
+    try {
+      assert.notEqual(await takeAdminShellSection(token, 'requests'), null);
+      // The store's own 5-30 s cadence, with no navigation in between. The
+      // payload is past the staleness bound now, and that must NOT read as
+      // "this generation may load again" — a poll asking through the shell
+      // would re-read the users store and re-resolve the tier every few
+      // seconds for data nobody asked for.
+      Date.now = () => realNow() + ADMIN_SHELL_HANDOFF_MS + 1;
+      assert.equal(await takeAdminShellSection(token, 'requests'), null);
+      assert.equal(await takeAdminShellSection(token, 'me'), null);
+      assert.equal(shellCalls(mock.urls), 1, `the steady state must cost no shell calls, got: ${mock.urls.join(', ')}`);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('a failed load does not suppress the next navigation’s coalescing', async () => {
+    const token = tokenFor('user-1');
+    let failing = true;
+    const mock = mockShellFetch((url) => {
+      if (!url.endsWith('admin-shell')) return { status: 200, body: { authenticated: false, isAdmin: false } };
+      return failing ? { status: 401, body: { error: 'Unauthorized' } } : { status: 200, body: shellBody() };
+    });
+    restoreFetch = mock.restore;
+
+    assert.equal(await takeAdminShellSection(token, 'requests'), null);
+    assert.equal(await takeAdminShellSection(token, 'me'), null);
+    assert.equal(shellCalls(mock.urls), 1, 'one attempt for the generation that failed');
+
+    // A failure is a fact about one navigation. Remembering it past the
+    // generation boundary would suppress the next navigation's coalescing —
+    // the same trap the freshness window fell into, in the other direction.
+    beginNewPageGeneration();
+    failing = false;
+    assert.notEqual(await takeAdminShellSection(token, 'requests'), null);
+    assert.equal(shellCalls(mock.urls), 2);
+    assert.equal(isAdminShellUnavailable(), false, 'a failure is never the sticky 404');
+    resetAuthExpiryForTests();
+  });
+
+  it('an abort spends only its own generation — the page that took over still coalesces', async () => {
+    const token = tokenFor('user-1');
+    const urls: string[] = [];
+    let aborting = true;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      // What `fetch` throws when the page-generation signal aborts mid-load.
+      if (aborting) throw new DOMException('The operation was aborted.', 'AbortError');
+      return new Response(JSON.stringify(shellBody()), { status: 200 });
+    }) as typeof fetch;
+    restoreFetch = () => {
+      globalThis.fetch = originalFetch;
+    };
+
+    assert.equal(await takeAdminShellSection(token, 'requests'), null, 'an abort is a null, never an error');
+
+    // The navigation that aborted it also minted the generation its three
+    // consumers will ask in: they must be coalesced, not punished for the
+    // load the click itself cancelled.
+    beginNewPageGeneration();
+    aborting = false;
+    assert.notEqual(await takeAdminShellSection(token, 'requests'), null);
+    assert.notEqual(await takeAdminShellSection(token, 'me'), null);
+    assert.equal(urls.length, 2, `one aborted load, then one for the page that took over: ${urls.join(', ')}`);
+    assert.equal(isAdminShellUnavailable(), false, 'an abort is never a verdict about the endpoint');
+  });
+
+  it('the sticky 404 outlives navigations — a new generation does not un-retire the coalesced path', async () => {
+    const token = tokenFor('user-1');
+    const mock = mockShellFetch((url) =>
+      url.endsWith('admin-shell')
+        ? { status: 404, body: {} }
+        : { status: 200, body: { authenticated: true, isAdmin: true, roles: ['admin'] } }
+    );
+    restoreFetch = mock.restore;
+
+    assert.equal((await fetchAdminAccessStateViaShell(token)).isAdmin, true);
+    assert.equal(isAdminShellUnavailable(), true);
+
+    // One 404 is enough: the deploy has no `admin-shell`, and that is not a
+    // fact about this page generation. Clicking must not start re-probing it.
+    beginNewPageGeneration();
+    assert.equal(await takeAdminShellSection(token, 'me'), null);
+    assert.equal((await fetchAdminAccessStateViaShell(token)).isAdmin, true);
+    assert.equal(shellCalls(mock.urls), 1, `one probe for the page's whole life, got: ${mock.urls.join(', ')}`);
   });
 });

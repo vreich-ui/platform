@@ -3,29 +3,34 @@
  * `admin-object` verb endpoint every other admin surface uses; nothing here
  * reads or writes anything else.
  *
- * ## Why this fetches records and not just the inventory
+ * ## W4.1 — one call, not N+1
  *
- * The only link between a variant and its parent is `lineage.parent_content_id`
- * inside the BODY (`lib/article-object/variant.ts:57`), and an inventory row
- * carries no body at all (`server/lib/object-inventory.ts:148-189`). The
- * `object_inventory {variants_of}` projection the schema comment mentions
- * (`schema/bodies/content-item-v1.ts:146`) does not exist — `variants_of`
- * appears nowhere in the code. So the family graph can only be built by
- * reading each article record.
+ * This file used to list the inventory and then issue one `object_get` per
+ * article, because the only link between a variant and its parent —
+ * `lineage.parent_content_id` (`lib/article-object/variant.ts`) — lived in the
+ * BODY, and an inventory row carried no body. Measured live, that was 40
+ * `admin-object` invocations for one page load: each individually warm and
+ * fast, all 40 paying the ~250-400 ms fixed per-invocation platform overhead
+ * `Server-Timing` isolated.
  *
- * That is one `inventory` call plus one `get` per article, bounded by
- * `RECORD_FETCH_CONCURRENCY`. It is honest about its cost: the article corpus
- * is small, and the alternative is a server change this task does not own. If
- * the corpus grows past a few hundred articles, the right fix is a
- * `variants_of` projection on the inventory row, not a bigger fan-out here.
+ * The fix was the one the old comment here named as the right one: the
+ * projection now carries what the page needs. `content_item` inventory rows
+ * ship a `content` summary — `slug`, `parent_content_id`, and the judged-score
+ * digest (`server/lib/object-inventory.ts`) — so the family graph, the
+ * permalink column and the judgement table are all derivable from the listing
+ * itself. One call, whatever the corpus size.
  */
 import { callObjectVerb, type GetToken } from '../edit-mode/verbs-client.js';
 import type { VariantMember, VariantScore } from './variant-experiments.js';
 
 export type { GetToken };
 
-/** How many record reads are in flight at once. Matches the server sweep's own posture. */
-export const RECORD_FETCH_CONCURRENCY = 6;
+/** The W4.1 `content` summary, as it arrives on the wire. Every field is optional here on purpose: this is untrusted JSON, not the server's own type. */
+interface InventoryContentSummary {
+  slug?: string | null;
+  parent_content_id?: string | null;
+  scores?: unknown;
+}
 
 interface InventoryArticleRow {
   object_id: string;
@@ -39,13 +44,19 @@ interface InventoryArticleRow {
   unpublished_changes: boolean;
   updated_at: string;
   lock?: { held: boolean; owner_id?: string; owner_label?: string };
+  content?: InventoryContentSummary;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
-const readScores = (body: Record<string, unknown>): VariantScore[] | undefined => {
-  const scores = body.scores;
+/**
+ * The digest, re-read defensively. The server already drops entries a
+ * judgement row could not render (no framework, no dimension, no finite
+ * score); this repeats the check rather than trusting the wire, exactly as it
+ * did when the same shape arrived from a record body.
+ */
+const readScores = (scores: unknown): VariantScore[] | undefined => {
   if (!Array.isArray(scores)) return undefined;
   const parsed = scores.filter(isRecord).map((entry) => ({
     scored_by: String(entry.scored_by ?? ''),
@@ -59,37 +70,18 @@ const readScores = (body: Record<string, unknown>): VariantScore[] | undefined =
   return usable.length ? usable : undefined;
 };
 
-const readParentId = (body: Record<string, unknown>): string | undefined => {
-  const lineage = body.lineage;
-  if (!isRecord(lineage)) return undefined;
-  return typeof lineage.parent_content_id === 'string' ? lineage.parent_content_id : undefined;
-};
-
-async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (;;) {
-      const index = next++;
-      if (index >= items.length) return;
-      out[index] = await fn(items[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return out;
-}
+const stringOrUndefined = (value: unknown): string | undefined =>
+  typeof value === 'string' && value ? value : undefined;
 
 /**
- * Every article, with the three body fields the family derivation needs.
+ * Every article, with the three body facts the family derivation needs — from
+ * ONE `inventory` call.
  *
  * `viewerId` is the signed-in user's identity subject when the caller knows it:
  * a lock the VIEWER holds is not an obstacle (checkout is re-entrant for the
  * owner), a lock someone else holds is. Omitted, every held lock is treated as
  * someone else's — the safe direction, since the worst it does is show a
  * blocker the server would not have raised.
- *
- * A record that fails to load is skipped rather than failing the sweep: one
- * unreadable article should cost one row, not the page.
  */
 export async function fetchVariantMembers(
   getToken: GetToken,
@@ -103,21 +95,11 @@ export async function fetchVariantMembers(
     (row) => row.object_type === 'content_item'
   );
 
-  const bodies = await mapWithConcurrency(rows, RECORD_FETCH_CONCURRENCY, async (row) => {
-    const result = await callObjectVerb(getToken, {
-      action: 'get',
-      object_type: 'content_item',
-      object_id: row.object_id,
-    });
-    const record = result.status === 200 && isRecord(result.body.record) ? result.body.record : undefined;
-    return isRecord(record?.body) ? (record.body as Record<string, unknown>) : undefined;
-  });
-
-  return rows.map((row, index) => {
-    const body = bodies[index];
-    const parentId = body ? readParentId(body) : undefined;
-    const slug = body && typeof body.slug === 'string' ? body.slug : undefined;
-    const scores = body ? readScores(body) : undefined;
+  return rows.map((row) => {
+    const content = row.content ?? {};
+    const parentId = stringOrUndefined(content.parent_content_id);
+    const slug = stringOrUndefined(content.slug);
+    const scores = readScores(content.scores);
     const lockOwner = row.lock?.held ? row.lock.owner_id : undefined;
     return {
       object_id: row.object_id,

@@ -37,7 +37,6 @@ import {
   artifactTagPointerKeys,
   listArtifactIndexKeys,
   readArtifactReferenceResult,
-  requestArtifactReferenceKey,
   writeArtifactReferenceIndexes,
   type ArtifactIndexStore,
 } from '../lib/artifact-index.js';
@@ -532,19 +531,20 @@ const handlePreview: ActionHandler = async (params, context) => {
 
 // ─── artifact verbs ─────────────────────────────────────────────────────────
 
+/**
+ * W3 T1: the reference write ALONE is no longer a complete soft delete.
+ * `ArtifactPointer` now mirrors `deletedAtISO`, and a pointer left saying
+ * "live" over a deleted record makes `admin-editorial-assets` pay a read to
+ * discover that — so this writes the reference and its pointers together,
+ * through the same helper `artifact_soft_delete` uses. Same reference key,
+ * same reference metadata bag as the local writer it replaces.
+ */
 const writeArtifactReferenceJson = async (
   indexStore: ArtifactIndexStore,
   requestId: string,
   artifact: ArtifactReference
 ) => {
-  await indexStore.setJSON(requestArtifactReferenceKey(requestId, artifact.sha256), artifact, {
-    metadata: {
-      requestId,
-      sha256: artifact.sha256,
-      contentType: artifact.contentType,
-      ...(artifact.deletedAtISO ? { deletedAtISO: artifact.deletedAtISO } : {}),
-    },
-  });
+  await writeArtifactReferenceIndexes(indexStore, requestId, artifact);
 };
 
 const deleteIndexKey = async (

@@ -35,20 +35,44 @@
  * serve an admin-only optimisation. The access client stays React-free; the
  * coalescing lives here, where only `/admin/*` loads it.
  *
- * ### One shared fetch, each section handed over once
+ * ### One shared fetch per PAGE GENERATION, each section handed over once
  *
- * `takeAdminShellSection` starts the shell fetch if one is not already in
- * flight and otherwise joins it, so three consumers waking in the same tick
- * cost one request. Each section is then handed to its consumer ONCE and the
- * payload is dropped after `ADMIN_SHELL_HANDOFF_MS`.
+ * Everything here is keyed to `currentPageGeneration()` — the identity
+ * `page-generation.ts` mints alongside each navigation's `AbortController` —
+ * and to nothing else. Within one generation:
  *
- * That one-shot rule is what keeps the steady state honest. `requests-store`
- * polls every 5-30 s; if it kept asking through the shell, every poll would
- * re-read the users store and re-resolve the tier for data it was not asking
- * for. The shell serves the NAVIGATION BURST — the moment all three want an
- * answer at once — and each consumer's own endpoint serves its own cadence
- * afterwards. `ADMIN_SHELL_HANDOFF_MS` matches `REQUESTS_INDEX_FRESH_MS`, the
- * window `requests-store` already treats a snapshot as current within.
+ *   - the FIRST consumer to ask starts the shell fetch; the others join the
+ *     promise it left behind, so three consumers waking in the same tick cost
+ *     one request;
+ *   - that generation gets exactly ONE attempt. Once it has settled — with a
+ *     payload, a failure or an abort — no later ask re-probes the shell, it
+ *     just answers `null` and the consumer uses its own endpoint;
+ *   - each section is handed over exactly ONCE.
+ *
+ * A new generation resets all three: a fresh attempt, a fresh payload, a fresh
+ * set of sections to hand out. That is the whole fix behind this design —
+ * keying the handoff to a WALL CLOCK instead made the coalescing work on only
+ * every other click. A navigation inside the freshness window found the
+ * previous navigation's payload still "fresh", started no new fetch, and then
+ * found all three sections already taken, so all three consumers fell back.
+ * That is worse than not coalescing at all: with the shell serving almost all
+ * shell traffic, the three dedicated functions are COLD whenever a fallback
+ * fires (measured 1037-2471 ms against 476 ms for the coalesced call), and
+ * operators click faster than the window, so the fallback was the common case.
+ *
+ * The one-shot-per-section rule is what keeps the steady state honest, and it
+ * needs no clock to do it. `requests-store` polls every 5-30 s without
+ * navigating, so its second and later ticks are the same generation asking
+ * again for a section it has already taken — `null`, straight to
+ * `admin-requests`. If a poll asked through the shell it would re-read the
+ * users store and re-resolve the tier for data it was not asking for. The
+ * shell serves the NAVIGATION BURST — the moment all three want an answer at
+ * once — and each consumer's own endpoint serves its own cadence afterwards.
+ *
+ * `ADMIN_SHELL_HANDOFF_MS` survives with a narrower job: it bounds how STALE a
+ * payload may be when it is handed over, for the consumer that mounts late in
+ * a long-lived generation. It no longer decides whether a fetch happens, and
+ * a lapsed payload does NOT buy its generation a second attempt.
  *
  * ### `null` always means "ask your own endpoint"
  *
@@ -69,14 +93,16 @@
  *     it); the two admin-gated sections are skipped, and a fallback call would
  *     simply collect the 403 the dedicated endpoint always gave.
  *   - an **abort** — see below.
- *   - a **load that already failed in this window** (a 401 on an expired
- *     session, a 500, a network error). Remembered for one handoff window so
- *     the other consumers fall straight back instead of each re-probing the
- *     shell first — otherwise a failing shell costs SIX requests where the
- *     promise below is "worst case, the old three".
- *   - the section already having been handed over, or the handoff window
- *     having lapsed. Nothing is wrong; the caller is just on its own cadence
- *     now.
+ *   - a **load this generation already attempted** — one that failed (a 401 on
+ *     an expired session, a 500, a network error), or was aborted, or whose
+ *     payload has since gone stale. The three consumers do not wake in the
+ *     same tick, so without this each one that arrives after a failed attempt
+ *     settled would start its own shell fetch and make its own fallback call
+ *     anyway: SIX requests, where the promise below is "worst case, the old
+ *     three". The NEXT generation always attempts again — an attempt is a fact
+ *     about one navigation, never a verdict on the endpoint.
+ *   - the section already having been handed over. Nothing is wrong; the
+ *     caller is just on its own cadence now.
  *
  * ### Abort
  *
@@ -88,11 +114,14 @@
  * its own, so an aborted coalesced fetch must leave it doing what it always
  * did (its own unsignalled poll) rather than handing it an `AbortError` to
  * explain to the operator. Worst case on a navigation mid-flight is the old
- * three-call behaviour, for the page the user has already left.
+ * three-call behaviour, for the page the user has already left — and only for
+ * that page. The abort spends the outgoing generation's one attempt, never the
+ * incoming one's: the navigation that aborted the load also minted the
+ * generation the next three consumers will ask in, so they coalesce normally.
  */
 import { cacheAdminAccessState, fetchAdminAccessState, type AdminAccessState } from './admin-access-client.js';
 import { clearAuthExpired, isAuthExpiredStatus, markAuthExpired } from './auth-expiry.js';
-import { currentPageSignal, isAbortError } from './page-generation.js';
+import { currentPageGeneration, currentPageSignal, isAbortError } from './page-generation.js';
 import { REQUEST_LIST_MAX_LIMIT } from './request-list-limits.js';
 
 const ENDPOINT = '/.netlify/functions/admin-shell';
@@ -114,10 +143,16 @@ export interface AdminShellSections {
 export type AdminShellSectionName = keyof AdminShellSections;
 
 /**
- * How long a fetched payload is still worth handing over. Matched to
- * `REQUESTS_INDEX_FRESH_MS` — the window `requests-store.ts` already treats a
- * snapshot as current within — so a navigation burst is coalesced and a
- * steady-state poll is not.
+ * How stale a fetched payload may be and still be worth handing over.
+ *
+ * A STALENESS bound, not the coalescing key: what decides whether a consumer
+ * joins this navigation's load or falls back is the page generation (see the
+ * header). This only stops a consumer that mounts late in a long-lived
+ * generation — an overlay opened minutes after the page settled — from being
+ * handed an opening snapshot that has since moved on. Matched to
+ * `REQUESTS_INDEX_FRESH_MS`, the window `requests-store.ts` already treats a
+ * snapshot of the same data as current within, so the two agree on what
+ * "still current" means.
  */
 export const ADMIN_SHELL_HANDOFF_MS = 5_000;
 
@@ -136,35 +171,48 @@ export const ADMIN_SHELL_REQUEST_LIMIT = REQUEST_LIST_MAX_LIMIT;
 
 interface Handoff {
   sections: AdminShellSections;
+  /** The page generation this payload was fetched in — see `usableHandoff`. */
+  generation: number;
   fetchedAtMs: number;
   taken: Set<AdminShellSectionName>;
 }
 
+/** A load in flight, and the generation that started it. A load is only ever joined by its OWN generation. */
+interface InflightLoad {
+  generation: number;
+  load: Promise<Handoff | null>;
+}
+
 /** Sticky once a deploy has told us there is no `admin-shell`. One 404 is enough. */
 let shellUnavailable = false;
-let inflight: Promise<Handoff | null> | undefined;
+let inflight: InflightLoad | undefined;
 let handoff: Handoff | null = null;
 /**
- * When a load last failed for a reason that is NOT the sticky 404 and NOT an
- * abort — a 401, a 500, a network error, an unreadable body.
+ * The page generation whose `admin-shell` load has already been STARTED —
+ * settled or not, successful or not.
  *
- * One attempt per handoff window, shared by every consumer. Without this each
- * consumer that wakes AFTER the failed attempt settled starts its own shell
- * fetch and then makes its own fallback call anyway, so a shell that 401s on
- * an expired session costs SIX requests where this module's contract is "worst
- * case, the old three-call behaviour". An abort is excluded for the same
- * reason it does not set `shellUnavailable`: the page going away is not a
- * verdict about the endpoint, and suppressing the NEXT page generation's
- * coalescing would be the opposite of the point.
+ * One attempt per generation, shared by every consumer. The three consumers do
+ * not wake in the same tick in production (the gate runs in `AdminLayout`'s
+ * inline script, the two stores when their React islands mount), so without
+ * this each consumer that wakes after a failed attempt settled starts its own
+ * shell fetch and then makes its own fallback call anyway: a shell that 401s
+ * on an expired session costs SIX requests, where this module's contract is
+ * "worst case, the old three-call behaviour".
+ *
+ * Keyed to the generation and to nothing else, because that is what the fact
+ * is about: one navigation asked, once. The NEXT navigation always asks again,
+ * whatever happened to this one — the page going away is not a verdict about
+ * the endpoint (only a 404 is, via `shellUnavailable`), and suppressing the
+ * next generation's coalescing would be the opposite of the point.
  */
-let shellFailedAtMs = 0;
+let attemptedGeneration: number | null = null;
 
-/** Test-only: back to a pristine module — no sticky 404, no remembered failure, no in-flight load, no payload waiting to be handed over. */
+/** Test-only: back to a pristine module — no sticky 404, no spent attempt, no in-flight load, no payload waiting to be handed over. */
 export function resetAdminShellClientForTests(): void {
   shellUnavailable = false;
   inflight = undefined;
   handoff = null;
-  shellFailedAtMs = 0;
+  attemptedGeneration = null;
 }
 
 /** Whether a 404 has retired the coalesced path for this page's lifetime. Exported for the test, and for nothing else. */
@@ -176,13 +224,7 @@ const isSections = (value: unknown): value is AdminShellSections => {
   return Boolean(sections.access && sections.requests && sections.me);
 };
 
-async function fetchShell(token: string): Promise<Handoff | null> {
-  /** A failure worth remembering for this window — see `shellFailedAtMs`. */
-  const failed = (): null => {
-    shellFailedAtMs = Date.now();
-    return null;
-  };
-
+async function fetchShell(token: string, generation: number): Promise<Handoff | null> {
   let response: Response;
   try {
     response = await fetch(ENDPOINT, {
@@ -192,13 +234,13 @@ async function fetchShell(token: string): Promise<Handoff | null> {
       signal: currentPageSignal(),
     });
   } catch (error) {
-    // An abort is the page going away, never a verdict about the endpoint —
-    // so it must NOT set `shellUnavailable`, and must not be remembered as a
-    // failure either, or one navigation would retire the coalesced path for
-    // the rest of the session (or for the next page's whole burst).
+    // An abort is the page going away, never a verdict about the endpoint, so
+    // it must NOT set `shellUnavailable`. It spends only the generation it was
+    // started in — the navigation that aborted it has already minted the next
+    // one, whose consumers get a fetch of their own.
     if (isAbortError(error)) return null;
     console.error('Admin shell load failed (network).', error);
-    return failed();
+    return null;
   }
 
   // A deploy without `admin-shell`. Retire the path rather than paying a 404
@@ -209,11 +251,11 @@ async function fetchShell(token: string): Promise<Handoff | null> {
   }
   if (isAuthExpiredStatus(response.status)) {
     markAuthExpired();
-    return failed();
+    return null;
   }
   if (!response.ok) {
     console.error(`Admin shell load failed (HTTP ${response.status}).`);
-    return failed();
+    return null;
   }
   // The server knew who we are, so a banner left over from an earlier expiry
   // is now stale — the same rule `requests-client.ts`'s `authorizedFetch` has.
@@ -224,9 +266,21 @@ async function fetchShell(token: string): Promise<Handoff | null> {
     return null;
   });
   const sections = (body as { sections?: unknown } | null)?.sections;
-  if (!isSections(sections)) return failed();
-  shellFailedAtMs = 0;
-  return { sections, fetchedAtMs: Date.now(), taken: new Set() };
+  if (!isSections(sections)) return null;
+  return { sections, generation, fetchedAtMs: Date.now(), taken: new Set() };
+}
+
+/**
+ * The payload this generation is entitled to, or `null`.
+ *
+ * Drops a payload that belongs to a page the user has already left — however
+ * recent it is, it is the PREVIOUS navigation's answer and this one is owed a
+ * fetch of its own — and one that has gone stale inside its own generation.
+ */
+function usableHandoff(generation: number): Handoff | null {
+  if (!handoff) return null;
+  if (handoff.generation !== generation || Date.now() - handoff.fetchedAtMs >= ADMIN_SHELL_HANDOFF_MS) handoff = null;
+  return handoff;
 }
 
 /**
@@ -241,25 +295,37 @@ export async function takeAdminShellSection<T>(
   name: AdminShellSectionName
 ): Promise<T | null> {
   if (!token || shellUnavailable) return null;
+  const generation = currentPageGeneration();
 
-  const fresh = handoff && Date.now() - handoff.fetchedAtMs < ADMIN_SHELL_HANDOFF_MS ? handoff : null;
-  if (!fresh) {
-    handoff = null;
-    // ONE attempt per window when the last one failed. A consumer that wakes
-    // after a failed attempt has already settled must fall straight back to
-    // its own endpoint rather than re-probe the shell on its own account —
-    // three consumers doing that is three shell calls AND three fallbacks.
-    // A load still in flight is joined, never bailed on: the marker is about
-    // attempts that are already over.
-    if (!inflight && Date.now() - shellFailedAtMs < ADMIN_SHELL_HANDOFF_MS) return null;
-    inflight ??= fetchShell(token).finally(() => {
-      inflight = undefined;
-    });
-    const loaded = await inflight;
+  if (!usableHandoff(generation)) {
+    // A load in flight for a generation the user has LEFT is never joined: it
+    // carries that page's signal, so it is already aborting, and joining it
+    // would hand this navigation a `null` and three fallback calls — exactly
+    // the every-other-click failure this module is keyed to generations to
+    // avoid. This generation's own load is joined, never bailed on.
+    let load = inflight?.generation === generation ? inflight.load : undefined;
+    if (!load) {
+      // One attempt per generation — see `attemptedGeneration`. A consumer
+      // that arrives after this generation's attempt settled (a failure, an
+      // abort, or a payload since gone stale) falls straight back to its own
+      // endpoint rather than re-probe the shell on its own account.
+      if (attemptedGeneration === generation) return null;
+      attemptedGeneration = generation;
+      load = fetchShell(token, generation).finally(() => {
+        if (inflight?.generation === generation) inflight = undefined;
+      });
+      inflight = { generation, load };
+    }
+    const loaded = await load;
+    // Navigated while this was in flight: the answer belongs to the page the
+    // user has left, and the generation that took over is owed its own fetch,
+    // which its own consumers will start. Never store it — it would be dropped
+    // by `usableHandoff` on sight anyway.
+    if (currentPageGeneration() !== generation) return null;
     // A second consumer awaiting the same promise must not clobber a payload
     // the first already began taking sections out of.
     if (loaded) handoff ??= loaded;
-    if (!handoff) return null;
+    if (!usableHandoff(generation)) return null;
   }
 
   const current = handoff;

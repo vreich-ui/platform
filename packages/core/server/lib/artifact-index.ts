@@ -18,10 +18,30 @@ export type ArtifactIndexStore = {
   }) => Promise<BlobListResponse> | AsyncIterable<BlobListResponse>;
 };
 
+/**
+ * W3 T1: the two fields a listing needs BEFORE it reads the record it names.
+ *
+ * Netlify's blob `list()` answers `{ key, etag }` and nothing else (see
+ * lib/blob-list.ts), so a pointer's `metadata` bag is unreachable from a
+ * listing. "Newest N of this kind" therefore meant reading EVERY
+ * `request-artifacts/<requestId>/<sha>.json` just to learn which N —
+ * the 3.6s `admin-editorial-assets` spent on every admin navigation.
+ *
+ * Both stay OPTIONAL permanently, not for a migration window: an older
+ * pointer has neither and the read path repairs it in place
+ * (`repairArtifactPointer`) instead of anyone running a backfill. Absent
+ * `createdAtISO` means "unknown, read the record"; absent `deletedAtISO`
+ * means "not known to be deleted" — NEVER "live". Liveness is still owned by
+ * the record; the pointer flag only skips a read that would be thrown away.
+ */
 export type ArtifactPointer = {
   requestId: string;
   sha256: string;
   artifactKind: ArtifactKind;
+  /** Mirror of `ArtifactReference.createdAtISO`. Absent on an unrepaired pointer. */
+  createdAtISO?: string;
+  /** Mirror of `ArtifactReference.deletedAtISO`. Written ONLY by the authoritative write paths. */
+  deletedAtISO?: string;
 };
 
 export const requestArtifactReferenceKey = (requestId: string, sha256: string) => {
@@ -34,6 +54,8 @@ export const artifactPointerValue = (requestId: string, reference: ArtifactRefer
     requestId,
     sha256: reference.sha256,
     artifactKind: (reference.artifactKind ?? artifactKind) as ArtifactKind,
+    createdAtISO: reference.createdAtISO,
+    ...(reference.deletedAtISO ? { deletedAtISO: reference.deletedAtISO } : {}),
   };
 };
 
@@ -161,6 +183,22 @@ export const artifactTagPointerKeys = (reference: ArtifactReference) => {
   );
 };
 
+/**
+ * Write the full reference AND every pointer that names it.
+ *
+ * ORDERING (W3 T1). These writes are not atomic — they never were — but now
+ * that a pointer carries `deletedAtISO` a torn write can HIDE a live artifact
+ * instead of merely costing a wasted read. So whichever half makes the
+ * artifact more visible goes first: a soft-deleted reference writes the record
+ * then the pointers, a live one writes the pointers then the record. Either
+ * way a crash in between leaves a pointer saying "live" over a record that
+ * decides — one wasted read, never a vanished row. Only a real delete/restore
+ * race (two writers) can still invert that, and that race predates this field.
+ *
+ * SHARED POINTERS. `by-kind/` and `by-tag/` are keyed by sha256 alone, so two
+ * requests holding the same bytes share one — see `writeSharedPointer` below
+ * for why a delete may not stamp one that names another request.
+ */
 export const writeArtifactReferenceIndexes = async (
   indexStore: ArtifactIndexStore,
   requestId: string,
@@ -181,12 +219,62 @@ export const writeArtifactReferenceIndexes = async (
     ...(reference.deletedAtISO ? { deletedAtISO: reference.deletedAtISO } : {}),
   };
 
-  await Promise.all([
-    indexStore.setJSON(fullReferenceKey, reference, { metadata: fullReferenceMetadata }),
-    indexStore.setJSON(artifactKindPointerKey(reference), pointer, { metadata: pointerMetadata }),
-    indexStore.setJSON(artifactRequestPointerKey(requestId, reference), pointer, { metadata: pointerMetadata }),
-    ...artifactTagPointerKeys(reference).map((key) => indexStore.setJSON(key, pointer, { metadata: pointerMetadata })),
-  ]);
+  const writeReference = () => indexStore.setJSON(fullReferenceKey, reference, { metadata: fullReferenceMetadata });
+
+  /**
+   * `by-kind/<kind>/<sha>.json` and `by-tag/<tag>/<sha>.json` are keyed by
+   * sha256 ALONE, so two requests holding the same bytes — which is the normal
+   * outcome of cross-request dedupe (artifact-upload.ts, W2 T2.4) — share one
+   * pointer. `by-request/` is the only one scoped to a request.
+   *
+   * That sharing was harmless while a pointer said nothing about liveness:
+   * whoever it named, the reader opened that record and decided. Now that
+   * `deletedAtISO` lets `admin-editorial-assets` SKIP the read, stamping a
+   * shared pointer because THIS request's reference was deleted would hide the
+   * other request's LIVE reference from every by-kind/by-tag listing, with no
+   * read to discover otherwise.
+   *
+   * So a delete may only stamp a shared pointer that is its own to stamp. An
+   * absent, unreadable or same-request pointer is ours. A pointer naming
+   * another request is left exactly as it was, and the listing pays its one
+   * read to find out what that reference's state really is — the same "the
+   * record decides" fallback the ordering rule above relies on. A live write
+   * needs no such guard: repointing a shared pointer at a LIVE reference can
+   * only ever make an artifact more visible.
+   */
+  const sharedPointerNamesAnotherRequest = async (key: string): Promise<boolean> => {
+    try {
+      const stored = await indexStore.get(key);
+      if (!stored) return false;
+      const existing = JSON.parse(stored) as { requestId?: unknown };
+      return typeof existing?.requestId === 'string' && existing.requestId !== '' && existing.requestId !== requestId;
+    } catch {
+      // Unreadable or unparseable: treat it as ours and overwrite, which is
+      // what every writer did before this guard existed.
+      return false;
+    }
+  };
+
+  const writeSharedPointer = async (key: string) => {
+    if (reference.deletedAtISO && (await sharedPointerNamesAnotherRequest(key))) return;
+    await indexStore.setJSON(key, pointer, { metadata: pointerMetadata });
+  };
+
+  const writePointers = () =>
+    Promise.all([
+      writeSharedPointer(artifactKindPointerKey(reference)),
+      indexStore.setJSON(artifactRequestPointerKey(requestId, reference), pointer, { metadata: pointerMetadata }),
+      ...artifactTagPointerKeys(reference).map((key) => writeSharedPointer(key)),
+    ]);
+
+  if (reference.deletedAtISO) {
+    await writeReference();
+    await writePointers();
+    return;
+  }
+
+  await writePointers();
+  await writeReference();
 };
 
 /**
@@ -261,6 +349,83 @@ export const resolveArtifactPointer = async (
   if (!requestId || !sha256) return undefined;
 
   return readArtifactReference(indexStore, requestId, sha256);
+};
+
+/**
+ * Normalize a stored pointer blob. `undefined` for anything that cannot name a
+ * reference — the same outcome `resolveArtifactPointer` already gave that input.
+ * `createdAtISO`/`deletedAtISO` are accepted only as VALID ISO dates, so a
+ * pointer carrying garbage degrades to "unknown, read the record" rather than
+ * sorting to the top of an admin listing.
+ */
+export const parseArtifactPointer = (value: unknown): ArtifactPointer | undefined => {
+  if (!isRecord(value)) return undefined;
+
+  const requestId = typeof value.requestId === 'string' ? value.requestId : undefined;
+  const sha256 = typeof value.sha256 === 'string' ? value.sha256 : undefined;
+  if (!requestId || !sha256) return undefined;
+
+  const isoOrUndefined = (candidate: unknown) =>
+    typeof candidate === 'string' && !Number.isNaN(Date.parse(candidate)) ? candidate : undefined;
+
+  const createdAtISO = isoOrUndefined(value.createdAtISO);
+  const deletedAtISO = isoOrUndefined(value.deletedAtISO);
+
+  return {
+    requestId,
+    sha256,
+    artifactKind: value.artifactKind as ArtifactKind,
+    ...(createdAtISO ? { createdAtISO } : {}),
+    ...(deletedAtISO ? { deletedAtISO } : {}),
+  };
+};
+
+/**
+ * READ-REPAIR, not a migration. A pointer written before `createdAtISO` existed
+ * is repaired by the first read path that had to open its record anyway, so it
+ * costs its extra read once in its lifetime and nobody runs anything.
+ *
+ * Three rules make that safe from a concurrent read path:
+ *
+ *   1. It MERGES onto the raw stored JSON, so a field another writer put there
+ *      — including one this type does not know — survives.
+ *   2. It writes `createdAtISO` only, and only when absent; that field is
+ *      immutable for a reference, so writing it can never be stale. It NEVER
+ *      writes or clears `deletedAtISO` — a repair stamping liveness from a
+ *      record read moments ago could land after a concurrent restore and hide
+ *      a live artifact for good. Liveness belongs to the delete/restore paths,
+ *      which write record and pointers together.
+ *   3. It never throws. A failed repair must cost a future read, not this one.
+ */
+export const repairArtifactPointer = async (
+  indexStore: ArtifactIndexStore,
+  key: string,
+  storedPointer: unknown,
+  reference: ArtifactReference
+): Promise<boolean> => {
+  if (!isRecord(storedPointer)) return false;
+
+  const parsed = parseArtifactPointer(storedPointer);
+  if (!parsed || parsed.createdAtISO) return false;
+  if (typeof reference.createdAtISO !== 'string' || Number.isNaN(Date.parse(reference.createdAtISO))) return false;
+
+  try {
+    await indexStore.setJSON(
+      key,
+      { ...storedPointer, createdAtISO: reference.createdAtISO },
+      {
+        metadata: {
+          requestId: parsed.requestId,
+          sha256: parsed.sha256,
+          artifactKind: String(parsed.artifactKind ?? ''),
+        },
+      }
+    );
+    return true;
+  } catch (error) {
+    console.warn(`[artifact-index] pointer read-repair failed at ${key}`, error);
+    return false;
+  }
 };
 
 export const listArtifactIndexKeys = async (indexStore: ArtifactIndexStore, prefix: string): Promise<string[]> => {

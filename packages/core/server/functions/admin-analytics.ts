@@ -101,7 +101,8 @@ import {
   type AnalyticsNoteInput,
   type AnalyticsViewInput,
 } from '../../lib/admin/analytics-views-logic.js';
-import { fetchAnnotationMarkers } from '../lib/analytics-annotations.js';
+import { fetchAnnotationMarkers, type ShippedMarkerCache } from '../lib/analytics-annotations.js';
+import type { AnnotationMarker } from '../../lib/admin/analytics-annotations-logic.js';
 import type { ObjectVerbStore } from '../lib/object-verbs.js';
 import { fetchAnalyticsInsights } from '../lib/analytics-insights.js';
 
@@ -451,6 +452,44 @@ const rawExportResourceResponse = async (params: Record<string, string | undefin
  */
 const ANNOTATIONS_CACHE_CONTROL = 'private, no-cache';
 
+/**
+ * W3.3 — the memo this resource finally joins, and the half it deliberately
+ * leaves out.
+ *
+ * The comment above says why the WHOLE body cannot be memoized: a note added
+ * from this same page must be visible on the very next read. That reasoning
+ * covers the notes source only. The other two — finished Netlify deploys and
+ * `publish` history entries — are not written by this page and were paying a
+ * full object-store sweep on every single load, which is where
+ * `/admin/analytics`'s server `work` went.
+ *
+ * So the file's own `memo`/`MEMO_TTL_MS` now backs that half, keyed like every
+ * other entry on this file (site + window), while `fetchAnnotationMarkers`
+ * reads notes live and merges. The response `ETag` below is still computed off
+ * the MERGED body, so a fresh note still changes the validator — the memo
+ * changes what the server recomputes, never what the client is allowed to
+ * cache.
+ *
+ * `etag` on the stored entry is the true hash of what it holds, so the
+ * `entry.etag === etagFor(entry.body)` invariant every other memo entry keeps
+ * still holds here; it is simply never the one served, because this entry is
+ * half a body.
+ */
+const shippedMarkerCacheFor = (binding: SiteBinding, from: string, to: string): ShippedMarkerCache => {
+  const cacheKey = `ann:${binding.siteId}:${from}:${to}`;
+  return {
+    read: () => {
+      const entry = memo.get(cacheKey);
+      if (!entry || entry.expiresAt <= Date.now()) return undefined;
+      return entry.body.markers as AnnotationMarker[];
+    },
+    write: (markers) => {
+      const body = { markers: [...markers] };
+      memo.set(cacheKey, { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS });
+    },
+  };
+};
+
 const annotationsResourceResponse = async (binding: SiteBinding, event: LambdaEvent) => {
   const params = event.queryStringParameters ?? {};
   if (!params.from || !params.to) return jsonResponse(400, { error: 'from and to are required (ISO timestamps).' });
@@ -464,6 +503,7 @@ const annotationsResourceResponse = async (binding: SiteBinding, event: LambdaEv
     viewsStore,
     from: params.from,
     to: params.to,
+    shippedCache: shippedMarkerCacheFor(binding, params.from, params.to),
   });
   const body = { markers };
   const etag = timeSerialize(() => etagFor(body));

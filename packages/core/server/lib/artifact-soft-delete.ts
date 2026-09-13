@@ -28,6 +28,7 @@ import { getMcpBinding } from './mcp-binding.js';
 import {
   listArtifactIndexKeys,
   requestArtifactReferenceKey,
+  writeArtifactReferenceIndexes,
   type ArtifactIndexStore,
 } from './artifact-index.js';
 import {
@@ -92,19 +93,25 @@ export const loadArtifactReferenceForAdminMutation = async (
   return { ok: true as const, artifact };
 };
 
+/**
+ * W3 T1: this used to write ONLY `request-artifacts/<requestId>/<sha>.json`,
+ * which was correct while a pointer said nothing about liveness — every reader
+ * re-read the record anyway. It is not correct now that `ArtifactPointer`
+ * carries `deletedAtISO`: a soft-delete that left the `by-kind`/`by-request`/
+ * `by-tag` pointers untouched would leave a pointer claiming a deleted artifact
+ * is live, and a restore would leave one claiming a live artifact is deleted.
+ *
+ * So every admin mutation of a reference now rewrites the reference AND its
+ * pointers, through the one helper that knows the ordering rule. The reference
+ * write itself is byte-for-byte what it was (same key, same metadata bag) —
+ * `writeArtifactReferenceIndexes` builds the identical `fullReferenceMetadata`.
+ */
 export const writeArtifactReferenceForAdminMutation = async (
   store: ArtifactIndexStore,
   requestId: string,
   artifact: ArtifactReference
 ) => {
-  await store.setJSON(requestArtifactReferenceKey(requestId, artifact.sha256), artifact, {
-    metadata: {
-      requestId,
-      sha256: artifact.sha256,
-      contentType: artifact.contentType,
-      ...(artifact.deletedAtISO ? { deletedAtISO: artifact.deletedAtISO } : {}),
-    },
-  });
+  await writeArtifactReferenceIndexes(store, requestId, artifact);
 };
 
 export const openArtifactIndexStoreForAdminMutation = async (event: unknown, binding?: SiteBinding) =>

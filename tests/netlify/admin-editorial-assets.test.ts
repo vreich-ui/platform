@@ -144,23 +144,30 @@ test('admin editorial assets rejects unauthenticated requests', async () => {
  * store.
  *
  * What the reads ARE, per key under `by-kind/<kind>/`:
- *   1. the pointer itself — its only payload here is the `requestId`;
- *   2. the full reference at `request-artifacts/<requestId>/<sha>.json`.
- * Two reads per artifact, and — this is the part the cap exists for — the
- * function returns at most 100 rows however many it read. The sort key
- * (`createdAtISO`) and the liveness flag (`deletedAtISO`) live ONLY on the
- * full reference, so nothing cheaper than reading it can decide which 100
- * are the newest; shrinking THAT needs those two fields on the pointer (an
- * artifact-index schema bump). Until then this test is the fence: anything
- * that adds a THIRD read per artifact, or reads the same record twice, fails
- * here.
+ *   1. the pointer itself — ALWAYS, one per key;
+ *   2. the full reference at `request-artifacts/<requestId>/<sha>.json` — only
+ *      when the pointer cannot answer on its own.
+ *
+ * W3 T1 moved `createdAtISO`/`deletedAtISO` onto `ArtifactPointer`, so (2) is
+ * now paid for the ~100 rows the function RETURNS rather than for every
+ * artifact in the store. The three tests below are the fence around that:
+ * repaired pointers must cost ~100 record reads no matter how large the store
+ * is, unrepaired pointers must cost exactly what they always did (plus the
+ * repair write that makes it the last time), and a half-repaired store must
+ * return the same rows as a fully repaired one.
  */
 const countingIndexStore = (entries: Map<string, string>) => {
   const reads: string[] = [];
+  const writes: string[] = [];
   let inFlight = 0;
   let peakInFlight = 0;
   return {
+    entries,
     reads,
+    // W3 T1: the sweep is no longer read-only. It REPAIRS a pointer that has no
+    // createdAtISO, which is the whole self-healing mechanism — nobody runs a
+    // backfill — so the store records writes instead of refusing them.
+    writes,
     peak: () => peakInFlight,
     async get(key: string) {
       inFlight += 1;
@@ -175,8 +182,10 @@ const countingIndexStore = (entries: Map<string, string>) => {
         inFlight -= 1;
       }
     },
-    async setJSON() {
-      throw new Error('listKind must never write');
+    async setJSON(key: string, value: unknown) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      writes.push(key);
+      entries.set(key, JSON.stringify(value));
     },
     async list({ prefix = '' }: { prefix?: string } = {}) {
       return { blobs: [...entries.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key, etag: '' })) };
@@ -184,13 +193,43 @@ const countingIndexStore = (entries: Map<string, string>) => {
   };
 };
 
-const seedArtifacts = (count: number, kind: 'image' | 'pdf', options: { deleteEvery?: number } = {}) => {
+/**
+ * `repaired` decides which pointers carry the W3 fields:
+ *   'none'  — every pointer is the OLD three-field shape. This is a real
+ *             tenant on the morning of the deploy, and the sweep must behave
+ *             exactly as it did before.
+ *   'all'   — every pointer has been repaired (or was written after W3).
+ *   'even'  — a mix, which is every tenant in between.
+ */
+const seedArtifacts = (
+  count: number,
+  kind: 'image' | 'pdf',
+  options: { deleteEvery?: number; repaired?: 'none' | 'all' | 'even' } = {}
+) => {
   const entries = new Map<string, string>();
+  const repaired = options.repaired ?? 'none';
+
   for (let i = 0; i < count; i += 1) {
     const sha = String(i).padStart(64, 'a');
     const requestId = `req_perf_${kind}${i}_20260901_01`;
     const deleted = options.deleteEvery ? i % options.deleteEvery === 0 : false;
-    entries.set(`by-kind/${kind}/${sha}.json`, JSON.stringify({ requestId, sha256: sha, artifactKind: kind }));
+    // Ascending with i, so the newest artifacts are the HIGHEST i.
+    const createdAtISO = `2026-09-01T00:${String(i % 60).padStart(2, '0')}:${String(Math.floor(i / 60)).padStart(2, '0')}.000Z`;
+    const pointerRepaired = repaired === 'all' || (repaired === 'even' && i % 2 === 0);
+
+    entries.set(
+      `by-kind/${kind}/${sha}.json`,
+      JSON.stringify({
+        requestId,
+        sha256: sha,
+        artifactKind: kind,
+        // A repaired pointer mirrors BOTH fields, exactly as a post-W3 write
+        // path leaves them: the sort key always, the liveness flag only when
+        // the reference carries one.
+        ...(pointerRepaired ? { createdAtISO } : {}),
+        ...(pointerRepaired && deleted ? { deletedAtISO: '2026-09-02T00:00:00.000Z' } : {}),
+      })
+    );
     entries.set(
       `request-artifacts/${encodeURIComponent(requestId)}/${sha}.json`,
       JSON.stringify({
@@ -198,8 +237,7 @@ const seedArtifacts = (count: number, kind: 'image' | 'pdf', options: { deleteEv
         sha256: sha,
         sizeBytes: 100 + i,
         contentType: kind === 'pdf' ? 'application/pdf' : 'image/png',
-        // Ascending with i, so the newest artifacts are the HIGHEST i.
-        createdAtISO: `2026-09-01T00:${String(i % 60).padStart(2, '0')}:${String(Math.floor(i / 60)).padStart(2, '0')}.000Z`,
+        createdAtISO,
         artifactKind: kind,
         ...(deleted ? { deletedAtISO: '2026-09-02T00:00:00.000Z' } : {}),
       })
@@ -208,29 +246,34 @@ const seedArtifacts = (count: number, kind: 'image' | 'pdf', options: { deleteEv
   return entries;
 };
 
-test('listKind reads exactly one pointer + one reference per indexed artifact, and no more', async () => {
+test('listKind on UNREPAIRED pointers costs exactly what it always did, and repairs them as it goes', async () => {
   const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
   const { STORE_READ_CONCURRENCY } = await import('../../packages/core/server/lib/blob-list.js');
 
   const ARTIFACTS = 120;
-  const store = countingIndexStore(seedArtifacts(ARTIFACTS, 'image'));
+  const store = countingIndexStore(seedArtifacts(ARTIFACTS, 'image', { repaired: 'none' }));
   const references = await listKind(store as never, 'image');
 
   const pointerReads = store.reads.filter((key) => key.startsWith('by-kind/'));
   const recordReads = store.reads.filter((key) => key.startsWith('request-artifacts/'));
 
+  // Identical to the pre-W3 numbers: a pointer with no createdAtISO cannot be
+  // placed in the sort at all, so its record still has to be opened.
   assert.equal(pointerReads.length, ARTIFACTS, 'exactly one pointer read per by-kind key');
-  assert.equal(recordReads.length, ARTIFACTS, 'exactly one FULL-RECORD read per by-kind key');
+  assert.equal(recordReads.length, ARTIFACTS, 'an unrepaired pointer still costs its full-record read');
   assert.equal(store.reads.length, ARTIFACTS * 2, 'no read beyond those two per artifact');
   assert.equal(new Set(store.reads).size, store.reads.length, 'no key is read twice in one sweep');
 
-  // The 100-row cap is applied AFTER the reads — this is the O(A)-read-for-
-  // 100-rows ceiling that only an index carrying createdAtISO can remove.
-  assert.equal(references.length, 100);
+  // ...plus the repair. This is the self-healing mechanism: nothing anywhere
+  // runs a backfill, the read path that pays the cost is the one that removes
+  // it.
+  assert.equal(store.writes.length, ARTIFACTS, 'every unrepaired pointer is repaired exactly once');
   assert.ok(
-    recordReads.length > references.length,
-    'documents the ceiling: more records are read than rows are returned'
+    store.writes.every((key) => key.startsWith('by-kind/')),
+    'a repair writes the pointer it read and nothing else'
   );
+
+  assert.equal(references.length, 100);
 
   // Ordering and slicing are unchanged: newest first, top 100.
   const created = references.map((reference) => reference.createdAtISO);
@@ -247,12 +290,85 @@ test('listKind reads exactly one pointer + one reference per indexed artifact, a
     store.peak() <= STORE_READ_CONCURRENCY,
     `peak in-flight reads ${store.peak()} exceeded STORE_READ_CONCURRENCY ${STORE_READ_CONCURRENCY}`
   );
+
+  // The repair is idempotent AND it is what buys the win: run the same sweep
+  // again over the store the first one left behind and the full-record reads
+  // collapse to the rows returned.
+  const second = countingIndexStore(store.entries);
+  const secondReferences = await listKind(second as never, 'image');
+
+  assert.deepEqual(
+    secondReferences.map((reference) => reference.sha256),
+    references.map((reference) => reference.sha256),
+    'repairing a pointer changes cost, never rows'
+  );
+  assert.equal(second.reads.filter((key) => key.startsWith('request-artifacts/')).length, 100);
+  assert.equal(second.writes.length, 0, 'a repaired pointer is never repaired again');
+});
+
+test('listKind on REPAIRED pointers reads ~100 records however large the store is', async () => {
+  const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
+
+  for (const ARTIFACTS of [120, 600]) {
+    const store = countingIndexStore(seedArtifacts(ARTIFACTS, 'image', { repaired: 'all' }));
+    const references = await listKind(store as never, 'image');
+
+    const pointerReads = store.reads.filter((key) => key.startsWith('by-kind/'));
+    const recordReads = store.reads.filter((key) => key.startsWith('request-artifacts/'));
+
+    assert.equal(pointerReads.length, ARTIFACTS, 'the pointer sweep is still one read per by-kind key');
+    assert.equal(
+      recordReads.length,
+      100,
+      `full-record reads must equal the rows returned, not the store size (${ARTIFACTS} artifacts)`
+    );
+    assert.equal(store.writes.length, 0, 'nothing to repair, nothing written');
+    assert.equal(references.length, 100);
+    assert.equal(references[0]?.sha256, String(ARTIFACTS - 1).padStart(64, 'a'), 'the newest artifact leads');
+
+    const created = references.map((reference) => reference.createdAtISO);
+    assert.deepEqual(
+      created,
+      [...created].sort((a, b) => b.localeCompare(a)),
+      'newest first'
+    );
+  }
+});
+
+test('listKind returns the SAME rows on a half-repaired store as on a fully repaired one', async () => {
+  const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
+
+  const ARTIFACTS = 300;
+  const allRepaired = countingIndexStore(seedArtifacts(ARTIFACTS, 'image', { repaired: 'all' }));
+  const mixed = countingIndexStore(seedArtifacts(ARTIFACTS, 'image', { repaired: 'even' }));
+  const noneRepaired = countingIndexStore(seedArtifacts(ARTIFACTS, 'image', { repaired: 'none' }));
+
+  const expected = (await listKind(allRepaired as never, 'image')).map((reference) => reference.sha256);
+  const fromMixed = (await listKind(mixed as never, 'image')).map((reference) => reference.sha256);
+  const fromNone = (await listKind(noneRepaired as never, 'image')).map((reference) => reference.sha256);
+
+  // The failure this pins: sorting only the pointers that happen to carry a
+  // createdAtISO would answer "the newest 100 of the REPAIRED ones". Here the
+  // unrepaired half is interleaved with the repaired half across the whole
+  // date range, so that bug cannot produce this list.
+  assert.equal(expected.length, 100);
+  assert.deepEqual(fromMixed, expected, 'a half-repaired store answers exactly like a fully repaired one');
+  assert.deepEqual(fromNone, expected, 'an unrepaired store answers exactly like a fully repaired one');
+
+  // Cost on the mix sits between the two extremes: the unrepaired half must be
+  // read to be placed at all, the repaired half only if it makes the cut.
+  const mixedRecordReads = mixed.reads.filter((key) => key.startsWith('request-artifacts/')).length;
+  assert.ok(
+    mixedRecordReads > 100 && mixedRecordReads < ARTIFACTS,
+    `a mixed store should read more than the rows returned and fewer than the whole store; read ${mixedRecordReads}`
+  );
+  assert.equal(mixed.writes.length, ARTIFACTS / 2, 'exactly the unrepaired half is repaired');
 });
 
 test('listKind still drops soft-deleted references and keeps the rest in order', async () => {
   const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
 
-  const store = countingIndexStore(seedArtifacts(20, 'pdf', { deleteEvery: 2 }));
+  const store = countingIndexStore(seedArtifacts(20, 'pdf', { deleteEvery: 2, repaired: 'none' }));
   const references = await listKind(store as never, 'pdf');
 
   assert.equal(references.length, 10, 'every second fixture row is soft-deleted');
@@ -261,6 +377,125 @@ test('listKind still drops soft-deleted references and keeps the rest in order',
     'a soft-deleted reference is never returned'
   );
   assert.equal(store.reads.length, 40, 'a soft-deleted artifact still costs its two reads — it is only known after');
+});
+
+test('a repaired pointer that says "deleted" skips its record; one that lies is caught by the record', async () => {
+  const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
+
+  const entries = seedArtifacts(20, 'pdf', { deleteEvery: 2, repaired: 'all' });
+  const store = countingIndexStore(entries);
+  const references = await listKind(store as never, 'pdf');
+
+  assert.equal(references.length, 10, 'every second fixture row is soft-deleted');
+  assert.equal(
+    store.reads.filter((key) => key.startsWith('request-artifacts/')).length,
+    10,
+    'a pointer that already knows the row is deleted saves the record read entirely'
+  );
+
+  /**
+   * The dangerous direction, and why liveness is still decided by the RECORD:
+   * a pointer can be stale-LIVE (a torn write, or a delete that raced this
+   * sweep). Rolling every pointer back to "live" while the records still say
+   * deleted must change nothing about the rows — it may only cost reads.
+   */
+  const stale = new Map(entries);
+  for (const [key, value] of entries) {
+    if (!key.startsWith('by-kind/')) continue;
+    const pointer = JSON.parse(value) as Record<string, unknown>;
+    delete pointer.deletedAtISO;
+    stale.set(key, JSON.stringify(pointer));
+  }
+
+  const staleStore = countingIndexStore(stale);
+  const fromStale = await listKind(staleStore as never, 'pdf');
+
+  assert.deepEqual(
+    fromStale.map((reference) => reference.sha256),
+    references.map((reference) => reference.sha256),
+    'a pointer that wrongly claims a deleted artifact is live never puts it in the result'
+  );
+  assert.equal(
+    staleStore.reads.filter((key) => key.startsWith('request-artifacts/')).length,
+    20,
+    'it costs the reads it saved, and nothing else'
+  );
+});
+
+/**
+ * The read-repair is a WRITE issued from a read path, against a store other
+ * writers are using at the same time. Two rules keep that safe, and both are
+ * pinned here because neither is visible in the rows the sweep returns:
+ *
+ *   - it MERGES onto the stored pointer, so a field it does not know about
+ *     survives — a repair that re-derived the pointer would silently drop
+ *     whatever a newer writer had put there;
+ *   - it writes `createdAtISO` and NOTHING else. `createdAtISO` is immutable
+ *     for a reference, so writing it can never be stale. `deletedAtISO` is
+ *     not: a repair that stamped liveness from a record it read moments ago
+ *     could land after a concurrent restore and hide a live artifact for good,
+ *     so liveness stays the exclusive property of the delete/restore paths.
+ */
+test('the read-repair adds the sort key, keeps every other field, and never writes liveness', async () => {
+  const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
+
+  const entries = seedArtifacts(4, 'image', { deleteEvery: 2, repaired: 'none' });
+  const extraKey = `by-kind/image/${String(1).padStart(64, 'a')}.json`;
+  entries.set(extraKey, JSON.stringify({ ...JSON.parse(entries.get(extraKey) as string), someFutureField: 'keep me' }));
+
+  const store = countingIndexStore(entries);
+  await listKind(store as never, 'image');
+
+  const repairedLive = JSON.parse(entries.get(extraKey) as string) as Record<string, unknown>;
+  assert.equal(repairedLive.someFutureField, 'keep me', 'the repair must not drop a field it does not know about');
+  assert.equal(repairedLive.createdAtISO, '2026-09-01T00:01:00.000Z', 'the repair adds the sort key');
+  assert.equal(repairedLive.deletedAtISO, undefined);
+  assert.equal(repairedLive.requestId, 'req_perf_image1_20260901_01', 'identity is untouched');
+
+  // i=0 is soft-deleted in the fixture (deleteEvery: 2). Its pointer is
+  // repaired for the sort key, and deliberately NOT stamped as deleted.
+  const deletedKey = `by-kind/image/${String(0).padStart(64, 'a')}.json`;
+  const repairedDeleted = JSON.parse(entries.get(deletedKey) as string) as Record<string, unknown>;
+  assert.equal(repairedDeleted.createdAtISO, '2026-09-01T00:00:00.000Z');
+  assert.equal(
+    repairedDeleted.deletedAtISO,
+    undefined,
+    'a read path must never stamp liveness onto a pointer; only the delete path may'
+  );
+});
+
+test('listKind refills past rows whose record turns out to be unusable, rather than returning short', async () => {
+  const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
+
+  // 120 repaired pointers; the 40 NEWEST have records that are gone. A plain
+  // `slice(0, 100)` over the pointers would return 60 rows. The pre-W3 sweep
+  // returned 80 (it read everything, then sliced), and so must this one.
+  const entries = seedArtifacts(120, 'image', { repaired: 'all' });
+  for (let i = 80; i < 120; i += 1) {
+    const sha = String(i).padStart(64, 'a');
+    entries.delete(`request-artifacts/${encodeURIComponent(`req_perf_image${i}_20260901_01`)}/${sha}.json`);
+  }
+
+  const store = countingIndexStore(entries);
+  const references = await listKind(store as never, 'image');
+
+  assert.equal(references.length, 80, 'the 80 artifacts whose records still exist are all returned');
+  assert.deepEqual(
+    references.map((reference) => reference.sha256).sort(),
+    Array.from({ length: 80 }, (_, i) => String(i).padStart(64, 'a')).sort(),
+    'exactly the surviving artifacts, none of the ones whose record is gone'
+  );
+  const createdAt = references.map((reference) => reference.createdAtISO);
+  assert.deepEqual(
+    createdAt,
+    [...createdAt].sort((a, b) => b.localeCompare(a)),
+    'still newest first after a refill'
+  );
+  assert.equal(
+    new Set(store.reads.filter((key) => key.startsWith('request-artifacts/'))).size,
+    120,
+    'refilling reads each record at most once'
+  );
 });
 
 /**

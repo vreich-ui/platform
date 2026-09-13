@@ -45,6 +45,10 @@ import {
   startRequestsIndexPoll,
 } from './requests-store.js';
 import { resetAdminShellClientForTests } from './admin-shell-client.js';
+// The shell handoff is keyed to the page generation. CI has no DOM stack to
+// fire `astro:before-preparation` on, so the navigation case below drives the
+// generation counter at the same seam `AdminLayout.astro`'s listener drives.
+import { beginNewPageGeneration, resetPageGenerationForTests } from './page-generation.js';
 
 const getToken = async () => 'token';
 
@@ -122,8 +126,10 @@ afterEach(() => {
   activeFetch = undefined;
   resetRequestsIndexForTests();
   // The shell client's sticky "no admin-shell on this deploy" flag and its
-  // one-shot handoff are module scope too, for the same ClientRouter reason.
+  // one-shot-per-generation handoff are module scope too, for the same
+  // ClientRouter reason — as is the generation counter they are keyed to.
   resetAdminShellClientForTests();
+  resetPageGenerationForTests();
 });
 
 describe('the optimistic overlay — the real store, not a recorder', () => {
@@ -721,6 +727,41 @@ describe('T-shell — the coalesced first read', () => {
     refreshRequestsIndexNow(getToken);
     await waitFor(() => activeFetch!.countOf(REQUESTS_URL) === 1);
     assert.equal(requestsIndexSnapshot().rows?.[0]?.status, 'archived');
+  });
+
+  /**
+   * The regression this store felt hardest, measured live: the coalescing
+   * worked on only every OTHER navigation. A click inside the old 5 s handoff
+   * window found the previous page's payload still "fresh" and its `requests`
+   * section already taken, so this store fell through to `admin-requests` —
+   * which by then was COLD, because almost all shell traffic goes through
+   * `admin-shell` now. Measured 4167 ms with `cold=1`, against 476 ms for the
+   * coalesced call. The handoff is keyed to the page generation for exactly
+   * this: a new navigation is always owed a new coalesced load.
+   */
+  it('the first tick of the NEXT navigation is coalesced too, not dropped onto the cold endpoint', async () => {
+    const fetchMock = mockFetch({
+      [SHELL_URL]: () => ({ body: shellSection() }),
+      [REQUESTS_URL]: () => ({ body: { ...emptyRequestsBody, seq: 9 } }),
+    });
+    activeFetch = fetchMock;
+    const firstStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => fetchMock.countOf(SHELL_URL) === 1);
+    firstStop();
+
+    const realNow = Date.now;
+    try {
+      // The operator reads the page, then clicks: the island remounts past
+      // T1.2 R2's freshness window (so this tick really does have to ask),
+      // and the layout has begun a new page generation on the way out.
+      Date.now = () => realNow() + REQUESTS_INDEX_FRESH_MS + 1;
+      beginNewPageGeneration();
+      activeStop = startRequestsIndexPoll(getToken);
+      await waitFor(() => fetchMock.countOf(SHELL_URL) === 2);
+    } finally {
+      Date.now = realNow;
+    }
+    assert.equal(fetchMock.countOf(REQUESTS_URL), 0, 'a navigation must never be served by the cold dedicated call');
   });
 
   it('falls back to admin-requests when the shell marks that section errored', async () => {

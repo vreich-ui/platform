@@ -718,13 +718,21 @@ test('save-artifact saves safe ArtifactReference display fields and rejects unsa
     label: string;
     tags: string[];
     sha256: string;
+    createdAtISO: string;
   };
   assert.equal(artifact.originalFilename, 'hero safe.png');
   assert.equal(artifact.label, 'Hero Safe Upload');
   assert.deepEqual(artifact.tags, ['hero', 'safe']);
 
   const indexStore = await getArtifactIndexBlobStore({});
-  const expectedPointer = { requestId, sha256: artifact.sha256, artifactKind: 'image' };
+  // W3 T1: the pointer mirrors the reference's sort key so a listing can order
+  // and slice before it reads any record.
+  const expectedPointer = {
+    requestId,
+    sha256: artifact.sha256,
+    artifactKind: 'image',
+    createdAtISO: artifact.createdAtISO,
+  };
   assert.deepEqual(
     JSON.parse((await indexStore.get(`by-kind/image/${artifact.sha256}.json`)) || '{}'),
     expectedPointer

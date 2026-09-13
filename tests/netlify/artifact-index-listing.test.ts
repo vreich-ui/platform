@@ -260,3 +260,133 @@ test('Artifact listing and metadata retrieval', async () => {
     assert.equal(listAfterRestore.structuredContent.artifacts.length, 1);
   });
 });
+
+/**
+ * W3 T1: `ArtifactPointer` now mirrors the reference's `createdAtISO` and
+ * `deletedAtISO`, so `admin-editorial-assets` can sort and slice a `by-kind/`
+ * listing before it opens a single record. That is only safe while EVERY path
+ * that changes a reference also rewrites its pointers — a soft delete that
+ * touched `request-artifacts/` alone would leave a pointer swearing a deleted
+ * artifact is live, and a restore would leave one swearing a live artifact is
+ * deleted.
+ *
+ * This pins the write side of that contract at the surface an operator uses:
+ * the `soft_delete_artifact` / `restore_artifact` MCP tools.
+ */
+test('soft delete and restore keep every pointer in step with the reference', async () => {
+  await withBlobStores(async ({ indexValues }) => {
+    const bytes = Buffer.from('%PDF-1.7\npointer liveness');
+    const sha = sha256(bytes);
+    const requestId = 'req_test_pointer_liveness_20260913_01';
+
+    await saveArtifactBytes({
+      requestId,
+      artifactKind: ArtifactKind.Pdf,
+      contentType: 'application/pdf',
+      expectedSizeBytes: bytes.byteLength,
+      expectedSha256: sha,
+      bytes,
+      tags: ['liveness'],
+      label: 'Liveness PDF',
+    });
+
+    const pointerKeys = [
+      `by-kind/pdf/${sha}.json`,
+      `by-request/${encodeURIComponent(requestId)}/pdf/${sha}.json`,
+      `by-tag/liveness/${sha}.json`,
+    ];
+    const readPointer = (key: string) =>
+      JSON.parse(String(indexValues.get(key))) as { createdAtISO?: string; deletedAtISO?: string };
+    const readReference = () =>
+      JSON.parse(String(indexValues.get(`request-artifacts/${encodeURIComponent(requestId)}/${sha}.json`))) as {
+        createdAtISO: string;
+        deletedAtISO?: string;
+      };
+
+    const created = readReference().createdAtISO;
+    for (const key of pointerKeys) {
+      const pointer = readPointer(key);
+      assert.equal(pointer.createdAtISO, created, `${key} must carry the reference's sort key`);
+      assert.equal(pointer.deletedAtISO, undefined, `${key} must not claim a live artifact is deleted`);
+    }
+
+    await callMcp('soft_delete_artifact', { requestId, sha256: sha });
+
+    const deletedAt = readReference().deletedAtISO;
+    assert.ok(deletedAt, 'the reference is stamped');
+    for (const key of pointerKeys) {
+      const pointer = readPointer(key);
+      assert.equal(pointer.deletedAtISO, deletedAt, `${key} must carry the same stamp as the reference`);
+      assert.equal(pointer.createdAtISO, created, `${key} must not lose the sort key across a delete`);
+    }
+
+    await callMcp('restore_artifact', { requestId, sha256: sha });
+
+    assert.equal(readReference().deletedAtISO, undefined);
+    for (const key of pointerKeys) {
+      const pointer = readPointer(key);
+      assert.equal(pointer.deletedAtISO, undefined, `${key} must not keep a stamp the reference no longer has`);
+      assert.equal(pointer.createdAtISO, created, `${key} must not lose the sort key across a restore`);
+    }
+  });
+});
+
+/**
+ * W3 T1 follow-up: `by-kind/<kind>/<sha>.json` and `by-tag/<tag>/<sha>.json`
+ * are keyed by sha256 ALONE, so cross-request dedupe (W2 T2.4 — a second
+ * request uploading bytes this tenant already stores gets its own reference
+ * over the same digest) leaves TWO live references behind one pointer.
+ *
+ * While a pointer said nothing about liveness that only decided which
+ * requestId a listing happened to show. Now that `deletedAtISO` on a pointer
+ * lets `admin-editorial-assets` skip the record read entirely, a soft delete
+ * that stamped the shared pointer would take the OTHER request's live artifact
+ * off the media picker with nothing left to notice — no torn write, no race,
+ * just the ordinary delete path. The request-scoped `by-request/` pointer is
+ * still stamped, because that one really is this request's.
+ */
+test('a soft delete never stamps a shared pointer that names another live request', async () => {
+  await withBlobStores(async ({ indexValues }) => {
+    const bytes = Buffer.from('%PDF-1.7\nshared digest, two requests');
+    const sha = sha256(bytes);
+    const deletedRequestId = 'req_test_shared_ptr_a_20260913_01';
+    const liveRequestId = 'req_test_shared_ptr_b_20260913_01';
+
+    for (const requestId of [deletedRequestId, liveRequestId]) {
+      await saveArtifactBytes({
+        requestId,
+        artifactKind: ArtifactKind.Pdf,
+        contentType: 'application/pdf',
+        expectedSizeBytes: bytes.byteLength,
+        expectedSha256: sha,
+        bytes,
+        tags: ['shared'],
+        label: 'Shared PDF',
+      });
+    }
+
+    const readJson = (key: string) => JSON.parse(String(indexValues.get(key))) as Record<string, unknown>;
+    const sharedKeys = [`by-kind/pdf/${sha}.json`, `by-tag/shared/${sha}.json`];
+
+    // The second upload is the last writer, so the shared pointers name it.
+    for (const key of sharedKeys) {
+      assert.equal(readJson(key).requestId, liveRequestId, `${key} names the most recent uploader`);
+    }
+
+    await callMcp('soft_delete_artifact', { requestId: deletedRequestId, sha256: sha });
+
+    for (const key of sharedKeys) {
+      const pointer = readJson(key);
+      assert.equal(pointer.requestId, liveRequestId, `${key} must not be repointed at the deleted request`);
+      assert.equal(pointer.deletedAtISO, undefined, `${key} must not hide ${liveRequestId}'s live reference`);
+    }
+
+    // The request-scoped pointer IS this request's, and is stamped normally.
+    const ownPointer = readJson(`by-request/${encodeURIComponent(deletedRequestId)}/pdf/${sha}.json`);
+    assert.ok(ownPointer.deletedAtISO, 'the deleted request keeps an honest by-request pointer');
+
+    // And the live reference is untouched.
+    const liveReference = readJson(`request-artifacts/${encodeURIComponent(liveRequestId)}/${sha}.json`);
+    assert.equal(liveReference.deletedAtISO, undefined);
+  });
+});
