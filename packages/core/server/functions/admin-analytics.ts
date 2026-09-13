@@ -42,13 +42,72 @@
  * same window (e.g. the range picker firing on mount, then a tab regaining
  * focus) never re-hits Netlify's undocumented, presumably rate-limited
  * Analytics API more than once per TTL.
+ *
+ * ## Server-Timing sections (T-analytics) — reading one `/admin/analytics` load
+ *
+ * `/admin/analytics` fires FOUR separate invocations of this function at
+ * mount (`?resource=views`, `?source=netlify`, `?source=own`,
+ * `?resource=annotations`), plus `?source=insights` on tab open. They are
+ * separate requests, so devtools shows four `Server-Timing` rows side by side
+ * and — until these sections existed — the four looked identical from the
+ * outside, which is how three consecutive waves ended up guessing which row
+ * carried the page's `work`.
+ *
+ * Exactly ONE branch section is emitted per invocation, and it is the branch
+ * name: `sec.views` · `sec.netlify` · `sec.own` · `sec.annotations` ·
+ * `sec.insights` · `sec.arm_metrics` · `sec.notes` · `sec.raw_export` ·
+ * `sec.object_identity`. Each covers everything the branch does AFTER the
+ * auth wall (`auth` is already its own phase metric), so `sec.<branch>` is
+ * very nearly that invocation's whole `work`, and the four rows' branch
+ * sections attribute the page with nothing left over.
+ *
+ * Inside the branches that talk to something slow the phases are split
+ * further — an external HTTP call, local store work and local CPU are three
+ * different findings and must not share one number:
+ *
+ *   `netlify_upstream_pageviews` — the CURRENT window: `/pageviews`, then
+ *       `/visitors` + `/ranking/pages` + `/ranking/sources` fanned out. Four
+ *       Netlify Analytics calls in two dependent layers.
+ *   `netlify_upstream_previous`  — those same four again for the preceding
+ *       window (D3's KPI deltas). Best-effort.
+ *   `netlify_upstream_rankings`  — `/ranking/not_found` + `/ranking/countries`.
+ *   `netlify_upstream_bandwidth` — the one `/bandwidth` probe.
+ *   `netlify_shape`              — LOCAL only: series mapping, body, ETag
+ *       hash. No network; eleven upstream calls sit above it.
+ *
+ *   `own_sink_stats`       — the ONE HTTP call to the tracking sink (`/stats`).
+ *   `own_object_directory` — the committed-export read, memoised per deploy,
+ *       so ~0 on every invocation after the first on a warm container.
+ *   `own_surfaces`         — `publishingSurfaces`: up to two object-store point
+ *       reads per row of `top_objects`, run strictly AFTER the directory read.
+ *       If both are large, that sequencing is the finding.
+ *   `own_shape`            — LOCAL only: the ETag hash of the own body.
+ *
+ *   `views_store` / `views_read`               — the Blobs handle, then the one
+ *       `views/index.json` GET. If `sec.views` is seconds, one of these says
+ *       which half.
+ *   `annotations_stores` / `annotations_markers` — the two Blobs handles, then
+ *       W3.3's five-warm-read marker sweep.
+ *   `insights_fetch` · `arm_rollups` / `arm_experiments` / `arm_weights`.
+ *
+ * The three `netlify_upstream_*` after the first, and the three `arm_*`, run
+ * CONCURRENTLY: they overlap and sum to more than their branch. Per
+ * `timeSection`'s own doc, a section's `dur` is what removing it would save
+ * only if it were the slowest one.
+ *
+ * **A memo hit is legible by ABSENCE.** Every `*_upstream_*` / `*_sink_*` /
+ * `*_read` / `*_markers` section sits PAST its branch's memo check, so a row
+ * carrying `sec.netlify` with no `sec.netlify_upstream_pageviews` beside it
+ * was served from the warm-instance memo and cost nothing upstream. The one
+ * shape this cannot explain is a large branch section with no inner section
+ * at all — that would put the cost in the memo/ETag path itself.
  */
 import { createHash } from 'node:crypto';
 
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
-import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
+import { timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import {
   fetchTrafficAnalytics,
   fetchNotFoundAndCountries,
@@ -278,9 +337,17 @@ const ownAnalyticsResponse = async (
   if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
 
   try {
-    const stats = await fetchOwnTrackerStats(
-      { from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString() },
-      { filters: { country: filters.country, source: filters.source, object_id: filters.object_id } }
+    // `own_sink_stats` is the ONE external call this branch makes; the two
+    // sections after it are local store work, and they are deliberately
+    // measured apart from it and from each other — "the sink is slow", "the
+    // export directory is cold" and "the per-object surface reads are a
+    // sweep in disguise" are three different findings with three different
+    // fixes, and a single number for the branch cannot tell them apart.
+    const stats = await timeSection('own_sink_stats', () =>
+      fetchOwnTrackerStats(
+        { from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString() },
+        { filters: { country: filters.country, source: filters.source, object_id: filters.object_id } }
+      )
     );
 
     // D6 — resolve every object id this response references (top objects +
@@ -289,7 +356,15 @@ const ownAnalyticsResponse = async (
       ...(stats.top_objects ?? []).map((row) => row?.object_id),
       ...(stats.engagement_funnel ?? []).map((row) => row?.object_id),
     ].filter((id): id is string => typeof id === 'string' && id.length > 0);
-    const objectDirectory = await resolveAnalyticsObjectDirectory(binding.dataRoot, objectIds);
+    const objectDirectory = await timeSection('own_object_directory', () =>
+      resolveAnalyticsObjectDirectory(binding.dataRoot, objectIds)
+    );
+
+    // Measured as its own section rather than folded into the body literal:
+    // this runs strictly AFTER the directory read above (the two are
+    // independent and could be concurrent), so the two durations side by
+    // side are what says whether that sequencing is worth changing.
+    const surfaces = await timeSection('own_surfaces', () => publishingSurfaces(binding, stats.top_objects ?? []));
 
     const body = {
       configured: true,
@@ -299,9 +374,13 @@ const ownAnalyticsResponse = async (
       stats,
       object_directory: objectDirectory,
       // W7.4: which surface published each of the objects in this window.
-      surfaces: surfaceSplit(stats, await publishingSurfaces(binding, stats.top_objects ?? [])),
+      surfaces: surfaceSplit(stats, surfaces),
     };
-    const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
+    const entry: MemoEntry = {
+      body,
+      etag: await timeSection('own_shape', () => etagFor(body)),
+      expiresAt: Date.now() + MEMO_TTL_MS,
+    };
     memo.set(cacheKey, entry);
     return cachedResponse(entry, ifNoneMatch);
   } catch (error) {
@@ -365,11 +444,15 @@ const viewInputFromBody = (body: Record<string, unknown>): AnalyticsViewInput | 
 
 /** GET/POST/DELETE `?resource=views` — the Views menu's list/save/delete. Same admin auth wall; a small blob store, not the object substrate (see `analytics-views-logic.ts`'s header for why). */
 const viewsResourceResponse = async (binding: SiteBinding, event: LambdaEvent) => {
-  const store = await getAnalyticsViewsBlobStore(event, binding);
+  // Split in two because "opening the Blobs handle" and "the one GET of
+  // views/index.json" fail slow for entirely different reasons — a handle
+  // that has to resolve a site/token is platform latency, a slow GET is the
+  // store itself. A saved-views read costing seconds has to say which.
+  const store = await timeSection('views_store', () => getAnalyticsViewsBlobStore(event, binding));
   const params = event.queryStringParameters ?? {};
 
   if (event.httpMethod === 'GET') {
-    return jsonResponse(200, { views: await listAnalyticsViews(store) });
+    return jsonResponse(200, { views: await timeSection('views_read', () => listAnalyticsViews(store)) });
   }
 
   if (event.httpMethod === 'POST') {
@@ -492,19 +575,25 @@ const shippedMarkerCacheFor = (binding: SiteBinding, from: string, to: string): 
 
 const annotationsResourceResponse = async (binding: SiteBinding, event: LambdaEvent) => {
   const params = event.queryStringParameters ?? {};
-  if (!params.from || !params.to) return jsonResponse(400, { error: 'from and to are required (ISO timestamps).' });
+  // Bound before the sections below so the narrowing survives into their
+  // closures — `params.from` is `string | undefined` again inside one.
+  const { from, to } = params;
+  if (!from || !to) return jsonResponse(400, { error: 'from and to are required (ISO timestamps).' });
 
-  const [objectsStore, viewsStore] = await Promise.all([
-    getSiteObjectsBlobStore(event, binding),
-    getAnalyticsViewsBlobStore(event, binding),
-  ]);
-  const markers = await fetchAnnotationMarkers({
-    store: objectsStore as unknown as ObjectVerbStore,
-    viewsStore,
-    from: params.from,
-    to: params.to,
-    shippedCache: shippedMarkerCacheFor(binding, params.from, params.to),
-  });
+  const [objectsStore, viewsStore] = await timeSection('annotations_stores', () =>
+    Promise.all([getSiteObjectsBlobStore(event, binding), getAnalyticsViewsBlobStore(event, binding)])
+  );
+  // W3.3 took this from 14 listings + a record per object to 5 warm reads;
+  // its own section is what proves that is still true on the next reading.
+  const markers = await timeSection('annotations_markers', () =>
+    fetchAnnotationMarkers({
+      store: objectsStore as unknown as ObjectVerbStore,
+      viewsStore,
+      from,
+      to,
+      shippedCache: shippedMarkerCacheFor(binding, from, to),
+    })
+  );
   const body = { markers };
   const etag = timeSerialize(() => etagFor(body));
   const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
@@ -614,7 +703,7 @@ const insightsAnalyticsResponse = async (ifNoneMatch: string | undefined) => {
   if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
 
   try {
-    const body = await fetchAnalyticsInsights();
+    const body = await timeSection('insights_fetch', () => fetchAnalyticsInsights());
     // `InsightsOverview` is a named interface (unlike every other branch's
     // inline object-literal body), so it needs an explicit cast to satisfy
     // `MemoEntry.body`'s `Record<string, unknown>` — TS requires a declared
@@ -673,10 +762,15 @@ const armMetricsResponse = async (binding: SiteBinding, ifNoneMatch: string | un
   if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
 
   try {
+    // Concurrent, so these three overlap and sum to more than `sec.arm_metrics`
+    // — each one's `dur` is its own wall time, i.e. what removing it would
+    // save only if it were the slowest of the three.
     const [rows, experiments, weights] = await Promise.all([
-      fetchOwnTrackerRollups(),
-      readTrackingExperiments(binding),
-      fetchOwnTrackerWeights({ warn: (message) => console.warn(`[admin-analytics] ${message}`) }),
+      timeSection('arm_rollups', () => fetchOwnTrackerRollups()),
+      timeSection('arm_experiments', () => readTrackingExperiments(binding)),
+      timeSection('arm_weights', () =>
+        fetchOwnTrackerWeights({ warn: (message) => console.warn(`[admin-analytics] ${message}`) })
+      ),
     ]);
     const body = { configured: true, enabled: true, rows, experiments, weights };
     const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
@@ -703,7 +797,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
-    return viewsResourceResponse(binding, event);
+    return timeSection('views', () => viewsResourceResponse(binding, event));
   }
 
   if (params.resource === 'raw_export') {
@@ -711,7 +805,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
-    return rawExportResourceResponse(params);
+    return timeSection('raw_export', () => rawExportResourceResponse(params));
   }
 
   if (params.resource === 'annotations') {
@@ -719,14 +813,15 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
-    return annotationsResourceResponse(binding, event);
+    return timeSection('annotations', () => annotationsResourceResponse(binding, event));
   }
 
   if (params.resource === 'notes') {
     const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
-    return notesResourceResponse(binding, event, access.email);
+    const actorEmail = access.email;
+    return timeSection('notes', () => notesResourceResponse(binding, event, actorEmail));
   }
 
   if (params.resource === 'object_identity') {
@@ -734,7 +829,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     const access = await timeAuth(() => resolveAdminAccessFromEvent(event, context, binding));
     if (!access.authenticated) return jsonResponse(401, { error: access.error || 'Authentication is required.' });
     if (!access.isAdmin || !access.email) return jsonResponse(403, { error: 'Admin access is required.' });
-    return objectIdentityResourceResponse(binding, event);
+    return timeSection('object_identity', () => objectIdentityResourceResponse(binding, event));
   }
 
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
@@ -748,106 +843,124 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   if (params.source === 'own') {
     const ifNoneMatchOwn = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-    return ownAnalyticsResponse(binding, range, custom, filters, ifNoneMatchOwn);
+    return timeSection('own', () => ownAnalyticsResponse(binding, range, custom, filters, ifNoneMatchOwn));
   }
 
   if (params.source === 'insights') {
     const ifNoneMatchInsights = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-    return insightsAnalyticsResponse(ifNoneMatchInsights);
+    return timeSection('insights', () => insightsAnalyticsResponse(ifNoneMatchInsights));
   }
 
   if (params.source === 'arm_metrics') {
     const ifNoneMatchArm = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-    return armMetricsResponse(binding, ifNoneMatchArm);
+    return timeSection('arm_metrics', () => armMetricsResponse(binding, ifNoneMatchArm));
   }
 
-  const windowResult = resolveDateWindow(range, new Date(), custom);
-  if (!windowResult.ok) return jsonResponse(400, { error: windowResult.error });
-  const window = windowResult.window;
+  // The Netlify branch has no helper of its own (it IS the dispatcher's
+  // tail), so its section wraps the remainder directly rather than a call.
+  // Named `netlify` to sit beside `views`/`own`/`annotations` in a trace of
+  // the four invocations this page fires at mount.
+  return timeSection('netlify', async () => {
+    const windowResult = resolveDateWindow(range, new Date(), custom);
+    if (!windowResult.ok) return jsonResponse(400, { error: windowResult.error });
+    const window = windowResult.window;
 
-  // Not configured at all (missing token/site id) — same env vars as
-  // deploy_lookup, so this can only happen if that family is also broken.
-  // Not an error to surface loudly: an honest, catalogued degrade.
-  if (!isNetlifyAnalyticsLookupConfigured()) {
-    return jsonResponse(
-      200,
-      {
-        configured: false,
-        enabled: false,
-        error_code: 'analytics_lookup_unconfigured',
-        message: 'Netlify Analytics credentials are not configured for this site.',
-        range,
-      },
-      { 'Cache-Control': CACHE_CONTROL }
-    );
-  }
+    // Not configured at all (missing token/site id) — same env vars as
+    // deploy_lookup, so this can only happen if that family is also broken.
+    // Not an error to surface loudly: an honest, catalogued degrade.
+    if (!isNetlifyAnalyticsLookupConfigured()) {
+      return jsonResponse(
+        200,
+        {
+          configured: false,
+          enabled: false,
+          error_code: 'analytics_lookup_unconfigured',
+          message: 'Netlify Analytics credentials are not configured for this site.',
+          range,
+        },
+        { 'Cache-Control': CACHE_CONTROL }
+      );
+    }
 
-  const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
-  const cacheKey = `${binding.siteId}:${range}:${window.from}:${window.to}:${window.resolution}`;
-  const cached = memo.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
+    const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];
+    const cacheKey = `${binding.siteId}:${range}:${window.from}:${window.to}:${window.resolution}`;
+    const cached = memo.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cachedResponse(cached, ifNoneMatch);
 
-  try {
-    const siteHost = siteHostFromEnv();
-    const raw = await fetchTrafficAnalytics(window, siteHost);
-    const series = mapAnalyticsToChartSeries(raw);
+    try {
+      const siteHost = siteHostFromEnv();
+      // ELEVEN calls to the Netlify Analytics API hang off the next two
+      // statements (4 here, 4 in the previous window, 2 rankings, 1 bandwidth),
+      // in two dependent layers. They are the only thing on this whole page we
+      // do not control, so each group gets its own section: a slow branch has
+      // to say WHICH group, or the fix is a guess again.
+      const raw = await timeSection('netlify_upstream_pageviews', () => fetchTrafficAnalytics(window, siteHost));
 
-    // R6.2 — every one of these is best-effort and independent: none of
-    // them may throw past this point (their own modules already catch), so
-    // a failure on any one never blocks the primary series above.
-    const [previousRaw, notFoundAndCountries, bandwidthBytes] = await Promise.all([
-      fetchPreviousTrafficAnalytics(window, siteHost),
-      fetchNotFoundAndCountries(window).catch(() => null),
-      bandwidthKnownUnavailable ? Promise.resolve(null) : fetchBandwidth(window),
-    ]);
-    if (bandwidthBytes === null) bandwidthKnownUnavailable = true;
+      // R6.2 — every one of these is best-effort and independent: none of
+      // them may throw past this point (their own modules already catch), so
+      // a failure on any one never blocks the primary series above.
+      // Concurrent, so the three sections overlap each other.
+      const [previousRaw, notFoundAndCountries, bandwidthBytes] = await Promise.all([
+        timeSection('netlify_upstream_previous', () => fetchPreviousTrafficAnalytics(window, siteHost)),
+        timeSection('netlify_upstream_rankings', () => fetchNotFoundAndCountries(window).catch(() => null)),
+        timeSection('netlify_upstream_bandwidth', () =>
+          bandwidthKnownUnavailable ? Promise.resolve(null) : fetchBandwidth(window)
+        ),
+      ]);
+      if (bandwidthBytes === null) bandwidthKnownUnavailable = true;
 
-    // R6.4/D8 — "excl. admin" combines both path-shaped rankings
-    // (`topPaths` + `topNotFound`) that could carry a `/admin`/`/.netlify`
-    // row; "Internal" is `topSources`' same-host referrers alone. Both are
-    // approximations computed from visible ranking rows only (Netlify's
-    // aggregate totals can't be filtered directly) — labelled as such on
-    // the client, never presented as exact.
-    const excludedAdminVisits =
-      (raw.excludedAdminPathVisits ?? 0) + (notFoundAndCountries?.excludedAdminNotFoundVisits ?? 0);
-    const internalReferrerVisits = raw.internalReferrerVisits ?? 0;
+      // R6.4/D8 — "excl. admin" combines both path-shaped rankings
+      // (`topPaths` + `topNotFound`) that could carry a `/admin`/`/.netlify`
+      // row; "Internal" is `topSources`' same-host referrers alone. Both are
+      // approximations computed from visible ranking rows only (Netlify's
+      // aggregate totals can't be filtered directly) — labelled as such on
+      // the client, never presented as exact.
+      const excludedAdminVisits =
+        (raw.excludedAdminPathVisits ?? 0) + (notFoundAndCountries?.excludedAdminNotFoundVisits ?? 0);
+      const internalReferrerVisits = raw.internalReferrerVisits ?? 0;
 
-    const body = {
-      configured: true,
-      enabled: true,
-      range,
-      window,
-      series,
-      previousSeries: previousRaw ? mapAnalyticsToChartSeries(previousRaw) : undefined,
-      topNotFound: notFoundAndCountries?.topNotFound,
-      topCountries: notFoundAndCountries?.topCountries,
-      bandwidthBytes,
-      excludedAdminVisits,
-      internalReferrerVisits,
-    };
-    const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
-    memo.set(cacheKey, entry);
-    return cachedResponse(entry, ifNoneMatch);
-  } catch (error) {
-    if (error instanceof NetlifyAnalyticsNotEnabledError) {
-      // A per-tenant plan gap, not a fault — catalogued and cached exactly
-      // like a real result so a tenant without the add-on doesn't hammer the
-      // API every time someone opens the page.
-      const body = {
-        configured: true,
-        enabled: false,
-        error_code: 'analytics_not_enabled',
-        message:
-          'Analytics is not enabled for this site. Turn on the Netlify Analytics add-on for this site in Netlify to see analytics data here.',
-        range,
-      };
-      const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
+      // Everything from here down is LOCAL CPU — no network. Measured apart
+      // from the upstream sections above so "the API is slow" can never be
+      // confused with "mapping 90 days of buckets is slow".
+      const entry: MemoEntry = await timeSection('netlify_shape', () => {
+        const body = {
+          configured: true,
+          enabled: true,
+          range,
+          window,
+          series: mapAnalyticsToChartSeries(raw),
+          previousSeries: previousRaw ? mapAnalyticsToChartSeries(previousRaw) : undefined,
+          topNotFound: notFoundAndCountries?.topNotFound,
+          topCountries: notFoundAndCountries?.topCountries,
+          bandwidthBytes,
+          excludedAdminVisits,
+          internalReferrerVisits,
+        };
+        return { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
+      });
       memo.set(cacheKey, entry);
       return cachedResponse(entry, ifNoneMatch);
+    } catch (error) {
+      if (error instanceof NetlifyAnalyticsNotEnabledError) {
+        // A per-tenant plan gap, not a fault — catalogued and cached exactly
+        // like a real result so a tenant without the add-on doesn't hammer the
+        // API every time someone opens the page.
+        const body = {
+          configured: true,
+          enabled: false,
+          error_code: 'analytics_not_enabled',
+          message:
+            'Analytics is not enabled for this site. Turn on the Netlify Analytics add-on for this site in Netlify to see analytics data here.',
+          range,
+        };
+        const entry: MemoEntry = { body, etag: etagFor(body), expiresAt: Date.now() + MEMO_TTL_MS };
+        memo.set(cacheKey, entry);
+        return cachedResponse(entry, ifNoneMatch);
+      }
+      console.error('Failed to load analytics.', error);
+      return jsonResponse(500, { error: 'Analytics data could not be loaded.' });
     }
-    console.error('Failed to load analytics.', error);
-    return jsonResponse(500, { error: 'Analytics data could not be loaded.' });
-  }
+  });
 };
 
 export const createHandler = (binding: SiteBinding) => withServerTiming('admin-analytics', buildHandlerImpl(binding));

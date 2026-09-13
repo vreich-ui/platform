@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, rm } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 
 import { handler } from '../../netlify/functions/admin-analytics.js';
 import { handler as compatHandler } from '../../netlify/functions/admin-traffic.js';
@@ -20,6 +20,12 @@ import {
 import { objectTypes, type ObjectRecord } from '../../packages/core/schema/object-record-v1.js';
 
 const parseBody = (response: { body: string }) => JSON.parse(response.body) as Record<string, unknown>;
+
+/** The compiled CI run executes from `.tmp/ci-test`; source-pinning assertions below need the real tree. Same resolution as `artifacts.test.ts`. */
+const REPO_ROOT = (() => {
+  const cwd = process.cwd();
+  return basename(cwd) === 'ci-test' && basename(dirname(cwd)) === '.tmp' ? join(cwd, '..', '..') : cwd;
+})();
 
 const LOCAL_BLOBS_ROOT = join(process.cwd(), '.netlify', 'local-blobs-test', 'admin-analytics');
 setLocalBlobsRootForTesting(LOCAL_BLOBS_ROOT);
@@ -140,6 +146,173 @@ test('admin-analytics carries a Server-Timing header on a 401', async () => {
   assert.match(
     response.headers['Server-Timing'],
     /cold;dur=\d.*auth;dur=[\d.]+.*work;dur=[\d.]+.*serialize;dur=[\d.]+/
+  );
+});
+
+// ── T-analytics: every invocation this page fires says which one it is ──────
+//
+// `/admin/analytics` fires FOUR invocations of THIS function at mount
+// (`?resource=views`, `?source=netlify`, `?source=own`, `?resource=annotations`)
+// and they arrive as four indistinguishable `Server-Timing` rows in devtools.
+// Three waves in a row had to guess which row carried the page's ~2.4 s of
+// `work`. The guard below is what stops a fourth: each of the four must name
+// itself with its own `sec.<branch>` metric, and the expensive branches must
+// additionally split their phases, so one reading attributes the cost instead
+// of prompting another investigation.
+const timingOf = (response: { headers?: Record<string, string> }): string => {
+  const header = response.headers?.['Server-Timing'];
+  assert.ok(header, 'Server-Timing header must be present');
+  return header;
+};
+
+/** `sec.<name>;dur=<ms>` → the ms, or undefined when this invocation never entered that section. */
+const sectionMs = (header: string, name: string): number | undefined => {
+  const match = header.match(new RegExp(`(?:^|, )sec\\.${name};dur=([\\d.]+)`));
+  return match ? Number(match[1]) : undefined;
+};
+
+const withAdminEnv = async (run: () => Promise<void>) => {
+  const saved = {
+    NETLIFY: process.env.NETLIFY,
+    NETLIFY_SITE_ID: process.env.NETLIFY_SITE_ID,
+    ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+  };
+  process.env.NETLIFY = 'false';
+  process.env.NETLIFY_SITE_ID = '';
+  process.env.ADMIN_EMAILS = 'owner@example.com';
+  try {
+    await run();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+};
+
+const ADMIN_CONTEXT = { clientContext: { user: { sub: 'owner-1', email: 'owner@example.com' } } };
+
+test('T-analytics: each of the four mount invocations names its own resource in Server-Timing', async () => {
+  await withAdminEnv(async () => {
+    const call = (queryStringParameters: Record<string, string>) =>
+      handler({ httpMethod: 'GET', queryStringParameters, headers: {} }, ADMIN_CONTEXT);
+
+    // The four the page fires at mount, in the order the client fires them.
+    const views = timingOf(await call({ resource: 'views' }));
+    const netlify = timingOf(await call({ source: 'netlify' }));
+    const own = timingOf(await call({ source: 'own' }));
+    const annotations = timingOf(await call({ resource: 'annotations', from: WINDOW.from, to: WINDOW.to }));
+
+    // Each row carries EXACTLY its own branch name — the whole point is that
+    // four rows side by side are told apart without opening the request.
+    assert.notEqual(sectionMs(views, 'views'), undefined, '?resource=views must emit sec.views');
+    assert.notEqual(sectionMs(netlify, 'netlify'), undefined, '?source=netlify must emit sec.netlify');
+    assert.notEqual(sectionMs(own, 'own'), undefined, '?source=own must emit sec.own');
+    assert.notEqual(
+      sectionMs(annotations, 'annotations'),
+      undefined,
+      '?resource=annotations must emit sec.annotations'
+    );
+
+    // ...and only its own: a row that claimed two branches would make the
+    // four ambiguous again, which is the failure this whole change exists to
+    // prevent.
+    for (const [header, mine] of [
+      [views, 'views'],
+      [netlify, 'netlify'],
+      [own, 'own'],
+      [annotations, 'annotations'],
+    ] as const) {
+      for (const other of ['views', 'netlify', 'own', 'annotations'] as const) {
+        if (other === mine) continue;
+        assert.equal(sectionMs(header, other), undefined, `sec.${mine} row must not also carry sec.${other}`);
+      }
+    }
+
+    // The four phase metrics are untouched by the sections beside them.
+    assert.match(views, /cold;dur=\d.*auth;dur=[\d.]+.*work;dur=[\d.]+.*serialize;dur=[\d.]+/);
+  });
+});
+
+test('T-analytics: the two store-backed branches split their phases, not just their totals', async () => {
+  await withAdminEnv(async () => {
+    // A branch total alone cannot say whether a slow saved-views read is the
+    // Blobs handle or the blob; these two sections are what answer that.
+    const views = timingOf(
+      await handler({ httpMethod: 'GET', queryStringParameters: { resource: 'views' }, headers: {} }, ADMIN_CONTEXT)
+    );
+    assert.notEqual(sectionMs(views, 'views_store'), undefined, 'sec.views_store must be present');
+    assert.notEqual(sectionMs(views, 'views_read'), undefined, 'sec.views_read must be present');
+
+    const annotations = timingOf(
+      await handler(
+        {
+          httpMethod: 'GET',
+          queryStringParameters: { resource: 'annotations', from: WINDOW.from, to: WINDOW.to },
+          headers: {},
+        },
+        ADMIN_CONTEXT
+      )
+    );
+    assert.notEqual(sectionMs(annotations, 'annotations_stores'), undefined, 'sec.annotations_stores must be present');
+    assert.notEqual(
+      sectionMs(annotations, 'annotations_markers'),
+      undefined,
+      'sec.annotations_markers must be present — W3.3`s five-warm-read sweep needs its own number'
+    );
+  });
+});
+
+test('T-analytics: a branch that never reached its upstream emits no upstream section', async () => {
+  // The memo/degrade tell, asserted rather than described: with no Analytics
+  // credentials and no tracking sink configured, both branches return their
+  // catalogued "not configured" body WITHOUT calling out. The branch section
+  // is present, every `*_upstream_*`/`*_sink_*` section is absent — which is
+  // exactly how a warm memo hit reads too, and is why "sec.netlify is large
+  // but sec.netlify_upstream_pageviews is missing" is a real finding rather
+  // than a gap in the instrumentation.
+  await withAdminEnv(async () => {
+    const netlify = timingOf(
+      await handler({ httpMethod: 'GET', queryStringParameters: { source: 'netlify' }, headers: {} }, ADMIN_CONTEXT)
+    );
+    assert.notEqual(sectionMs(netlify, 'netlify'), undefined);
+    for (const phase of ['netlify_upstream_pageviews', 'netlify_upstream_previous', 'netlify_shape'] as const) {
+      assert.equal(sectionMs(netlify, phase), undefined, `sec.${phase} must be absent when the API was never called`);
+    }
+
+    const own = timingOf(
+      await handler({ httpMethod: 'GET', queryStringParameters: { source: 'own' }, headers: {} }, ADMIN_CONTEXT)
+    );
+    assert.notEqual(sectionMs(own, 'own'), undefined);
+    assert.equal(sectionMs(own, 'own_sink_stats'), undefined, 'an unconfigured sink is never called');
+  });
+});
+
+// T-analytics: the one unbounded external dependency left on this page.
+// `netlify-analytics.ts` passed NO `signal` to any of its ELEVEN calls, so
+// each inherited Node's default (no request deadline at all) — the same shape
+// as admin-governance's inherited 90 s health probe. Pinned by source because
+// there is nothing to observe from the outside until the upstream hangs, and
+// by then it has already cost a page load.
+test('T-analytics: every Netlify Analytics call declares a timeout', async () => {
+  const source = await readFile(join(REPO_ROOT, 'packages/core/server/lib/netlify-analytics.ts'), 'utf8');
+  const fetchCalls = source.match(/await fetch\(/g) ?? [];
+  assert.equal(fetchCalls.length, 1, 'all Analytics traffic goes through the single fetchNetlifyAnalyticsApi call');
+  assert.match(
+    source,
+    /signal: AbortSignal\.timeout\(NETLIFY_ANALYTICS_TIMEOUT_MS\)/,
+    'the shared Analytics fetch must carry an explicit deadline'
+  );
+  const declared = source.match(/const NETLIFY_ANALYTICS_TIMEOUT_MS = ([\d_]+);/)?.[1];
+  assert.ok(declared, 'the deadline must be a named constant, so it is greppable and arguable');
+  const ms = Number(declared.replace(/_/g, ''));
+  // Bounds, not a magic number: tighter than the sink reads on this same page
+  // would make Analytics the first thing to fail on a slow-but-working
+  // upstream; looser than a synchronous function's own budget would make the
+  // deadline decorative.
+  assert.ok(
+    ms > 2_500 && ms <= 10_000,
+    `Analytics deadline ${ms} ms must sit between the measured worst case and the function budget`
   );
 });
 
