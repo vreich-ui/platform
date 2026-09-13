@@ -376,6 +376,24 @@ const VISUAL_IDENTITY_BINDING = {
   inputMapping: { tenantId: 'projectId', autoApply: 'apply' },
 };
 
+// A4 — the one EXECUTOR-bound operation in production (CMS-Agent #321):
+// read-only (riskLevel "read"), so needsDurableRegistration(effects) is
+// false and it is the operation the "answers inline, registers nothing"
+// tests below exercise. Its executorBinding names the SAME field names the
+// operation's own input already uses (tenantId, objectType, ...) — no
+// inputMapping, unlike the workflow-bound fixtures above.
+const SITE_INVENTORY_DESCRIPTOR = {
+  operationId: 'site_inventory',
+  version: 1,
+  title: 'Site inventory',
+  effects: [{ kind: 'read_site_inventory', riskLevel: 'read' }],
+};
+const SITE_INVENTORY_EXECUTOR_BINDING = {
+  executorId: 'site_inventory_executor',
+  operationId: 'site_inventory',
+  inputSchema: { type: 'object', required: ['tenantId'] },
+};
+
 /** A per-tool-name responder, for tests that need operation_get/operation_preflight to differ from workflow_start_dry_run. */
 const namedCtx = (
   respond: (
@@ -1004,4 +1022,391 @@ test('run_workspace_workflow: the plain workflow_id path (no operation_id) sends
     'operation_get/operation_preflight are never called on the plain workflow_id path'
   );
   assert.equal((calls[0]!.args as { workflowId?: string }).workflowId, 'not_a_registered_workflow_id');
+});
+
+// ─── A4 (CMS-Agent #321): executor-bound operations dispatch through
+// operation.execute, not workflow_start_dry_run — and, being read-only,
+// answer inline with NO durable registration (no req_…, no phantom running
+// entry) ───────────────────────────────────────────────────────────────────
+
+test('run_workspace_workflow(operation_id: site_inventory) dispatches operation_execute, NOT workflow_start_dry_run, and registers no request', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: SITE_INVENTORY_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'site_inventory',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [],
+            effects: SITE_INVENTORY_DESCRIPTOR.effects,
+            executable: true,
+            binding: null,
+            executorBinding: SITE_INVENTORY_EXECUTOR_BINDING,
+          },
+        };
+      if (name === 'operation_execute')
+        return {
+          ok: true,
+          data: {
+            operationId: 'site_inventory',
+            tenantId: 'platform',
+            executed: true,
+            refusal: null,
+            result: { objects: [{ objectId: 'page_home', objectType: 'page' }] },
+            completion: [{ id: 'inventory_returned' }],
+          },
+        };
+      // workflow_start_dry_run — must never be reached.
+      return { ok: true, data: { run: { runId: 'should_never_start' } } };
+    },
+    calls,
+    registered
+  );
+
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'site_inventory',
+    input: { objectType: 'page' },
+  });
+
+  assert.equal(result.is_error, false);
+  assert.equal(
+    calls.map((c) => c.name).join(','),
+    'operation_get,operation_preflight,operation_execute',
+    'workflow_start_dry_run must never be called for an executor-bound operation'
+  );
+  assert.equal(
+    calls.some((c) => c.name === 'workflow_start_dry_run'),
+    false
+  );
+
+  // THE fix (item 3): a pure read answers inline and registers NOTHING.
+  assert.equal(registered.length, 0, 'a read-only executor dispatch must never call ctx.requests.register');
+  const body = JSON.parse(result.content) as { operation_id: string; result: unknown; request_id?: string };
+  assert.equal(body.operation_id, 'site_inventory');
+  assert.deepEqual(body.result, { objects: [{ objectId: 'page_home', objectType: 'page' }] });
+  assert.equal('request_id' in body, false, 'no req_… id is minted for an inline executor result');
+});
+
+test('run_workspace_workflow(operation_id: site_inventory) sets tenantId from the SITE, never from the model — no inputMapping rename on this path', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const ctx = namedCtx((name) => {
+    if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: SITE_INVENTORY_DESCRIPTOR } };
+    if (name === 'operation_preflight')
+      return {
+        ok: true,
+        data: {
+          operationId: 'site_inventory',
+          selectedVersion: 1,
+          missingRequired: [],
+          blockers: [],
+          effects: SITE_INVENTORY_DESCRIPTOR.effects,
+          executable: true,
+          binding: null,
+          executorBinding: SITE_INVENTORY_EXECUTOR_BINDING,
+        },
+      };
+    if (name === 'operation_execute')
+      return {
+        ok: true,
+        data: { operationId: 'site_inventory', executed: true, refusal: null, result: {}, completion: [] },
+      };
+    return { ok: true, data: {} };
+  }, calls);
+
+  await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'site_inventory',
+    input: {
+      objectType: 'page',
+      // Pre-rename spoof: the model's own tenantId, supplied directly.
+      tenantId: 'attacker-tenant',
+      // A model-supplied projectId is inert too — this path never renames
+      // tenantId -> projectId (there is no inputMapping at all here), so
+      // projectId is just an ordinary, unused field on this operation.
+      projectId: 'attacker-tenant-mapped',
+      approved: true,
+      principal: { kind: 'human', id: 'attacker', email: 'x@example.com' },
+    },
+  });
+
+  const preflightArgs = calls.find((c) => c.name === 'operation_preflight')!.args;
+  assert.equal(preflightArgs.tenantId, 'platform');
+  assert.equal((preflightArgs.input as Record<string, unknown>).tenantId, 'platform');
+
+  const executeArgs = calls.find((c) => c.name === 'operation_execute')!.args;
+  assert.equal(executeArgs.tenantId, 'platform', 'the top-level tenantId sent to operation_execute must be the site');
+  const executeInput = executeArgs.input as Record<string, unknown>;
+  assert.equal(executeInput.tenantId, 'platform', "the operation's own input.tenantId must be the site, not the model's");
+  assert.notEqual(executeInput.tenantId, 'attacker-tenant');
+  assert.equal(executeInput.projectId, 'attacker-tenant-mapped', "projectId is just an ordinary field here — passed through unrenamed, never treated as the scope key");
+  // Same guarantee the workflow path's own equivalent test makes: the model
+  // can never smuggle a publish approval through as a TOP-LEVEL argument to
+  // the downstream call — operation_execute's own args carry only
+  // operationId/tenantId/input, never an `approved` sibling field.
+  assert.equal('approved' in executeArgs, false, 'the model can never smuggle a publish approval through this path');
+});
+
+const EXECUTE_REFUSALS: Array<{ code: string; message: string }> = [
+  { code: 'not_read_only', message: '"site_inventory" declares 1 non-read effect(s); operation.execute only runs read operations.' },
+  { code: 'unknown_operation', message: 'No operation is registered as "site_inventory".' },
+  { code: 'no_executor_binding', message: '"site_inventory" has no registered EXECUTOR that operation.execute can run today.' },
+  { code: 'executor_failed', message: 'Executor for "site_inventory" reported a failure.' },
+  { code: 'input_invalid', message: 'Input for "site_inventory" did not pass preflight.' },
+];
+
+test('run_workspace_workflow(operation_id: site_inventory) surfaces EACH real operation_execute refusal — code/message/evidence, never flattened — and registers no request', async () => {
+  for (const refusal of EXECUTE_REFUSALS) {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const registered: Array<Record<string, unknown>> = [];
+    const ctx = namedCtx(
+      (name) => {
+        if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: SITE_INVENTORY_DESCRIPTOR } };
+        if (name === 'operation_preflight')
+          return {
+            ok: true,
+            data: {
+              operationId: 'site_inventory',
+              selectedVersion: 1,
+              missingRequired: [],
+              blockers: [],
+              effects: SITE_INVENTORY_DESCRIPTOR.effects,
+              executable: true,
+              binding: null,
+              executorBinding: SITE_INVENTORY_EXECUTOR_BINDING,
+            },
+          };
+        if (name === 'operation_execute')
+          return {
+            ok: true,
+            data: {
+              operationId: 'site_inventory',
+              executed: false,
+              refusal: { code: refusal.code, message: refusal.message, evidence: { reason: refusal.code } },
+              result: null,
+              completion: [],
+            },
+          };
+        return { ok: true, data: { run: { runId: 'should_never_start' } } };
+      },
+      calls,
+      registered
+    );
+    const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+      operation_id: 'site_inventory',
+      input: { objectType: 'page' },
+    });
+    assert.equal(result.is_error, true, refusal.code);
+    const body = JSON.parse(result.content) as { code: string; error: string; evidence: unknown };
+    assert.equal(body.code, refusal.code, `the REAL refusal code must survive, not a flattened generic one`);
+    assert.equal(body.error, refusal.message, 'the REAL refusal message must survive');
+    assert.deepEqual(body.evidence, { reason: refusal.code }, 'refusal evidence must survive');
+    assert.equal(registered.length, 0, `a refused operation_execute call (${refusal.code}) must never register a request`);
+  }
+});
+
+test('run_workspace_workflow(operation_id: site_inventory) treats a transport failure from operation_execute as a refusal too — registers no request', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: SITE_INVENTORY_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'site_inventory',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            effects: SITE_INVENTORY_DESCRIPTOR.effects,
+            executable: true,
+            binding: null,
+            executorBinding: SITE_INVENTORY_EXECUTOR_BINDING,
+          },
+        };
+      if (name === 'operation_execute') return { ok: false, message: 'CMS-Agent is unreachable', code: 'upstream_unavailable' };
+      return { ok: true, data: {} };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'site_inventory',
+    input: {},
+  });
+  assert.equal(result.is_error, true);
+  assert.equal((JSON.parse(result.content) as { code: string }).code, 'upstream_unavailable');
+  assert.equal(registered.length, 0);
+});
+
+// ─── landing-order safety: CMS-Agent may not have granted operation_execute
+// to a tenant's scoped chat bearer yet (a cross-tenant pin defect on the
+// CMS-Agent side has to land first — mcpEndpoint.ts scopes by
+// projectId/project_id only, operation_execute scopes by tenantId). Both that
+// gap AND a plain "not in the allowlist yet" surface as the SAME opaque
+// cms_agent_auth_failed 401 CMS-Agent's client deliberately never
+// disambiguates — this must read as a clear, actionable "not granted yet"
+// message, never a generic failure and never something worth retrying ──────
+
+test('run_workspace_workflow(operation_id: site_inventory) surfaces a clear, actionable message when operation_execute itself is not yet granted to this bearer — not a generic failure, registers no request', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: SITE_INVENTORY_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'site_inventory',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            effects: SITE_INVENTORY_DESCRIPTOR.effects,
+            executable: true,
+            binding: null,
+            executorBinding: SITE_INVENTORY_EXECUTOR_BINDING,
+          },
+        };
+      // operation_get/operation_preflight succeeded with this SAME bearer
+      // moments earlier (above) — the auth failure lands ONLY on
+      // operation_execute, exactly the shape a not-yet-granted execute
+      // surface (or the tenantId/projectId scoping gap) produces.
+      if (name === 'operation_execute')
+        return {
+          ok: false,
+          code: 'cms_agent_auth_failed',
+          message:
+            'CMS-Agent rejected the credential. The site token may be wrong, or scoped to a different project — the service returns the same response for both.',
+        };
+      return { ok: true, data: {} };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'site_inventory',
+    input: { objectType: 'page' },
+  });
+  assert.equal(result.is_error, true);
+  assert.equal(
+    calls.map((c) => c.name).join(','),
+    'operation_get,operation_preflight,operation_execute',
+    'the diagnosis relies on operation_get/operation_preflight having already succeeded with this bearer'
+  );
+  const body = JSON.parse(result.content) as { code: string; error: string; evidence: unknown };
+  assert.equal(body.code, 'operation_execute_not_granted', 'a specific code, not the generic cms_agent_auth_failed');
+  assert.match(body.error, /not yet granted|cannot run catalog operations yet/i);
+  assert.match(body.error, /credential reconciler/i, 'must name the actual remedy — an operator running the reconciler');
+  assert.match(body.error, /retrying this exact request will not help/i, 'must discourage a retry loop, not invite one');
+  assert.deepEqual(body.evidence, { operationId: 'site_inventory' });
+  assert.equal(registered.length, 0, 'a not-yet-granted refusal must never register a request');
+});
+
+test('run_workspace_workflow(operation_id: site_inventory) does NOT special-case a genuine cms_agent_auth_failed on the FIRST call (operation_get) — the diagnosis only applies once operation_get/operation_preflight have already proven the bearer works', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) =>
+      name === 'operation_get'
+        ? { ok: false, code: 'cms_agent_auth_failed', message: 'CMS-Agent rejected the credential.' }
+        : { ok: true, data: {} },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'site_inventory',
+    input: {},
+  });
+  assert.equal(result.is_error, true);
+  const body = JSON.parse(result.content) as { code: string };
+  // The generic transport error surfaces unmodified here — operation_execute
+  // was never even reached, so there is nothing yet to diagnose as
+  // "not granted specifically".
+  assert.equal(body.code, 'cms_agent_auth_failed');
+  assert.equal(calls.map((c) => c.name).join(','), 'operation_get');
+  assert.equal(registered.length, 0);
+});
+
+test('run_workspace_workflow(operation_id) refuses when preflight carries NEITHER binding nor executorBinding — never dispatches either surface, never registers', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'pdf_template_family',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [WORKFLOW_BINDING_GAP],
+            executable: false,
+            binding: null,
+            executorBinding: null,
+          },
+        };
+      return { ok: true, data: { run: { runId: 'should_never_start' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'pdf_template_family',
+    input: {},
+  });
+  assert.equal(result.is_error, true);
+  assert.equal(
+    calls.map((c) => c.name).join(','),
+    'operation_get,operation_preflight',
+    'neither workflow_start_dry_run nor operation_execute may be called'
+  );
+  assert.equal(registered.length, 0);
+  assert.equal((JSON.parse(result.content) as { code: string }).code, 'operation_not_ready');
+});
+
+test('run_workspace_workflow(operation_id) dispatches the WORKFLOW path unchanged when the preflight response has no executorBinding field at all — an older CMS-Agent (predates A4)', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'pdf_template_family',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [],
+            executable: true,
+            binding: PDF_BINDING,
+            // no executorBinding key at all — a CMS-Agent that predates A4.
+          },
+        };
+      return { ok: true, data: { run: { runId: 'run_pdf_legacy', status: 'created' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'pdf_template_family',
+    input: { templateFamily: 'brochure' },
+  });
+  assert.equal(result.is_error, false);
+  assert.equal(
+    calls.map((c) => c.name).join(','),
+    'operation_get,operation_preflight,workflow_start_dry_run',
+    'the workflow path must behave exactly as it did before A4'
+  );
+  assert.equal(calls.find((c) => c.name === 'workflow_start_dry_run')!.args.workflowId, PDF_BINDING.workflowId);
+  assert.equal(registered.length, 1, 'a write-risk workflow-bound operation still registers a running request');
 });

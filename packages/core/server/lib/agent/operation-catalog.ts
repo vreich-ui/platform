@@ -117,6 +117,25 @@ export const operationBindingSchema = z.object({
 });
 export type OperationBinding = z.infer<typeof operationBindingSchema>;
 
+// A4 (CMS-Agent #321): the OTHER thing that can implement an operation. An
+// operation is bound to EITHER a workflow (operationBindingSchema above) OR a
+// registered EXECUTOR — never both (CMS-Agent's operationExecutorBindings.ts
+// asserts this mutual exclusivity at import). executorId is the only field
+// this schema requires for the same reason workflowId is required above: a
+// malformed row is CMS-Agent's own bug, not the model's input, so failing
+// the whole parse on a missing executorId IS the fail-safe, not a thing to
+// tolerate. inputSchema is a nested JSON-Schema object describing what the
+// executor itself requires (see checkExecutorInputContract on the CMS-Agent
+// side) — carried through as z.unknown() the same way operationDescriptorSchema's
+// own inputSchema is, since this side never evaluates it (only CMS-Agent's
+// preflight does, before ever reporting executorBinding as non-null).
+export const operationExecutorBindingSchema = z.object({
+  executorId: z.string().min(1),
+  operationId: z.string().optional(),
+  inputSchema: z.unknown().optional(),
+});
+export type OperationExecutorBinding = z.infer<typeof operationExecutorBindingSchema>;
+
 export const operationPreflightResultSchema = z.object({
   operationId: z.string(),
   selectedVersion: z.number().int().positive(),
@@ -139,11 +158,59 @@ export const operationPreflightResultSchema = z.object({
   // above) rather than omitting the key — both must parse to the same
   // "no binding" state resolveCatalogOperation checks with `pf.binding?.`.
   binding: operationBindingSchema.nullable().optional(),
+  // A4 (CMS-Agent #321): the executor-side sibling of `binding` — set when
+  // this operation is implemented by a registered EXECUTOR instead of a
+  // workflow (site_inventory is the one example today). Same tolerance as
+  // `binding`: .nullable() because CMS-Agent sends `executorBinding: null`
+  // for an operation that has neither kind of implementation, and
+  // .optional() so a CMS-Agent predating A4 (which never sends this field at
+  // all) still parses — resolveCatalogOperation (tools.ts) checks
+  // `pf.executorBinding` the same defensive way it already checks
+  // `pf.binding`, never assuming absence means "no executor".
+  executorBinding: operationExecutorBindingSchema.nullable().optional(),
 });
 export type OperationPreflightResult = z.infer<typeof operationPreflightResultSchema>;
 
 export const parseOperationPreflight = (data: unknown): OperationPreflightResult | undefined => {
   const parsed = operationPreflightResultSchema.safeParse(data);
+  return parsed.success ? parsed.data : undefined;
+};
+
+// A4 — CMS-Agent's operation.execute envelope (operationTools.ts). Read-only
+// gated on CMS-Agent's side (it refuses any operation whose declared effects
+// are not all riskLevel "read" before ever reaching an executor); Platform
+// never re-derives that gate, it only relays what CMS-Agent decided.
+//
+// `refusal` carries CMS-Agent's REAL code/message/evidence — not_read_only,
+// unknown_operation, input_invalid, no_executor_binding, executor_failed
+// (see operationTools.ts's operation.execute for the full refusal chain, in
+// order) — so a caller can surface the actual reason and remedy to the
+// editor instead of a single flattened "it failed". `executed`/`refusal` are
+// NOT modeled as evidence-typed opposites of each other in this schema (both
+// could in principle be sent inconsistently by a future CMS-Agent) —
+// resolveCatalogOperation's caller treats `executed !== true` OR a
+// non-null `refusal` as a refusal, whichever fires, so a malformed
+// `{executed: true, refusal: {...}}` still fails safe as a refusal rather
+// than being read as success.
+export const operationExecuteRefusalSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  evidence: z.unknown().optional(),
+});
+export type OperationExecuteRefusal = z.infer<typeof operationExecuteRefusalSchema>;
+
+export const operationExecuteResultSchema = z.object({
+  operationId: z.string(),
+  tenantId: z.string().optional(),
+  executed: z.boolean(),
+  refusal: operationExecuteRefusalSchema.nullable().optional(),
+  result: z.unknown().optional(),
+  completion: z.array(operationCompletionSchema).optional(),
+});
+export type OperationExecuteResult = z.infer<typeof operationExecuteResultSchema>;
+
+export const parseOperationExecuteResult = (data: unknown): OperationExecuteResult | undefined => {
+  const parsed = operationExecuteResultSchema.safeParse(data);
   return parsed.success ? parsed.data : undefined;
 };
 

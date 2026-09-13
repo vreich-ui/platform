@@ -12,6 +12,7 @@ import {
   highestEffectRisk,
   needsDurableRegistration,
   operationRequestKind,
+  parseOperationExecuteResult,
   parseOperationGet,
   parseOperationList,
   parseOperationPreflight,
@@ -181,6 +182,110 @@ test('parseOperationPreflight rejects the WHOLE payload when a present binding i
     binding: { inputMapping: { tenantId: 'projectId' } }, // no workflowId
   });
   assert.equal(result, undefined, 'a malformed binding must fail loud, not be silently treated as absent');
+});
+
+// ─── A4: executorBinding on operation.preflight ──────────────────────────────
+
+test('parseOperationPreflight round-trips a populated executorBinding', () => {
+  const result = parseOperationPreflight({
+    operationId: 'site_inventory',
+    selectedVersion: 1,
+    executable: true,
+    binding: null,
+    executorBinding: {
+      executorId: 'site_inventory_executor',
+      operationId: 'site_inventory',
+      inputSchema: { type: 'object', required: ['tenantId'] },
+    },
+  });
+  assert.deepEqual(result?.executorBinding, {
+    executorId: 'site_inventory_executor',
+    operationId: 'site_inventory',
+    inputSchema: { type: 'object', required: ['tenantId'] },
+  });
+  assert.equal(result?.binding, null, 'an operation is bound to at most one of the two kinds');
+});
+
+test('parseOperationPreflight tolerates executorBinding: null (an operation with neither kind of implementation)', () => {
+  const result = parseOperationPreflight({
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    executable: false,
+    binding: null,
+    executorBinding: null,
+  });
+  assert.equal(result?.binding, null);
+  assert.equal(result?.executorBinding, null);
+});
+
+test('parseOperationPreflight tolerates a payload with no executorBinding field at all — a CMS-Agent predating A4', () => {
+  const result = parseOperationPreflight({
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    executable: true,
+    binding: { workflowId: 'pdf_family_conductor' },
+    // no executorBinding key at all
+  });
+  assert.equal(result?.executorBinding, undefined, 'absent must stay absent, never coerced to null');
+  assert.deepEqual(result?.binding, { workflowId: 'pdf_family_conductor' });
+});
+
+test('parseOperationPreflight rejects the WHOLE payload when a present executorBinding is malformed (missing executorId)', () => {
+  const result = parseOperationPreflight({
+    operationId: 'site_inventory',
+    selectedVersion: 1,
+    executorBinding: { inputSchema: {} }, // no executorId
+  });
+  assert.equal(result, undefined, 'a malformed executorBinding must fail loud, not be silently treated as absent');
+});
+
+// ─── A4: operation.execute's envelope ─────────────────────────────────────────
+
+test('parseOperationExecuteResult reads a successful execution — result + completion carried through unmodified', () => {
+  const result = parseOperationExecuteResult({
+    operationId: 'site_inventory',
+    tenantId: 'platform',
+    executed: true,
+    refusal: null,
+    result: { objects: [{ objectId: 'page_home' }] },
+    completion: [{ id: 'inventory_returned', description: 'The inventory was returned.' }],
+  });
+  assert.equal(result?.executed, true);
+  assert.equal(result?.refusal, null);
+  assert.deepEqual(result?.result, { objects: [{ objectId: 'page_home' }] });
+  assert.deepEqual(result?.completion, [{ id: 'inventory_returned', description: 'The inventory was returned.' }]);
+});
+
+test('parseOperationExecuteResult reads each real refusal shape — code/message/evidence never dropped', () => {
+  for (const code of ['not_read_only', 'unknown_operation', 'no_executor_binding', 'executor_failed', 'input_invalid']) {
+    const result = parseOperationExecuteResult({
+      operationId: 'pdf_template_family',
+      executed: false,
+      refusal: { code, message: `refused: ${code}`, evidence: { detail: code } },
+      result: null,
+      completion: [],
+    });
+    assert.equal(result?.executed, false, code);
+    assert.equal(result?.refusal?.code, code);
+    assert.equal(result?.refusal?.message, `refused: ${code}`);
+    assert.deepEqual(result?.refusal?.evidence, { detail: code });
+  }
+});
+
+test('parseOperationExecuteResult tolerates a refusal with no evidence field', () => {
+  const result = parseOperationExecuteResult({
+    operationId: 'pdf_template_family',
+    executed: false,
+    refusal: { code: 'unknown_operation', message: 'not registered' },
+  });
+  assert.equal(result?.refusal?.code, 'unknown_operation');
+  assert.equal(result?.refusal?.evidence, undefined);
+});
+
+test('parseOperationExecuteResult is undefined for a payload missing its required keys', () => {
+  assert.equal(parseOperationExecuteResult({}), undefined, 'operationId/executed are required');
+  assert.equal(parseOperationExecuteResult(null), undefined);
+  assert.equal(parseOperationExecuteResult({ operationId: 'x' }), undefined, 'executed is required');
 });
 
 // ─── highestEffectRisk / needsDurableRegistration ────────────────────────────
