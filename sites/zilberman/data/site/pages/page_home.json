@@ -1,9 +1,10 @@
 {
   "__generated": {
-    "at": "2026-09-11T09:52:56.140Z",
-    "attribution": "publish_key",
+    "at": "2026-09-13T09:49:44.444Z",
+    "attribution": "oauth",
     "from": "objects/page/by-id/page_home.json",
-    "record_version": 210
+    "record_version": 214,
+    "surface": "plugin:claude"
   },
   "navigationOverrides": {
     "footer": "nav_footer"
@@ -18,7 +19,7 @@
             "label": "Projects",
             "style": "primary",
             "target": {
-              "href": "/s-projects-side-by-side",
+              "href": "/partners",
               "kind": "route"
             }
           }
