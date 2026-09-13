@@ -942,9 +942,16 @@ const preflightOperationTool: ChatTool = {
 // before dispatch: operation_get (unregistered id refused, alternatives
 // named, never treated as a usable workflow id) then operation_preflight
 // (bounded validation/defaults; tenantId is cmsAgent.projectId, applied LAST
-// so the model can never widen scope). missingRequired/blockers hard-refuse;
-// capabilityGaps are surfaced but not yet wired to a capability-status
-// source, so they do not block (follow-up wave, named in the delivery report).
+// so the model can never widen scope). missingRequired/blockers hard-refuse,
+// and so does an operation that isn't executable: pf.executable === false,
+// OR any capabilityGap with reason "not_supported" — checked even when
+// `executable` is absent (older CMS-Agent, predates it) so a missing field
+// is never read as "true" and this fails safe. That refusal carries the
+// gap's own remedy and its evidence's implementingTask, so the editor is
+// told which task will make the operation work, not just "no". A gap with
+// reason "not_configured" is left alone, surfaced only: every operation
+// reports one whenever the caller passes no configuredCapabilities, so
+// refusing on it would block every operation, including working ones.
 type CatalogOperationSelection =
   | { ok: true; workflowId: string; kind: RequestKind; title?: string; input: Record<string, unknown> }
   | { ok: false; content: string };
@@ -987,7 +994,20 @@ const resolveCatalogOperation = async (
   }
   const blockers = pf.blockers ?? [];
   const missingRequired = pf.missingRequired ?? [];
-  if (blockers.length > 0 || missingRequired.length > 0) {
+  const capabilityGaps = pf.capabilityGaps ?? [];
+  // Fail safe: `executable` is newer than capabilityGaps, so an older
+  // CMS-Agent that never sends it must not be read as "executable: true" —
+  // a "not_supported" gap on its own is enough to refuse.
+  const notSupportedGaps = capabilityGaps.filter((gap) => gap.reason === 'not_supported');
+  const notExecutable = pf.executable === false || notSupportedGaps.length > 0;
+  if (blockers.length > 0 || missingRequired.length > 0 || notExecutable) {
+    // Prefer the workflow_binding gap's own remedy/evidence (the case this
+    // fix targets — an operation with no implementing workflow yet) but
+    // fall back to whichever not_supported gap is present.
+    const remedyGap = notSupportedGaps.find((gap) => gap.capability === 'workflow_binding') ?? notSupportedGaps[0];
+    const remedyEvidence = remedyGap?.evidence as { implementingTask?: unknown } | undefined;
+    const implementingTask =
+      typeof remedyEvidence?.implementingTask === 'string' ? remedyEvidence.implementingTask : undefined;
     return {
       ok: false,
       content: json({
@@ -995,7 +1015,9 @@ const resolveCatalogOperation = async (
         code: 'operation_not_ready',
         missing_required: missingRequired,
         blockers,
-        capability_gaps: pf.capabilityGaps ?? [],
+        capability_gaps: capabilityGaps,
+        ...(remedyGap?.remedy ? { remedy: remedyGap.remedy } : {}),
+        ...(implementingTask ? { implementing_task: implementingTask } : {}),
       }),
     };
   }

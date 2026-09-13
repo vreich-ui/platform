@@ -109,6 +109,15 @@ export const operationPreflightResultSchema = z.object({
   capabilityGaps: z.array(operationCapabilityGapSchema).optional(),
   effects: z.array(operationEffectSchema).optional(),
   completion: z.array(operationCompletionSchema).optional(),
+  // #313: whether CMS-Agent can actually dispatch this operation (e.g. it
+  // has a bound implementing workflow) and, when it can, the binding used.
+  // Optional and tolerant on purpose — a caller talking to a CMS-Agent that
+  // predates #313 never sends either field, and dropping them here would
+  // silently reinstate the bug this schema exists to prevent (resolveCatalogOperation
+  // in tools.ts is what fails safe on an absent `executable`; this parser
+  // must not fail safe FOR it by discarding the field).
+  executable: z.boolean().optional(),
+  binding: z.unknown().optional(),
 });
 export type OperationPreflightResult = z.infer<typeof operationPreflightResultSchema>;
 

@@ -646,3 +646,180 @@ test('list_operations / get_operation / preflight_operation are read-class, auto
   assert.equal(preflightCall.args.tenantId, 'platform', 'preflight_operation must ignore a model-supplied tenantId');
   assert.equal((preflightCall.args.input as Record<string, unknown>).tenantId, 'platform');
 });
+
+// ─── the defect this file fixes: an unbound operation (executable: false)
+// must hard-refuse, never reach workflow_start_dry_run with its operationId
+// used as a workflowId (CMS-Agent falls back to publishing_conductor for an
+// unregistered workflowId — a chat request for e.g. a PDF template family
+// must never start a publishing run) ──────────────────────────────────────
+
+const WORKFLOW_BINDING_GAP = {
+  capability: 'workflow_binding',
+  reason: 'not_supported',
+  evidence: { operationId: 'pdf_template_family', implementingTask: 'A7' },
+  remedy: 'Implement task A7 to bind pdf_template_family to a workflow.',
+};
+
+test('run_workspace_workflow(operation_id) hard-refuses executable: false with empty blockers/missingRequired — never dispatches, never registers', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'pdf_template_family',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [WORKFLOW_BINDING_GAP],
+            executable: false,
+            binding: null,
+          },
+        };
+      return { ok: true, data: { run: { runId: 'should_never_start' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'pdf_template_family',
+    input: {},
+  });
+  assert.equal(result.is_error, true);
+  assert.equal(
+    calls.map((c) => c.name).join(','),
+    'operation_get,operation_preflight',
+    'workflow_start_dry_run must never be called for a non-executable operation'
+  );
+  assert.equal(registered.length, 0, 'a refused operation must never register a request');
+
+  const body = JSON.parse(result.content) as { code: string; remedy: string; implementing_task: string };
+  assert.equal(body.code, 'operation_not_ready');
+  assert.equal(body.remedy, WORKFLOW_BINDING_GAP.remedy, 'the refusal must carry the gap\'s own remedy');
+  assert.equal(body.implementing_task, 'A7', 'the refusal must name the implementing task, not just refuse');
+});
+
+test('run_workspace_workflow(operation_id) refuses fail-safe when `executable` is absent but a not_supported gap is present (older CMS-Agent)', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'pdf_template_family',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [WORKFLOW_BINDING_GAP],
+            // no `executable` field at all — an older CMS-Agent
+          },
+        };
+      return { ok: true, data: { run: { runId: 'should_never_start' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'pdf_template_family',
+    input: {},
+  });
+  assert.equal(result.is_error, true, 'an absent `executable` must not be read as true');
+  assert.equal(calls.map((c) => c.name).join(','), 'operation_get,operation_preflight');
+  assert.equal(registered.length, 0);
+  assert.equal((JSON.parse(result.content) as { implementing_task: string }).implementing_task, 'A7');
+});
+
+test('run_workspace_workflow(operation_id) does NOT refuse on a "not_configured" gap alone — every operation reports one with no configuredCapabilities', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'pdf_template_family',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [
+              { capability: 'image_search', reason: 'not_configured', remedy: 'Configure image search.' },
+            ],
+            executable: true,
+          },
+        };
+      return { ok: true, data: { run: { runId: 'run_ok', status: 'created' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'pdf_template_family',
+    input: { templateFamily: 'brochure' },
+  });
+  assert.equal(result.is_error, false, 'a not_configured gap alone must not block dispatch');
+  assert.equal(calls.map((c) => c.name).join(','), 'operation_get,operation_preflight,workflow_start_dry_run');
+  assert.equal(registered.length, 1);
+});
+
+test('run_workspace_workflow(operation_id) dispatches exactly as before when executable: true — no regression', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    (name) => {
+      if (name === 'operation_get') return { ok: true, data: { known: true, descriptor: PDF_DESCRIPTOR } };
+      if (name === 'operation_preflight')
+        return {
+          ok: true,
+          data: {
+            operationId: 'pdf_template_family',
+            selectedVersion: 1,
+            missingRequired: [],
+            blockers: [],
+            capabilityGaps: [],
+            executable: true,
+            binding: { workflowId: 'pdf_family_conductor' },
+          },
+        };
+      return { ok: true, data: { run: { runId: 'run_ok_2', status: 'created' } } };
+    },
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    operation_id: 'pdf_template_family',
+    input: { templateFamily: 'brochure' },
+  });
+  assert.equal(result.is_error, false);
+  assert.equal(calls.map((c) => c.name).join(','), 'operation_get,operation_preflight,workflow_start_dry_run');
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0]!.kind, 'pdf');
+});
+
+test('run_workspace_workflow: the plain workflow_id path (no operation_id) sends an arbitrary workflowId straight to workflow_start_dry_run — NOT covered by this fix', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const registered: Array<Record<string, unknown>> = [];
+  const ctx = namedCtx(
+    () => ({ ok: true, data: { run: { runId: 'run_plain', status: 'created' } } }),
+    calls,
+    registered
+  );
+  const result = await chatToolByName('run_workspace_workflow')!.execute(ctx, {
+    workflow_id: 'not_a_registered_workflow_id',
+    input: { topic: 'whatever' },
+  });
+  assert.equal(result.is_error, false, 'documenting current behaviour: the plain path never consults the catalog');
+  assert.equal(
+    calls.map((c) => c.name).join(','),
+    'workflow_start_dry_run',
+    'operation_get/operation_preflight are never called on the plain workflow_id path'
+  );
+  assert.equal((calls[0]!.args as { workflowId?: string }).workflowId, 'not_a_registered_workflow_id');
+});

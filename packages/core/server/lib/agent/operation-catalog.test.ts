@@ -100,6 +100,50 @@ test('parseOperationPreflight is undefined for a payload missing its required ke
   assert.equal(parseOperationPreflight(null), undefined);
 });
 
+// #313: `executable` and `binding` were added to CMS-Agent's wire payload
+// after this schema was written — a tolerant parser that silently dropped
+// them would reinstate the bug where an unbound operation's preflight looks
+// indistinguishable from a bound one to everything downstream.
+test('parseOperationPreflight round-trips executable: false and its capabilityGaps evidence, unmodified', () => {
+  const wire = {
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    missingRequired: [],
+    blockers: [],
+    capabilityGaps: [
+      {
+        capability: 'workflow_binding',
+        reason: 'not_supported',
+        evidence: { operationId: 'pdf_template_family', implementingTask: 'A7' },
+        remedy: 'Implement task A7 to bind pdf_template_family to a workflow.',
+      },
+    ],
+    executable: false,
+    binding: null,
+  };
+  const result = parseOperationPreflight(wire);
+  assert.equal(result?.executable, false, 'executable must survive parsing, not be dropped');
+  assert.equal(result?.binding, null);
+  assert.deepEqual(result?.capabilityGaps, wire.capabilityGaps);
+});
+
+test('parseOperationPreflight round-trips executable: true with a populated binding', () => {
+  const result = parseOperationPreflight({
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    executable: true,
+    binding: { workflowId: 'pdf_family_conductor' },
+  });
+  assert.equal(result?.executable, true);
+  assert.deepEqual(result?.binding, { workflowId: 'pdf_family_conductor' });
+});
+
+test('parseOperationPreflight tolerates a payload with neither executable nor binding — an older CMS-Agent', () => {
+  const result = parseOperationPreflight({ operationId: 'pdf_template_family', selectedVersion: 1 });
+  assert.equal(result?.executable, undefined);
+  assert.equal(result?.binding, undefined);
+});
+
 // ─── highestEffectRisk / needsDurableRegistration ────────────────────────────
 
 test('highestEffectRisk picks the worst of several effects, publish over write over read', () => {
