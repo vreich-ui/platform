@@ -25,6 +25,7 @@ import {
   loadObjectIndex,
   sweepInventoryRows,
   OBJECT_INDEX_KEY,
+  OBJECT_INDEX_SCHEMA_VERSION,
   type ObjectIndexStore,
 } from '../../packages/core/server/lib/objects/index-store.js';
 import type { InventoryRow } from '../../packages/core/server/lib/object-inventory.js';
@@ -49,6 +50,26 @@ const pageRecord = (id: string, revision = 1): ObjectRecord => ({
   history: [],
   version: revision,
   content_revision: revision,
+});
+
+/**
+ * W4.1 — an article, since the `content` summary the variants surface reads is
+ * projected from a `content_item` body and nothing else in this file has one.
+ */
+const articleRecord = (id: string, options: { slug: string; parent?: string }): ObjectRecord => ({
+  ...pageRecord(id),
+  object_id: id,
+  object_type: 'content_item',
+  schema_version: 'content_item.v1',
+  body: {
+    title: `Article ${id}`,
+    slug: options.slug,
+    ...(options.parent ? { lineage: { parent_content_id: options.parent } } : {}),
+    scores: [
+      { scored_by: 'agent:judge', at: '2026-08-10T00:00:00.000Z', framework: 'f', dimension: 'clarity', score: 3 },
+      { scored_by: 'agent:judge', at: '2026-08-20T00:00:00.000Z', framework: 'f', dimension: 'clarity', score: 4 },
+    ],
+  },
 });
 
 /**
@@ -101,7 +122,7 @@ const inventory = (store: ObjectVerbStore) =>
 
 const rowsOf = (result: { body: Record<string, unknown> }) => result.body.objects as InventoryRow[];
 const statsOf = (result: { body: Record<string, unknown> }) =>
-  result.body.index as { listed: number; cached: number; read: number; wrote: boolean };
+  result.body.index as { listed: number; cached: number; read: number; wrote: boolean; rebuilt: boolean };
 
 // ═══ the measurement ══════════════════════════════════════════════════════
 
@@ -121,7 +142,7 @@ test('BEFORE/AFTER: a cold sweep reads every record; a warm sweep reads exactly 
   assert.equal(counts.list, TYPE_COUNT, 'one list() per governed object type, unchanged');
   assert.equal(counts.get, N + 1, `${N} record reads + 1 index probe — the pre-T5.1 cost`);
   assert.equal(counts.set, 1, 'the projection is persisted once');
-  assert.deepEqual(statsOf(cold), { listed: N, cached: 0, read: N, wrote: true });
+  assert.deepEqual(statsOf(cold), { listed: N, cached: 0, read: N, wrote: true, rebuilt: false });
 
   // Warm: nothing changed, so nothing is read but the index itself. This is
   // the whole point of R3 — N record reads collapse to zero.
@@ -132,7 +153,7 @@ test('BEFORE/AFTER: a cold sweep reads every record; a warm sweep reads exactly 
   assert.equal(counts.list, TYPE_COUNT, 'the listings still happen — they name the live key set');
   assert.equal(counts.get, 1, 'ONE blob read for N objects (was N + 1)');
   assert.equal(counts.set, 0, 'an unchanged store costs zero writes');
-  assert.deepEqual(statsOf(warm), { listed: N, cached: N, read: 0, wrote: false });
+  assert.deepEqual(statsOf(warm), { listed: N, cached: N, read: 0, wrote: false, rebuilt: false });
 
   // Same data, either way round.
   assert.deepEqual(rowsOf(warm), rowsOf(cold));
@@ -150,7 +171,7 @@ test('a record changed since the last sweep is re-read; the other N-1 are not', 
   const after = await inventory(store);
   assert.equal(counts.get, 2, 'the index + exactly the one record whose etag moved');
   assert.equal(counts.set, 1, 'the projection is repaired');
-  assert.deepEqual(statsOf(after), { listed: 10, cached: 9, read: 1, wrote: true });
+  assert.deepEqual(statsOf(after), { listed: 10, cached: 9, read: 1, wrote: true, rebuilt: false });
 
   const changed = rowsOf(after).find((row) => row.object_id === 'page_seed_03');
   assert.equal(changed?.content_revision, 7, 'the cache must never serve the pre-edit row');
@@ -208,7 +229,7 @@ test('a store whose listing carries no etags degrades to the old sweep and never
 
   const first = await sweepInventoryRows(store, { nowMs: NOW });
   assert.equal(first.rows.length, 6);
-  assert.deepEqual(first.stats, { listed: 6, cached: 0, read: 6, wrote: false });
+  assert.deepEqual(first.stats, { listed: 6, cached: 0, read: 6, wrote: false, rebuilt: false });
 
   counts.get = 0;
   counts.set = 0;
@@ -258,4 +279,73 @@ test('a single-type sweep does not truncate the projection to that type', async 
 
   const index = await loadObjectIndex(store);
   assert.equal(index?.entries.length, 4, 'the theme entry survives a page-only sweep');
+});
+
+// ═══ W4.1: the schema bump heals itself ═══════════════════════════════════
+
+test('the stored schema version is the one the row shape was bumped to', () => {
+  // A row-shape change that does NOT move this string would serve rows from
+  // entries projected under the old shape — the failure the bump exists to
+  // stop. The literal is asserted so the bump is a deliberate act.
+  assert.equal(OBJECT_INDEX_SCHEMA_VERSION, 'object-inventory-index.v2');
+});
+
+test('an index written under the OLD schema is detected on read, rebuilt in place, and matches a fresh build', async () => {
+  // The reference: what a store with no index at all produces.
+  const fresh = countingStore();
+  seedPages(fresh.put, 5);
+  fresh.put('objects/content_item/by-id/req_a.json', articleRecord('req_a', { slug: 'parent-slug' }));
+  fresh.put('objects/content_item/by-id/req_b.json', articleRecord('req_b', { slug: 'clone-slug', parent: 'req_a' }));
+  const expected = await sweepInventoryRows(fresh.store, { nowMs: NOW });
+
+  // The same store, but carrying a v1 index whose entries are structurally
+  // valid and whose etags MATCH the live blobs — the worst case, because
+  // every row would be served from cache if the version were not checked.
+  const aged = countingStore();
+  seedPages(aged.put, 5);
+  aged.put('objects/content_item/by-id/req_a.json', articleRecord('req_a', { slug: 'parent-slug' }));
+  aged.put('objects/content_item/by-id/req_b.json', articleRecord('req_b', { slug: 'clone-slug', parent: 'req_a' }));
+  await sweepInventoryRows(aged.store, { nowMs: NOW });
+  const current = await loadObjectIndex(aged.store);
+  assert.ok(current, 'a v2 index to age');
+  aged.put(OBJECT_INDEX_KEY, {
+    ...current,
+    schema_version: 'object-inventory-index.v1',
+    // The v1 row shape: no `content` summary on a content_item row.
+    entries: current.entries.map((entry) => {
+      const { content: _dropped, ...row } = entry.row as Record<string, unknown>;
+      return { ...entry, row };
+    }),
+  });
+
+  // Nobody runs anything: the next ordinary read repairs it.
+  const healed = await sweepInventoryRows(aged.store, { nowMs: NOW });
+  assert.equal(healed.stats.rebuilt, true, 'the discard is reported, never silent');
+  assert.equal(healed.stats.cached, 0, 'not one row may be served from a superseded index');
+  assert.equal(healed.stats.read, healed.stats.listed, 'every record is re-projected');
+  assert.equal(healed.stats.wrote, true, 'and the repaired index is persisted by the same request');
+
+  const byId = (rows: typeof healed.rows) => [...rows].sort((a, b) => a.object_id.localeCompare(b.object_id));
+  assert.deepEqual(byId(healed.rows), byId(expected.rows), 'same rows as a store that never held an old index');
+
+  const rebuilt = await loadObjectIndex(aged.store);
+  assert.equal(rebuilt?.schema_version, OBJECT_INDEX_SCHEMA_VERSION);
+  assert.equal(rebuilt?.entries.length, 7);
+
+  // And the repair is once, not once per read.
+  const afterHeal = await sweepInventoryRows(aged.store, { nowMs: NOW });
+  assert.deepEqual(afterHeal.stats, { listed: 7, cached: 7, read: 0, wrote: false, rebuilt: false });
+});
+
+test('a cold store is not reported as a rebuild, but a corrupt index is', async () => {
+  const cold = countingStore();
+  seedPages(cold.put, 2);
+  const first = await sweepInventoryRows(cold.store, { nowMs: NOW });
+  assert.equal(first.stats.rebuilt, false, 'there was nothing to discard');
+
+  const { store, put, blobs } = countingStore();
+  seedPages(put, 2);
+  blobs.set(OBJECT_INDEX_KEY, { value: '{not json', etag: 'etag-x' });
+  const repaired = await sweepInventoryRows(store, { nowMs: NOW });
+  assert.equal(repaired.stats.rebuilt, true);
 });

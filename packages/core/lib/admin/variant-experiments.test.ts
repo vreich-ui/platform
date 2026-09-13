@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
 import {
   buildVariantFamilies,
@@ -9,7 +9,9 @@ import {
   memberSeverity,
   variantEvidence,
   type VariantMember,
+  type VariantScore,
 } from './variant-experiments.js';
+import { fetchVariantMembers } from './variants-client.js';
 
 const member = (overrides: Partial<VariantMember> & { object_id: string }): VariantMember => ({
   display_name: overrides.object_id,
@@ -278,5 +280,215 @@ describe('variantEvidence — the honest results surface', () => {
       assert.ok(gap.source.includes('/'), `${gap.id} must cite a path`);
       assert.ok(gap.detail.length > 40, `${gap.id} must say what is missing`);
     }
+  });
+});
+
+// ═══ W4.1 — the call count behind this page ═══════════════════════════════════
+
+/**
+ * `/admin/variants` was measured live at FORTY `admin-object` invocations for
+ * one page load: one `inventory`, then one `get` per article, because
+ * `lineage.parent_content_id` lived in the body and the inventory projection
+ * did not carry it. Each call was warm and individually fast — the cost was
+ * the count against the ~250-400 ms fixed per-invocation platform overhead.
+ *
+ * These tests pin the COUNT, and pin that collapsing it changed no output:
+ * the legacy N+1 derivation is reproduced below, run against the same fixture,
+ * and its members and its families must match the one-call path exactly. The
+ * acceptance bar for the whole page was <= 3 calls; this path is 1.
+ */
+
+const ARTICLE_COUNT = 12;
+
+/** One fixture article: the record body the store holds, and the lifecycle fields a row mirrors. */
+const article = (index: number) => {
+  const id = `req_probe_${String(index).padStart(2, '0')}`;
+  // A family of three: #0 is a parent, #1 and #2 are its clones. The rest are
+  // standalone parents, which is what a real corpus mostly is.
+  const parent = index === 1 || index === 2 ? 'req_probe_00' : undefined;
+  return {
+    id,
+    row: {
+      object_id: id,
+      object_type: 'content_item',
+      display_name: `Article ${index}`,
+      status: 'active' as const,
+      review_state: 'none' as const,
+      published_time: index % 2 === 0 ? '2026-08-01T00:00:00.000Z' : null,
+      unpublished_changes: index % 2 !== 0,
+      updated_at: '2026-08-02T00:00:00.000Z',
+    },
+    body: {
+      title: `Article ${index}`,
+      slug: `article-${index}`,
+      ...(parent ? { lineage: { parent_content_id: parent } } : {}),
+      scores: [
+        { scored_by: 'agent:judge', at: '2026-08-03T00:00:00.000Z', framework: 'f1', dimension: 'clarity', score: 2 },
+        { scored_by: 'agent:judge', at: '2026-08-08T00:00:00.000Z', framework: 'f1', dimension: 'clarity', score: 4 },
+      ] as Record<string, unknown>[],
+    } as Record<string, unknown>,
+  };
+};
+
+const ARTICLES = Array.from({ length: ARTICLE_COUNT }, (_, index) => article(index));
+
+/**
+ * The server, as far as this page can tell: `inventory` answers rows carrying
+ * the W4.1 `content` summary (the same reduction `object-inventory.ts` does —
+ * latest score per framework/dimension), `get` answers a record envelope.
+ * Every request is tallied by action.
+ */
+const mockObjectEndpoint = () => {
+  const actions: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const request = JSON.parse(String(init?.body ?? '{}')) as { action?: string; object_id?: string };
+    actions.push(String(request.action));
+    if (request.action === 'inventory') {
+      const objects = ARTICLES.map((entry) => {
+        const lineage = entry.body.lineage as { parent_content_id?: string } | undefined;
+        const scores = entry.body.scores as Record<string, unknown>[];
+        return {
+          ...entry.row,
+          content: {
+            slug: entry.body.slug as string,
+            parent_content_id: lineage?.parent_content_id ?? null,
+            // The digest: newest entry per (framework, dimension).
+            scores: [scores[scores.length - 1]],
+          },
+        };
+      });
+      return new Response(JSON.stringify({ objects }), { status: 200 });
+    }
+    const found = ARTICLES.find((entry) => entry.id === request.object_id);
+    return new Response(JSON.stringify({ record: { object_id: request.object_id, body: found?.body } }), {
+      status: 200,
+    });
+  }) as typeof fetch;
+  return {
+    actions,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+};
+
+/**
+ * The derivation as it was BEFORE W4.1, verbatim in shape: list, then one
+ * `get` per row, reading the same three facts out of each body. Kept here and
+ * only here, as the reference the one-call path is proved equal to.
+ */
+const legacyFetchVariantMembers = async (): Promise<VariantMember[]> => {
+  const listed = await fetch('/.netlify/functions/admin-object', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'inventory', object_type: 'content_item' }),
+  });
+  const rows = ((await listed.json()) as { objects: Record<string, unknown>[] }).objects;
+  const members: VariantMember[] = [];
+  for (const row of rows) {
+    const got = await fetch('/.netlify/functions/admin-object', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'get', object_type: 'content_item', object_id: row.object_id }),
+    });
+    const body = ((await got.json()) as { record: { body: Record<string, unknown> } }).record.body;
+    const lineage = body.lineage as { parent_content_id?: string } | undefined;
+    const scores = body.scores as VariantScore[];
+    const { content: _content, object_type: _type, ...rest } = row as Record<string, unknown>;
+    members.push({
+      ...(rest as unknown as VariantMember),
+      ...(lineage?.parent_content_id ? { parent_content_id: lineage.parent_content_id } : {}),
+      slug: body.slug as string,
+      // The old path carried the whole array; the surface reduces it to the
+      // newest per line itself, which is what the digest now ships.
+      scores: [scores[scores.length - 1] as VariantScore],
+    });
+  }
+  return members;
+};
+
+describe('fetchVariantMembers (W4.1)', () => {
+  let restoreFetch: (() => void) | undefined;
+  afterEach(() => {
+    restoreFetch?.();
+    restoreFetch = undefined;
+  });
+
+  it('issues exactly ONE admin-object call for the whole page, whatever the corpus size', async () => {
+    const endpoint = mockObjectEndpoint();
+    restoreFetch = endpoint.restore;
+
+    const members = await fetchVariantMembers(async () => 'test-token');
+
+    assert.equal(endpoint.actions.length, 1, `one call, not ${ARTICLE_COUNT + 1} — this is the whole task`);
+    assert.deepEqual(endpoint.actions, ['inventory']);
+    assert.ok(endpoint.actions.length <= 3, 'the plan’s acceptance bar for the page');
+    assert.equal(members.length, ARTICLE_COUNT);
+  });
+
+  it('derives the SAME members and the same families the N+1 path did', async () => {
+    const endpoint = mockObjectEndpoint();
+    restoreFetch = endpoint.restore;
+
+    const oneCall = await fetchVariantMembers(async () => 'test-token');
+    const callsForOne = endpoint.actions.length;
+
+    endpoint.actions.length = 0;
+    const legacy = await legacyFetchVariantMembers();
+    const callsForLegacy = endpoint.actions.length;
+
+    assert.equal(callsForOne, 1);
+    assert.equal(callsForLegacy, ARTICLE_COUNT + 1, 'the measured before-count: one inventory plus one get per row');
+
+    assert.deepEqual(oneCall, legacy, 'the projection carries exactly what the record reads carried');
+    assert.deepEqual(buildVariantFamilies(oneCall), buildVariantFamilies(legacy));
+
+    // And the grouping is a real one, not an empty coincidence.
+    const families = buildVariantFamilies(oneCall);
+    const withVariants = families.find((family) => family.variants.length > 0);
+    assert.equal(withVariants?.parentId, 'req_probe_00');
+    assert.equal(withVariants?.variants.length, 2);
+    assert.deepEqual(
+      judgementRows(withVariants as (typeof families)[number]).map((row) => row.dimension),
+      ['clarity']
+    );
+  });
+
+  it('reads the parentage off the row, so a row without a summary is simply a parent', async () => {
+    const originalFetch = globalThis.fetch;
+    restoreFetch = () => {
+      globalThis.fetch = originalFetch;
+    };
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          objects: [
+            {
+              object_id: 'req_bare',
+              object_type: 'content_item',
+              display_name: 'Bare',
+              status: 'active',
+              review_state: 'none',
+              published_time: null,
+              unpublished_changes: true,
+              updated_at: '2026-08-02T00:00:00.000Z',
+              content: { slug: null, parent_content_id: null },
+            },
+          ],
+        }),
+        { status: 200 }
+      )) as typeof fetch;
+
+    const members = await fetchVariantMembers(async () => 'test-token');
+    assert.deepEqual(members, [
+      {
+        object_id: 'req_bare',
+        display_name: 'Bare',
+        status: 'active',
+        review_state: 'none',
+        published_time: null,
+        unpublished_changes: true,
+        updated_at: '2026-08-02T00:00:00.000Z',
+      },
+    ]);
   });
 });

@@ -16,12 +16,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  contentSummaryFromBody,
   inventoryDetailFromRecord,
   inventoryRowFromRecord,
   matchesInventoryFilters,
   recipeSummaryFromBody,
 } from '../../packages/core/server/lib/object-inventory.js';
-import { handleObjectVerb, type ObjectVerbRequest, type ObjectVerbStore } from '../../packages/core/server/lib/object-verbs.js';
+import {
+  handleObjectVerb,
+  type ObjectVerbRequest,
+  type ObjectVerbStore,
+} from '../../packages/core/server/lib/object-verbs.js';
 import { objectRecordKey } from '../../packages/core/server/lib/object-store-keys.js';
 import type { ApprovalPolicy } from '../../packages/core/lib/approval-policy.js';
 import type { ObjectRecord, Principal } from '../../packages/core/schema/object-record-v1.js';
@@ -487,4 +492,93 @@ test('the detail view inherits the recipe summary', async () => {
   assert.equal(res.status, 200, JSON.stringify(res.body));
   const detail = res.body.object as { recipe?: { name: string | null } };
   assert.equal(detail.recipe?.name, 'Default');
+});
+
+// ═══ W4.1: the variants index on a content_item row ═══════════════════════════
+
+const articleBody = (overrides: Record<string, unknown> = {}) => ({
+  title: 'A study of niacinamide',
+  slug: 'a-study-of-niacinamide',
+  ...overrides,
+});
+
+test('a content_item row carries slug and parentage so a family is derivable from the LISTING', () => {
+  const parent = inventoryRowFromRecord(
+    baseRecord({
+      object_id: 'req_parent',
+      object_type: 'content_item',
+      schema_version: 'content_item.v1',
+      body: articleBody() as ObjectRecord['body'],
+    }),
+    NOW
+  );
+  assert.deepEqual(parent.content, { slug: 'a-study-of-niacinamide', parent_content_id: null });
+
+  const clone = inventoryRowFromRecord(
+    baseRecord({
+      object_id: 'req_clone',
+      object_type: 'content_item',
+      schema_version: 'content_item.v1',
+      body: articleBody({
+        slug: 'a-study-of-niacinamide-b',
+        lineage: { parent_content_id: 'req_parent', source_version_id: 'v3' },
+      }) as ObjectRecord['body'],
+    }),
+    NOW
+  );
+  assert.equal(clone.content?.parent_content_id, 'req_parent', 'the ONLY variant → parent link, now on the row');
+  assert.equal(clone.content?.slug, 'a-study-of-niacinamide-b');
+
+  const page = inventoryRowFromRecord(baseRecord(), NOW);
+  assert.equal(page.content, undefined, 'non-article rows carry no summary — the projection grows for one type');
+});
+
+test('the scores digest keeps the LATEST entry per (framework, dimension) and drops what no row could render', () => {
+  const summary = contentSummaryFromBody(
+    'content_item',
+    articleBody({
+      scores: [
+        { scored_by: 'agent:a', at: '2026-08-01T00:00:00.000Z', framework: 'f1', dimension: 'clarity', score: 3 },
+        // Newer judgement of the same line — scores are append-only, so this wins.
+        {
+          scored_by: 'agent:b',
+          at: '2026-08-09T00:00:00.000Z',
+          framework: 'f1',
+          dimension: 'clarity',
+          score: 4,
+          rationale: 'tighter lede',
+        },
+        { scored_by: 'metric:ctr', at: '2026-08-05T00:00:00.000Z', framework: 'f1', dimension: 'ctr', score: 0.1 },
+        // Unrenderable: no dimension, and a non-numeric score.
+        { scored_by: 'agent:a', at: '2026-08-02T00:00:00.000Z', framework: 'f1', score: 2 },
+        { scored_by: 'agent:a', at: '2026-08-02T00:00:00.000Z', framework: 'f1', dimension: 'depth', score: 'high' },
+        'not an entry at all',
+      ],
+    })
+  );
+  assert.deepEqual(summary?.scores, [
+    {
+      scored_by: 'agent:b',
+      at: '2026-08-09T00:00:00.000Z',
+      framework: 'f1',
+      dimension: 'clarity',
+      score: 4,
+      rationale: 'tighter lede',
+    },
+    { scored_by: 'metric:ctr', at: '2026-08-05T00:00:00.000Z', framework: 'f1', dimension: 'ctr', score: 0.1 },
+  ]);
+
+  // Most articles are unjudged, and the key is absent rather than empty so
+  // every other inventory consumer pays nothing for this.
+  assert.equal(contentSummaryFromBody('content_item', articleBody())?.scores, undefined);
+  assert.equal(contentSummaryFromBody('content_item', articleBody({ scores: 'nope' }))?.scores, undefined);
+});
+
+test('content summaries are DEFENSIVE: a malformed article body yields nulls, never a throw', () => {
+  assert.deepEqual(contentSummaryFromBody('content_item', 42), { slug: null, parent_content_id: null });
+  assert.deepEqual(contentSummaryFromBody('content_item', { slug: '  ', lineage: 'nope' }), {
+    slug: null,
+    parent_content_id: null,
+  });
+  assert.equal(contentSummaryFromBody('page', articleBody()), undefined);
 });

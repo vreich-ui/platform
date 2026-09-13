@@ -86,6 +86,88 @@ export const recipeSummaryFromBody = (
   return summary;
 };
 
+/**
+ * W4.1 — the VARIANTS index: the `content_item` body facts `/admin/variants`
+ * needs to group a family, carried on the row so the page reads the inventory
+ * ONCE instead of one `object_get` per article (measured live: 40
+ * `admin-object` invocations, each warm, all paying the ~250-400 ms fixed
+ * per-invocation overhead). Same move as the W8.3b recipe summary above — a
+ * row answers what the browse surface is actually asking.
+ *
+ * Nulls, never absent keys, for the two scalars: "declares no parent" must not
+ * look like "this row predates the projection". It cannot — the index rebuilds
+ * on the schema bump (`objects/index-store.ts`).
+ */
+export type InventoryContentSummary = {
+  /** `body.slug` — the permalink tail the variants table shows next to a name. */
+  slug: string | null;
+  /** `body.lineage.parent_content_id` — set on clones, null on a parent. The ONLY variant→parent link. */
+  parent_content_id: string | null;
+  /** The judged-score digest, omitted entirely when the record carries none (most do). */
+  scores?: InventoryScoreDigestEntry[];
+};
+
+/** One digest entry — `contentItemScoreSchema`'s field set, minus nothing the surface reads. */
+export type InventoryScoreDigestEntry = {
+  scored_by: string;
+  at: string;
+  framework: string;
+  dimension: string;
+  score: number;
+  rationale?: string;
+};
+
+/**
+ * `body.scores[]` reduced to the LATEST entry per `(framework, dimension)`.
+ *
+ * Not the whole array: scores are append-only by design (12-plan §15.3 rule 1)
+ * so it grows without bound, while `variant-experiments.ts:judgementRows`
+ * performs exactly this reduction itself and throws the rest away. Doing it
+ * here bounds what every OTHER inventory consumer now carries. The tie rule is
+ * `judgementRows`' own (`score.at >= …` keeps the later entry) and the drop
+ * rule is the client's own, so the digest and a full record read produce
+ * identical judgement rows.
+ */
+const scoreDigestFromBody = (body: Record<string, unknown>): InventoryScoreDigestEntry[] => {
+  if (!Array.isArray(body.scores)) return [];
+  const latest = new Map<string, InventoryScoreDigestEntry>();
+  for (const entry of body.scores) {
+    if (!isRecord(entry)) continue;
+    const framework = typeof entry.framework === 'string' ? entry.framework : '';
+    const dimension = typeof entry.dimension === 'string' ? entry.dimension : '';
+    const score = typeof entry.score === 'number' ? entry.score : Number.NaN;
+    if (!framework || !dimension || !Number.isFinite(score)) continue;
+    const at = typeof entry.at === 'string' ? entry.at : '';
+    const key = `${framework}\u0000${dimension}`;
+    if (at < (latest.get(key)?.at ?? '')) continue;
+    latest.set(key, {
+      scored_by: typeof entry.scored_by === 'string' ? entry.scored_by : '',
+      at,
+      framework,
+      dimension,
+      score,
+      ...(typeof entry.rationale === 'string' ? { rationale: entry.rationale } : {}),
+    });
+  }
+  return [...latest.values()];
+};
+
+/** Defensive, exactly like `recipeSummaryFromBody`: a half-healed draft body yields nulls, never a throw. Undefined for every type but `content_item`. */
+export const contentSummaryFromBody = (
+  objectType: ObjectRecord['object_type'],
+  body: unknown
+): InventoryContentSummary | undefined => {
+  if (objectType !== 'content_item') return undefined;
+  const record = isRecord(body) ? body : {};
+  const lineage = isRecord(record.lineage) ? record.lineage : {};
+  const scores = scoreDigestFromBody(record);
+  return {
+    slug: stringOrNull(record.slug),
+    parent_content_id: stringOrNull(lineage.parent_content_id),
+    ...(scores.length ? { scores } : {}),
+  };
+};
+
 export type InventoryRow = {
   object_id: string;
   object_type: ObjectRecord['object_type'];
@@ -120,6 +202,8 @@ export type InventoryRow = {
   unpublished_changes: boolean;
   /** Present on recipe rows only (template / section_template / theme) — the W8.3b reuse-first index. */
   recipe?: InventoryRecipeSummary;
+  /** Present on content_item rows only — the W4.1 variants index. */
+  content?: InventoryContentSummary;
 };
 
 export type InventoryDetail = InventoryRow & {
@@ -173,6 +257,7 @@ export const inventoryRowFromRecord = (
   const publishedTime = record.publication.published_time;
   const receiptRevision = publishedContentRevision(record);
   const recipe = recipeSummaryFromBody(record.object_type, record.body);
+  const content = contentSummaryFromBody(record.object_type, record.body);
   return {
     object_id: record.object_id,
     object_type: record.object_type,
@@ -195,6 +280,7 @@ export const inventoryRowFromRecord = (
         ? true
         : receiptRevision === null || receiptRevision !== record.content_revision,
     ...(recipe ? { recipe } : {}),
+    ...(content ? { content } : {}),
   };
 };
 

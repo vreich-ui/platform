@@ -23,7 +23,7 @@ import { z } from 'zod';
 
 import { getAdminStateFromEvent, type LambdaContext } from '../lib/admin-auth.js';
 import { resolveRolesFromEvent } from '../lib/request-roles.js';
-import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
+import { timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 import { isOwner } from '../lib/roles.js';
 import {
   getGovernanceBlobStore,
@@ -172,10 +172,49 @@ const committed = () => ({
 // ─── PF3: CMS-Agent bridge status (memoized health probe) ────────────────────
 
 const CMS_AGENT_HEALTH_TTL_MS = 60_000;
-const cmsAgentHealthClient = new CmsAgentClient();
+/**
+ * T-perf wave 3 — after last wave's one-doc-read + `Promise.all` fix shipped,
+ * re-measurement showed `work` barely moved (2126 -> 2002 ms). `sec.doc` /
+ * `sec.probe` below are what let the NEXT measurement say which half that
+ * still is, but the code-level reasoning already points one way: `doc` is a
+ * single Netlify Blobs GET, and `probe` — when the memo below is cold, which
+ * it always is on a cold container, by construction — is up to three SERIAL
+ * cross-service HTTP calls (`initialize`, `notifications/initialized`,
+ * `tools/call` for `agent_resolve`), each of which inherited
+ * `CmsAgentClient`'s conversational-turn default of 90 s per call with no
+ * override. A live-conversation turn can legitimately need that; a
+ * governance-page STATUS check cannot — nothing here reads the probe's
+ * result to decide anything, `cmsAgentStatus` below turns a failure of any
+ * kind into `{configured, health: {ok:false, code, message}}`, never an
+ * error response. 3 s is a deliberately tight budget for what should be a
+ * same-region, no-payload health call: generous under normal conditions,
+ * and it bounds the worst case (a lost session forcing a fresh handshake) to
+ * single-digit seconds instead of tens-to-hundreds of them. Scoped to THIS
+ * client instance only — every other `CmsAgentClient` caller (chat turns,
+ * node execution) keeps the 90 s default this constant does not touch.
+ */
+export const CMS_AGENT_PROBE_TIMEOUT_MS = 3_000;
+const cmsAgentHealthClient = new CmsAgentClient({ timeoutMs: CMS_AGENT_PROBE_TIMEOUT_MS });
 /** Keyed by project id: each site is its own Netlify process, but a keyed
- *  cache removes the whole cross-tenant-staleness class outright. */
+ *  cache removes the whole cross-tenant-staleness class outright. Module
+ *  scope, so it survives across invocations of a WARM container — the only
+ *  thing it cannot do anything about is a cold one, which starts with an
+ *  empty module and therefore an empty cache by construction (see `sec.probe`
+ *  above for what covers that case instead). */
 const cmsAgentHealthCache = new Map<string, { at: number; health: Record<string, unknown> }>();
+
+/**
+ * Test-only: the memo living at module scope is the whole point in
+ * production (it is what makes a warm container's second-and-later `get`
+ * skip the network call entirely), but that same persistence means a test
+ * that calls `cmsAgentProbe` directly — the only way to exercise the timeout
+ * fix behaviorally rather than by source inspection — would otherwise see
+ * whatever an earlier test in this same process already cached. Never
+ * imported outside admin-governance.test.ts.
+ */
+export const __resetCmsAgentProbeCacheForTesting = (): void => {
+  cmsAgentHealthCache.clear();
+};
 
 type CmsAgentProbe = { missing: string[]; health?: Record<string, unknown> };
 
@@ -190,8 +229,14 @@ type CmsAgentProbe = { missing: string[]; health?: Record<string, unknown> };
  * shape carries one doc-derived field (`legacy_mode_override_ignored`).
  * Separating the probe from the field lets the `get` verb start both at once
  * (`Promise.all`) and pay for the slower one, not for both in series.
+ *
+ * Exported for admin-governance.test.ts — whether a hung CMS-Agent actually
+ * degrades this to an unknown status within `CMS_AGENT_PROBE_TIMEOUT_MS`,
+ * instead of failing the read or blocking past it, is a runtime property no
+ * source-level regex can prove (this file's established pattern for what it
+ * CAN prove at the source level; see the wiring test below).
  */
-const cmsAgentProbe = async (binding: SiteBinding): Promise<CmsAgentProbe> => {
+export const cmsAgentProbe = async (binding: SiteBinding): Promise<CmsAgentProbe> => {
   const missing = cmsAgentMissingEnvVars(binding.env);
   if (missing.length > 0) return { missing };
   const projectId = getSiteIdentity().cmsAgentProjectId;
@@ -290,8 +335,15 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     if (req.verb === 'get') {
       // ONE read of `overrides.v1` (this used to read the same blob twice —
       // once here and once inside resolveActivePolicies — then wait for the
-      // CMS-Agent probe on top of both, all in series).
-      const [doc, probe] = await Promise.all([getGovernanceDoc(store), cmsAgentProbe(binding)]);
+      // CMS-Agent probe on top of both, all in series). `timeSection` splits
+      // `work` by QUESTION ASKED (see admin-editorial-assets.ts for the same
+      // pattern) so Server-Timing's `sec.doc` / `sec.probe` say which of the
+      // two concurrent halves is actually the long pole, instead of that
+      // being an inference again.
+      const [doc, probe] = await Promise.all([
+        timeSection('doc', () => getGovernanceDoc(store)),
+        timeSection('probe', () => cmsAgentProbe(binding)),
+      ]);
       return readJsonResponse(event, {
         doc,
         committed: committed(),

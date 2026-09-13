@@ -135,8 +135,8 @@ function schedule(getToken: GetToken, myGeneration: number, baseMs: number): voi
  * shell serves the navigation BURST, and a poll that asked through it would
  * be re-reading the users store and re-resolving the caller's tier every few
  * seconds for data nobody asked for. `takeAdminShellSection` enforces it (one
- * handoff per section, inside a 5 s window) and answers `null` for every
- * other case — no shell on this deploy, that section errored server-side,
+ * coalesced load and one handoff per section, per PAGE GENERATION — a poll is
+ * the same generation asking twice) and answers `null` for every other case — no shell on this deploy, that section errored server-side,
  * the caller has no admin tier, the load was aborted by a navigation — which
  * lands here as exactly the call this chain has always made.
  *

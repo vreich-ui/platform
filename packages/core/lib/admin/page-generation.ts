@@ -27,10 +27,32 @@
  * …) must run to completion even if the user navigates away the instant
  * after clicking it — each client module's own call sites decide which of
  * its functions is which; see their comments.
+ *
+ * ## The generation's IDENTITY, not just its signal
+ *
+ * An `AbortSignal` answers "is the page I was started for still current?" for
+ * work that is already in flight. It cannot answer "is the payload I am
+ * holding this page's answer?", because a settled signal is an object nobody
+ * kept and an aborted one is indistinguishable from the next abort.
+ * `currentPageGeneration()` gives the same fact a comparable identity: a
+ * monotonic counter that changes exactly when `beginNewPageGeneration()` mints
+ * a new controller, so a module can stamp what it cached with the generation
+ * it was fetched in and compare later.
+ *
+ * `admin-shell-client.ts` is the reason it exists: it coalesces the shell's
+ * three opening reads per NAVIGATION, and a wall clock cannot tell "the second
+ * consumer of this navigation" from "the first consumer of the next one" —
+ * see that module's header for what keying it to time instead cost.
  */
 import { useSyncExternalStore } from 'react';
 
 let controller = new AbortController();
+/**
+ * Identity of the current generation. Monotonic and never reused, so a
+ * stamped-and-compared payload can only ever match the generation it was
+ * actually fetched in.
+ */
+let generation = 1;
 const listeners = new Set<() => void>();
 
 const emit = () => listeners.forEach((listener) => listener());
@@ -38,6 +60,17 @@ const emit = () => listeners.forEach((listener) => listener());
 /** The signal for whatever page generation is current right now. Read-only; never mutate it directly. */
 export function currentPageSignal(): AbortSignal {
   return controller.signal;
+}
+
+/**
+ * Identity of whatever page generation is current right now.
+ *
+ * A plain getter, deliberately not a hook: the modules that key cached work to
+ * a generation are client modules with no React in them, and this module is
+ * already reached from the admin gate's inline script.
+ */
+export function currentPageGeneration(): number {
+  return generation;
 }
 
 /**
@@ -50,6 +83,7 @@ export function currentPageSignal(): AbortSignal {
 export function beginNewPageGeneration(): AbortSignal {
   if (!controller.signal.aborted) controller.abort();
   controller = new AbortController();
+  generation += 1;
   emit();
   return controller.signal;
 }
@@ -69,7 +103,15 @@ export function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError';
 }
 
-/** Test-only: start each test from a clean, unaborted controller instead of leaking one across files. */
+/**
+ * Test-only: start each test from a clean, unaborted controller instead of
+ * leaking one across files.
+ *
+ * The generation counter moves FORWARD rather than back to its initial value:
+ * it is an identity, and a reset that reissued a spent one would let a payload
+ * another module stamped in an earlier test pass for this test's own.
+ */
 export function resetPageGenerationForTests(): void {
   controller = new AbortController();
+  generation += 1;
 }

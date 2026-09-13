@@ -182,6 +182,39 @@ const firstPartyBundle = (fn: string) => {
  *
  * Re-measured 2026-09-13, after the shell coalescing (T-shell):
  *   admin-auth-state 216 · admin-requests 367 · admin-users 438 · admin-shell 369
+ *
+ * Pointer sort key (W3 T1, 2026-09-13) raised admin-agent-chat 3352 -> 3360,
+ * measured at 3357 KB. There is NO import edge to cut here: the module count
+ * is unchanged at 256 before and after, because both files that grew
+ * (lib/artifact-index.ts, lib/artifact-soft-delete.ts) were already in the
+ * graph. The growth is `ArtifactPointer` gaining createdAtISO/deletedAtISO,
+ * `parseArtifactPointer`/`repairArtifactPointer`, and the reasoning for why a
+ * read path is allowed to write a pointer at all. Headroom was 1 KB before
+ * this, which is why a documentation-and-two-helpers change tripped it.
+ *
+ * Variants projection (W4.1, 2026-09-13) raised admin-agent-chat 3360 -> 3368,
+ * measured at 3363 KB. Again NO import edge to cut: the module count is 256
+ * before and after, because both files that grew — server/lib/object-inventory
+ * .ts and server/lib/objects/index-store.ts — were already in the graph via
+ * object-verbs. The growth is the `content` summary a content_item inventory
+ * row now carries (slug, lineage.parent_content_id, the judged-score digest)
+ * plus the index schema bump and its rebuild-on-read reporting, which is what
+ * turns /admin/variants from 40 admin-object invocations into 1. Trimmed from
+ * an initial 3364 KB by cutting prose, not code; what is left IS the feature.
+ * Headroom was 3 KB before this — a second consecutive raise on a 3 KB margin
+ * means the next change here should expect to pay for a real cut, not prose.
+ *
+ * Rebase onto the admin-truthfulness wave (2026-09-13) raised it 3372 -> 3392,
+ * measured at 3384 KB across 257 modules. This is the SUM of two independently
+ * measured raises meeting on one branch, not a new edge: the pointer sort key
+ * and the variants projection each grew files already in the graph, and the
+ * truthfulness wave had separately taken the cap to 3372 on main. The module
+ * count moved 256 -> 257 from that wave's own work, not from W3. The margin is
+ * deliberately widened to 8 KB: four consecutive raises on a <=3 KB headroom
+ * is a ratchet that spends a whole task's review on prose trimming. The next
+ * change that trips this should cut the agent/tools.ts definitions-vs-executors
+ * split (~127 KB of executors that never run on the governance read path),
+ * which is the one real cut left in this bundle.
  */
 const BUDGETS_KB: Record<string, number> = {
   // The coalesced shell call — one navigation, one invocation. Capped first
@@ -193,7 +226,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3372,
+  'admin-agent-chat': 3392,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

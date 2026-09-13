@@ -157,26 +157,24 @@ test('saveArtifactBytes writes final bytes and retained artifact indexes idempot
       ),
       artifact
     );
-    assert.deepEqual(JSON.parse(indexValues.get(`by-kind/pdf/${expectedSha256}.json`) as string), {
+    // W3 T1: every pointer now mirrors the reference's sort key, so a listing
+    // can order and slice without opening the record. `deletedAtISO` is absent
+    // because this reference is live — it is written only when the reference
+    // carries it.
+    const expectedPdfPointer = {
       requestId: 'req_direct_upload_request_20260630_01',
       sha256: expectedSha256,
       artifactKind: 'pdf',
-    });
+      createdAtISO: artifact.createdAtISO,
+    };
+    assert.deepEqual(JSON.parse(indexValues.get(`by-kind/pdf/${expectedSha256}.json`) as string), expectedPdfPointer);
     assert.deepEqual(
       JSON.parse(
         indexValues.get(`by-request/req_direct_upload_request_20260630_01/pdf/${expectedSha256}.json`) as string
       ),
-      {
-        requestId: 'req_direct_upload_request_20260630_01',
-        sha256: expectedSha256,
-        artifactKind: 'pdf',
-      }
+      expectedPdfPointer
     );
-    assert.deepEqual(JSON.parse(indexValues.get(`by-tag/paper/${expectedSha256}.json`) as string), {
-      requestId: 'req_direct_upload_request_20260630_01',
-      sha256: expectedSha256,
-      artifactKind: 'pdf',
-    });
+    assert.deepEqual(JSON.parse(indexValues.get(`by-tag/paper/${expectedSha256}.json`) as string), expectedPdfPointer);
 
     const duplicate = await saveArtifactBytes(input);
     assert.equal(duplicate.ok, true);
@@ -547,6 +545,7 @@ test('artifact-upload function stores valid PNG bytes and writes all artifact in
         blobKey: string;
         contentType: string;
         label: string;
+        createdAtISO: string;
       };
       assert.equal(artifact.artifactKind, 'image');
       assert.equal(artifact.blobKey, `image/req_function_image_request_20260630_01/${expectedSha256}.png`);
@@ -559,26 +558,26 @@ test('artifact-upload function stores valid PNG bytes and writes all artifact in
         ),
         artifact
       );
+      const expectedImagePointer = {
+        requestId: 'req_function_image_request_20260630_01',
+        sha256: expectedSha256,
+        artifactKind: 'image',
+        createdAtISO: artifact.createdAtISO,
+      };
       assert.deepEqual(
         JSON.parse(
           indexValues.get(`by-request/req_function_image_request_20260630_01/image/${expectedSha256}.json`) as string
         ),
-        {
-          requestId: 'req_function_image_request_20260630_01',
-          sha256: expectedSha256,
-          artifactKind: 'image',
-        }
+        expectedImagePointer
       );
-      assert.deepEqual(JSON.parse(indexValues.get(`by-kind/image/${expectedSha256}.json`) as string), {
-        requestId: 'req_function_image_request_20260630_01',
-        sha256: expectedSha256,
-        artifactKind: 'image',
-      });
-      assert.deepEqual(JSON.parse(indexValues.get(`by-tag/hero/${expectedSha256}.json`) as string), {
-        requestId: 'req_function_image_request_20260630_01',
-        sha256: expectedSha256,
-        artifactKind: 'image',
-      });
+      assert.deepEqual(
+        JSON.parse(indexValues.get(`by-kind/image/${expectedSha256}.json`) as string),
+        expectedImagePointer
+      );
+      assert.deepEqual(
+        JSON.parse(indexValues.get(`by-tag/hero/${expectedSha256}.json`) as string),
+        expectedImagePointer
+      );
     } finally {
       if (previousSecret === undefined) delete process.env.ARTIFACT_UPLOAD_TOKEN_SECRET;
       else process.env.ARTIFACT_UPLOAD_TOKEN_SECRET = previousSecret;
