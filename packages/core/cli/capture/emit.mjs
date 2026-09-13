@@ -764,6 +764,32 @@ const REUSE_LOCK_RELEASE_FAILED = 'reuse_lock_release_failed';
 
 const navRoleOf = (row) => row?.role ?? row?.body?.role ?? null;
 
+/**
+ * The `pageRouteRows` counterpart for navigation: `object_inventory` rows never carry `role`
+ * (InventoryRow has no navigation-specific fields — only recipe types get a body-derived summary),
+ * so `navRoleOf(row)` is null for EVERY summary row and `collidingNav` below could never match
+ * without this probe. Unresolved, a navigation reuse candidate silently fell through to `object_create`
+ * and hit the target's real id collision as `requested_id_unavailable` — the reuse path existed but
+ * was never reached.
+ */
+async function navRoleRows(transport, inventory, trace) {
+  const rows = inventoryRows(inventory);
+  const resolved = [];
+  for (const row of rows) {
+    if (navRoleOf(row)) {
+      resolved.push(row);
+      continue;
+    }
+    if (typeof row?.object_id !== 'string') throw new EmissionError('Navigation inventory row has no object_id for role probing.');
+    const detail = await transport.call('object_get', { object_type: 'navigation', object_id: row.object_id });
+    trace.push({ verb: 'object_get', objectType: 'navigation', objectId: row.object_id, purpose: 'navigation_role_probe' });
+    const record = recordFrom(detail);
+    if (!navRoleOf(record)) throw new EmissionError(`Navigation ${row.object_id} has no readable role for collision probing.`);
+    resolved.push(record);
+  }
+  return resolved;
+}
+
 const lockTokenOf = (record) => record?.lockToken ?? record?.lock_token ?? record?.lock?.token ?? null;
 const recordVersionOf = (record) =>
   record?.record_version ?? record?.recordVersion ?? record?.version ?? null;
@@ -894,6 +920,7 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
     trace.push({ verb: 'object_inventory', objectType: type });
   }
   const existingPages = await pageRouteRows(transport, inventories.page, trace);
+  const existingNavs = await navRoleRows(transport, inventories.navigation, trace);
   const report = {
     ...plan,
     dryRun: false,
@@ -986,7 +1013,7 @@ export async function executeEmission({ plan, transport, projectPolicyResolver, 
     // already occupy it.
     const collidingNav =
       operation.objectType === 'navigation'
-        ? inventoryRows(inventories.navigation).find((row) => navRoleOf(row) === operation.body.role) ?? null
+        ? existingNavs.find((row) => navRoleOf(row) === operation.body.role) ?? null
         : null;
     let body = clone(operation.body);
     // Bind materialized artifacts into this body's asset fields. A page binds its

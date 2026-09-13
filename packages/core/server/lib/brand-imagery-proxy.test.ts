@@ -3,12 +3,16 @@ import test from 'node:test';
 
 import {
   BRAND_IMAGERY_MAX_REFERENCES,
+  brandImageryProposalSchema,
   proposeBrandImagery,
+  toVisualStandardBody,
+  toVisualStandardReferences,
   validateBrandImageryProposeInput,
   type BrandImageryCmsAgentClient,
   type BrandImageryProposeInput,
   type BrandImageryProxyDeps,
 } from './brand-imagery-proxy.js';
+import { visualStandardBodySchema } from '../../schema/bodies/visual-standard-v1.js';
 
 const VALID_BRAND_IMAGERY = {
   version: 1,
@@ -623,4 +627,94 @@ test('proposeBrandImagery: the reference cap still holds after hydration -- a st
   const references = writerInput.references as unknown[];
   assert.equal(references.length, BRAND_IMAGERY_MAX_REFERENCES, 'truncated to the cap, not refused');
   assert.deepEqual(references, tooMany.slice(0, BRAND_IMAGERY_MAX_REFERENCES));
+});
+
+// ─── G3: the proposal → visual_standard.v1 adapter ──────────────────────────
+//
+// The bug these guard: a `visual_standard` could not be created from a
+// proposal at all. The envelope emits `mode` where the body wants `kind`, and
+// carries no `version`, no `references` and no `status`, so the agent's
+// hand-assembly failed the `.strict()` schema every time (`version: Invalid
+// input: expected 1; kind: Invalid option; references: expected array,
+// received undefined; (root): Unrecognized keys: "name", "summary"`). The
+// assertion that matters is the LAST one in each test: the REAL schema, not a
+// restatement of it, accepts what the adapter emits.
+
+test('toVisualStandardBody: a house proposal becomes a body the real schema accepts', () => {
+  const references = toVisualStandardReferences([
+    { blobKey: 'image/site/mood-1.jpg', note: 'the palette, not the subject', weight: 0.8 },
+  ]);
+  const body = toVisualStandardBody(brandImageryProposalSchema.parse(validProposalBody()), { references });
+
+  assert.equal(body.version, 1);
+  assert.equal(body.kind, 'house'); // mode → kind
+  assert.equal(body.status, 'draft');
+  assert.equal(body.label, 'Clinical clean');
+  assert.deepEqual(body.brandImagery, VALID_BRAND_IMAGERY);
+  assert.deepEqual(body.sampleSubjects, ['a jar of moisturizer on a marble countertop']);
+  assert.deepEqual(body.references, references);
+  assert.deepEqual(body.derivedFrom, { method: 'writer' });
+  assert.ok(!('mode' in body), 'the envelope-only key never leaks into the body');
+
+  const parsed = visualStandardBodySchema.safeParse(body);
+  assert.equal(parsed.success, true, parsed.success ? '' : JSON.stringify(parsed.error.issues));
+});
+
+test('toVisualStandardBody: a template proposal keeps whenToUse and validates with an empty mood board', () => {
+  const proposal = brandImageryProposalSchema.parse(
+    validProposalBody({ mode: 'template', label: 'Summer campaign', whenToUse: 'Seasonal promo runs only.' })
+  );
+  const body = toVisualStandardBody(proposal, { references: [] });
+
+  assert.equal(body.kind, 'template');
+  assert.equal(body.whenToUse, 'Seasonal promo runs only.');
+  assert.deepEqual(body.references, []);
+
+  const parsed = visualStandardBodySchema.safeParse(body);
+  assert.equal(parsed.success, true, parsed.success ? '' : JSON.stringify(parsed.error.issues));
+});
+
+test('toVisualStandardReferences: mints deterministic ref_ ids, keeps the board, drops what the body cannot hold', () => {
+  const input = [
+    { blobKey: 'image/site/mood-1.jpg', region: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, note: 'warm neutral', weight: 0.4 },
+    { url: 'https://elsewhere.example/photo.jpg' }, // url-only: the body schema requires a blobKey
+    { blobKey: 'image/site/mood-2.jpg', weight: 7 }, // out of the schema's 0..1 range: dropped, not emitted invalid
+  ];
+
+  const references = toVisualStandardReferences(input);
+  assert.equal(references.length, 2);
+  assert.equal(references[0]?.blobKey, 'image/site/mood-1.jpg');
+  assert.deepEqual(references[0]?.region, { x: 0.1, y: 0.1, w: 0.5, h: 0.5 });
+  assert.equal(references[0]?.note, 'warm neutral');
+  assert.equal(references[0]?.weight, 0.4);
+  assert.equal(references[1]?.weight, undefined);
+  for (const reference of references) assert.match(reference.id, /^ref_[a-z0-9]+$/);
+  assert.notEqual(references[0]?.id, references[1]?.id);
+
+  // Deterministic: filing the same board twice mints the same ids.
+  assert.deepEqual(toVisualStandardReferences(input), references);
+});
+
+test('proposeBrandImagery: the success body ships a ready visualStandardBody alongside the proposal', async () => {
+  const { client } = stubCmsAgent((name) =>
+    name === 'visual_identity_propose'
+      ? { ok: true, data: nodeExecuteResult(validProposalBody()) }
+      : { ok: false, code: 'unexpected', message: 'unexpected tool' }
+  );
+
+  const result = await proposeBrandImagery(
+    baseInput({ references: [{ blobKey: 'image/site/mood-1.jpg', weight: 0.8 }] }),
+    baseDeps(client)
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const body = result.ok ? (result.body.visualStandardBody as unknown) : undefined;
+  // The proposal itself is still there — the approval card reads it.
+  assert.equal(result.ok && result.body.mode, 'house');
+
+  const parsed = visualStandardBodySchema.safeParse(body);
+  assert.equal(parsed.success, true, parsed.success ? '' : JSON.stringify(parsed.error.issues));
+  assert.equal(parsed.success && parsed.data.kind, 'house');
+  assert.equal(parsed.success && parsed.data.references.length, 1);
+  assert.equal(parsed.success && parsed.data.references[0]?.blobKey, 'image/site/mood-1.jpg');
 });

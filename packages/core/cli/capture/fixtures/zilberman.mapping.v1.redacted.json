@@ -47,7 +47,7 @@
                       "label": "[redacted:8 chars]",
                       "target": {
                         "kind": "route",
-                        "href": "/s-projects-side-by-side"
+                        "href": "/partners"
                       },
                       "style": "primary"
                     }
@@ -196,7 +196,7 @@
                       "label": "[redacted:8 chars]",
                       "target": {
                         "kind": "route",
-                        "href": "/s-projects-side-by-side"
+                        "href": "/partners"
                       },
                       "style": "primary"
                     },
@@ -244,7 +244,7 @@
                     "label": "[redacted:8 chars]",
                     "target": {
                       "kind": "route",
-                      "href": "/s-projects-side-by-side"
+                      "href": "/partners"
                     },
                     "style": "primary"
                   }
@@ -272,7 +272,7 @@
                       "label": "[redacted:8 chars]",
                       "target": {
                         "kind": "route",
-                        "href": "/s-projects-side-by-side"
+                        "href": "/partners"
                       },
                       "style": "primary"
                     }
@@ -983,7 +983,7 @@
                     "label": "[redacted:8 chars]",
                     "target": {
                       "kind": "route",
-                      "href": "/s-projects-side-by-side"
+                      "href": "/partners"
                     },
                     "style": "primary"
                   },
@@ -1051,7 +1051,7 @@
                       "label": "[redacted:8 chars]",
                       "target": {
                         "kind": "route",
-                        "href": "/s-projects-side-by-side"
+                        "href": "/partners"
                       },
                       "style": "primary"
                     },
@@ -3415,7 +3415,7 @@
                 "label": "[redacted:8 chars]",
                 "target": {
                   "kind": "route",
-                  "href": "/s-projects-side-by-side"
+                  "href": "/partners"
                 }
               },
               {

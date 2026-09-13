@@ -272,22 +272,27 @@ describe('brandImageryProposalPresentation', () => {
 
   it('the Apply prompt names the exact tools, in order, and never invents style words', () => {
     const prompt = brandImageryApplyPrompt({ mode: 'house', label: 'Clinical-clean house look' });
-    assert.match(prompt, /visual_standard_materializer/);
+    assert.match(prompt, /object_create/);
     assert.match(prompt, /site_apply_brand_imagery/);
     assert.match(prompt, /dry run/);
-    assert.ok(prompt.indexOf('visual_standard_materializer') < prompt.indexOf('site_apply_brand_imagery'));
+    assert.ok(prompt.indexOf('object_create') < prompt.indexOf('site_apply_brand_imagery'));
   });
 
   // REVIEW (brand-imagery wave): `visual_standard_materializer` is a CMS-Agent
   // NODE. No platform chat registry (generated or legacy) wires a tool that can
   // execute it — `brand_imagery_propose` proxies only the WRITER node — so a
-  // prompt naming it alone left the agent with a dead end. And asking for
-  // `apply: true` while also asking for a dry run and approval contradicted
-  // itself: the materializer would have applied before the human ever saw the
-  // diff.
-  it('the Apply prompt gives a reachable fallback and never pre-applies', () => {
+  // prompt naming it left the agent with a dead end.
+  //
+  // G3: the fallback prose that replaced it described the body field by field,
+  // and the agent's hand-assembly failed the `.strict()` schema on everything
+  // the prose left out (`version`, `references`, `kind` vs `mode`). The prompt
+  // now points at the ready `visualStandardBody` the proposal ships, and must
+  // never go back to re-specifying the body or naming the missing node.
+  it('the Apply prompt points at the ready payload, not a hand-assembled body', () => {
     const house = brandImageryApplyPrompt({ mode: 'house', label: 'Clinical-clean house look' });
-    assert.match(house, /apply: false/);
+    assert.match(house, /visualStandardBody/);
+    assert.match(house, /verbatim/);
+    assert.doesNotMatch(house, /visual_standard_materializer/);
     assert.doesNotMatch(house, /apply: true/);
     assert.match(house, /object_create/);
     assert.match(house, /set_visual_standard_fields/);
