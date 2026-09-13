@@ -29,21 +29,26 @@ import {
   type UsersBlobStore,
 } from '../lib/users-store.js';
 import { MAJOR_KEY_ARTIFACT_REF_RE } from '../lib/artifact-trust.js';
-import {
-  acceptInvitation,
-  activateOnLoginDetailed,
-  previewInvitationByToken,
-  type GoTrueIdentity,
-} from '../lib/membership/invitations.js';
-import { appendAudit, getPolicy, stampOnboarding } from '../lib/membership/write.js';
+import { acceptInvitation, previewInvitationByToken, type GoTrueIdentity } from '../lib/membership/invitations.js';
+import { appendAudit, stampOnboarding } from '../lib/membership/write.js';
 import { auditActorFromPrincipal, personIdForEmail } from '../lib/membership/store.js';
 import { handleMembershipVerb } from '../lib/membership/verbs.js';
+/**
+ * T-shell: `me` and `synthesizedRecord` moved down to the membership leaf so
+ * `admin-shell.ts` can answer the SAME read as one section of its coalesced
+ * response without importing this module (and with it the whole management
+ * surface) into a function that only reads. Behaviour is unchanged here; the
+ * one payload change is that `me`'s `policy` is now the whole membership
+ * policy rather than just `require_display_name` — see that module's header
+ * and the `/admin/settings/admins` three-call fix it pays for.
+ */
+import { resolveMeSection, synthesizedRecord } from '../lib/membership/session.js';
 import { getNetlifyBlobStore, getSiteObjectsBlobStore } from '../lib/blob-store.js';
 import type { OAuthBlobStore } from '../lib/oauth-store.js';
 import { softDeleteArtifactReference } from '../lib/artifact-soft-delete.js';
 import type { Principal } from '../../schema/object-record-v1.js';
-import { friendlyNameFromEmail } from '../../lib/admin/display-name.js';
 import { getSiteIdentity } from '../../lib/site-identity.js';
+import { timeAuth, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 
 /** T18.0a: the accept page's password policy (mirrors GoTrue's default minimum). */
 export const ACCEPT_MIN_PASSWORD = 8;
@@ -63,7 +68,7 @@ const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-s
 const jsonResponse = (status: number, body: Record<string, unknown>) => ({
   statusCode: status,
   headers: jsonHeaders,
-  body: JSON.stringify({ ok: status >= 200 && status < 300, status, ...body }),
+  body: timeSerialize(() => JSON.stringify({ ok: status >= 200 && status < 300, status, ...body })),
 });
 
 /**
@@ -103,25 +108,6 @@ const safeJsonParse = (event: LambdaEvent): { ok: true; value: unknown } | { ok:
 };
 
 const nowIso = () => new Date().toISOString();
-
-/** A read-only view for a caller with no stored record yet (e.g. a bootstrap owner's first login). */
-const synthesizedRecord = (email: string, owner: boolean, ts = nowIso()): UserRecord => {
-  return {
-    schema_version: 1,
-    email,
-    // D3 (2026-08-06): a friendly default, not the raw email — this only
-    // ever runs when NO record exists yet (first login before any
-    // update_me), so it can never clobber a display name a user set
-    // (getUserRecord/`existing` short-circuits this call once one exists).
-    display_name: friendlyNameFromEmail(email),
-    role: owner ? 'owner' : 'admin',
-    status: 'active',
-    invited_by: 'bootstrap',
-    created_at: ts,
-    updated_at: ts,
-    audit: [],
-  };
-};
 
 // T18.6a: `ListedUser` / `listUsersWithEnvironment` moved to membership/verbs.ts; re-exported for callers.
 export { listUsersWithEnvironment, type ListedUser } from '../lib/membership/verbs.js';
@@ -165,7 +151,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     }
   }
 
-  const adminState = await getAdminStateFromEvent(event, context);
+  const adminState = await timeAuth(() => getAdminStateFromEvent(event, context));
   if (!adminState.authenticated) return jsonResponse(401, { error: adminState.error ?? 'Unauthorized' });
 
   const email = normalizeUserEmail(adminState.email ?? '');
@@ -217,9 +203,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       return jsonResponse(200, { user: null, needs_grant: true });
     }
 
-    const roles = await resolveRolesForPrincipalAsync(principal, {
-      getUserRecord: (e) => getUserRecord(store, e),
-    });
+    const roles = await timeAuth(() =>
+      resolveRolesForPrincipalAsync(principal, {
+        getUserRecord: (e) => getUserRecord(store, e),
+      })
+    );
     if (!roles.includes('admin')) return jsonResponse(403, { error: 'Admin access required' });
     const owner = isOwner(roles);
 
@@ -286,64 +274,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         return jsonResponse(400, { error: 'Invalid request fields.' });
 
       case 'me': {
-        // T9.5/T9.6: first-login activation (invited → active + stamp user_id)
-        // and last_seen on every self-read. Materialize a missing bootstrap
-        // Owner deliberately so the members list reflects their real access.
-        const at = nowIso();
-        /**
-         * T5.1 R10 (F11): `me` is a READ that every admin page load makes,
-         * and it used to cost TWO blob writes — `saveMember` to stamp
-         * `last_seen_at`, and an audit append. `activateOnLoginDetailed`
-         * now reports whether it actually persisted anything (it throttles
-         * `last_seen_at` to `LAST_SEEN_REFRESH_MS`), and the audit entry
-         * rides that same decision so the two stay in step.
-         *
-         * BEHAVIOUR CHANGE, deliberate and disclosed: the `person.login`
-         * audit entry is appended at most once an hour per person instead
-         * of once per page load. `membership.activate` — the entry that
-         * records a real state transition — is unaffected, because a
-         * genuine activation always writes.
-         */
-        const activation = await activateOnLoginDetailed(store, email, adminState.userId, at);
-        const activated = activation?.record ?? null;
-        if (activated && activation?.wrote) {
-          await appendAudit(store, {
-            at,
-            actor: auditActorFromPrincipal(principal),
-            action:
-              activated.status === 'active' && activated.audit.at(-1)?.action === 'activate'
-                ? 'membership.activate'
-                : 'person.login',
-            target: { person_id: activated.person_id ?? personIdForEmail(email), email },
-            via: 'admin_ui',
-          }).catch(() => undefined);
-        }
-        if (!activated && environmentRoleForEmail(email) === 'owner') {
-          const bootstrapOwner: UserRecord = {
-            ...synthesizedRecord(email, true, at),
-            user_id: adminState.userId,
-            last_seen_at: at,
-            audit: [{ at, actor_email: email, action: 'bootstrap_activate' }],
-          };
-          await putUserRecord(store, bootstrapOwner);
-          const materialised = await getUserRecord(store, email);
-          return jsonResponse(200, {
-            user: materialised ?? bootstrapOwner,
-            bootstrap: true,
-            roles,
-            onboarding: materialised?.onboarding ?? { steps: {} },
-            policy: { require_display_name: (await getPolicy(store)).require_display_name },
-          });
-        }
-        return jsonResponse(200, {
-          user: activated ?? synthesizedRecord(email, owner),
-          bootstrap: !activated,
-          roles,
-          // T18.5: the welcome gate reads these (no record ⇒ no onboarding ⇒ the
-          // layout's forbidden panel, never a redirect loop).
-          onboarding: activated?.onboarding ?? null,
-          policy: { require_display_name: (await getPolicy(store)).require_display_name },
-        });
+        // T-shell: the whole read lives in `membership/session.ts` now, shared
+        // verbatim with `admin-shell.ts`'s `me` section. The tier resolved
+        // above is passed in rather than re-resolved — the same "auth once"
+        // rule the shell function is built on.
+        const result = await resolveMeSection({ store, email, userId: adminState.userId, roles, owner, principal });
+        return jsonResponse(result.status, result.body);
       }
 
       case 'update_me': {
@@ -398,5 +334,10 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 // Re-export for tests that exercise the store surface directly.
 export type { UsersBlobStore };
 
-/** W11 T11.4: per-site factory — the site shim instantiates this with its binding. */
-export const createHandler = (binding: SiteBinding) => buildHandlerImpl(binding);
+/** W11 T11.4: per-site factory — the site shim instantiates this with its binding.
+ *  T-shell: the Server-Timing wrap the other two shell-trio functions already
+ *  had. `admin-users` was measured at 454-710 ms on the wire with NO header at
+ *  all, which is the one thing that made its share of the per-navigation floor
+ *  unattributable — the wrap says how much of that is auth, work and
+ *  serialisation, the same four metrics its siblings report. */
+export const createHandler = (binding: SiteBinding) => withServerTiming('admin-users', buildHandlerImpl(binding));

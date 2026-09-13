@@ -2,9 +2,24 @@
  * T2.1 — cold-start bundle caps for the admin functions.
  *
  * Netlify cold-starts a function by loading its ENTIRE bundle before the
- * handler's first line runs, so a function's module graph is a latency
- * number, not a tidiness one. The measured spread on the shell trio was
- * 445 ms → 5164 ms for the same function, call to call.
+ * handler's first line runs, so a function's module graph is a COLD-START
+ * latency number, not a tidiness one.
+ *
+ * WHAT THIS FILE IS AND IS NOT, corrected 2026-09-13. T2.1 opened with the
+ * 445 ms → 5164 ms call-to-call spread measured on the shell trio and read it
+ * as a bundle-size result. T0.1's `Server-Timing` wave then measured the same
+ * endpoints directly and disproved that reading: every sampled invocation
+ * reported `cold=0`, and `admin-auth-state` did 0.02 ms of server work for
+ * 242-683 ms on the wire. The spread is dominated by ~250-400 ms of fixed
+ * per-INVOCATION platform overhead, which no bundle cap can touch — that is
+ * why the fix for the admin's per-click floor was `admin-shell` (fewer calls),
+ * not a smaller bundle.
+ *
+ * These caps still earn their place, for the narrower thing they actually
+ * govern: the first invocation on a new container, where the whole graph IS
+ * loaded before the handler runs, and where `admin-users` at 2.58 MB was a
+ * real multi-second stall. Read them as a cold-start ratchet, and never as an
+ * explanation for warm call-to-call variance.
  *
  * What is measured: bundle each site shim in `netlify/functions/` with
  * esbuild, `packages: 'external'` (so node_modules are excluded and the
@@ -22,6 +37,19 @@
  * capped together because all three fire on EVERY `/admin/*` navigation (see
  * lib/admin/use-current-user.ts). `admin-auth-state` at 192 KB is the shape
  * the other two are held to.
+ *
+ * `admin-shell` joins them under the same cap and the same bans, and is the
+ * one that matters most: it is the COALESCED call the shell now makes instead
+ * of the three (T-shell — `Server-Timing` showed the per-click floor is ~250-400
+ * ms of fixed per-invocation overhead, not server work), so it runs on every
+ * navigation whether or not the other three do. It comes in UNDER the two it
+ * supersedes on the read path precisely because it imports the two read paths
+ * from leaf modules — `lib/requests/list-snapshot.ts` and
+ * `lib/membership/session.ts` — instead of importing `admin-requests.ts` and
+ * `admin-users.ts`, which would have pulled the workflow-cancel bridge and the
+ * whole membership-management surface (~200 KB) into a function that only
+ * reads. If this cap ever fails, suspect exactly that: a new import edge from
+ * `admin-shell.ts` to one of the action handlers.
  *
  * `admin-agent-chat` is a RATCHET, not a target: ~81% of its weight IS the
  * mcp.ts subtree, and unlike admin-users that coupling is real — the chat
@@ -120,15 +148,25 @@ const firstPartyBundle = (fn: string) => {
  * artifact_orphan_sweep/artifact_dedupe_by_sha tools, so it costs nothing
  * here. Nothing to cut: the new module IS the feature, and it drags no new
  * subtree behind it.
+ *
+ * Re-measured 2026-09-13, after the shell coalescing (T-shell):
+ *   admin-auth-state 216 · admin-requests 367 · admin-users 438 · admin-shell 369
  */
 const BUDGETS_KB: Record<string, number> = {
-  // Shell trio — every /admin/* navigation pays these three.
+  // The coalesced shell call — one navigation, one invocation. Capped first
+  // because it is the one that now runs on every click.
+  'admin-shell': 500,
+  // Shell trio — still live (other callers, and the client's per-section
+  // fallback when `admin-shell` is absent or a section errors).
   'admin-auth-state': 500,
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
   'admin-agent-chat': 3352,
 };
+
+/** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */
+const SHELL_FUNCTIONS = ['admin-shell', 'admin-auth-state', 'admin-requests', 'admin-users'];
 
 for (const [fn, capKb] of Object.entries(BUDGETS_KB)) {
   test(`BUNDLE BUDGET: ${fn} stays under ${capKb} KB of first-party source`, () => {
@@ -155,7 +193,7 @@ const MCP_SURFACE = [
   'packages/core/server/lib/brand-imagery-proxy.ts',
 ];
 
-for (const fn of ['admin-auth-state', 'admin-requests', 'admin-users']) {
+for (const fn of SHELL_FUNCTIONS) {
   test(`SHELL TRIO: ${fn} does not statically import the MCP tool surface`, () => {
     const { modules } = firstPartyBundle(fn);
     const found = MCP_SURFACE.filter((mod) => modules.includes(mod));
@@ -178,7 +216,7 @@ for (const fn of ['admin-auth-state', 'admin-requests', 'admin-users']) {
  * shell-trio function stays free of them is to not reach those modules at
  * all. This asserts the real bundle, node_modules included.
  */
-for (const fn of ['admin-auth-state', 'admin-requests', 'admin-users']) {
+for (const fn of SHELL_FUNCTIONS) {
   test(`SHELL TRIO: ${fn} bundles neither sharp nor stripe`, () => {
     const modules = Object.keys(bundleInputs(fn, { externalPackages: false }));
     for (const pkg of ['sharp', 'stripe']) {

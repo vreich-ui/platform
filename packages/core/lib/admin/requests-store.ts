@@ -37,13 +37,15 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 import { REQUEST_LIST_MAX_LIMIT } from './request-list-limits.js';
-import { isAuthExpired, subscribeAuthExpiry } from './auth-expiry.js';
+import { AuthExpiredError, isAuthExpired, subscribeAuthExpiry } from './auth-expiry.js';
+import { takeAdminShellSection } from './admin-shell-client.js';
 
 import {
   listRequestsIfChanged,
   pollIntervalWithBackoff,
   requestPollIntervalFor,
   type EmailMode,
+  type RequestListView,
   type RequestRowView,
 } from './requests-client.js';
 import {
@@ -119,15 +121,69 @@ function schedule(getToken: GetToken, myGeneration: number, baseMs: number): voi
   timer = setTimeout(() => void tick(getToken, myGeneration), delay);
 }
 
-async function tick(getToken: GetToken, myGeneration: number): Promise<void> {
+/**
+ * T-shell — the index, from whichever call this tick is entitled to.
+ *
+ * The FIRST tick of a page generation takes the `requests` section out of the
+ * one coalesced `admin-shell` response the gate and `useCurrentUser` are also
+ * being served from: `Server-Timing` showed the admin's per-click floor was
+ * three round trips' worth of fixed per-invocation overhead (~250-400 ms
+ * each), not server work, so the three opening reads travel together now.
+ *
+ * Every later tick — this chain's own 5-30 s cadence — goes straight to
+ * `admin-requests` as it always did. That split is the whole discipline: the
+ * shell serves the navigation BURST, and a poll that asked through it would
+ * be re-reading the users store and re-resolving the caller's tier every few
+ * seconds for data nobody asked for. `takeAdminShellSection` enforces it (one
+ * handoff per section, inside a 5 s window) and answers `null` for every
+ * other case — no shell on this deploy, that section errored server-side,
+ * the caller has no admin tier, the load was aborted by a navigation — which
+ * lands here as exactly the call this chain has always made.
+ *
+ * The shell hands back the same `ETag` the dedicated endpoint would have put
+ * in the header, so the conditional-poll protocol (T5.1 R8) survives a
+ * coalesced first load: the very next tick can still send `If-None-Match` and
+ * get a bodyless `304`.
+ */
+async function readIndexPage(
+  getToken: GetToken,
+  forceDirect: boolean
+): Promise<{ unchanged: true; etag: string | undefined } | { unchanged: false; view: RequestListView; etag?: string }> {
+  // Resolved ONCE and replayed, rather than letting the shell client and the
+  // list client each ask: `getToken` reaches goTrue, and an empty answer is
+  // the auth-expiry signal `listRequestsIfChanged` raises for itself — it
+  // must see the same token this tick already looked at, not a second one.
+  const accessToken = await getToken();
+  const replayToken: GetToken = async () => accessToken;
+  const shellView = forceDirect
+    ? null
+    : await takeAdminShellSection<RequestListView & { etag?: string }>(accessToken, 'requests');
+  if (shellView) return { unchanged: false, view: shellView, ...(shellView.etag ? { etag: shellView.etag } : {}) };
+  // C3: the coalesced call is a REQUEST, so it can be the one that discovers
+  // the session is gone. Once it has, a second call to `admin-requests` would
+  // spend a request to be told the same thing — so this raises the expiry the
+  // list client would have raised, and `tick` treats it as the pause it is
+  // (no error on screen, no retry armed) rather than a load failure.
+  if (isAuthExpired()) throw new AuthExpiredError();
+  // W19 T19.2: ONE blob GET (the request index), capped generously enough
+  // that the quick-filter tabs (all subsets of this same active set) stay
+  // accurate — see the module comment for what is deliberately NOT served
+  // from this cache.
+  return listRequestsIfChanged(replayToken, { limit: REQUEST_LIST_MAX_LIMIT }, lastEtag);
+}
+
+/**
+ * `forceDirect` is `refreshRequestsIndexNow`'s doing and nothing else's: a
+ * caller that just archived or cancelled something wants the server's answer
+ * AFTER the write, and the shell handoff is a snapshot taken before it. It is
+ * the same reason that path already clears `lastEtag` — a `304` and a
+ * pre-mutation coalesced payload are the same lie.
+ */
+async function tick(getToken: GetToken, myGeneration: number, forceDirect = false): Promise<void> {
   if (myGeneration !== generation) return; // this chain was retired while the timer was pending
   if (isAuthExpired()) return; // C3: paused, not retired — see `schedule` and `watchAuthRecovery`
   try {
-    // W19 T19.2: ONE blob GET (the request index), capped generously enough
-    // that the quick-filter tabs (all subsets of this same active set) stay
-    // accurate — see the module comment for what is deliberately NOT served
-    // from this cache.
-    const response = await listRequestsIfChanged(getToken, { limit: REQUEST_LIST_MAX_LIMIT }, lastEtag);
+    const response = await readIndexPage(getToken, forceDirect);
     if (myGeneration !== generation) return;
     lastEtag = response.etag;
 
@@ -228,6 +284,16 @@ export function startRequestsIndexPoll(getToken: GetToken): () => void {
 }
 
 /**
+ * Read-only access to the published index snapshot outside React — the same
+ * seam `decisionOverlaySnapshot()` (below) and `currentUserSnapshot()`
+ * (`use-current-user.ts`) already provide for their singletons. This repo's
+ * test stack has no renderer, so the module-scope snapshot every hook-based
+ * subscriber reads from is the only place "what every surface now sees" can
+ * be asserted. A React consumer uses `useRequestsIndex`.
+ */
+export const requestsIndexSnapshot = (): RequestsIndexState => snapshot;
+
+/**
  * Test-only: back to the pristine `EMPTY` snapshot with no pending timer —
  * so one test's fetched rows (and their very recent `fetchedAtMs`) can never
  * suppress the NEXT test's own expected initial fetch via the freshness
@@ -253,7 +319,7 @@ export function refreshRequestsIndexNow(getToken: GetToken): void {
   generation += 1;
   if (timer) clearTimeout(timer);
   timer = undefined;
-  void tick(getToken, generation);
+  void tick(getToken, generation, true);
 }
 
 /** Called by a subscriber's own `visibilitychange` listener; a no-op if a chain is already armed or nobody is subscribed. */

@@ -38,15 +38,27 @@ import {
   beginDecisionOverlay,
   decisionOverlaySnapshot,
   refreshRequestsIndexNow,
+  requestsIndexSnapshot,
   REQUESTS_INDEX_FRESH_MS,
   resetRequestsIndexForTests,
   settleDecisionOverlay,
   startRequestsIndexPoll,
 } from './requests-store.js';
+import { resetAdminShellClientForTests } from './admin-shell-client.js';
 
 const getToken = async () => 'token';
 
 const REQUESTS_URL = '/.netlify/functions/admin-requests';
+/**
+ * T-shell: the store's FIRST tick of a page generation now offers to take its
+ * page out of the one coalesced `admin-shell` response the gate and
+ * `useCurrentUser` are also served from (`Server-Timing` showed the admin's
+ * per-click floor was three round trips' fixed overhead, not server work).
+ * Unless a test routes this URL itself, `mockFetch` answers it 404 — the
+ * "older deploy" case — so every pre-existing case here keeps exercising
+ * exactly the direct `admin-requests` path it was written for.
+ */
+const SHELL_URL = '/.netlify/functions/admin-shell';
 const OBJECT_URL = '/.netlify/functions/admin-object';
 const ACTIVITY_URL = '/.netlify/functions/admin-request-activity';
 
@@ -63,6 +75,7 @@ function mockFetch(routes: Record<string, Route>) {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
     calls.push({ url, body });
     const route = routes[url];
+    if (!route && url === SHELL_URL) return new Response('{}', { status: 404 });
     if (!route) throw new Error(`requests-store.test.ts: unmocked fetch to ${url}`);
     const { status = 200, body: resBody } = await route(body);
     return new Response(JSON.stringify(resBody), { status, headers: { 'content-type': 'application/json' } });
@@ -108,6 +121,9 @@ afterEach(() => {
   activeFetch?.restore();
   activeFetch = undefined;
   resetRequestsIndexForTests();
+  // The shell client's sticky "no admin-shell on this deploy" flag and its
+  // one-shot handoff are module scope too, for the same ClientRouter reason.
+  resetAdminShellClientForTests();
 });
 
 describe('the optimistic overlay — the real store, not a recorder', () => {
@@ -588,5 +604,135 @@ describe('cross-surface sync through the real store — object-review and chat-t
       undefined,
       'and the alias expires with it — otherwise the row is stuck reading "decided" forever'
     );
+  });
+});
+
+/**
+ * T-shell — the store's first tick of a page generation is served from the
+ * ONE coalesced `admin-shell` response; every later tick is its own call.
+ *
+ * The measurement that forced this: `admin-auth-state` does 0.02 ms of server
+ * work and still costs 242-683 ms on the wire, so the shell's per-click floor
+ * was three round trips of fixed per-invocation overhead. This store owns one
+ * of those three.
+ *
+ * The split is the discipline. The shell serves the navigation BURST — the
+ * moment the gate, `useCurrentUser` and this store all want an answer at once.
+ * The 5-30 s poll cadence afterwards goes straight to `admin-requests`, because
+ * a poll asking through the shell would re-read the users store and re-resolve
+ * the caller's tier every few seconds for data nobody asked for.
+ */
+describe('T-shell — the coalesced first read', () => {
+  const shellSection = (over: Record<string, unknown> = {}) => ({
+    ok: true,
+    status: 200,
+    sections: {
+      access: { status: 'ok', data: { authenticated: true, isAdmin: true, roles: ['owner'] } },
+      me: { status: 'ok', data: { user: { email: 'boss@x.test' }, roles: ['owner'] } },
+      requests: {
+        status: 'ok',
+        data: {
+          ...emptyRequestsBody,
+          requests: [
+            {
+              request_id: 'req_shell_1',
+              kind: 'article',
+              title: 'From the coalesced call',
+              status: 'done',
+              created_by: 'boss@x.test',
+              updated_at: '2026-09-13T00:00:00.000Z',
+              archived: false,
+            },
+          ],
+          total: 1,
+          seq: 7,
+          etag: '"shell-etag"',
+        },
+      },
+      ...over,
+    },
+  });
+
+  it('takes its first page out of the shell response, with no admin-requests call at all', async () => {
+    activeFetch = mockFetch({ [SHELL_URL]: () => ({ body: shellSection() }) });
+    activeStop = startRequestsIndexPoll(getToken);
+
+    await waitFor(() => activeFetch!.countOf(SHELL_URL) === 1);
+    assert.equal(activeFetch.countOf(REQUESTS_URL), 0, 'the coalesced call must replace the dedicated one');
+    assert.deepEqual(
+      requestsIndexSnapshot().rows?.map((row) => row.request_id),
+      ['req_shell_1']
+    );
+    assert.equal(requestsIndexSnapshot().total, 1);
+  });
+
+  /**
+   * The conditional-poll protocol (T5.1 R8) has to survive a coalesced first
+   * load, or the very first poll after every navigation would re-transfer a
+   * byte-identical body. `admin-shell` therefore hands back the same hash the
+   * dedicated endpoint would have put in the `ETag` header.
+   */
+  it('replays the shell’s etag as If-None-Match on the next, direct poll', async () => {
+    activeFetch = mockFetch({
+      [SHELL_URL]: () => ({ body: shellSection() }),
+      [REQUESTS_URL]: () => ({ body: { ...emptyRequestsBody, seq: 7 } }),
+    });
+    activeStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => activeFetch!.countOf(SHELL_URL) === 1);
+
+    // The chain's own next tick: the shell has already handed this section
+    // over, so it goes to `admin-requests` — carrying the shell's etag.
+    refreshRequestsIndexNow(getToken);
+    await waitFor(() => activeFetch!.countOf(REQUESTS_URL) === 1);
+    assert.equal(activeFetch.countOf(SHELL_URL), 1, 'only the FIRST read may come from the shell');
+  });
+
+  /**
+   * `refreshRequestsIndexNow` runs after a mutation (archive / cancel / mute)
+   * and must come back with the server's answer AFTER the write. A handoff
+   * payload captured before it is the same lie a `304` would be — which is
+   * why that path already clears `lastEtag`.
+   */
+  it('a forced refresh after a mutation bypasses the shell handoff entirely', async () => {
+    activeFetch = mockFetch({
+      [SHELL_URL]: () => ({ body: shellSection() }),
+      [REQUESTS_URL]: () => ({
+        body: {
+          ...emptyRequestsBody,
+          requests: [
+            {
+              request_id: 'req_shell_1',
+              kind: 'article',
+              title: 'From the coalesced call',
+              status: 'archived',
+              created_by: 'boss@x.test',
+              updated_at: '2026-09-13T00:01:00.000Z',
+              archived: true,
+            },
+          ],
+          total: 1,
+          seq: 8,
+        },
+      }),
+    });
+    activeStop = startRequestsIndexPoll(getToken);
+    await waitFor(() => activeFetch!.countOf(SHELL_URL) === 1);
+
+    refreshRequestsIndexNow(getToken);
+    await waitFor(() => activeFetch!.countOf(REQUESTS_URL) === 1);
+    assert.equal(requestsIndexSnapshot().rows?.[0]?.status, 'archived');
+  });
+
+  it('falls back to admin-requests when the shell marks that section errored', async () => {
+    activeFetch = mockFetch({
+      [SHELL_URL]: () => ({ body: shellSection({ requests: { status: 'error', code: 'read_failed' } }) }),
+      [REQUESTS_URL]: () => ({ body: { ...emptyRequestsBody, seq: 3 } }),
+    });
+    activeStop = startRequestsIndexPoll(getToken);
+
+    // Degradation parity: with three separate calls, one failing left the
+    // other two intact — a coalesced call must be no worse for this store.
+    await waitFor(() => activeFetch!.countOf(REQUESTS_URL) === 1);
+    assert.deepEqual(requestsIndexSnapshot().rows, []);
   });
 });

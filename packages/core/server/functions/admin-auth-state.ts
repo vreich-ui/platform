@@ -1,6 +1,6 @@
 import type { SiteBinding } from '../lib/site-binding.js';
 import type { LambdaContext } from '../lib/admin-auth.js';
-import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
+import { resolveAdminAccessFromEvent, type AdminAccessState } from '../lib/request-roles.js';
 import { environmentRoleForEmail, isOwner } from '../lib/roles.js';
 import { getUsersBlobStore } from '../lib/users-store.js';
 import { ensureDefaultMembershipOnLogin } from '../lib/membership/invitations.js';
@@ -22,11 +22,37 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
   body: timeSerialize(() => JSON.stringify(body)),
 });
 
-const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
-  if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') {
-    return jsonResponse(405, { error: 'Method not allowed' });
-  }
+/** The display payload this endpoint answers with — and `admin-shell.ts`'s `access` section, byte for byte. */
+export interface AdminAccessStatePayload {
+  authenticated: boolean;
+  isAdmin: boolean;
+  tier: 'owner' | 'admin' | null;
+  email?: string;
+  userId?: string;
+  error?: string;
+  roles: string[];
+}
 
+/**
+ * Resolve the caller's access ONCE and return both the wire payload and the
+ * resolved state behind it.
+ *
+ * The second half of that pair is the whole point: `admin-shell.ts` gates its
+ * requests and `me` sections on the SAME `AdminAccessState` this produced, so
+ * a coalesced navigation resolves auth once instead of three times. Measured
+ * 2026-09-13: this endpoint does 0.02 ms of work and costs 242-683 ms on the
+ * wire, so three resolutions were never three auth costs — they were three
+ * round trips. Sharing the state is what removes two of them.
+ *
+ * Exported rather than inlined so the defaulting below (a WRITE on some
+ * logins) lives in exactly one place and cannot drift between the two
+ * callers.
+ */
+export const resolveAdminAccessSection = async (
+  event: LambdaEvent,
+  context: LambdaContext | undefined,
+  binding: SiteBinding
+): Promise<{ payload: AdminAccessStatePayload; adminState: AdminAccessState }> => {
   // T9.4/S1: resolve the full workspace tier via the shared admin-access
   // resolver (users store + ADMIN_EMAILS bootstrap owners) — the SAME
   // resolver every admin function now gates on (request-roles.ts), so this
@@ -65,15 +91,26 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
 
   const tier = isOwner(adminState.roles) ? 'owner' : adminState.roles.includes('admin') ? 'admin' : null;
 
-  return jsonResponse(200, {
-    authenticated: adminState.authenticated,
-    isAdmin: adminState.isAdmin,
-    tier,
-    email: adminState.email,
-    userId: adminState.userId,
-    error: adminState.error,
-    roles: adminState.roles,
-  });
+  return {
+    payload: {
+      authenticated: adminState.authenticated,
+      isAdmin: adminState.isAdmin,
+      tier,
+      email: adminState.email,
+      userId: adminState.userId,
+      error: adminState.error,
+      roles: adminState.roles,
+    },
+    adminState,
+  };
+};
+
+const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
+  if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') {
+    return jsonResponse(405, { error: 'Method not allowed' });
+  }
+  const { payload } = await resolveAdminAccessSection(event, context, binding);
+  return jsonResponse(200, { ...payload });
 };
 
 /** W11 T11.4: per-site factory — the site shim instantiates this with its binding.

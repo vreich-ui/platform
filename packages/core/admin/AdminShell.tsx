@@ -179,6 +179,21 @@ function NavList({
               <a
                 key={item.href}
                 href={item.href}
+                /**
+                 * T5.3 (admin latency plan): warm the next section's DOCUMENT
+                 * on hover, so a sidebar click no longer pays its TTFB before
+                 * the page's own islands can start loading.
+                 *
+                 * No `astro.config` change was needed: `AdminLayout` renders
+                 * through `Layout.astro`, whose `<ClientRouter />` already
+                 * calls `init({ prefetchAll: true })` with the default
+                 * `hover` strategy, so these links were eligible already.
+                 * Naming the strategy pins it to THIS nav — should the fleet
+                 * ever narrow prefetching globally (`prefetchAll: false`),
+                 * the admin sidebar keeps the behaviour it was measured with
+                 * rather than silently losing it.
+                 */
+                data-astro-prefetch="hover"
                 onClick={onNavigate}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
@@ -402,11 +417,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
               {identity.adminLabel}
             </span>
           </a>
-          <NavList
-            currentPath={currentPath}
-            owner={owner}
-            admin={isAdmin}
-          />
+          <NavList currentPath={currentPath} owner={owner} admin={isAdmin} />
           <a
             href="/"
             target="_blank"
@@ -557,12 +568,7 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
           side="left"
           width={280}
         >
-          <NavList
-            currentPath={currentPath}
-            owner={owner}
-            admin={isAdmin}
-            onNavigate={() => setMobileNav(false)}
-          />
+          <NavList currentPath={currentPath} owner={owner} admin={isAdmin} onNavigate={() => setMobileNav(false)} />
         </Drawer>
 
         <CommandPalette

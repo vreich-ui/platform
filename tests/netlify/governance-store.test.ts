@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  activePoliciesFromDoc,
   resolveActivePolicies,
   putGovernanceDoc,
   getGovernanceDoc,
@@ -174,4 +175,57 @@ test('a store read that throws degrades to committed', async () => {
     brandImageryOverrides: 'committed',
     genesis: 'committed',
   });
+});
+
+/**
+ * T-perf — `activePoliciesFromDoc` is `resolveActivePolicies` with the read
+ * taken out, split so a caller that returns BOTH the raw doc and the resolved
+ * policies in one response (admin-governance.ts's `get`) reads `overrides.v1`
+ * once instead of twice. These pin that the split changed nothing: same
+ * resolution for the same doc, and zero store traffic of its own.
+ */
+const countingStore = () => {
+  const inner = memStore();
+  let reads = 0;
+  return {
+    ...inner,
+    reads: () => reads,
+    async get(key: string) {
+      reads += 1;
+      return inner.get(key);
+    },
+  };
+};
+
+test('activePoliciesFromDoc resolves exactly as resolveActivePolicies does, for an empty and an overridden doc', async () => {
+  for (const override of [
+    {},
+    { learning_mode: true },
+    { brandImageryOverrides: 'lock' as const },
+    { chat_registry: 'legacy' as const },
+    { surfaces: { 'plugin:claude': 'block' as const } },
+  ]) {
+    const store = countingStore();
+    const stored = doc(override);
+    await putGovernanceDoc(store, stored);
+
+    const viaStore = await resolveActivePolicies(store);
+    const readsAfterStorePath = store.reads();
+    const viaDoc = activePoliciesFromDoc(await getGovernanceDoc(store));
+
+    assert.deepEqual(viaDoc, viaStore, `resolution drifted for override ${JSON.stringify(override)}`);
+    // The pure resolver itself reads nothing — the only read above is the
+    // explicit getGovernanceDoc, which is the ONE read the caller now makes.
+    assert.equal(store.reads(), readsAfterStorePath + 1, 'activePoliciesFromDoc must not touch the store');
+  }
+});
+
+test('activePoliciesFromDoc(null) is the committed disaster fallback', () => {
+  const active = activePoliciesFromDoc(null);
+  assert.deepEqual(active.approval, activeApprovalPolicy());
+  assert.deepEqual(active.creation, activeCreationPolicy());
+  assert.deepEqual(active.genesis, FLEET_GENESIS_POLICY);
+  assert.equal(active.learning_mode, false);
+  assert.equal(active.brandImageryOverrides, 'allow');
+  assert.equal(active.provenance.approval, 'committed');
 });

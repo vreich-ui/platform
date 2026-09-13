@@ -20,6 +20,11 @@
  * the background; see `peekCachedAdminAccessState`.
  */
 import { getSiteIdentity } from '../site-identity.js';
+// The cache-key derivation this module and `use-current-user.ts` share — two
+// persisted identity snapshots, one rule for whose entry is whose. It lives in
+// its own dependency-free leaf because this module ships on public reader
+// pages via `HeaderAuthButton.astro`.
+import { decodeTokenSubject } from './token-subject.js';
 
 const ENDPOINT = '/.netlify/functions/admin-auth-state';
 
@@ -45,28 +50,6 @@ interface CachedAdminAccessState {
   fetchedAt: number;
 }
 
-const base64UrlDecode = (segment: string): string => {
-  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
-  return atob(padded);
-};
-
-/**
- * Pulls the `sub` claim out of a JWT without verifying it — this is a cache
- * key, never a trust boundary; the server verifies the token on every real
- * request regardless of anything decoded here.
- */
-const decodeTokenSubject = (token: string): string | null => {
-  try {
-    const payload = token.split('.')[1];
-    if (!payload) return null;
-    const decoded = JSON.parse(base64UrlDecode(payload)) as { sub?: string };
-    return typeof decoded.sub === 'string' && decoded.sub ? decoded.sub : null;
-  } catch {
-    return null;
-  }
-};
-
 const readCache = (subject: string): CachedAdminAccessState | null => {
   try {
     const raw = sessionStorage.getItem(CACHE_KEY(subject));
@@ -81,7 +64,10 @@ const readCache = (subject: string): CachedAdminAccessState | null => {
 
 const writeCache = (subject: string, state: AdminAccessState): void => {
   try {
-    sessionStorage.setItem(CACHE_KEY(subject), JSON.stringify({ state, fetchedAt: Date.now() } satisfies CachedAdminAccessState));
+    sessionStorage.setItem(
+      CACHE_KEY(subject),
+      JSON.stringify({ state, fetchedAt: Date.now() } satisfies CachedAdminAccessState)
+    );
   } catch {
     // Private browsing / disabled storage — the caller still gets a correct
     // answer this page load, it just can't paint instantly next time.
@@ -112,6 +98,25 @@ export function clearCachedAdminAccessState(): void {
   } catch {
     // Private browsing / disabled storage — nothing was ever cached.
   }
+}
+
+/**
+ * Write an access state into the instant-paint cache for `token`'s subject,
+ * for an answer that did NOT come from this module's own fetch.
+ *
+ * T-shell: `admin-shell` returns the same `admin-auth-state` payload as one
+ * section of its single coalesced response (`admin-shell-client.ts`), and an
+ * answer that arrives that way must seed the very same cache, or the next
+ * navigation would have nothing to paint from and the coalescing would have
+ * bought a round trip back. The caching RULE is unchanged and stays here,
+ * where it can only be written one way: a genuine answer (admit or deny) is
+ * cache-worthy, a `checkFailed` blip never is — caching a transient failure
+ * would paint the next navigation from a lie.
+ */
+export function cacheAdminAccessState(token: string | null | undefined, state: AdminAccessState): void {
+  if (!token || state.checkFailed) return;
+  const subject = decodeTokenSubject(token);
+  if (subject) writeCache(subject, state);
 }
 
 /**

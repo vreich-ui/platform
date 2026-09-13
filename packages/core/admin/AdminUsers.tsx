@@ -36,7 +36,17 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { Avatar, Badge, Button, type ButtonProps, Card, EmptyState, IconButton, Skeleton, StatusPill } from './primitives';
+import {
+  Avatar,
+  Badge,
+  Button,
+  type ButtonProps,
+  Card,
+  EmptyState,
+  IconButton,
+  Skeleton,
+  StatusPill,
+} from './primitives';
 import { Input, Select, Switch, Textarea } from './forms';
 import { Dialog, ConfirmDialog, Drawer, Popover, useToast } from './overlays';
 import { DataTable, type Column } from './data';
@@ -78,7 +88,6 @@ import {
   listUnmanagedIdentities,
   grantRole,
   avatarSrc,
-  getMembershipPolicy,
   exportMember,
   type UserView,
   type UserRole,
@@ -223,12 +232,28 @@ export function AdminUsersBody() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  // T4.3: the compiled-in default until `policy_get` answers (Owner+Admin
-  // tier — fetched once `me` resolves an admin/owner role); keeps the role
-  // picker's "who may I grant this to" gate accurate on a site whose
-  // committed policy override (`config/membership-policy.ts`) differs from
-  // the fleet default.
-  const [policy, setPolicy] = useState<MembershipPolicyView>(DEFAULT_POLICY_VIEW);
+  /**
+   * T4.3: the compiled-in default until the server's own policy arrives; keeps
+   * the role picker's "who may I grant this to" gate accurate on a site whose
+   * committed policy override (`config/membership-policy.ts`) differs from the
+   * fleet default.
+   *
+   * T-shell: it arrives on `me` now, not from a third `admin-users` call.
+   * This page was measured firing `admin-users` THREE times per visit (n=3,
+   * max 2317 ms) — `me` through `useCurrentUser`, `list` for the members
+   * table, and `policy_get` for exactly this state. `me` already read the
+   * policy record to answer `require_display_name`, so `policy_get` was a
+   * whole round trip (~250-400 ms of fixed per-invocation overhead, per the
+   * Server-Timing measurements) for bytes the first call was already holding.
+   * The page is now `me` + `list`, and after the coalescing `me` costs no
+   * call of its own here at all — the shell already fetched it.
+   *
+   * Still `DEFAULT_POLICY_VIEW` until it lands, and on a server too old to
+   * send it: `MembershipPolicyServer` is a superset of the three fields this
+   * view needs, and absent means "keep the compiled-in default", exactly as
+   * a failed `policy_get` did.
+   */
+  const policy: MembershipPolicyView = currentUser.policy ?? DEFAULT_POLICY_VIEW;
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -290,23 +315,6 @@ export function AdminUsersBody() {
       alive = false;
     };
   }, []);
-
-  // T4.3: best-effort — `policy_get` is admin-tier too, but a site that
-  // cannot answer it (or an older deploy without the verb) just keeps
-  // DEFAULT_POLICY_VIEW; never blocks the page. Fires once the shared `me`
-  // cache resolves an admin/owner role, independent of the list fetch above.
-  useEffect(() => {
-    if (currentUser.loading || !roles.includes('admin')) return;
-    let alive = true;
-    getMembershipPolicy(getToken)
-      .then((policyRes) => {
-        if (alive) setPolicy(policyRes.policy);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [currentUser.loading, roles]);
 
   useEffect(() => {
     if (!inviteOpen) return;

@@ -333,6 +333,37 @@ export function Skeleton({ variant = 'text', width, height, className, style, ..
   );
 }
 
+// ─── RefreshingChip ───────────────────────────────────────────────────────────
+
+/**
+ * T5.1: the quiet "a value is already on screen and we are revalidating it"
+ * affordance — the counterpart to `Skeleton`, which is only ever correct for
+ * a panel the viewer has never seen.
+ *
+ * This exact markup had been written out inline four times (AdminHome,
+ * ObjectsPlane, ContentLibrary, Studio) as those surfaces each grew the
+ * stale-while-revalidate pattern; T5.2 splits several pages into per-PANEL
+ * resources, which would have multiplied the copies rather than the surfaces.
+ * `active` is a prop rather than the caller's own ternary so a panel reads
+ * `<RefreshingChip active={x.refreshing} />` next to its content instead of
+ * wrapping it.
+ */
+export function RefreshingChip({ active = true, className }: { active?: boolean; className?: string }) {
+  if (!active) return null;
+  return (
+    <p
+      className={cn(
+        'flex items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]',
+        className
+      )}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="inline-block animate-pulse">●</span> Refreshing…
+    </p>
+  );
+}
+
 // ─── EmptyState ───────────────────────────────────────────────────────────────
 
 /** D4/B4: `EmptyState`'s own icon+color lookup, sourced from `SEVERITY`

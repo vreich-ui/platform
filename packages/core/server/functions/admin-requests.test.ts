@@ -60,6 +60,20 @@ const repoRoot = (): string => {
   return root;
 };
 const source = readFileSync(path.join(repoRoot(), 'packages/core/server/functions/admin-requests.ts'), 'utf8');
+/**
+ * T-shell: the `list` READ — index read, bounded object backfill, page
+ * projection, `ETag` — moved to `lib/requests/list-snapshot.ts` so
+ * `admin-shell.ts` can serve the same snapshot as one section of its
+ * coalesced response without importing this module's write paths (and with
+ * them `cms-agent-client`'s 42 KB of cold start). The two rules below are
+ * rules about that READ, so they follow it: they scan the endpoint AND the
+ * leaf, as one body of source. Nothing about what they assert changed.
+ */
+const listSource = readFileSync(
+  path.join(repoRoot(), 'packages/core/server/lib/requests/list-snapshot.ts'),
+  'utf8'
+);
+const readPathSource = `${source}\n${listSource}`;
 
 describe('admin-requests requestSchema', () => {
   it('accepts a bare list and every filter it documents', () => {
@@ -123,16 +137,37 @@ describe('the archive gate (plan §8)', () => {
 
 describe('the two rules this endpoint must not regress', () => {
   it('never scans: `list` reads the index and the O(N) walk is not even imported (plan F7)', () => {
-    assert.ok(!source.includes('listRequestDocs'), 'admin-requests must not import the O(N) doc walk');
-    assert.ok(source.includes('loadIndex('), 'list must read the index doc');
-    assert.ok(source.includes('rebuilt: true'), 'a rebuild must be reported, never silent');
+    assert.ok(!readPathSource.includes('listRequestDocs'), 'the list read must not import the O(N) doc walk');
+    assert.ok(readPathSource.includes('loadIndex('), 'list must read the index doc');
+    assert.ok(readPathSource.includes('rebuilt: true'), 'a rebuild must be reported, never silent');
   });
 
   it('reads team-wide: the creator-scoped chat rule is deliberately not applied (plan §8)', () => {
-    assert.ok(!source.includes('visibleChatDocs'), 'requests are team-wide readable — see the module header');
+    assert.ok(!readPathSource.includes('visibleChatDocs'), 'requests are team-wide readable — see the module header');
     assert.ok(
       /TEAM-WIDE/.test(source),
       'the departure from chat-visibility must stay commented, so nobody "fixes" it back'
+    );
+  });
+
+  /**
+   * T-shell — the cold-start rule that made the extraction worth doing, as a
+   * source assertion so a future refactor cannot quietly undo it: the leaf the
+   * shell function shares must not reach back into this module or into the
+   * workflow-cancel bridge. `tests/netlify/function-bundle-budget.test.ts`
+   * catches the SIZE if it does; this names the edge.
+   */
+  it('the shared list read stays a leaf: no edge back to the endpoint or the agent bridge', () => {
+    // Import specifiers only — the module's own header NAMES both of these,
+    // which is the point of it, and a substring match would fail on the prose.
+    const imported = [...listSource.matchAll(/from '([^']+)'/g)].map((match) => match[1]);
+    assert.ok(
+      !imported.some((specifier) => specifier.includes('admin-requests')),
+      `list-snapshot must not import the endpoint back — found ${imported.join(', ')}`
+    );
+    assert.ok(
+      !imported.some((specifier) => specifier.includes('cms-agent-client')),
+      'the workflow-cancel bridge belongs to `cancel`, not to `list`'
     );
   });
 

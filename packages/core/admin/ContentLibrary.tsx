@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { cn } from './utils';
-import { Badge, StatusPill, Skeleton, EmptyState, Card } from './primitives';
+import { Badge, StatusPill, RefreshingChip, Skeleton, EmptyState, Card } from './primitives';
 import { Input } from './forms';
 import { DataTable, type Column } from './data';
 import { relativeTimeFromNow } from './logic';
@@ -225,15 +225,7 @@ function ContentLibraryBody() {
 
   return (
     <div className="flex flex-col gap-4">
-      {refreshing ? (
-        <p
-          className="flex items-center gap-1.5 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
-          role="status"
-          aria-live="polite"
-        >
-          <span className="inline-block animate-pulse">●</span> Refreshing…
-        </p>
-      ) : null}
+      <RefreshingChip active={refreshing} />
 
       <div className="flex flex-wrap items-center gap-2">
         {typeChips.map((chip) => {

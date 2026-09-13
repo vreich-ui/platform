@@ -168,3 +168,58 @@ test('environment rows are immutable server-side while the self guard remains fi
     }
   );
 });
+
+/**
+ * T-shell — `admin-users` was the one shell function with NO `Server-Timing`
+ * at all: measured at 454-710 ms on the wire with nothing saying where that
+ * went, while its two siblings reported cold/auth/work/serialize. It is
+ * wrapped now, on the same four metrics, so the next measurement can attribute
+ * its share of the per-navigation floor instead of guessing at it. The header
+ * must survive every response shape this handler produces, 405 and 401
+ * included.
+ */
+test('admin-users carries a Server-Timing header with cold/auth/work/serialize', async () => {
+  await withUsersStore({ ADMIN_EMAILS: 'boss@example.com' }, async () => {
+    const response = await handler(post('me'), contextFor('boss@example.com'));
+    const header = response.headers['Server-Timing'];
+    assert.ok(header, 'Server-Timing header must be present');
+    for (const metric of ['cold', 'auth', 'work', 'serialize']) {
+      assert.match(header, new RegExp(`${metric};dur=\\d+(\\.\\d+)?`), `missing ${metric} metric in "${header}"`);
+    }
+    // `timeAuth` must have wrapped a real call, not silently no-op'd.
+    const authDur = Number(header.match(/auth;dur=([\d.]+)/)?.[1]);
+    assert.ok(Number.isFinite(authDur) && authDur >= 0, `auth;dur must be a real number, got ${authDur}`);
+  });
+});
+
+test('admin-users Server-Timing survives a 405 and a 401', async () => {
+  const notAllowed = await handler({ httpMethod: 'GET' });
+  assert.equal(notAllowed.statusCode, 405);
+  assert.ok(notAllowed.headers['Server-Timing']);
+
+  const unauthorized = await handler(post('me'));
+  assert.equal(unauthorized.statusCode, 401);
+  assert.ok(unauthorized.headers['Server-Timing']);
+});
+
+/**
+ * T-shell — `/admin/settings/admins` was measured firing `admin-users` THREE
+ * times per visit (n=3, max 2317 ms): `me`, `list`, and `policy_get` purely
+ * for the role picker's grant rules. `me` had ALREADY read the policy record
+ * to answer `require_display_name`, so the third call bought nothing but
+ * another round trip's fixed overhead. The whole policy rides `me` now and
+ * `AdminUsers.tsx` reads it from `useCurrentUser`.
+ */
+test('me carries the whole membership policy, so the members page needs no policy_get', async () => {
+  await withUsersStore({ ADMIN_EMAILS: 'boss@example.com' }, async () => {
+    const me = JSON.parse((await handler(post('me'), contextFor('boss@example.com'))).body);
+    const viaPolicyGet = JSON.parse((await handler(post('policy_get'), contextFor('boss@example.com'))).body);
+    assert.deepEqual(me.policy, viaPolicyGet.policy, 'me must answer with exactly what policy_get would have');
+    // The three fields the role picker actually reads (MembershipPolicyView).
+    assert.equal(typeof me.policy.who_can_invite, 'string');
+    assert.ok(Array.isArray(me.policy.roles_admin_may_grant));
+    assert.equal(typeof me.policy.max_resends, 'number');
+    // …and the one T18.5's welcome gate reads, unchanged.
+    assert.equal(typeof me.policy.require_display_name, 'boolean');
+  });
+});

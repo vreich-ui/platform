@@ -33,7 +33,7 @@ import { ArtifactStagePreview } from './ArtifactStagePreview';
 import { useChat } from './chat';
 import { ImageryBoard } from './ImageryBoard';
 import { PdfTemplatesPanel } from './PdfTemplatesPanel';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { Tabs } from './menus';
 import { Dialog } from './overlays';
 import { IconExternalLink, IconPalette, IconSparkles } from './icons';
@@ -44,7 +44,7 @@ import { fetchStudioData } from '@core/lib/admin/studio-client';
 import { fetchEditorialAssets } from '@core/lib/admin/editorial-assets-client';
 import { fetchGovernance } from '@core/lib/admin/governance-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
-import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
+import { useCachedResource } from '@core/lib/admin/use-cached-resource';
 import { createFreeChat, sendChatMessage, type ChatStatus } from '@core/lib/admin/chat-client';
 import type { Blockage } from '@core/lib/admin/blockage';
 import {
@@ -186,6 +186,16 @@ function IdentityBoard({
   identity: SiteIdentity;
   onRetheme: () => void;
 }) {
+  // PERF: the logo preview below is expensive to mount (an authenticated
+  // image fetch) but sits inside a `<details>` that opens on demand — a
+  // native `<details>` mounts its children regardless of `open`, so without
+  // this the fetch fired on every page load whether or not anyone ever
+  // looked at it. `hasOpenedLogoPreview` only ever flips false → true (the
+  // `onToggle` below reports `open`, never re-reads it back to false on
+  // close), so the preview mounts on first open and STAYS mounted — a
+  // second open is instant, from the loader's own cache, rather than a
+  // repeat fetch.
+  const [hasOpenedLogoPreview, setHasOpenedLogoPreview] = useState(false);
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -229,12 +239,33 @@ function IdentityBoard({
                 : 'This publication currently uses a text mark.'}
             </p>
             {model.availableLogo ? (
-              <details>
+              <details
+                onToggle={(event) => {
+                  if (event.currentTarget.open) setHasOpenedLogoPreview(true);
+                }}
+              >
                 <summary className="cursor-pointer text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-accent)]">
                   Available logo preview: {model.availableLogo.label}
                 </summary>
+                {/* PERF: this reveal renders into the "Mark" card's own
+                    column — bounded to a `max-h-72` (18rem) scrollable box at
+                    a fraction of the page width, the same "card-sized, a few
+                    hundred pixels" profile `ArtifactStagePreview`'s own
+                    `size="thumbnail"` (512px) comment already describes for
+                    the mood board / examples strip / library picker. It was
+                    requesting the full-size original on every page load —
+                    measured at 1.5MB / ~3s on drluriescience's visual-identity
+                    page — because a native `<details>` mounts its children
+                    regardless of whether the disclosure is open. `thumbnail`
+                    is the existing width for this display size; on top of
+                    that, `ArtifactStagePreview` itself is now only mounted
+                    once `hasOpenedLogoPreview` is true (see above), so a
+                    publication whose logo preview nobody ever opens makes NO
+                    request at all, not just a smaller one. */}
                 <div className="mt-3 max-h-72 overflow-auto rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] p-3">
-                  <ArtifactStagePreview artifact={model.availableLogo} />
+                  {hasOpenedLogoPreview ? (
+                    <ArtifactStagePreview artifact={model.availableLogo} size="thumbnail" />
+                  ) : null}
                 </div>
               </details>
             ) : null}
@@ -385,6 +416,38 @@ function IntentDialog({ intent, onClose }: { intent: VisualIdentityChatIntent | 
   );
 }
 
+/**
+ * One panel's "not yet" / "couldn't" state (T5.2).
+ *
+ * No data and no error means the panel is still loading — a skeleton, which
+ * is only ever correct for a panel the viewer has nothing cached for. An
+ * error retries THAT panel alone: the page no longer has a single load to
+ * try again, and a failed PDF-template read is no reason to re-fetch the
+ * brand board that is already on screen.
+ */
+function PanelState({ label, error, onRetry }: { label: string; error?: string; onRetry: () => void }) {
+  if (!error) {
+    return (
+      <div className="flex flex-col gap-3" role="status" aria-live="polite">
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">Loading {label}…</p>
+        <Skeleton variant="rect" height={420} />
+      </div>
+    );
+  }
+  return (
+    <EmptyState
+      severity="error"
+      title={`Couldn’t load ${label}`}
+      message={error}
+      action={
+        <Button variant="secondary" onClick={onRetry}>
+          Try again
+        </Button>
+      }
+    />
+  );
+}
+
 function VisualIdentityBody({
   identity,
   rail,
@@ -418,67 +481,111 @@ function VisualIdentityBody({
   // loads below, and repeat mounts within a session can resolve it for free.
   const currentUser = useCurrentUser();
   const [owner, setOwner] = useState<boolean | null>(null);
-  const [model, setModel] = useState<VisualIdentityViewModel | null>(null);
-  const [site, setSite] = useState<StudioRecord | undefined>(undefined);
-  const [standards, setStandards] = useState<StudioRecord[]>([]);
-  const [assets, setAssets] = useState<EditorialAssetsPayload | undefined>(undefined);
-  const [overridePolicy, setOverridePolicy] = useState<BrandImageryOverridePolicy>('allow');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<VisualIdentityTab>('identity');
   const [pendingIntent, setPendingIntent] = useState<VisualIdentityChatIntent | undefined>(undefined);
 
   /**
-   * T1.4 (perf): this used to `await fetchMe` FIRST and only then fire the
-   * site/studio/editorial/standards/policy reads — one full serial round
-   * trip ahead of the five that actually paint the page, on every mount.
-   * Ownership is resolved separately below (`currentUser`), so this fires
-   * unconditionally and in parallel with it rather than behind it. A
-   * confirmed non-owner still never SEES this data (the render gate below
-   * checks `owner` before `loading`/`model`); the calls that go out in the
-   * rare case someone reaches this Owner-only route without the role are the
-   * same reads `object`/`studio`/`governance` already gate server-side.
+   * T5.2 (admin latency plan) — FIVE INDEPENDENT PANEL RESOURCES, not one
+   * `Promise.all`.
+   *
+   * This page was measured at ~14s to first content on drluriescience: the
+   * site record, the theme set, the `visual_standard` collection, the
+   * guardrail and `admin-editorial-assets` all went out together and the
+   * whole page held a full-height skeleton until the SLOWEST of them
+   * answered — `editorial-assets`, by a wide margin, which only the PDF tab
+   * and one optional logo disclosure actually read. The brand board was
+   * therefore invisible for seconds after everything it needs had already
+   * arrived.
+   *
+   * Each read is now its own `useCachedResource` (`lib/admin/use-cached-resource.ts`):
+   * every panel paints the moment ITS data lands, a repeat visit paints
+   * synchronously from the session snapshot with a quiet `RefreshingChip`
+   * instead of a skeleton, and a failed revalidation leaves the last good
+   * panel on screen. Nothing about WHAT is fetched changed — same five
+   * reads, same final state.
+   *
+   * T1.4's ownership note still holds: this fires unconditionally and in
+   * parallel with `useCurrentUser`, never behind it, and a confirmed
+   * non-owner never SEES any of it (the render gate below checks `owner`
+   * first).
    */
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    // T1.1: this page's own load — rides the current page-generation
-    // signal, minted once per call so every leg of the parallel fetch below
-    // shares one cancellation.
-    const signal = currentPageSignal();
-    try {
-      const [siteRecord, studio, editorial, visualStandards, policy] = await Promise.all([
-        fetchSite(identity.siteId, signal),
-        fetchStudioData(getToken),
-        fetchEditorialAssets(getToken),
-        fetchVisualStandards(signal),
-        fetchOverridePolicy(),
-      ]);
-      setSite(siteRecord);
-      setStandards(visualStandards);
-      setAssets(editorial);
-      setOverridePolicy(policy);
-      setModel(
-        buildVisualIdentityViewModel({
-          site: siteRecord,
-          themes: studio.themes,
-          artifacts: editorial.artifacts,
-          fallbackName: identity.brandName,
-        })
-      );
-    } catch (reason) {
-      // T1.1: the page navigating away is why this fetch died, not a real
-      // failure — leave the view exactly as it was.
-      if (isAbortError(reason)) return;
-      setError(reason instanceof Error ? reason.message : 'Visual identity could not be loaded.');
-    } finally {
-      setLoading(false);
-    }
-  }, [identity.brandName, identity.siteId]);
+  const siteResource = useCachedResource<StudioRecord>(`visual-identity:site:${identity.siteId}`, (signal) =>
+    fetchSite(identity.siteId, signal)
+  );
+  const themesResource = useCachedResource<StudioRecord[]>('visual-identity:themes', async () => {
+    // `studio-client` keeps its own TTL/in-flight cache, so a Studio visit in
+    // the same session pays for this once between the two surfaces.
+    const studio = await fetchStudioData(getToken);
+    return studio.themes;
+  });
+  const standardsResource = useCachedResource<StudioRecord[]>('visual-identity:standards', (signal) =>
+    fetchVisualStandards(signal)
+  );
+  const assetsResource = useCachedResource<EditorialAssetsPayload>('visual-identity:assets', () =>
+    fetchEditorialAssets(getToken)
+  );
+  const policyResource = useCachedResource<BrandImageryOverridePolicy>('visual-identity:imagery-override-policy', () =>
+    fetchOverridePolicy()
+  );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const site = siteResource.value;
+  const assets = assetsResource.value;
+  const themes = themesResource.value;
+  const standards = standardsResource.value;
+  const overridePolicy = policyResource.value;
+
+  /**
+   * A7 / `onChanged`: one call that revalidates every panel, which is what
+   * every mechanical write on this page (an imagery apply, a PDF template
+   * publish, a finished chat run) has always meant by "reload". Stable —
+   * each resource's `refresh` is keyed, not per-render — so the
+   * `onRefreshReady` effect below still hands the outer component a current
+   * closure without re-firing on every render.
+   */
+  const load = useCallback(() => {
+    siteResource.refresh();
+    themesResource.refresh();
+    standardsResource.refresh();
+    assetsResource.refresh();
+    policyResource.refresh();
+  }, [
+    siteResource.refresh,
+    themesResource.refresh,
+    standardsResource.refresh,
+    assetsResource.refresh,
+    policyResource.refresh,
+  ]);
+
+  /**
+   * The brand board waits on the site record AND the theme set, and on
+   * nothing else.
+   *
+   * `artifacts` contributes exactly one OPTIONAL thing (`availableLogo`, a
+   * collapsed disclosure), so the board simply GAINS the logo preview when
+   * `editorial-assets` answers — an addition, never a corrected value, which
+   * is why it is the one input allowed to arrive late.
+   *
+   * `themes` is NOT that. The board answers two questions from it — "Available
+   * named visual systems" (which renders "No named theme objects are
+   * available" on an empty list) and the palette card's "Applied from
+   * <theme>" title — so a board built from `themes ?? []` would state, as a
+   * settled fact, that a publication has no themes and no matching palette
+   * while the read that knows better is still in flight. That is a WRONG
+   * value painted early, the exact thing the PDF panel waits on the site
+   * record for and the imagery board waits on the guardrail for.
+   */
+  const model = useMemo(
+    () =>
+      site && themes
+        ? buildVisualIdentityViewModel({
+            site,
+            themes,
+            artifacts: assets?.artifacts ?? [],
+            fallbackName: identity.brandName,
+          })
+        : null,
+    [site, themes, assets, identity.brandName]
+  );
 
   // T1.4: the ownership half of what `load` used to do inline, now driven by
   // the shared `useCurrentUser` cache instead of a private `fetchMe`. Fires
@@ -528,6 +635,22 @@ function VisualIdentityBody({
     [rail]
   );
 
+  /**
+   * Every panel below resolves on its own. Three rules hold for all of them:
+   *
+   *  - A SKELETON ONLY WHERE THERE IS NOTHING TO SHOW. A cached value paints
+   *    immediately and carries the small `RefreshingChip` instead.
+   *  - AN EMPTY-LOOKING PANEL IS NEVER RENDERED FROM MISSING DATA. `themes`,
+   *    `standards` and `assets` are `undefined` until they load and an ARRAY
+   *    once they have (empty is a real answer for all three), so "this
+   *    publication has no named themes" / "no image standards" / "PDF
+   *    templates aren't available here" can only be said once the server has
+   *    actually said it — never as a side effect of a panel painting early.
+   *    That is also why the imagery board waits on the guardrail:
+   *    `overridePolicy` decides whether overrides are offered at all, and
+   *    'allow' is its FALLBACK value, not a safe placeholder.
+   *  - A PANEL THAT FAILED SAYS SO IN ITS OWN TAB, and retries only itself.
+   */
   const tabs = useMemo(
     () => [
       {
@@ -536,45 +659,109 @@ function VisualIdentityBody({
         content:
           model && site ? (
             <IdentityBoard model={model} identity={identity} onRetheme={() => runIntent(RETHEME_INTENT)} />
-          ) : null,
+          ) : (
+            <PanelState
+              label="the brand board"
+              error={siteResource.error ?? themesResource.error}
+              onRetry={() => {
+                siteResource.refresh();
+                themesResource.refresh();
+              }}
+            />
+          ),
       },
       {
         id: 'imagery' as const,
         label: VISUAL_IDENTITY_TAB_LABELS.imagery,
-        content: (
-          <ImageryBoard
-            identity={identity}
-            site={site}
-            standards={standards}
-            overridePolicy={overridePolicy}
-            isOwner={owner === true}
-            getToken={getToken}
-            {...(rail?.chatId ? { chatId: rail.chatId } : {})}
-            {...(rail?.blockage ? { pendingBlockage: rail.blockage } : {})}
-            onIntent={runIntent}
-            onChanged={load}
-          />
-        ),
+        content:
+          site && standards && overridePolicy ? (
+            <ImageryBoard
+              identity={identity}
+              site={site}
+              standards={standards}
+              overridePolicy={overridePolicy}
+              isOwner={owner === true}
+              getToken={getToken}
+              {...(rail?.chatId ? { chatId: rail.chatId } : {})}
+              {...(rail?.blockage ? { pendingBlockage: rail.blockage } : {})}
+              onIntent={runIntent}
+              onChanged={load}
+            />
+          ) : (
+            <PanelState
+              label="the image standards"
+              error={siteResource.error ?? standardsResource.error ?? policyResource.error}
+              onRetry={() => {
+                siteResource.refresh();
+                standardsResource.refresh();
+                policyResource.refresh();
+              }}
+            />
+          ),
       },
       {
         id: 'pdf' as const,
         label: VISUAL_IDENTITY_TAB_LABELS.pdf,
-        content: (
-          <PdfTemplatesPanel
-            identity={identity}
-            site={site}
-            templates={assets?.pdf_templates ?? []}
-            artifacts={assets?.artifacts ?? []}
-            available={assets?.pdf_templates_available === true}
-            isOwner={owner === true}
-            getToken={getToken}
-            onChanged={load}
-          />
-        ),
+        // Waits on the SITE record as well as the templates: `site.pdf` is what
+        // marks a row "Already the site default", so a panel rendered before
+        // it lands would show every row as un-pinned — a wrong badge, not a
+        // missing one. The site record is a single `admin-object` get and
+        // lands long before `admin-editorial-assets` in practice.
+        content:
+          assets && site ? (
+            <PdfTemplatesPanel
+              identity={identity}
+              site={site}
+              templates={assets.pdf_templates}
+              artifacts={assets.artifacts}
+              available={assets.pdf_templates_available === true}
+              isOwner={owner === true}
+              getToken={getToken}
+              onChanged={load}
+            />
+          ) : (
+            <PanelState
+              label="the PDF templates"
+              error={assetsResource.error ?? siteResource.error}
+              onRetry={() => {
+                assetsResource.refresh();
+                siteResource.refresh();
+              }}
+            />
+          ),
       },
     ],
-    [assets, identity, load, model, overridePolicy, owner, runIntent, site, standards]
+    [
+      assets,
+      assetsResource.error,
+      assetsResource.refresh,
+      identity,
+      load,
+      model,
+      overridePolicy,
+      owner,
+      policyResource.error,
+      policyResource.refresh,
+      rail,
+      runIntent,
+      site,
+      siteResource.error,
+      siteResource.refresh,
+      standards,
+      standardsResource.error,
+      standardsResource.refresh,
+      themesResource.error,
+      themesResource.refresh,
+    ]
   );
+
+  // Anything still revalidating behind content that is already on screen.
+  const refreshing =
+    siteResource.refreshing ||
+    themesResource.refreshing ||
+    standardsResource.refreshing ||
+    assetsResource.refreshing ||
+    policyResource.refreshing;
 
   // T1.4: `owner === null` (still waiting on `useCurrentUser`) is checked
   // BEFORE `loading` (the identity/standards/assets fetch) — the two now
@@ -598,30 +785,10 @@ function VisualIdentityBody({
       />
     );
   }
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-3" role="status" aria-live="polite">
-        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-          Loading the publication’s visual system…
-        </p>
-        <Skeleton variant="rect" height={420} />
-      </div>
-    );
-  }
-  if (error || !model) {
-    return (
-      <EmptyState
-        severity="error"
-        title="Visual identity unavailable"
-        message={error ?? 'The visual identity records could not be loaded.'}
-        action={
-          <Button variant="secondary" onClick={() => void load()}>
-            Try again
-          </Button>
-        }
-      />
-    );
-  }
+  // T5.2: no page-level `loading` gate any more. The frame, the heading and
+  // the tab strip belong to the page, not to any fetch, so they paint the
+  // instant ownership resolves — each tab then shows its own panel, its own
+  // skeleton, or its own failure.
   return (
     <div className="flex flex-col gap-4">
       <header>
@@ -633,6 +800,7 @@ function VisualIdentityBody({
           the PDF templates its documents render from.
         </p>
       </header>
+      <RefreshingChip active={refreshing} />
       <Tabs tabs={tabs} value={tab} onChange={selectTab} />
       <IntentDialog intent={pendingIntent} onClose={() => setPendingIntent(undefined)} />
     </div>

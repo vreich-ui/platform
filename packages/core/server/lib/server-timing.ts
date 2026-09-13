@@ -39,6 +39,14 @@
  *     helper convention) — are instrumented directly; `work` is what's left,
  *     and can never under-count because a new branch forgot to wrap itself.
  *
+ * A fifth, OPTIONAL family joins them on a handler that coalesces several
+ * independent reads into one response (`admin-shell.ts`): `sec.<name>;dur=`,
+ * via `timeSection`. See that function's comment — the phase metrics say how
+ * the invocation split in TIME, the section metrics say how its `work` split
+ * by QUESTION ASKED, which is what a coalesced call needs to be debuggable
+ * at all. A handler that declares no sections emits exactly the four metrics
+ * it always did.
+ *
  * ## Composition
  *
  * Same shape as every other cross-cutting concern already applied at
@@ -105,7 +113,7 @@ const moduleLoadedAtMs = Date.now();
 /** T0.1: single module-scope flag — true once this container has handled one invocation. */
 let hasHandledInvocation = false;
 
-type TimingAccumulator = { authMs: number; serializeMs: number };
+type TimingAccumulator = { authMs: number; serializeMs: number; sections: Map<string, number> };
 
 /** The in-flight invocation's accumulator, or null outside any wrapped call. */
 let currentInvocation: TimingAccumulator | null = null;
@@ -143,6 +151,42 @@ export const timeSerialize = <T>(fn: () => T): T => {
     return fn();
   } finally {
     if (invocation) invocation.serializeMs += performance.now() - start;
+  }
+};
+
+/**
+ * Wrap one named SECTION of a handler that answers several independent
+ * questions in a single response — today `admin-shell.ts`, which returns the
+ * access state, the requests index and the caller's `me` record in one round
+ * trip. `auth`/`work`/`serialize` say how the invocation split by PHASE;
+ * these say how the `work` phase split by SECTION, which is the only way the
+ * next measurement can tell "the coalesced call costs 400 ms" from "the
+ * requests read costs 380 ms of it".
+ *
+ * Emitted as `sec.<name>;dur=<ms>`. The `sec.` prefix is deliberate: a
+ * section called `auth` or `work` would otherwise collide with the four
+ * phase metrics, and a `Server-Timing` name is a bare token (`.` is legal in
+ * one, a space is not — names are slugged below for safety).
+ *
+ * Sections are measured CONCURRENTLY in the coalescing handler, so their
+ * durations overlap each other and sum to MORE than `work`. That is the
+ * point — a section's `dur` is its own wall time, i.e. what removing it
+ * would save only if it were the slowest one.
+ *
+ * Accumulates per name (two calls with the same name sum), and is a safe
+ * no-op outside a `withServerTiming`-wrapped invocation, exactly like
+ * `timeAuth`/`timeSerialize`.
+ */
+export const timeSection = async <T>(name: string, fn: () => T | Promise<T>): Promise<T> => {
+  const invocation = currentInvocation;
+  const start = invocation ? performance.now() : 0;
+  try {
+    return await fn();
+  } finally {
+    if (invocation) {
+      const key = name.replace(/[^A-Za-z0-9_-]+/g, '_');
+      invocation.sections.set(key, (invocation.sections.get(key) ?? 0) + (performance.now() - start));
+    }
   }
 };
 
@@ -200,7 +244,7 @@ export const withServerTiming = <E, C, R extends LambdaResponse>(
     const isCold = !hasHandledInvocation;
     hasHandledInvocation = true;
 
-    const accumulator: TimingAccumulator = { authMs: 0, serializeMs: 0 };
+    const accumulator: TimingAccumulator = { authMs: 0, serializeMs: 0, sections: new Map() };
     const previousInvocation = currentInvocation;
     currentInvocation = accumulator;
 
@@ -223,6 +267,10 @@ export const withServerTiming = <E, C, R extends LambdaResponse>(
         `auth;dur=${round2(accumulator.authMs)}`,
         `work;dur=${round2(workMs)}`,
         `serialize;dur=${round2(accumulator.serializeMs)}`,
+        // Per-section breakdown, only for a handler that actually declared
+        // sections (`timeSection`) — every other wrapped handler's header is
+        // byte-identical to what it emitted before sections existed.
+        ...[...accumulator.sections].map(([name, ms]) => `sec.${name};dur=${round2(ms)}`),
       ].join(', ');
 
       // Only `.headers` changes; every other field of `response` (including

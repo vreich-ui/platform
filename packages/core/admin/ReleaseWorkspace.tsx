@@ -2,16 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
-import { Badge, Button, Card, EmptyState, Skeleton } from './primitives';
+import { Badge, Button, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { Switch } from './forms';
 import { ConfirmDialog, useToast } from './overlays';
 import { ActionRow } from './approval';
 import { IconCheck, IconExternalLink, IconRocket } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { fetchInventoryRows } from '@core/lib/admin/library-client';
+import { fetchInventoryRows, invalidateInventoryCache } from '@core/lib/admin/library-client';
 import { listChats, type ChatSummaryView } from '@core/lib/admin/chat-client';
 import {
   fetchReleaseOverview,
+  invalidateReleaseOverview,
   triggerProductionRelease,
   type ReleaseDeployState,
   type ReleaseObjectView,
@@ -30,7 +31,7 @@ import {
 import { assertDecided, decide, decisionAvailability, type DecisionAction } from '@core/lib/admin/decisions';
 import { forceReleaseObjectLock } from '@core/lib/edit-mode/verbs-client';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
-import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
+import { useCachedResource } from '@core/lib/admin/use-cached-resource';
 
 async function getToken(): Promise<string> {
   const auth = await import('@core/lib/admin/goTrueClient');
@@ -290,14 +291,7 @@ function ReleaseReviewGroupCard({
 
 function ReleaseWorkspaceContent() {
   const { toast } = useToast();
-  const [overview, setOverview] = useState<ReleaseOverview>();
-  // T1.3: `null` means "hasn't loaded yet" — distinct from "loaded, no
-  // chats" — so the work-summary card below can tell the two apart and
-  // skeleton itself instead of flashing an empty state.
-  const [chats, setChats] = useState<ChatSummaryView[] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [releasing, setReleasing] = useState(false);
-  const [error, setError] = useState<string>();
   const [lastResult, setLastResult] = useState<ReleaseResultView>();
   const [reviewedQueueSignature, setReviewedQueueSignature] = useState<string>();
   // T3.2 (A7): per-group acknowledgement, local and per-batch — see
@@ -307,77 +301,78 @@ function ReleaseWorkspaceContent() {
   const currentUser = useCurrentUser();
   const canForceRelease = currentUser.roles.includes('owner');
 
-  const refresh = useCallback(async (opts?: { force?: boolean }) => {
-    // T5.1 R2 / T1.3: an explicit refresh (after a write, or while polling a
-    // build in progress) must bypass the module TTL for the same reason it
-    // already bypasses the inventory one — the human pressed Refresh, or
-    // just released. The initial mount does NOT force: it is content to
-    // reuse whatever the module cache / in-flight dedupe already has rather
-    // than pay for a cold server recompute (measured ~5.3s) on every page
-    // open — `fetchReleaseOverview`/`fetchInventoryRows` still hit the
-    // network on a cold cache either way, force only skips reusing a warm one.
-    const force = opts?.force ?? true;
-    try {
-      const [nextOverview, rows] = await Promise.all([
-        fetchReleaseOverview(getToken, { force }),
-        fetchInventoryRows(getToken, { force }),
-      ]);
-      setOverview(nextOverview);
-      setError(undefined);
-      return rows;
-    } catch (reason) {
-      // T1.1: the page navigating away is why this fetch died, not a real
-      // failure — `undefined` tells every call site below to leave whatever
-      // is on screen alone instead of wiping it to an empty table.
-      if (isAbortError(reason)) return undefined;
-      setError(reason instanceof Error ? reason.message : 'Release state could not be loaded.');
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  /**
+   * T5.2 (admin latency plan) — THREE INDEPENDENT RESOURCES, not one gate.
+   *
+   * T1.3 had already taken the chat list (`listChats`, measured ~8.3s
+   * reading every transcript) off the paint path. What remained was a single
+   * `Promise.all` over the release overview and the whole object inventory,
+   * with ONE `loading` flag over both: the deploy status, the review batch
+   * and the approvals list — all of which come from the overview alone —
+   * stayed behind a full-page skeleton until the inventory sweep finished,
+   * even though nothing on this page reads the inventory except the two
+   * work-summary cards at the bottom.
+   *
+   * Each is now its own `useCachedResource`: a repeat visit paints every
+   * panel it has a snapshot for immediately (with the quiet
+   * `RefreshingChip`), the overview no longer waits on the inventory, and a
+   * failure in one leaves the other two alone. Same three reads, same final
+   * state.
+   *
+   * NEITHER FETCHER FORCES. That is deliberate and unchanged from T1.3: the
+   * initial mount is content to reuse whatever the client modules' own TTL /
+   * in-flight dedupe already has rather than pay for a cold server recompute
+   * (measured ~5.3s) on every page open. An explicit refresh — after a write,
+   * or while polling a build in progress — goes through `refreshReleaseState`
+   * below, which drops those module caches first so the TTL can never hide an
+   * editor's own action from them.
+   */
+  const overviewResource = useCachedResource<ReleaseOverview>('release:overview', () =>
+    fetchReleaseOverview(getToken, { force: false })
+  );
+  const inventoryResource = useCachedResource<LibraryRow[]>('release:inventory', () =>
+    fetchInventoryRows(getToken, { force: false })
+  );
+  const chatsResource = useCachedResource<ChatSummaryView[]>('release:chats', async (signal) => {
+    const { chats: list } = await listChats(getToken, false, signal);
+    return list;
+  });
 
-  const [rows, setRows] = useState<LibraryRow[]>([]);
-  const applyRows = useCallback((next: LibraryRow[] | undefined) => {
-    if (next) setRows(next);
-  }, []);
-  useEffect(() => {
-    void refresh({ force: false }).then(applyRows);
-  }, [refresh, applyRows]);
+  const overview = overviewResource.value;
+  const rows = inventoryResource.value;
+  /**
+   * T1.3's distinction, kept: `undefined` means "hasn't loaded yet" — which
+   * is a skeleton, not an empty card. A FAILED chat read still degrades to
+   * "no work" exactly as it did before (the card is a summary, not the
+   * release content), but the failure is not written to the resource cache,
+   * so the next visit re-reads rather than painting a remembered blank.
+   */
+  const chats = chatsResource.value ?? (chatsResource.error ? [] : undefined);
+
+  /**
+   * The one explicit refresh — after a decision, a force-release, a started
+   * release, or a poll tick on a build in progress. Drops the client modules'
+   * own TTL caches as well as the resource snapshots, because a human who
+   * just acted must see their own action reflected rather than a cached
+   * pre-action state.
+   */
+  const refreshReleaseState = useCallback(() => {
+    invalidateReleaseOverview();
+    invalidateInventoryCache();
+    overviewResource.refresh();
+    inventoryResource.refresh();
+  }, [overviewResource.refresh, inventoryResource.refresh]);
 
   useEffect(() => {
     if (!overview || !['queued', 'building', 'ready_not_published'].includes(overview.deploy.state)) return;
-    const timer = window.setInterval(() => void refresh().then(applyRows), 6000);
+    const timer = window.setInterval(refreshReleaseState, 6000);
     return () => window.clearInterval(timer);
-  }, [overview?.deploy.state, refresh, applyRows]);
+  }, [overview?.deploy.state, refreshReleaseState]);
 
-  /**
-   * T1.3: the work-summary card's own load, off the first-paint path.
-   * `listChats` reads every transcript (measured ~8.3s) purely to feed the
-   * "Needs you" / "Working" cards below — it has no bearing on whether the
-   * release content itself (deploy status, review groups, approvals) can be
-   * shown, so it no longer blocks `loading`. Failure degrades this card
-   * alone, same as `refresh` degrades the main content to its own error
-   * state rather than throwing.
-   */
-  const loadWork = useCallback(async () => {
-    try {
-      const { chats: list } = await listChats(getToken, false, currentPageSignal());
-      setChats(list);
-    } catch (err) {
-      // T1.1: the page navigating away is why this fetch died, not a real
-      // failure — leave whatever this card already shows alone.
-      if (isAbortError(err)) return;
-      setChats([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadWork();
-  }, [loadWork]);
-
-  const work = useMemo(() => getWorkSummary(rows, chats ?? []), [rows, chats]);
-  const workLoading = chats === null;
+  const work = useMemo(() => getWorkSummary(rows ?? [], chats ?? []), [rows, chats]);
+  // T5.2: the work summary is the ONE thing on this page that reads the
+  // inventory, so it — and only it — waits for both of its inputs.
+  const workLoading = rows === undefined || chats === undefined;
   const waiting = useMemo(() => overview?.objects.filter((object) => object.state === 'published') ?? [], [overview]);
   const approvals = useMemo(
     () => overview?.objects.filter((object) => object.review_state === 'open') ?? [],
@@ -425,7 +420,7 @@ function ReleaseWorkspaceContent() {
     );
     assertDecided(result);
     toast({ title: item.display_name, description: result.receipt, tone: 'success' });
-    applyRows(await refresh());
+    refreshReleaseState();
   };
 
   const runForceRelease = async (item: ReleaseObjectView) => {
@@ -448,7 +443,7 @@ function ReleaseWorkspaceContent() {
         : 'No lock was held — nothing to release.',
       tone: 'success',
     });
-    applyRows(await refresh());
+    refreshReleaseState();
   };
 
   const release = async () => {
@@ -462,7 +457,7 @@ function ReleaseWorkspaceContent() {
         description: result.reason,
         tone: result.released ? 'success' : 'info',
       });
-      applyRows(await refresh());
+      refreshReleaseState();
     } catch (reason) {
       toast({
         title: 'Release could not start',
@@ -487,16 +482,25 @@ function ReleaseWorkspaceContent() {
           leftIcon={<IconRocket size={16} />}
           onClick={() => void release()}
           loading={releasing}
-          disabled={loading || waiting.length === 0 || !reviewed}
+          disabled={!overview || waiting.length === 0 || !reviewed}
         >
           Release after review
         </Button>
       </header>
 
-      {loading ? (
-        <Skeleton variant="rect" height={420} />
-      ) : error || !overview || !deploy ? (
-        <EmptyState severity="error" title="Release unavailable" message={error} />
+      {/* T5.2: the header above belongs to the page, not to any fetch, so it
+          paints immediately. Everything below is the OVERVIEW's content —
+          deploy status, the review batch, the approvals queue — and waits
+          only on the overview; a skeleton here means nothing is cached for
+          this viewer yet, a chip means real content is on screen while it
+          revalidates. */}
+      <RefreshingChip active={overviewResource.refreshing || inventoryResource.refreshing} />
+      {!overview || !deploy ? (
+        overviewResource.error ? (
+          <EmptyState severity="error" title="Release unavailable" message={overviewResource.error} />
+        ) : (
+          <Skeleton variant="rect" height={420} />
+        )
       ) : (
         <>
           <Card className="flex flex-wrap items-center justify-between gap-4">
