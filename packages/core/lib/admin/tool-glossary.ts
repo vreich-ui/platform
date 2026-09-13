@@ -88,6 +88,24 @@ export const TOOL_GLOSSARY: Record<string, ToolGlossaryEntry> = {
     detail:
       'Returns the steps of the article production pipeline — what each one does, how risky it is, and what it depends on. The agent reads this before starting or explaining a writing run. Read-only.',
   },
+  list_operations: {
+    label: 'List standard jobs',
+    short: 'Lists the standard jobs this site can run — PDFs, renders, asset lookups, and more.',
+    detail:
+      'Returns every registered standard job this site can run: what it does, what it needs, and what phrases match it. The agent checks this before falling back to a raw editing step. Read-only.',
+  },
+  get_operation: {
+    label: 'Look up a standard job',
+    short: 'Looks up one standard job by its id.',
+    detail:
+      'Returns the full definition of one standard job by id — its inputs, effects and requirements — or names the valid ids if the one asked for is not registered. Read-only.',
+  },
+  preflight_operation: {
+    label: 'Check a standard job before running it',
+    short: 'Checks whether a standard job is ready to run, before running it.',
+    detail:
+      'Validates a proposed standard job against what it actually needs, filling in defaults and reporting anything missing, before the agent commits to running it. Read-only — nothing is started.',
+  },
   get_workspace_run: {
     label: 'Check a writing run',
     short: 'Polls a running article job for its overall status and step states.',

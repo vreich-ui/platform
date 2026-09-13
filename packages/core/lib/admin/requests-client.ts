@@ -24,7 +24,7 @@ export type RequestStatus =
   | 'cancelled'
   | 'archived';
 
-export type RequestKind = 'article' | 'page' | 'section' | 'theme' | 'media' | 'capture' | 'other';
+export type RequestKind = 'article' | 'page' | 'section' | 'theme' | 'media' | 'capture' | 'other' | 'pdf';
 
 export interface RequestRowView {
   request_id: string;

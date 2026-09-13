@@ -1,0 +1,159 @@
+/**
+ * A3 — pure unit tests for operation-catalog.ts: the wire parsers (tolerant
+ * of malformed/partial payloads), the risk/registration helpers, and the
+ * operationId → RequestKind map that fixes the article-stamping bug.
+ * Integration with run_workspace_workflow is covered in
+ * orchestration-tools.test.ts.
+ */
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  highestEffectRisk,
+  needsDurableRegistration,
+  operationRequestKind,
+  parseOperationGet,
+  parseOperationList,
+  parseOperationPreflight,
+  requestKindForWorkflow,
+} from './operation-catalog.js';
+
+// ─── parseOperationList ──────────────────────────────────────────────────────
+
+test('parseOperationList reads the six live descriptors and drops anything unparsable rather than throwing', () => {
+  const result = parseOperationList({
+    operations: [
+      { operationId: 'site_inventory', version: 1 },
+      { operationId: 'pdf_template_family', version: 2, title: 'PDF family' },
+      { operationId: 'no_version' }, // missing required `version` — dropped, not thrown
+      'garbage',
+      null,
+    ],
+  });
+  assert.equal(result.length, 2);
+  assert.equal(result[0]!.operationId, 'site_inventory');
+  assert.equal(result[1]!.title, 'PDF family');
+});
+
+test('parseOperationList degrades to an empty list for a malformed envelope', () => {
+  assert.deepEqual(parseOperationList(undefined), []);
+  assert.deepEqual(parseOperationList(null), []);
+  assert.deepEqual(parseOperationList({}), []);
+  assert.deepEqual(parseOperationList({ operations: 'not-an-array' }), []);
+  assert.deepEqual(parseOperationList('garbage'), []);
+});
+
+// ─── parseOperationGet ───────────────────────────────────────────────────────
+
+test('parseOperationGet reads a known descriptor', () => {
+  const result = parseOperationGet({ known: true, descriptor: { operationId: 'document_render', version: 3 } });
+  assert.ok(result?.known);
+  assert.equal(result.known === true && result.descriptor.operationId, 'document_render');
+});
+
+test("parseOperationGet names the registered alternatives for an unknown operation — never echoes the caller's string as usable", () => {
+  const result = parseOperationGet({ known: false, registeredOperationIds: ['site_inventory', 'pdf_template_family'] });
+  assert.equal(result?.known, false);
+  assert.deepEqual(result && !result.known ? result.registeredOperationIds : undefined, [
+    'site_inventory',
+    'pdf_template_family',
+  ]);
+});
+
+test('parseOperationGet is undefined for an unreadable envelope, never a guess', () => {
+  assert.equal(parseOperationGet(undefined), undefined);
+  assert.equal(parseOperationGet({}), undefined);
+  assert.equal(
+    parseOperationGet({ known: true, descriptor: { version: 1 } }),
+    undefined,
+    'a descriptor missing operationId must not parse'
+  );
+});
+
+test('parseOperationGet tolerates a missing registeredOperationIds array on the unknown branch', () => {
+  const result = parseOperationGet({ known: false });
+  assert.equal(result?.known, false);
+  assert.deepEqual(result && !result.known ? result.registeredOperationIds : undefined, []);
+});
+
+// ─── parseOperationPreflight ─────────────────────────────────────────────────
+
+test('parseOperationPreflight reads a full result and tolerates missing optional arrays', () => {
+  const full = parseOperationPreflight({
+    operationId: 'pdf_template_family',
+    selectedVersion: 1,
+    appliedDefaults: { locale: 'en' },
+    missingRequired: [],
+    blockers: [],
+    capabilityGaps: [],
+  });
+  assert.equal(full?.operationId, 'pdf_template_family');
+  assert.deepEqual(full?.appliedDefaults, { locale: 'en' });
+
+  const minimal = parseOperationPreflight({ operationId: 'site_inventory', selectedVersion: 1 });
+  assert.equal(minimal?.missingRequired, undefined);
+});
+
+test('parseOperationPreflight is undefined for a payload missing its required keys', () => {
+  assert.equal(parseOperationPreflight({}), undefined);
+  assert.equal(parseOperationPreflight({ operationId: 'x' }), undefined, 'selectedVersion is required');
+  assert.equal(parseOperationPreflight(null), undefined);
+});
+
+// ─── highestEffectRisk / needsDurableRegistration ────────────────────────────
+
+test('highestEffectRisk picks the worst of several effects, publish over write over read', () => {
+  assert.equal(
+    highestEffectRisk([
+      { kind: 'a', riskLevel: 'read' },
+      { kind: 'b', riskLevel: 'publish' },
+      { kind: 'c', riskLevel: 'write' },
+    ]),
+    'publish'
+  );
+  assert.equal(highestEffectRisk([{ kind: 'a', riskLevel: 'read' }]), 'read');
+  assert.equal(highestEffectRisk([]), undefined);
+  assert.equal(highestEffectRisk(undefined), undefined);
+});
+
+test('highestEffectRisk ignores an effect with an unrecognised riskLevel rather than crashing', () => {
+  assert.equal(highestEffectRisk([{ kind: 'a', riskLevel: 'catastrophic' as unknown as 'read' }]), undefined);
+});
+
+test('needsDurableRegistration is true only for write/publish — a pure read is answered inline, never registered', () => {
+  assert.equal(needsDurableRegistration([{ kind: 'a', riskLevel: 'read' }]), false);
+  assert.equal(needsDurableRegistration([{ kind: 'a', riskLevel: 'write' }]), true);
+  assert.equal(needsDurableRegistration([{ kind: 'a', riskLevel: 'publish' }]), true);
+  assert.equal(needsDurableRegistration(undefined), false);
+  assert.equal(needsDurableRegistration([]), false);
+});
+
+// ─── operationRequestKind / requestKindForWorkflow (THE article-stamping fix) ─
+
+test('operationRequestKind maps every one of the six live operations to its own kind, never article', () => {
+  assert.equal(operationRequestKind('site_inventory'), 'other');
+  assert.equal(operationRequestKind('visual_identity_review_change'), 'theme');
+  assert.equal(operationRequestKind('pdf_template_family'), 'pdf');
+  assert.equal(operationRequestKind('document_render'), 'pdf');
+  assert.equal(operationRequestKind('asset_lookup_adopt'), 'media');
+  assert.equal(operationRequestKind('image_template_revision'), 'page');
+});
+
+test('operationRequestKind falls back to "other" for an unrecognised id — never a silent "article"', () => {
+  assert.equal(operationRequestKind('some_future_operation'), 'other');
+  assert.notEqual(operationRequestKind('some_future_operation'), 'article');
+});
+
+test('requestKindForWorkflow: THE regression this module fixes — a PDF workflow id is never stamped article', () => {
+  assert.equal(requestKindForWorkflow('pdf_template_family'), 'pdf');
+  assert.equal(requestKindForWorkflow('document_render'), 'pdf');
+});
+
+test('requestKindForWorkflow: undefined and publishing_conductor ARE article, by construction (ART-1)', () => {
+  assert.equal(requestKindForWorkflow(undefined), 'article');
+  assert.equal(requestKindForWorkflow('publishing_conductor'), 'article');
+});
+
+test('requestKindForWorkflow: an unrecognised workflow id is "other", never a guessed "article"', () => {
+  assert.equal(requestKindForWorkflow('some_custom_workflow'), 'other');
+});

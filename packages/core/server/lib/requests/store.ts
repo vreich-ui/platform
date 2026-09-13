@@ -79,7 +79,14 @@ export const NON_TERMINAL_REQUEST_STATUSES = requestStatusSchema.options.filter(
 // later field existed must still parse — no `.default()` anywhere, so a
 // round-trip never injects fields the writer did not put there.
 
-export const requestKindSchema = z.enum(['article', 'page', 'section', 'theme', 'media', 'capture', 'other']);
+/**
+ * A3: `'pdf'` added for CMS-Agent A2's `pdf_template_family`/`document_render`
+ * catalog operations (`agent/operation-catalog.ts`). Additive and backward
+ * compatible — every doc written before this change used one of the original
+ * seven values, all still valid members, so an old stored doc still parses;
+ * only NEW writes can carry `'pdf'`.
+ */
+export const requestKindSchema = z.enum(['article', 'page', 'section', 'theme', 'media', 'capture', 'other', 'pdf']);
 export type RequestKind = z.infer<typeof requestKindSchema>;
 
 export const requestWorkflowSchema = z.object({

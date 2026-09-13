@@ -103,6 +103,13 @@ const firstPartyBundle = (fn: string) => {
 /**
  * Caps in KB of first-party source. Measured 2026-09-10 at:
  *   admin-auth-state 192 · admin-requests 340 · admin-users 392 · admin-agent-chat 3140
+ *
+ * A3 (2026-09-13) raised admin-agent-chat 3328 → 3340: three new read-only
+ * chat tools (list_operations/get_operation/preflight_operation) plus the
+ * pure operation-catalog.ts module they and run_workspace_workflow's new
+ * operation_id routing share, measured at 3330 KB. No new import edge — the
+ * module imports only zod and the already-reachable requests/store.js type;
+ * this is real first-party feature code, not a coupling regression.
  */
 const BUDGETS_KB: Record<string, number> = {
   // Shell trio — every /admin/* navigation pays these three.
@@ -110,7 +117,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3328,
+  'admin-agent-chat': 3340,
 };
 
 for (const [fn, capKb] of Object.entries(BUDGETS_KB)) {
