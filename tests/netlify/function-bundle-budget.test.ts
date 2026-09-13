@@ -110,6 +110,16 @@ const firstPartyBundle = (fn: string) => {
  * operation_id routing share, measured at 3330 KB. No new import edge — the
  * module imports only zod and the already-reachable requests/store.js type;
  * this is real first-party feature code, not a coupling regression.
+ *
+ * Legacy-owner self-heal (2026-09-13) raised it 3340 → 3352, measured at
+ * 3341 KB. Wiring adoption into resolveArtifactBridgeScope's MISS path makes
+ * lib/artifact-legacy-adopt.ts (7.2 KB, dead since #733) reachable; the rest
+ * is the resolver's own wiring. Exactly ONE module joins the graph — the
+ * heaviest thing adoption reaches, lib/artifact-dedupe-sweep.ts at 19.7 KB
+ * for its collectReferencedArtifactKeys, was already in the bundle via the
+ * artifact_orphan_sweep/artifact_dedupe_by_sha tools, so it costs nothing
+ * here. Nothing to cut: the new module IS the feature, and it drags no new
+ * subtree behind it.
  */
 const BUDGETS_KB: Record<string, number> = {
   // Shell trio — every /admin/* navigation pays these three.
@@ -117,7 +127,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3340,
+  'admin-agent-chat': 3352,
 };
 
 for (const [fn, capKb] of Object.entries(BUDGETS_KB)) {
