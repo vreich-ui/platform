@@ -3,6 +3,12 @@ import type { LambdaContext } from '../lib/admin-auth.js';
 import { resolveAdminAccessFromEvent } from '../lib/request-roles.js';
 import { isOwner } from '../lib/roles.js';
 import { readArtifactReference, type ArtifactIndexStore } from '../lib/artifact-index.js';
+import {
+  dedupeArtifactsBySha,
+  sweepOrphanArtifacts,
+  type ArtifactSweepListStore,
+} from '../lib/artifact-dedupe-sweep.js';
+import type { ArtifactByteStore } from '../lib/artifact-soft-delete.js';
 import { normalizeArtifactBlobKey } from '../lib/artifacts.js';
 import { getManagedBlobStore, listManagedBlobStores } from '../lib/blob-admin.js';
 import { collectBlobListItems } from '../lib/blob-list.js';
@@ -342,6 +348,75 @@ const handleGetArtifactMetadata: ActionHandler = async (params, event, binding) 
   return jsonResponse(200, { artifact });
 };
 
+
+// ── Artifact storage maintenance (Owner-only, admin SESSION) ────────────────
+//
+// `artifact_dedupe_by_sha` and `artifact_orphan_sweep` exist as MCP tools, but
+// they are INTERNAL_ONLY_TOOLS and requireAdminToolAccess refuses an MCP
+// bearer: running them meant a human with the site's PUBLISH SECRET hand-
+// rolling an HTTP call, per tenant. That is not a gate, it is an obstacle —
+// the same secret opens far more than these two verbs, and needing it put
+// routine storage upkeep out of reach of the person already signed in as
+// Owner.
+//
+// These are the same two functions, reached through the surface that already
+// authenticates a Netlify Identity admin session and already gates Owner-only
+// blob maintenance. No new authority: this endpoint was ALREADY allowed to
+// delete any blob in any store (`delete-blob`, `wipe-store`, `wipe-all`), so a
+// refcount-guarded, dry-run-by-default sweep is strictly more careful than
+// what it could do before.
+//
+// `dry_run` defaults TRUE on both. The destructive direction must be asked for
+// by name — `dry_run: false` — exactly as the MCP verbs require.
+const MAINTENANCE_DEFAULT_LIMIT = 200;
+const MAINTENANCE_MAX_LIMIT = 1000;
+
+const asBoundedInt = (value: unknown, fallback: number, max: number) => {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+
+  return Math.min(Math.trunc(parsed), max);
+};
+
+/** dry_run is TRUE unless the caller explicitly says otherwise. */
+const isDryRun = (params: Record<string, unknown>) => (params.dry_run ?? params.dryRun) !== false;
+
+const handleArtifactDedupeBySha: ActionHandler = async (params, event, binding) => {
+  const indexStore = getStoreHandle('artifact-index', event, binding) as unknown as ArtifactIndexStore;
+  const artifactStore = getStoreHandle('artifacts', event, binding) as unknown as ArtifactByteStore;
+  const artifactKind = asTrimmed(params.artifact_kind ?? params.artifactKind);
+
+  const result = await dedupeArtifactsBySha(indexStore, artifactStore, {
+    dryRun: isDryRun(params),
+    ...(artifactKind ? { artifactKind } : {}),
+    limit: asBoundedInt(params.limit, MAINTENANCE_DEFAULT_LIMIT, MAINTENANCE_MAX_LIMIT),
+    cursor: asBoundedInt(params.cursor, 0, Number.MAX_SAFE_INTEGER),
+  });
+
+  return jsonResponse(200, { dryRun: isDryRun(params), result });
+};
+
+const handleArtifactOrphanSweep: ActionHandler = async (params, event, binding) => {
+  const indexStore = getStoreHandle('artifact-index', event, binding) as unknown as ArtifactIndexStore;
+  const objectsStore = getStoreHandle('site-objects', event, binding) as unknown as ArtifactSweepListStore;
+  const requestPrefix = asTrimmed(params.request_prefix ?? params.requestPrefix);
+  const olderThan = asTrimmed(params.older_than ?? params.olderThan);
+
+  const result = await sweepOrphanArtifacts(indexStore, objectsStore, {
+    dryRun: isDryRun(params),
+    ...(requestPrefix ? { requestPrefix } : {}),
+    ...(olderThan ? { olderThan } : {}),
+    // Attribution comes from the SESSION, never from the request body: the
+    // deletedBy stamped on a soft-deleted reference has to name the human the
+    // endpoint authenticated, not whatever a caller typed.
+    deletedBy: asTrimmed(params.__actor) ?? 'admin_artifact_maintenance',
+    limit: asBoundedInt(params.limit, MAINTENANCE_DEFAULT_LIMIT, MAINTENANCE_MAX_LIMIT),
+    cursor: asBoundedInt(params.cursor, 0, Number.MAX_SAFE_INTEGER),
+  });
+
+  return jsonResponse(200, { dryRun: isDryRun(params), result });
+};
+
 const actionHandlers: Record<string, ActionHandler> = {
   'list-stores': handleListStores,
   'list-blobs': handleListBlobs,
@@ -353,6 +428,8 @@ const actionHandlers: Record<string, ActionHandler> = {
   'wipe-store': handleWipeStore,
   'wipe-all': handleWipeAll,
   'get-artifact-metadata': handleGetArtifactMetadata,
+  'artifact-dedupe-by-sha': handleArtifactDedupeBySha,
+  'artifact-orphan-sweep': handleArtifactOrphanSweep,
 };
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
@@ -378,6 +455,9 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
   }
 
   const params = parseBody(event);
+  // The sweep stamps `deletedBy` from here. Overwrite unconditionally so a
+  // body-supplied `__actor` can never impersonate anyone.
+  params.__actor = adminState.email ?? adminState.userId ?? 'admin_artifact_maintenance';
   const action = asTrimmed(params.action);
   const actionHandler = action ? actionHandlers[action] : undefined;
 
