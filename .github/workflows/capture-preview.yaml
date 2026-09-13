@@ -1,0 +1,270 @@
+# W2.1/G6-T1 — capture fidelity: render the emitted drafts, screenshot them, score the pair.
+#
+# ## Why this job exists at all
+#
+# Capture's fidelity rubric reported `visual 0 scored / N unavailable` on every run since T12.6.
+# Nothing was broken: an emitted draft is an unpublished object graph, unpublished objects do not
+# render, so the scorer had source screenshots and nothing to compare them to. `preview.mjs` — a
+# complete, tested draft-preview renderer — has been in this repo since T12.10 with NOTHING
+# invoking it.
+#
+# ## Why it is CI, and why CI also scores
+#
+# CI is the only place that already has a platform checkout, Node, Astro, a resolvable Chromium,
+# `sharp`, `preview.mjs` and `score.mjs`. Adding an image stack plus a storage read grant to
+# cms-agent's Cloud Run image (which has no Chromium, no Astro and no `sharp`) to score two PNGs
+# would be the wrong shape — so the bytes are brought to the tools rather than the tools to the
+# bytes.
+#
+# CI also SCORES, rather than uploading preview PNGs for something else to score, because
+# `score.mjs` already takes `{snapshot, mapping, previewManifest, screenshotRoot}` — one directory
+# holding both sides — and already passes against a real fixture
+# (`packages/core/cli/capture/score.test.mjs`). That removes a whole workstream: no second
+# implementation of the normalize-and-diff semantics, and no bulk upload of preview PNGs. What
+# leaves this job is the REPORT: small, and exactly what cms-agent needs.
+#
+# ## The whole job is path fidelity
+#
+# `score.mjs` resolves both sides against one `--screenshot-root`: a source shot at its snapshot
+# `path`, a preview shot at the path `capture-preview.v1` names. One misplaced file and that pair
+# reads `unavailable`. So the source bytes are written at the snapshot's own path, verbatim, and
+# `preview.mjs` writes its own under `preview/` in the SAME root, which is precisely why it was
+# built to take a `--run-root`.
+#
+# ## What it may never do
+#
+# Never commits, never publishes, never releases, never deploys. `preview.mjs` already records
+# those verbs as refused; `scripts/ci/capture-preview-report.mjs` ASSERTS that record and fails the
+# job if it ever stops being true.
+#
+# ## Dispatch inputs
+#
+# The four stage documents are too large for a dispatch payload (Zilberman's snapshot is 187 KB and
+# its mapping 120 KB, against a ~64 KB ceiling), so cms-agent writes each as a git blob in this
+# repository and passes the blob sha. See scripts/ci/capture-preview-inputs.mjs for the reasoning.
+
+name: capture-preview
+
+# GitHub does not return a workflow run's INPUTS over the API, so a dispatcher cannot find the run
+# it just started by matching them. The correlation therefore travels in the run's NAME, which is
+# queryable: cms-agent passes its own `<runId>:<nodeId>:<stamp>` as `cms_run_id` and then matches
+# `workflow_runs[].name` against it (capturePreviewDispatch.ts's findDispatchedRun).
+run-name: capture-preview ${{ inputs.target }} ${{ inputs.cms_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: The capture target project id (cms-agent's projectId, e.g. site_zilberman).
+        required: true
+        type: string
+      site:
+        description: The tenant site directory to preview against, e.g. sites/zilberman.
+        required: true
+        type: string
+      capture_job_id:
+        description: pdf-tool capture jobId holding this run's source screenshots. One of this or capture_request_id.
+        required: false
+        type: string
+      capture_request_id:
+        description: pdf-tool capture requestId, when the jobId is not to hand.
+        required: false
+        type: string
+      snapshot_blob:
+        description: Git blob sha of this run's snapshot.v1 document.
+        required: true
+        type: string
+      mapping_blob:
+        description: Git blob sha of the REFINED capture-map.v1 document.
+        required: true
+        type: string
+      plan_blob:
+        description: Git blob sha of the capture-emission-plan.v1 document.
+        required: true
+        type: string
+      theme_blob:
+        description: Git blob sha of the theme.v1 document.
+        required: true
+        type: string
+      cms_run_id:
+        description: cms-agent's workflow run id, carried through for correlation only.
+        required: false
+        type: string
+
+permissions:
+  # `write` is for `POST /git/blobs` only — the report leaves this job as an unreferenced blob (see
+  # the "Publish the report" step). Nothing here commits, tags, or moves a ref, and the preview
+  # plane's forbidden verbs (object_publish, release_to_production, trigger_netlify_build, deploy)
+  # are refused by preview.mjs and asserted by capture-preview-report.mjs.
+  contents: write
+
+concurrency:
+  # One fidelity run per capture target at a time. Two concurrent previews of the same tenant would
+  # race on the same scratch site directory.
+  group: capture-preview-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  preview-and-score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUN_ROOT: .tmp/capture-fidelity
+      # Every dispatch input reaches the shell as an ENVIRONMENT VARIABLE, never as an expression
+      # interpolated into a script. An input is caller-controlled text; `${{ inputs.x }}` inside a
+      # `run:` block is string substitution BEFORE bash parses the line, which is a command
+      # injection waiting for the first target id with a quote in it.
+      CAPTURE_TARGET: ${{ inputs.target }}
+      CAPTURE_SITE: ${{ inputs.site }}
+      CAPTURE_JOB_ID: ${{ inputs.capture_job_id }}
+      CAPTURE_REQUEST_ID: ${{ inputs.capture_request_id }}
+      SNAPSHOT_BLOB: ${{ inputs.snapshot_blob }}
+      MAPPING_BLOB: ${{ inputs.mapping_blob }}
+      PLAN_BLOB: ${{ inputs.plan_blob }}
+      THEME_BLOB: ${{ inputs.theme_blob }}
+      REPOSITORY: ${{ github.repository }}
+      PDF_TOOL_BASE_URL: ${{ vars.PDF_TOOL_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # browser.mjs DISCOVERS a browser and never downloads one (by design — the capture plane must
+      # not install software mid-run). ubuntu-latest ships Google Chrome; resolve it explicitly here
+      # so a runner image change fails loudly with a named cause instead of inside Playwright.
+      - name: Resolve Chromium
+        run: |
+          for candidate in /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+            if [ -x "$candidate" ]; then
+              echo "CAPTURE_BROWSER_EXECUTABLE=$candidate" >> "$GITHUB_ENV"
+              "$candidate" --version
+              exit 0
+            fi
+          done
+          echo "No preinstalled Chromium-compatible browser on this runner image." >&2
+          exit 1
+
+      # Both sides of every pair end up under ONE root: the stage documents and the source
+      # screenshots here, the preview screenshots (under preview/) in the next step.
+      #
+      # Exit 3 from any of the four steps below means "named holes in the evidence", which the
+      # report carries as defects. Only a different non-zero code is a broken run — the REPORT is
+      # this job's product, and failing the job on a defect it correctly enumerated would hide the
+      # very thing the job was run to produce.
+      - name: Assemble the capture run's inputs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PDF_TOOL_AGENT_RUN_TOKEN: ${{ secrets.PDF_TOOL_AGENT_RUN_TOKEN }}
+        run: |
+          status=0
+          node scripts/ci/capture-preview-inputs.mjs \
+            --run-root "$RUN_ROOT" \
+            --repository "$REPOSITORY" \
+            --snapshot-blob "$SNAPSHOT_BLOB" \
+            --mapping-blob "$MAPPING_BLOB" \
+            --plan-blob "$PLAN_BLOB" \
+            --theme-blob "$THEME_BLOB" \
+            --pdf-tool-base-url "$PDF_TOOL_BASE_URL" \
+            --project "$CAPTURE_TARGET" \
+            ${CAPTURE_JOB_ID:+--capture-job-id "$CAPTURE_JOB_ID"} \
+            ${CAPTURE_REQUEST_ID:+--capture-request-id "$CAPTURE_REQUEST_ID"} \
+            --out "$RUN_ROOT/inputs-summary.json" || status=$?
+          if [ "$status" != 0 ] && [ "$status" != 3 ]; then exit "$status"; fi
+
+      # The real renderer: copies sites/<client> into a scratch dir, writes the emitted draft bodies
+      # at /__draft-preview/<page id>, applies the captured theme, Astro-builds, serves dist/ on
+      # localhost and screenshots each emitted block at the SOURCE viewports.
+      - name: Render the draft preview
+        run: |
+          status=0
+          node packages/core/cli/capture/preview.mjs \
+            --target "$CAPTURE_TARGET" \
+            --plan "$RUN_ROOT/capture-emission-plan.v1.json" \
+            --mapping "$RUN_ROOT/capture-map.v1.json" \
+            --theme "$RUN_ROOT/theme.v1.json" \
+            --site "$CAPTURE_SITE" \
+            --run-root "$RUN_ROOT" \
+            --browser-executable "$CAPTURE_BROWSER_EXECUTABLE" \
+            --out "$RUN_ROOT/capture-preview.v1.json" || status=$?
+          if [ "$status" != 0 ] && [ "$status" != 3 ]; then exit "$status"; fi
+
+      - name: Score the pair
+        run: |
+          status=0
+          node packages/core/cli/capture/score.mjs \
+            --target "$CAPTURE_TARGET" \
+            --snapshot "$RUN_ROOT/snapshot.v1.json" \
+            --mapping "$RUN_ROOT/capture-map.v1.json" \
+            --theme "$RUN_ROOT/theme.v1.json" \
+            --preview "$RUN_ROOT/capture-preview.v1.json" \
+            --screenshot-root "$RUN_ROOT" \
+            --side-by-side "$RUN_ROOT/side-by-side.html" \
+            --gap-out "$RUN_ROOT/palette-gaps.v1.json" \
+            --out "$RUN_ROOT/fidelity-report.v1.json" || status=$?
+          if [ "$status" != 0 ] && [ "$status" != 3 ]; then exit "$status"; fi
+
+      # Fails the job outright if the preview ever claims to have published, released or deployed.
+      - name: Assert the preview published nothing, and summarize
+        run: |
+          status=0
+          node scripts/ci/capture-preview-report.mjs \
+            --preview "$RUN_ROOT/capture-preview.v1.json" \
+            --report "$RUN_ROOT/fidelity-report.v1.json" \
+            --inputs "$RUN_ROOT/inputs-summary.json" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --out "$RUN_ROOT/capture-fidelity-outcome.v1.json" || status=$?
+          if [ "$status" != 0 ] && [ "$status" != 3 ]; then exit "$status"; fi
+
+      # HOW THE REPORT GETS BACK TO cms-agent.
+      #
+      # An uploaded artifact is a zip, and cms-agent would need a zip reader (and a new dependency
+      # in a serverless image) to open one. So the report also travels the way the inputs arrived:
+      # as an unreferenced git blob, whose sha is published as the NAME of a tiny marker artifact.
+      # cms-agent lists this run's artifacts (JSON), reads the sha off the marker, and fetches the
+      # report with `GET /git/blobs/{sha}` — no archive download, no unzip, no new dependency.
+      - name: Publish the report as a git blob
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha=$(gh api "repos/$REPOSITORY/git/blobs" \
+            -f "content=$(base64 -w0 < "$RUN_ROOT/fidelity-report.v1.json")" \
+            -f encoding=base64 --jq .sha)
+          case "$sha" in
+            [0-9a-f]*) : ;;
+            *) echo "git blob create returned no sha" >&2; exit 1 ;;
+          esac
+          mkdir -p "$RUN_ROOT/blob-marker"
+          printf '%s\n' "$sha" > "$RUN_ROOT/blob-marker/report-blob-sha.txt"
+          echo "REPORT_BLOB_SHA=$sha" >> "$GITHUB_ENV"
+
+      - name: Publish the report blob's sha as a marker artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # The NAME is the payload — cms-agent reads the sha off it
+          # (CAPTURE_PREVIEW_REPORT_BLOB_ARTIFACT_PREFIX).
+          name: capture-fidelity-report-blob-${{ env.REPORT_BLOB_SHA }}
+          if-no-files-found: error
+          retention-days: 14
+          path: ${{ env.RUN_ROOT }}/blob-marker/report-blob-sha.txt
+
+      # The report (small) is what leaves this job; the PNGs stay on the runner.
+      - name: Upload the fidelity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-fidelity-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ env.RUN_ROOT }}/fidelity-report.v1.json
+            ${{ env.RUN_ROOT }}/capture-preview.v1.json
+            ${{ env.RUN_ROOT }}/capture-fidelity-outcome.v1.json
+            ${{ env.RUN_ROOT }}/palette-gaps.v1.json
+            ${{ env.RUN_ROOT }}/inputs-summary.json
+            ${{ env.RUN_ROOT }}/side-by-side.html
