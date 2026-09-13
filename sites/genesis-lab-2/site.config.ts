@@ -60,6 +60,8 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/admin/analytics/object/:objectId', to: '/admin/analytics/object/__object', status: 200 },
     // T2.1: /admin is the shell entry, not a surface — it opens on Requests.
     { from: '/admin', to: '/admin/requests', status: 302 },
+    // The admin shell's own 404 — unmatched /admin/* keeps the shell (and the session).
+    { from: '/admin/*', to: '/admin/not-found', status: 404 },
   ],
 });
 

@@ -9,6 +9,8 @@ import test from 'node:test';
 
 import type { StudioRecord } from './studio-client.js';
 import {
+  hasUnpublishedChanges,
+  proposeFromBoardAvailability,
   MIN_REGION_FRACTION,
   appendLibraryReference,
   blobKeyFromPreviewUrl,
@@ -813,4 +815,153 @@ test('canRegenerate follows canEditBoard (isAdmin), independent of whether examp
   });
   const notAdmin = buildImageryWorkspace({ site: site({}), standards: [standard], isAdmin: false });
   assert.equal(notAdmin.examples.canRegenerate, false);
+});
+
+// ─── the applied card tells the truth about its source (site_zilberman, 2026-09-13) ──
+
+/** A record with real release state, unlike the `publication: {}` default above. */
+const publishedRecord = (
+  objectId: string,
+  body: Record<string, unknown>,
+  overrides: Record<string, unknown>
+): StudioRecord =>
+  ({
+    ...(record(objectId, body) as unknown as Record<string, unknown>),
+    ...overrides,
+  }) as StudioRecord;
+
+const appliedFromHistory = (id: string, at: string) => [
+  {
+    at,
+    action: 'set_site_brand_imagery',
+    actor: { kind: 'human', id: 'u1' },
+    details: { applied_brand_imagery_source: { kind: 'visual_standard', id } },
+  },
+];
+
+test('hasUnpublishedChanges reads release state the way the inventory does', () => {
+  const never = publishedRecord('vis_a', { brandImagery: IMAGERY }, { publication: { published_time: null } });
+  assert.equal(hasUnpublishedChanges(never), true, 'never published');
+
+  const stale = publishedRecord(
+    'vis_a',
+    { brandImagery: IMAGERY },
+    {
+      content_revision: 4,
+      publication: { published_time: '2026-09-01T00:00:00.000Z', publish_receipt: { content_revision: 2 } },
+    }
+  );
+  assert.equal(hasUnpublishedChanges(stale), true, 'published at an older content_revision');
+
+  const clean = publishedRecord(
+    'vis_a',
+    { brandImagery: IMAGERY },
+    {
+      content_revision: 4,
+      publication: { published_time: '2026-09-01T00:00:00.000Z', publish_receipt: { content_revision: 4 } },
+    }
+  );
+  assert.equal(hasUnpublishedChanges(clean), false);
+});
+
+test('a source that has moved on since the apply is named on the applied card', () => {
+  const model = buildImageryWorkspace({
+    site: site({ brandImagery: IMAGERY }, appliedFromHistory('vis_zil', '2026-09-11T10:13:38.548Z')),
+    standards: [
+      publishedRecord(
+        'vis_zil',
+        {
+          kind: 'house',
+          label: 'Zilberman house',
+          status: 'active',
+          // Edited after the apply, and no longer what the site serves.
+          brandImagery: { ...IMAGERY, styleSentence: 'Rewritten after the apply.' },
+          references: [],
+        },
+        {
+          updated_at: '2026-09-11T10:28:11.267Z',
+          content_revision: 2,
+          publication: { published_time: null },
+        }
+      ),
+    ],
+  });
+
+  assert.equal(model.applied.appliedAt, '2026-09-11T10:13:38.548Z');
+  assert.ok(model.applied.drift, 'the card must not report a bare "applied <date>"');
+  assert.equal(model.applied.drift?.contractDiffers, true);
+  assert.equal(model.applied.drift?.editedSinceApply, true);
+  assert.equal(model.applied.drift?.unpublishedChanges, true);
+  assert.match(String(model.applied.drift?.note), /has changed since/);
+  assert.match(String(model.applied.drift?.note), /never been published/);
+});
+
+test('an edit that did not touch the imagery contract says "edited since", not "out of date"', () => {
+  const model = buildImageryWorkspace({
+    site: site({ brandImagery: IMAGERY }, appliedFromHistory('vis_zil', '2026-09-11T10:13:38.548Z')),
+    standards: [
+      publishedRecord(
+        'vis_zil',
+        { kind: 'house', label: 'Zilberman house', status: 'active', brandImagery: IMAGERY, references: [] },
+        {
+          updated_at: '2026-09-11T10:28:11.267Z',
+          content_revision: 2,
+          publication: { published_time: '2026-09-11T10:30:00.000Z', publish_receipt: { content_revision: 2 } },
+        }
+      ),
+    ],
+  });
+  assert.equal(model.applied.drift?.contractDiffers, false);
+  assert.equal(model.applied.drift?.editedSinceApply, true);
+  assert.match(String(model.applied.drift?.note), /edited since, and not re-applied/);
+});
+
+test('a published, unedited source earns no drift line at all', () => {
+  const model = buildImageryWorkspace({
+    site: site({ brandImagery: IMAGERY }, appliedFromHistory('vis_zil', '2026-09-11T10:13:38.548Z')),
+    standards: [
+      publishedRecord(
+        'vis_zil',
+        { kind: 'house', label: 'Zilberman house', status: 'active', brandImagery: IMAGERY, references: [] },
+        {
+          updated_at: '2026-09-11T10:10:00.000Z',
+          content_revision: 2,
+          publication: { published_time: '2026-09-11T10:12:00.000Z', publish_receipt: { content_revision: 2 } },
+        }
+      ),
+    ],
+  });
+  assert.equal(model.applied.drift, undefined);
+});
+
+test('an unrecorded provenance gets no drift line — it has nothing to compare against', () => {
+  const model = buildImageryWorkspace({
+    site: site({ brandImagery: IMAGERY }),
+    standards: [
+      publishedRecord(
+        'vis_zil',
+        { kind: 'house', label: 'House', status: 'active', brandImagery: IMAGERY, references: [] },
+        { publication: { published_time: null } }
+      ),
+    ],
+  });
+  assert.equal(model.applied.source.kind, 'unrecorded');
+  assert.equal(model.applied.drift, undefined);
+});
+
+// ─── the propose button only offers what the server will accept ─────────────
+
+test('an empty mood board with no brief disables the propose button and says why', () => {
+  const blocked = proposeFromBoardAvailability({ referenceCount: 0 });
+  assert.equal(blocked.disabled, true);
+  assert.match(String(blocked.reason), /mood board is empty/);
+});
+
+test('a brief lifts the block — the writer can work from words alone', () => {
+  assert.equal(proposeFromBoardAvailability({ referenceCount: 0, brief: '  cinematic, 1970s  ' }).disabled, false);
+  assert.equal(proposeFromBoardAvailability({ referenceCount: 0, brief: '   ' }).disabled, true);
+});
+
+test('any reference at all lifts the block', () => {
+  assert.equal(proposeFromBoardAvailability({ referenceCount: 1 }).disabled, false);
 });

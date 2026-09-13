@@ -297,6 +297,18 @@
   status = 301
   force = true
 
+# The admin shell's own 404 (2026-09-13). LAST of the /admin rules and
+# deliberately UNFORCED: Netlify serves a matching static file before an
+# unforced rule, and every real admin page is either a built file or one of
+# the rewrites above, so this fires only where nothing else matched. Without
+# it an unmatched /admin/* path (a mistyped /admin/visual-identity, say) fell
+# through to the PUBLIC site's 404 — no sidebar, no way back, and a "Sign in"
+# header shown to a live Owner session.
+[[redirects]]
+  from = "/admin/*"
+  to = "/admin/not-found"
+  status = 404
+
 
 [[redirects]]
   from = "/blog"

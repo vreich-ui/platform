@@ -1,0 +1,16 @@
+---
+// /admin/not-found — the admin shell's own 404. Every tenant's netlify.toml
+// rewrites unmatched `/admin/*` here with `status = 404`, so a mistyped admin
+// address keeps the sidebar and the session instead of dropping an
+// authenticated Owner onto the PUBLIC site's 404 (see AdminNotFound.tsx).
+import '@site/config/policy-bindings'; // D2: register the site-identity provider before resolving it below
+import { getSiteIdentity } from '@core/lib/site-identity';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import AdminNotFound from '~/admin/AdminNotFound';
+
+const identity = getSiteIdentity();
+---
+
+<AdminLayout title="Admin — Not found">
+  <AdminNotFound client:load identity={identity} />
+</AdminLayout>

@@ -167,6 +167,17 @@ export interface DeriveInput {
   /** The sweeper's clock, in epoch ms — derivation has no clock of its own. */
   now: number;
   config?: DeriveConfig;
+  /**
+   * When this request started waiting — the request doc's own `created_at`.
+   *
+   * The ONLY time evidence there is for a request that was registered without
+   * a run id (`workflow_start_dry_run` answered without one, or the
+   * registration predates the run): with no run to read, `updatedAt` and the
+   * dispatch heartbeat do not exist, so without this a never-dispatched
+   * request derives `queued` for ever and is polled for ever. Optional
+   * because every other caller (a display-time derivation, a test) has a run.
+   */
+  queuedSince?: string | null;
 }
 
 // ─── output ──────────────────────────────────────────────────────────────────
@@ -397,7 +408,7 @@ export const deriveRequestStatus = (input: DeriveInput): DerivedRequestState => 
   }
 };
 
-const derive = ({ run, chat, now, config }: DeriveInput): DerivedRequestState => {
+const derive = ({ run, chat, now, config, queuedSince }: DeriveInput): DerivedRequestState => {
   const stallAfterMs =
     typeof config?.stallAfterMs === 'number' && config.stallAfterMs > 0 ? config.stallAfterMs : STALL_AFTER_MS;
 
@@ -456,7 +467,27 @@ const derive = ({ run, chat, now, config }: DeriveInput): DerivedRequestState =>
   }
 
   // §5.1 row 1 (second half): created and not yet dispatched.
-  if (run === undefined || run === null) return result('queued');
+  //
+  // "Not yet" is a claim with a clock on it. A request registered without a
+  // run id has no run to read, so the only evidence that it is still starting
+  // is how long ago it was created — past the stall window it has not been
+  // dispatched at all, and saying `queued` for ever is the lie that keeps it
+  // out of the desk's attention set (found live on `site_zilberman`,
+  // 2026-09-13: two runs at step 0 for one and four days, reported as
+  // "Starting" and absent from "Needs you").
+  if (run === undefined || run === null) {
+    const since = parseMs(queuedSince);
+    if (since !== undefined && Number.isFinite(now) && now - since >= stallAfterMs) {
+      return result('stalled', neverDispatchedReason(now - since), [
+        {
+          code: 'never_dispatched',
+          message: 'No workflow run was ever recorded for this request.',
+          ...(asString(queuedSince) ? { at: asString(queuedSince) as string } : {}),
+        },
+      ]);
+    }
+    return result('queued');
+  }
   if (!runReadable) return result('running', UNREADABLE_REASON, unreadableBlocker(run));
 
   const status = asString(run.status);
@@ -499,7 +530,21 @@ const derive = ({ run, chat, now, config }: DeriveInput): DerivedRequestState =>
     return result('done');
   }
 
-  if (status === 'queued') return result('queued');
+  // A run CMS-Agent accepted but never started is subject to exactly the same
+  // §5.2 test as a running one: `stalled` means NOTHING IS HAPPENING, and
+  // nothing is happening is nothing is happening whether the run reached node
+  // one or not. Before this, only `running` was stall-tested, so a run parked
+  // at `queued` sat at "Starting · step 0 of 25" indefinitely — invisible to
+  // the "Needs you" desk (it classifies as `active`), never `nudgeable`, and
+  // so never nudged back to life by the sweeper. `isNotAdvancing` is the same
+  // conservative two-signal test used below: a run queued for a few seconds
+  // has a recent `updatedAt` and cannot read as stalled.
+  if (status === 'queued') {
+    if (isNotAdvancing(run, nodes, now, stallAfterMs)) {
+      return result('stalled', queuedStalledReason(stallAfterMs), stalledBlockers(run, stallAfterMs, 'stalled_queued'));
+    }
+    return result('queued');
+  }
 
   // Not a §5.1 row: a run CMS-Agent skipped outright ended without producing
   // anything and will never move again — `cancelled` is the honest editor
@@ -590,15 +635,35 @@ const stalledReason = (run: RunSnapshot, stallAfterMs: number): string => {
   } — it looks stuck.`;
 };
 
-const stalledBlockers = (run: RunSnapshot, stallAfterMs: number): RequestBlocker[] => {
+const stalledBlockers = (run: RunSnapshot, stallAfterMs: number, code = 'stalled'): RequestBlocker[] => {
   const currentId = asString(run.currentNodeId);
   const at = asString(run.updatedAt) ?? asString(run.updated_at);
   return [
     {
       ...(currentId ? { node_id: currentId } : {}),
-      code: 'stalled',
+      code,
       message: `No dispatch heartbeat and no node transition within ${stallAfterMs}ms.`,
       ...(at ? { at } : {}),
     },
   ];
+};
+
+/** A run that never left the queue: the honest sentence names WHERE it stopped, which is nowhere. */
+const queuedStalledReason = (stallAfterMs: number): string => {
+  const minutes = Math.max(1, Math.round(stallAfterMs / 60_000));
+  return `This job was accepted but has not started a single step for over ${minutes} minute${
+    minutes === 1 ? '' : 's'
+  } — it looks stuck before the first step.`;
+};
+
+/** A request with no run at all, past the window: say so plainly rather than "Starting". */
+const neverDispatchedReason = (waitedMs: number): string => {
+  const hours = waitedMs / 3_600_000;
+  const waited =
+    hours >= 24
+      ? `${Math.floor(hours / 24)} day${Math.floor(hours / 24) === 1 ? '' : 's'}`
+      : hours >= 1
+        ? `${Math.floor(hours)} hour${Math.floor(hours) === 1 ? '' : 's'}`
+        : `${Math.max(1, Math.round(waitedMs / 60_000))} minutes`;
+  return `This job has been waiting ${waited} and no workflow run was ever started for it.`;
 };

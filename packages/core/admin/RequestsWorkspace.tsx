@@ -31,6 +31,7 @@ import { browserPermission, requestBrowserPermission, type BrowserPermission } f
 import { Input, Select } from './forms';
 import { useToast } from './overlays';
 import { DropdownMenu } from './menus';
+import { cn } from './utils';
 import { IconDots, IconExternalLink, IconRobot, IconSettings } from './icons';
 import {
   archiveRequest,
@@ -55,19 +56,22 @@ import {
   type RequestUrlFilterField,
 } from '@core/lib/admin/request-url-filters';
 import {
-  DEFAULT_REQUEST_QUICK_FILTER,
   matchesQuickFilter,
   nodeLabel,
   QUICK_FILTERS,
   quickFilterToStatuses,
   publishPolicyFromApproval,
   publishTargetFor,
+  requestFacts,
   requestObjectHref,
   requestSeverityLevel,
+  requestsEmptyState,
   rowActions,
   rowMetaLine,
   sortRequestRows,
+  summarizeRequestRows,
   type PublishPolicy,
+  type RequestFact,
   type RequestQuickFilter,
   type RowAction,
   type RowActionId,
@@ -590,6 +594,98 @@ function RequestRow({
  * below already renders the run's own approval card; offering a second pair
  * of decision buttons six inches above it is how two surfaces disagree.
  */
+/**
+ * The request-level facts a detail view must state — see `requestFacts`.
+ *
+ * A `<dl>` rather than a paragraph: these are labelled machine facts an
+ * operator reads by scanning for one of them (the run id to paste into a tool,
+ * the "last moved" age that turns "Starting" into "stuck"), not prose.
+ */
+function RequestFactList({ facts }: { facts: RequestFact[] }) {
+  if (facts.length === 0) return null;
+  return (
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[length:var(--adm-text-xs)]">
+      {facts.map((fact) => (
+        <div key={fact.label} className="contents">
+          <dt className="text-[var(--adm-text-muted)]">{fact.label}</dt>
+          <dd className={cn('min-w-0 break-words text-[var(--adm-text)]', fact.mono && 'font-mono')}>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * The head of a single request's view — the same block on the `/admin/requests/<id>`
+ * route and in the list's slide-over, so the two can never disagree about what
+ * a request IS. Before this the route rendered the run card alone (no id, no
+ * timestamps, no reason, no actions) and the slide-over rendered three badges;
+ * for a run stuck four days, neither answered the only question being asked.
+ */
+function RequestDetailHead({
+  row,
+  nowMs,
+  runId,
+  roles,
+  myEmail,
+  muted,
+  canDecide,
+  publishPolicy,
+  busy,
+  handlers,
+}: {
+  row: RequestRowView;
+  nowMs: number;
+  runId?: string;
+  roles: readonly string[];
+  myEmail: string | undefined;
+  muted: readonly string[];
+  canDecide: boolean;
+  publishPolicy: PublishPolicy;
+  busy: boolean;
+  handlers: RowActionHandlers;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge level={requestSeverityLevel(row.status)}>{requestStatusLabel(row.status)}</StatusBadge>
+        <Badge tone="neutral">{KIND_LABELS[row.kind] ?? row.kind}</Badge>
+        {/* D3: the object this request produced, one click from open — every
+            object id or title rendered in this admin must carry an href
+            (`tests/scripts/admin-object-links.test.mjs`). */}
+        {row.object_id ? (
+          <a
+            href={requestObjectHref(row.object_id)}
+            className="adm-focusable inline-flex items-center gap-1 rounded-[var(--adm-radius-pill)] bg-[var(--adm-surface-sunken)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+          >
+            <IconExternalLink size={12} />
+            Object
+          </a>
+        ) : null}
+        {/* B1: the same action list the row renders — retry, cancel, archive,
+            mute, publish — reachable from the detail, not just from the list. */}
+        <RequestDrawerActions
+          row={row}
+          roles={roles}
+          mine={Boolean(myEmail) && row.created_by.trim().toLowerCase() === myEmail}
+          muted={muted.includes(row.request_id)}
+          canDecide={canDecide}
+          publishPolicy={publishPolicy}
+          busy={busy}
+          handlers={handlers}
+        />
+      </div>
+      {/* The badge says WHAT; this says why, in the sweeper's own words. A list
+          row suppresses it (`rowMetaLine`) because it repeats the badge there —
+          on the one request you opened, it is the answer you came for. */}
+      {row.status_reason ? (
+        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">{row.status_reason}</p>
+      ) : null}
+      <RequestFactList facts={requestFacts(row, nowMs, runId ? { run_id: runId } : undefined)} />
+    </div>
+  );
+}
+
 function RequestDrawerActions({
   row,
   roles,
@@ -1144,9 +1240,34 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   // `rows` below — a `running` selected request would otherwise vanish from
   // `rows` under the default `needsYou` filter and the open-draft link would
   // never appear for the one status it matters most on.
-  const selectedRowObjectId = selectedId
-    ? sharedIndex.rows?.find((row) => row.request_id === selectedId)?.object_id
-    : undefined;
+  const selectedRow = selectedId ? sharedIndex.rows?.find((row) => row.request_id === selectedId) : undefined;
+  const selectedRowObjectId = selectedRow?.object_id;
+  /**
+   * The run behind whichever request is open, reported upward by
+   * `RequestActivity` (`onRunResolved`) — the index row has never carried one,
+   * which is why the detail could not state it. Keyed by request id so a
+   * navigation between two requests cannot show the previous run's id.
+   */
+  const [resolvedRun, setResolvedRun] = useState<{ requestId: string; runId: string } | undefined>(undefined);
+  const runIdFor = (requestId: string | undefined): string | undefined =>
+    requestId && resolvedRun?.requestId === requestId ? resolvedRun.runId : undefined;
+  const noteRunFor = useCallback(
+    (requestId: string) => (runId: string) => setResolvedRun({ requestId, runId }),
+    []
+  );
+
+  /**
+   * What the WHOLE active desk looks like, for the empty state's copy — the
+   * same shared, unfiltered cache the header pills count, so an empty tab and
+   * the pills can never tell different stories. `undefined` under `custom`
+   * (mine / archived / a live search): that view queries the server directly
+   * and the shared cache is not the universe those rows came from, so the
+   * copy says nothing about the rest rather than something wrong about it.
+   */
+  const deskSummary = useMemo(
+    () => (custom ? undefined : summarizeRequestRows(sharedIndex.rows ?? [])),
+    [custom, sharedIndex.rows]
+  );
 
   const rows = useMemo(() => {
     if (custom) return sortRequestRows(customRows ?? []);
@@ -1323,11 +1444,30 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
         {selectedId ? (
           /* C3: the single-request route has no rows to dim — the run's own
              timeline is what is stale here, so it dims instead. */
-          <div className={`mb-3${authExpired ? ' opacity-50' : ''}`}>
+          <div className={`mb-3 flex flex-col gap-3${authExpired ? ' opacity-50' : ''}`}>
+            {/* The facts the run card cannot state — request id, step, when it
+                last moved, who asked, the run id, the reason — plus the same
+                actions the list row offers. Without them this route was a run
+                card and nothing else. */}
+            {selectedRow ? (
+              <RequestDetailHead
+                row={selectedRow}
+                nowMs={nowMs}
+                {...(runIdFor(selectedId) ? { runId: runIdFor(selectedId) as string } : {})}
+                roles={user.roles}
+                myEmail={myEmail}
+                muted={muted}
+                canDecide={canDecide}
+                publishPolicy={publishPolicy}
+                busy={busy}
+                handlers={rowHandlers}
+              />
+            ) : null}
             <RequestActivity
               requestId={selectedId}
               defaultExpanded
               onSettled={refresh}
+              onRunResolved={noteRunFor(selectedId)}
               isOwner={isOwner}
               onRetry={() => void retryRun(selectedId)}
               // E3b: `sharedIndex.rows` (the shared cache's own, un-filtered-
@@ -1342,16 +1482,10 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
         {loading ? (
           <Skeleton variant="rect" height={160} />
         ) : rows.length === 0 ? (
-          <EmptyState
-            title={quickFilter === 'archived' ? 'Nothing archived' : 'Nothing here'}
-            message={
-              quickFilter === 'archived'
-                ? 'Archived requests appear here once someone files them away.'
-                : quickFilter === DEFAULT_REQUEST_QUICK_FILTER
-                  ? 'Nothing needs you right now — everything in flight is moving on its own.'
-                  : 'Ask the agent for an article and it will appear here while it is being written.'
-            }
-          />
+          /* The copy is derived from the WHOLE active set, not from this tab
+             (`requestsEmptyState`) — an empty "Needs you" may report that it
+             is empty, never that everything else is fine. */
+          <EmptyState {...requestsEmptyState(quickFilter, deskSummary)} />
         ) : (
           /* C3: dimmed, so it is visible at a glance that these rows are a
              snapshot of a session that ended rather than current truth. The
@@ -1391,43 +1525,24 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
           {openId ? (
             <div className="flex flex-col gap-3">
               {openRow ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge level={requestSeverityLevel(openRow.status)}>
-                    {requestStatusLabel(openRow.status)}
-                  </StatusBadge>
-                  <Badge tone="neutral">{KIND_LABELS[openRow.kind] ?? openRow.kind}</Badge>
-                  {/* D3: the object this request produced, one click from
-                      open — every object id or title rendered in this admin
-                      must carry an href (`tests/scripts/admin-object-links.test.mjs`),
-                      and the request detail pane was the one place that
-                      named the object with nothing to click. */}
-                  {openRow.object_id ? (
-                    <a
-                      href={requestObjectHref(openRow.object_id)}
-                      className="adm-focusable inline-flex items-center gap-1 rounded-[var(--adm-radius-pill)] bg-[var(--adm-surface-sunken)] px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
-                    >
-                      <IconExternalLink size={12} />
-                      Object
-                    </a>
-                  ) : null}
-                  {/* B1: the same action list the row renders — the two
-                      hand-written buttons that used to live here are gone. */}
-                  <RequestDrawerActions
-                    row={openRow}
-                    roles={user.roles}
-                    mine={Boolean(myEmail) && openRow.created_by.trim().toLowerCase() === myEmail}
-                    muted={muted.includes(openRow.request_id)}
-                    canDecide={canDecide}
-                    publishPolicy={publishPolicy}
-                    busy={busy}
-                    handlers={rowHandlers}
-                  />
-                </div>
+                <RequestDetailHead
+                  row={openRow}
+                  nowMs={nowMs}
+                  {...(runIdFor(openId) ? { runId: runIdFor(openId) as string } : {})}
+                  roles={user.roles}
+                  myEmail={myEmail}
+                  muted={muted}
+                  canDecide={canDecide}
+                  publishPolicy={publishPolicy}
+                  busy={busy}
+                  handlers={rowHandlers}
+                />
               ) : null}
               <RequestActivity
                 requestId={openId}
                 defaultExpanded
                 onSettled={refresh}
+                onRunResolved={noteRunFor(openId)}
                 isOwner={isOwner}
                 onRetry={() => void retryRun(openId)}
                 // E3b: `openRow` is this same drawer's own row (C1's

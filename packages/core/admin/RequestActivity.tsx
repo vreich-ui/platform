@@ -513,6 +513,16 @@ export interface RequestActivityProps {
   /** Called when the run reaches a terminal state, so the host can refresh its own data. */
   onSettled?: (activity: ActivityView) => void;
   /**
+   * Called once the poll has resolved which run is behind this request.
+   *
+   * The index row carries no run id, so the detail head could not state one —
+   * and the run id is the first thing an operator needs to take a stuck job
+   * anywhere else (an MCP call, a log search). This component already knows
+   * it; the callback just stops it from being knowledge the card keeps to
+   * itself. Fired on the FIRST resolution only.
+   */
+  onRunResolved?: (runId: string) => void;
+  /**
    * Offered on the recovery block. Absent means no button at all.
    *
    * FIX 9: takes no node. The card still requires a named recovery node to
@@ -561,6 +571,7 @@ export function RequestActivity({
   runId,
   defaultExpanded,
   onSettled,
+  onRunResolved,
   onRetry,
   isOwner = false,
   chatStatus,
@@ -599,6 +610,8 @@ export function RequestActivity({
   /** Held in a ref so a host that re-creates the callback each render cannot restart the poll chain. */
   const onSettledRef = useRef(onSettled);
   onSettledRef.current = onSettled;
+  const onRunResolvedRef = useRef(onRunResolved);
+  onRunResolvedRef.current = onRunResolved;
 
   const hasTarget = Boolean(requestId || runId);
 
@@ -692,7 +705,10 @@ export function RequestActivity({
 
         etagRef.current = result.etag;
         const view = result.view;
-        if (view.run_id) resolvedRunIdRef.current = view.run_id;
+        if (view.run_id && resolvedRunIdRef.current !== view.run_id) {
+          resolvedRunIdRef.current = view.run_id;
+          onRunResolvedRef.current?.(view.run_id);
+        }
         setActivity(view.activity);
         setReason(view.reason);
         setCanApprove(view.can_approve === true);

@@ -132,6 +132,14 @@ export const CANONICAL_INFRA_REDIRECTS = [
   // index.astro is a real built page (it keeps a <meta http-equiv="refresh">
   // as the belt-and-braces fallback) and would otherwise win.
   { from: '/admin', to: '/admin/requests', status: 302, force: true },
+  // The admin shell's own 404 (2026-09-13). Fleet law for the same reason
+  // `/admin` above is: an unmatched /admin path must not eject an
+  // authenticated operator into the PUBLIC site's 404, where the shell, the
+  // sidebar and the session's visible state are all gone. LAST, and UNFORCED
+  // — Netlify serves a matching static file before an unforced rule, so every
+  // real admin page (and every rewrite above) still wins; this catches only
+  // what nothing else matched.
+  { from: '/admin/*', to: '/admin/not-found', status: 404, force: false },
 ];
 
 /**

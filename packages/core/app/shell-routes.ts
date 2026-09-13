@@ -109,6 +109,13 @@ export const SHELL_ROUTES: ReadonlyArray<{ pattern: string; entry: string }> = [
   { pattern: '/admin/settings/guardrails', entry: 'admin/settings/guardrails.astro' },
   { pattern: '/admin/settings/visual-identity', entry: 'admin/settings/visual-identity.astro' },
   { pattern: '/admin/studio', entry: 'admin/studio.astro' },
+  // The admin shell's own 404. Every tenant's netlify.toml sends unmatched
+  // `/admin/*` here with `status = 404` (non-forced, so it fires only where
+  // nothing else matched) — before it, a mistyped admin address rendered the
+  // PUBLIC site's 404, losing the sidebar and showing "Sign in" to a live
+  // Owner session. Never linked from NAV: you arrive by mistake, not on
+  // purpose.
+  { pattern: '/admin/not-found', entry: 'admin/not-found.astro' },
 ];
 
 /**

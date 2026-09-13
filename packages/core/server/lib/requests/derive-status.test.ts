@@ -632,3 +632,79 @@ describe('D7 — a resolvable failure is needs_you', () => {
     assert.equal(derived.status, 'failed');
   });
 });
+
+// ─── a job that never left the queue (site_zilberman, 2026-09-13) ───────────
+//
+// Two runs sat at "Starting · Step 0 of 25" for one and four days. `queued`
+// was exempt from every stall test, so they were never `stalled`: they
+// classified as `active`, stayed out of the "Needs you" desk under a sentence
+// asserting everything in flight was moving on its own, were never
+// `nudgeable` (so the sweeper never revived them), and could not even be
+// retried by hand (`retryRequest` accepts stalled/failed only).
+
+describe('§5.2 applied to a run that never started', () => {
+  /** The fixture parked at `queued`, every liveness signal dead. */
+  const parkedQueuedRun = (): RunSnapshot => ({
+    ...withRun({ status: 'queued', approvalsRequired: [], errors: [] }),
+    nodes: (realRun().nodes ?? []).map((n) => ({ ...n, status: 'queued', lastDispatch: null })),
+    currentNodeId: 'input_triage',
+    stall: { stalled: true },
+  });
+
+  it('a queued run with no heartbeat and no transition for longer than the window is stalled', () => {
+    const derived = deriveRequestStatus({ run: parkedQueuedRun(), now: NOW_LATE });
+    assert.strictEqual(derived.status, 'stalled');
+    assert.strictEqual(derived.nudgeable, true, 'the sweeper must be allowed to nudge it back to life');
+    assert.match(String(derived.status_reason), /has not started a single step/);
+    assert.strictEqual(derived.blockers[0]?.code, 'stalled_queued');
+  });
+
+  it('a queued run that was accepted seconds ago is still queued — a queue is not a stall', () => {
+    const derived = deriveRequestStatus({ run: parkedQueuedRun(), now: NOW });
+    assert.strictEqual(derived.status, 'queued');
+    assert.strictEqual(derived.nudgeable, false);
+  });
+
+  it('a queued run whose doc moved inside the window is still queued', () => {
+    const moving = { ...parkedQueuedRun(), updatedAt: iso(NOW_LATE - 60_000) };
+    assert.strictEqual(deriveRequestStatus({ run: moving, now: NOW_LATE }).status, 'queued');
+  });
+
+  it('a queued run with a live dispatch heartbeat is still queued', () => {
+    const beating = parkedQueuedRun();
+    beating.nodes = (beating.nodes ?? []).map((n, index) =>
+      index === 0 ? { ...n, lastDispatch: { dispatchedAt: iso(NOW_LATE - 30_000) } } : n
+    );
+    assert.strictEqual(deriveRequestStatus({ run: beating, now: NOW_LATE }).status, 'queued');
+  });
+
+  it('a queued run with no time evidence at all is never fabricated into a stall', () => {
+    const blind: RunSnapshot = { runId: 'run_blind', status: 'queued' };
+    assert.strictEqual(deriveRequestStatus({ run: blind, now: NOW_LATE }).status, 'queued');
+  });
+
+  it('a chat gate still outranks a queued stall — a human gate is never stalled', () => {
+    const derived = deriveRequestStatus({
+      run: parkedQueuedRun(),
+      chat: chat('awaiting_approval'),
+      now: NOW_LATE,
+    });
+    assert.strictEqual(derived.status, 'needs_you');
+  });
+
+  it('a request registered with no run at all is stalled once it is past the window', () => {
+    const derived = deriveRequestStatus({ now: NOW_LATE, queuedSince: iso(NOW_LATE - 4 * 24 * 3_600_000) });
+    assert.strictEqual(derived.status, 'stalled');
+    assert.strictEqual(derived.blockers[0]?.code, 'never_dispatched');
+    assert.match(String(derived.status_reason), /4 days/);
+  });
+
+  it('a request registered moments ago with no run yet is queued, not stalled', () => {
+    const derived = deriveRequestStatus({ now: NOW_LATE, queuedSince: iso(NOW_LATE - 5_000) });
+    assert.strictEqual(derived.status, 'queued');
+  });
+
+  it('with no run and no created_at, nothing is fabricated', () => {
+    assert.strictEqual(deriveRequestStatus({ now: NOW_LATE }).status, 'queued');
+  });
+});

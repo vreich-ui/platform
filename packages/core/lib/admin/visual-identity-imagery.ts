@@ -304,6 +304,30 @@ export type AppliedImagerySourceKind = 'visual_standard' | 'theme' | 'unrecorded
 export interface AppliedImageryView extends ImageryContractView {
   source: { kind: AppliedImagerySourceKind; id?: string; label: string };
   appliedAt?: string;
+  /**
+   * What has happened to the SOURCE standard since it was applied — absent
+   * when nothing has, or when there is no identified source to compare with.
+   *
+   * "applied <date>" on its own is a claim about the past that reads as a
+   * claim about the present. On `site_zilberman` (2026-09-13) it sat over a
+   * standard that had never been published and had been edited fourteen
+   * minutes after the stamp, and the page said none of it. The applied copy
+   * itself is not in doubt — it is the site object's own `brandImagery`, a
+   * real snapshot taken at apply time, which is exactly why the two can
+   * diverge and why the divergence has to be stated rather than implied.
+   */
+  drift?: AppliedImageryDrift;
+}
+
+export interface AppliedImageryDrift {
+  /** The source standard's `brandImagery` no longer matches what is applied. */
+  contractDiffers: boolean;
+  /** The source standard was written after the apply stamp. */
+  editedSinceApply: boolean;
+  /** The source standard has never been published, or carries unpublished changes. */
+  unpublishedChanges: boolean;
+  /** One editor sentence, safe to render verbatim next to "applied <date>". */
+  note: string;
 }
 
 /**
@@ -552,6 +576,16 @@ export interface VisualStandardView {
   appliedToSite: boolean;
   /** The mood board is full — "Add reference" must stop offering. */
   boardFull: boolean;
+  /** `updated_at` from the record — when this standard was last WRITTEN. */
+  updatedAt?: string;
+  /**
+   * Release truth, read the same way `object-inventory.ts` reads it: never
+   * published, or published at a `content_revision` older than the current
+   * one. A standard can be applied to a site while in this state — publish
+   * governs the export, apply governs the site's own copy — so the two facts
+   * have to be reported separately rather than one standing in for the other.
+   */
+  unpublishedChanges: boolean;
 }
 
 const readStatus = (value: unknown): VisualStandardStatus =>
@@ -597,6 +631,59 @@ export function buildVisualStandardView(
       : {}),
     appliedToSite: appliedImageryKey !== 'undefined' && stableJson(body.brandImagery) === appliedImageryKey,
     boardFull: references.length >= MOOD_BOARD_MAX_REFERENCES,
+    ...(str(asBag(record).updated_at) ? { updatedAt: str(asBag(record).updated_at) as string } : {}),
+    unpublishedChanges: hasUnpublishedChanges(record),
+  };
+}
+
+/**
+ * `object-inventory.ts`'s `unpublished_changes`, computed client-side off the
+ * same record fields (this surface has the records already and must not need a
+ * second endpoint to answer "is this published?"). Never published counts as
+ * unpublished; so does a receipt pinned to an older `content_revision`.
+ */
+export function hasUnpublishedChanges(record: StudioRecord): boolean {
+  const bag = asBag(record);
+  const publication = asBag(bag.publication);
+  const publishedTime = publication.published_time;
+  if (typeof publishedTime !== 'string' || publishedTime.length === 0) return true;
+  const receipt = asBag(publication.publish_receipt);
+  const receiptRevision = receipt.content_revision;
+  const current = bag.content_revision;
+  if (typeof receiptRevision !== 'number') return true;
+  return typeof current === 'number' ? receiptRevision !== current : false;
+}
+
+/**
+ * What the applied card must say beyond "applied <date>".
+ *
+ * Pure and exported so the sentence is test-pinned rather than assembled in
+ * JSX. `undefined` means there is genuinely nothing to add: the source
+ * standard is published, unedited since the apply, and its contract still
+ * matches what the site is serving.
+ */
+export function appliedImageryDrift(input: {
+  appliedAt?: string;
+  source: VisualStandardView | undefined;
+}): AppliedImageryDrift | undefined {
+  const { source } = input;
+  if (!source) return undefined;
+  const contractDiffers = !source.appliedToSite;
+  const editedSinceApply = Boolean(
+    input.appliedAt && source.updatedAt && Date.parse(source.updatedAt) > Date.parse(input.appliedAt)
+  );
+  const unpublishedChanges = source.unpublishedChanges;
+  if (!contractDiffers && !editedSinceApply && !unpublishedChanges) return undefined;
+  const clauses: string[] = [];
+  if (contractDiffers)
+    clauses.push(`${source.label} has changed since — what is applied here is the older copy`);
+  else if (editedSinceApply) clauses.push(`${source.label} has been edited since, and not re-applied`);
+  if (unpublishedChanges) clauses.push(`${source.label} has never been published, or has unpublished changes`);
+  return {
+    contractDiffers,
+    editedSinceApply,
+    unpublishedChanges,
+    note: `${clauses.join('; ')}.`,
   };
 }
 
@@ -667,6 +754,29 @@ function buildExamplesView(selected: VisualStandardView | undefined, canEditBoar
   };
 }
 
+/**
+ * Whether "Write contract from mood board" can actually run right now.
+ *
+ * `admin-visual-identity-propose` refuses a proposal with zero readable
+ * references and no brief as 422 `no_images_reached_writer` — the model call
+ * is never made. The Imagery tab used to explain that prerequisite in the
+ * mood-board panel and then offer the button anyway in a different panel, with
+ * nothing on the control to say it could not run (`site_zilberman`,
+ * 2026-09-13: a 0-of-24 board next to a live button). A BRIEF LIFTS IT: the
+ * writer can work from words alone, which is why this is not a bare
+ * `referenceCount === 0` check.
+ */
+export function proposeFromBoardAvailability(input: {
+  referenceCount: number;
+  brief?: string;
+}): { disabled: boolean; reason?: string } {
+  if (input.referenceCount > 0 || (input.brief ?? '').trim().length > 0) return { disabled: false };
+  return {
+    disabled: true,
+    reason: 'The mood board is empty. Add reference images, or write a brief below, and this can run.',
+  };
+}
+
 export function buildImageryWorkspace(input: {
   site: StudioRecord | undefined;
   standards: readonly StudioRecord[];
@@ -681,10 +791,13 @@ export function buildImageryWorkspace(input: {
   const appliedKey = stableJson(appliedImagery);
   const provenance = readAppliedImagerySource(input.site);
 
-  const views = input.standards
+  // Archived standards are kept in `allViews` for one purpose only: the
+  // applied card must still be able to name the standard it came from after
+  // someone archives it, rather than quietly losing the provenance line.
+  const allViews = input.standards
     .map((record) => buildVisualStandardView(record, appliedKey))
-    .filter((value): value is VisualStandardView => value !== undefined)
-    .filter((view) => view.status !== 'archived');
+    .filter((value): value is VisualStandardView => value !== undefined);
+  const views = allViews.filter((view) => view.status !== 'archived');
   const house = views.find((view) => view.isHouse);
   const templates = views.filter((view) => !view.isHouse).sort((a, b) => a.label.localeCompare(b.label));
   const standards = [...(house ? [house] : []), ...templates];
@@ -696,6 +809,18 @@ export function buildImageryWorkspace(input: {
   const canApply = input.isOwner === true;
   const canEditBoard = input.isAdmin !== false;
 
+  // The standard the apply receipt names — the only object this card may
+  // compare itself against. A site publish is NOT an apply of anything (the
+  // two timestamps sat 21 seconds apart on `site_zilberman` and the page read
+  // the wrong one as provenance); `readAppliedImagerySource` reads only the
+  // `applied_brand_imagery_source` stamp, and an unstamped site reports
+  // `unrecorded` and gets no drift line rather than a guess.
+  const appliedSource = provenance.id ? allViews.find((view) => view.objectId === provenance.id) : undefined;
+  const drift = appliedImageryDrift({
+    ...(provenance.appliedAt ? { appliedAt: provenance.appliedAt } : {}),
+    source: appliedSource,
+  });
+
   return {
     applied: {
       ...buildImageryContractView(appliedImagery),
@@ -705,6 +830,7 @@ export function buildImageryWorkspace(input: {
         label: provenance.label,
       },
       ...(provenance.appliedAt ? { appliedAt: provenance.appliedAt } : {}),
+      ...(drift ? { drift } : {}),
     },
     ...(input.siteShortId ? { houseId: `vis_${input.siteShortId}` } : {}),
     ...(house ? { house } : {}),

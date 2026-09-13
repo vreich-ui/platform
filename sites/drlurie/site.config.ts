@@ -104,6 +104,8 @@ export const siteConfig: SiteConfig = siteConfigSchema.parse({
     { from: '/admin/maintenance', to: '/admin/inventory', status: 301 },
     // T21.9b: the traffic dashboard is renamed to Analytics.
     { from: '/admin/traffic', to: '/admin/analytics', status: 301 },
+    // The admin shell's own 404 — unmatched /admin/* keeps the shell (and the session).
+    { from: '/admin/*', to: '/admin/not-found', status: 404 },
     { from: '/blog', to: '/learn/library', status: 301 },
     { from: '/topics', to: '/learn/topics', status: 301 },
     { from: '/topics/*', to: '/learn/topics/:splat', status: 301 },

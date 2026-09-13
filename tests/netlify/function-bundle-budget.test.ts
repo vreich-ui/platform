@@ -169,6 +169,17 @@ const firstPartyBundle = (fn: string) => {
  * in a module the bundle already carries whole, so there is no import edge to
  * cut.
  *
+ * Admin-truthfulness wave (2026-09-13) raised it 3364 -> 3372, measured at
+ * 3367 KB on top of the W2.0 tree. NO new import edge: every byte is new logic inside modules the
+ * bundle already reached — `requests/derive-status.ts` (stall reasoning
+ * extended to a queued run), `requests/store.ts` + the new
+ * `requests/request-kind.ts` (id-evidence kind reconciliation, ~2 KB, imported
+ * only by store.ts and importing only a type), and
+ * `lib/admin/request-logic.ts` / `lib/admin/visual-identity-imagery.ts` (the
+ * empty-state, detail-facts and applied-drift derivations, which live in
+ * lib/admin precisely so they can be tested). Nothing to cut: no module joins
+ * the graph and no subtree comes with it.
+ *
  * Re-measured 2026-09-13, after the shell coalescing (T-shell):
  *   admin-auth-state 216 · admin-requests 367 · admin-users 438 · admin-shell 369
  */
@@ -182,7 +193,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3364,
+  'admin-agent-chat': 3372,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */
