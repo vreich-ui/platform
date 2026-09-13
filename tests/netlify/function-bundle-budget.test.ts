@@ -160,6 +160,15 @@ const firstPartyBundle = (fn: string) => {
  * the delta is the safeguard that keeps an unattended sweep from retiring a
  * capture's artifacts before capture has written the pages citing them.
  *
+ * W2.0 write-time artifact-ownership claim (2026-09-13) raised it 3356 → 3364,
+ * measured at 3359 KB on top of the media-compaction tree. NO new module and NO
+ * new import edge: the claim lives in mcp-tool-handlers.ts's own
+ * `callObjectAction` and uses `readRequestOwner` / `writeRequestOwner` /
+ * `PUBLIC_ARTIFACT_PATH_RE`, all three already imported there. The 6 KB is this
+ * function plus the comment that says why it exists — first-party feature code
+ * in a module the bundle already carries whole, so there is no import edge to
+ * cut.
+ *
  * Re-measured 2026-09-13, after the shell coalescing (T-shell):
  *   admin-auth-state 216 · admin-requests 367 · admin-users 438 · admin-shell 369
  */
@@ -173,7 +182,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3356,
+  'admin-agent-chat': 3364,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

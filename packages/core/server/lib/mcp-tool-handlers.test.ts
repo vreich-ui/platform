@@ -14,6 +14,7 @@ import {
   ARTIFACT_BRIDGE_SCOPE_CACHE_TTL_MS,
   resolveArtifactBridgeScopeForJobWithStore,
   callResumeAgentArtifactJob,
+  artifactRequestOwnershipClaimsForObjectAction,
 } from './mcp-tool-handlers.js';
 import type { IdempotencyBlobStore, ToolCallResponse } from './idempotency-store.js';
 
@@ -219,5 +220,99 @@ describe('callResumeAgentArtifactJob — fail-fast input validation', () => {
     const result = await call(rest);
     assert.strictEqual(result.isError, true);
     assert.match(errorText(result), /approval_token is required/);
+  });
+});
+
+
+// ─── W2.0: a write that cites artifact bytes claims them ───────────────────
+describe('artifactRequestOwnershipClaimsForObjectAction (W2.0)', () => {
+  const sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const imgPath = (requestId: string) => `/img/${requestId}/${sha}.jpg`;
+
+  it('a page patch that cites /img/<request_id>/ claims that request for the patched page', () => {
+    const claims = artifactRequestOwnershipClaimsForObjectAction(
+      {
+        action: 'patch',
+        object_type: 'page',
+        object_id: 'page_home',
+        ops: [
+          {
+            op: 'upsert_section',
+            section: { kind: 'media', media: { type: 'image', src: imgPath('req_capture_zilberman_20260910_01') } },
+          },
+        ],
+      },
+      {}
+    );
+
+    assert.deepEqual(claims, {
+      action: 'patch',
+      owner: { object_type: 'page', object_id: 'page_home' },
+      requestIds: ['req_capture_zilberman_20260910_01'],
+    });
+  });
+
+  it('a create claims for the id the store MINTED, not the one the payload asked for', () => {
+    // The capture emitter asks for `page_capture_<sha18>` and the store answers
+    // with whatever it minted; the owner has to be the object that exists.
+    const claims = artifactRequestOwnershipClaimsForObjectAction(
+      {
+        action: 'create',
+        object_type: 'page',
+        requested_id: 'page_capture_abc123',
+        body: { sections: [{ hero: { src: imgPath('req_capture_acme_1') } }] },
+      },
+      { record: { object_id: 'page_minted_1' } }
+    );
+
+    assert.equal(claims?.owner.object_id, 'page_minted_1');
+    assert.deepEqual(claims?.requestIds, ['req_capture_acme_1']);
+  });
+
+  it('collects every distinct request id the write cites, once each', () => {
+    const claims = artifactRequestOwnershipClaimsForObjectAction(
+      {
+        action: 'patch',
+        object_type: 'page',
+        object_id: 'page_home',
+        ops: [
+          { op: 'upsert_section', section: { a: imgPath('req_one'), b: imgPath('req_one') } },
+          { op: 'upsert_section', section: { deep: { nested: [{ src: `/pdf/req_two/${sha}.pdf` }] } } },
+        ],
+      },
+      {}
+    );
+
+    assert.deepEqual(claims?.requestIds.sort(), ['req_one', 'req_two']);
+  });
+
+  it('claims nothing when the write cites no artifact path', () => {
+    assert.equal(
+      artifactRequestOwnershipClaimsForObjectAction(
+        { action: 'patch', object_type: 'page', object_id: 'page_home', ops: [{ op: 'set_page_meta', fields: { title: 'Home' } }] },
+        {}
+      ),
+      undefined
+    );
+    // A bare /img/ string that is not a full artifact path is not a citation.
+    assert.equal(
+      artifactRequestOwnershipClaimsForObjectAction(
+        { action: 'patch', object_type: 'page', object_id: 'page_home', ops: [{ src: '/img/req_one/not-a-sha.jpg' }] },
+        {}
+      ),
+      undefined
+    );
+  });
+
+  it('claims nothing for object types that cannot own a request, or for actions that are not writes', () => {
+    const ops = [{ op: 'upsert_section', section: { src: imgPath('req_one') } }];
+    assert.equal(
+      artifactRequestOwnershipClaimsForObjectAction({ action: 'patch', object_type: 'theme', object_id: 'theme_x', ops }, {}),
+      undefined
+    );
+    assert.equal(
+      artifactRequestOwnershipClaimsForObjectAction({ action: 'validate', object_type: 'page', object_id: 'page_home', ops }, {}),
+      undefined
+    );
   });
 });

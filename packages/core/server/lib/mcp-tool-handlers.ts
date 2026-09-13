@@ -4330,12 +4330,164 @@ const triggerVisualStandardExamplesAfterObjectAction = async (
   }
 };
 
+/**
+ * W2.0 — a write that CITES artifact bytes claims them, at write time.
+ *
+ * PR #308 (CMS-Agent) + #729 made the capture emitter declare `owner` on the
+ * ingest call for every artifact it creates, so a fresh capture's request id
+ * gets its `request-owner/<request_id>.json` pointer as the bytes land. PR
+ * #736 made a media op on a request with NO pointer derive one on the read
+ * path, by the full-projection "which active object cites this blobKey" scan.
+ *
+ * Between those two sits the case neither covers cheaply: an object patched
+ * with image srcs under `/img/<request_id>/` whose BYTES were ingested by an
+ * earlier run — a re-capture reusing a prior pass's media ledger, a page that
+ * pastes a sibling page's image, every page the emitter's reuse/patch path
+ * touched before #308 existed. Nothing is ingested on those calls, so the
+ * ingest-time declaration never fires and the request stays unowned until a
+ * later media op pays for a full scan — a scan that refuses
+ * (`ambiguous_evidence`) whenever two objects cite the same bytes.
+ *
+ * The writer does not need the scan: it is holding the citation. This claims
+ * ownership from the write itself, for the request ids the write names, and
+ * only when no pointer exists yet. It is the SAME scheme, not a second one
+ * (`writeRequestOwner`, site stamped server-side from `getSiteIdentity()`,
+ * exactly as the ingest `owner` argument writes it), and no widening: a
+ * caller that can patch this object can already declare an owner for any
+ * request id by ingesting one byte under it. An already-owned request is
+ * left alone, so a curated pointer is never re-pointed and the immutable
+ * `artifact_request_owner_conflict` rule is never reached from here. Best
+ * effort, never throws: a successful write must not fail on a pointer.
+ */
+const OWNERSHIP_CLAIM_MAX_REQUEST_IDS = 16;
+const OWNERSHIP_CLAIM_MAX_DEPTH = 12;
+
+/** Every `/img|/pdf/<request_id>/<sha>.<ext>` string anywhere in a create body or a patch ops array. */
+const collectCitedArtifactRequestIds = (value: unknown, found: Set<string>, depth = 0): void => {
+  if (found.size >= OWNERSHIP_CLAIM_MAX_REQUEST_IDS || depth > OWNERSHIP_CLAIM_MAX_DEPTH) return;
+
+  if (typeof value === 'string') {
+    if (!PUBLIC_ARTIFACT_PATH_RE.test(value)) return;
+    const requestId = value.split('/')[2];
+    if (requestId) found.add(requestId);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) collectCitedArtifactRequestIds(entry, found, depth + 1);
+    return;
+  }
+
+  if (value && typeof value === 'object') {
+    for (const entry of Object.values(value as Record<string, unknown>)) {
+      collectCitedArtifactRequestIds(entry, found, depth + 1);
+    }
+  }
+};
+
+type OwnershipClaimTarget = {
+  action: string;
+  owner: { object_type: (typeof ARTIFACT_REQUEST_OWNER_TYPES)[number]; object_id: string };
+  /** The part of the payload that carries the citations: the body on create, the ops on patch. */
+  cited: unknown;
+};
+
+/**
+ * The object this write produced, when it is a type that may own a request id.
+ * `create` learns its minted id from the result record (the id is minted
+ * server-side); `patch` already names it in the payload.
+ */
+const resolveOwnershipClaimTarget = (
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>
+): OwnershipClaimTarget | undefined => {
+  const action = toNonEmptyString(payload.action);
+  const objectType = toNonEmptyString(payload.object_type);
+  if (!action || !objectType) return undefined;
+  if (!(ARTIFACT_REQUEST_OWNER_TYPES as readonly string[]).includes(objectType)) return undefined;
+  const ownerType = objectType as (typeof ARTIFACT_REQUEST_OWNER_TYPES)[number];
+
+  if (action === 'create') {
+    const record = result.record;
+    const objectId =
+      (record && typeof record === 'object' && !Array.isArray(record)
+        ? toNonEmptyString((record as Record<string, unknown>).object_id)
+        : undefined) ?? toNonEmptyString(payload.requested_id);
+    if (!objectId) return undefined;
+    return { action, owner: { object_type: ownerType, object_id: objectId }, cited: payload.body };
+  }
+
+  if (action === 'patch') {
+    const objectId = toNonEmptyString(payload.object_id);
+    if (!objectId) return undefined;
+    return { action, owner: { object_type: ownerType, object_id: objectId }, cited: payload.ops };
+  }
+
+  return undefined;
+};
+
+/**
+ * The whole decision, as a pure function: which object claims which request
+ * ids from this one write. Exported as the test seam — everything below it is
+ * blob I/O.
+ */
+export const artifactRequestOwnershipClaimsForObjectAction = (
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>
+): { action: string; owner: OwnershipClaimTarget['owner']; requestIds: string[] } | undefined => {
+  const target = resolveOwnershipClaimTarget(payload, result);
+  if (!target) return undefined;
+
+  const requestIds = new Set<string>();
+  collectCitedArtifactRequestIds(target.cited, requestIds);
+  if (requestIds.size === 0) return undefined;
+
+  return { action: target.action, owner: target.owner, requestIds: [...requestIds] };
+};
+
+/** Never throws — see the block comment above. */
+const claimArtifactRequestOwnershipAfterObjectAction = async (
+  event: LambdaEvent,
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>
+): Promise<void> => {
+  const claims = artifactRequestOwnershipClaimsForObjectAction(payload, result);
+  if (!claims) return;
+
+  try {
+    const store = (await getArtifactIndexBlobStore(event, getMcpBinding()).catch(() => undefined)) as unknown as
+      | ArtifactIndexStore
+      | undefined;
+    if (!store) return;
+
+    for (const requestId of claims.requestIds) {
+      const existing = await readRequestOwner(store, requestId);
+      if (existing) continue;
+      await registerArtifactRequestOwner(event, requestId, claims.owner, `object_${claims.action}`);
+      event.log?.({
+        event: 'artifact_request_owner_claimed',
+        request_id: requestId,
+        object_type: claims.owner.object_type,
+        object_id: claims.owner.object_id,
+        action: claims.action,
+      });
+    }
+  } catch (error) {
+    event.log?.({
+      event: 'artifact_request_owner_claim_failed',
+      action: claims.action,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
 export const callObjectAction = async (event: LambdaEvent, payload: Record<string, unknown>) => {
   const result = await invokeObjectStore(event, payload);
 
   if ('isError' in result) return result;
 
   await triggerVisualStandardExamplesAfterObjectAction(event, payload, result);
+  await claimArtifactRequestOwnershipAfterObjectAction(event, payload, result);
 
   return toolResult(result);
 };

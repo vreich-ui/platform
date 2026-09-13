@@ -701,7 +701,11 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
   # packages/core changed. exit 0 = skip, non-zero = build; \`git diff --quiet\` is 0 when
   # unchanged. An empty $CACHED_COMMIT_REF (first/forced build) makes git error non-zero =>
   # build, which is the safe default.
-  ignore = "git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/${ids.clientSlug} packages/core"
+  # G7 — root \`scripts\` and root \`package.json\`/\`package-lock.json\` are watched too: the build
+  # command above runs ../../scripts/*.mjs directly and \`npm ci --prefix ../..\` off the root
+  # lockfile, so a root-only change to either was being skipped here exactly like the
+  # packages/core gap PR #501 fixed for the shared workspace.
+  ignore = "git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/${ids.clientSlug} packages/core scripts package.json package-lock.json"
 [build.environment]
   NODE_VERSION = "20"
   # Same omission the root netlify.toml carries (W15 S3 parity): the secrets
