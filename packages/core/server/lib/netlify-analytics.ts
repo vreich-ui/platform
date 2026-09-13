@@ -88,6 +88,37 @@ import {
 const NETLIFY_ANALYTICS_BASE_URL = 'https://analytics.services.netlify.com/v2';
 
 /**
+ * Per-call deadline for the Analytics API (T-analytics, 2026-09-13).
+ *
+ * Until this constant existed every call in this module passed NO `signal`
+ * at all, so each one inherited the runtime's default — which for Node's
+ * `fetch` is no request deadline whatsoever (only a connect timeout and a
+ * 300 s headers timeout). This is the same shape as `admin-governance`'s
+ * inherited 90-second health probe: an admin page whose worst case is set by
+ * an upstream nobody here controls, and which nothing in the code says out
+ * loud. Every SIBLING external call this same page makes already declares
+ * one — `own-tracker-stats.ts` caps `/stats` at 8 s, `own-tracker-rollups.ts`
+ * caps `/rollups` at 8 s and `/weights` at 2 s — so this module was the one
+ * unbounded dependency on `/admin/analytics`.
+ *
+ * 6 s, chosen against the measurement rather than by feel: `/admin/analytics`
+ * was measured at `work=2453 ms` for its WHOLE slowest invocation, and the
+ * Netlify branch spends that across two dependent layers of calls, so no
+ * single call on that sample can have taken more than ~2.4 s. 6 s is >2x the
+ * worst latency the live page has actually shown, which is the margin that
+ * keeps this a bound on a hang and not a new way to fail a working panel.
+ *
+ * What a trip does NOT do is break the dashboard: `/visitors`, the three
+ * `/ranking/*` calls, `/bandwidth` and the whole previous-window fetch
+ * already `.catch()` to `null` and degrade that one field to absent. Only
+ * the primary `/pageviews` call can surface a timeout to the caller, and it
+ * surfaces it the same way any other transport failure there already does.
+ * `admin-analytics.ts`'s `sec.netlify_upstream_*` sections are what should
+ * decide whether 6 s is still the right number — read them before changing it.
+ */
+const NETLIFY_ANALYTICS_TIMEOUT_MS = 6_000;
+
+/**
  * `resolveDateWindow` (this module's only caller of `windowQuery`) always
  * computes its `from`/`to` in UTC, so the timezone this module asks
  * Netlify's Analytics API for buckets in is always UTC too — never the host
@@ -139,6 +170,7 @@ const fetchNetlifyAnalyticsApi = async (subpath: string): Promise<unknown> => {
   const requestPath = `/${encodeURIComponent(siteId)}${subpath}`;
   const response = await fetch(`${NETLIFY_ANALYTICS_BASE_URL}${requestPath}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(NETLIFY_ANALYTICS_TIMEOUT_MS),
   });
 
   // The private Analytics surface can reject an un-entitled site at any of
