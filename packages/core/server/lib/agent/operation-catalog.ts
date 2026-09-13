@@ -100,6 +100,23 @@ export const operationCapabilityGapSchema = z.object({
 });
 export type OperationCapabilityGap = z.infer<typeof operationCapabilityGapSchema>;
 
+// #313: what implements an executable operation. workflowId is the ONLY
+// field resolveCatalogOperation (tools.ts) may dispatch — an operation id is
+// not a workflow id (visual_identity_review_change's bound workflow is
+// `visual_identity`), so there is no safe fallback from the descriptor.
+// inputMapping renames the operation's input fields to the target workflow's
+// entry-node names (e.g. tenantId -> projectId); no entry = unchanged. Both
+// optional so `{ workflowId }` alone still parses. Stricter than the
+// surrounding `z.unknown()` fields on purpose: this is CMS-Agent's own
+// code-defined table, not the model, so a malformed one (missing
+// workflowId) failing the whole parse IS the fail-safe.
+export const operationBindingSchema = z.object({
+  workflowId: z.string().min(1),
+  operationId: z.string().optional(),
+  inputMapping: z.record(z.string(), z.string()).optional(),
+});
+export type OperationBinding = z.infer<typeof operationBindingSchema>;
+
 export const operationPreflightResultSchema = z.object({
   operationId: z.string(),
   selectedVersion: z.number().int().positive(),
@@ -117,7 +134,11 @@ export const operationPreflightResultSchema = z.object({
   // in tools.ts is what fails safe on an absent `executable`; this parser
   // must not fail safe FOR it by discarding the field).
   executable: z.boolean().optional(),
-  binding: z.unknown().optional(),
+  // .nullable() because CMS-Agent's own wire shape sends `binding: null` for
+  // an unbound operation (see the executable:false capabilityGaps case
+  // above) rather than omitting the key — both must parse to the same
+  // "no binding" state resolveCatalogOperation checks with `pf.binding?.`.
+  binding: operationBindingSchema.nullable().optional(),
 });
 export type OperationPreflightResult = z.infer<typeof operationPreflightResultSchema>;
 
