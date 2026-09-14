@@ -1,5 +1,6 @@
 import '../../sites/drlurie/config/policy-bindings.js';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -93,11 +94,12 @@ test('admin editorial assets returns sanitized PDF templates and indexed media',
     const serverTiming = responseHeaders?.['Server-Timing'];
     assert.ok(serverTiming, 'Server-Timing header must be present');
     assert.match(serverTiming, /cold;dur=\d.*auth;dur=[\d.]+.*work;dur=[\d.]+.*serialize;dur=[\d.]+/);
-    // T-perf — `work` is now split by QUESTION ASKED: the two `by-kind`
-    // sweeps and the cross-site pdf-tool template listing all run inside one
-    // Promise.all, so their `sec.*` durations overlap and the biggest one is
-    // what this call actually costs.
-    for (const section of ['sec.artifacts_image', 'sec.artifacts_pdf', 'sec.pdf_templates']) {
+    // T-perf — `work` is split by QUESTION ASKED: the media listing (now ONE
+    // projection sweep answering both kinds, not two `by-kind` sweeps) and the
+    // cross-site pdf-tool template listing run inside one Promise.all, so
+    // their `sec.*` durations overlap and the biggest one is what this call
+    // actually costs.
+    for (const section of ['sec.artifacts_projection', 'sec.pdf_templates']) {
       assert.ok(serverTiming.includes(section), `Server-Timing must carry ${section}; got: ${serverTiming}`);
     }
     const body = JSON.parse(response.body) as {
@@ -156,7 +158,12 @@ test('admin editorial assets rejects unauthenticated requests', async () => {
  * repair write that makes it the last time), and a half-repaired store must
  * return the same rows as a fully repaired one.
  */
-const countingIndexStore = (entries: Map<string, string>) => {
+const countingIndexStore = (entries: Map<string, string>, options: { etags?: boolean } = {}) => {
+  // `etags: true` makes `list()` report a REAL per-key etag (sha1 of the
+  // stored value, so a write moves it). The pointer sweep never looks at an
+  // etag; the projection is verified by it, and the parity tests below run
+  // both paths over the SAME fixture.
+  const withEtags = options.etags ?? false;
   const reads: string[] = [];
   const writes: string[] = [];
   let inFlight = 0;
@@ -188,7 +195,11 @@ const countingIndexStore = (entries: Map<string, string>) => {
       entries.set(key, JSON.stringify(value));
     },
     async list({ prefix = '' }: { prefix?: string } = {}) {
-      return { blobs: [...entries.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key, etag: '' })) };
+      return {
+        blobs: [...entries.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({ key, etag: withEtags ? createHash('sha1').update(value).digest('hex') : '' })),
+      };
     },
   };
 };
@@ -523,18 +534,113 @@ test('the artifact sweep and the pdf-tool template listing are issued concurrent
 
   assert.match(
     source,
-    /const \[images, pdfs, listed\] = await Promise\.all\(\[[\s\S]{0,600}listPlatformPdfTemplates\(/,
-    'listPlatformPdfTemplates must be started inside the SAME Promise.all as the two listKind sweeps'
+    /const \[projected, listed\] = await Promise\.all\(\[[\s\S]{0,600}listPlatformPdfTemplates\(/,
+    'listPlatformPdfTemplates must be started inside the SAME Promise.all as the artifact sweep'
   );
   assert.doesNotMatch(
     source,
     /const artifacts = [\s\S]{0,400}await listPlatformPdfTemplates\(/,
     'the template listing must not be awaited after the artifact projection again'
   );
-  for (const section of ['artifacts_image', 'artifacts_pdf', 'pdf_templates']) {
+  for (const section of ['artifacts_projection', 'pdf_templates']) {
     assert.ok(
       source.includes(`timeSection('${section}'`),
       `work must be attributable per section — missing timeSection('${section}')`
     );
   }
+});
+
+/**
+ * P3 — the projection replaces the pointer sweep on this surface, so the two
+ * must answer with the SAME rows in the same order on the same store. These
+ * run both paths over one fixture, including the two shapes a real tenant is
+ * actually in:
+ *
+ *   - half-repaired pointers (`repaired: 'even'`), the state every tenant is
+ *     in between deploys;
+ *   - a stale-LIVE pointer over a soft-deleted record — the torn state #746
+ *     made possible. The pointer sweep survives it by re-checking the record;
+ *     the projection cannot see it at all, because it reads the records.
+ */
+test('the projection answers exactly what the by-kind sweep answers', async () => {
+  const { listKind } = await import('../../packages/core/server/functions/admin-editorial-assets.js');
+  const { sweepEditorialArtifacts } = await import(
+    '../../packages/core/server/lib/artifact-listing-projection.js'
+  );
+  const { projectEditorialArtifact } = await import('../../packages/core/lib/admin/editorial-assets.js');
+
+  const viaPointers = async (entries: Map<string, string>) =>
+    (await listKind(countingIndexStore(new Map(entries)) as never, 'image'))
+      .map(projectEditorialArtifact)
+      .filter((artifact) => artifact !== undefined)
+      .map((artifact) => artifact.id);
+
+  const viaProjection = async (entries: Map<string, string>) => {
+    const store = countingIndexStore(new Map(entries), { etags: true });
+    const sweep = await sweepEditorialArtifacts(store as never);
+    assert.equal(sweep.complete, true, 'the fixture is inside one read budget');
+    return sweep.byKind.image.map((artifact) => artifact.id);
+  };
+
+  for (const repaired of ['all', 'even', 'none'] as const) {
+    const entries = seedArtifacts(300, 'image', { repaired });
+    assert.deepEqual(
+      await viaProjection(entries),
+      await viaPointers(entries),
+      `same rows, same order, on a ${repaired}-repaired store`
+    );
+  }
+
+  // Half-repaired AND with deletions, which is where the two paths could most
+  // easily disagree about which 100 rows the newest ones are.
+  const mixed = seedArtifacts(300, 'image', { repaired: 'even', deleteEvery: 3 });
+  assert.deepEqual(await viaProjection(mixed), await viaPointers(mixed), 'same rows with soft-deletes interleaved');
+
+  // A pointer that wrongly claims a deleted artifact is live.
+  const stale = new Map(mixed);
+  for (const [key, value] of mixed) {
+    if (!key.startsWith('by-kind/')) continue;
+    const pointer = JSON.parse(value) as Record<string, unknown>;
+    delete pointer.deletedAtISO;
+    stale.set(key, JSON.stringify(pointer));
+  }
+  assert.deepEqual(
+    await viaProjection(stale),
+    await viaPointers(stale),
+    'a stale-live pointer changes neither path\'s rows — one re-checks the record, the other never read the pointer'
+  );
+});
+
+test('the projection is not written under any prefix another reader lists', async () => {
+  const { EDITORIAL_PROJECTION_KEY } = await import(
+    '../../packages/core/server/lib/artifact-listing-projection.js'
+  );
+  const { sweepEditorialArtifacts } = await import(
+    '../../packages/core/server/lib/artifact-listing-projection.js'
+  );
+
+  const store = countingIndexStore(seedArtifacts(5, 'image', { repaired: 'all' }), { etags: true });
+  await sweepEditorialArtifacts(store as never);
+
+  assert.ok(store.entries.has(EDITORIAL_PROJECTION_KEY), 'the projection is persisted');
+  // Every prefix any other reader of this store lists (admin-list-blob-images,
+  // mcp-artifact-admin, admin-inventory, the dedupe sweep, artifact-trust).
+  for (const prefix of [
+    'by-kind/',
+    'by-tag/',
+    'by-request/',
+    'by-sha/',
+    'by-slot/',
+    'request-artifacts/',
+    'request-owner/',
+  ]) {
+    assert.ok(
+      !EDITORIAL_PROJECTION_KEY.startsWith(prefix),
+      `the projection key must not appear in a ${prefix} listing`
+    );
+  }
+  // And it is invisible to this module's own listing, which is the one sweep
+  // that runs against the same store on every load.
+  const listed = (await store.list({ prefix: 'request-artifacts/' })) as { blobs: { key: string }[] };
+  assert.ok(!listed.blobs.some((blob) => blob.key === EDITORIAL_PROJECTION_KEY));
 });

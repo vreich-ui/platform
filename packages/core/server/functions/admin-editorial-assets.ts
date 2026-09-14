@@ -16,8 +16,13 @@ import { isArtifactReference, type ArtifactReference } from '../lib/artifacts.js
 import { mapWithConcurrency, STORE_READ_CONCURRENCY } from '../lib/blob-list.js';
 import { buildPdfToolStorageGrant } from '../lib/pdf-tool-storage-grant.js';
 import { listPlatformPdfTemplates } from '../lib/pdf-tool-client.js';
-import { projectEditorialArtifact, projectPdfTemplate } from '../../lib/admin/editorial-assets.js';
-import { timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
+import { sweepEditorialArtifacts } from '../lib/artifact-listing-projection.js';
+import {
+  projectEditorialArtifact,
+  projectPdfTemplate,
+  type EditorialArtifact,
+} from '../../lib/admin/editorial-assets.js';
+import { logDiagnostics, timeAuth, timeSection, timeSerialize, withServerTiming } from '../lib/server-timing.js';
 
 type LambdaEvent = {
   headers?: Record<string, string | undefined>;
@@ -174,6 +179,32 @@ export async function listKind(store: ArtifactIndexStore, kind: 'image' | 'pdf')
   return [...unique.values()].sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
 }
 
+/**
+ * BOTH kinds, from ONE sweep of the artifact RECORDS.
+ *
+ * `listKind` (above) asks the `by-kind/` pointers, and that cost this surface
+ * `sec.artifacts_image = 2406ms` on drluriescience: two listings, a read of
+ * every pointer, and a full-record read for every row returned. The
+ * projection (`lib/artifact-listing-projection.ts`) lists the records once and
+ * serves every row whose etag has not moved since it was last projected —
+ * `1 list + 1 get` in steady state, and the pointers are not consulted at all,
+ * so a shared or torn `by-kind/` pointer cannot affect this listing.
+ *
+ * The one case that still goes the old way is a projection that has not
+ * converged: a cold or wholly-invalidated store larger than the sweep's read
+ * budget answers `complete: false`, and this response falls back to `listKind`
+ * rather than showing a short list. That costs the old price for the few loads
+ * it takes the projection to fill in — never a wrong answer.
+ */
+const listArtifacts = async (store: ArtifactIndexStore): Promise<EditorialArtifact[]> => {
+  const sweep = await sweepEditorialArtifacts(store);
+  logDiagnostics('artifacts_projection', sweep.stats);
+  if (sweep.complete) return [...sweep.byKind.image, ...sweep.byKind.pdf];
+
+  const [images, pdfs] = await Promise.all([listKind(store, 'image'), listKind(store, 'pdf')]);
+  return [...images, ...pdfs].map(projectEditorialArtifact).filter((artifact) => artifact !== undefined);
+};
+
 const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, context?: LambdaContext) => {
   if (event.httpMethod !== 'GET') return jsonResponse(405, { error: 'Method not allowed' });
 
@@ -211,17 +242,13 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
      * to another investigation.
      */
     const grant = buildPdfToolStorageGrant();
-    const [images, pdfs, listed] = await Promise.all([
-      timeSection('artifacts_image', () => listKind(indexStore, 'image')),
-      timeSection('artifacts_pdf', () => listKind(indexStore, 'pdf')),
+    const [projected, listed] = await Promise.all([
+      timeSection('artifacts_projection', () => listArtifacts(indexStore)),
       // Same short-circuit as before: no grant, no call to pdf-tool at all.
       grant.ok ? timeSection('pdf_templates', () => listPlatformPdfTemplates(grant.grant, { limit: 100 })) : undefined,
     ]);
 
-    const artifacts = [...images, ...pdfs]
-      .map(projectEditorialArtifact)
-      .filter((artifact) => artifact !== undefined)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const artifacts = [...projected].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
     if (!grant.ok || !listed || !listed.ok) {
       return respond({ pdf_templates: [], artifacts, pdf_templates_available: false });
