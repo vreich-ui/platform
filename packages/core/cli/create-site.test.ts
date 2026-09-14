@@ -876,3 +876,74 @@ test('re-running against an existing sites/<client>/ is a no-op plan-wise (the c
   const second = buildPlan({ name: 'acme' });
   assert.deepEqual(first.files, second.files);
 });
+
+// ─── G4 (2026-09-14): the scaffolded site-identity carries an aggression ceiling ───
+//
+// WHY THIS IS A TEST AND NOT A COMMENT. `aggressionCeiling` is optional in
+// `siteIdentityConfigSchema` so that pre-W6 scaffolds still parse — which means
+// its absence from a NEW scaffold breaks nothing here and everything three
+// services away: `object_contract(content_item)` surfaces it as
+// `aggression_ceiling`, CMS-Agent resolves `min(placement_target, ceiling)` from
+// it, and with no ceiling the engine stamps `resolved_vector_unclamped:no_ceiling`
+// and publishes copy against no bound at all. The schema's own doc comment
+// already states the law — "every committed site config MUST carry one" — so this
+// is the law made enforceable at the only moment it can be: scaffold time.
+test('the scaffolded site-identity declares an aggression ceiling, validated by the real schema', async () => {
+  const { siteIdentityConfigSchema, assertAggressionCeiling, AGGRESSION_CEILING_DIALS } = await import('../lib/site-identity.js');
+  const plan = buildPlan({ name: 'acme' });
+  const identity = plan.files.find((file) => file.path === 'sites/acme/config/site-identity.ts');
+  assert.ok(identity, 'the scaffold must write a site-identity config');
+  assert.ok(identity);
+
+  const match = /aggressionCeiling:\s*(\{[^}]*\})/.exec(identity.content as string);
+  assert.ok(match, 'sites/<client>/config/site-identity.ts must declare aggressionCeiling');
+  assert.ok(match);
+
+  // Parse the literal the template emits, rather than asserting on its text: the
+  // point is that the VALUE is a legal ceiling, not that it was spelled a
+  // particular way.
+  const ceiling = JSON.parse(match[1].replace(/([a-z_]+):/g, '"$1":').replace(/,\s*\}/, '}'));
+  assert.deepEqual(Object.keys(ceiling).sort(), [...AGGRESSION_CEILING_DIALS].sort());
+  assertAggressionCeiling(ceiling, 'create-site scaffold template');
+
+  // And the whole config still satisfies the real schema with the ceiling in it.
+  const parsed = siteIdentityConfigSchema.safeParse({
+    siteId: 'site_acme',
+    siteSlug: 'acme',
+    brandName: 'Acme',
+    mcpServerName: 'Acme_MCP_Server',
+    mcpDiagnosticName: 'Acme_MCP',
+    assetHost: 'https://example-assets.netlify.app',
+    assetFolder: 'acme',
+    pdfToolProjectId: 'acme',
+    aggressionCeiling: ceiling,
+  });
+  assert.equal(parsed.success, true, parsed.success ? '' : JSON.stringify(parsed.error?.issues));
+});
+
+// The hyphenated-slug case, which is the one that has actually bitten. `idsFor`
+// snake-cases (`a-b` -> `a_b`) and CMS-Agent's genesis writes the tenant's
+// objectDialect from that same derivation; a change to either side without the
+// other sends the engine to ids no writer in this repo ever mints. The committed
+// proof for this row is sites/genesis-lab-2/config/site-identity.ts.
+test('idsFor snake-cases a hyphenated slug, and the scaffolded siteId matches', () => {
+  const ids = idsFor('genesis-lab-3');
+  assert.equal(ids.clientId, 'genesis_lab_3');
+  assert.equal(ids.siteId, 'site_genesis_lab_3');
+  assert.equal(ids.taxonomyId, 'tax_genesis_lab_3');
+  assert.equal(ids.themeId, 'thm_genesis_lab_3_default');
+  assert.equal(ids.visualStandardId, 'vis_genesis_lab_3');
+
+  const plan = buildPlan({ name: 'genesis-lab-3' });
+  const identity = plan.files.find((file) => file.path === 'sites/genesis-lab-3/config/site-identity.ts');
+  assert.ok(identity);
+  assert.match(identity.content, /siteId: 'site_genesis_lab_3'/);
+  assert.match(identity.content, /siteSlug: 'genesis-lab-3'/);
+
+  const voiceSeed = plan.files.find((file) => file.path === 'sites/genesis-lab-3/seeds/voice-seed-data.mjs');
+  assert.ok(voiceSeed);
+  assert.match(voiceSeed.content, /'voice_genesis_lab_3'/);
+  const strategySeed = plan.files.find((file) => file.path === 'sites/genesis-lab-3/seeds/strategy-seed-data.mjs');
+  assert.ok(strategySeed);
+  assert.match(strategySeed.content, /'strat_genesis_lab_3'/);
+});
