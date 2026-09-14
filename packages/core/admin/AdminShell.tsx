@@ -44,6 +44,8 @@ import {
   IconArchive,
   type IconProps,
 } from './icons';
+import { listChats, type ChatSummaryView } from '@core/lib/admin/chat-client';
+import { presentChatSession } from '@core/lib/admin/chat-session-presentation';
 import { objectTypeLabel } from '@core/lib/admin/display-name';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
 import { avatarSrc } from '@core/lib/admin/users-client';
@@ -273,8 +275,10 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   const [mobileNav, setMobileNav] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [objectRows, setObjectRows] = useState<LibraryRow[]>([]);
+  const [chatRows, setChatRows] = useState<ChatSummaryView[]>([]);
   const [workCounts, setWorkCounts] = useState({ working: 0, needsYou: 0, blocked: 0 });
   const objectsAttempted = useRef(false);
+  const chatsAttempted = useRef(false);
 
   // W18 T18.5: the welcome gate. A member whose Person.onboarding is not
   // completed (new invitee, Netlify-UI grant, first-time bootstrap Owner) is
@@ -342,6 +346,30 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
   }, [paletteOpen]);
 
   /**
+   * ASV2-W1.3 — same lazy-on-open pattern as the object list above, for the
+   * "Switch conversation…" entries: this is the hub's session switch for
+   * when hub focus mode (`AgentsHub.tsx`) has the rail hidden, so ⌘K needs
+   * its own copy of `listChats` rather than depending on the hub island
+   * being mounted.
+   */
+  useEffect(() => {
+    if (!paletteOpen || chatsAttempted.current) return;
+    chatsAttempted.current = true;
+    let alive = true;
+    (async () => {
+      try {
+        const { chats } = await listChats(shellToken, owner);
+        if (alive) setChatRows(chats);
+      } catch {
+        // palette still works for nav/actions without the conversation list
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [paletteOpen, owner]);
+
+  /**
    * T5.1 R4 (F14) exception #1 — this one stays a HARD document load on
    * purpose. Every other in-app jump in this file is now `navigate()` (an
    * Astro `ClientRouter` swap, which preserves the ES module registry and
@@ -396,7 +424,23 @@ export function AdminShell({ currentPath, title, identity, children, wide = fals
     onSelect: () => void navigate(`/admin/content/${encodeURIComponent(row.object_id)}?type=${row.object_type}`),
   }));
 
-  const commands: CommandItem[] = [...actionCommands, ...navCommands, ...objectCommands];
+  /**
+   * ASV2-W1.3 — "Switch conversation…" entries: the hub's session switch
+   * when `AgentsHub.tsx`'s rail is hidden by hub focus mode. Same navigate()
+   * round trip every other in-hub session link already uses
+   * (`RequestsWorkspace.tsx`, `ObjectsPlane.tsx`, `AdminHome.tsx`,
+   * `QuickActions.tsx`) — landing on `/admin/agents?chat=<id>` is what
+   * actually opens the chosen conversation, not a second mechanism.
+   */
+  const chatCommands: CommandItem[] = chatRows.map((row) => ({
+    id: `chat-${row.chat_id}`,
+    label: presentChatSession(row).title,
+    group: 'Switch conversation',
+    keywords: [row.chat_id],
+    onSelect: () => void navigate(`/admin/agents?chat=${encodeURIComponent(row.chat_id)}`),
+  }));
+
+  const commands: CommandItem[] = [...actionCommands, ...navCommands, ...chatCommands, ...objectCommands];
 
   return (
     <ToastProvider>

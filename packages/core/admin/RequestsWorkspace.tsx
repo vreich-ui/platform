@@ -21,6 +21,20 @@ import type { ReactNode } from 'react';
 import { navigate } from 'astro:transitions/client';
 
 import { AdminShell } from './AdminShell';
+import { AgentRail, useAgentDock } from './AgentRail';
+import { useChat, type UseChatState } from './chat';
+import { createObjectChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { parseFocus, type ObjectSelection } from '@core/lib/admin/object-selection';
+import { WORKSPACE_EXPANDED_MIN_WIDTH } from '@core/lib/admin/responsive-workspace';
+import {
+  dockAddress,
+  dockChatIntent,
+  dockFocusLabel,
+  dockLayout,
+  dockPreferenceScope,
+  rememberDockChat,
+  type DockChatCache,
+} from '@core/lib/admin/universal-dock';
 import type { SiteIdentity } from '@core/lib/site-identity';
 import { Badge, Button, Card, EmptyState, IconButton, Skeleton } from './primitives';
 import { RequestActivity, useRetryRequest } from './RequestActivity';
@@ -32,7 +46,7 @@ import { Input, Select } from './forms';
 import { useToast } from './overlays';
 import { DropdownMenu } from './menus';
 import { cn } from './utils';
-import { IconDots, IconExternalLink, IconRobot, IconSettings } from './icons';
+import { IconDots, IconExternalLink, IconRobot, IconSettings, IconSparkles } from './icons';
 import {
   archiveRequest,
   cancelRequest,
@@ -78,6 +92,8 @@ import {
 } from '@core/lib/admin/request-logic';
 import { activeApprovalPolicy, publishRequiresApproval } from '@core/lib/approval-policy';
 import { runQuickAction } from '@core/lib/admin/quick-actions';
+import { ObjectActionStrip } from './ObjectActionStrip';
+import type { ControlsActionSurface } from './ControlsCard';
 import { callObjectVerb } from '@core/lib/edit-mode/verbs-client';
 import { refreshRequestsIndexNow, useDecisionOverlay, useRequestsIndex } from '@core/lib/admin/requests-store';
 import {
@@ -90,11 +106,7 @@ import {
 import { DECIDED_WAITING_LABEL, pendingDecisionForRequest } from '@core/lib/admin/decision-overlay';
 import { liveArticleUrl } from '@core/lib/admin/publication-card';
 import { fetchReleaseOverview, triggerProductionRelease } from '@core/lib/admin/release-client';
-import {
-  releaseConfirmation,
-  releaseScopeFrom,
-  type ReleaseConfirmation,
-} from '@core/lib/admin/release-confirmation';
+import { releaseConfirmation, releaseScopeFrom, type ReleaseConfirmation } from '@core/lib/admin/release-confirmation';
 import { useCurrentUser } from '@core/lib/admin/use-current-user';
 import { currentPageSignal, isAbortError } from '@core/lib/admin/page-generation';
 import {
@@ -575,12 +587,7 @@ function RequestRow({
               {...(reject.reason ? { rejectDisabledReason: reject.reason } : {})}
             />
           ) : null}
-          <RowActionCluster
-            actions={rest}
-            busy={busy}
-            onInvoke={invoke}
-            menuLabel={`More actions for ${row.title}`}
-          />
+          <RowActionCluster actions={rest} busy={busy} onInvoke={invoke} menuLabel={`More actions for ${row.title}`} />
         </span>
       </div>
     </li>
@@ -938,6 +945,32 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   // address, drawer included, rather than only its query string.
   const [openId, setOpenId] = useState<string | undefined>(() => (selectedId ? undefined : requestIdFromPath()));
 
+  // ─── ASV2-W2.2/W2.3: the universal dock ──────────────────────────────────
+  /**
+   * A request is a RECORD, not an object — but the object it produced is a
+   * `content_item` BY CONSTRUCTION: `mintWorkspaceRequestId` mints the
+   * request id as a content_item id and the sweep records it as one, which is
+   * the same proof `requestObjectHref` (request-logic.ts) already relies on.
+   * So this is the one type the dock may pair a request row's `object_id`
+   * with, and a row that has no object yet simply has no selection — the pair
+   * travels together or not at all (engine.ts Constraint 7).
+   */
+  const [focused, setFocused] = useState<ObjectSelection | undefined>(undefined);
+  const [chatCache, setChatCache] = useState<DockChatCache>({});
+  const chatCacheRef = useRef<DockChatCache>({});
+  chatCacheRef.current = chatCache;
+  /** `undefined` until the editor SENDS — see `sendFromDock`. Selecting polls nothing. */
+  const [dockChatId, setDockChatId] = useState<string | undefined>(undefined);
+  /** W3.2 — the composer's draft for an action strip hand-off. A draft is not a send. */
+  const [dockSeed, setDockSeed] = useState<{ key: string; text: string } | undefined>(undefined);
+  const [dockBusy, setDockBusy] = useState(false);
+  const [dockError, setDockError] = useState<string | undefined>(undefined);
+  const [dockDrawerOpen, setDockDrawerOpen] = useState(false);
+  const [expandedWorkspace, setExpandedWorkspace] = useState(false);
+  const [contentWidthPx, setContentWidthPx] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const dockChat = useChat(getToken, dockChatId);
+
   /** The four filters as one value — what the address is written from. */
   const urlFilters = useMemo(
     () => ({ quickFilter, kind: kindFilter, mine, q: query }),
@@ -951,8 +984,45 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     if (typeof window === 'undefined' || selectedId || !urlFiltersApplied) return;
     // FIX 6: `openId` is part of the address, so opening or closing the drawer
     // no longer means writing a path that has forgotten the filters.
-    window.history.replaceState({}, '', requestsAddress(urlFilters, openId));
-  }, [urlFilters, openId, selectedId, urlFiltersApplied]);
+    //
+    // W2.2: and the dock's `?focus=` rides the same writer. `requestsAddress`
+    // REBUILDS the whole address out of filter state, so the selection has to
+    // be re-applied to its result or every filter change would unbind the
+    // dock; `dockAddress` keeps every other parameter, so the two are
+    // independent in both directions.
+    window.history.replaceState({}, '', dockAddress(requestsAddress(urlFilters, openId), focused));
+  }, [urlFilters, openId, selectedId, urlFiltersApplied, focused]);
+
+  /** W2.2: the address restores the binding, exactly like the filters above. */
+  useEffect(() => {
+    setFocused(parseFocus(window.location.search));
+  }, []);
+
+  /**
+   * W2.3: the same viewport contract and the same mutual exclusion as
+   * `ObjectWorkspace.tsx` — the inline dock and any overlay copy of it are
+   * never both mounted. Only half the gate; `dockLayout` is the other half.
+   */
+  useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${WORKSPACE_EXPANDED_MIN_WIDTH}px)`);
+    const sync = () => setExpandedWorkspace(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  /** The content width the 60% promise is actually about — no media query can see it. */
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width === 'number') setContentWidthPx(width);
+    });
+    observer.observe(element);
+    setContentWidthPx(element.getBoundingClientRect().width);
+    return () => observer.disconnect();
+  }, []);
 
   // ─── the shared chain (T2.3): default view + the shell's pills, one poll ──
   const sharedIndex = useRequestsIndex(getToken);
@@ -1251,10 +1321,7 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
   const [resolvedRun, setResolvedRun] = useState<{ requestId: string; runId: string } | undefined>(undefined);
   const runIdFor = (requestId: string | undefined): string | undefined =>
     requestId && resolvedRun?.requestId === requestId ? resolvedRun.runId : undefined;
-  const noteRunFor = useCallback(
-    (requestId: string) => (runId: string) => setResolvedRun({ requestId, runId }),
-    []
-  );
+  const noteRunFor = useCallback((requestId: string) => (runId: string) => setResolvedRun({ requestId, runId }), []);
 
   /**
    * What the WHOLE active desk looks like, for the empty state's copy — the
@@ -1288,6 +1355,116 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
 
   const openRow = useMemo(() => rows.find((row) => row.request_id === openId), [rows, openId]);
 
+  // ─── the dock's derived state and handlers (W2.2) ────────────────────────
+
+  const focusedRow = useMemo(
+    () => (focused ? rows.find((row) => row.object_id === focused.object_id) : undefined),
+    [rows, focused]
+  );
+  /**
+   * TWO scopes (see ObjectsPlane's copy of this comment): the rail's per-chat
+   * preferences are per object; whether the dock is a spine belongs to the
+   * surface, or collapsing it once would be undone by the next row click.
+   */
+  const preferenceScope = dockPreferenceScope('requests', user.user?.email, focused);
+  const dock = useAgentDock(focused, dockPreferenceScope('requests', user.user?.email));
+  const layout = dockLayout({ expandedWorkspace, contentWidthPx });
+
+  /** Keyed on the LAYOUT, not the breakpoint — see ObjectsPlane's copy. */
+  useEffect(() => {
+    if (layout === 'beside') setDockDrawerOpen(false);
+  }, [layout]);
+
+  /**
+   * The row click's selection half. `dockChatIntent('select', …)` is `idle`
+   * by construction, so this issues NO request and mints NO chat doc.
+   *
+   * A row with no object yet CLEARS the selection rather than keeping the
+   * previous row's: the dock states what the editor is looking at, and
+   * leaving a stale object under a different row's name is how a turn gets
+   * sent about the wrong article. `parseFocus`-shaped honesty, one level up.
+   */
+  const focusRow = useCallback((row: RequestRowView | undefined): ObjectSelection | undefined => {
+    const next = row?.object_id ? { object_type: 'content_item', object_id: row.object_id } : undefined;
+    setFocused(next);
+    // A different object is a different conversation — stop polling the old one.
+    setDockChatId(undefined);
+    setDockError(undefined);
+    return next;
+  }, []);
+
+  /**
+   * THE LAZY BINDING. `createObjectChat` is reached from here and nowhere
+   * else on this surface, and only on a SEND. `create_chat kind:'object'`
+   * carries the pair, which is what puts `object_type`/`object_id` on every
+   * later turn's context (engine.ts Constraint 7).
+   */
+  const sendFromDock = useCallback(
+    async (text: string, sendFocus?: string, testMode?: boolean) => {
+      const intent = dockChatIntent('send', focused, chatCacheRef.current);
+      if (intent.kind === 'idle') return;
+      if (intent.kind === 'attach' && intent.chatId === dockChatId) {
+        await dockChat.send(text, sendFocus, testMode);
+        return;
+      }
+      setDockBusy(true);
+      setDockError(undefined);
+      try {
+        let chatId: string;
+        if (intent.kind === 'attach') {
+          chatId = intent.chatId;
+        } else {
+          const bound = intent.selection;
+          const created = await createObjectChat(getToken, bound.object_type, bound.object_id, focusedRow?.title);
+          chatId = created.chat.chat_id;
+          setChatCache((cache) => rememberDockChat(cache, bound, created.chat.chat_id));
+        }
+        await sendChatMessage(getToken, chatId, text, sendFocus, testMode);
+        // Only now does anything start polling.
+        setDockChatId(chatId);
+      } catch (reason) {
+        setDockError(reason instanceof Error ? reason.message : 'The message could not be sent.');
+      } finally {
+        setDockBusy(false);
+      }
+    },
+    [dockChat, dockChatId, focused, focusedRow?.title]
+  );
+
+  const dockChatState: UseChatState = useMemo(
+    () => ({
+      ...dockChat,
+      busy: dockChat.busy || dockBusy,
+      error: dockError ?? dockChat.error,
+      send: sendFromDock,
+    }),
+    [dockChat, dockBusy, dockError, sendFromDock]
+  );
+
+  /**
+   * ASV2-W3.2 — the strip's subject on an inbox surface.
+   *
+   * `publishTargetFor` is the shape this file ALREADY publishes through (B3),
+   * and its own doc says which of its fields are real: the type, the id and
+   * the title. Everything else exists to satisfy `LibraryRow` and is a
+   * placeholder — which matters here in a way it did not for Publish alone,
+   * because the strip's presence gate reads those fields. So the one action
+   * whose gate would be decided by a FABRICATED field is excluded rather
+   * than offered on a guess: `review_state` is stated as `'none'`, which
+   * would make "Submit for review" look available on an object already in
+   * review. Publish stays for B3's own reason — the server's
+   * `checkPublishGate` is the authority, and this surface has always offered
+   * it — and Validate / New variant / Replace image are gated on `status`,
+   * which `publishTargetFor` states truthfully.
+   */
+  const stripRow = useMemo(() => (focusedRow ? publishTargetFor(focusedRow) : undefined), [focusedRow]);
+  /**
+   * W3.3 — whether a conversation already exists for this selection. Same
+   * decision, same reason as `ObjectsPlane`'s copy: the trace rides the lazy
+   * binding, so it may only attach, never mint.
+   */
+  const dockChatBound = dockChatIntent('send', focused, chatCache).kind === 'attach';
+
   const onOpenRow = (row: RequestRowView, event: React.MouseEvent<HTMLAnchorElement>) => {
     if (selectedId) return; // already the detail route — plain navigation
     if (
@@ -1301,14 +1478,19 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
       return;
     event.preventDefault();
     setOpenId(row.request_id);
+    // W2.2: the same click binds the dock to this request's article. No
+    // request goes out and no chat doc is minted — see `focusRow`.
+    const next = focusRow(row);
     // FIX 6: the filters ride along, so Back and Close return to the list the
     // person was actually looking at rather than to an unfiltered one.
-    window.history.pushState({}, '', requestsAddress(urlFilters, row.request_id));
+    window.history.pushState({}, '', dockAddress(requestsAddress(urlFilters, row.request_id), next));
   };
 
   const closeDrawer = () => {
     setOpenId(undefined);
-    window.history.pushState({}, '', requestsAddress(urlFilters));
+    // Closing the detail leaves the dock bound: the editor is still working
+    // on that article, they just put the run's timeline away.
+    window.history.pushState({}, '', dockAddress(requestsAddress(urlFilters), focused));
   };
 
   /**
@@ -1355,180 +1537,175 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
     onRaiseBudget: openDetail,
   };
 
+  /**
+   * ONE `AgentRail` element, placed EITHER in the column or in the Drawer —
+   * never both. The rail mounts approval effects, so two of it on one surface
+   * would auto-approve the same call twice (`ObjectWorkspace.tsx`'s own
+   * comment on the same pair).
+   *
+   * Not mounted on the single-request route: that page IS one request's
+   * detail, and its run card already owns the approval surface.
+   */
+  // W3.2/W4.2 — one bundle, two affordances: the strip beside the composer and
+  // any `actions` card the agent puts in the transcript.
+  const stripSurface: ControlsActionSurface | undefined = stripRow
+    ? {
+        row: stripRow,
+        roles: user.roles,
+        onSeedComposer: (prompt) => setDockSeed({ key: `strip-${Date.now()}`, text: prompt }),
+        trace: { bound: dockChatBound, send: (text) => sendFromDock(text) },
+        onChanged: refresh,
+      }
+    : undefined;
+
+  const agentRail = (
+    <AgentRail
+      chat={dockChatState}
+      focus={dockFocusLabel(focused, focusedRow?.title)}
+      preferenceScope={preferenceScope}
+      selection={focused}
+      {...(focusedRow ? { selectionTitle: focusedRow.title } : {})}
+      onSelectionChange={(next) => {
+        setFocused(next);
+        setDockChatId(undefined);
+        setDockError(undefined);
+      }}
+      isOwner={isOwner}
+      canUseTestMode={isOwner}
+      {...(dockSeed ? { draftSeed: dockSeed } : {})}
+      {...(stripSurface
+        ? {
+            aboveComposer: <ObjectActionStrip {...stripSurface} exclude={['submit_review']} />,
+            /* W4.2 — the same bundle drives an §6.1 `actions` card in the
+               transcript. WITHOUT `exclude`: that list is a statement about
+               what this surface already offers elsewhere, and a verb the
+               agent named explicitly is not a duplicate of a button the
+               editor was not looking at. */
+            controlsActionSurface: stripSurface,
+          }
+        : {})}
+      collapsed={layout === 'beside' && dock.collapsed}
+      {...(layout === 'beside' ? { onToggleCollapsed: dock.toggle } : {})}
+    />
+  );
+  const dockMounted = !selectedId;
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* C3: above everything, because it changes how everything below must
+    <div ref={contentRef} className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="flex min-w-0 flex-col gap-4">
+        {/* C3: above everything, because it changes how everything below must
           be read — and it stays until someone signs in. */}
-      {authExpired ? <SessionExpiredBanner /> : null}
-      <Card
-        kicker="Requests"
-        title={selectedId ? 'This request' : 'Runs inbox'}
-        actions={
-          selectedId ? (
-            <Button size="sm" variant="secondary" onClick={() => void navigate('/admin/requests')}>
-              All requests
-            </Button>
-          ) : (
-            <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              {loading ? '' : `${rows.length} ${rows.length === 1 ? 'request' : 'requests'}`}
-            </span>
-          )
-        }
-      >
-        {selectedId ? null : (
-          <>
-            <QuickFilterTabs value={quickFilter} onChange={onQuickFilterChange} />
-            {/* B5: Search + Kind + Mine on one line — the notification settings
+        {authExpired ? <SessionExpiredBanner /> : null}
+        <Card
+          kicker="Requests"
+          title={selectedId ? 'This request' : 'Runs inbox'}
+          actions={
+            selectedId ? (
+              <Button size="sm" variant="secondary" onClick={() => void navigate('/admin/requests')}>
+                All requests
+              </Button>
+            ) : (
+              <span className="flex items-center gap-2">
+                {layout === 'drawer' ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leftIcon={<IconSparkles size={16} />}
+                    onClick={() => {
+                      // One overlay at a time (see the Drawer's comment below).
+                      setOpenId(undefined);
+                      setDockDrawerOpen(true);
+                    }}
+                  >
+                    Agent
+                  </Button>
+                ) : null}
+                <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                  {loading ? '' : `${rows.length} ${rows.length === 1 ? 'request' : 'requests'}`}
+                </span>
+              </span>
+            )
+          }
+        >
+          {selectedId ? null : (
+            <>
+              <QuickFilterTabs value={quickFilter} onChange={onQuickFilterChange} />
+              {/* B5: Search + Kind + Mine on one line — the notification settings
                 (e-mail cadence, desktop alerts) are per-person preferences, not
                 filters over the list, so they move behind a gear rather than
                 competing with the filters for row space. */}
-            <div className="my-3 flex flex-wrap items-end gap-2">
-              <div className="min-w-[9rem]">
-                <Select
-                  label="Kind"
-                  value={kindFilter}
-                  onChange={(event) => onKindFilterChange(event.target.value)}
-                  options={[
-                    { value: '', label: 'Every kind' },
-                    ...Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label })),
-                  ]}
-                />
-              </div>
-              <div className="min-w-[12rem] flex-1">
-                <Input
-                  label="Search"
-                  value={queryInput}
-                  placeholder="Title or request id"
-                  onChange={(event) => onQueryInputChange(event.target.value)}
-                />
-              </div>
-              <label className="flex items-center gap-1.5 pb-2.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-                <input type="checkbox" checked={mine} onChange={(event) => onMineChange(event.target.checked)} /> Mine
-              </label>
-              <Popover
-                mode="click"
-                placement="bottom"
-                trigger={(a11y) => (
-                  <IconButton
-                    {...a11y}
-                    label="Notification settings"
-                    icon={<IconSettings size={16} />}
-                    variant="secondary"
+              <div className="my-3 flex flex-wrap items-end gap-2">
+                <div className="min-w-[9rem]">
+                  <Select
+                    label="Kind"
+                    value={kindFilter}
+                    onChange={(event) => onKindFilterChange(event.target.value)}
+                    options={[
+                      { value: '', label: 'Every kind' },
+                      ...Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label })),
+                    ]}
                   />
-                )}
-                content={
-                  <div className="flex w-64 flex-col gap-3">
-                    <EmailModeControl
-                      mode={emailMode}
-                      onChange={(next) => {
-                        setEmailModeState(next);
-                        void act('Saved', () => setEmailMode(getToken, next));
-                      }}
+                </div>
+                <div className="min-w-[12rem] flex-1">
+                  <Input
+                    label="Search"
+                    value={queryInput}
+                    placeholder="Title or request id"
+                    onChange={(event) => onQueryInputChange(event.target.value)}
+                  />
+                </div>
+                <label className="flex items-center gap-1.5 pb-2.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+                  <input type="checkbox" checked={mine} onChange={(event) => onMineChange(event.target.checked)} /> Mine
+                </label>
+                <Popover
+                  mode="click"
+                  placement="bottom"
+                  trigger={(a11y) => (
+                    <IconButton
+                      {...a11y}
+                      label="Notification settings"
+                      icon={<IconSettings size={16} />}
+                      variant="secondary"
                     />
-                    <BrowserNotifyControl />
-                  </div>
-                }
-              />
-            </div>
-          </>
-        )}
+                  )}
+                  content={
+                    <div className="flex w-64 flex-col gap-3">
+                      <EmailModeControl
+                        mode={emailMode}
+                        onChange={(next) => {
+                          setEmailModeState(next);
+                          void act('Saved', () => setEmailMode(getToken, next));
+                        }}
+                      />
+                      <BrowserNotifyControl />
+                    </div>
+                  }
+                />
+              </div>
+            </>
+          )}
 
-        {/* C3: while the session is gone the banner above IS the explanation;
+          {/* C3: while the session is gone the banner above IS the explanation;
             a second, vaguer sentence in red only competes with it. */}
-        {error && !authExpired ? (
-          <p className="mb-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{error}</p>
-        ) : null}
+          {error && !authExpired ? (
+            <p className="mb-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{error}</p>
+          ) : null}
 
-        {/* W19: on a single request, the full node timeline is the page — an
+          {/* W19: on a single request, the full node timeline is the page — an
             editor who opened THIS request wants the detail, not a summary. */}
-        {selectedId ? (
-          /* C3: the single-request route has no rows to dim — the run's own
+          {selectedId ? (
+            /* C3: the single-request route has no rows to dim — the run's own
              timeline is what is stale here, so it dims instead. */
-          <div className={`mb-3 flex flex-col gap-3${authExpired ? ' opacity-50' : ''}`}>
-            {/* The facts the run card cannot state — request id, step, when it
+            <div className={`mb-3 flex flex-col gap-3${authExpired ? ' opacity-50' : ''}`}>
+              {/* The facts the run card cannot state — request id, step, when it
                 last moved, who asked, the run id, the reason — plus the same
                 actions the list row offers. Without them this route was a run
                 card and nothing else. */}
-            {selectedRow ? (
-              <RequestDetailHead
-                row={selectedRow}
-                nowMs={nowMs}
-                {...(runIdFor(selectedId) ? { runId: runIdFor(selectedId) as string } : {})}
-                roles={user.roles}
-                myEmail={myEmail}
-                muted={muted}
-                canDecide={canDecide}
-                publishPolicy={publishPolicy}
-                busy={busy}
-                handlers={rowHandlers}
-              />
-            ) : null}
-            <RequestActivity
-              requestId={selectedId}
-              defaultExpanded
-              onSettled={refresh}
-              onRunResolved={noteRunFor(selectedId)}
-              isOwner={isOwner}
-              onRetry={() => void retryRun(selectedId)}
-              // E3b: `sharedIndex.rows` (the shared cache's own, un-filtered-
-              // by-quick-filter set — the doubly-filtered `rows` below can
-              // exclude a `running` selected row entirely) rather than a
-              // second fetch this route has never needed. Absent when the
-              // id is outside that cache's cap: honest, not a guess.
-              {...(selectedRowObjectId ? { objectId: selectedRowObjectId } : {})}
-            />
-          </div>
-        ) : null}
-        {loading ? (
-          <Skeleton variant="rect" height={160} />
-        ) : rows.length === 0 ? (
-          /* The copy is derived from the WHOLE active set, not from this tab
-             (`requestsEmptyState`) — an empty "Needs you" may report that it
-             is empty, never that everything else is fine. */
-          <EmptyState {...requestsEmptyState(quickFilter, deskSummary)} />
-        ) : (
-          /* C3: dimmed, so it is visible at a glance that these rows are a
-             snapshot of a session that ended rather than current truth. The
-             principle applied literally — the UI must not present stale rows
-             as if they were live. `aria-hidden` is deliberately NOT set: the
-             rows are still readable, just no longer trustworthy, and the
-             banner above already says so. */
-          <ul className={`flex flex-col${authExpired ? ' opacity-50' : ''}`}>
-            {rows.map((row) => (
-              <RequestRow
-                key={row.request_id}
-                row={row}
-                nowMs={nowMs}
-                roles={user.roles}
-                mine={Boolean(myEmail) && row.created_by.trim().toLowerCase() === myEmail}
-                busy={busy}
-                muted={muted.includes(row.request_id)}
-                canDecide={canDecide}
-                publishPolicy={publishPolicy}
-                decided={pendingDecisionForRequest(decisionOverlay, row.request_id)}
-                onDecide={decideRow}
-                selected={row.request_id === (selectedId ?? openId)}
-                onOpen={onOpenRow}
-                handlers={rowHandlers}
-              />
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      {/* D1(b): row detail as a slide-over — a small enhancement over the
-          load-bearing `/admin/requests/<id>` route, not a replacement for it
-          (see the file header comment). Only rendered on the plain list
-          route; the direct route above already IS the detail view. */}
-      {selectedId ? null : (
-        <Drawer open={Boolean(openId)} onClose={closeDrawer} title={openRow?.title ?? 'Request'} width={480}>
-          {openId ? (
-            <div className="flex flex-col gap-3">
-              {openRow ? (
+              {selectedRow ? (
                 <RequestDetailHead
-                  row={openRow}
+                  row={selectedRow}
                   nowMs={nowMs}
-                  {...(runIdFor(openId) ? { runId: runIdFor(openId) as string } : {})}
+                  {...(runIdFor(selectedId) ? { runId: runIdFor(selectedId) as string } : {})}
                   roles={user.roles}
                   myEmail={myEmail}
                   muted={muted}
@@ -1539,78 +1716,177 @@ export function RequestsBody({ selectedId }: { selectedId?: string }) {
                 />
               ) : null}
               <RequestActivity
-                requestId={openId}
+                requestId={selectedId}
                 defaultExpanded
                 onSettled={refresh}
-                onRunResolved={noteRunFor(openId)}
+                onRunResolved={noteRunFor(selectedId)}
                 isOwner={isOwner}
-                onRetry={() => void retryRun(openId)}
-                // E3b: `openRow` is this same drawer's own row (C1's
-                // `object_id`) — the mid-run "open draft" link the run card
-                // offers, not a second guess at where the object lives.
-                {...(openRow?.object_id ? { objectId: openRow.object_id } : {})}
+                onRetry={() => void retryRun(selectedId)}
+                // E3b: `sharedIndex.rows` (the shared cache's own, un-filtered-
+                // by-quick-filter set — the doubly-filtered `rows` below can
+                // exclude a `running` selected row entirely) rather than a
+                // second fetch this route has never needed. Absent when the
+                // id is outside that cache's cap: honest, not a guess.
+                {...(selectedRowObjectId ? { objectId: selectedRowObjectId } : {})}
               />
             </div>
           ) : null}
-        </Drawer>
-      )}
+          {loading ? (
+            <Skeleton variant="rect" height={160} />
+          ) : rows.length === 0 ? (
+            /* The copy is derived from the WHOLE active set, not from this tab
+             (`requestsEmptyState`) — an empty "Needs you" may report that it
+             is empty, never that everything else is fine. */
+            <EmptyState {...requestsEmptyState(quickFilter, deskSummary)} />
+          ) : (
+            /* C3: dimmed, so it is visible at a glance that these rows are a
+             snapshot of a session that ended rather than current truth. The
+             principle applied literally — the UI must not present stale rows
+             as if they were live. `aria-hidden` is deliberately NOT set: the
+             rows are still readable, just no longer trustworthy, and the
+             banner above already says so. */
+            <ul className={`flex flex-col${authExpired ? ' opacity-50' : ''}`}>
+              {rows.map((row) => (
+                <RequestRow
+                  key={row.request_id}
+                  row={row}
+                  nowMs={nowMs}
+                  roles={user.roles}
+                  mine={Boolean(myEmail) && row.created_by.trim().toLowerCase() === myEmail}
+                  busy={busy}
+                  muted={muted.includes(row.request_id)}
+                  canDecide={canDecide}
+                  publishPolicy={publishPolicy}
+                  decided={pendingDecisionForRequest(decisionOverlay, row.request_id)}
+                  onDecide={decideRow}
+                  selected={row.request_id === (selectedId ?? openId)}
+                  onOpen={onOpenRow}
+                  handlers={rowHandlers}
+                />
+              ))}
+            </ul>
+          )}
+        </Card>
 
-      {/* B3: publishing commits the draft to the export — not undoable from
+        {/* D1(b): row detail as a slide-over — a small enhancement over the
+          load-bearing `/admin/requests/<id>` route, not a replacement for it
+          (see the file header comment). Only rendered on the plain list
+          route; the direct route above already IS the detail view. */}
+        {selectedId ? null : (
+          <Drawer open={Boolean(openId)} onClose={closeDrawer} title={openRow?.title ?? 'Request'} width={480}>
+            {openId ? (
+              <div className="flex flex-col gap-3">
+                {openRow ? (
+                  <RequestDetailHead
+                    row={openRow}
+                    nowMs={nowMs}
+                    {...(runIdFor(openId) ? { runId: runIdFor(openId) as string } : {})}
+                    roles={user.roles}
+                    myEmail={myEmail}
+                    muted={muted}
+                    canDecide={canDecide}
+                    publishPolicy={publishPolicy}
+                    busy={busy}
+                    handlers={rowHandlers}
+                  />
+                ) : null}
+                <RequestActivity
+                  requestId={openId}
+                  defaultExpanded
+                  onSettled={refresh}
+                  onRunResolved={noteRunFor(openId)}
+                  isOwner={isOwner}
+                  onRetry={() => void retryRun(openId)}
+                  // E3b: `openRow` is this same drawer's own row (C1's
+                  // `object_id`) — the mid-run "open draft" link the run card
+                  // offers, not a second guess at where the object lives.
+                  {...(openRow?.object_id ? { objectId: openRow.object_id } : {})}
+                />
+              </div>
+            ) : null}
+          </Drawer>
+        )}
+
+        {/* B3: publishing commits the draft to the export — not undoable from
           this row — so it asks first, and says what the client's posture
           means for the click. A `manual` client still gets the button: the
           record's approval state lives on the object, not on this row, so
           the server's publish gate is what actually decides. */}
-      <ConfirmDialog
-        open={Boolean(publishTarget)}
-        onClose={() => setPublishTarget(undefined)}
-        onConfirm={() => {
-          const target = publishTarget;
-          setPublishTarget(undefined);
-          if (target) void publishRow(target);
-        }}
-        title={`Publish “${publishTarget?.title ?? 'this article'}”?`}
-        message={
-          publishPolicy === 'manual'
-            ? 'This client requires an approved review before a publish is accepted. If the article has one, this commits it to the export; it goes live on the next release.'
-            : 'This commits the article to the export. It goes live on the next release.'
-        }
-        confirmLabel="Publish"
-      />
+        <ConfirmDialog
+          open={Boolean(publishTarget)}
+          onClose={() => setPublishTarget(undefined)}
+          onConfirm={() => {
+            const target = publishTarget;
+            setPublishTarget(undefined);
+            if (target) void publishRow(target);
+          }}
+          title={`Publish “${publishTarget?.title ?? 'this article'}”?`}
+          message={
+            publishPolicy === 'manual'
+              ? 'This client requires an approved review before a publish is accepted. If the article has one, this commits it to the export; it goes live on the next release.'
+              : 'This commits the article to the export. It goes live on the next release.'
+          }
+          confirmLabel="Publish"
+        />
 
-      {/* W21.3: the release is SITE-wide — `admin-release`'s options carry no
+        {/* W21.3: the release is SITE-wide — `admin-release`'s options carry no
           object id — so the dialog says so rather than letting the row it was
           started from imply a scope the endpoint does not have. FIX 5: every
           sentence in it is now derived from the release overview
           (`releaseConfirmation`), and with nothing waiting there is no confirm
           to press. */}
-      {releaseTarget?.confirmation.kind === 'confirm' ? (
-        <ConfirmDialog
-          open
+        {releaseTarget?.confirmation.kind === 'confirm' ? (
+          <ConfirmDialog
+            open
+            onClose={() => setReleaseTarget(undefined)}
+            onConfirm={() => {
+              setReleaseTarget(undefined);
+              void releaseSite();
+            }}
+            title={releaseTarget.confirmation.title}
+            message={releaseTarget.confirmation.message}
+            confirmLabel={releaseTarget.confirmation.confirmLabel}
+          />
+        ) : null}
+        <Dialog
+          open={releaseTarget?.confirmation.kind === 'nothing_waiting'}
           onClose={() => setReleaseTarget(undefined)}
-          onConfirm={() => {
-            setReleaseTarget(undefined);
-            void releaseSite();
-          }}
-          title={releaseTarget.confirmation.title}
-          message={releaseTarget.confirmation.message}
-          confirmLabel={releaseTarget.confirmation.confirmLabel}
-        />
+          title={releaseTarget?.confirmation.title ?? ''}
+          size="sm"
+          footer={
+            <Button variant="secondary" onClick={() => setReleaseTarget(undefined)}>
+              Close
+            </Button>
+          }
+        >
+          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
+            {releaseTarget?.confirmation.message}
+          </p>
+        </Dialog>
+      </div>
+
+      {/* W2.3: `_auto` on the track so a collapsed dock shrinks to its spine
+          rather than leaving a blank gutter. `w-[24rem]` / `w-12` are the
+          literals for `AGENT_SURFACE_LAYOUT.dockPx` (384) and DOCK_SPINE_PX
+          (48) — Tailwind's scanner needs them written out. */}
+      {dockMounted && layout === 'beside' ? (
+        <div
+          className={cn('sticky top-4 self-start', dock.collapsed ? 'w-12' : 'w-[24rem]')}
+          aria-label="Contextual agent dock"
+        >
+          {agentRail}
+        </div>
       ) : null}
-      <Dialog
-        open={releaseTarget?.confirmation.kind === 'nothing_waiting'}
-        onClose={() => setReleaseTarget(undefined)}
-        title={releaseTarget?.confirmation.title ?? ''}
-        size="sm"
-        footer={
-          <Button variant="secondary" onClick={() => setReleaseTarget(undefined)}>
-            Close
-          </Button>
-        }
-      >
-        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text)]">
-          {releaseTarget?.confirmation.message}
-        </p>
-      </Dialog>
+      {/* W2.3: the EXISTING narrow-screen path — the same kit `Drawer`, at the
+          same width, `ObjectWorkspace.tsx` already uses. It is NOT opened by a
+          row click here: on this surface a row click opens the request's own
+          detail slide-over, and two overlays at once is not a layout. The
+          button below is the way in, and it closes that one first. */}
+      {dockMounted && layout === 'drawer' ? (
+        <Drawer open={dockDrawerOpen} onClose={() => setDockDrawerOpen(false)} title="Publishing Agent" width={480}>
+          {dockDrawerOpen ? agentRail : null}
+        </Drawer>
+      ) : null}
     </div>
   );
 }

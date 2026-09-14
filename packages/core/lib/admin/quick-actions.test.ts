@@ -11,6 +11,7 @@ import {
   type QuickActionChip,
   type QuickActionHandlers,
 } from './quick-actions.js';
+import { resolveActionStrip } from './object-action-strip.js';
 import type { VerbResult } from './bulk-object-ops.js';
 import type { LibraryRow } from './library-logic.js';
 
@@ -349,5 +350,68 @@ describe('definitionsForRow', () => {
       definitionsForRow(article).map((definition) => definition.id),
       ['validate', 'submit_review', 'publish', 'new_variant', 'replace_image']
     );
+  });
+});
+
+// ─── ASV2-W3: ONE registry drives the strip AND the chip row ────────────────
+//
+// The acceptance this pins is not "the two agree today" — two hand-written
+// tables agree right up until one is edited. It is that both surfaces read
+// THESE definitions: the strip's entries carry the registry's own `params`
+// array by reference, so a verb, a label or a parameter can only be changed
+// in one place.
+
+describe('the action strip and the chip row are the same registry', () => {
+  const roles = ['owner'] as const;
+
+  it('offers the same actions, in the same order, for the same row', () => {
+    const chips = DEFAULT_QUICK_ACTION_REGISTRY.resolve({
+      row: article,
+      roles,
+      getToken: async () => '',
+      handlers: noopHandlers,
+    });
+    const entries = resolveActionStrip({ row: article, roles });
+    assert.deepStrictEqual(
+      entries.map((entry) => entry.id),
+      chips.map((chip) => chip.id)
+    );
+    assert.deepStrictEqual(
+      entries.map((entry) => entry.verb),
+      chips.map((chip) => chip.verb)
+    );
+    assert.deepStrictEqual(
+      entries.map((entry) => entry.execution),
+      chips.map((chip) => chip.execution)
+    );
+  });
+
+  it('hands both surfaces the registry definition itself, not a copy of it', () => {
+    const source = QUICK_ACTIONS.find((definition) => definition.id === 'new_variant');
+    assert.ok(source);
+    const entry = resolveActionStrip({ row: article, roles }).find((candidate) => candidate.id === 'new_variant');
+    const chip = chipFor('new_variant', article, [...roles]);
+    assert.strictEqual(entry?.params, source.params, 'the strip carries the registry array by reference');
+    assert.strictEqual(chip.params, source.params, 'and so does the chip');
+    assert.strictEqual(entry?.label, source.label);
+  });
+
+  it('runs Validate, Submit for review and Publish through the one executor', async () => {
+    for (const [id, wire] of [
+      ['validate', ['validate']],
+      ['submit_review', ['checkout', 'submit_review', 'checkin']],
+      ['publish', ['checkout', 'publish_by_time', 'checkin']],
+    ] as const) {
+      const verbs = fakeVerbs({ checkout: { status: 200, body: { lockToken: 'lk_1' } } });
+      const entry = resolveActionStrip({ row: article, roles }).find((candidate) => candidate.id === id);
+      assert.ok(entry);
+      const result = await runQuickAction(verbs.call, entry, article);
+      assert.ok(result.ok, result.receipt);
+      assert.deepStrictEqual(
+        verbs.calls.map((body) => body.action),
+        [...wire],
+        `${id} took a different route`
+      );
+    }
   });
 });

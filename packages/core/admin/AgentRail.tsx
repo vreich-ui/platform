@@ -1,13 +1,22 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { Button, EmptyState, IconButton } from './primitives';
+import { Badge, Button, EmptyState, IconButton } from './primitives';
 import { ChatComposer, ChatStateChip, ChatThread, type UseChatState } from './chat';
+import type { ControlsActionSurface } from './ControlsCard';
 import { IconChevronLeft, IconChevronRight, IconPlus, IconSparkles } from './icons';
 import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
 import { cn } from './utils';
 import { objectIdFromEvents } from '@core/lib/admin/chat-liveness';
 import type { DockedChatControl } from '@core/lib/admin/docked-chat-session';
+import type { ObjectSelection } from '@core/lib/admin/object-selection';
+import {
+  DOCK_EMPTY_HEADING,
+  dockHeading,
+  readPersistedDockCollapsed,
+  resolveDockCollapsed,
+  writePersistedDockCollapsed,
+} from '@core/lib/admin/universal-dock';
 
 export function AgentRail({
   chat,
@@ -16,6 +25,7 @@ export function AgentRail({
   suggestions,
   preferenceScope,
   aboveComposer,
+  controlsActionSurface,
   belowHeader,
   contextActions,
   draftSeed,
@@ -26,6 +36,9 @@ export function AgentRail({
   className,
   collapsed = false,
   onToggleCollapsed,
+  selection,
+  selectionTitle,
+  onSelectionChange,
 }: {
   chat: UseChatState;
   focus: string;
@@ -33,6 +46,14 @@ export function AgentRail({
   suggestions?: string[];
   preferenceScope?: string;
   aboveComposer?: React.ReactNode;
+  /**
+   * ASV2-W4.2 — the SAME row/roles/trace bundle the host hands
+   * `<ObjectActionStrip>` in `aboveComposer`, passed as data rather than as a
+   * node so an §6.1 `actions` card IN the transcript can dispatch through the
+   * same executor. A host with no object in focus passes nothing, and §6.4
+   * renders every button disabled with its reason.
+   */
+  controlsActionSurface?: ControlsActionSurface;
   /** Contextual sections the host surface docks above the transcript (T2.2). */
   belowHeader?: React.ReactNode;
   contextActions?: Array<{ id: string; label: string; text: string }>;
@@ -74,6 +95,37 @@ export function AgentRail({
    */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  /**
+   * ASV2-W2.1 — the UNIVERSAL DOCK's binding.
+   *
+   * Until W2 this rail was mounted only where exactly one object was in
+   * scope, and `focus` (a sentence) was the only thing it knew about that
+   * object. On a surface that LISTS objects there is no such single object:
+   * what the agent is talking about is the row the editor clicked, or the one
+   * `?focus=<type>:<id>` named. That is this prop.
+   *
+   * BACKWARD COMPATIBILITY IS A HARD REQUIREMENT: passing neither `selection`
+   * nor `onSelectionChange` leaves every existing call site
+   * (`ObjectWorkspace`, `VisualIdentityWorkspace`, `TemplatesWorkspace`,
+   * `InventoryPage`) rendering exactly as it does today — `selectionBound`
+   * below is the single switch, and it is false for all four.
+   */
+  selection?: ObjectSelection;
+  /**
+   * The host's own row label for `selection`. The selection itself carries
+   * only the pair (W0 keeps it wire-shaped), and a selection restored from
+   * the address may name an object whose row this surface never loaded, so
+   * this is optional and the id is the fallback.
+   */
+  selectionTitle?: string;
+  /**
+   * How the rail hands a selection change BACK to its host — today only to
+   * clear it ("Clear" in the header), which is the one selection gesture the
+   * rail itself owns; the rows own the rest. Passing it is also what puts the
+   * rail in selection-bound mode when nothing is selected yet, so the header
+   * can say "Select an object" instead of nothing.
+   */
+  onSelectionChange?: (next: ObjectSelection | undefined) => void;
 }) {
   const [approvalMode, setApprovalMode] = useRunApprovalMode(chat, { preferenceScope, approvalInStage });
   /** B2: the run card's Retry, wired the same way on all four surfaces. */
@@ -95,6 +147,13 @@ export function AgentRail({
    * same. See the `objectId` prop below for why the events, not the binding.
    */
   const railObjectId = chat.request?.object_id ?? objectIdFromEvents(chat.events);
+  /**
+   * W2.1 — the ONE switch between the rail this file has always been and the
+   * universal dock. False for every call site that passes neither new prop,
+   * which is all four pre-existing ones. Not a hook, so it is safe here.
+   */
+  const selectionBound = selection !== undefined || onSelectionChange !== undefined;
+  const heading = dockHeading(selection, selectionTitle);
 
   const collapsedTone =
     chat.status === 'awaiting_approval' || chat.status === 'awaiting_candidate'
@@ -183,9 +242,37 @@ export function AgentRail({
             ) : null}
           </div>
         </div>
-        <p className="mt-0.5 truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-          Working on {focus}
-        </p>
+        {/* W2.1: bound to a SELECTION, the header states the object — title
+            plus a type pill — rather than the `focus` sentence a
+            single-object surface supplies. With nothing selected it states
+            the instruction, because on a listing surface that IS the state. */}
+        {selectionBound ? (
+          <div className="mt-1 flex min-w-0 items-center gap-2">
+            {heading.typeLabel ? <Badge>{heading.typeLabel}</Badge> : null}
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate text-[length:var(--adm-text-sm)]',
+                heading.empty ? 'text-[var(--adm-text-muted)]' : 'font-medium text-[var(--adm-text-heading)]'
+              )}
+              {...(heading.empty ? {} : { title: heading.title })}
+            >
+              {heading.title}
+            </span>
+            {onSelectionChange && !heading.empty ? (
+              <button
+                type="button"
+                onClick={() => onSelectionChange(undefined)}
+                className="adm-focusable shrink-0 rounded px-1.5 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-0.5 truncate text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+            Working on {focus}
+          </p>
+        )}
         {/* A failed mint must never be a silent `undefined` chat: the reason
             stays on screen next to the control that retries it. */}
         {newChat?.control.error ? (
@@ -194,97 +281,157 @@ export function AgentRail({
           </p>
         ) : null}
       </header>
-      {belowHeader ? <div className="shrink-0 pt-3">{belowHeader}</div> : null}
-      {/* W19: what the job is doing, above the transcript. Collapsed to one
-          live line until the editor asks for the detail. */}
-      {chat.request ? (
-        <div className="shrink-0 pt-3">
-          <RequestActivity
-            requestId={chat.request.request_id}
-            isOwner={isOwner}
-            {...(chat.status ? { chatStatus: chat.status } : {})}
-            onStatesStatusChange={setRunCardStatesStatus}
-            onRetry={() => void retryRun(chat.request!.request_id)}
-            // E3b/FIX 2: the binding's `object_id` when the client happens to
-            // hold one, else the newest `request_progress` event that names it
-            // — the binding is sent on the first poll only and latched, and
-            // the object is recorded long after that, so mid-run the events
-            // are the only place this fact arrives. Absent = not recorded yet.
-            {...(railObjectId ? { objectId: railObjectId } : {})}
+      {/* W2.1 — nothing selected is a real state on a listing surface, and
+          the empty state IS the instruction. The transcript and the composer
+          are not rendered at all here: there is no object to bind a turn to,
+          and a composer that accepted text would have to either refuse it or
+          mint an unbound conversation. */}
+      {selectionBound && heading.empty ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+          <EmptyState
+            icon={<IconSparkles size={26} />}
+            title={DOCK_EMPTY_HEADING}
+            message="Pick a row and the agent works on that object. Nothing is sent — and no conversation is started — until you write the first message."
           />
         </div>
-      ) : null}
-      <ChatThread
-        events={chat.events}
-        status={chat.status}
-        pending={chat.pending}
-        candidateSet={chat.candidateSet}
-        {...(chat.blockage ? { blockage: chat.blockage } : {})}
-        onResolveBlockage={(remedyId, args) => void chat.resolveBlockage(remedyId, args)}
-        previewCandidateId={chat.previewCandidate?.candidate_id}
-        busy={chat.busy}
-        onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
-        onReject={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
-        onPreviewCandidate={(candidateId) => chat.preview(candidateId)}
-        onChooseCandidate={(candidateId) => void chat.chooseCandidate(candidateId)}
-        onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
-        onQuote={(text) => setQuote({ token: Date.now(), text })}
-        onSendControls={(text) => void chat.send(text, undefined, testMode)}
-        preferenceScope={preferenceScope}
-        approvalInStage={approvalInStage}
-        pendingConsumed={chat.pendingConsumed}
-        lastOutcome={chat.lastOutcome}
-        lastEventAtMs={chat.lastEventAtMs}
-        onUndo={(prompt) => void chat.send(prompt)}
-        isOwner={isOwner}
-        hasRunCard={runCardStatesStatus}
-        emptyHint={
-          <EmptyState
-            title="Ready when you are"
-            message="Describe an outcome. The agent can inspect this object and propose a governed change."
+      ) : (
+        <>
+          {belowHeader ? <div className="shrink-0 pt-3">{belowHeader}</div> : null}
+          {/* W19: what the job is doing, above the transcript. Collapsed to one
+          live line until the editor asks for the detail. */}
+          {chat.request ? (
+            <div className="shrink-0 pt-3">
+              <RequestActivity
+                requestId={chat.request.request_id}
+                isOwner={isOwner}
+                {...(chat.status ? { chatStatus: chat.status } : {})}
+                onStatesStatusChange={setRunCardStatesStatus}
+                onRetry={() => void retryRun(chat.request!.request_id)}
+                // E3b/FIX 2: the binding's `object_id` when the client happens to
+                // hold one, else the newest `request_progress` event that names it
+                // — the binding is sent on the first poll only and latched, and
+                // the object is recorded long after that, so mid-run the events
+                // are the only place this fact arrives. Absent = not recorded yet.
+                {...(railObjectId ? { objectId: railObjectId } : {})}
+              />
+            </div>
+          ) : null}
+          <ChatThread
+            events={chat.events}
+            status={chat.status}
+            pending={chat.pending}
+            candidateSet={chat.candidateSet}
+            {...(chat.blockage ? { blockage: chat.blockage } : {})}
+            onResolveBlockage={(remedyId, args) => void chat.resolveBlockage(remedyId, args)}
+            previewCandidateId={chat.previewCandidate?.candidate_id}
+            busy={chat.busy}
+            onApprove={(editedArgs) => chat.pending && void chat.approve(chat.pending.call_id, editedArgs)}
+            onReject={(reason) => chat.pending && void chat.deny(chat.pending.call_id, reason)}
+            onPreviewCandidate={(candidateId) => chat.preview(candidateId)}
+            onChooseCandidate={(candidateId) => void chat.chooseCandidate(candidateId)}
+            onRejectCandidates={(reason) => void chat.rejectCandidates(reason)}
+            onQuote={(text) => setQuote({ token: Date.now(), text })}
+            onSendControls={(text) => void chat.send(text, undefined, testMode)}
+            {...(controlsActionSurface ? { controlsActionSurface } : {})}
+            preferenceScope={preferenceScope}
+            approvalInStage={approvalInStage}
+            pendingConsumed={chat.pendingConsumed}
+            lastOutcome={chat.lastOutcome}
+            lastEventAtMs={chat.lastEventAtMs}
+            onUndo={(prompt) => void chat.send(prompt)}
+            isOwner={isOwner}
+            hasRunCard={runCardStatesStatus}
+            emptyHint={
+              <EmptyState
+                title="Ready when you are"
+                message="Describe an outcome. The agent can inspect this object and propose a governed change."
+              />
+            }
           />
-        }
-      />
-      {chat.error ? (
-        <p className="shrink-0 py-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
-      ) : null}
-      <div className="shrink-0 border-t border-[var(--adm-border)] pt-3">
-        <ChatComposer
-          status={chat.status}
-          busy={chat.busy}
-          onSend={(text) => void chat.send(text, agentFocus ?? focus, testMode)}
-          onCancel={() => void chat.cancel()}
-          suggestions={suggestions}
-          contextActions={contextActions}
-          draftSeed={draftSeed}
-          // FIX: `newChat` is intentionally NOT forwarded to the composer
-          // here — the header above already renders it (`Button` next to
-          // the state chip), and that stays the one place this rail offers
-          // it. Forwarding it too was the second half of a row that, once
-          // the starter-suggestion chips were dropped, had nothing left in
-          // it but this one chip. `ChatComposer` still accepts `newChat` on
-          // its own (compactly, no full-width row) for a caller that hosts
-          // it with no header of its own — none does today, but the prop
-          // stays so that case isn't a silent dead end.
-          quote={quote}
-          above={aboveComposer}
-          // FIX: moved out of a bordered `mb-2` row above the composer and
-          // into its `runMode` slot (bottom-left of the input row) — the
-          // placement `RunApprovalControls`' own doc comment already
-          // describes ("A5 ... rather than a full-width row above it") and
-          // that `AgentsHub` already uses. The rail just hadn't caught up:
-          // it alone still spent a full boxed row on the autonomy controls.
-          runMode={
-            <RunApprovalControls
-              mode={approvalMode}
-              onChange={setApprovalMode}
-              testMode={testMode}
-              onTestModeChange={setTestMode}
-              canUseTestMode={canUseTestMode}
+          {chat.error ? (
+            <p className="shrink-0 py-2 text-[length:var(--adm-text-xs)] text-[var(--adm-danger)]">{chat.error}</p>
+          ) : null}
+          <div className="shrink-0 border-t border-[var(--adm-border)] pt-3">
+            <ChatComposer
+              status={chat.status}
+              busy={chat.busy}
+              onSend={(text) => void chat.send(text, agentFocus ?? focus, testMode)}
+              onCancel={() => void chat.cancel()}
+              suggestions={suggestions}
+              contextActions={contextActions}
+              draftSeed={draftSeed}
+              // FIX: `newChat` is intentionally NOT forwarded to the composer
+              // here — the header above already renders it (`Button` next to
+              // the state chip), and that stays the one place this rail offers
+              // it. Forwarding it too was the second half of a row that, once
+              // the starter-suggestion chips were dropped, had nothing left in
+              // it but this one chip. `ChatComposer` still accepts `newChat` on
+              // its own (compactly, no full-width row) for a caller that hosts
+              // it with no header of its own — none does today, but the prop
+              // stays so that case isn't a silent dead end.
+              quote={quote}
+              above={aboveComposer}
+              // FIX: moved out of a bordered `mb-2` row above the composer and
+              // into its `runMode` slot (bottom-left of the input row) — the
+              // placement `RunApprovalControls`' own doc comment already
+              // describes ("A5 ... rather than a full-width row above it") and
+              // that `AgentsHub` already uses. The rail just hadn't caught up:
+              // it alone still spent a full boxed row on the autonomy controls.
+              runMode={
+                <RunApprovalControls
+                  mode={approvalMode}
+                  onChange={setApprovalMode}
+                  testMode={testMode}
+                  onTestModeChange={setTestMode}
+                  canUseTestMode={canUseTestMode}
+                />
+              }
             />
-          }
-        />
-      </div>
+          </div>
+        </>
+      )}
     </section>
   );
+}
+
+/**
+ * ASV2-W2.1 — the collapsed-state half of the dock, for a host that binds the
+ * rail to a selection.
+ *
+ * It deliberately does NOT live inside `AgentRail`. `collapsed` /
+ * `onToggleCollapsed` are controlled props and four call sites already drive
+ * them from their own state; persisting from inside the component would have
+ * changed what those four do, which W2.1 forbids. So this extends that same
+ * path rather than adding a second one: the host still passes `collapsed` and
+ * `onToggleCollapsed`, and this hook is where the value comes from.
+ *
+ * Two rules, both decided in `universal-dock.ts` and tested there:
+ *  - with no selection the dock is a spine, whatever the toggle last said;
+ *  - the stored preference is keyed by the SAME `preferenceScope` string the
+ *    rail already threads to `useRunApprovalMode` / `useTestMode`, so a
+ *    surface has one scope mechanism, not two.
+ */
+export function useAgentDock(
+  selection: ObjectSelection | undefined,
+  preferenceScope: string
+): { collapsed: boolean; toggle: () => void } {
+  const [userCollapsed, setUserCollapsed] = useState(false);
+
+  // A scope change (a different selection, or a different viewer) loads THAT
+  // scope's own stored value — never a blanket reset, the `useTestMode`
+  // convention. An unstored scope falls back to open, which is what makes the
+  // first selection open the dock.
+  useEffect(() => {
+    setUserCollapsed(readPersistedDockCollapsed(preferenceScope) ?? false);
+  }, [preferenceScope]);
+
+  const toggle = useCallback(() => {
+    setUserCollapsed((current) => {
+      const next = !current;
+      writePersistedDockCollapsed(preferenceScope, next);
+      return next;
+    });
+  }, [preferenceScope]);
+
+  return { collapsed: resolveDockCollapsed({ selection, userCollapsed }), toggle };
 }

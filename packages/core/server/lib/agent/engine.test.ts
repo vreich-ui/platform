@@ -15,8 +15,11 @@ import test from 'node:test';
 import type { ChatDoc, ChatMsg, ChatRun } from './chat-store.js';
 import {
   checkConverseBounds,
+  dropOverBoundsUiCapabilities,
+  UI_CAPABILITIES_BOUNDS,
   type CmsAgentConverseRequest,
   type CmsAgentConverseResponse,
+  type CmsAgentResolveResponse,
   type CmsAgentResult,
 } from './cms-agent-client.js';
 import {
@@ -25,8 +28,10 @@ import {
   CmsAgentEngineError,
   CMS_AGENT_UNAVAILABLE_TEXT,
   humanCopyForCmsAgentError,
+  MIN_AGENT_REV_FOR_UI_CAPABILITIES,
   providerEngine,
   trimTranscriptForCmsAgent,
+  uiCapabilitiesAllowedAtRev,
   type CmsAgentTurnClient,
 } from './engine.js';
 import type { WireTool } from './provider.js';
@@ -90,14 +95,32 @@ const okTurn = (over: Partial<CmsAgentConverseResponse> = {}): CmsAgentResult<Cm
 });
 
 /** Scripted stand-in for the PF1 client: returns `script` responses in order. */
-const stubClient = (script: Array<CmsAgentResult<CmsAgentConverseResponse>>) => {
+const resolvedAgent = (rev: number, ref = `agt_client_manager@${rev}`): CmsAgentResolveResponse => ({
+  agent_ref: ref,
+  name: 'Client Manager',
+  rev,
+  model: 'gpt-4.1',
+  status: 'active',
+});
+
+/**
+ * `revs` is the rev `agent_resolve` reports on each successive resolve —
+ * ASV2-W4.3's `ui_capabilities` gate reads it, and the re-resolve path is
+ * supposed to pick up a CHANGED rev, so the stub has to be able to change it.
+ * Defaults to the gate's minimum so existing cases exercise the sending side.
+ */
+const stubClient = (
+  script: Array<CmsAgentResult<CmsAgentConverseResponse>>,
+  revs: number[] = [MIN_AGENT_REV_FOR_UI_CAPABILITIES]
+) => {
   const converseCalls: CmsAgentConverseRequest[] = [];
   const invalidations: string[] = [];
   let resolves = 0;
   const client: CmsAgentTurnClient = {
     async resolveAgent() {
       resolves += 1;
-      return { ok: true, data: `agt_client_manager@${resolves}` };
+      const rev = revs[Math.min(resolves - 1, revs.length - 1)]!;
+      return { ok: true, data: resolvedAgent(rev, `agt_client_manager@${resolves}`) };
     },
     async converse(request) {
       converseCalls.push(structuredClone(request));
@@ -110,9 +133,17 @@ const stubClient = (script: Array<CmsAgentResult<CmsAgentConverseResponse>>) => 
   return { client, converseCalls, invalidations, resolveCount: () => resolves };
 };
 
-const engineWith = (script: Array<CmsAgentResult<CmsAgentConverseResponse>>) => {
-  const stub = stubClient(script);
-  const engine = cmsAgentEngine({ client: stub.client, projectId: 'platform', siteId: 'site_platform' });
+const engineWith = (
+  script: Array<CmsAgentResult<CmsAgentConverseResponse>>,
+  options: { revs?: number[]; roles?: readonly string[] } = {}
+) => {
+  const stub = stubClient(script, options.revs);
+  const engine = cmsAgentEngine({
+    client: stub.client,
+    projectId: 'platform',
+    siteId: 'site_platform',
+    roles: options.roles ?? ['owner'],
+  });
   return { engine, ...stub };
 };
 
@@ -168,6 +199,164 @@ test("every turn's approval_note tells Client Manager to propose the privileged 
   assert.match(note, /VERBATIM|verbatim/);
   assert.ok(note.length <= 1000, `approval_note must stay within the 1000-char contract bound, got ${note.length}`);
   assert.ok(checkConverseBounds(converseCalls[0]!) === undefined, 'the note must pass the pre-flight bound check');
+});
+
+// ─── ASV2-W4.3: context.ui_capabilities (chat-controls protocol §7) ────────
+
+test('the rev gate opens at the rev CMS-Agent accepts the field, and only there', () => {
+  assert.equal(MIN_AGENT_REV_FOR_UI_CAPABILITIES, 8, 'client_manager accepts ui_capabilities from rev 8 (ASV2-W4-CA.2)');
+  assert.equal(uiCapabilitiesAllowedAtRev(MIN_AGENT_REV_FOR_UI_CAPABILITIES - 1), false);
+  assert.equal(uiCapabilitiesAllowedAtRev(MIN_AGENT_REV_FOR_UI_CAPABILITIES), true);
+  // `>=`, not `===`: ensureConversationalAgentSeeds() bumps a stored agent to
+  // rev + 1 only when its prompt is byte-identical to a superseded text, so a
+  // deployed workspace lands on rev >= 8 with no guarantee of the number.
+  assert.equal(uiCapabilitiesAllowedAtRev(MIN_AGENT_REV_FOR_UI_CAPABILITIES + 5), true);
+  // An unknown rev reads as below the gate — the closed side is the safe side.
+  assert.equal(uiCapabilitiesAllowedAtRev(undefined), false);
+  assert.equal(uiCapabilitiesAllowedAtRev('8'), false);
+  assert.equal(uiCapabilitiesAllowedAtRev(Number.NaN), false);
+});
+
+test("a focused object's turn carries the rights-filtered quick actions of that object's type", async () => {
+  const { engine, converseCalls } = engineWith([okTurn()], { roles: ['editor'] });
+  await engine({ doc: chatDoc({ object_type: 'content_item', object_id: 'req_x' }), run: chatRun(), system: '', tools: TOOLS });
+
+  const manifest = converseCalls[0]!.context.ui_capabilities!;
+  assert.equal(manifest.v, 2);
+  assert.ok(manifest.controls.includes('actions'), 'the kinds this build renders');
+  assert.deepEqual(
+    manifest.actions.map((action) => action.verb),
+    ['object_validate', 'object_submit_review', 'object_create_variant', 'agent_chat'],
+    "an editor's rights-filtered QUICK_ACTIONS for a content_item — object_publish needs PUBLISHING"
+  );
+  // The parameter schema travels with the verb: that is what lets §6.1's
+  // executionFor(params) rule decide run / popover / hand-off client-side.
+  assert.deepEqual(
+    manifest.actions.find((action) => action.verb === 'object_create_variant')?.params,
+    { mode: { type: 'enum', required: false } }
+  );
+  // A publisher on the same object gets the extra verb; nothing else changes.
+  const publisher = engineWith([okTurn()], { roles: ['publisher'] });
+  await publisher.engine({ doc: chatDoc({ object_type: 'content_item', object_id: 'req_x' }), run: chatRun(), system: '', tools: TOOLS });
+  assert.ok(
+    publisher.converseCalls[0]!.context.ui_capabilities!.actions.some((action) => action.verb === 'object_publish')
+  );
+  assert.equal(checkConverseBounds(converseCalls[0]!), undefined, 'the manifest must pass the pre-flight bounds');
+});
+
+test('a free chat carries the manifest with an empty actions list — the kinds, but nothing to act on', async () => {
+  const { engine, converseCalls } = engineWith([okTurn()], { roles: ['owner'] });
+  const doc = chatDoc({ chat_id: 'chat_free1', kind: 'free' });
+  delete doc.object_type;
+  delete doc.object_id;
+  await engine({ doc, run: chatRun(), system: '', tools: [] });
+
+  const manifest = converseCalls[0]!.context.ui_capabilities!;
+  assert.deepEqual(manifest.actions, []);
+  assert.ok(manifest.controls.length > 0);
+});
+
+test('below the minimum rev the field is absent and the context is byte-identical to the pre-W4.3 wire', async () => {
+  const gated = engineWith([okTurn()], { revs: [MIN_AGENT_REV_FOR_UI_CAPABILITIES - 1], roles: ['owner'] });
+  await gated.engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS });
+  const oldWire = gated.converseCalls[0]!.context;
+  assert.equal('ui_capabilities' in oldWire, false, 'a tenant on an older agent rev degrades, never fails');
+
+  // "Byte-identical to today's": the same context, key for key, that the turn
+  // above the gate sends once its one added field is removed.
+  const open = engineWith([okTurn()], { revs: [MIN_AGENT_REV_FOR_UI_CAPABILITIES], roles: ['owner'] });
+  await open.engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS });
+  const { ui_capabilities: _added, ...withoutManifest } = open.converseCalls[0]!.context;
+  assert.equal(JSON.stringify(oldWire), JSON.stringify(withoutManifest));
+});
+
+test('a re-resolve that reports a newer rev opens the gate for the retry', async () => {
+  const stale: CmsAgentResult<CmsAgentConverseResponse> = {
+    ok: false,
+    code: 'agent_unresolved',
+    message: 'stale ref',
+    retryableWithSameTurnId: false,
+  };
+  const { engine, converseCalls } = engineWith([stale, okTurn()], {
+    revs: [MIN_AGENT_REV_FOR_UI_CAPABILITIES - 1, MIN_AGENT_REV_FOR_UI_CAPABILITIES],
+    roles: ['owner'],
+  });
+  await engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS });
+
+  assert.equal(converseCalls.length, 2);
+  assert.equal('ui_capabilities' in converseCalls[0]!.context, false, 'first attempt saw the old rev');
+  assert.ok(converseCalls[1]!.context.ui_capabilities, 'the retry is gated on what the agent is now');
+  assert.equal(converseCalls[1]!.turn_id, 't_run_pf2_1_r1', 'a validation-class rejection still mints a fresh id');
+});
+
+test('a deployment that rejects the manifest despite a passing rev gets one retry without it, under a fresh id', async () => {
+  const rejected: CmsAgentResult<CmsAgentConverseResponse> = {
+    ok: false,
+    code: 'invalid_turn_request',
+    message: 'context: Unrecognized key "ui_capabilities"',
+    retryableWithSameTurnId: false,
+  };
+  const { engine, converseCalls } = engineWith([rejected, okTurn()], { roles: ['owner'] });
+  const turn = await engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS });
+
+  assert.equal(converseCalls.length, 2);
+  assert.ok(converseCalls[0]!.context.ui_capabilities, 'the rev said it was safe to send');
+  assert.equal('ui_capabilities' in converseCalls[1]!.context, false, 'the retry drops it');
+  // The claim on the first id is already written upstream, so the retry must
+  // mint a fresh one or it conflicts forever.
+  assert.equal(converseCalls[0]!.turn_id, 't_run_pf2_1');
+  assert.equal(converseCalls[1]!.turn_id, 't_run_pf2_1_nouc');
+  assert.equal(turn.text, 'Here is a proposal.', 'the editor still gets an answer');
+  // Everything else about the turn is unchanged.
+  assert.equal(converseCalls[1]!.context.approval_note, converseCalls[0]!.context.approval_note);
+});
+
+test('the manifest retry fires at most once — a second rejection surfaces as the real error', async () => {
+  const rejected: CmsAgentResult<CmsAgentConverseResponse> = {
+    ok: false,
+    code: 'invalid_turn_request',
+    message: 'messages: too many entries',
+    retryableWithSameTurnId: false,
+  };
+  const { engine, converseCalls } = engineWith([rejected], { roles: ['owner'] });
+  await assert.rejects(
+    () => engine({ doc: chatDoc(), run: chatRun(), system: '', tools: TOOLS }),
+    (error: unknown) => error instanceof CmsAgentEngineError && error.code === 'cms_agent_invalid_turn_request'
+  );
+  assert.equal(converseCalls.length, 2, 'one retry, then the failure stands');
+});
+
+test('an over-bounds manifest is dropped whole, never truncated — the turn still goes', () => {
+  const { engine: _engine } = engineWith([okTurn()]);
+  const request = {
+    agent_ref: 'agt_client_manager@8',
+    project_id: 'platform',
+    conversation_id: 'obj:page_home',
+    turn_id: 't_run_pf2_1',
+    actor: { kind: 'human', id: 'identity-wolf' },
+    context: {
+      site_id: 'site_platform',
+      approval_note: 'note',
+      ui_capabilities: {
+        v: 2 as const,
+        controls: ['radio'],
+        actions: Array.from({ length: UI_CAPABILITIES_BOUNDS.maxActions + 1 }, (_unused, index) => ({
+          verb: `verb_${index}`,
+          label: 'Do it',
+        })),
+      },
+    },
+    messages: [{ role: 'user' as const, text: 'hi' }],
+    tools: [],
+    constraints: { ...{ max_tokens: 16_000, timeout_ms: 90_000 } },
+  } satisfies CmsAgentConverseRequest;
+
+  const dropped = dropOverBoundsUiCapabilities(request);
+  assert.equal('ui_capabilities' in dropped.context, false, 'dropped, not truncated');
+  assert.equal(dropped.turn_id, request.turn_id, 'the same turn_id still goes out — nothing is burned');
+  assert.equal(checkConverseBounds(dropped), undefined, 'and the turn is still valid');
+  // The original is untouched: the drop is a rebuild, not a mutation.
+  assert.equal(request.context.ui_capabilities.actions.length, UI_CAPABILITIES_BOUNDS.maxActions + 1);
 });
 
 test('a free chat sends neither object_type nor object_id; diagnostics_requested rides only when set', async () => {

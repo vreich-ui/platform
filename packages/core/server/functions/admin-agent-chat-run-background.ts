@@ -120,6 +120,11 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
     client: cmsAgentClient,
     projectId: getSiteIdentity().cmsAgentProjectId,
     siteId: binding.siteId,
+    // ASV2-W4.3 §7: the SAME freshly-resolved roles the tool context executes
+    // under, used only to rights-filter the turn's `ui_capabilities` manifest.
+    // Passing the run's own roles (rather than re-resolving) is what keeps the
+    // manifest and the writes it advertises describing one caller.
+    roles,
   });
 
   const result = await runAgentLoop(

@@ -99,7 +99,10 @@ import { fetchObjectLockStatusIfChanged, type ObjectLockView } from '@core/lib/a
 import { pageSectionLabel } from '@core/lib/admin/preview-logic';
 import type { Role as ReviewerRole } from '@core/lib/admin/object-review-ui';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
-import { QuickActionChips } from './QuickActions';
+import { ObjectActionStrip } from './ObjectActionStrip';
+import type { ControlsActionSurface } from './ControlsCard';
+import { objectControlOverrides } from '@core/lib/admin/object-action-strip';
+import { runQuickAction, type QuickActionVerb } from '@core/lib/admin/quick-actions';
 import {
   OBJECT_CONTROL_IDS,
   objectReviewDecisionTarget,
@@ -125,6 +128,7 @@ import {
   type ObjectDetailTab,
 } from '@core/lib/admin/object-detail-tabs';
 import { WORKSPACE_EXPANDED_MIN_WIDTH } from '@core/lib/admin/responsive-workspace';
+import { dockLayout } from '@core/lib/admin/universal-dock';
 import {
   NEW_NAV_ITEM_COMPOSER_SEED,
   NEW_SECTION_COMPOSER_SEED,
@@ -139,6 +143,12 @@ async function getToken(): Promise<string> {
   const m = await import('@core/lib/admin/goTrueClient');
   return (await m.getAccessToken()) ?? '';
 }
+
+/** The one verb door, shaped as `bulk-object-ops.ts`'s injectable `VerbCaller`. */
+const callVerb = async (body: Record<string, unknown>) => {
+  const { callObjectVerb } = await import('@core/lib/edit-mode/verbs-client');
+  return callObjectVerb(getToken, body);
+};
 
 // A successful write here (patch / publish / discard / create_variant) can
 // change what the library list should show (display name, updated_at,
@@ -645,7 +655,14 @@ function ArticleTaxonomyCard({
       {(() => {
         const saveDisabled = Boolean(disabledReason) || !changed;
         const saveButton = (a11y?: PopoverTriggerA11yProps) => (
-          <Button size="sm" className="self-start" onClick={() => void save()} loading={busy} disabled={saveDisabled} {...a11y}>
+          <Button
+            size="sm"
+            className="self-start"
+            onClick={() => void save()}
+            loading={busy}
+            disabled={saveDisabled}
+            {...a11y}
+          >
             Save draft
           </Button>
         );
@@ -685,6 +702,14 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const [agentOpen, setAgentOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [expandedWorkspace, setExpandedWorkspace] = useState(false);
+  /**
+   * ASV2-W2.3: the dock's promise is about CONTENT width, which no viewport
+   * media query can see — the admin shell's `xl` sidebar and `<main>`'s
+   * padding come out of the viewport first. Measured, not derived, so a shell
+   * change cannot silently move the gate.
+   */
+  const [contentWidthPx, setContentWidthPx] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(0);
   const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [focus, setFocus] = useState<WorkspaceFocus>({ kind: 'object', label: '' });
@@ -701,18 +726,36 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const currentUser = useCurrentUser();
   const owner = currentUser.roles.includes('owner') || currentUser.user?.role === 'owner';
 
-  // The dock owns approval effects, so the inline dock and the drawer dock
-  // are mutually exclusive at runtime — never both mounted.
   useEffect(() => {
     const media = window.matchMedia(`(min-width: ${WORKSPACE_EXPANDED_MIN_WIDTH}px)`);
-    const sync = () => {
-      setExpandedWorkspace(media.matches);
-      if (media.matches) setAgentOpen(false);
-    };
+    const sync = () => setExpandedWorkspace(media.matches);
     sync();
     media.addEventListener('change', sync);
     return () => media.removeEventListener('change', sync);
   }, []);
+
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width === 'number') setContentWidthPx(width);
+    });
+    observer.observe(element);
+    setContentWidthPx(element.getBoundingClientRect().width);
+    return () => observer.disconnect();
+  }, [loading, error]);
+
+  const dockBeside = dockLayout({ expandedWorkspace, contentWidthPx }) === 'beside';
+
+  // The dock owns approval effects, so the inline dock and the drawer dock
+  // are mutually exclusive at runtime — never both mounted. W2.3: keyed on
+  // the LAYOUT, not on the breakpoint: in the 1280–1298 band the breakpoint
+  // matches while the dock is still a Drawer, and closing it there would shut
+  // the agent on a viewer who has no other way in.
+  useEffect(() => {
+    if (dockBeside) setAgentOpen(false);
+  }, [dockBeside]);
 
   /**
    * T0.2 R1 (F1): the three reads have no data dependency on each other —
@@ -879,65 +922,6 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       setBusy(false);
     }
   };
-
-  const doPublish = () =>
-    runAction(async () => {
-      if (!record) return;
-      const { EditSession } = await import('@core/lib/edit-mode/verbs-client');
-      const session = new EditSession(record.object_type, record.object_id, getToken);
-      const co = await session.ensureCheckout();
-      if (!co.ok) {
-        toast({ title: 'Locked', description: co.heldBy ? `Held by ${co.heldBy}.` : undefined, tone: 'warning' });
-        return;
-      }
-      const res = await session.publish();
-      await session.checkin();
-      if (res.status === 200) {
-        void invalidateLibraryCache();
-        toast({ title: 'Published', tone: 'success' });
-        await load();
-      } else {
-        // B7 (T0.3): "blocked" is D4's true-dead-end word — a non-200 here is
-        // usually a recoverable failure (retrying the same click after
-        // fixing the cause works), so it reads as "failed", not "blocked".
-        toast({
-          title: 'Publish failed',
-          description: String((res.body as { error?: string }).error ?? ''),
-          tone: 'danger',
-        });
-      }
-    });
-
-  /**
-   * A1's missing control: the workspace used to render "resolve them, then
-   * re-open review before approving" as plain text naming an action with no
-   * button anywhere. This is that button. Re-opening IS `submit_review`,
-   * which writes under a held lock — hence checkout → submit → checkin.
-   */
-  const doSubmitReview = () =>
-    runAction(async () => {
-      if (!record) return;
-      const { EditSession } = await import('@core/lib/edit-mode/verbs-client');
-      const session = new EditSession(record.object_type, record.object_id, getToken);
-      const co = await session.ensureCheckout();
-      if (!co.ok) {
-        toast({ title: 'Locked', description: co.heldBy ? `Held by ${co.heldBy}.` : undefined, tone: 'warning' });
-        return;
-      }
-      const res = await session.submitReview();
-      await session.checkin();
-      if (res.status === 200) {
-        void invalidateLibraryCache();
-        toast({ title: 'Review re-opened', tone: 'success' });
-        await load();
-      } else {
-        toast({
-          title: 'Could not re-open review',
-          description: String((res.body as { error?: string }).error ?? ''),
-          tone: 'danger',
-        });
-      }
-    });
 
   const doDiscard = () =>
     runAction(async () => {
@@ -1144,6 +1128,80 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
     unpublished_changes: lifecycle === 'draft' || lifecycle === 'approved',
   };
 
+  /**
+   * W3.2/W4.2 — one bundle, two affordances: the strip beside the composer,
+   * and any §6.1 `actions` card the agent puts in this object's transcript.
+   *
+   * W3.3 — this surface opens its object's conversation on load, so `chatId`
+   * IS the "a chat already exists" answer here; there is no lazy binding to
+   * trip. It is still asked rather than assumed, because a failed mint leaves
+   * it `undefined` and a trace must never be the thing that creates one.
+   */
+  const railActionSurface: ControlsActionSurface = {
+    row: quickActionRow,
+    roles: currentUser.roles,
+    overrides: objectControlOverrides(controls),
+    onSeedComposer: (prompt) => setComposerSeed({ key: `strip-${Date.now()}`, text: prompt }),
+    trace: { bound: Boolean(chatId), send: (text) => chat.send(text) },
+    onChanged: () => void load(),
+  };
+
+  /**
+   * ASV2-W3.2 — THE PAGE'S OWN CONTROLS AND THE STRIP RUN THE SAME EXECUTOR.
+   *
+   * Publish and Submit-for-review used to compose their own wire bodies here,
+   * through an `EditSession` (checkout → verb → checkin), while the chips and
+   * the runs inbox composed the same two bodies inside `runQuickAction`. Two
+   * implementations that happened to agree — right up until one of them was
+   * edited. There is now ONE composer of the publish and submit wire bodies
+   * in the admin (`quick-actions.ts`), and this calls it.
+   *
+   * What is unchanged: the sequence (the executor takes the checkout, runs
+   * the verb and gives the lock back on both paths, which is exactly what a
+   * fresh `EditSession` did here), the gate (`controls.publish` /
+   * `controls.submit_review` still decide whether the button is live), and
+   * the toast. What improves: the description is now the registry's own
+   * one-sentence receipt rather than a raw error string.
+   *
+   * NOT unchanged, deliberately: this page's buttons do not write the
+   * `[action:…]` trace. The strip does (W3.3) — see the report; making it
+   * universal is a one-line change, but it would start an agent turn on every
+   * publish taken from a button that has never done so.
+   */
+  const runObjectVerb = (
+    chip: { id: string; verb: QuickActionVerb; label: string },
+    copy: { done: string; failed: string }
+  ) =>
+    runAction(async () => {
+      const result = await runQuickAction(callVerb, chip, quickActionRow);
+      toast({
+        title: result.ok ? copy.done : copy.failed,
+        description: result.receipt,
+        tone: result.ok ? 'success' : 'danger',
+      });
+      if (!result.ok) return;
+      void invalidateLibraryCache();
+      await load();
+    });
+
+  const doPublish = () =>
+    runObjectVerb({ id: 'publish', verb: 'object_publish', label: 'Publish' }, {
+      done: 'Published',
+      failed: 'Publish failed',
+    });
+
+  /**
+   * A1's control, unchanged in what it is for: the workspace used to render
+   * "resolve them, then re-open review before approving" as plain text naming
+   * an action with no button anywhere. Re-opening IS `submit_review`, which
+   * writes under a held lock — the executor takes and returns that lock.
+   */
+  const doSubmitReview = () =>
+    runObjectVerb({ id: 'submit_review', verb: 'object_submit_review', label: 'Submit for review' }, {
+      done: 'Review opened',
+      failed: 'Could not open the review',
+    });
+
   const focusLabel = focus.kind === 'object' || !focus.label ? displayName : `${displayName} → ${focus.label}`;
   const sequentialProposal =
     focus.kind === 'new-section' && isNewPageSectionProposal(chat.pending, record.object_id, existingSectionIds);
@@ -1163,6 +1221,18 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
   const activity = deriveActivityEntries(record);
   const usage = deriveUsage();
 
+  /**
+   * ASV2-W2.3 — ONE layout rule for every surface that docks the rail.
+   *
+   * This route used to gate on `WORKSPACE_EXPANDED_MIN_WIDTH` alone, which is
+   * a VIEWPORT breakpoint and therefore cannot see the dock's own promise:
+   * at exactly 1280 the `xl` sidebar (240px) and `<main>`'s padding (24px a
+   * side) leave ~992 content px, and the object would get 588 of them —
+   * 59.3%, under the 60% floor `MIN_OBJECT_FRACTION` states. `dockLayout`
+   * runs both gates, so between roughly 1280 and 1298 viewport px the dock
+   * now falls back to the Drawer below instead of starving the object.
+   * `ObjectsPlane` and `RequestsWorkspace` use the same call.
+   */
   const agentRail = (
     <AgentRail
       chat={chat}
@@ -1173,8 +1243,8 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
       draftSeed={composerSeed}
       approvalInStage={sequentialProposal}
       isOwner={owner}
-      collapsed={expandedWorkspace && dockCollapsed}
-      {...(expandedWorkspace ? { onToggleCollapsed: () => setDockCollapsed((value) => !value) } : {})}
+      collapsed={dockBeside && dockCollapsed}
+      {...(dockBeside ? { onToggleCollapsed: () => setDockCollapsed((value) => !value) } : {})}
       belowHeader={
         <div className="flex flex-col gap-2">
           <DetailSection title="Agent assignment">
@@ -1187,7 +1257,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
                 objectId={record.object_id}
                 nodes={
                   Array.isArray((record.body as { nodes?: unknown } | undefined)?.nodes)
-                    ? ((record.body as { nodes: ArticlePdfNodeLike[] }).nodes)
+                    ? (record.body as { nodes: ArticlePdfNodeLike[] }).nodes
                     : undefined
                 }
                 events={chat.events}
@@ -1204,17 +1274,30 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
           </DetailSection>
         </div>
       }
+      /* W4.2 — the same bundle as data, so an §6.1 `actions` card in the
+         transcript dispatches through that one executor (and through the same
+         `resolveObjectControls` overrides) rather than a second. */
+      controlsActionSurface={railActionSurface}
       aboveComposer={
-        readiness && readinessOpenItems > 0 ? (
-          <details className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
-            <summary className="cursor-pointer select-none text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-warning)]">
-              {readinessOpenItems} readiness item{readinessOpenItems === 1 ? '' : 's'} before publish
-            </summary>
-            <div className="mt-2">
-              <ReadinessList groups={readiness} />
-            </div>
-          </details>
-        ) : null
+        <div className="flex flex-col gap-2">
+          {/* W3.2 — the strip beside the composer, so the verb and the
+              conversation about it are one gesture. The FULL set here, gated
+              by the same `resolveObjectControls` map the page's own Publish
+              and Submit-for-review buttons read, so the two copies of a verb
+              on this surface can never disagree about whether it is
+              available or about why it is not. */}
+          <ObjectActionStrip {...railActionSurface} />
+          {readiness && readinessOpenItems > 0 ? (
+            <details className="rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface-sunken)] px-3 py-2">
+              <summary className="cursor-pointer select-none text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-warning)]">
+                {readinessOpenItems} readiness item{readinessOpenItems === 1 ? '' : 's'} before publish
+              </summary>
+              <div className="mt-2">
+                <ReadinessList groups={readiness} />
+              </div>
+            </details>
+          ) : null}
+        </div>
       }
     />
   );
@@ -1672,7 +1755,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {!expandedWorkspace ? (
+          {!dockBeside ? (
             <Button
               size="sm"
               variant="secondary"
@@ -1731,16 +1814,17 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
 
       {/* Action surface — quick-action chips + the primary publish control. */}
       <div className="flex flex-wrap items-center gap-2 rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2">
-        <QuickActionChips
+        <ObjectActionStrip
           row={quickActionRow}
           roles={currentUser.roles}
-          variant="button"
           /* Publish, Submit for review and New variant already exist on this
              surface as gated controls that render disabled WITH A REASON
              (`object-detail-actions.ts`), which is the better affordance
-             where the object is the subject of the page. The chips add what
-             that set has no entry for. */
+             where the object is the subject of the page. The strip adds what
+             that set has no entry for — and excluding hides nothing: the
+             control that owns each id is on screen with its own reason. */
           exclude={['publish', 'submit_review', 'new_variant']}
+          overrides={objectControlOverrides(controls)}
           /* This surface already has the object's chat in the rail, so a
              hand-off seeds that composer (T2.2 left `composerSeed` wired to
              `ChatComposer`'s `draftSeed` for exactly this) instead of
@@ -1789,7 +1873,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
 
       {reviewPanel}
 
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <div ref={contentRef} className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <Tabs
             value={tab}
@@ -1803,7 +1887,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
           />
         </div>
         {/* The dock: sticky while the content scrolls. */}
-        {expandedWorkspace ? (
+        {dockBeside ? (
           <div
             className={cn('sticky top-4 self-start', dockCollapsed ? 'w-12' : 'w-[24rem]')}
             aria-label="Contextual agent dock"
@@ -1813,7 +1897,7 @@ function WorkspaceBody({ identity }: { identity: SiteIdentity }) {
         ) : null}
       </div>
 
-      {!expandedWorkspace ? (
+      {!dockBeside ? (
         <Drawer open={agentOpen} onClose={() => setAgentOpen(false)} title="Publishing Agent" width={480}>
           {agentOpen ? agentRail : null}
         </Drawer>

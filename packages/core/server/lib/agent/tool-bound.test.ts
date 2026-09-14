@@ -79,7 +79,16 @@ const stubClient = (
   seen: Array<{ turnId: string; toolCount: number }>
 ): CmsAgentTurnClient =>
   ({
-    resolveAgent: async () => ({ ok: true, data: 'agt_client_manager@1' }),
+    // rev 7 is BELOW MIN_AGENT_REV_FOR_UI_CAPABILITIES on purpose: these cases
+    // pin the legacy TOOL-bound fallback, and a turn carrying a
+    // `ui_capabilities` manifest has a second, independent one-shot retry on
+    // `invalid_turn_request` (engine.ts). Keeping this stub under the gate
+    // means each fallback is counted by the tests that own it; the manifest
+    // one is pinned in engine.test.ts.
+    resolveAgent: async () => ({
+      ok: true,
+      data: { agent_ref: 'agt_client_manager@1', name: 'Client Manager', rev: 7, model: 'm', status: 'active' },
+    }),
     invalidateAgentRef: () => {},
     converse: async (request: { turn_id: string; tools: WireTool[] }) => {
       seen.push({ turnId: request.turn_id, toolCount: request.tools.length });

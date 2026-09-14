@@ -13,8 +13,7 @@
  * rendered disabled — no generic "tag any governed object" verb exists on
  * the MCP surface today (T0.1 §7).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { navigate } from 'astro:transitions/client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AdminShell } from './AdminShell';
 import type { SiteIdentity } from '@core/lib/site-identity';
@@ -22,7 +21,21 @@ import { cn } from './utils';
 import { Badge, Button, IconButton, Card, EmptyState, RefreshingChip, Skeleton } from './primitives';
 import { Input, Select } from './forms';
 import { DropdownMenu, type MenuItem } from './menus';
-import { ConfirmDialog, useToast } from './overlays';
+import { ConfirmDialog, Drawer, useToast } from './overlays';
+import { AgentRail, useAgentDock } from './AgentRail';
+import { useChat, type UseChatState } from './chat';
+import { createObjectChat, sendChatMessage } from '@core/lib/admin/chat-client';
+import { parseFocus, type ObjectSelection } from '@core/lib/admin/object-selection';
+import { WORKSPACE_EXPANDED_MIN_WIDTH } from '@core/lib/admin/responsive-workspace';
+import {
+  dockAddress,
+  dockChatIntent,
+  dockFocusLabel,
+  dockLayout,
+  dockPreferenceScope,
+  rememberDockChat,
+  type DockChatCache,
+} from '@core/lib/admin/universal-dock';
 import { DataTable, type Column } from './data';
 import { SeverityIcon, StatusBadge } from './severity';
 import {
@@ -35,6 +48,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconRobot,
+  IconSparkles,
 } from './icons';
 import {
   OBJECT_TYPE_FACETS,
@@ -66,7 +80,8 @@ import {
   type SelectionState,
 } from '@core/lib/admin/bulk-selection';
 import { bulkArchiveObjects, bulkValidateObjects, type VerbCaller } from '@core/lib/admin/bulk-object-ops';
-import { QuickActionChips } from './QuickActions';
+import { ObjectActionMenu, ObjectActionStrip } from './ObjectActionStrip';
+import type { ControlsActionSurface } from './ControlsCard';
 import { objectTypeLabel, idTooltip } from '@core/lib/admin/display-name';
 import { type LibraryRow } from '@core/lib/admin/library-logic';
 import { type EditorialObjectState } from '@core/lib/admin/editorial-state';
@@ -101,18 +116,33 @@ const writeStoredViewMode = (mode: ViewMode): void => {
   }
 };
 
+/** A row as the pair the dock (and, through it, the wire) binds to. */
+const selectionForRow = (row: LibraryRow): ObjectSelection => ({
+  object_type: row.object_type,
+  object_id: row.object_id,
+});
+
 const detailHref = (row: LibraryRow): string =>
   `/admin/content/${encodeURIComponent(row.object_id)}?type=${encodeURIComponent(row.object_type)}`;
 
-/** Reflects current facet/view state into the URL without a navigation — same idiom AgentsHub.tsx already uses. */
-const syncUrl = (type: TypeFacetSelection, view: ViewMode): void => {
+/**
+ * Reflects current facet/view state into the URL without a navigation — same
+ * idiom AgentsHub.tsx already uses.
+ *
+ * ASV2-W2.2: this REBUILDS the address from scratch, so the dock's `?focus=`
+ * has to be re-applied to the result or every facet click would silently
+ * unbind the dock. `dockAddress` is that re-application, and it is symmetric:
+ * the selection survives a filter change, and the filters survive a selection
+ * change (`withFocus` keeps every other parameter).
+ */
+const syncUrl = (type: TypeFacetSelection, view: ViewMode, selection?: ObjectSelection): void => {
   if (typeof window === 'undefined') return;
   const params = new URLSearchParams();
   const typeParam = typeFacetToParam(type);
   if (typeParam) params.set('type', typeParam);
   if (view !== 'table') params.set('view', view);
   const qs = params.toString();
-  window.history.replaceState({}, '', qs ? `/admin/objects?${qs}` : '/admin/objects');
+  window.history.replaceState({}, '', dockAddress(qs ? `/admin/objects?${qs}` : '/admin/objects', selection));
 };
 
 // ─── selection checkbox (native input, indeterminate set imperatively) ──────
@@ -145,34 +175,39 @@ function RowCheckbox({
   );
 }
 
-function OpenChatButton({ row, size = 'sm' as const }: { row: LibraryRow; size?: 'sm' }) {
-  const { toast } = useToast();
-  const [pending, setPending] = useState(false);
-  const open = async () => {
-    setPending(true);
-    try {
-      const { createObjectChat } = await import('@core/lib/admin/chat-client');
-      const { chat } = await createObjectChat(getToken, row.object_type, row.object_id, row.display_name);
-      await navigate(`/admin/agents?chat=${encodeURIComponent(chat.chat_id)}`);
-    } catch (err) {
-      toast({
-        title: "Couldn't open chat",
-        description: err instanceof Error ? err.message : undefined,
-        tone: 'danger',
-      });
-    } finally {
-      setPending(false);
-    }
-  };
+/**
+ * ASV2-W2.2 — the row's agent gesture is a SELECTION now, not a navigation.
+ *
+ * It used to `createObjectChat` on the click and navigate to `/admin/agents`.
+ * Both halves are wrong under this wave: the click MINTED A CHAT DOC for
+ * every row anyone was ever curious about (a click never mints — see
+ * `universal-dock.ts`), and it took the editor off the library to talk about
+ * a row they were still comparing with its neighbours. The dock does the same
+ * job in place, and binds only when they actually send something. Nothing
+ * became unreachable: the object's own detail page still docks a rail, and
+ * `/admin/agents` still lists every conversation there is.
+ */
+function SelectForDockButton({
+  row,
+  selected,
+  onSelect,
+  size = 'sm' as const,
+}: {
+  row: LibraryRow;
+  selected: boolean;
+  onSelect: (row: LibraryRow) => void;
+  size?: 'sm';
+}) {
   return (
     <IconButton
-      label={`Open chat for ${row.display_name}`}
+      label={selected ? `${row.display_name} is in the agent dock` : `Ask the agent about ${row.display_name}`}
       icon={<IconRobot size={16} />}
       size={size}
-      disabled={pending}
+      variant={selected ? 'secondary' : 'ghost'}
+      aria-pressed={selected}
       onClick={(e) => {
         e.stopPropagation();
-        void open();
+        onSelect(row);
       }}
     />
   );
@@ -322,11 +357,73 @@ function ObjectsPlaneBody({ roles }: { roles: readonly string[] }) {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [validateReport, setValidateReport] = useState<string | null>(null);
 
+  // ─── ASV2-W2.2: the universal dock ────────────────────────────────────────
+  // `selection` above is the BULK checkbox set; this is the single row the
+  // agent dock is bound to. Different facts, deliberately different names.
+  const [focused, setFocused] = useState<ObjectSelection | undefined>(undefined);
+  /**
+   * Selection key → the chat this selection has already been bound to. Held
+   * as state AND in a ref: `send` below is called from a callback that must
+   * read the newest cache in the same tick it may have written it.
+   */
+  const [chatCache, setChatCache] = useState<DockChatCache>({});
+  const chatCacheRef = useRef<DockChatCache>({});
+  chatCacheRef.current = chatCache;
+  /**
+   * `undefined` until the editor SENDS. This is the whole no-request-on-click
+   * proof: `useChat` polls only when it holds an id, and nothing sets this on
+   * a selection — not even when a chat for that selection is already cached,
+   * because attaching would still be a poll the click did not ask for.
+   */
+  const [dockChatId, setDockChatId] = useState<string | undefined>(undefined);
+  /**
+   * ASV2-W3.2 — the composer's draft, for a hand-off taken from the strip or
+   * from a row's `⋯`. Seeding a DRAFT is not sending: nothing is posted and
+   * no chat doc is minted until the editor presses send, which is the same
+   * promise `dockChatIntent('select', …)` makes about clicking a row.
+   */
+  const [dockSeed, setDockSeed] = useState<{ key: string; text: string } | undefined>(undefined);
+  const [dockBusy, setDockBusy] = useState(false);
+  const [dockError, setDockError] = useState<string | undefined>(undefined);
+  const [dockDrawerOpen, setDockDrawerOpen] = useState(false);
+  const [expandedWorkspace, setExpandedWorkspace] = useState(false);
+  const [contentWidthPx, setContentWidthPx] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const dockChat = useChat(getToken, dockChatId);
+  const viewer = useCurrentUser().user?.email;
+  /** Whether a row is the one in the dock. Cheaper than a key round trip per row per render. */
+  const isFocusedRow = (row: LibraryRow): boolean =>
+    focused?.object_id === row.object_id && focused.object_type === row.object_type;
+  /**
+   * ASV2-W5 (review): matched on the PAIR, not on the id alone. An object key
+   * in this repo is `{object_type, object_id}` — that is the whole reason the
+   * address format is `?focus=<type>:<id>` — so two rows of different types
+   * may share an id, and an id-only lookup could hand the strip a DIFFERENT
+   * row than the one the dock is bound to. `runQuickAction` reads
+   * `row.object_type`/`row.object_id` straight off it, so that would have run
+   * a verb against the wrong object. Same comparison as `isFocusedRow`.
+   */
+  const focusedRow = focused ? rows.find((r) => isFocusedRow(r)) : undefined;
+  /**
+   * TWO scopes, because they are two facts. The rail's own per-chat
+   * preferences (run mode, test mode, thread state) are per OBJECT — the
+   * shape `ObjectWorkspace.tsx` already uses. Whether the dock is a spine is
+   * a property of this SURFACE, not of the object in it: scoping it per
+   * object would re-open a dock the editor deliberately collapsed every time
+   * they clicked a different row.
+   */
+  const preferenceScope = dockPreferenceScope('objects', viewer, focused);
+  const dock = useAgentDock(focused, dockPreferenceScope('objects', viewer));
+
   // URL → initial facet/view (deep-linkable, and what the old-route redirects preselect).
   useEffect(() => {
     setNow(Date.now());
     const params = new URLSearchParams(window.location.search);
     setTypeFacet(parseTypeFacetParam(params.get('type')));
+    // W2.2: the address restores the dock's binding. `parseFocus` reads an
+    // unpaired or over-long value as NO selection, so a hand-edited URL opens
+    // an empty dock rather than sending a malformed pair (Constraint 7).
+    setFocused(parseFocus(window.location.search));
     const urlView = params.get('view');
     if (urlView === 'grid' || urlView === 'table') setView(urlView);
     else {
@@ -395,7 +492,162 @@ function ObjectsPlaneBody({ roles }: { roles: readonly string[] }) {
       )
     );
   }, [rows]);
-  useEffect(() => syncUrl(typeFacet, view), [typeFacet, view]);
+  useEffect(() => syncUrl(typeFacet, view, focused), [typeFacet, view, focused]);
+
+  // ─── ASV2-W2.2/W2.3: the dock's own effects and handlers ─────────────────
+
+  /**
+   * W2.3: the SAME viewport contract `ObjectWorkspace.tsx` gates its dock on,
+   * and the same mutual exclusion — the inline dock and the overlay `Drawer`
+   * are never both mounted, because the rail owns approval effects and two
+   * of it on one surface would double-submit them. This is only HALF the
+   * gate; see `dockLayout`.
+   */
+  useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${WORKSPACE_EXPANDED_MIN_WIDTH}px)`);
+    const sync = () => setExpandedWorkspace(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  /**
+   * The other half: the dock's promise is about CONTENT width, which no
+   * viewport media query can see (the admin shell's `xl` sidebar and padding
+   * come out of it first). Re-attached when the skeleton is replaced by the
+   * real tree, since the measured element only exists then.
+   */
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width === 'number') setContentWidthPx(width);
+    });
+    observer.observe(element);
+    setContentWidthPx(element.getBoundingClientRect().width);
+    return () => observer.disconnect();
+  }, [loading, error]);
+
+  const layout = dockLayout({ expandedWorkspace, contentWidthPx });
+
+  /**
+   * The mutual exclusion, keyed on the LAYOUT rather than the breakpoint: in
+   * the 1280–1298 band the breakpoint matches while the dock is still a
+   * Drawer, and closing it there would shut the agent on a viewer who has no
+   * other way in.
+   */
+  useEffect(() => {
+    if (layout === 'beside') setDockDrawerOpen(false);
+  }, [layout]);
+
+  const clearFocus = useCallback((next?: ObjectSelection) => {
+    setFocused(next);
+    // A different object is a different conversation: stop polling the old
+    // one rather than showing its transcript under the new object's name.
+    setDockChatId(undefined);
+    setDockError(undefined);
+  }, []);
+
+  /**
+   * The row gesture. `dockChatIntent('select', …)` is `idle` by construction,
+   * so this issues NO request and mints NO chat doc — it moves local state
+   * and rewrites the address, nothing else.
+   */
+  const selectRow = useCallback(
+    (row: LibraryRow) => {
+      const first = !focused;
+      clearFocus(selectionForRow(row));
+      // "Opens on the first selection" — in the narrow arrangement the dock
+      // has no spine to open, so the overlay is what opens. Only the FIRST
+      // time: an overlay that reappeared over the list on every later row
+      // click would fight an editor who is still comparing rows.
+      if (first && layout === 'drawer') setDockDrawerOpen(true);
+    },
+    [clearFocus, focused, layout]
+  );
+
+  /**
+   * The LAZY binding. `createObjectChat` is reached from here and nowhere
+   * else on this surface, and this runs on a SEND. The paired
+   * `object_type`/`object_id` go up with `create_chat kind:'object'`, which
+   * is what puts the pair on every later turn's `CmsAgentContext`
+   * (engine.ts Constraint 7).
+   */
+  const sendFromDock = useCallback(
+    async (text: string, sendFocus?: string, testMode?: boolean) => {
+      const intent = dockChatIntent('send', focused, chatCacheRef.current);
+      if (intent.kind === 'idle') return;
+      // Already attached and polling: let `useChat` own the send, so its
+      // busy flag and its immediate re-poll behave exactly as everywhere else.
+      if (intent.kind === 'attach' && intent.chatId === dockChatId) {
+        await dockChat.send(text, sendFocus, testMode);
+        return;
+      }
+      setDockBusy(true);
+      setDockError(undefined);
+      try {
+        let chatId: string;
+        if (intent.kind === 'attach') {
+          chatId = intent.chatId;
+        } else {
+          const bound = intent.selection;
+          const created = await createObjectChat(
+            getToken,
+            bound.object_type,
+            bound.object_id,
+            focusedRow?.display_name
+          );
+          chatId = created.chat.chat_id;
+          setChatCache((cache) => rememberDockChat(cache, bound, created.chat.chat_id));
+        }
+        await sendChatMessage(getToken, chatId, text, sendFocus, testMode);
+        // Only now does anything start polling.
+        setDockChatId(chatId);
+      } catch (reason) {
+        setDockError(reason instanceof Error ? reason.message : 'The message could not be sent.');
+      } finally {
+        setDockBusy(false);
+      }
+    },
+    [dockChat, dockChatId, focused, focusedRow?.display_name]
+  );
+
+  const dockChatState: UseChatState = useMemo(
+    () => ({
+      ...dockChat,
+      busy: dockChat.busy || dockBusy,
+      error: dockError ?? dockChat.error,
+      send: sendFromDock,
+    }),
+    [dockChat, dockBusy, dockError, sendFromDock]
+  );
+
+  /**
+   * ASV2-W3.3 — does a conversation for the focused object ALREADY exist?
+   *
+   * Asked through W2's own decision rather than re-derived: `attach` means a
+   * chat is known for this selection, `mint` means sending would CREATE one.
+   * The trace may only ever ride an `attach` — `sendFromDock` is the LAZY
+   * BINDING, so a trace fired at an unbound object would mint a chat doc as a
+   * side effect of clicking Validate, which is the exact thing the dock was
+   * built not to do. `actionTraceDelivery` owns what happens instead.
+   */
+  const dockChatBound = dockChatIntent('send', focused, chatCache).kind === 'attach';
+
+  /**
+   * A hand-off taken from a ROW's menu belongs to that row, not to whatever
+   * the dock happens to be showing — so it binds the dock first and then
+   * seeds the draft. Still no request: `selectRow` is `idle` by construction
+   * and a draft is not a send.
+   */
+  const seedFromRow = useCallback(
+    (row: LibraryRow, prompt: string) => {
+      selectRow(row);
+      setDockSeed({ key: `strip-${row.object_id}-${Date.now()}`, text: prompt });
+    },
+    [selectRow]
+  );
 
   const setViewMode = (mode: ViewMode) => {
     setView(mode);
@@ -561,174 +813,267 @@ function ObjectsPlaneBody({ roles }: { roles: readonly string[] }) {
       header: '',
       render: (r) => (
         <div className="flex items-center justify-end gap-1.5">
-          <QuickActionChips row={r} roles={roles} onChanged={() => void refresh()} />
-          <OpenChatButton row={r} />
+          <ObjectActionMenu
+            row={r}
+            roles={roles}
+            onSeedComposer={(prompt) => seedFromRow(r, prompt)}
+            onChanged={() => void refresh()}
+          />
+          <SelectForDockButton row={r} selected={isFocusedRow(r)} onSelect={selectRow} />
         </div>
       ),
     },
   ];
 
+  /**
+   * ONE `AgentRail` element, placed EITHER in the column or in the Drawer —
+   * never both. The rail mounts approval effects, so two of it on one surface
+   * would auto-approve the same call twice; `ObjectWorkspace.tsx`'s own
+   * comment says the same thing about the same pair.
+   */
+  // W3.2/W4.2 — one bundle, two affordances: the strip beside the composer and
+  // any `actions` card the agent puts in the transcript.
+  const actionSurface: ControlsActionSurface | undefined = focusedRow
+    ? {
+        row: focusedRow,
+        roles,
+        onSeedComposer: (prompt) => setDockSeed({ key: `strip-${Date.now()}`, text: prompt }),
+        trace: { bound: dockChatBound, send: (text) => sendFromDock(text) },
+        onChanged: () => void refresh(),
+      }
+    : undefined;
+
+  const agentRail = (
+    <AgentRail
+      chat={dockChatState}
+      focus={dockFocusLabel(focused, focusedRow?.display_name)}
+      preferenceScope={preferenceScope}
+      selection={focused}
+      {...(focusedRow ? { selectionTitle: focusedRow.display_name } : {})}
+      onSelectionChange={clearFocus}
+      {...(dockSeed ? { draftSeed: dockSeed } : {})}
+      {...(actionSurface
+        ? {
+            // W3.2 — the strip sits beside the composer, so the verb and the
+            // conversation about it are the same gesture. No `exclude`: this
+            // surface has no controls of its own for these actions.
+            aboveComposer: <ObjectActionStrip {...actionSurface} />,
+            // W4.2 — the same bundle as data, so an §6.1 `actions` card in the
+            // transcript runs through that one executor rather than a second.
+            controlsActionSurface: actionSurface,
+          }
+        : {})}
+      isOwner={roles.includes('owner')}
+      canUseTestMode={roles.includes('owner')}
+      collapsed={layout === 'beside' && dock.collapsed}
+      {...(layout === 'beside' ? { onToggleCollapsed: dock.toggle } : {})}
+    />
+  );
+
   return (
-    <div className="flex flex-col gap-4">
-      <RefreshingChip active={refreshing} />
+    <div ref={contentRef} className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="flex min-w-0 flex-col gap-4">
+        <RefreshingChip active={refreshing} />
 
-      <TypeFacetChips rows={rows} selection={typeFacet} onChange={setTypeFacet} />
+        <TypeFacetChips rows={rows} selection={typeFacet} onChange={setTypeFacet} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="max-w-sm flex-1">
-          <Input
-            placeholder="Search by name or id…"
-            value={queryInput}
-            onChange={(e) => setQueryInput(e.target.value)}
-            aria-label="Search objects"
-          />
-        </div>
-        <Select
-          aria-label="Sort by"
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as ObjectSortKey)}
-          options={OBJECT_SORT_OPTIONS.map((o) => ({ value: o.key, label: o.label }))}
-          className="w-40"
-        />
-        <IconButton
-          label={sortDir === 'asc' ? 'Sort ascending — click for descending' : 'Sort descending — click for ascending'}
-          icon={sortDir === 'asc' ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
-          variant="secondary"
-          onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
-        />
-        <div className="ml-auto flex items-center gap-1 rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] p-0.5">
-          <IconButton
-            label="Table view"
-            icon={<IconLayoutList size={16} />}
-            variant={view === 'table' ? 'secondary' : 'ghost'}
-            aria-pressed={view === 'table'}
-            onClick={() => setViewMode('table')}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="max-w-sm flex-1">
+            <Input
+              placeholder="Search by name or id…"
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              aria-label="Search objects"
+            />
+          </div>
+          <Select
+            aria-label="Sort by"
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as ObjectSortKey)}
+            options={OBJECT_SORT_OPTIONS.map((o) => ({ value: o.key, label: o.label }))}
+            className="w-40"
           />
           <IconButton
-            label="Grid view"
-            icon={<IconLayoutGrid size={16} />}
-            variant={view === 'grid' ? 'secondary' : 'ghost'}
-            aria-pressed={view === 'grid'}
-            onClick={() => setViewMode('grid')}
+            label={
+              sortDir === 'asc' ? 'Sort ascending — click for descending' : 'Sort descending — click for ascending'
+            }
+            icon={sortDir === 'asc' ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
+            variant="secondary"
+            onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
           />
+          <div className="ml-auto flex items-center gap-1 rounded-[var(--adm-radius-md)] border border-[var(--adm-border-strong)] p-0.5">
+            <IconButton
+              label="Table view"
+              icon={<IconLayoutList size={16} />}
+              variant={view === 'table' ? 'secondary' : 'ghost'}
+              aria-pressed={view === 'table'}
+              onClick={() => setViewMode('table')}
+            />
+            <IconButton
+              label="Grid view"
+              icon={<IconLayoutGrid size={16} />}
+              variant={view === 'grid' ? 'secondary' : 'ghost'}
+              aria-pressed={view === 'grid'}
+              onClick={() => setViewMode('grid')}
+            />
+          </div>
+          {/* W2.3: the narrow arrangement's way into the dock — the same
+            compact button `ObjectWorkspace.tsx` puts in its header. */}
+          {layout === 'drawer' ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              leftIcon={<IconSparkles size={16} />}
+              onClick={() => setDockDrawerOpen(true)}
+            >
+              Agent
+            </Button>
+          ) : null}
         </div>
+
+        {selectionCount(selection) > 0 ? (
+          <BulkToolbar
+            count={selectionCount(selection)}
+            onClear={() => setSelection(clearSelection())}
+            onArchive={() => setConfirmArchive(true)}
+            onValidate={() => void runValidate()}
+            busy={bulkBusy}
+          />
+        ) : null}
+
+        {validateReport ? (
+          <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]" role="status" aria-live="polite">
+            {validateReport}
+          </p>
+        ) : null}
+
+        {sorted.length === 0 ? (
+          <EmptyState
+            icon={<IconLibrary size={26} />}
+            title={rows.length === 0 ? 'No objects yet' : 'No matches'}
+            message={
+              rows.length === 0 ? 'Objects you create will appear here.' : 'Try a different type or search term.'
+            }
+          />
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                {sorted.length} {sorted.length === 1 ? 'object' : 'objects'}
+              </p>
+              {isAllSelected(selection, pageIds) && filteredIds.length > pageIds.length ? (
+                <button
+                  type="button"
+                  onClick={() => setSelection(selectAll(filteredIds))}
+                  className="adm-focusable rounded px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-accent)] hover:underline"
+                >
+                  Select all {filteredIds.length} filtered
+                </button>
+              ) : null}
+            </div>
+
+            {view === 'table' ? (
+              <DataTable columns={columns} rows={paged.items} getRowKey={(r) => r.object_id} />
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {paged.items.map((r) => {
+                  const status = statusFor(r, states[r.object_id]);
+                  return (
+                    <div
+                      key={r.object_id}
+                      className="flex flex-col gap-2 rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)] bg-[var(--adm-surface)] p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <RowCheckbox
+                          checked={isSelected(selection, r.object_id)}
+                          onChange={() => setSelection((s) => toggleSelection(s, r.object_id))}
+                          label={`Select ${r.display_name}`}
+                        />
+                        <SeverityIcon level={status.level} title={status.label} />
+                      </div>
+                      <div className="grid aspect-square place-items-center rounded-[var(--adm-radius-md)] bg-[var(--adm-surface-sunken)] text-[var(--adm-text-muted)]">
+                        <IconLibrary size={28} />
+                      </div>
+                      <a href={detailHref(r)} className="adm-focusable min-w-0 rounded">
+                        <p
+                          className="truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:text-[var(--adm-accent)]"
+                          title={idTooltip(r.object_id)}
+                        >
+                          {r.display_name}
+                        </p>
+                      </a>
+                      <div className="flex items-center justify-between gap-1">
+                        <Badge>{objectTypeLabel(r.object_type)}</Badge>
+                        <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+                          {relativeTimeFromNow(r.updated_at, now) || '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <ObjectActionMenu
+                          row={r}
+                          roles={roles}
+                          onSeedComposer={(prompt) => seedFromRow(r, prompt)}
+                          onChanged={() => void refresh()}
+                        />
+                        <SelectForDockButton row={r} selected={isFocusedRow(r)} onSelect={selectRow} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {paged.pageCount > 1 ? (
+              <div className="flex items-center justify-center gap-3">
+                <Button variant="secondary" size="sm" disabled={paged.page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  Previous
+                </Button>
+                <span className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
+                  Page {paged.page} of {paged.pageCount}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={paged.page >= paged.pageCount}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
+
+        <ConfirmDialog
+          open={confirmArchive}
+          onClose={() => setConfirmArchive(false)}
+          onConfirm={() => void runArchive()}
+          title={`Archive ${selectionCount(selection)} object${selectionCount(selection) === 1 ? '' : 's'}?`}
+          message="Archived objects are removed from the live export on the next release and can be restored from Maintenance within the grace period. Anything still referenced or with an open review is skipped and reported."
+          confirmLabel="Archive"
+          tone="danger"
+        />
       </div>
 
-      {selectionCount(selection) > 0 ? (
-        <BulkToolbar
-          count={selectionCount(selection)}
-          onClear={() => setSelection(clearSelection())}
-          onArchive={() => setConfirmArchive(true)}
-          onValidate={() => void runValidate()}
-          busy={bulkBusy}
-        />
-      ) : null}
-
-      {validateReport ? (
-        <p className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]" role="status" aria-live="polite">
-          {validateReport}
-        </p>
-      ) : null}
-
-      {sorted.length === 0 ? (
-        <EmptyState
-          icon={<IconLibrary size={26} />}
-          title={rows.length === 0 ? 'No objects yet' : 'No matches'}
-          message={rows.length === 0 ? 'Objects you create will appear here.' : 'Try a different type or search term.'}
-        />
+      {/* The dock: sticky while the list scrolls. `_auto` on the grid track so
+          a collapsed dock shrinks to its spine instead of leaving a blank
+          24rem gutter. `w-[24rem]` / `w-12` are the literals for
+          `AGENT_SURFACE_LAYOUT.dockPx` (384) and DOCK_SPINE_PX (48) —
+          Tailwind's scanner needs them written out. */}
+      {layout === 'beside' ? (
+        <div
+          className={cn('sticky top-4 self-start', dock.collapsed ? 'w-12' : 'w-[24rem]')}
+          aria-label="Contextual agent dock"
+        >
+          {agentRail}
+        </div>
       ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <p className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-              {sorted.length} {sorted.length === 1 ? 'object' : 'objects'}
-            </p>
-            {isAllSelected(selection, pageIds) && filteredIds.length > pageIds.length ? (
-              <button
-                type="button"
-                onClick={() => setSelection(selectAll(filteredIds))}
-                className="adm-focusable rounded px-2 py-0.5 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-accent)] hover:underline"
-              >
-                Select all {filteredIds.length} filtered
-              </button>
-            ) : null}
-          </div>
-
-          {view === 'table' ? (
-            <DataTable columns={columns} rows={paged.items} getRowKey={(r) => r.object_id} />
-          ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {paged.items.map((r) => {
-                const status = statusFor(r, states[r.object_id]);
-                return (
-                  <div
-                    key={r.object_id}
-                    className="flex flex-col gap-2 rounded-[var(--adm-radius-lg)] border border-[var(--adm-border)] bg-[var(--adm-surface)] p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <RowCheckbox
-                        checked={isSelected(selection, r.object_id)}
-                        onChange={() => setSelection((s) => toggleSelection(s, r.object_id))}
-                        label={`Select ${r.display_name}`}
-                      />
-                      <SeverityIcon level={status.level} title={status.label} />
-                    </div>
-                    <div className="grid aspect-square place-items-center rounded-[var(--adm-radius-md)] bg-[var(--adm-surface-sunken)] text-[var(--adm-text-muted)]">
-                      <IconLibrary size={28} />
-                    </div>
-                    <a href={detailHref(r)} className="adm-focusable min-w-0 rounded">
-                      <p
-                        className="truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)] hover:text-[var(--adm-accent)]"
-                        title={idTooltip(r.object_id)}
-                      >
-                        {r.display_name}
-                      </p>
-                    </a>
-                    <div className="flex items-center justify-between gap-1">
-                      <Badge>{objectTypeLabel(r.object_type)}</Badge>
-                      <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
-                        {relativeTimeFromNow(r.updated_at, now) || '—'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-1">
-                      <QuickActionChips row={r} roles={roles} onChanged={() => void refresh()} />
-                      <OpenChatButton row={r} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {paged.pageCount > 1 ? (
-            <div className="flex items-center justify-center gap-3">
-              <Button variant="secondary" size="sm" disabled={paged.page <= 1} onClick={() => setPage((p) => p - 1)}>
-                Previous
-              </Button>
-              <span className="text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]">
-                Page {paged.page} of {paged.pageCount}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={paged.page >= paged.pageCount}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Button>
-            </div>
-          ) : null}
-        </>
+        /* W2.3: the EXISTING narrow-screen path, not a second one — the same
+           kit `Drawer` at the same width `ObjectWorkspace.tsx` uses. */
+        <Drawer open={dockDrawerOpen} onClose={() => setDockDrawerOpen(false)} title="Publishing Agent" width={480}>
+          {dockDrawerOpen ? agentRail : null}
+        </Drawer>
       )}
-
-      <ConfirmDialog
-        open={confirmArchive}
-        onClose={() => setConfirmArchive(false)}
-        onConfirm={() => void runArchive()}
-        title={`Archive ${selectionCount(selection)} object${selectionCount(selection) === 1 ? '' : 's'}?`}
-        message="Archived objects are removed from the live export on the next release and can be restored from Maintenance within the grace period. Anything still referenced or with an open review is skipped and reported."
-        confirmLabel="Archive"
-        tone="danger"
-      />
     </div>
   );
 }
