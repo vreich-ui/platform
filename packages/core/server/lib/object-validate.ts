@@ -1857,6 +1857,8 @@ export const checkEditorialStrategy = (body: unknown, atPublish: boolean): Readi
     );
   }
 
+  criteria.push(...commissioningCriteria(body.commissioning));
+
   criteria.push(shareSumCriterion('strategy_angle_mix_sum', 'angle_mix', body.angle_mix, 'share'));
   criteria.push(shareSumCriterion('strategy_topic_weights_sum', 'topic_weights', body.topic_weights, 'weight'));
 
@@ -1885,6 +1887,83 @@ export const checkEditorialStrategy = (body: unknown, atPublish: boolean): Readi
   // a write-time block (the prompt guard) or a permanent warning. A strategy is
   // never withheld from publish for being thin — see the header.
   void atPublish;
+  return criteria;
+};
+
+/**
+ * The commissioning (autonomy) criteria — WARNINGS ONLY, at draft and at publish.
+ *
+ * Absence is the state of every tenant that existed before autonomous
+ * commissioning did, and every one of them must keep validating exactly as
+ * before. So the strongest thing said about a missing block is that it is
+ * missing: "this publication cannot commission its own work", which is a fact
+ * about a site, not a defect in it.
+ *
+ * Structural nonsense INSIDE a present block (duplicate archetype ids, a seed
+ * naming an archetype that does not exist) is refused earlier, by the body
+ * schema at write. What is left for here is the shape a schema cannot judge:
+ * a block switched on with nothing to publish from.
+ */
+const commissioningCriteria = (value: unknown): ReadinessCriterion[] => {
+  const label = 'Autonomous commissioning';
+  if (value === undefined || value === null) {
+    return [
+      crit(
+        'strategy_commissioning_present',
+        label,
+        'warning',
+        'No commissioning block — this publication only publishes what a human or an agent asks it to. Nothing is ' +
+          'blocked. Add commissioning (enabled, runsPerDay, dailyBudgetUsd, maxConcurrentRuns, readerStateMix, ' +
+          'archetypes, seeds) to let editorial_planner commission its own work.'
+      ),
+      crit('strategy_commissioning_shape', 'Commissioning has something to publish', 'optional', 'No commissioning block.'),
+    ];
+  }
+  if (!isRecord(value)) {
+    // BOTH criteria, even here. A readiness surface keyed by constraint id loses a row entirely
+    // when a declared `enforced_live` rule returns nothing, so a body carrying `commissioning: "on"`
+    // would silently show one fewer check than the contract promises.
+    return [
+      crit('strategy_commissioning_present', label, 'optional', 'Commissioning block shape not recognized (see schema check).'),
+      crit('strategy_commissioning_shape', 'Commissioning has something to publish', 'optional', 'Commissioning block shape not recognized (see schema check).'),
+    ];
+  }
+
+  const criteria: ReadinessCriterion[] = [];
+  const enabled = value.enabled === true;
+  criteria.push(
+    enabled
+      ? crit('strategy_commissioning_present', label, 'complete', '')
+      : crit(
+          'strategy_commissioning_present',
+          label,
+          'warning',
+          'Commissioning is configured but switched off (enabled: false) — editorial_planner will plan for this ' +
+            'tenant on request and commission nothing on its own. Set enabled: true when the seeds and budget are ' +
+            'the ones you want running unattended.'
+        )
+  );
+
+  const archetypes = Array.isArray(value.archetypes) ? value.archetypes : [];
+  const seeds = Array.isArray(value.seeds) ? value.seeds : [];
+  const shapeLabel = 'Commissioning has something to publish';
+  if (enabled && archetypes.length === 0 && seeds.length === 0) {
+    criteria.push(
+      crit(
+        'strategy_commissioning_shape',
+        shapeLabel,
+        'warning',
+        'Commissioning is enabled but names no archetypes and no seeds. The planner falls back to seeds when its ' +
+          'model turn returns nothing usable, so a tenant with neither can go a day publishing nothing without ' +
+          'anything looking broken.'
+      )
+    );
+  } else if (archetypes.length === 0 && seeds.length === 0) {
+    criteria.push(crit('strategy_commissioning_shape', shapeLabel, 'optional', 'No archetypes or seeds yet.'));
+  } else {
+    criteria.push(crit('strategy_commissioning_shape', shapeLabel, 'complete', ''));
+  }
+
   return criteria;
 };
 

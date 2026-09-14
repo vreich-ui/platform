@@ -133,8 +133,17 @@ export const editorialRequestSchema = z.object({
   /** Human, editable; seeded from the brief. */
   title: z.string(),
   brief_excerpt: z.string().optional(),
-  /** E-mail of the human who asked. */
+  /** E-mail of the human who asked — or the engine agent id, when nobody asked (see commissioned_by). */
   created_by: z.string(),
+  /**
+   * Track C: the engine component that commissioned this request when no human
+   * did — today only `"editorial_planner"`. Optional on the wire and in the
+   * doc: every request written before autonomous commissioning existed has no
+   * such field, and a missing value must read as "a human asked", not throw.
+   */
+  commissioned_by: z.string().optional(),
+  /** One sentence saying WHY the planner chose this piece. Stored verbatim; the surface truncates. */
+  commissioning_rationale: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   status: requestStatusSchema,
@@ -191,6 +200,9 @@ export const requestIndexRowSchema = z.object({
   status: requestStatusSchema,
   status_reason: z.string().optional(),
   created_by: z.string(),
+  /** Track C — see the doc field. Optional on the wire so an index blob written before this change still parses. */
+  commissioned_by: z.string().optional(),
+  commissioning_rationale: z.string().optional(),
   updated_at: z.string(),
   progress: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).optional(),
   current_node: z.string().optional(),
@@ -247,6 +259,8 @@ export const projectIndexRow = (doc: EditorialRequest): RequestIndexRow => {
     status: doc.status,
     ...(doc.status_reason !== undefined ? { status_reason: doc.status_reason } : {}),
     created_by: doc.created_by,
+    ...(doc.commissioned_by !== undefined ? { commissioned_by: doc.commissioned_by } : {}),
+    ...(doc.commissioning_rationale !== undefined ? { commissioning_rationale: doc.commissioning_rationale } : {}),
     updated_at: doc.updated_at,
     ...(doc.workflow ? { progress: { done: doc.workflow.node_done, total: doc.workflow.node_total } } : {}),
     ...(doc.workflow?.current_node !== undefined ? { current_node: doc.workflow.current_node } : {}),
@@ -471,6 +485,9 @@ export type CreateRequestInput = {
   title: string;
   brief_excerpt?: string;
   created_by: string;
+  /** Track C: set by the engine when `editorial_planner` commissioned this request instead of a human. */
+  commissioned_by?: string;
+  commissioning_rationale?: string;
   /** The conversation that started the job, attached at creation. */
   chat?: { chat_id: string; kind: RequestChatLink['kind'] };
   /** Present for workflow-backed requests; counters start at zero. */
@@ -513,6 +530,8 @@ export const createRequest = async (
     title: input.title,
     ...(input.brief_excerpt !== undefined ? { brief_excerpt: input.brief_excerpt.slice(0, BRIEF_EXCERPT_MAX) } : {}),
     created_by: input.created_by,
+    ...(input.commissioned_by !== undefined ? { commissioned_by: input.commissioned_by } : {}),
+    ...(input.commissioning_rationale !== undefined ? { commissioning_rationale: input.commissioning_rationale } : {}),
     created_at: at,
     updated_at: at,
     status: 'queued',

@@ -162,6 +162,13 @@ const scopeWord = (scope: unknown): string => {
   return '';
 };
 
+/**
+ * The strategy field a `planner_halted` blockage points an operator back at
+ * (Track C). Named rather than inlined so the engine's minting side and this
+ * label table cannot drift apart silently.
+ */
+export const STRATEGY_COMMISSIONING_FIELD = 'editorial_strategy.commissioning';
+
 const LIMIT_FIELD_LABELS: Record<string, string> = {
   maxTurns: 'turn limit',
   toolCallLimit: 'tool-call limit',
@@ -195,10 +202,19 @@ function labelFor(remedy: Remedy): string {
       return value === undefined ? `Raise the ${name}` : `Raise the ${name} to ${value}`;
     }
     case 'retry': return 'Try again';
-    case 'resume': return 'Resume';
+    case 'resume':
+      // The planner's halt is resumed by clearing the halt, not by resuming a
+      // run — same verb, and deliberately the same button, because from the
+      // operator's chair "resume" means the same thing in both places.
+      return args.scope === 'planner' ? 'Resume commissioning' : 'Resume';
     case 'approve_gate': return 'Approve';
     case 'decline_gate': return 'Decline';
     case 'set_project_field':
+      // `editorial_strategy.commissioning` is the autonomy block the planner
+      // halted against (planner_halted, Track C). An operator does not think
+      // of that as "setting a field" — they think of it as going back to the
+      // strategy — so it gets the words they would use.
+      if (args.field === STRATEGY_COMMISSIONING_FIELD) return 'Revise the strategy';
       return args.field === 'mcpEndpoint' ? 'Set the CMS-Agent endpoint' : `Set ${String(args.field ?? 'the missing field')}`;
     case 'open_settings':
       return args.path === 'credentials' ? 'Open credentials' : 'Open settings';

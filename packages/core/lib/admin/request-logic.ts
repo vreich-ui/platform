@@ -482,6 +482,8 @@ export const requestFacts = (
     progress?: { done: number; total: number };
     current_node?: string;
     created_by: string;
+    commissioned_by?: string;
+    commissioning_rationale?: string;
     updated_at: string;
   },
   nowMs: number,
@@ -494,7 +496,17 @@ export const requestFacts = (
   // "Last moved" and not "Updated": on a stuck run the whole question is when
   // it last did anything, and the answer being "4d" is the finding.
   if (age) facts.push({ label: 'Last moved', value: `${age} ago (${row.updated_at})` });
-  if (row.created_by) facts.push({ label: 'Asked by', value: row.created_by });
+  // Track C: when the planner commissioned the piece, NOBODY asked — so the
+  // pane says "Commissioned by" and names the engine component, instead of
+  // showing an "Asked by" that quietly implies a person did. The rationale is
+  // the next fact because the first question an operator asks a run nobody
+  // requested is "why this one?".
+  if (row.commissioned_by) {
+    facts.push({ label: 'Commissioned by', value: row.commissioned_by, mono: true });
+    if (row.commissioning_rationale) facts.push({ label: 'Why', value: row.commissioning_rationale });
+  } else if (row.created_by) {
+    facts.push({ label: 'Asked by', value: row.created_by });
+  }
   if (run?.workflow_id) facts.push({ label: 'Workflow', value: run.workflow_id, mono: true });
   if (run?.run_id) facts.push({ label: 'Run', value: run.run_id, mono: true });
   return facts;

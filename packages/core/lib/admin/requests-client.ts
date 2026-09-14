@@ -33,6 +33,15 @@ export interface RequestRowView {
   status: RequestStatus;
   status_reason?: string;
   created_by: string;
+  /**
+   * Track C: the engine component that commissioned this request when nobody
+   * asked for it — today only `"editorial_planner"`. Absent on every request
+   * written before autonomous commissioning, and on every request a human
+   * actually asked for, so absent reads as "a human asked".
+   */
+  commissioned_by?: string;
+  /** One sentence saying why the planner picked this piece. */
+  commissioning_rationale?: string;
   updated_at: string;
   progress?: { done: number; total: number };
   current_node?: string;

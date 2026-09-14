@@ -15,6 +15,7 @@
  *  3. A human gate is never nudged. `nudgeable` comes from the derivation and
  *     is already false for every approval/paused/blocked state.
  */
+import { adoptableCommissionedRuns, type CommissionedRunSnapshot } from './adopt-commissioned.js';
 import {
   MAX_NUDGES,
   deriveRequestStatus,
@@ -41,6 +42,7 @@ import {
   NON_TERMINAL_REQUEST_STATUSES,
   TERMINAL_REQUEST_STATUSES,
   cancelRequest,
+  createRequest,
   loadIndex,
   loadRequest,
   rebuildIndex,
@@ -87,6 +89,14 @@ export interface SweepBridge {
   /** S-26: the project `callTool` is scoped to, forwarded onto `node_get_latest_output`
    * (a run-addressed call) via `PublicationOutputReader`. Optional alongside `callTool`. */
   projectId?: string;
+  /**
+   * Track C: `workflow_list_runs`, used for ONE thing — noticing runs that
+   * `editorial_planner` commissioned on the other plane and that therefore have
+   * no request row here yet (`adopt-commissioned.ts`). Optional: a bridge
+   * without it simply never adopts, which is exactly the behaviour every site
+   * had before autonomous commissioning existed.
+   */
+  listRuns?(limit: number): Promise<{ ok: boolean; data?: Record<string, unknown> }>;
 }
 
 export interface SweepChatSink {
@@ -534,8 +544,83 @@ export const sweepRequest = async (deps: SweepDeps, requestId: string): Promise<
 };
 
 /** One pass. Bounded by `SWEEP_BATCH_MAX` and by whatever invocation time is left. */
-export const runSweep = async (deps: SweepDeps): Promise<{ considered: number; outcomes: SweepOutcome[] }> => {
-  const index = (await loadIndex(deps.store)) ?? (await rebuildIndex(deps.store));
+/**
+ * How many recent runs one adoption pass looks at — the page size `workflow_list_runs` caps at.
+ *
+ * It was 25, on the reasoning that the planner commissions single digits a day. That reasoning is
+ * about the planner and the window is about the TENANT: a site with ordinary chat-driven activity
+ * can push a commissioned run off a 25-row page between two passes, and an unadopted run is lost
+ * permanently — no inbox row, no operator visibility, and the run publishes anyway. The maximum
+ * page is one call either way, so there is nothing to save by looking at less.
+ */
+export const ADOPT_RUN_SCAN_LIMIT = 100;
+
+/**
+ * Track C — register a row for every commissioned run that has none yet.
+ *
+ * BEST-EFFORT, EXACTLY LIKE `requests.register`: a bridge that cannot answer,
+ * or a create that throws, is logged and swallowed. Losing the RECORD of a
+ * commissioned run is bad; letting it break the sweep that drives every other
+ * request on the site is worse. Returns the ids it adopted so the caller can
+ * log them; the ordinary pass picks them up from the index on the next sweep.
+ */
+export const adoptCommissionedRuns = async (deps: SweepDeps, knownRequestIds: ReadonlySet<string>): Promise<string[]> => {
+  const listRuns = deps.bridge?.listRuns;
+  if (!listRuns) return [];
+  let payload: Record<string, unknown> | undefined;
+  try {
+    const answer = await listRuns.call(deps.bridge, ADOPT_RUN_SCAN_LIMIT);
+    if (!answer.ok) return [];
+    payload = answer.data;
+  } catch (error) {
+    console.error('commissioned-run adoption: list failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+  const rows = Array.isArray(payload?.runs) ? (payload!.runs as CommissionedRunSnapshot[]) : [];
+  const adoptable = adoptableCommissionedRuns(rows, knownRequestIds, deps.bridge?.projectId);
+  const adopted: string[] = [];
+  for (const run of adoptable) {
+    try {
+      await createRequest(deps.store, {
+        request_id: run.request_id,
+        kind: run.kind,
+        title: run.title,
+        ...(run.brief_excerpt ? { brief_excerpt: run.brief_excerpt } : {}),
+        // NOT a person. `created_by` is the engine component, and
+        // `commissioned_by` is what the surface actually reads — together they
+        // keep "Asked by" from ever naming a human who did not ask.
+        created_by: run.commissioned_by,
+        commissioned_by: run.commissioned_by,
+        ...(run.commissioning_rationale ? { commissioning_rationale: run.commissioning_rationale } : {}),
+        workflow: {
+          run_id: run.run_id,
+          workflow_id: run.workflow_id,
+          project_id: run.project_id,
+          ...(run.node_total !== undefined ? { node_total: run.node_total } : {}),
+        },
+      });
+      adopted.push(run.request_id);
+    } catch (error) {
+      console.error('commissioned-run adoption: create failed', {
+        request_id: run.request_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return adopted;
+};
+
+export const runSweep = async (
+  deps: SweepDeps
+): Promise<{ considered: number; outcomes: SweepOutcome[]; adopted?: string[] }> => {
+  let index = (await loadIndex(deps.store)) ?? (await rebuildIndex(deps.store));
+  // Adoption runs FIRST so a run commissioned since the last pass is swept in
+  // this pass rather than the next one — a commissioned article is already a
+  // day old by the time anybody looks at it.
+  const adopted = await adoptCommissionedRuns(deps, new Set(index.rows.map((row) => row.request_id)));
+  if (adopted.length > 0) index = (await loadIndex(deps.store)) ?? index;
   const ids = selectSweepable(index.rows);
   const outcomes: SweepOutcome[] = [];
   for (const id of ids) {
@@ -543,5 +628,5 @@ export const runSweep = async (deps: SweepDeps): Promise<{ considered: number; o
     const outcome = await sweepRequest(deps, id);
     if (outcome) outcomes.push(outcome);
   }
-  return { considered: ids.length, outcomes };
+  return { considered: ids.length, outcomes, ...(adopted.length > 0 ? { adopted } : {}) };
 };

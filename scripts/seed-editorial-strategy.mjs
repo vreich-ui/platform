@@ -79,6 +79,20 @@ export const genesisStrategyBody = (brandName) => ({
   angle_mix: [],
   funnel_aggression: { tofu: 0, mofu: 0.2, bofu: 0.4 },
   cadence: `${ONBOARDING_FILL_MARKER} — how often, and at what volume?`,
+  // Track C: the autonomy block, seeded OFF — the same literal create-site.mjs
+  // scaffolds, kept here for the same reason the rest of this body is
+  // (the test pins the two against each other).
+  commissioning: {
+    enabled: false,
+    runsPerDay: 1,
+    dailyBudgetUsd: 10,
+    maxConcurrentRuns: 1,
+    stopAfterConsecutiveFailures: 2,
+    readerStateMix: { recognition: 0.25, understanding: 0.25, investigation: 0.25, selection: 0.25 },
+    archetypes: [],
+    seeds: [],
+    exclusions: [],
+  },
   provenance: { set_by: 'genesis_default', set_at: GENESIS_DEFAULT_SET_AT },
 });
 
