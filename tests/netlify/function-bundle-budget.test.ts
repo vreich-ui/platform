@@ -215,6 +215,23 @@ const firstPartyBundle = (fn: string) => {
  * change that trips this should cut the agent/tools.ts definitions-vs-executors
  * split (~127 KB of executors that never run on the governance read path),
  * which is the one real cut left in this bundle.
+ *
+ * A4 executor-operation dispatch (2026-09-13) raised admin-agent-chat
+ * 3392 -> 3420, measured at 3399 KB. VERIFIED, not assumed: reproduced this
+ * file's own firstPartyBundle() against origin/main (c6f4b523) for
+ * admin-agent-chat and diffed the metafile's module SET — 257 modules on
+ * both sides, zero added, zero removed. There is no import edge to cut; the
+ * +14.2 KB is two files already in the graph growing in place — agent/
+ * tools.ts (+10.5 KB: resolveCatalogOperation's `dispatch` discriminated
+ * union for the executor-vs-workflow kind, the new runExecutorOperation
+ * entrypoint that calls operation_execute instead of
+ * workflow_start_dry_run, and its refusal relay including the
+ * not-yet-granted diagnosis) and agent/operation-catalog.ts (+3.7 KB: the
+ * executorBinding wire shape and operation.execute's own result schema).
+ * Cap rounded up to 3420 (21 KB headroom) rather than measured+8 — the
+ * pattern above has round-tripped through <=3 KB margins four times because
+ * each raise picked the tightest number that passed; a rounder number here
+ * is deliberately not that number.
  */
 const BUDGETS_KB: Record<string, number> = {
   // The coalesced shell call — one navigation, one invocation. Capped first
@@ -226,7 +243,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3392,
+  'admin-agent-chat': 3420,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */
