@@ -63,6 +63,16 @@ import {
   resolvePdfJobKind,
   resolvePdfRequirementsDefault,
 } from '../../lib/pdf/pdf-bridge-defaults.js';
+import { runDocumentRender, type DocumentRenderEffects } from '../../lib/pdf/document-render.js';
+import {
+  TEMPLATE_PREVIEW_FIXTURE_IDS,
+  buildTemplatePreviewFixture,
+  runTemplatePreviewFixture,
+  templatePreviewRequestId,
+  type DerivedTemplateSchema,
+  type TemplatePreviewEffects,
+  type TemplatePreviewFixtureId,
+} from '../../lib/pdf/template-preview.js';
 import {
   defaultPdfRenderDataMapper,
   resolvePdfJobRenderData,
@@ -94,6 +104,7 @@ import {
   failedContentCheckFromQualityGate,
   inspectDocumentContent,
   inspectDocumentContentFromPublicPath,
+  resolveDocumentContentInspectionFromPublicPath,
   type DocumentContentCheck,
 } from './pdf-content-inspection.js';
 import { recordPdfContentCheck } from './pdf-content-check-store.js';
@@ -106,10 +117,7 @@ import {
   writeRequestOwner,
   type ArtifactIndexStore,
 } from './artifact-index.js';
-import {
-  adoptLegacyArtifactOwnership,
-  type LegacyAdoptionResult,
-} from './artifact-legacy-adopt.js';
+import { adoptLegacyArtifactOwnership, type LegacyAdoptionResult } from './artifact-legacy-adopt.js';
 import type { ArtifactSweepListStore } from './artifact-dedupe-sweep.js';
 
 /**
@@ -689,12 +697,7 @@ export const callCreateArtifactUploadIntent = async (event: LambdaEvent, input: 
       expiresAt,
     });
 
-    await registerArtifactRequestOwner(
-      event,
-      normalized.value.requestId,
-      owner.owner,
-      'create_artifact_upload_intent'
-    );
+    await registerArtifactRequestOwner(event, normalized.value.requestId, owner.owner, 'create_artifact_upload_intent');
 
     return toolResult({
       ok: true,
@@ -1528,10 +1531,7 @@ export const callBrandImageryPropose = async (event: LambdaEvent, input: Record<
   const artifactStore = (await getArtifactBlobStore(event, getMcpBinding())) as {
     get: (key: string, options: { type: 'arrayBuffer' }) => Promise<ArrayBuffer | null>;
   };
-  const artifactIndexStore = (await getArtifactIndexBlobStore(
-    event,
-    getMcpBinding()
-  )) as unknown as ArtifactIndexStore;
+  const artifactIndexStore = (await getArtifactIndexBlobStore(event, getMcpBinding())) as unknown as ArtifactIndexStore;
   const baseUrl = (process.env.URL ?? '').replace(/\/+$/, '');
 
   const result = await proposeBrandImagery(proposeInput, {
@@ -3524,6 +3524,438 @@ const attachPdfToArticle = async (
       agent_name: 'render_article_pdf',
     }).catch(() => undefined);
   }
+};
+
+// ─── A8 gap 1 — wiring template-preview.ts and document-render.ts into the real bridge ────
+//
+// Both pure modules were built and tested (contract tests only) against injected fakes; the
+// two handlers below are what actually calls them with real effects, composed ENTIRELY from
+// existing, unmodified pieces of this file — no new pdf-tool call, no new object-store verb,
+// no relaxed quality gate. Kept thin on purpose (the coordinator's own instruction): every
+// decision (fixture shape, preflight, job reuse, poll termination, the verified/unverified
+// split, the newsletter/report refusal) lives in template-preview.ts / document-render.ts;
+// these two functions only adapt arguments and inject effects, exactly like
+// callRenderArticlePdf above them.
+
+/** How long a template-preview fixture's job id stays cached (`TemplatePreviewEffects`'s
+ *  getCachedJob/setCachedJob) before a repeat call re-creates rather than reuses it. A fixture
+ *  render is stable for as long as the template version and the fixture's own data hash are
+ *  unchanged (both are baked into the cache key by `templatePreviewJobKey`), so this is long —
+ *  unlike `ARTIFACT_BRIDGE_SCOPE_CACHE_TTL_MS`'s 12 minutes, which only has to outlive one job's
+ *  own polling lifetime. 24h means "reuse today's render of this exact fixture", not "forever";
+ *  a new call after that simply creates a fresh job, same as a cache miss always would. */
+const TEMPLATE_PREVIEW_JOB_CACHE_NAMESPACE = 'template-preview-job';
+const TEMPLATE_PREVIEW_JOB_CACHE_TTL_MS = 24 * 60 * 60_000;
+
+/**
+ * A8 Part 1 — `preview_pdf_template_fixture`: renders one of the six worst-case fixtures
+ * (`TEMPLATE_PREVIEW_FIXTURE_IDS`) against a real, stored template through the SAME
+ * create/poll/inspect machinery every other PDF caller uses (final mode — the content quality
+ * gate runs), and reports a receipt that is only ever `verified: true` when a real, inspected
+ * render backs that word. See template-preview.ts's header for the full investigation this
+ * closes (why `validate_pdf_template` / `preview_pdf_template` cannot answer this on their
+ * own).
+ *
+ * `template_json` is REQUIRED input, not fetched back from `get_pdf_template` — deliberately.
+ * `get-pdf-template`'s response shape is confirmed in this repo (by
+ * `renderDataSchemaFromTemplateBody`'s own callers) to carry `renderDataSchema`; nothing in
+ * this repo's tests or contracts confirms it also echoes `templateJson` back, and guessing a
+ * response field this module cannot verify is exactly the class of claim A8 exists to stop.
+ * `derive_render_data_schema` and `create_pdf_template` already require the caller to hold and
+ * resend `templateJson` for the same reason — this tool asks for nothing this bridge does not
+ * already ask everywhere else it needs a template body. `get_pdf_template` IS still called,
+ * for the one thing it is a confirmed source of: the ACTUAL resolved `version` (so an omitted
+ * `version` previews whatever is really live, not a guess) and, when the stored record
+ * declares one, its own `renderDataSchema` for the preflight check.
+ */
+export const callPreviewPdfTemplateFixture = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const scoped = resolveTemplateBridgeScope(input);
+  if (!scoped.ok) return scoped.result;
+  const siteId = scoped.siteId;
+
+  const templateId = toNonEmptyString(input.template_id);
+  if (!templateId) return toolError('template_id is required.');
+
+  const templateJsonInput = input.template_json;
+  if (!templateJsonInput || typeof templateJsonInput !== 'object' || Array.isArray(templateJsonInput)) {
+    return toolError(
+      'template_json is required and must be an object — the same document you would send to create_pdf_template.'
+    );
+  }
+
+  const fixtureId = toNonEmptyString(input.fixture);
+  if (!fixtureId || !(TEMPLATE_PREVIEW_FIXTURE_IDS as readonly string[]).includes(fixtureId)) {
+    return toolError(`fixture must be one of: ${TEMPLATE_PREVIEW_FIXTURE_IDS.join(', ')}.`, {
+      error_code: 'template_preview_fixture_invalid',
+    });
+  }
+
+  const renderer = toNonEmptyString(input.renderer);
+  if (renderer && !['pdfme', 'react-pdf', 'typst', 'chromium'].includes(renderer)) {
+    return toolError('renderer must be one of: pdfme, react-pdf, typst, chromium.');
+  }
+
+  const requestedVersion =
+    typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : undefined;
+
+  const built = buildArtifactBridgeGrant();
+  if (!built.ok) return built.result;
+
+  const found = await getPlatformPdfTemplate(built.grant, {
+    templateId,
+    ...(requestedVersion ? { version: requestedVersion } : {}),
+  });
+  if (!found.ok) return pdfToolBridgeError(found);
+  const foundBody = getRecordValue(found.body) ?? {};
+  const version =
+    typeof foundBody.version === 'number' && Number.isFinite(foundBody.version) ? foundBody.version : undefined;
+  if (version === undefined) {
+    return toolError('pdf-tool returned no version for this template.', { error_code: 'pdf_tool_invalid_response' });
+  }
+  const storedRenderDataSchema = renderDataSchemaFromTemplateBody(foundBody);
+
+  const derived = await derivePlatformRenderDataSchema({
+    templateJson: templateJsonInput,
+    ...(renderer ? { renderer: renderer as PlatformCreateTemplateInput['renderer'] } : {}),
+  });
+  if (!derived.ok) return pdfToolBridgeError(derived);
+  const derivedBody = getRecordValue(derived.body) ?? {};
+  const derivedSchema: DerivedTemplateSchema = {
+    ...(derivedBody.renderDataSchema !== undefined ? { renderDataSchema: derivedBody.renderDataSchema } : {}),
+    ...(isJsonObject(derivedBody.sampleData) ? { sampleData: derivedBody.sampleData } : {}),
+    ...(isJsonObject(derivedBody.sampleAssets)
+      ? { sampleAssets: derivedBody.sampleAssets as DerivedTemplateSchema['sampleAssets'] }
+      : {}),
+    ...(Array.isArray(derivedBody.slots) ? { slots: derivedBody.slots as string[] } : {}),
+    ...(Array.isArray(derivedBody.imageSlots) ? { imageSlots: derivedBody.imageSlots as string[] } : {}),
+  };
+
+  const fixture = buildTemplatePreviewFixture(fixtureId as TemplatePreviewFixtureId, derivedSchema);
+  const requestId = templatePreviewRequestId(templateId, version);
+  const pollBudgetMs = resolveRenderArticlePdfPollBudgetMs(event.invocationDeadlineMs, Date.now(), process.env);
+
+  const effects: TemplatePreviewEffects = {
+    ensureOwnerRegistered: async (reqId) => {
+      // A template preview belongs to no article — `pdf_template` is deliberately not in
+      // ARTIFACT_REQUEST_OWNER_TYPES (see template-preview.ts's header). The SITE is: an
+      // existing, already-valid owner type, registered once per (template, version).
+      await registerArtifactRequestOwner(
+        event,
+        reqId,
+        { object_type: 'site', object_id: siteId },
+        'preview_pdf_template_fixture'
+      );
+      return { ok: true, value: true };
+    },
+    getCachedJob: async (jobKey) => {
+      const store = await getIdempotencyBlobStore(event, getMcpBinding());
+      return getCachedValue<{ jobId: string }>(store, TEMPLATE_PREVIEW_JOB_CACHE_NAMESPACE, jobKey);
+    },
+    setCachedJob: async (jobKey, value) => {
+      const store = await getIdempotencyBlobStore(event, getMcpBinding());
+      await setCachedValue(
+        store,
+        TEMPLATE_PREVIEW_JOB_CACHE_NAMESPACE,
+        jobKey,
+        value,
+        TEMPLATE_PREVIEW_JOB_CACHE_TTL_MS
+      );
+    },
+    createJob: async (jobInput) => {
+      const result = await callCreateAgentArtifactJob(event, {
+        site_id: siteId,
+        request_id: jobInput.requestId,
+        artifact_kind: 'pdf',
+        template_id: jobInput.templateId,
+        data: jobInput.data,
+        ...(jobInput.assets ? { assets: jobInput.assets } : {}),
+        filename: `preview-${fixtureId}.pdf`,
+        wait: false,
+      });
+      if (toolResultIsError(result)) {
+        const body = structuredOf(result);
+        return {
+          ok: false as const,
+          error: {
+            ...(toNonEmptyString(body?.error_code) ? { code: toNonEmptyString(body?.error_code)! } : {}),
+            message: firstToolText(result) ?? 'The preview render job could not be created.',
+          },
+        };
+      }
+      const job = readArticlePdfJobView(structuredOf(result));
+      if (!job) return { ok: false as const, error: { message: 'pdf-tool returned no job id for this preview.' } };
+      return { ok: true as const, value: job };
+    },
+    pollJob: async (jobId) => {
+      const result = await callGetAgentArtifactJobStatus(event, {
+        site_id: siteId,
+        request_id: requestId,
+        job_id: jobId,
+      });
+      if (toolResultIsError(result)) {
+        return { ok: false as const, error: { message: firstToolText(result) ?? 'status poll failed' } };
+      }
+      const job = readArticlePdfJobView({ jobId, ...(structuredOf(result) ?? {}) });
+      return job
+        ? { ok: true as const, value: job }
+        : { ok: false as const, error: { message: 'status poll returned an unreadable body' } };
+    },
+    inspectContent: async ({ publicPath }) => resolveDocumentContentInspectionFromPublicPath(publicPath),
+    sleep: async (ms) => {
+      await sleep(ms);
+    },
+    now: () => Date.now(),
+    log: (entry) =>
+      event.log?.({ event: 'preview_pdf_template_fixture', ...entry, siteId, templateId, version, fixtureId }),
+  };
+
+  const outcome = await runTemplatePreviewFixture(
+    {
+      siteId,
+      templateId,
+      version,
+      fixture,
+      ...(storedRenderDataSchema !== undefined ? { renderDataSchema: storedRenderDataSchema } : {}),
+      pollBudgetMs,
+      polling: { tool: 'get_agent_artifact_job_status', input: { site_id: siteId, request_id: requestId } },
+    },
+    effects
+  );
+
+  if (!outcome.ok) {
+    return toolError(outcome.error.message, {
+      error_code: outcome.error.code ?? 'template_preview_job_not_created',
+      siteId,
+      templateId,
+    });
+  }
+  return toolResult({ ...outcome.receipt });
+};
+
+/**
+ * A8 Part 2 — `document_render`: renders an existing owned document standalone, through
+ * document-render.ts's `runDocumentRender`, which itself delegates the actual job lifecycle to
+ * `renderArticlePdf` (reused unchanged) for the one document kind Platform's content model has
+ * a mapper for today (`article`). See document-render.ts's header for why a kind with no
+ * registered mapper (`newsletter`, `report`, ...) is refused BEFORE any job is created, rather
+ * than silently mapped through the article schema — that refusal is gap 2, and it is left
+ * exactly as-is here (the coordinator's own instruction).
+ *
+ * `articleTitle` is deliberately never set on the composed params: the owner record that would
+ * supply it is only read INSIDE `runDocumentRender` (via the `readOwnerRecord` effect below),
+ * after this function has already had to decide what params to pass it — and `articleTitle` is
+ * cosmetic (the attached node's alt text) rather than load-bearing, so omitting it costs
+ * nothing but a nicer alt string on first attach.
+ *
+ * KNOWN LIMITATION, stated rather than papered over: `readSiteBrand` is left undefined. The
+ * real render (once not blocked) still gets brand injected correctly — `createJob` below calls
+ * `callCreateAgentArtifactJob` with `data` omitted, so THAT call's own D-2/D-3 pipeline (mapper
+ * + brand-slot classification) runs exactly as it does for `render_article_pdf`. What this
+ * costs is precision in the PRE-FLIGHT check only: for a template whose brand slot is an
+ * object, the preflight's own mapped-data validation runs without brand and can occasionally
+ * report `blocked: invalid_render_data` for a template that would in fact render fine.
+ * Classifying the brand slot correctly needs the resolved template's schema cross-referenced
+ * against `pdf-render-brand.ts`'s slot classifier, which `readSiteBrand`'s effect signature
+ * (`() => Promise<unknown>`, no schema parameter) cannot express without changing
+ * `document-render.ts`'s already-tested contract. A conservative false "blocked" is the safe
+ * failure mode here — it never produces a false "rendered" — so this is left as a named,
+ * reported gap rather than a silent guess.
+ */
+export const callDocumentRender = async (event: LambdaEvent, input: Record<string, unknown>) => {
+  const siteId = toNonEmptyString(input.site_id);
+  const ownerObjectType = toNonEmptyString(input.owner_object_type);
+  const ownerObjectId = toNonEmptyString(input.owner_object_id);
+  const identity = getSiteIdentity();
+  if (!siteId || !ownerObjectType || !ownerObjectId) {
+    return toolError('site_id, owner_object_type, and owner_object_id are required.', {
+      error_code: 'artifact_scope_required',
+    });
+  }
+  if (siteId !== identity.siteId) {
+    return toolError(
+      `Artifact scope mismatch: this deployment owns ${identity.siteId}, not ${siteId}. Use the owning site's Platform connector.`,
+      { error_code: 'artifact_site_mismatch' }
+    );
+  }
+  // Today's content model has exactly one owner shape with a registered mapper --
+  // content_item (document-render.ts's header + DocumentRenderParams.ownerObjectType's own
+  // literal type). Refused here, by name, before any object-store round trip -- this is a
+  // different refusal than runDocumentRender's own no_mapper_for_kind gate, which is about
+  // DOCUMENT KIND, not owner type.
+  if (ownerObjectType !== 'content_item') {
+    return toolError(
+      `document_render only supports owner_object_type "content_item" today; ${ownerObjectType} has no owner shape or render-data mapper registered.`,
+      { error_code: 'document_render_owner_type_unsupported' }
+    );
+  }
+
+  const attach = input.attach !== false;
+  const templateIdInput = toNonEmptyString(input.template_id);
+  const filenameInput = toNonEmptyString(input.filename);
+  const documentKind = resolvePdfJobKind(toNonEmptyString(input.document_kind));
+  const pollBudgetMs = resolveRenderArticlePdfPollBudgetMs(event.invocationDeadlineMs, Date.now(), process.env);
+
+  const effects: DocumentRenderEffects = {
+    readOwnerRecord: async () => {
+      const lookup = await invokeObjectStore(event, {
+        action: 'get',
+        object_type: ownerObjectType,
+        object_id: ownerObjectId,
+      });
+      if ('isError' in lookup) {
+        return {
+          ok: false as const,
+          error: {
+            code: 'artifact_request_not_found',
+            message: `${ownerObjectType} ${ownerObjectId} does not exist on ${siteId}. Create or select the document before rendering it.`,
+          },
+        };
+      }
+      const record = getRecordValue(lookup.record);
+      if (!record || record.object_id !== ownerObjectId || record.site !== siteId) {
+        return {
+          ok: false as const,
+          error: {
+            code: 'artifact_job_scope_mismatch',
+            message: `Render scope mismatch: ${ownerObjectId} is not owned by ${siteId}.`,
+          },
+        };
+      }
+      return { ok: true as const, value: record };
+    },
+    readSitePdfDefaults: async () => {
+      const siteLookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
+      const siteRecord = 'isError' in siteLookup ? undefined : getRecordValue(siteLookup.record);
+      return readSitePdfDefaults(getRecordValue(siteRecord?.body));
+    },
+    readTemplateRenderDataSchema: async (tId) => {
+      const built = buildArtifactBridgeGrant();
+      if (!built.ok) return undefined;
+      const templateLookup = await getPlatformPdfTemplate(built.grant, { templateId: tId });
+      return templateLookup.ok
+        ? renderDataSchemaFromTemplateBody(getRecordValue(templateLookup.body) ?? {})
+        : undefined;
+    },
+    // createJob deliberately omits `data` -- callCreateAgentArtifactJob's own D-1..D-4
+    // pipeline (default templateId, the D-2 mapper, D-3 brand injection, D-4 requirements)
+    // runs exactly as it does for render_article_pdf, so the REAL render is always at least
+    // as brand-aware as render_article_pdf's -- see this function's own KNOWN LIMITATION note.
+    createJob: async () => {
+      const result = await callCreateAgentArtifactJob(event, {
+        site_id: siteId,
+        request_id: ownerObjectId,
+        artifact_kind: 'pdf',
+        kind: documentKind,
+        wait: false,
+        ...(templateIdInput ? { template_id: templateIdInput } : {}),
+        ...(filenameInput ? { filename: filenameInput } : {}),
+      });
+      if (toolResultIsError(result)) {
+        const body = structuredOf(result);
+        return {
+          ok: false as const,
+          error: {
+            ...(toNonEmptyString(body?.error_code) ? { code: toNonEmptyString(body?.error_code)! } : {}),
+            message: firstToolText(result) ?? 'The document render job could not be created.',
+          },
+        };
+      }
+      const job = readArticlePdfJobView(structuredOf(result));
+      if (!job) return { ok: false as const, error: { message: 'pdf-tool returned no job id for this render.' } };
+      return { ok: true as const, value: job };
+    },
+    pollJob: async (jobId) => {
+      const result = await callGetAgentArtifactJobStatus(event, {
+        site_id: siteId,
+        request_id: ownerObjectId,
+        job_id: jobId,
+      });
+      if (toolResultIsError(result)) {
+        return { ok: false as const, error: { message: firstToolText(result) ?? 'status poll failed' } };
+      }
+      const job = readArticlePdfJobView({ jobId, ...(structuredOf(result) ?? {}) });
+      return job
+        ? { ok: true as const, value: job }
+        : { ok: false as const, error: { message: 'status poll returned an unreadable body' } };
+    },
+    readArticleNodes: async () => {
+      const fresh = await invokeObjectStore(event, {
+        action: 'get',
+        object_type: 'content_item',
+        object_id: ownerObjectId,
+      });
+      if ('isError' in fresh) {
+        return { ok: false as const, error: { message: 'The document could not be re-read for the attach.' } };
+      }
+      const body = getRecordValue(getRecordValue(fresh.record)?.body);
+      const nodes = Array.isArray(body?.nodes) ? (body!.nodes as ArticleNodeLike[]) : [];
+      return { ok: true as const, value: nodes };
+    },
+    applyAttach: async (op) => attachPdfToArticle(event, ownerObjectId, op),
+    sleep: async (ms) => {
+      await sleep(ms);
+    },
+    now: () => Date.now(),
+    log: (entry) => event.log?.({ event: 'document_render', ...entry, siteId, ownerObjectId, documentKind }),
+  };
+
+  const outcome = await runDocumentRender(
+    {
+      siteId,
+      ownerObjectType: 'content_item',
+      ownerObjectId,
+      documentKind,
+      ...(templateIdInput ? { templateId: templateIdInput } : {}),
+      attach,
+      pollBudgetMs,
+      polling: { tool: 'get_agent_artifact_job_status', input: { site_id: siteId, request_id: ownerObjectId } },
+    },
+    effects
+  );
+
+  if (!outcome.ok) {
+    return toolError(outcome.error.message, {
+      error_code: outcome.error.code ?? 'document_render_job_not_created',
+      siteId,
+      ownerObjectId,
+    });
+  }
+
+  if (outcome.outcome === 'blocked') {
+    return toolResult({
+      ok: true,
+      outcome: 'blocked',
+      siteId,
+      ownerObjectId,
+      documentKind: outcome.documentKind,
+      reason: outcome.reason,
+      detail: outcome.detail,
+      ...(outcome.errors ? { errors: outcome.errors } : {}),
+      ...(outcome.missingAssetIds ? { missingAssetIds: outcome.missingAssetIds } : {}),
+    });
+  }
+
+  // outcome.outcome === 'rendered' -- same D-D content-quality filing render_article_pdf does,
+  // only ever a FAILURE (failedContentCheckFromQualityGate never produces an "ok" verdict --
+  // see pdf-content-inspection.ts's own header for why), and only when the PDF actually landed
+  // on the document.
+  if (outcome.receipt.attached && outcome.receipt.attachment) {
+    await filePdfContentCheck(
+      event,
+      outcome.receipt.attachment.href,
+      failedContentCheckFromQualityGate(outcome.receipt.qualityGate, {
+        ...(outcome.receipt.pageCount !== undefined ? { pageCount: outcome.receipt.pageCount } : {}),
+      })
+    );
+  }
+
+  return toolResult({
+    ok: true,
+    outcome: 'rendered',
+    documentKind: outcome.documentKind,
+    templateId: outcome.templateId,
+    ...outcome.receipt,
+  });
 };
 
 /**

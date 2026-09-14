@@ -72,6 +72,8 @@ import {
   callBuildPdfRenderData,
   callVerifyPdfContent,
   callRenderArticlePdf,
+  callPreviewPdfTemplateFixture,
+  callDocumentRender,
   callValidatePdfRenderData,
   callGetPdfRenderBrand,
   callDeriveRenderDataSchema,
@@ -254,6 +256,25 @@ const OPERATIONAL_HANDLERS: Record<string, OperationalHandler> = {
       'render_article_pdf',
       args.idempotency_key,
       () => callRenderArticlePdf(event, args),
+      getMcpBinding()
+    ),
+  // A8 gap 1: both create a real (paid) render job, so they replicate the
+  // same idempotency wrapping render_article_pdf / create_agent_artifact_job
+  // use here.
+  preview_pdf_template_fixture: (event, args) =>
+    withIdempotentToolCall(
+      event,
+      'preview_pdf_template_fixture',
+      args.idempotency_key,
+      () => callPreviewPdfTemplateFixture(event, args),
+      getMcpBinding()
+    ),
+  document_render: (event, args) =>
+    withIdempotentToolCall(
+      event,
+      'document_render',
+      args.idempotency_key,
+      () => callDocumentRender(event, args),
       getMcpBinding()
     ),
   validate_pdf_render_data: callValidatePdfRenderData,

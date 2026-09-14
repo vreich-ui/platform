@@ -232,6 +232,19 @@ const firstPartyBundle = (fn: string) => {
  * pattern above has round-tripped through <=3 KB margins four times because
  * each raise picked the tightest number that passed; a rounder number here
  * is deliberately not that number.
+ *
+ * A8 gap-1 close (2026-09-14) raised admin-agent-chat 3420 -> 3500, measured
+ * at 3467 KB across 259 modules (was 257). This IS a new edge, and it is the
+ * whole point of the change: `packages/core/lib/pdf/template-preview.ts`
+ * (524 lines) and `packages/core/lib/pdf/document-render.ts` (244 lines)
+ * existed before this as orphan pure modules — reachable from nothing but
+ * their own test files, hence invisible to this bundle — and are now wired
+ * into `mcp-tool-handlers.ts` (two new handlers, `callPreviewPdfTemplateFixture`
+ * / `callDocumentRender`) so the admin chat can actually call them. A module
+ * that cannot be reached cannot cost a KB; making it reachable is gap 1
+ * closing, not drift. No other file in the graph grew. Headroom rounded to
+ * 33 KB (3500 vs the 3467 measured) rather than the tightest number that
+ * passed, matching this file's own stated preference above.
  */
 const BUDGETS_KB: Record<string, number> = {
   // The coalesced shell call — one navigation, one invocation. Capped first
@@ -243,7 +256,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3420,
+  'admin-agent-chat': 3500,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

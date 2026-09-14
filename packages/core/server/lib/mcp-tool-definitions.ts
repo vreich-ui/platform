@@ -306,7 +306,7 @@ const expectedSha256JsonSchema = {
 const artifactRequestOwnerJsonSchema = {
   type: 'object',
   description:
-    'Optional. The CMS object that owns this request id, for requests not named after a content_item (a captured page, a visual_standard). Registered once and immutable: re-registering the same owner is a no-op, a different one is refused. The object does not have to exist yet — capture ingests a page\'s imagery before the page is created — but it must exist, be active and be on this site before any media op on this request will resolve.',
+    "Optional. The CMS object that owns this request id, for requests not named after a content_item (a captured page, a visual_standard). Registered once and immutable: re-registering the same owner is a no-op, a different one is refused. The object does not have to exist yet — capture ingests a page's imagery before the page is created — but it must exist, be active and be on this site before any media op on this request will resolve.",
   properties: {
     object_type: {
       type: 'string',
@@ -357,13 +357,13 @@ const annotationPublicPathJsonSchema = {
   type: 'string',
   pattern: '^/(img|pdf)/[^/]+/[0-9a-fA-F]{64}\\.[a-z]+$',
   description:
-    'The image artifact\'s public path, e.g. /img/{request_id}/{sha256}.webp — pass the value create_agent_artifact_job, get_agent_artifact_job_status or get_agent_artifact_by_slot returned, verbatim. Supply this or sha256 (both is fine when they name the same artifact).',
+    "The image artifact's public path, e.g. /img/{request_id}/{sha256}.webp — pass the value create_agent_artifact_job, get_agent_artifact_job_status or get_agent_artifact_by_slot returned, verbatim. Supply this or sha256 (both is fine when they name the same artifact).",
 };
 const annotationSha256JsonSchema = {
   type: 'string',
   pattern: '^[a-fA-F0-9]{64}$',
   description:
-    'The image artifact\'s SHA-256 hex digest, as get_artifact_metadata takes it alongside the request id. Resolved to pdf-tool\'s blobKey through this request\'s artifact index. Supply this or public_path.',
+    "The image artifact's SHA-256 hex digest, as get_artifact_metadata takes it alongside the request id. Resolved to pdf-tool's blobKey through this request's artifact index. Supply this or public_path.",
 };
 
 const artifactListLimitJsonSchema = {
@@ -489,7 +489,11 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
           type: 'object',
           additionalProperties: false,
           properties: {
-            minPageCount: { type: 'integer', minimum: 1, description: 'Minimum pages. No floor by default (effectively 1).' },
+            minPageCount: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Minimum pages. No floor by default (effectively 1).',
+            },
             maxBytes: { type: 'integer', minimum: 1 },
           },
           description:
@@ -537,7 +541,11 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
           type: 'object',
           additionalProperties: false,
           properties: {
-            minPageCount: { type: 'integer', minimum: 1, description: 'Minimum pages. No floor by default (effectively 1).' },
+            minPageCount: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Minimum pages. No floor by default (effectively 1).',
+            },
             maxBytes: { type: 'integer', minimum: 1 },
           },
           description:
@@ -696,10 +704,10 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         style: objectSchema(
           {
             visualStandardId: stringSchema(
-              'Id of a visual_standard object (house vis_<site> or template vis_<site>_<slug>) whose brandImagery is used in place of the site\'s own — ignored (and reported in overriddenFields) if this id does not resolve, or if this site\'s brandImageryOverrides guardrail is locked.'
+              "Id of a visual_standard object (house vis_<site> or template vis_<site>_<slug>) whose brandImagery is used in place of the site's own — ignored (and reported in overriddenFields) if this id does not resolve, or if this site's brandImageryOverrides guardrail is locked."
             ),
             override: anyObjectSchema(
-              'Partial BrandImagery fields (site-v1.ts brandImagerySchema — e.g. medium, styleSentence, palette, negative, composition, aspectRatios, seedBase, lora), shallow-merged by Platform on top of the resolved base (visualStandardId\'s standard, else the site\'s own brandImagery, else one derived from brandTokens) before prompt assembly. STYLE fields only — never subject; `prompt` stays subject-only regardless of what this carries.'
+              "Partial BrandImagery fields (site-v1.ts brandImagerySchema — e.g. medium, styleSentence, palette, negative, composition, aspectRatios, seedBase, lora), shallow-merged by Platform on top of the resolved base (visualStandardId's standard, else the site's own brandImagery, else one derived from brandTokens) before prompt assembly. STYLE fields only — never subject; `prompt` stays subject-only regardless of what this carries."
             ),
             note: stringSchema(
               'Optional free-text note about why this override was chosen. Audit trail only — never influences generation.'
@@ -732,7 +740,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The same request id used to create the job — owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The same request id used to create the job — owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         job_id: stringSchema('Job id returned by create_agent_artifact_job.'),
       },
       ['site_id', 'request_id', 'job_id']
@@ -746,7 +756,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The same request id used to create the job — owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The same request id used to create the job — owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         job_id: stringSchema('Job id returned by create_agent_artifact_job.'),
         resume_token: stringSchema("The resume token from the blocked job's status (resume.input.resumeToken)."),
         approval_token: stringSchema('The operator approval secret authorizing this job to proceed.'),
@@ -762,7 +774,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('Existing request id — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'Existing request id — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         slot: stringSchema('The exact slot used when the job was created.'),
       },
       ['site_id', 'request_id', 'slot']
@@ -842,7 +856,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
           'Optional filename for the annotated artifact; pdf-tool derives "<source stem>-annotated.<ext>" when omitted.'
         ),
         slot: stringSchema(
-          'Optional request-scoped slot so the annotated image is retrievable via get_agent_artifact_by_slot. Setting it REPLACES that slot\'s lookup pointer (the previous artifact\'s bytes stay stored).'
+          "Optional request-scoped slot so the annotated image is retrievable via get_agent_artifact_by_slot. Setting it REPLACES that slot's lookup pointer (the previous artifact's bytes stay stored)."
         ),
         tags: arraySchema({ type: 'string', minLength: 1 }, 'Optional ArtifactReference tags for the annotated image.'),
         label: stringSchema('Optional human-readable label for the annotated artifact.'),
@@ -855,7 +869,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'check_image_text',
     description:
-      "A WARN-ONLY OCR gate over an image artifact of THIS request, through this site's trusted Platform bridge. SYNCHRONOUS: it answers in this one call, there is no job to poll. IT WRITES NOTHING — no artifact, no index entry, no slot pointer — and it is the only one of the four image tools that does not touch the tenant plane. THE GATE IS INFORMATION, NEVER A FAILURE: a failing check still comes back as a SUCCESSFUL call, with the verdict nested in `textCheck.ok`; treat `textCheck` as a warning to read, not a blocker. Two modes. mode:\"expect_none\" flags ANY significant text OCR finds — call it on a generated BASE image before annotating it, to catch a model that baked its own (usually garbled) text into the pixels. mode:\"expect\" verifies every string in `expect` actually rendered — call it AFTER annotate_image with the same strings its AnnotationSpec's text/badge elements were supposed to draw, to confirm the render service produced legible glyphs rather than, say, a font substitution silently dropping them. MATCHING POLICY: case-insensitive, whitespace-collapsed, with the 0/O and 1/l/I pairs folded together, matched as a normalized substring of the detected text in reading order. Nothing else is fuzzy — a genuinely misspelled or wrong string still fails to match. Returns `textCheck` VERBATIM: { mode, detected: string[], ok, warnings, matched?, missing? }; the image's bytes never reach this response, only the text read out of them. WHAT IT DOES NOT COVER, so you do not over-trust it: it says nothing about whether detected text is legible or well-composed, nothing about scripts beyond the supported OCR languages, and — because OCR can miss faint, tiny or heavily-stylized text — a passing expect_none check is evidence of no OBVIOUS leaked text, not a guarantee of none. Name the image with public_path or sha256, exactly as get_artifact_metadata takes it. Platform resolves the canonical pdf-tool project, verifies the request and the artifact belong to this site, and mints/forwards a fresh short-lived storage grant server-side — never supply your own storage/token/projectId argument, it is refused (artifact_grant_not_accepted), never honoured. NOTE ON AVAILABILITY: the OCR engine lives in pdf-tool's render service, so this tool can answer OCR_UNAVAILABLE or RENDER_SERVICE_UNAVAILABLE while every other tool here works — that is a deployment state, not a caller mistake. Error codes: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, artifact_target_required, artifact_not_in_request_index, artifact_grant_not_accepted, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response; from pdf-tool, verbatim: TEXT_CHECK_INVALID_MODE, ARTIFACT_NOT_VERIFIED, ANNOTATE_ARTIFACT_NOT_IMAGE, OCR_ARTIFACT_NOT_FOUND, OCR_IMAGE_INVALID, OCR_IMAGE_TOO_LARGE, OCR_LANGUAGE_UNAVAILABLE, OCR_BUDGET_EXCEEDED, OCR_UNAVAILABLE, RENDER_SERVICE_UNCONFIGURED, RENDER_SERVICE_UNAVAILABLE, OCR_TIMEOUT.",
+      'A WARN-ONLY OCR gate over an image artifact of THIS request, through this site\'s trusted Platform bridge. SYNCHRONOUS: it answers in this one call, there is no job to poll. IT WRITES NOTHING — no artifact, no index entry, no slot pointer — and it is the only one of the four image tools that does not touch the tenant plane. THE GATE IS INFORMATION, NEVER A FAILURE: a failing check still comes back as a SUCCESSFUL call, with the verdict nested in `textCheck.ok`; treat `textCheck` as a warning to read, not a blocker. Two modes. mode:"expect_none" flags ANY significant text OCR finds — call it on a generated BASE image before annotating it, to catch a model that baked its own (usually garbled) text into the pixels. mode:"expect" verifies every string in `expect` actually rendered — call it AFTER annotate_image with the same strings its AnnotationSpec\'s text/badge elements were supposed to draw, to confirm the render service produced legible glyphs rather than, say, a font substitution silently dropping them. MATCHING POLICY: case-insensitive, whitespace-collapsed, with the 0/O and 1/l/I pairs folded together, matched as a normalized substring of the detected text in reading order. Nothing else is fuzzy — a genuinely misspelled or wrong string still fails to match. Returns `textCheck` VERBATIM: { mode, detected: string[], ok, warnings, matched?, missing? }; the image\'s bytes never reach this response, only the text read out of them. WHAT IT DOES NOT COVER, so you do not over-trust it: it says nothing about whether detected text is legible or well-composed, nothing about scripts beyond the supported OCR languages, and — because OCR can miss faint, tiny or heavily-stylized text — a passing expect_none check is evidence of no OBVIOUS leaked text, not a guarantee of none. Name the image with public_path or sha256, exactly as get_artifact_metadata takes it. Platform resolves the canonical pdf-tool project, verifies the request and the artifact belong to this site, and mints/forwards a fresh short-lived storage grant server-side — never supply your own storage/token/projectId argument, it is refused (artifact_grant_not_accepted), never honoured. NOTE ON AVAILABILITY: the OCR engine lives in pdf-tool\'s render service, so this tool can answer OCR_UNAVAILABLE or RENDER_SERVICE_UNAVAILABLE while every other tool here works — that is a deployment state, not a caller mistake. Error codes: artifact_scope_required, artifact_site_mismatch, artifact_request_not_found, artifact_request_scope_mismatch, artifact_target_required, artifact_not_in_request_index, artifact_grant_not_accepted, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, pdf_tool_invalid_response; from pdf-tool, verbatim: TEXT_CHECK_INVALID_MODE, ARTIFACT_NOT_VERIFIED, ANNOTATE_ARTIFACT_NOT_IMAGE, OCR_ARTIFACT_NOT_FOUND, OCR_IMAGE_INVALID, OCR_IMAGE_TOO_LARGE, OCR_LANGUAGE_UNAVAILABLE, OCR_BUDGET_EXCEEDED, OCR_UNAVAILABLE, RENDER_SERVICE_UNCONFIGURED, RENDER_SERVICE_UNAVAILABLE, OCR_TIMEOUT.',
     inputSchema: objectSchema(
       {
         site_id: annotationSiteIdJsonSchema,
@@ -874,7 +888,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         ),
         languages: arraySchema(
           { type: 'string', minLength: 1 },
-          'Optional OCR language codes; omit for the render service\'s default. Only languages with traineddata installed there are supported — anything else is refused with OCR_LANGUAGE_UNAVAILABLE naming what IS supported, rather than silently mis-recognizing text in the wrong script.'
+          "Optional OCR language codes; omit for the render service's default. Only languages with traineddata installed there are supported — anything else is refused with OCR_LANGUAGE_UNAVAILABLE naming what IS supported, rather than silently mis-recognizing text in the wrong script."
         ),
       },
       ['site_id', 'request_id', 'mode']
@@ -938,7 +952,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         ),
         sample_data: {
           description:
-            "Example render data for this template version, forwarded verbatim to pdf-tool as sampleData. Used for previews and for the thumbnail render at publish time, and validated against render_data_schema when both are present. Any JSON value the schema accepts.",
+            'Example render data for this template version, forwarded verbatim to pdf-tool as sampleData. Used for previews and for the thumbnail render at publish time, and validated against render_data_schema when both are present. Any JSON value the schema accepts.',
         },
         sample_assets: anyObjectSchema(
           "The image assets sample_data REFERENCES, in exactly the shape a render job's `assets` takes: { images: [{ assetId, blobKey } | { assetId, dataUri }] }. Forwarded verbatim as sampleAssets. Supply it whenever sample_data names image assetIds — publish_pdf_template's thumbnail render resolves those images from here, and without it the stored preview shows broken images."
@@ -952,7 +966,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'list_pdf_templates',
     description:
-      "List pdf-tool PDF templates for THIS site through the trusted Platform bridge. Site ownership, canonical project, and storage grant are resolved server-side. NOT PLATFORM OBJECTS: a PDF template is a pdf-tool record living in pdf-tool's own store, NOT a CMS object — the ids returned here are not object ids, they do not appear in object_list/object_inventory, and object_checkout / object_patch / object_retire / object_publish will all fail on them with \"Object record not found\". Every operation on a template goes through the *_pdf_template tools on this bridge: get_pdf_template to read one, create_pdf_template to create or version, publish_pdf_template to activate, delete_pdf_template to deactivate. Disabled templates are hidden from this list by default.",
+      'List pdf-tool PDF templates for THIS site through the trusted Platform bridge. Site ownership, canonical project, and storage grant are resolved server-side. NOT PLATFORM OBJECTS: a PDF template is a pdf-tool record living in pdf-tool\'s own store, NOT a CMS object — the ids returned here are not object ids, they do not appear in object_list/object_inventory, and object_checkout / object_patch / object_retire / object_publish will all fail on them with "Object record not found". Every operation on a template goes through the *_pdf_template tools on this bridge: get_pdf_template to read one, create_pdf_template to create or version, publish_pdf_template to activate, delete_pdf_template to deactivate. Disabled templates are hidden from this list by default.',
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
@@ -966,7 +980,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'get_pdf_template',
     description:
-      "Fetch a pdf-tool PDF template record for THIS site through the trusted Platform bridge. NOT A PLATFORM OBJECT: this is a pdf-tool record in pdf-tool's own store, NOT a CMS object — object_get / object_checkout / object_patch / object_retire do not address it and fail with \"Object record not found\". Read it here, change it with create_pdf_template (new version) / publish_pdf_template (activate) / delete_pdf_template (soft, reversible deactivation).",
+      'Fetch a pdf-tool PDF template record for THIS site through the trusted Platform bridge. NOT A PLATFORM OBJECT: this is a pdf-tool record in pdf-tool\'s own store, NOT a CMS object — object_get / object_checkout / object_patch / object_retire do not address it and fail with "Object record not found". Read it here, change it with create_pdf_template (new version) / publish_pdf_template (activate) / delete_pdf_template (soft, reversible deactivation).',
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
@@ -986,14 +1000,14 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
         site_id: stringSchema('Owning site object id; must match this deployment.'),
         content_item_id: stringSchema('The content_item object id (the article) to map.'),
         template_id: stringSchema(
-          "Optional pdf-tool template id whose renderDataSchema to target; omit for the generic article contract."
+          'Optional pdf-tool template id whose renderDataSchema to target; omit for the generic article contract.'
         ),
         verbosity: {
           type: 'string',
           enum: ['full', 'summary'],
           default: 'full',
           description:
-            "\"full\" (default) returns the mapped `data` and `assets`. \"summary\" omits both — keeping schemaSource, schemaNote, unfilled[] and assetIds[] — for the debugging questions this tool is usually asked, without the payload.",
+            '"full" (default) returns the mapped `data` and `assets`. "summary" omits both — keeping schemaSource, schemaNote, unfilled[] and assetIds[] — for the debugging questions this tool is usually asked, without the payload.',
         },
       },
       ['site_id', 'content_item_id']
@@ -1027,16 +1041,78 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
   },
   {
+    name: 'preview_pdf_template_fixture',
+    description:
+      "Render one of six worst-case FIXTURES against a real, stored template and report whether its ACTUAL rendered output is clean — not a first-page sample of the template's own stored sampleData, and not a validation pass that deliberately skips the content quality gate. fixture is one of: long (worst-case multi-page — this is the check for 'is a genuinely long document actually viewable'), short (near-empty prose), empty (every optional field blank), rich_text (formatting-shaped content: bold, links, raw tags an editor pasted in), rtl (right-to-left script), images (image slots — if the template declares any and this fixture is deliberately built to exercise them). Each fixture is derived from THIS template's own declared placeholders (via derive_render_data_schema, run on your template_json), so it works for any template shape, not a hand-authored one. It runs the SAME final-mode render + create_agent_artifact_job + get_agent_artifact_job_status + inspect_pdf_artifact pipeline every other PDF caller on this bridge uses — the content quality gate runs for real. The receipt's `verified` is true ONLY when a real completed render's actual output was inspected and reported clean; `pending` means still rendering (poll with the returned job id, using `polling`), `failed` means pdf-tool itself failed the render, and a completed render whose output could not be inspected stays `contentCheck.status: 'unverified'` — never a guessed pass. `preflight` reports, before any render is attempted, when the fixture does not satisfy the template's own render-data contract (status: invalid_fixture — see errors[]/missingAssetIds[]). Repeat calls for the SAME template version and the SAME fixture data reuse the earlier job (`reused: true`) instead of re-rendering. template_json is required input, the same document you would send to create_pdf_template or derive_render_data_schema — this bridge does not assume get_pdf_template's response echoes it back. version pins which stored version is previewed; omit it to preview whatever is actually live right now (the response's own `version` says which one that was). Error codes: template_scope_required, template_site_mismatch, template_preview_fixture_invalid, pdf_tool_bridge_not_configured, pdf_tool_bridge_request_failed, template_preview_job_not_created.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        template_id: stringSchema('The pdf-tool template id to preview.'),
+        template_json: anyObjectSchema(
+          'The renderer-specific template document to derive fixtures from and preview — exactly what you would send to create_pdf_template / derive_render_data_schema. Nothing extra is stored; this is used only to build the fixture and derive its render-data contract.'
+        ),
+        fixture: {
+          type: 'string',
+          enum: ['long', 'short', 'empty', 'rich_text', 'rtl', 'images'],
+          description:
+            'Which worst-case fixture to render: long (multi-page), short, empty, rich_text, rtl, or images.',
+        },
+        version: intSchema('Optional specific stored version to preview; omit for whatever is currently live.'),
+        renderer: {
+          type: 'string',
+          enum: ['pdfme', 'react-pdf', 'typst', 'chromium'],
+          description:
+            'Optional target renderer, passed through to the fixture-derivation step. Omit to resolve it the way create_pdf_template does.',
+        },
+        idempotency_key: idempotencyKeyJsonSchema,
+      },
+      ['site_id', 'template_id', 'template_json', 'fixture']
+    ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+  },
+  {
+    name: 'document_render',
+    description:
+      "Render an existing owned document standalone — today, the one document kind Platform's content model actually has an owner shape and a render-data mapper for is `article` (owner_object_type: content_item), and this tool refuses to guess for any other kind rather than silently forcing unrelated content through the article schema. Pass document_kind (e.g. 'newsletter', 'report') to see that refusal by name: the response comes back `outcome: 'blocked', reason: 'no_mapper_for_kind'`, and NO job is created — a blocked call costs nothing. For the one supported kind, this composes the exact same create_agent_artifact_job -> poll -> inspect -> attach pipeline render_article_pdf uses, plus an explicit pre-render safety gate: it resolves the actual template (template_id, or the site's own site.pdf.byKind[document_kind] ?? site.pdf.defaultTemplateId), builds render data through the kind-scoped mapper, and validates it against that template's own render-data contract BEFORE creating any job — a template with no site default at all comes back `outcome: 'blocked', reason: 'no_template'`, and data that fails the template's own contract comes back `outcome: 'blocked', reason: 'invalid_render_data'` (see errors[]/missingAssetIds[]). A render that is NOT blocked returns `outcome: 'rendered'` with the SAME receipt shape render_article_pdf returns (status, jobId, public_path, attached, pageCount, qualityGate, unfilled[], summary) — quality-gate findings WARN, they never block, exactly as render_article_pdf documents. Error codes: artifact_scope_required, artifact_site_mismatch, document_render_owner_type_unsupported, artifact_request_not_found, artifact_job_scope_mismatch, document_render_job_not_created.",
+    inputSchema: objectSchema(
+      {
+        site_id: stringSchema('Owning site object id; must match this deployment.'),
+        owner_object_type: stringSchema(
+          'The owning object\'s type. Only "content_item" has a registered render-data mapper today; any other value is refused by name before any lookup.'
+        ),
+        owner_object_id: stringSchema('The owning object id (the content_item/article) to render.'),
+        document_kind: stringSchema(
+          "Optional document kind, e.g. 'article' (default), 'newsletter', 'report'. A kind with no registered render-data mapper is refused with outcome: 'blocked' rather than mapped through the article schema."
+        ),
+        template_id: stringSchema(
+          "Optional pdf-tool template id. Omit to use the site's configured default for this document_kind (site.pdf.byKind[kind] ?? site.pdf.defaultTemplateId)."
+        ),
+        filename: stringSchema(
+          "Optional artifact filename. Omit to derive it from the document's own slug — never pass a generic placeholder like 'document' or 'output'."
+        ),
+        attach: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Attach the finished PDF to the document as a `document` media node (default true). false renders and reports without touching the document at all.',
+        },
+        idempotency_key: idempotencyKeyJsonSchema,
+      },
+      ['site_id', 'owner_object_type', 'owner_object_id']
+    ),
+    governance: { toolClass: 'creation', preview: { kind: 'input_echo' } },
+  },
+  {
     name: 'validate_pdf_render_data',
     description:
       "Dry-check render data against a template's contract WITHOUT creating a job or spending a render. Answers the two questions W1 fails a real job on: does `data` satisfy the template's renderDataSchema (RENDER_DATA_INVALID at job creation), and does `assets` supply every job asset the data names (ASSET_MISSING at dispatch). Returns `valid`, `schemaValid`, ajv-shaped `errors[]` ({instancePath, schemaPath, keyword, message} — JSON pointers into your data), `missingAssetIds[]`, `unusedAssetIds[]` and `referencedAssetIds[]`. `authoritative` is false when the template's schema uses a keyword this pre-flight does not implement — pdf-tool's own validator is always the final word, and this tool never claims otherwise. A template that declares no renderDataSchema is checked against the generic article_brochure_v1 contract and the response says so in `schemaSource` (such a template also gets NO contract check on a real job — seed one via create_pdf_template's render_data_schema). Read-only. To get data worth checking, call build_pdf_render_data; to render, call render_article_pdf.",
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        template_id: stringSchema("The pdf-tool template id whose renderDataSchema to check against."),
+        template_id: stringSchema('The pdf-tool template id whose renderDataSchema to check against.'),
         data: anyObjectSchema('The render data object to check.'),
         assets: anyObjectSchema(
-          "The job assets that would accompany the render: { images: [{ assetId, blobKey }] }. Omit to check the schema only — any asset id `data` names then reports as missing, which is the truth for a job with no assets."
+          'The job assets that would accompany the render: { images: [{ assetId, blobKey }] }. Omit to check the schema only — any asset id `data` names then reports as missing, which is the truth for a job with no assets.'
         ),
       },
       ['site_id', 'template_id', 'data']
@@ -1051,7 +1127,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
         template_id: stringSchema(
-          "Optional pdf-tool template id. With it, the response reports the actual brand slot classification and exactly what would be merged into `data` for that template."
+          'Optional pdf-tool template id. With it, the response reports the actual brand slot classification and exactly what would be merged into `data` for that template.'
         ),
       },
       ['site_id']
@@ -1107,7 +1183,7 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'delete_pdf_template',
     description:
-      "THE ONLY WAY to remove a PDF template — use this, not the object_* verbs. A PDF template is a pdf-tool record in pdf-tool's own store, NOT a platform CMS object: object_checkout / object_retire / object_patch / object_discard do not address template ids at all and fail with \"Object record not found\" no matter how many times they are retried. Deactivates the template for THIS site through the trusted Platform bridge. SOFT AND REVERSIBLE (status -> disabled), NOT a hard delete and NOT a timed deletion: the underlying template data and stored bytes are preserved indefinitely, there is NO grace period, and nothing is ever purged by this call — do not tell an editor a template will be hard-deleted after any number of days (that is the MEMBERSHIP purge model, member_purge, and it has nothing to do with templates). A disabled template is hidden from list_pdf_templates by default, and is blocked from publish_pdf_template and from rendering (create_agent_artifact_job) while disabled. Deactivating an already-disabled template succeeds without error (idempotent).",
+      'THE ONLY WAY to remove a PDF template — use this, not the object_* verbs. A PDF template is a pdf-tool record in pdf-tool\'s own store, NOT a platform CMS object: object_checkout / object_retire / object_patch / object_discard do not address template ids at all and fail with "Object record not found" no matter how many times they are retried. Deactivates the template for THIS site through the trusted Platform bridge. SOFT AND REVERSIBLE (status -> disabled), NOT a hard delete and NOT a timed deletion: the underlying template data and stored bytes are preserved indefinitely, there is NO grace period, and nothing is ever purged by this call — do not tell an editor a template will be hard-deleted after any number of days (that is the MEMBERSHIP purge model, member_purge, and it has nothing to do with templates). A disabled template is hidden from list_pdf_templates by default, and is blocked from publish_pdf_template and from rendering (create_agent_artifact_job) while disabled. Deactivating an already-disabled template succeeds without error (idempotent).',
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
@@ -1202,7 +1278,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The request id this search is sourcing images for — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The request id this search is sourcing images for — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         query: stringSchema('Search prompt describing the desired image.'),
         count: {
           type: 'number',
@@ -1238,7 +1316,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The request id whose image search bank to read — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The request id whose image search bank to read — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         limit: intSchema('Optional max candidates to return (default all, max 200).'),
         cursor: stringSchema('Optional pagination cursor from a previous get_image_search_bank call.'),
       },
@@ -1253,7 +1333,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The request id that owns the candidate — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The request id that owns the candidate — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         candidate_id: stringSchema('The candidate id from get_image_search_bank.'),
         state: {
           type: 'string',
@@ -1278,7 +1360,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The request id this import is scoped to — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The request id this import is scoped to — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         url: stringSchema('https URL of the image to import.'),
         filename: stringSchema('Optional target filename; derived from the URL if omitted.'),
         slot: stringSchema('Optional safe slot so the artifact is retrievable via get_agent_artifact_by_slot.'),
@@ -1318,7 +1402,9 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
     inputSchema: objectSchema(
       {
         site_id: stringSchema('Owning site object id; must match this deployment.'),
-        request_id: stringSchema('The request id this import batch is scoped to — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'),
+        request_id: stringSchema(
+          'The request id this import batch is scoped to — the request id owned by a content object on this site (content_item, or a page/visual_standard registered as owner).'
+        ),
         urls: arraySchema(
           { type: 'string', minLength: 1 },
           'https URLs: direct images, zip archives, or folder/index pages (max 50).'
@@ -1579,12 +1665,13 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
   {
     name: 'artifact_dedupe_by_sha',
     description:
-      'Admin-only, idempotent, cursor-paged storage compaction: groups live ArtifactReferences by sha256, keeps the OLDEST blob per group as the storageKey for all of them, and deletes the other blobs\' bytes. References are NOT rewritten — every request keeps its own blobKey and its own /img|/pdf public path, which keep serving through the storageKey redirect. Returns { groups, blobs_deleted, bytes_freed } plus a per-group breakdown and a checkpoint cursor. dry_run defaults to TRUE: only an explicit dry_run:false deletes anything.',
+      "Admin-only, idempotent, cursor-paged storage compaction: groups live ArtifactReferences by sha256, keeps the OLDEST blob per group as the storageKey for all of them, and deletes the other blobs' bytes. References are NOT rewritten — every request keeps its own blobKey and its own /img|/pdf public path, which keep serving through the storageKey redirect. Returns { groups, blobs_deleted, bytes_freed } plus a per-group breakdown and a checkpoint cursor. dry_run defaults to TRUE: only an explicit dry_run:false deletes anything.",
     inputSchema: objectSchema({
       dry_run: {
         type: 'boolean',
         default: true,
-        description: 'When true or omitted, report what would be compacted without repointing references or deleting any bytes.',
+        description:
+          'When true or omitted, report what would be compacted without repointing references or deleting any bytes.',
       },
       artifact_kind: {
         type: 'string',
@@ -1604,7 +1691,8 @@ export const TOOL_DEFINITIONS_PART1: ToolDefinition[] = [
       dry_run: {
         type: 'boolean',
         default: true,
-        description: 'When true or omitted, report the orphan candidates and dangling references without soft-deleting anything.',
+        description:
+          'When true or omitted, report the orphan candidates and dangling references without soft-deleting anything.',
       },
       request_prefix: stringSchema('Optional request-id prefix to restrict the sweep to.'),
       older_than: isoDateStringSchema(

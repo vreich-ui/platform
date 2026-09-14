@@ -266,6 +266,8 @@ import {
   callVerifyArticleImages,
   callVerifyPdfContent,
   callRenderArticlePdf,
+  callPreviewPdfTemplateFixture,
+  callDocumentRender,
   callValidatePdfRenderData,
   callGetPdfRenderBrand,
   callCommerceOrders,
@@ -1144,6 +1146,15 @@ const callTool = async (event: LambdaEvent, name: unknown, args: unknown) => {
     // replay the original receipt rather than start a second render.
     case 'render_article_pdf':
       return withBoundIdempotentToolCall(event, name, input.idempotency_key, () => callRenderArticlePdf(event, input));
+    // A8 gap 1: both create a real (paid) render job — same idempotency wrapper as
+    // render_article_pdf / create_agent_artifact_job, for the same reason (a 502/timeout is
+    // ambiguous about whether the job was created).
+    case 'preview_pdf_template_fixture':
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () =>
+        callPreviewPdfTemplateFixture(event, input)
+      );
+    case 'document_render':
+      return withBoundIdempotentToolCall(event, name, input.idempotency_key, () => callDocumentRender(event, input));
     // W2 T2.3: both read-only — no job, no render, no write.
     case 'validate_pdf_render_data':
       return callValidatePdfRenderData(event, input);
