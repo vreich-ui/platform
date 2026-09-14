@@ -46,6 +46,9 @@ export interface ChatToolCatalogEntry {
  *  default; 'lock' makes an artifact job ignore a supplied `style` and use
  *  only the site's own brandImagery. */
 export type BrandImageryOverridePolicy = 'allow' | 'lock';
+/** W21: the capture-plane guardrail mode. Every mode narrows the project registry's
+ *  capturePolicy; none can widen it. Unset resolves to 'open'. */
+export type SiteCaptureMode = 'open' | 'self_only' | 'locked';
 
 export interface GovernanceState {
   doc: {
@@ -54,6 +57,7 @@ export interface GovernanceState {
     chat_tools?: Record<string, ToolAutonomy>;
     learning_mode?: boolean;
     brandImageryOverrides?: BrandImageryOverridePolicy;
+    siteCapture?: SiteCaptureMode;
   } | null;
   committed: { approval: ApprovalConfig; creation: unknown };
   active: {
@@ -61,7 +65,14 @@ export interface GovernanceState {
     creation: unknown;
     learning_mode: boolean;
     brandImageryOverrides: BrandImageryOverridePolicy;
-    provenance: { approval: string; creation: string; learning_mode: string; brandImageryOverrides: string };
+    siteCapture: SiteCaptureMode;
+    provenance: {
+      approval: string;
+      creation: string;
+      learning_mode: string;
+      brandImageryOverrides: string;
+      siteCapture: string;
+    };
   };
   chat_tools_catalog?: ChatToolCatalogEntry[];
 }
@@ -103,9 +114,13 @@ export const setLearningMode = (getToken: GetToken, enabled: boolean) =>
 export const setBrandImageryOverrides = (getToken: GetToken, policy: BrandImageryOverridePolicy) =>
   post<GovernanceState>(getToken, { verb: 'set', brandImageryOverrides: policy });
 
+/** Write the capture-plane guardrail (W21). Owner-only server-side. */
+export const setSiteCapture = (getToken: GetToken, mode: SiteCaptureMode) =>
+  post<GovernanceState>(getToken, { verb: 'set', siteCapture: mode });
+
 export const revertGovernance = (
   getToken: GetToken,
-  target: 'approval' | 'creation' | 'chat_tools' | 'learning_mode' | 'brandImageryOverrides' | 'all'
+  target: 'approval' | 'creation' | 'chat_tools' | 'learning_mode' | 'brandImageryOverrides' | 'siteCapture' | 'all'
 ) => post<GovernanceState>(getToken, { verb: 'revert', target });
 
 /** Effective mode for a type given a config (per-type override, else master). */

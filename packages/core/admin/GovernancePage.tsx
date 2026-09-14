@@ -27,6 +27,7 @@ import {
   setChatToolsOverride,
   setLearningMode,
   setBrandImageryOverrides,
+  setSiteCapture,
   revertGovernance,
   effectiveApprovalMode,
   type GovernanceState,
@@ -35,6 +36,7 @@ import {
   type ChatToolCatalogEntry,
   type ToolAutonomy,
   type BrandImageryOverridePolicy,
+  type SiteCaptureMode,
 } from '@core/lib/admin/governance-client';
 import {
   describeTrackingGovernance,
@@ -49,6 +51,8 @@ import {
   governanceProvenanceLabel,
   toolGroupLabel,
   describeBrandImageryGuardrail,
+  describeSiteCaptureGuardrail,
+  SITE_CAPTURE_LABELS,
   currentAutonomyForCatalog,
 } from '@core/lib/admin/governance-presentation';
 // T1.2 R4: ownership used to come from a PRIVATE `fetchMe` this component
@@ -304,6 +308,7 @@ function GovernanceBody({
       </Card>
 
       <BrandImageryGuardrailCard gov={gov} owner={owner} onSaved={refresh} />
+      <SiteCaptureGuardrailCard gov={gov} owner={owner} onSaved={refresh} />
 
       <ChatToolAutonomyCard
         catalog={gov.chat_tools_catalog ?? []}
@@ -491,6 +496,105 @@ function BrandImageryGuardrailCard({
           </p>
         ))}
         <p>Stored values: allow, lock. Read by create_agent_artifact_job&rsquo;s style resolver.</p>
+      </TechnicalDetails>
+      {owner ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button onClick={save} loading={saving} disabled={saving || draft === active}>
+            Save setting
+          </Button>
+          <Button variant="secondary" onClick={revert} disabled={saving || !overridden}>
+            Revert to site default
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-4 text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
+          Only Owners can change this guardrail.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// ─── site capture guardrail (W21) ──────────────────────────────────────────
+//
+// Three-state, so a Select rather than the Switch its neighbour uses. The
+// crawl BOUNDS are not editable here and deliberately so — they live in the
+// CMS-Agent project registry (one operational home, ruling R-C2 v2). This card
+// only chooses how much of that authority the site currently uses, which is
+// why every option reads as a narrowing of somebody else's decision.
+
+function SiteCaptureGuardrailCard({
+  gov,
+  owner,
+  onSaved,
+}: {
+  gov: GovernanceState;
+  owner: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const active = gov.active.siteCapture;
+  const [draft, setDraft] = useState<SiteCaptureMode>(active);
+  const [saving, setSaving] = useState(false);
+  const overridden = gov.active.provenance.siteCapture === 'override';
+  const view = describeSiteCaptureGuardrail(draft, gov.active.provenance.siteCapture);
+
+  useEffect(() => setDraft(active), [active]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await setSiteCapture(getToken, draft);
+      await onSaved();
+      toast({ title: `Site capture: ${SITE_CAPTURE_LABELS[draft]}`, tone: 'success' });
+    } catch (err) {
+      toast({ title: 'Save failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const revert = async () => {
+    setSaving(true);
+    try {
+      await revertGovernance(getToken, 'siteCapture');
+      await onSaved();
+      toast({ title: 'Site capture guardrail restored to the site default', tone: 'success' });
+    } catch (err) {
+      toast({ title: 'Revert failed', description: err instanceof Error ? err.message : undefined, tone: 'danger' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      kicker="Site capture"
+      title="What agents may crawl"
+      actions={<Badge tone={overridden ? 'accent' : 'neutral'}>{view.provenanceLabel}</Badge>}
+    >
+      <Select
+        label="Capture scope"
+        hint={view.effect}
+        value={draft}
+        disabled={!owner || saving}
+        onChange={(e) => setDraft(e.target.value as SiteCaptureMode)}
+        options={[
+          { value: 'open', label: SITE_CAPTURE_LABELS.open },
+          { value: 'self_only', label: SITE_CAPTURE_LABELS.self_only },
+          { value: 'locked', label: SITE_CAPTURE_LABELS.locked },
+        ]}
+      />
+      <TechnicalDetails>
+        {view.rows.map((row) => (
+          <p key={row.label}>
+            {row.label}: {row.value}
+          </p>
+        ))}
+        <p>
+          Stored values: open, self_only, locked. Read by create_capture_job. This setting can only narrow the
+          project registry&rsquo;s capturePolicy &mdash; it can never add an origin or raise a page limit.
+        </p>
       </TechnicalDetails>
       {owner ? (
         <div className="mt-4 flex flex-wrap gap-2">

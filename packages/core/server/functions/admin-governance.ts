@@ -121,6 +121,9 @@ export const requestSchema = z.discriminatedUnion('verb', [
     /** U2 (BRIEF §3.7/R5): the `style` override channel guardrail on
      *  create_agent_artifact_job. Unset resolves to 'allow' (governance-store.ts). */
     brandImageryOverrides: z.enum(['allow', 'lock']).optional(),
+    /** W21: the capture-plane guardrail. Unset resolves to 'open' — the
+     *  registry policy as handed over (governance-store.ts). Narrows only. */
+    siteCapture: z.enum(['open', 'self_only', 'locked']).optional(),
     /** Wolf 2026-09-09: the genesis policy override — which baseline artifacts
      *  a mint must supply. FLEET-wide by nature, per-tenant by storage; see
      *  server/lib/genesis-policy-verbs.ts for the honest limit of what an
@@ -138,6 +141,7 @@ export const requestSchema = z.discriminatedUnion('verb', [
       'cms_agent_chat_mode',
       'chat_registry',
       'brandImageryOverrides',
+      'siteCapture',
       'genesis',
       'all',
     ]),
@@ -411,6 +415,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         req.learning_mode !== undefined && 'learning_mode',
         req.chat_registry !== undefined && `chat_registry=${req.chat_registry}`,
         req.brandImageryOverrides !== undefined && `brandImageryOverrides=${req.brandImageryOverrides}`,
+        req.siteCapture !== undefined && `siteCapture=${req.siteCapture}`,
         req.genesis !== undefined && `genesis.requiredArtifacts=[${req.genesis.requiredArtifacts.join(', ')}]`,
       ]
         .filter(Boolean)
@@ -428,6 +433,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         ...(req.learning_mode !== undefined ? { learning_mode: req.learning_mode } : {}),
         ...(req.chat_registry !== undefined ? { chat_registry: req.chat_registry } : {}),
         ...(req.brandImageryOverrides !== undefined ? { brandImageryOverrides: req.brandImageryOverrides } : {}),
+        ...(req.siteCapture !== undefined ? { siteCapture: req.siteCapture } : {}),
         ...(req.genesis !== undefined ? { genesis: req.genesis } : {}),
         updated_by: email,
         updated_at: nowIso(),
@@ -444,6 +450,7 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         delete next.cms_agent_chat_mode;
         delete next.chat_registry;
         delete next.brandImageryOverrides;
+        delete next.siteCapture;
         delete next.genesis;
       } else {
         delete next[req.target];
