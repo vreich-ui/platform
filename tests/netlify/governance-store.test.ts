@@ -48,6 +48,8 @@ test('empty store → committed policy, provenance committed', async () => {
   assert.deepEqual(active.creation, activeCreationPolicy());
   assert.equal(active.learning_mode, false);
   assert.equal(active.brandImageryOverrides, 'allow');
+  // W21: an untouched tenant defers to the project registry's capturePolicy, unchanged.
+  assert.equal(active.siteCapture, 'open');
   // Wolf 2026-09-09: `genesis` resolves against a fleet CONSTANT rather than a
   // provider, because the genesis policy has no per-site committed layer — see
   // packages/core/lib/genesis-policy.ts's header for why it cannot have one.
@@ -57,6 +59,7 @@ test('empty store → committed policy, provenance committed', async () => {
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    siteCapture: 'committed',
     genesis: 'committed',
   });
 });
@@ -68,6 +71,7 @@ test('undefined store → committed policy', async () => {
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    siteCapture: 'committed',
     genesis: 'committed',
   });
 });
@@ -141,6 +145,7 @@ test('a corrupt governance doc falls back to committed (never applies)', async (
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    siteCapture: 'committed',
     genesis: 'committed',
   });
 });
@@ -173,6 +178,7 @@ test('a store read that throws degrades to committed', async () => {
     creation: 'committed',
     learning_mode: 'committed',
     brandImageryOverrides: 'committed',
+    siteCapture: 'committed',
     genesis: 'committed',
   });
 });

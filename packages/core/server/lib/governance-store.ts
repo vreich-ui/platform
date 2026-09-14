@@ -77,6 +77,31 @@ export const governanceDocSchema = z.object({
    *  Visual identity guardrail card edits (owner-write, same as `approval`). */
   brandImageryOverrides: z.enum(['allow', 'lock']).optional(),
   /**
+   * W21 (Wolf, 2026-09-14): the per-site guardrail on the CAPTURE plane
+   * (`create_capture_job`). The crawl BOUNDS themselves stay in one operational
+   * home — the CMS-Agent project registry's `ProjectCapturePolicy`, ruling
+   * R-C2 v2 — and this never becomes a second copy of them. It is a MODE, and
+   * every mode can only NARROW what the registry already authorized:
+   *
+   *   'open'      the registry policy stands as handed over. The default when
+   *               unset, deliberately: this is an agent-first CMS and an agent
+   *               that cannot read the site it publishes to is harder to
+   *               operate for no safety gained. Note what 'open' is NOT — the
+   *               registry is still a closed allowlist of origins, so this is
+   *               "as wide as an operator already decided", never "anything".
+   *   'self_only' only this site's own canonical origin survives, whatever else
+   *               the registry authorized. The setting for a tenant that should
+   *               read itself back and crawl nobody else — and the cheap answer
+   *               to a third-party origin left on a record by an old clone job.
+   *   'locked'    no capture at all, without touching the registry or waiting
+   *               on a deploy. The per-surface kill switch's sibling.
+   *
+   * Same Owner bar, same doc, same card as `brandImageryOverrides` above, and
+   * the same fail-open-to-default posture on a missing or corrupt doc: a
+   * guardrail that cannot be read must not silently become a denial.
+   */
+  siteCapture: z.enum(['open', 'self_only', 'locked']).optional(),
+  /**
    * W7.5 — the per-surface kill switch.
    *
    * `member_suspend` cuts a PERSON. This cuts a CHAT APP: when a client starts
@@ -130,6 +155,11 @@ export interface ActivePolicies {
   /** Task 3: the runtime chat-registry override, when one is set. Callers
    *  apply the effective default (`chat_registry ?? 'generated'`) themselves. */
   chat_registry?: 'legacy' | 'generated';
+  /** W21: the capture-plane guardrail in force — doc override when present, else
+   *  'open' (the registry policy as handed over). resolveSiteCaptureMode in
+   *  capture-bridge-policy.ts resolves this SAME field independently for the
+   *  create_capture_job path, which needs no other policy here. */
+  siteCapture: 'open' | 'self_only' | 'locked';
   /** U2 (BRIEF §3.7/R5): the `style` override channel guardrail, resolved the
    *  same way as every other lever here — doc override when present, else the
    *  hardcoded default 'allow'. getBrandImageryOverridePolicy resolves this
@@ -145,6 +175,7 @@ export interface ActivePolicies {
     genesis: PolicyProvenance;
     learning_mode: PolicyProvenance;
     brandImageryOverrides: PolicyProvenance;
+    siteCapture: PolicyProvenance;
   };
 }
 
@@ -173,6 +204,7 @@ export const activePoliciesFromDoc = (doc: GovernanceDoc | null): ActivePolicies
     chat_tools: doc?.chat_tools,
     learning_mode: doc?.learning_mode ?? false,
     brandImageryOverrides: doc?.brandImageryOverrides ?? 'allow',
+    siteCapture: doc?.siteCapture ?? 'open',
     ...(doc?.chat_registry ? { chat_registry: doc.chat_registry } : {}),
     provenance: {
       approval: doc?.approval ? 'override' : 'committed',
@@ -180,6 +212,7 @@ export const activePoliciesFromDoc = (doc: GovernanceDoc | null): ActivePolicies
       genesis: doc?.genesis ? 'override' : 'committed',
       learning_mode: doc?.learning_mode !== undefined ? 'override' : 'committed',
       brandImageryOverrides: doc?.brandImageryOverrides !== undefined ? 'override' : 'committed',
+      siteCapture: doc?.siteCapture !== undefined ? 'override' : 'committed',
     },
   };
 };

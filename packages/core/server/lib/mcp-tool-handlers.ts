@@ -19,6 +19,7 @@
  */
 import { createHash } from 'node:crypto';
 import { getMcpBinding } from './mcp-binding.js';
+import { getGovernanceBlobStore, getGovernanceDoc } from './governance-store.js';
 import { fnv1aHash, parseBrandImagery, toFiniteNumber, type BrandImageryRecord } from './brand-imagery-derive.js';
 import {
   getBrandImageryOverridePolicy,
@@ -130,6 +131,8 @@ export { ARTIFACT_REQUEST_OWNER_TYPES };
 import type { DocumentContentRequirement } from '../../lib/pdf/document-content-check.js';
 import {
   CAPTURE_BRIDGE_MAX_PAGES,
+  applyCaptureGuardrail,
+  resolveSiteCaptureMode,
   validateCaptureBridgePolicy,
   validateCaptureSeedUrl,
 } from './capture-bridge-policy.js';
@@ -4105,6 +4108,35 @@ const capturePolling = (scope: CaptureBridgeScope, jobId: string) => ({
  * the committed site-identity seam — never a caller argument, never a credential. */
 const captureBridgeProjectId = (): string => getSiteIdentity().pdfToolProjectId;
 
+/** The site's capture guardrail mode. A governance blob read, like brand imagery's — and failing
+ *  open to the default for the same reason: a guardrail this plane cannot read must not become an
+ *  outage. */
+const siteCaptureMode = async (event: LambdaEvent) => {
+  try {
+    const store = await getGovernanceBlobStore(event, getMcpBinding());
+    return resolveSiteCaptureMode(await getGovernanceDoc(store));
+  } catch {
+    return resolveSiteCaptureMode(null);
+  }
+};
+
+/** This site's canonical origin, for the `self_only` mode. Only ever read when that mode is set --
+ *  an object-store round trip on every capture would be a cost the default mode never needs. */
+const siteOwnOrigin = async (event: LambdaEvent, siteId: string): Promise<string | undefined> => {
+  try {
+    const lookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
+    if ('isError' in lookup) return undefined;
+    const body = getRecordValue(getRecordValue(lookup.record)?.body);
+    const urls = getRecordValue(body?.urls);
+    const host = toNonEmptyString(urls?.canonicalHost);
+    if (!host) return undefined;
+    const parsed = new URL(host);
+    return parsed.protocol === 'https:' ? parsed.origin : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const callCreateCaptureJob = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const scoped = resolveCaptureBridgeScope(input);
   if (!scoped.ok) return scoped.result;
@@ -4113,7 +4145,16 @@ export const callCreateCaptureJob = async (event: LambdaEvent, input: Record<str
 
   const validated = validateCaptureBridgePolicy(input.policy);
   if (!validated.ok) return toolError(validated.error, { error_code: validated.errorCode });
-  const seed = validateCaptureSeedUrl(rawUrl, validated.policy);
+
+  // W21 — the site's own guardrail, applied BEFORE the seed check so a narrowed policy is what the
+  // seed is judged against (otherwise a caller could seed an origin the guardrail just removed and
+  // get the vaguer out-of-policy error, or worse, pass). Every mode narrows; none can widen.
+  const captureMode = await siteCaptureMode(event);
+  const ownOrigin = captureMode === 'self_only' ? await siteOwnOrigin(event, scoped.scope.siteId) : undefined;
+  const guarded = applyCaptureGuardrail(validated.policy, captureMode, ownOrigin);
+  if (!guarded.ok) return toolError(guarded.error, { error_code: guarded.errorCode });
+
+  const seed = validateCaptureSeedUrl(rawUrl, guarded.policy);
   if (!seed.ok) return toolError(seed.error, { error_code: 'capture_source_out_of_policy' });
 
   const projectId = captureBridgeProjectId();
@@ -4121,7 +4162,7 @@ export const callCreateCaptureJob = async (event: LambdaEvent, input: Record<str
   const created = await createPlatformCaptureJob(projectId, {
     requestId,
     url: seed.url,
-    policy: validated.policy,
+    policy: guarded.policy,
     label: `capture_bridge:${scoped.scope.siteId}`,
   });
   if (!created.ok) return pdfToolBridgeError(created);
@@ -4143,6 +4184,15 @@ export const callCreateCaptureJob = async (event: LambdaEvent, input: Record<str
     projectId,
     requestId,
     effective_max_pages: validated.effectiveMaxPages,
+    // Say which mode answered, always — a crawl that came back narrower than the project registry
+    // authorized should never leave the caller guessing whether that was policy or a bug.
+    site_capture_mode: guarded.mode,
+    ...(guarded.narrowed
+      ? {
+          guardrail_narrowed:
+            "This site's capture guardrail limited the crawl to its own origin; the project registry authorized more.",
+        }
+      : {}),
     ...(validated.clamped
       ? {
           policy_clamped: `maxPages was clamped to the plane's hard ceiling of ${CAPTURE_BRIDGE_MAX_PAGES}; the project policy asked for more.`,

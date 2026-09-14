@@ -63,6 +63,65 @@ export interface BrandImageryGuardrailView {
  *  string without either hardcoding it twice. */
 export const BRAND_IMAGERY_OVERRIDE_REVERT_TARGET = 'brandImageryOverrides' as const;
 
+// ─── W21: the capture-plane guardrail ───────────────────────────────────────
+//
+// Same split as the card above: the store/resolver owns truth, this owns
+// labels and rows. The one thing the copy has to get right is that "Open" does
+// NOT mean "crawl anything" — the project registry is still a closed allowlist
+// of origins — so every string here says whose decision is being deferred to.
+
+export type SiteCaptureMode = 'open' | 'self_only' | 'locked';
+
+export const SITE_CAPTURE_REVERT_TARGET = 'siteCapture' as const;
+
+export const SITE_CAPTURE_DEFAULT: SiteCaptureMode = 'open';
+
+export const SITE_CAPTURE_LABELS: Record<SiteCaptureMode, string> = {
+  open: 'Anything the project registry allows',
+  self_only: "This site's own pages only",
+  locked: 'Off — no site capture',
+};
+
+export const siteCaptureEffect = (mode: SiteCaptureMode): string => {
+  if (mode === 'open') {
+    return 'Agents may crawl any origin listed on this project’s capture policy in the registry — which is a closed allowlist, not the open web.';
+  }
+  if (mode === 'self_only') {
+    return 'Agents may read back this site’s own published pages and nothing else, whatever the registry lists.';
+  }
+  return 'Every capture job is refused here, without changing the registry or waiting on a deploy.';
+};
+
+export interface SiteCaptureGuardrailView {
+  effective: SiteCaptureMode;
+  provenance: 'override' | 'committed';
+  provenanceLabel: string;
+  label: string;
+  effect: string;
+  rows: BrandImageryGuardrailRow[];
+}
+
+/** Pure view-model for the capture guardrail card. */
+export const describeSiteCaptureGuardrail = (
+  effective: SiteCaptureMode,
+  provenance: string
+): SiteCaptureGuardrailView => {
+  const normalizedProvenance: 'override' | 'committed' = provenance === 'override' ? 'override' : 'committed';
+  return {
+    effective,
+    provenance: normalizedProvenance,
+    provenanceLabel: governanceProvenanceLabel(normalizedProvenance),
+    label: SITE_CAPTURE_LABELS[effective],
+    effect: siteCaptureEffect(effective),
+    rows: [
+      { label: 'Effective setting', value: SITE_CAPTURE_LABELS[effective] },
+      { label: 'Source', value: governanceProvenanceLabel(normalizedProvenance) },
+      { label: 'Site default', value: SITE_CAPTURE_LABELS[SITE_CAPTURE_DEFAULT] },
+      { label: 'Crawl bounds', value: 'The CMS-Agent project registry’s capturePolicy — this setting can only narrow it.' },
+    ],
+  };
+};
+
 /**
  * Pure view-model for the guardrail card: the effective value (already
  * resolved server-side — override when set, else the 'allow' default) plus

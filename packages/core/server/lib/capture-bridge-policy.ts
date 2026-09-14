@@ -134,3 +134,89 @@ export const validateCaptureSeedUrl = (raw: string, policy: Record<string, unkno
   }
   return { ok: true, url: url.href };
 };
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// W21 (Wolf, 2026-09-14) — THE PER-SITE CAPTURE GUARDRAIL.
+//
+// Where the registry decides WHAT a project may crawl, this decides how much of that authority
+// the SITE is currently willing to use. It is the capture plane's equivalent of
+// `brandImageryOverrides`: an Owner-set mode on the governance doc, editable from
+// /admin/settings/guardrails with no deploy and no registry write.
+//
+// It fits the module's one rule — this bridge may never widen — because every mode is a filter
+// over the policy the call already carried. There is no mode that adds an origin, raises
+// maxPages, or relaxes an invariant, and there is deliberately no way to express one.
+//
+// `open` is the default because an unset guardrail must mean "as the registry decided", not "off":
+// a tenant nobody has visited the guardrails page for behaves exactly as it did before this
+// existed, and the safety story stays where it belongs — the registry's origin allowlist, the
+// three-sided invariants above, and pdf-tool's own re-validation.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+export type SiteCaptureMode = 'open' | 'self_only' | 'locked';
+
+export const DEFAULT_SITE_CAPTURE_MODE: SiteCaptureMode = 'open';
+
+export type CaptureGuardrailResult =
+  | { ok: true; policy: Record<string, unknown>; mode: SiteCaptureMode; narrowed: boolean }
+  | { ok: false; error: string; errorCode: 'capture_policy_denies' };
+
+/**
+ * Apply the site's guardrail to an ALREADY-VALIDATED bridge policy. Pure: no store, no clock, no
+ * network — the mode and the own origin are resolved by the caller and handed in, so the whole
+ * narrowing table is unit-testable without a governance blob.
+ *
+ * `ownOrigin` is this site's canonical origin (site.urls.canonicalHost). It is only consulted for
+ * `self_only`; a site that cannot report one is refused in that mode rather than silently widened,
+ * because the alternative — falling back to `open` when we cannot tell what "self" means — is the
+ * one failure mode a narrowing guardrail must not have.
+ */
+export const applyCaptureGuardrail = (
+  policy: Record<string, unknown>,
+  mode: SiteCaptureMode,
+  ownOrigin: string | undefined
+): CaptureGuardrailResult => {
+  if (mode === 'locked') {
+    return {
+      ok: false,
+      error:
+        'Site capture is turned off by this site\'s guardrail (Admin → Guardrails → Site capture = Off). The project registry still authorizes it; this site does not.',
+      errorCode: 'capture_policy_denies',
+    };
+  }
+
+  if (mode === 'self_only') {
+    if (!ownOrigin) {
+      return {
+        ok: false,
+        error:
+          'Site capture is limited to this site\'s own pages by its guardrail, but this site reports no canonical origin (site.urls.canonicalHost), so "own" cannot be resolved. Set the canonical host, or change the guardrail.',
+        errorCode: 'capture_policy_denies',
+      };
+    }
+    const origins = (policy.allowedCrawlOrigins as string[]).filter((origin) => origin === ownOrigin);
+    if (origins.length === 0) {
+      return {
+        ok: false,
+        error: `Site capture is limited to this site's own pages (${ownOrigin}) by its guardrail, and the project registry's capturePolicy does not authorize that origin. Add it on the project record, or change the guardrail.`,
+        errorCode: 'capture_policy_denies',
+      };
+    }
+    return {
+      ok: true,
+      policy: { ...policy, allowedCrawlOrigins: origins },
+      mode,
+      narrowed: origins.length < (policy.allowedCrawlOrigins as string[]).length,
+    };
+  }
+
+  return { ok: true, policy, mode, narrowed: false };
+};
+
+/** Read the site's mode off the governance doc. Unset, missing or corrupt → the default (`open`),
+ *  matching getBrandImageryOverridePolicy's fail-open posture: an unreadable guardrail must not
+ *  become an outage on a plane that never had one. */
+export const resolveSiteCaptureMode = (doc: { siteCapture?: string } | null | undefined): SiteCaptureMode => {
+  const mode = doc?.siteCapture;
+  return mode === 'locked' || mode === 'self_only' || mode === 'open' ? mode : DEFAULT_SITE_CAPTURE_MODE;
+};
