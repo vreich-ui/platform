@@ -246,7 +246,9 @@ export const cmsAgentProbe = async (binding: SiteBinding): Promise<CmsAgentProbe
     const probe = await cmsAgentHealthClient.resolveAgent({ role: 'client_manager', project_id: projectId });
     cmsAgentHealthCache.set(projectId, {
       at: now,
-      health: probe.ok ? { ok: true, agent_ref: probe.data } : { ok: false, code: probe.code, message: probe.message },
+      health: probe.ok
+        ? { ok: true, agent_ref: probe.data.agent_ref }
+        : { ok: false, code: probe.code, message: probe.message },
     });
   }
   return { missing, health: cmsAgentHealthCache.get(projectId)!.health };

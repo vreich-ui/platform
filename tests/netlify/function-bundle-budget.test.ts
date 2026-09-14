@@ -245,6 +245,42 @@ const firstPartyBundle = (fn: string) => {
  * closing, not drift. No other file in the graph grew. Headroom rounded to
  * 33 KB (3500 vs the 3467 measured) rather than the tightest number that
  * passed, matching this file's own stated preference above.
+ *
+ * ASV2 (`ui_capabilities` on the turn wire, chat-controls protocol §7) raised
+ * admin-agent-chat 3420 -> 3440, measured at 3425 KB across 260 modules.
+ *
+ * The wave itself ratcheted this twice and landed at 3490 (measured 3471 /
+ * 261): W4.3 added the edge `engine.ts -> lib/admin/ui-capabilities.ts ->
+ * lib/admin/quick-actions.ts -> lib/admin/inventory-chat.ts` (+45 KB) and
+ * W4.1 added `ui-capabilities.ts -> lib/admin/chat-controls.ts` (+24 KB).
+ * Both sessions wrote down the same cut below and neither owned the files.
+ *
+ * ASV2-W5 (the review pass) TOOK BOTH CUTS, so most of that is reclaimed:
+ * the registry DATA now lives in the leaf `lib/admin/quick-actions-registry.ts`
+ * and the field KINDS in the leaf `lib/admin/controls-kinds.ts`;
+ * `quick-actions.ts` and `chat-controls.ts` re-export every moved name, so no
+ * call site changed, and `ui-capabilities.ts` imports the LEAF spelling. Three
+ * modules left this bundle (`quick-actions.ts` 29 KB, `chat-controls.ts` 25 KB,
+ * `inventory-chat.ts` 3.9 KB) and two joined it (7.9 KB + 1.8 KB). VERIFIED by
+ * reproducing this file's own `firstPartyBundle()` before and after:
+ * 3471.4 KB / 261 modules -> 3425.0 KB / 260 modules (the 0.8 KB
+ * difference from the raw cut is ASV2-W5's own comments in `engine.ts`).
+ *
+ * What remains over the wave's 3402 KB / 257 base IS the feature: the manifest
+ * builder, the registry data the server genuinely reads, and the kinds array.
+ * There is no second copy of the verb list on the server — which is the drift
+ * §6.4's offered-verb gate exists to prevent, and the reason the import edge
+ * was right and only its SPELLING was wrong.
+ *
+ * MEASURED ON THE INTEGRATED TREE (ASV2 rebased onto A8, 2026-09-14):
+ * 3494 KB across 262 modules — A8's 3467/259 plus this wave's net +27 KB /
+ * +3 modules after both cuts above. Cap set to 3520 (26 KB headroom), a round
+ * number rather than the tightest one that passes, per this file's own note.
+ *
+ * IF YOU TRIP THIS NEXT: check first that nothing has re-imported
+ * `lib/admin/quick-actions.js` or `lib/admin/chat-controls.js` from server
+ * code or from `ui-capabilities.ts`. Either spelling compiles and either
+ * silently re-adds ~55 KB; only the leaf modules are on the server's diet.
  */
 const BUDGETS_KB: Record<string, number> = {
   // The coalesced shell call — one navigation, one invocation. Capped first
@@ -256,7 +292,7 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3500,
+  'admin-agent-chat': 3520,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

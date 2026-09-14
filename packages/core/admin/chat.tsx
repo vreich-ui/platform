@@ -13,7 +13,7 @@ import { Avatar, Button, Card } from './primitives';
 import { Markdown } from './Markdown';
 import { Textarea } from './forms';
 import { Popover, useToast } from './overlays';
-import { ControlsCard } from './ControlsCard';
+import { ControlsCard, type ControlsActionSurface } from './ControlsCard';
 import { MicButton } from './MicButton';
 import { ApprovalCard, RunProgress, type ApprovalCardProps } from './approval';
 import { SeverityIcon } from './severity';
@@ -591,6 +591,7 @@ export function ChatMessage({
   laterUserTexts,
   busy = false,
   onSendControls,
+  controlsActionSurface,
 }: {
   event: ChatEventView;
   /** Text of every user message that comes AFTER this one in the transcript — used to
@@ -598,6 +599,9 @@ export function ChatMessage({
   laterUserTexts?: string[];
   busy?: boolean;
   onSendControls?: (text: string) => void;
+  /** ASV2-W4.2 — what an §6.1 `actions` block dispatches through. Absent → every
+   *  button disabled with §6.4's reason, which is the honest degradation. */
+  controlsActionSurface?: ControlsActionSurface;
 }) {
   if (event.type === 'user_message') {
     return (
@@ -636,6 +640,7 @@ export function ChatMessage({
             submittedText={findControlsSubmissionText(segment.block.id, laterUserTexts ?? [])}
             busy={busy}
             onSubmit={(brief) => onSendControls?.(brief)}
+            {...(controlsActionSurface ? { actionSurface: controlsActionSurface } : {})}
           />
         );
       })}
@@ -1385,6 +1390,7 @@ export function ChatThread({
   onRejectCandidates,
   onQuote,
   onSendControls,
+  controlsActionSurface,
   emptyHint,
   preferenceScope,
   approvalInStage = false,
@@ -1414,6 +1420,10 @@ export function ChatThread({
   onQuote?: (text: string) => void;
   /** Sends a `controls` submission brief through the same path as the composer. */
   onSendControls?: (text: string) => void;
+  /** ASV2-W4.2 — the row/roles/trace bundle an §6.1 `actions` block runs through.
+   *  The SAME object the surface hands `<ObjectActionStrip>`; absent on a surface
+   *  with no object in focus, which §6.4 renders as every button disabled. */
+  controlsActionSurface?: ControlsActionSurface;
   emptyHint?: React.ReactNode;
   preferenceScope?: string;
   approvalInStage?: boolean;
@@ -1592,6 +1602,7 @@ export function ChatThread({
               laterUserTexts={event.type === 'assistant_text' ? laterUserTextsAfter(event.seq) : undefined}
               busy={busy}
               onSendControls={onSendControls}
+              {...(controlsActionSurface ? { controlsActionSurface } : {})}
             />
           );
         }

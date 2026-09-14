@@ -4,19 +4,24 @@
  * column split is expressed as data here and asserted arithmetically in
  * `agents-hub-layout.test.ts` instead of being verified by rendering.
  *
- * `AgentsHub.tsx`'s grid (`lg:grid-cols-[260px_minmax(0,1fr)]`, `gap-5`) MUST
+ * `AgentsHub.tsx`'s grid (`lg:grid-cols-[220px_minmax(0,1fr)]`, `gap-5`) MUST
  * stay in lockstep with `railPx`/`gapPx` below — Tailwind's arbitrary values
  * have to be literal strings for its content scanner (see `primitives.tsx`'s
  * header comment), so nothing enforces that at compile time. Keep both
  * edits together.
  */
+import { AGENT_SURFACE_LAYOUT, HUB_RAIL_PX } from './agent-surface-layout.js';
+
 export const AGENTS_HUB_LAYOUT = {
-  /** The rail (starters + session list) is now a FIXED width, not a fraction
-   * of the viewport — the old `minmax(0,1fr)` column grew with the window,
-   * squeezing the chat column at exactly the sizes where it mattered most. */
-  railPx: 260,
+  /** The rail (starters + session list) is a FIXED width, not a fraction of
+   * the viewport — the old `minmax(0,1fr)` column grew with the window,
+   * squeezing the chat column at exactly the sizes where it mattered most.
+   * ASV2-W1: 260 → 220. ONE source of truth: the number lives in
+   * `agent-surface-layout.ts` beside the dock's, because hub focus mode and
+   * the dock are the same design decision measured twice. */
+  railPx: HUB_RAIL_PX,
   /** Matches the grid's `gap-5` (Tailwind gap-5 = 1.25rem = 20px). */
-  gapPx: 20,
+  gapPx: AGENT_SURFACE_LAYOUT.gapPx,
 } as const;
 
 /** The chat column's pixel width at a given content width, once the fixed rail and the gap are subtracted. */

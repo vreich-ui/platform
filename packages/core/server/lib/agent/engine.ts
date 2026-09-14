@@ -29,6 +29,7 @@ import {
   type CmsAgentError,
 } from './cms-agent-client.js';
 import { isMembershipTool } from '../mcp-tool-definitions-membership.js';
+import { buildUiCapabilities } from '../../../lib/admin/ui-capabilities.js';
 
 // ─── the seam ────────────────────────────────────────────────────────────────
 
@@ -157,6 +158,15 @@ export type CmsAgentEngineOptions = {
   projectId: string;
   /** `context.site_id` on every turn (the SiteBinding's site singleton id). */
   siteId: string;
+  /**
+   * ASV2-W4.3 — the run principal's freshly-resolved roles, used ONLY to
+   * rights-filter `context.ui_capabilities.actions` (§7). Display-level, like
+   * every other rights read outside a verb: the verb re-derives authority on
+   * every call, so a wrong value here can hide a button, never grant a write.
+   * Optional because a caller that cannot resolve roles should degrade to an
+   * empty manifest, not fail the turn.
+   */
+  roles?: readonly string[];
 };
 
 /**
@@ -188,7 +198,51 @@ const APPROVAL_NOTE =
   'live a workspace run, propose publish_workspace_run — never claim it happened without proposing it. When ' +
   'check_workspace_run_readiness reports no_go, show its checklist and blockers to the editor VERBATIM, not paraphrased.';
 
-const conversationContext = (doc: ChatDoc, run: ChatRun, siteId: string): CmsAgentContext => ({
+/**
+ * ASV2-W4.3 — the capability handshake that lets `context.ui_capabilities`
+ * ship at all (chat-controls protocol §7.1).
+ *
+ * CMS-Agent's `conversationContextSchema` is `.strict()`, so a context field a
+ * deployment does not know is not ignored — it fails the whole request as
+ * `invalid_turn_request`. And because the idempotency claim is written
+ * UPSTREAM of validation (as-built delta 1, the same rule `checkConverseBounds`
+ * exists for), that rejection **burns the `turn_id` permanently**. A field sent
+ * one turn too early therefore does not degrade; it breaks the chat.
+ *
+ * So the order is fixed and is the reverse of a prompt-only mirror: CMS-Agent
+ * accepts the field first, that revision is deployed, and only then does
+ * Platform send it. `agent_resolve` already reports the resolved agent's `rev`,
+ * which makes the handshake free — no env var, no per-tenant operator step, no
+ * manual migration. A tenant still pinned to an older `client_manager` rev
+ * simply sends no manifest and every chat behaves exactly as it does today.
+ *
+ * 8 is the rev at which `client_manager` accepts `ui_capabilities`
+ * (CMS-Agent `agentDefinitions.ts`, ASV2-W4-CA.1/CA.2). The comparison is
+ * `>=`, not `===`, because `ensureConversationalAgentSeeds()` bumps a stored
+ * agent to `rev + 1` only when its stored prompt is byte-identical to a
+ * superseded text: a deployed workspace lands on rev >= 8, but the exact
+ * number is not guaranteed, and an operator-edited prompt is never
+ * auto-upgraded by seeding. An unknown or non-numeric rev reads as below the
+ * gate — the closed side is the safe side.
+ *
+ * The rev is a strong signal and not a proof: it belongs to the stored agent
+ * RECORD, and `agent_update` moves it on any operator edit regardless of what
+ * the deployed service's schema accepts. The one-shot retry in
+ * `cmsAgentEngine` below is what makes the remaining gap non-fatal.
+ */
+export const MIN_AGENT_REV_FOR_UI_CAPABILITIES = 8;
+
+/** Whether this turn may carry the manifest. Pure, so the gate is testable on both sides. */
+export const uiCapabilitiesAllowedAtRev = (rev: unknown): boolean =>
+  typeof rev === 'number' && Number.isFinite(rev) && rev >= MIN_AGENT_REV_FOR_UI_CAPABILITIES;
+
+const conversationContext = (
+  doc: ChatDoc,
+  run: ChatRun,
+  siteId: string,
+  roles: readonly string[],
+  agentRev: number
+): CmsAgentContext => ({
   site_id: siteId,
   // Constraint 7: paired or absent — a free chat sends neither.
   ...(doc.kind === 'object' && doc.object_type && doc.object_id
@@ -200,6 +254,14 @@ const conversationContext = (doc: ChatDoc, run: ChatRun, siteId: string): CmsAge
   // A tone assertion, never authorization — mirrors systemPrompt()'s branch.
   ...(run.diagnostics_requested ? { diagnostics_requested: true } : {}),
   approval_note: APPROVAL_NOTE,
+  // ASV2-W4.3 §7: sent every turn exactly like approval_note, and absent
+  // below the gate — below it the request is byte-identical to today's.
+  // A free chat still sends the manifest, with an empty `actions` list: "I
+  // render these card kinds, and there is no object to act on" is a different
+  // (and more useful) statement than saying nothing at all.
+  ...(uiCapabilitiesAllowedAtRev(agentRev)
+    ? { ui_capabilities: buildUiCapabilities(doc.kind === 'object' ? doc.object_type : undefined, roles) }
+    : {}),
 });
 
 /**
@@ -271,6 +333,7 @@ export const fitToolsToCmsAgentBound = (tools: WireTool[], maxTools: number = CM
 
 export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
   const { client, projectId, siteId } = options;
+  const roles = options.roles ?? [];
   return async ({ doc, run, tools }) => {
     // Constraint 2: the admin surface can stamp an empty principal id — refuse
     // with a clear error rather than sending an unattributable turn.
@@ -284,10 +347,12 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
 
     const resolved = await client.resolveAgent({ role: 'client_manager', project_id: projectId });
     if (!resolved.ok) throw engineFailure(resolved);
-    let agentRef = resolved.data;
+    let agentRef = resolved.data.agent_ref;
+    // §7.1's capability handshake — see MIN_AGENT_REV_FOR_UI_CAPABILITIES.
+    let agentRev = resolved.data.rev;
 
     const messages = trimTranscriptForCmsAgent(run.transcript);
-    const context = conversationContext(doc, run, siteId);
+    let context = conversationContext(doc, run, siteId, roles, agentRev);
     // W18 T18.6b: CMS-Agent bounds the wire to CMS_AGENT_BOUNDS.maxTools. The
     // membership family (16 tools) is the newest and optional; when the run's
     // wire list would exceed the bound, that family is trimmed here — logged,
@@ -315,6 +380,7 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
     let refreshedRef = false;
     let retriedSession = false;
     let retriedToolBound = false;
+    let retriedWithoutManifest = false;
 
     for (;;) {
       const result = await client.converse({
@@ -372,6 +438,43 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
         );
         continue;
       }
+      /**
+       * ASV2-W4.3 — the gate's backstop, and the same shape as the tool-bound
+       * fallback above (T19.8), for the same reason.
+       *
+       * `rev` is a property of the STORED AGENT RECORD; accepting
+       * `ui_capabilities` is a property of the DEPLOYED SERVICE CODE. They move
+       * together on the normal path (ASV2-W4-CA.1 and CA.2 landed in one
+       * change), but nothing in the protocol makes that an invariant, and one
+       * ordinary path breaks it: `agent_update` bumps a stored agent's rev by
+       * one on EVERY edit (workspace store `updateConversationalAgent`). Two
+       * operator prompt edits on a pre-CA.1 workspace sitting at rev 6 put a
+       * rev-8 record in front of a service whose schema still rejects the
+       * field. That rejection is `invalid_turn_request`, and the claim is
+       * already written, so the id is gone either way: the choice is between
+       * losing the id AND the turn, or losing the id and still answering the
+       * editor. Retry once WITHOUT the manifest, under a fresh id.
+       *
+       * The trigger is deliberately not a match on the rejection's wording —
+       * that prose belongs to the other repo and can be reworded at any time.
+       * If the real cause was something else, the retry fails the same way and
+       * the error surfaces.
+       */
+      if (result.code === 'invalid_turn_request' && !retriedWithoutManifest && context.ui_capabilities) {
+        retriedWithoutManifest = true;
+        const { ui_capabilities: _rejected, ...withoutManifest } = context;
+        context = withoutManifest;
+        turnId = `${baseTurnId}_nouc`;
+        console.warn(
+          JSON.stringify({
+            event: 'cms_agent_ui_capabilities_rejected',
+            run_id: run.run_id,
+            agent_rev: agentRev,
+            min_rev: MIN_AGENT_REV_FOR_UI_CAPABILITIES,
+          })
+        );
+        continue;
+      }
       if (result.code === 'agent_unresolved' && !refreshedRef) {
         // Constraint 10: stale/pinned rev — drop the cache, re-resolve once,
         // and mint a FRESH turn_id (a validation-class rejection pinned the old one).
@@ -379,7 +482,27 @@ export const cmsAgentEngine = (options: CmsAgentEngineOptions): TurnEngine => {
         client.invalidateAgentRef('client_manager', projectId);
         const reresolved = await client.resolveAgent({ role: 'client_manager', project_id: projectId });
         if (!reresolved.ok) throw engineFailure(reresolved);
-        agentRef = reresolved.data;
+        agentRef = reresolved.data.agent_ref;
+        // The rev is why we re-resolved; rebuild the context so the retry is
+        // gated on what the agent is NOW, not on the stale ref's rev.
+        if (reresolved.data.rev !== agentRev) {
+          agentRev = reresolved.data.rev;
+          context = conversationContext(doc, run, siteId, roles, agentRev);
+          /**
+           * ASV2-W5 (review) — never PUT BACK a manifest this run already had
+           * rejected. `conversationContext` re-derives `ui_capabilities` from
+           * the new rev, so on the sequence
+           * `invalid_turn_request` (manifest dropped) → `agent_unresolved` →
+           * re-resolve to a rev at or above the gate, this line would resend
+           * the field that just failed — and `retriedWithoutManifest` is
+           * already spent, so the next rejection is terminal and burns the
+           * turn. The drop is one-way for the life of the run.
+           */
+          if (retriedWithoutManifest) {
+            const { ui_capabilities: _stillRejected, ...withoutManifest } = context;
+            context = withoutManifest;
+          }
+        }
         turnId = `${baseTurnId}_r1`;
         continue;
       }
@@ -400,6 +523,8 @@ export type ChatEngineOptions = {
   client: CmsAgentTurnClient;
   projectId: string;
   siteId: string;
+  /** ASV2-W4.3 — see `CmsAgentEngineOptions.roles`; forwarded unchanged. */
+  roles?: readonly string[];
 };
 
 /**
@@ -407,4 +532,9 @@ export type ChatEngineOptions = {
  * run records a coded error; no direct provider call is available here.
  */
 export const buildChatEngine = (options: ChatEngineOptions): TurnEngine =>
-  cmsAgentEngine({ client: options.client, projectId: options.projectId, siteId: options.siteId });
+  cmsAgentEngine({
+    client: options.client,
+    projectId: options.projectId,
+    siteId: options.siteId,
+    ...(options.roles ? { roles: options.roles } : {}),
+  });

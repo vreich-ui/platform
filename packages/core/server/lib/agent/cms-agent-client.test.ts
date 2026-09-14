@@ -7,9 +7,12 @@ import {
   CmsAgentClient,
   checkConverseBounds,
   cmsAgentMissingEnvVars,
+  dropOverBoundsUiCapabilities,
   isCmsAgentConfigured,
   resolveCmsAgentConfig,
   sanitizeCmsAgentPayload,
+  UI_CAPABILITIES_BOUNDS,
+  uiCapabilitiesWithinBounds,
   type CmsAgentConverseRequest,
 } from './cms-agent-client.js';
 
@@ -588,6 +591,69 @@ describe('bounds pre-flight', () => {
     }
     // Right at the limits, all still valid.
     assert.equal(checkConverseBounds(validRequest({ context: { site_id: 's', focus: 'f'.repeat(500) } })), undefined);
+  });
+
+  // ── ASV2-W4.3: context.ui_capabilities (chat-controls protocol §7) ──────
+  //
+  // Every OTHER bound in this file rejects the turn. This one drops the field
+  // and lets the turn go: a turn with no manifest degrades to "every button
+  // disabled", which is honest, where a truncated manifest would silently
+  // claim a capability the surface does not have — and failing the whole turn
+  // over a cosmetic manifest would be worse than either.
+
+  const manifest = (actionCount: number, labelChars = 8) => ({
+    v: 2 as const,
+    controls: ['radio', 'checkbox', 'toggle', 'actions', 'select_object', 'confirm'],
+    actions: Array.from({ length: actionCount }, (_unused, index) => ({
+      verb: `object_verb_${index}`,
+      label: 'x'.repeat(labelChars),
+      params: {},
+    })),
+  });
+
+  it('accepts a manifest inside §7’s bounds and carries it to the wire', async () => {
+    state.behavior.toolData = { usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 }, agent_rev: 8, model: 'm' };
+    const ui_capabilities = manifest(UI_CAPABILITIES_BOUNDS.maxActions);
+    assert.equal(uiCapabilitiesWithinBounds(ui_capabilities), true);
+    const client = new CmsAgentClient();
+    const result = await client.converse(validRequest({ context: { site_id: 's', ui_capabilities } }));
+    assert.equal(result.ok, true);
+    const call = state.requests.find((entry) => entry.rpcMethod === 'tools/call');
+    assert.ok(call!.body.includes('ui_capabilities'), 'an in-bounds manifest rides');
+  });
+
+  it('drops an over-bounds manifest locally and still sends the turn — no turn_id is burned', async () => {
+    state.behavior.toolData = { usage: { input_tokens: 1, output_tokens: 1, cost_usd: 0 }, agent_rev: 8, model: 'm' };
+    const client = new CmsAgentClient();
+    const overCount = validRequest({
+      context: { site_id: 's', ui_capabilities: manifest(UI_CAPABILITIES_BOUNDS.maxActions + 1) },
+    });
+    const result = await client.converse(overCount);
+    assert.equal(result.ok, true, 'the turn still goes');
+    const call = state.requests.find((entry) => entry.rpcMethod === 'tools/call');
+    assert.equal(call!.body.includes('ui_capabilities'), false, 'dropped, not truncated');
+    assert.ok(call!.body.includes('"turn_id":"t_run_1_0"'), 'under its original turn_id');
+    // The caller's own request object is never mutated by the drop.
+    assert.equal(overCount.context.ui_capabilities?.actions.length, UI_CAPABILITIES_BOUNDS.maxActions + 1);
+  });
+
+  it('drops on the serialized-character bound too, and leaves the rest of the context alone', () => {
+    // Few enough actions, far too many characters.
+    const fat = manifest(4, 2_000);
+    assert.ok(JSON.stringify(fat).length > UI_CAPABILITIES_BOUNDS.maxChars);
+    assert.equal(uiCapabilitiesWithinBounds(fat), false);
+    const dropped = dropOverBoundsUiCapabilities(
+      validRequest({ context: { site_id: 's', approval_note: 'keep me', ui_capabilities: fat } })
+    );
+    assert.equal('ui_capabilities' in dropped.context, false);
+    assert.equal(dropped.context.approval_note, 'keep me');
+    assert.equal(checkConverseBounds(dropped), undefined);
+  });
+
+  it('treats an absent manifest as in bounds — absence is a legal state (§7)', () => {
+    assert.equal(uiCapabilitiesWithinBounds(undefined), true);
+    const request = validRequest();
+    assert.equal(dropOverBoundsUiCapabilities(request), request, 'the common case is not even rebuilt');
   });
 
   it('accepts Platform’s real tool count', () => {

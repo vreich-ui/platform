@@ -856,7 +856,10 @@ test('PF2: cmsAgentEngine drives an ask→approve→resume cycle with an event s
     let index = 0;
     const client: CmsAgentTurnClient = {
       async resolveAgent() {
-        return { ok: true, data: 'agt_client_manager@1' };
+        return {
+          ok: true,
+          data: { agent_ref: 'agt_client_manager@1', name: 'Client Manager', rev: 1, model: 'gpt-4.1', status: 'active' },
+        };
       },
       invalidateAgentRef() {},
       async converse(request) {
@@ -1011,7 +1014,13 @@ test('PF5: admin chat always presents Client Manager as the reasoning identity',
   assert.match(source, /name: 'Client Manager'/);
   assert.match(source, /engine: 'cms_agent'/);
   assert.doesNotMatch(source, /agentView\(doc\.run\.profile\)/);
-  assert.match(ui, /kicker="Reasoning agent" title="Client Manager"/);
+  // ASV2-W1.1: hub focus mode removed the static "Reasoning agent" rail card
+  // (starters moved into the chat column's empty state, the rail down to
+  // just the session list) — the identity itself stays pinned above
+  // (`name: 'Client Manager'`, server-side) and is presented in the UI by
+  // the data-driven AgentChip, not a hardcoded label.
+  assert.match(ui, /<AgentChip agent=\{chat\.agent\}/);
+  assert.doesNotMatch(ui, /kicker="Reasoning agent"/);
   assert.doesNotMatch(ui, /<RosterSection owner=\{owner\}/);
 });
 

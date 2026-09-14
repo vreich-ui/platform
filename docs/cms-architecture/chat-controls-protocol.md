@@ -149,3 +149,223 @@ that engine. That means:
   render a `controls` block if the CMS-Agent model happens to emit one (the
   client doesn't care who authored the text), but it won't be _taught_ to
   prefer the pattern the way `off`-mode chats now are.
+
+---
+
+# v2 — clicking beyond a form (ASV2-W0.3)
+
+> Added by the Agent Surface v2 wave. §1–§5 above describe v1 and are
+> unchanged: a v1 block is still valid, still parses, still renders. v2 adds
+> three kinds and one per-turn capability channel. The client is the only
+> authority on what renders; the agent proposes.
+
+## 6. v2 block kinds
+
+A `controls` block is one of two shapes, and the shape is decided by its
+fields:
+
+- a **form block** — one or more `radio` / `checkbox` / `toggle` fields,
+  gathered by a submit button (v1, §1–§3, unchanged);
+- an **action block** — **exactly one** field of kind `actions`,
+  `select_object` or `confirm`, and **no submit button**: the click IS the
+  submission.
+
+Mixing the two in one block is invalid and fails the whole block (§1's
+all-or-nothing rule), because a card cannot both gather and fire. One block
+per assistant message either way.
+
+### 6.1 `actions` — a row of deterministic verbs
+
+    ```controls
+    {
+      "id": "next-step",
+      "title": "Ready when you are",
+      "fields": [
+        {
+          "kind": "actions",
+          "id": "next",
+          "label": "What would you like to do?",
+          "actions": [
+            {"verb": "object_validate", "label": "Validate"},
+            {"verb": "object_submit_review", "label": "Submit for review", "args": {"note": "ready"}},
+            {"verb": "object_publish", "label": "Publish", "tone": "danger"}
+          ]
+        }
+      ]
+    }
+    ```
+
+- `actions` — required, non-empty, at most 6 entries.
+- `verb` — required. **The id of a verb that already exists in
+  `packages/core/lib/admin/quick-actions.ts`.** A block may not invent one;
+  `controls` never widens the verb surface (see §6.4 and "Out of scope" in
+  the wave plan: no new server verbs).
+- `label` — required, the button's text.
+- `args` — optional object of pre-filled parameters. Parameters the editor
+  must still supply are collected by the same `executionFor(params)` path the
+  action strip uses (0 params → run immediately, 1 → popover, 2+ → hand back
+  to chat).
+- `tone` — optional, `default` (omit) or `danger`.
+
+Posts back: `[controls:<id>] ran <verb>` alongside the run's own
+`[action:<verb>] <label> — <receipt>` trace line.
+
+### 6.2 `select_object` — pick one of a finite set of objects
+
+    ```controls
+    {
+      "id": "which-article",
+      "fields": [
+        {
+          "kind": "select_object",
+          "id": "pick",
+          "label": "Which article did you mean?",
+          "objects": [
+            {"object_type": "content_item", "object_id": "req_evergreen_retinol_20260901_01", "title": "Retinol, by skin type", "status": "draft"}
+          ]
+        }
+      ]
+    }
+    ```
+
+- `objects` — required, non-empty, at most 12 entries. Each entry needs
+  `object_type` (1..128) and `object_id` (1..256) — the wire's own bounds for
+  that pair (`engine.ts` Constraint 7), so that a selection is always
+  expressible as a chat binding even though this block does not create one.
+  `title` is optional (falls back to the id); `status` is optional and renders
+  as a pill.
+
+Posts back: `[controls:<id>] selected <object_id>`.
+
+**What the click does NOT do (corrected by the ASV2-W5 review, 2026-09-14).**
+An earlier draft of this section said the selection "becomes the chat's
+`object_type`/`object_id` pair". It does not, and it cannot: a chat's pair is
+fixed when the chat doc is minted (`create_chat kind:'object'`), and
+`conversationContext` in `engine.ts` reads it from that doc on every turn.
+There is no rebind verb and this wave adds none. So a `select_object` click
+posts an ordinary transcript message naming the chosen object and nothing
+else — the conversation stays bound to whatever it was bound to, and the agent
+works from the id in that message. A client that silently repointed the dock
+would ALSO be wrong for a second reason: the receipt carries only
+`object_id`, so the pair would have to be reconstructed from the block the
+agent authored rather than from what the editor actually sent.
+
+If repointing is ever wanted, it is a new capability (a rebind verb, or
+minting a second chat for the chosen object) and needs its own ruling — not a
+sentence in this section.
+
+### 6.3 `confirm` — a two-way door
+
+    ```controls
+    {
+      "id": "publish-now",
+      "fields": [
+        {"kind": "confirm", "id": "go", "label": "Publish this now?", "confirm_label": "Publish", "decline_label": "Not yet", "tone": "danger"}
+      ]
+    }
+    ```
+
+- `confirm_label` / `decline_label` — optional (default "Confirm" / "Cancel").
+- `tone` — optional, `default` or `danger`.
+
+Posts back: `[controls:<id>] confirmed` or `[controls:<id>] declined`.
+
+A `confirm` block is a statement of intent in the transcript, **never an
+authorization**: a privileged tool call still renders its own approval card
+through the existing approval path. Confirming here does not approve there.
+
+### 6.4 The offered-verb rule
+
+A button may only name a verb the surface rendering it is currently offering.
+A button naming anything else renders **disabled with the reason "not
+available here"** — never hidden, matching `resolveObjectControls`'s
+disabled-with-reason convention, so the editor sees that the agent offered
+something the surface cannot do rather than seeing nothing at all. The
+decision is `allowedAction(action, manifest)` in
+`packages/core/lib/admin/chat-controls.ts`.
+
+**Which manifest, precisely (corrected by the ASV2-W5 review, 2026-09-14).**
+An earlier draft said "that turn's `ui_capabilities`". It overstates what
+ships: `ui_capabilities` travels **Platform → CMS-Agent only**, and nothing
+returns it to the browser, so the client never holds the object it was sent.
+What the client actually gates against is a manifest it REBUILDS locally, with
+the same pure builder (`buildUiCapabilities`, `lib/admin/ui-capabilities.ts`)
+and the same two inputs — the focused object's `object_type` and the viewer's
+roles. In practice the two agree, because both sides call one function over
+one registry; but they are **two evaluations, not one value**, and they can
+disagree wherever their inputs differ:
+
+- a surface with no object in focus passes no manifest at all, and every
+  action button renders disabled — even where the server, reading the chat
+  doc, sent a non-empty `actions` list for that same turn;
+- roles are resolved separately (`server/lib/roles.ts` for the manifest,
+  `useCurrentUser()` for the gate), so a stale client session gates on stale
+  roles.
+
+Neither is a security question — §6.4 is display only, and the paragraph below
+is the whole authority story. Returning the manifest to the client on the poll
+would make this one value instead of two; that is a server change and was
+deliberately out of scope for this wave.
+
+Rights are enforced where they always were — in the verb itself and in
+`resolveObjectControls` — not by the presence of a button.
+
+## 7. `ui_capabilities` — what the client can render, per turn
+
+The reason v1 needed §5's mirror at all: chats on the `cmsAgentEngine` path
+get **no system prompt** from Platform, so the agent cannot be told about the
+component library in a prompt Platform writes. `approval_note` was the only
+per-turn channel Platform controlled. `ui_capabilities` is the second, and it
+is structured rather than prose because it changes every turn with the
+focused object.
+
+Sent on `context` next to `approval_note`, on every
+`client_manager.turn.v1` request (`conversationContext` in
+`packages/core/server/lib/agent/engine.ts`):
+
+    "ui_capabilities": {
+      "v": 2,
+      "controls": ["radio", "checkbox", "toggle", "actions", "select_object", "confirm"],
+      "actions": [
+        {"verb": "object_validate", "label": "Validate", "params": {}},
+        {"verb": "object_submit_review", "label": "Submit for review", "params": {"note": {"type": "string", "required": false}}}
+      ]
+    }
+
+- `v` — protocol version, `2`. An agent that does not recognise it ignores
+  the object; the client's behaviour does not depend on the agent having read it.
+- `controls` — the kinds **this client build renders**. It is a capability
+  statement, not a menu: a kind absent here will fall back to a plain code
+  block if the agent emits it anyway.
+- `actions` — the focused object's `QUICK_ACTIONS` entries, **rights-filtered
+  for the caller**, each with its parameter schema. Empty array when no object
+  is in focus (a free chat) or when the caller may run none of them. This is
+  the list §6.4 gates against.
+
+Bounds (checked in `checkConverseBounds` before the request leaves Platform,
+so a violation can never burn a `turn_id`): at most 24 `actions` entries, and
+the serialized `ui_capabilities` object at most 4000 characters. Over either,
+the field is **dropped, not truncated** — a turn with no manifest degrades to
+"every button disabled", which is honest, where a truncated manifest would
+silently claim a capability the surface does not have.
+
+### 7.1 The strict-schema gate (why this cannot ship one-sided)
+
+CMS-Agent's `conversationContextSchema`
+(`src/agent/conversations/conversationContract.ts`) is `.strict()` and its
+JSON-Schema twin sets `additionalProperties: false`. An unknown `context`
+field is therefore **rejected** as `invalid_turn_request` — and since the
+idempotency claim is written upstream of validation, a rejection **burns the
+`turn_id`**. So the order is fixed and is the reverse of a prompt-only mirror:
+
+1. CMS-Agent accepts `ui_capabilities` in the context schema (additive,
+   optional) and teaches Client Manager §6's wording. Its `client_manager`
+   agent `rev` moves.
+2. That revision is **deployed**.
+3. Platform starts sending the field, gated on the resolved agent `rev`
+   (`agent_resolve` already returns `rev`) — below the minimum rev, the field
+   is simply absent and every chat behaves exactly as it does today.
+
+The gate is a capability handshake, not per-tenant operator plumbing: no
+tenant needs a manual step, and a tenant pinned to an older agent rev
+degrades instead of failing.

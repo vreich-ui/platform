@@ -9,15 +9,12 @@
  *   popover       → one field anchored under the chip, then run the verb
  *   chat-handoff  → open this object's chat with the prompt prefilled
  *
- * Both surfaces render through `QuickActionChips` rather than mapping the
- * chip array themselves, because a popover cannot live inside a
- * `() => void`: the chip's `onSelect` raises intent, this component owns the
- * field, the busy state and the receipt. The registry's contract is
- * unchanged — `resolve({row, roles, getToken})` still returns
- * `{id, label, onSelect}` — and rights-gating still happens inside `resolve`.
- * The one thing this file filters is `exclude`: chips a surface already
- * offers through its own controls, so the workspace does not grow a second
- * Publish button beside the first one.
+ * ASV2-W5: what is LEFT here after W3 is the two pieces that outlived the
+ * chip row — `QuickActionPopover` (the one single-field popover, now shared
+ * with `ObjectActionStrip.tsx`, because a popover cannot live inside a
+ * `() => void`) and the Inventory starter chips. The row-based
+ * `QuickActionChips` itself is gone; `ObjectActionStrip` / `ObjectActionMenu`
+ * replaced both of its call sites and added the disabled-with-a-reason gate.
  *
  * Nothing in here is a new component kit: native inputs, the existing
  * `Button` primitive, `--adm-*` tokens, and the shared `.adm-focusable` ring,
@@ -28,32 +25,17 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { navigate } from 'astro:transitions/client';
 
 import { Button } from './primitives';
-import { Popover, useToast } from './overlays';
+import { Popover } from './overlays';
 import { cn } from './utils';
 import {
-  DEFAULT_QUICK_ACTION_REGISTRY,
   inventoryQuickActionChips,
-  runQuickAction,
   type InventoryQuickActionCollection,
   type QuickActionChip,
   type QuickActionValues,
 } from '@core/lib/admin/quick-actions';
-import type { LibraryRow } from '@core/lib/admin/library-logic';
 import type { InventoryChatSelectionItem } from '@core/lib/admin/inventory-chat';
-
-async function getToken(): Promise<string> {
-  const auth = await import('@core/lib/admin/goTrueClient');
-  return (await auth.getAccessToken()) ?? '';
-}
-
-/** The one verb caller, shaped as `bulk-object-ops.ts`'s injectable `VerbCaller`. */
-const callVerb = async (body: Record<string, unknown>) => {
-  const { callObjectVerb } = await import('@core/lib/edit-mode/verbs-client');
-  return callObjectVerb(getToken, body);
-};
 
 const POPOVER_GAP = 6;
 const VIEWPORT_MARGIN = 8;
@@ -65,8 +47,13 @@ const POPOVER_WIDTH = 256;
  * One field, one confirm. Dismissed by Escape, an outside click, or a scroll
  * that would leave it stranded — the dismissal idiom `menus.tsx` already
  * uses, minus the keyboard roving a single radio group does not need.
+ *
+ * ASV2-W3.1: exported so `ObjectActionStrip.tsx` renders the SAME popover
+ * rather than a second one. The registry decides that a one-parameter action
+ * is collected in a popover (`executionFor`); there should be exactly one
+ * thing that popover looks like, whichever surface opened it.
  */
-function QuickActionPopover({
+export function QuickActionPopover({
   chip,
   anchor,
   busy,
@@ -280,122 +267,19 @@ function QuickActionChipButton({
   );
 }
 
-// ─── the chip row ───────────────────────────────────────────────────────────
-
-export interface QuickActionChipsProps {
-  row: LibraryRow;
-  roles: readonly string[];
-  /**
-   * `pill` is the dense row/card affordance (objects plane); `button` is the
-   * action-surface affordance (object workspace). Presentation only — the
-   * chip set and its rights gate are identical either way.
-   */
-  variant?: 'pill' | 'button';
-  /**
-   * Chat hand-off, when the surface already has this object's chat on screen:
-   * seed its composer instead of navigating away. Surfaces without a chat
-   * (the objects plane) omit this and get the default — open the object's
-   * chat and send the prompt, the same path `AgentsHub.tsx`'s starters use.
-   */
-  onSeedComposer?: (prompt: string) => void;
-  /**
-   * Chip ids this surface already offers through its OWN controls, so the
-   * chip row does not render a second Publish button beside the first one.
-   * A surface-level fact, deliberately not a registry-level one: the chip
-   * set for an object is the same everywhere, and this only says which of
-   * them would be a duplicate HERE. Note what excluding does NOT do — the
-   * workspace's own control renders disabled-with-a-reason
-   * (`object-detail-actions.ts`), so nothing is hidden by this; the reason
-   * is still on screen, on the control that owns it.
-   */
-  exclude?: readonly string[];
-  /** Called after a chip changed the record, so the surface can refetch. */
-  onChanged?: () => void;
-  className?: string;
-}
-
-export function QuickActionChips({
-  row,
-  roles,
-  variant = 'pill',
-  exclude,
-  onSeedComposer,
-  onChanged,
-  className,
-}: QuickActionChipsProps) {
-  const { toast } = useToast();
-  const [openId, setOpenId] = useState<string | undefined>();
-  const [busyId, setBusyId] = useState<string | undefined>();
-
-  const run = async (chip: QuickActionChip, values: QuickActionValues) => {
-    setBusyId(chip.id);
-    const result = await runQuickAction(callVerb, chip, row, values);
-    setBusyId(undefined);
-    setOpenId(undefined);
-    toast({
-      title: result.ok ? chip.label : `${chip.label} didn't run`,
-      description: result.receipt,
-      tone: result.ok ? 'success' : 'danger',
-    });
-    // A preview writes nothing, so it is not a reason to refetch.
-    if (result.ok && values.mode !== 'preview') onChanged?.();
-  };
-
-  const handOff = async (chip: QuickActionChip) => {
-    const prompt = chip.prompt ?? '';
-    if (onSeedComposer) {
-      onSeedComposer(prompt);
-      return;
-    }
-    setBusyId(chip.id);
-    try {
-      const { createObjectChat, sendChatMessage } = await import('@core/lib/admin/chat-client');
-      const { chat } = await createObjectChat(getToken, row.object_type, row.object_id, row.display_name);
-      await sendChatMessage(getToken, chat.chat_id, prompt);
-      await navigate(`/admin/agents?chat=${encodeURIComponent(chat.chat_id)}`);
-    } catch (error) {
-      toast({
-        title: "Couldn't open the chat",
-        description: error instanceof Error ? error.message : undefined,
-        tone: 'danger',
-      });
-    } finally {
-      setBusyId(undefined);
-    }
-  };
-
-  // Rights-gating lives inside `resolve` (T2.1's contract) — the only thing
-  // filtered here is the surface's own duplicates, see `exclude`.
-  const resolved = DEFAULT_QUICK_ACTION_REGISTRY.resolve({
-    row,
-    roles,
-    getToken,
-    handlers: {
-      run: (chip, values) => void run(chip, values),
-      openPopover: (chip) => setOpenId((current) => (current === chip.id ? undefined : chip.id)),
-      handOff: (chip) => void handOff(chip),
-    },
-  });
-  const chips = exclude?.length ? resolved.filter((chip) => !exclude.includes(chip.id)) : resolved;
-
-  if (!chips.length) return variant === 'pill' ? <span className="block min-h-[1.5rem]" /> : null;
-
-  return (
-    <span className={cn('flex flex-wrap items-center gap-1', className)}>
-      {chips.map((chip) => (
-        <QuickActionChipButton
-          key={chip.id}
-          chip={chip}
-          variant={variant}
-          open={openId === chip.id}
-          busy={busyId === chip.id}
-          onConfirm={(values) => void run(chip, values)}
-          onCancel={() => setOpenId(undefined)}
-        />
-      ))}
-    </span>
-  );
-}
+/**
+ * ASV2-W5: `QuickActionChips` (the row/button chip row) was DELETED here.
+ *
+ * W3 replaced both of its call sites with `ObjectActionStrip` /
+ * `ObjectActionMenu` (`ObjectActionStrip.tsx`), which resolve the same
+ * registry through `object-action-strip.ts` and add the disabled-with-a-reason
+ * gate the chip row never had. Verified with `rg` across the repo before
+ * removing (AGENTS.md §3.4): zero importers of `QuickActionChips` or
+ * `QuickActionChipsProps` remained. `QuickActionChipButton` below is kept —
+ * `InventoryQuickActionChips` still renders through it — and
+ * `QuickActionPopover` is kept because W3.1 exported it for the strip, so
+ * there is one popover, not two.
+ */
 
 // ─── Inventory starter chips (T5) ───────────────────────────────────────────
 

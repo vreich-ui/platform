@@ -22,6 +22,7 @@
  */
 import { PLATFORM_ENV_NAMES, readBoundEnv, type SiteBindingEnvNames } from '../site-binding.js';
 import type { ChatMsg, ChatToolCall } from './chat-store.js';
+import type { UiCapabilities } from '../../../lib/admin/ui-capabilities.js';
 import type { WireTool } from './provider.js';
 import { parseBlockage, type Blockage } from '../../../lib/admin/blockage.js';
 
@@ -402,6 +403,18 @@ export type CmsAgentContext = {
    */
   diagnostics_requested?: boolean;
   approval_note?: string;
+  /**
+   * ASV2-W4.3 (chat-controls protocol §7), additive and live at agent rev
+   * `MIN_AGENT_REV_FOR_UI_CAPABILITIES` (engine.ts): what the client build on
+   * the other end can render this turn, and the focused object's
+   * rights-filtered quick actions. Absent means "no manifest reached the
+   * client for this turn", which §6.4 reads as "every button disabled" — never
+   * as permission to offer anything.
+   *
+   * The upstream schema is `.strict()`, so this field may only be sent to a
+   * deployment that already accepts it; `cmsAgentEngine` owns that gate.
+   */
+  ui_capabilities?: UiCapabilities;
 };
 
 export type CmsAgentConstraints = { max_tokens: number; timeout_ms: number };
@@ -440,6 +453,52 @@ export type CmsAgentResolveResponse = {
 // ─── bounds pre-flight ───────────────────────────────────────────────────────
 
 const serializedLength = (value: unknown): number => JSON.stringify(value ?? null).length;
+
+/**
+ * ASV2-W4.3 — protocol §7's bounds on `context.ui_capabilities`.
+ *
+ * Same reason as every other bound in this file: the idempotency claim is
+ * written upstream of validation, so a violation that reaches CMS-Agent burns
+ * the `turn_id` permanently. The difference is what happens when the bound is
+ * exceeded. Every OTHER bound here rejects the turn; this one **drops the
+ * field and lets the turn go**. §7 is explicit about why: a turn with no
+ * manifest degrades to "every button disabled", which is honest, while a
+ * truncated manifest would silently claim a capability the surface does not
+ * have — and failing the whole turn over a cosmetic manifest would be worse
+ * than either.
+ */
+export const UI_CAPABILITIES_BOUNDS = { maxActions: 24, maxChars: 4000 } as const;
+
+/** True when the manifest may ride. Absent is always within bounds — absence is a legal state (§7). */
+export const uiCapabilitiesWithinBounds = (value: UiCapabilities | undefined): boolean =>
+  value === undefined ||
+  (value.actions.length <= UI_CAPABILITIES_BOUNDS.maxActions &&
+    serializedLength(value) <= UI_CAPABILITIES_BOUNDS.maxChars);
+
+/**
+ * Return a request whose `context.ui_capabilities` is either within §7's
+ * bounds or absent — never truncated. The same request object comes back
+ * untouched in the overwhelmingly common case, so this costs nothing per turn.
+ *
+ * Called by `converse` BEFORE `checkConverseBounds`, which is the property
+ * that matters: the drop happens locally, before any claim can be written, so
+ * an over-bounds manifest can never cost a `turn_id`.
+ */
+export const dropOverBoundsUiCapabilities = (request: CmsAgentConverseRequest): CmsAgentConverseRequest => {
+  const manifest = request.context.ui_capabilities;
+  if (uiCapabilitiesWithinBounds(manifest)) return request;
+  const { ui_capabilities: _dropped, ...context } = request.context;
+  console.warn(
+    JSON.stringify({
+      event: 'cms_agent_ui_capabilities_dropped',
+      turn_id: request.turn_id,
+      actions: manifest?.actions.length ?? 0,
+      chars: serializedLength(manifest),
+      bounds: UI_CAPABILITIES_BOUNDS,
+    })
+  );
+  return { ...request, context };
+};
 
 /**
  * Check the contract's bounds BEFORE the request leaves Platform.
@@ -591,7 +650,7 @@ export type CmsAgentClientOptions = {
 let requestCounter = 0;
 const nextRequestId = (): string => `pf-${(requestCounter += 1)}`;
 
-type AgentRefCacheEntry = { ref: string; expiresAt: number };
+type AgentRefCacheEntry = { resolved: CmsAgentResolveResponse; expiresAt: number };
 
 /**
  * One client per site binding. Holds at most one MCP session and a short-TTL
@@ -889,11 +948,16 @@ export class CmsAgentClient {
   /**
    * Never hardcode an agent id — resolve it. Cached per (role, project) for a
    * short TTL and dropped on `agent_unresolved` so a rev bump self-heals.
+   *
+   * ASV2-W4.3: returns `agent_resolve`'s WHOLE response rather than just the
+   * ref. `rev` is the capability handshake the `ui_capabilities` field is
+   * gated on (protocol §7.1) — it has to survive the cache, so the cache holds
+   * the response and not a string.
    */
-  async resolveAgent(request: CmsAgentResolveRequest): Promise<CmsAgentResult<string>> {
+  async resolveAgent(request: CmsAgentResolveRequest): Promise<CmsAgentResult<CmsAgentResolveResponse>> {
     const key = `${request.role}:${request.project_id}`;
     const cached = this.agentRefCache.get(key);
-    if (cached && cached.expiresAt > this.now()) return { ok: true, data: cached.ref };
+    if (cached && cached.expiresAt > this.now()) return { ok: true, data: cached.resolved };
 
     const resolved = await this.callTool<CmsAgentResolveResponse>('agent_resolve', { ...request });
     if (!resolved.ok) {
@@ -904,8 +968,8 @@ export class CmsAgentClient {
     if (typeof ref !== 'string' || ref.length === 0) {
       return fail('cms_agent_protocol_error', 'agent_resolve returned no agent_ref.');
     }
-    this.agentRefCache.set(key, { ref, expiresAt: this.now() + AGENT_REF_TTL_MS });
-    return { ok: true, data: ref };
+    this.agentRefCache.set(key, { resolved: resolved.data, expiresAt: this.now() + AGENT_REF_TTL_MS });
+    return { ok: true, data: resolved.data };
   }
 
   /** Forget a cached ref — call after `agent_unresolved` from `agent_converse`. */
@@ -914,7 +978,10 @@ export class CmsAgentClient {
   }
 
   /** One model turn. Bounds are checked locally first so a violation cannot burn the turn_id. */
-  async converse(request: CmsAgentConverseRequest): Promise<CmsAgentResult<CmsAgentConverseResponse>> {
+  async converse(input: CmsAgentConverseRequest): Promise<CmsAgentResult<CmsAgentConverseResponse>> {
+    // §7: an over-bounds manifest is dropped, not truncated, and the turn
+    // still goes — before the bounds check, so nothing about it can reject.
+    const request = dropOverBoundsUiCapabilities(input);
     const bounds = checkConverseBounds(request);
     if (bounds) return { ok: false, ...bounds };
     return this.callTool<CmsAgentConverseResponse>('agent_converse', { ...request });

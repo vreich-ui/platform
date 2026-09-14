@@ -19,10 +19,19 @@ import { Dialog, Popover, useToast } from './overlays';
 import { AgentChip, ChatComposer, ChatStateChip, ChatThread, useChat } from './chat';
 import { RequestActivity, useRetryRequest } from './RequestActivity';
 import { RunApprovalControls, useRunApprovalMode, useTestMode } from './RunApprovalControls';
-import { IconExternalLink, IconFilePlus, IconPalette, IconPencil, IconPlus, IconSparkles } from './icons';
+import {
+  IconExternalLink,
+  IconFilePlus,
+  IconLayoutList,
+  IconPalette,
+  IconPencil,
+  IconPlus,
+  IconSparkles,
+} from './icons';
 import { AGENT_STARTERS, agentStarterByKey, type AgentStarter } from '@core/lib/admin/agent-starters';
 import { createdObjectsFromEvents } from '@core/lib/admin/chat-logic';
 import { objectIdFromEvents } from '@core/lib/admin/chat-liveness';
+import { railVisible } from '@core/lib/admin/hub-focus';
 import { objectWorkspaceHref } from '@core/lib/admin/request-logic';
 import {
   assignProfile,
@@ -305,6 +314,18 @@ function HubBody() {
    */
   const currentUser = useCurrentUser();
   const owner = currentUser.roles.includes('owner') || currentUser.user?.role === 'owner';
+  /**
+   * ASV2-W1.1/W1.2 — hub focus mode. `railToggled` is the ONLY thing the
+   * "Sessions" pill (and, by extension, the rail) tracks client-side; the
+   * pure decision itself lives in `railVisible` (`lib/admin/hub-focus.ts`).
+   * Reset to `undefined` on every `activeId` change so the toggle never
+   * sticks past the conversation the editor asked to see it for — see that
+   * module's header comment for why.
+   */
+  const [railToggled, setRailToggled] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    setRailToggled(undefined);
+  }, [activeId]);
   const [pendingStarter, setPendingStarter] = useState<string | undefined>(undefined);
   const requestedStarterHandled = useRef(false);
   const chat = useChat(getToken, activeId);
@@ -389,109 +410,122 @@ function HubBody() {
    */
   const [runCardStatesStatus, setRunCardStatesStatus] = useState(false);
 
-  return (
-    // A6: the rail is a FIXED 260px (`AGENTS_HUB_LAYOUT.railPx` in
-    // `lib/admin/agents-hub-layout.ts` — keep both edits in lockstep), not a
-    // viewport fraction, so the chat column keeps ≥60% of the content width
-    // at any size instead of being squeezed by a `1fr` rail.
-    <div className="grid min-h-0 gap-5 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[260px_minmax(0,1fr)]">
-      {/* Left: starters + session list */}
-      <div className="flex min-h-0 flex-col gap-4">
-        <Card kicker="Start something" title="New conversation">
-          <div className="grid gap-1">
-            {AGENT_STARTERS.filter((starter) => !starter.ownerOnly || owner).map((starter) => (
-              <Popover
-                key={starter.key}
-                mode="hover"
-                content={starter.description}
-                trigger={(a11y) => (
-                  <button
-                    type="button"
-                    onClick={() => void startConversation(starter)}
-                    disabled={pendingStarter !== undefined}
-                    className="adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-2.5 py-2 text-left hover:border-[var(--adm-accent)]"
-                    {...a11y}
-                  >
-                    <span className="shrink-0 text-[var(--adm-accent)]">{STARTER_ICONS[starter.key]}</span>
-                    <span className="min-w-0 flex-1 truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                      {starter.label}
-                      {pendingStarter === starter.key ? '…' : ''}
-                    </span>
-                  </button>
-                )}
-              />
-            ))}
-          </div>
-        </Card>
+  /**
+   * ASV2-W1.1 — the rail's visibility is the pure decision in
+   * `lib/admin/hub-focus.ts`; this component only owns the toggle state and
+   * the Tailwind literal that has to stay in lockstep with it (see below).
+   */
+  const showRail = railVisible(activeId, railToggled);
 
-        <Card kicker="Reasoning agent" title="Client Manager">
-          <Popover
-            mode="hover"
-            content="If Client Manager is unavailable, the chat stops safely instead of switching to another model."
-            trigger={(a11y) => (
-              <p
-                tabIndex={0}
-                {...a11y}
-                className="adm-focusable cursor-default truncate text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)]"
-              >
-                Every admin conversation runs through CMS-Agent.
-              </p>
-            )}
-          />
-        </Card>
-
-        <Card
-          kicker="Conversations"
-          title="Recent sessions"
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
-          bodyClassName="min-h-0 flex-1 overflow-y-auto"
-        >
-          {chats === null ? (
-            <Skeleton variant="rect" height={120} />
-          ) : chats.length === 0 ? (
-            <EmptyState
-              icon={<IconSparkles size={24} />}
-              title="No conversations yet"
-              message="Start one above, or open any object's workspace — every object has its own agent."
-            />
-          ) : (
-            <ul className="flex flex-col">
-              {chats.map((item) => (
-                <li key={item.chat_id}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveId(item.chat_id)}
-                    className={`adm-focusable w-full border-b border-[var(--adm-border)] px-2 py-2.5 text-left last:border-0 hover:bg-[var(--adm-surface-sunken)] ${
-                      item.chat_id === activeId ? 'bg-[var(--adm-surface-sunken)]' : ''
-                    }`}
-                  >
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
-                        {presentChatSession(item).title}
-                      </span>
-                      <StatusPill
-                        status={item.status}
-                        tone={STATUS_TONE[item.status]}
-                        label={item.status.replaceAll('_', ' ')}
-                      />
-                    </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <Badge tone={item.kind === 'object' ? 'info' : 'neutral'}>
-                        {presentChatSession(item).kindLabel}
-                      </Badge>
-                      {(item.last_outcome?.chips ?? []).map((chip) => (
-                        <Badge key={chip} tone="neutral">
-                          {chip}
-                        </Badge>
-                      ))}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+  /**
+   * ASV2-W1.1 — starters ARE the chat column's empty state now, not a rail
+   * card (design table: "starters ARE the empty state, not a sidebar"). Same
+   * data (`AGENT_STARTERS`), same open-a-starter path (`startConversation`,
+   * unchanged below) — only where this renders moved.
+   */
+  const starterCards = (
+    <div className="mx-auto grid w-full max-w-xl gap-2 text-left sm:grid-cols-2">
+      {AGENT_STARTERS.filter((starter) => !starter.ownerOnly || owner).map((starter) => (
+        <Popover
+          key={starter.key}
+          mode="hover"
+          content={starter.description}
+          trigger={(a11y) => (
+            <button
+              type="button"
+              onClick={() => void startConversation(starter)}
+              disabled={pendingStarter !== undefined}
+              className="adm-focusable flex w-full items-center gap-2 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] bg-[var(--adm-surface)] px-3 py-2.5 text-left hover:border-[var(--adm-accent)]"
+              {...a11y}
+            >
+              <span className="shrink-0 text-[var(--adm-accent)]">{STARTER_ICONS[starter.key]}</span>
+              <span className="min-w-0 flex-1 truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                {starter.label}
+                {pendingStarter === starter.key ? '…' : ''}
+              </span>
+            </button>
           )}
-        </Card>
-      </div>
+        />
+      ))}
+    </div>
+  );
+
+  return (
+    // ASV2-W1.1: the rail is a FIXED 220px (`HUB_RAIL_PX` /
+    // `AGENTS_HUB_LAYOUT.railPx` in `lib/admin/agent-surface-layout.ts` —
+    // keep every edit in lockstep) while visible, not a viewport fraction,
+    // so the chat column keeps ≥60% of the content width at any size
+    // instead of being squeezed by a `1fr` rail. While a conversation is
+    // open the rail slides away entirely (`showRail`, `hub-focus.ts`) and
+    // the grid collapses to a single column — both class strings must stay
+    // LITERAL (not template-interpolated) for Tailwind's content scanner.
+    <div
+      className={
+        showRail
+          ? 'grid min-h-0 gap-5 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[220px_minmax(0,1fr)]'
+          : 'grid min-h-0 gap-5 lg:h-[calc(100dvh-9rem)] lg:grid-cols-[minmax(0,1fr)]'
+      }
+    >
+      {/* Left: session list. Slides away while a conversation is open —
+          brought back by the "Sessions" pill in the chat header, or by
+          picking a different conversation straight out of the ⌘K palette
+          (`AdminShell.tsx`'s "Switch conversation…" entries), which is the
+          hub's session switch for exactly this hidden-rail state. */}
+      {showRail ? (
+        <div className="flex min-h-0 flex-col gap-4">
+          <Card
+            kicker="Conversations"
+            title="Recent sessions"
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            bodyClassName="min-h-0 flex-1 overflow-y-auto"
+          >
+            {chats === null ? (
+              <Skeleton variant="rect" height={120} />
+            ) : chats.length === 0 ? (
+              <EmptyState
+                icon={<IconSparkles size={24} />}
+                title="No conversations yet"
+                message="Start one from the conversation panel, or open any object's workspace — every object has its own agent."
+              />
+            ) : (
+              <ul className="flex flex-col">
+                {chats.map((item) => (
+                  <li key={item.chat_id}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveId(item.chat_id)}
+                      className={`adm-focusable w-full border-b border-[var(--adm-border)] px-2 py-2.5 text-left last:border-0 hover:bg-[var(--adm-surface-sunken)] ${
+                        item.chat_id === activeId ? 'bg-[var(--adm-surface-sunken)]' : ''
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="truncate text-[length:var(--adm-text-sm)] font-medium text-[var(--adm-text)]">
+                          {presentChatSession(item).title}
+                        </span>
+                        <StatusPill
+                          status={item.status}
+                          tone={STATUS_TONE[item.status]}
+                          label={item.status.replaceAll('_', ' ')}
+                        />
+                      </span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                        <Badge tone={item.kind === 'object' ? 'info' : 'neutral'}>
+                          {presentChatSession(item).kindLabel}
+                        </Badge>
+                        {(item.last_outcome?.chips ?? []).map((chip) => (
+                          <Badge key={chip} tone="neutral">
+                            {chip}
+                          </Badge>
+                        ))}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      ) : null}
 
       {/* Right: the active conversation — a fixed-height chat panel at every
           breakpoint (AgentRail's proven pattern): the thread scrolls inside
@@ -524,17 +558,40 @@ function HubBody() {
                   </a>
                 ) : null}
               </span>
-              {active?.kind === 'object' && active.object_id ? (
-                <a
-                  // FIX 7: the shared helper. This copy emitted a bare `?type=`
-                  // for an unknown type; it only worked because `''` is falsy
-                  // where `ObjectWorkspace` decides whether to resolve the id.
-                  href={objectWorkspaceHref(active.object_id, active.object_type)}
-                  className="adm-focusable inline-flex items-center gap-1.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
-                >
-                  <IconExternalLink size={16} /> Open workspace
-                </a>
-              ) : null}
+              <span className="flex shrink-0 items-center gap-2">
+                {/* ASV2-W1.1: the rail auto-hides while a conversation is
+                    open (hub focus mode) — this pill is how it comes back
+                    without leaving the conversation. Only rendered while
+                    hidden; toggling it off again is symmetric. */}
+                {!showRail ? (
+                  <button
+                    type="button"
+                    onClick={() => setRailToggled(true)}
+                    className="adm-focusable inline-flex items-center gap-1.5 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] px-2 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:bg-[var(--adm-surface-sunken)] hover:text-[var(--adm-text)]"
+                  >
+                    <IconLayoutList size={14} /> Sessions
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRailToggled(false)}
+                    className="adm-focusable inline-flex items-center gap-1.5 rounded-[var(--adm-radius-md)] border border-[var(--adm-border)] px-2 py-1 text-[length:var(--adm-text-xs)] font-medium text-[var(--adm-text-muted)] hover:bg-[var(--adm-surface-sunken)] hover:text-[var(--adm-text)]"
+                  >
+                    <IconLayoutList size={14} /> Hide sessions
+                  </button>
+                )}
+                {active?.kind === 'object' && active.object_id ? (
+                  <a
+                    // FIX 7: the shared helper. This copy emitted a bare `?type=`
+                    // for an unknown type; it only worked because `''` is falsy
+                    // where `ObjectWorkspace` decides whether to resolve the id.
+                    href={objectWorkspaceHref(active.object_id, active.object_type)}
+                    className="adm-focusable inline-flex items-center gap-1.5 text-[length:var(--adm-text-sm)] text-[var(--adm-text-muted)] hover:text-[var(--adm-text)]"
+                  >
+                    <IconExternalLink size={16} /> Open workspace
+                  </a>
+                ) : null}
+              </span>
             </div>
             {/* W19: the live view of the job this conversation is about —
                 one line until expanded, and the place an editor watches a
@@ -626,8 +683,9 @@ function HubBody() {
         ) : (
           <EmptyState
             icon={<IconSparkles size={26} />}
-            title="CMS Agents"
-            message="Pick a conversation, or use a starter — create articles, pages from templates, section recipes, or review visual identity. Every write shows an approval card first."
+            title="Start a conversation"
+            message="Pick a starter below, open a session from the rail, or ⌘K to switch. Every write shows an approval card first."
+            action={starterCards}
           />
         )}
       </Card>
@@ -641,7 +699,7 @@ export interface AgentsHubProps {
 
 export default function AgentsHub({ identity }: AgentsHubProps) {
   return (
-    <AdminShell currentPath="/admin/agents" title="CMS Agents" identity={identity}>
+    <AdminShell currentPath="/admin/agents" title="CMS Agents" identity={identity} wide>
       <HubBody />
     </AdminShell>
   );
