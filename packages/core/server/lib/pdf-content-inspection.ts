@@ -22,17 +22,14 @@
  * (pageCount/sizeBytes/reason/findings), which is already scrubbed at the source (pdf-tool's
  * own `agent-artifact-pdf-inspect.ts` contract, and `document-content-check.ts` above it).
  */
-import {
-  MAJOR_KEY_ARTIFACT_REF_RE,
-  PUBLIC_ARTIFACT_PATH_RE,
-  rawArtifactRefForPublicPath,
-} from './artifact-trust.js';
+import { MAJOR_KEY_ARTIFACT_REF_RE, PUBLIC_ARTIFACT_PATH_RE, rawArtifactRefForPublicPath } from './artifact-trust.js';
 import { buildPdfToolStorageGrant } from './pdf-tool-storage-grant.js';
 import { inspectPlatformArtifact, type PdfToolClientOptions } from './pdf-tool-client.js';
 import {
   evaluateDocumentContent,
   parseDocumentContentInspection,
   type DocumentContentFinding,
+  type DocumentContentInspection,
   type DocumentContentRequirement,
 } from '../../lib/pdf/document-content-check.js';
 
@@ -72,18 +69,24 @@ export const resolvePdfArtifactRefFromPublicPath = (
 };
 
 /**
- * Runs the actual content check for one already-resolved PDF artifact. Never throws: every
- * failure mode (bridge not configured, pdf-tool unreachable, the artifact not verifiable,
- * an unparseable inspection response) resolves to `{ status: 'unverified', reason }` rather
- * than a claim this module cannot back up.
+ * The raw half of the check, split out for A8's template-preview handler: resolves and
+ * parses pdf-tool's inspection response for one already-resolved PDF artifact, but stops
+ * short of applying any verdict (no `requirement`, no `evaluateDocumentContent`) — the
+ * caller decides what the numbers mean. Never throws: every failure mode (bridge not
+ * configured, pdf-tool unreachable, an unparseable inspection response) resolves to
+ * `{ ok: false, reason }` rather than a claim this module cannot back up.
+ *
+ * `inspectDocumentContent` below is this function plus the verdict step — kept together so
+ * every existing caller of the verdict-shaped `DocumentContentCheck` is unaffected by this
+ * split.
  */
-export const inspectDocumentContent = async (
-  input: { blobKey: string; sha256?: string; requestId: string; requirement?: DocumentContentRequirement },
+export const resolveDocumentContentInspection = async (
+  input: { blobKey: string; sha256?: string; requestId: string },
   options: PdfToolClientOptions = {}
-): Promise<DocumentContentCheck> => {
+): Promise<{ ok: true; inspection: DocumentContentInspection } | { ok: false; reason: string }> => {
   const built = buildPdfToolStorageGrant();
   if (!built.ok) {
-    return { status: 'unverified', reason: `Content could not be inspected: ${built.error}` };
+    return { ok: false, reason: `Content could not be inspected: ${built.error}` };
   }
 
   const artifactReference: Record<string, unknown> = { blobKey: input.blobKey };
@@ -95,15 +98,33 @@ export const inspectDocumentContent = async (
     // ARTIFACT_NOT_PDF, PDF_INVALID_BYTES, ARTIFACT_BYTES_UNREADABLE, ...) into an MCP-level
     // error itself (see its `errorContent` wrapping) — postPdfTool already surfaces that here
     // as `ok: false`, so there is no separate "successful call, failed body.ok" case to check.
-    return { status: 'unverified', reason: `Content could not be inspected: ${inspected.error}` };
+    return { ok: false, reason: `Content could not be inspected: ${inspected.error}` };
   }
 
   const parsed = parseDocumentContentInspection(inspected.body);
   if (!parsed.ok) {
-    return { status: 'unverified', reason: `Content could not be inspected: ${parsed.reason}` };
+    return { ok: false, reason: `Content could not be inspected: ${parsed.reason}` };
   }
 
-  const verdict = evaluateDocumentContent(parsed.value, input.requirement);
+  return { ok: true, inspection: parsed.value };
+};
+
+/**
+ * Runs the actual content check for one already-resolved PDF artifact. Never throws: every
+ * failure mode (bridge not configured, pdf-tool unreachable, the artifact not verifiable,
+ * an unparseable inspection response) resolves to `{ status: 'unverified', reason }` rather
+ * than a claim this module cannot back up.
+ */
+export const inspectDocumentContent = async (
+  input: { blobKey: string; sha256?: string; requestId: string; requirement?: DocumentContentRequirement },
+  options: PdfToolClientOptions = {}
+): Promise<DocumentContentCheck> => {
+  const resolved = await resolveDocumentContentInspection(input, options);
+  if (!resolved.ok) {
+    return { status: 'unverified', reason: resolved.reason };
+  }
+
+  const verdict = evaluateDocumentContent(resolved.inspection, input.requirement);
   if (verdict.ok) {
     return { status: 'ok', pageCount: verdict.pageCount, sizeBytes: verdict.sizeBytes };
   }
@@ -111,9 +132,31 @@ export const inspectDocumentContent = async (
     status: 'failed',
     reason: verdict.reason,
     findings: verdict.findings,
-    pageCount: parsed.value.pageCount,
-    sizeBytes: parsed.value.sizeBytes,
+    pageCount: resolved.inspection.pageCount,
+    sizeBytes: resolved.inspection.sizeBytes,
   };
+};
+
+/**
+ * `resolveDocumentContentInspection`'s counterpart for a caller that only has the public
+ * path (A8's template-preview handler's position): resolves it to a blobKey first and
+ * reports `{ ok: false }` immediately when the path is not a recognized platform PDF
+ * artifact reference, instead of calling the bridge at all.
+ */
+export const resolveDocumentContentInspectionFromPublicPath = async (
+  publicPath: string,
+  options: PdfToolClientOptions = {}
+): Promise<{ ok: true; inspection: DocumentContentInspection } | { ok: false; reason: string }> => {
+  const resolved = resolvePdfArtifactRefFromPublicPath(publicPath);
+  if (!resolved) {
+    return {
+      ok: false,
+      reason:
+        'Content could not be inspected: this is not a recognized platform PDF artifact path ' +
+        '(expected /pdf/<requestId>/<sha256>.pdf).',
+    };
+  }
+  return resolveDocumentContentInspection(resolved, options);
 };
 
 /**

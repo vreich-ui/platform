@@ -52,17 +52,17 @@ const stubCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
 
 // ─── registry shape ────────────────────────────────────────────────────────
 
-test('the registry has exactly the expected 103 names: every visible TOOL_DEFINITION (64 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + the four image-annotation bridge tools, T-IMG, + derive_render_data_schema, S2) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
+test('the registry has exactly the expected 105 names: every visible TOOL_DEFINITION (64 + 16 membership, W18, + site_apply_brand_imagery, P3, + brand_imagery_propose, P5, + whoami, W7.2, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + the four image-annotation bridge tools, T-IMG, + derive_render_data_schema, S2, + preview_pdf_template_fixture / document_render, A8 gap-1 close) plus the 6 workspace tools and the 5 editorial-request tools (W19 T19.8/T19.8c), no INTERNAL_ONLY member', () => {
   const expectedVisible = new Set(
     ALL_DEFINITIONS.filter((def) => !INTERNAL_ONLY_TOOLS.has(def.name) && !CHAT_HIDDEN_TOOLS.has(def.name)).map(
       (def) => def.name
     )
   );
-  assert.equal(expectedVisible.size, 92);
+  assert.equal(expectedVisible.size, 94);
 
   const registryNames = GENERATED_CHAT_TOOLS.map((tool) => tool.name);
-  assert.equal(registryNames.length, 103);
-  assert.equal(new Set(registryNames).size, 103, 'no duplicate names');
+  assert.equal(registryNames.length, 105);
+  assert.equal(new Set(registryNames).size, 105, 'no duplicate names');
 
   const workspaceNames = [
     'list_workspace_nodes',
@@ -96,10 +96,7 @@ test('the registry has exactly the expected 103 names: every visible TOOL_DEFINI
   // /mcp but still absent from a client's chat registry — R-C5 only ever refused this
   // surface. If one of these ever appears here, the ruling was reversed by accident.
   for (const chatHiddenName of CHAT_HIDDEN_TOOLS) {
-    assert.ok(
-      !registryNames.includes(chatHiddenName),
-      `${chatHiddenName} is CHAT_HIDDEN and must not be chat-visible`
-    );
+    assert.ok(!registryNames.includes(chatHiddenName), `${chatHiddenName} is CHAT_HIDDEN and must not be chat-visible`);
   }
 });
 
@@ -124,9 +121,9 @@ test('every registry tool that routes to the operational bridge has a handler wi
   );
 });
 
-test('wire-tool budget: the non-membership registry (87) + present_candidates <= 99; the DEFAULT wire fits the bound untouched while the full 103-tool registry trims the membership family (16, W18 T18.6b) WHOLE; serialized registry under the 200_000 char budget', () => {
+test('wire-tool budget: the non-membership registry (89) + present_candidates <= 99; the DEFAULT wire fits the bound untouched while the full 105-tool registry trims the membership family (16, W18 T18.6b) WHOLE; serialized registry under the 200_000 char budget', () => {
   const nonMembership = GENERATED_CHAT_TOOLS.filter((tool) => !isMembershipTool(tool.name));
-  assert.equal(nonMembership.length, 87);
+  assert.equal(nonMembership.length, 89);
   // W19 T19.8: the old ceiling was 64 and the registry sat at exactly 63 + the
   // learning-mode tool — no headroom at all, so one more tool would have been
   // silently sliced off the wire. The bound moved to 96 on both sides.
@@ -627,8 +624,8 @@ test('compileSchema throws at compile time on an unsupported keyword', () => {
   );
 });
 
-test('every one of the 111 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
-  assert.equal(ALL_DEFINITIONS.length, 111);
+test('every one of the 113 TOOL_DEFINITIONS inputSchemas compiles without throwing', () => {
+  assert.equal(ALL_DEFINITIONS.length, 113);
   for (const def of ALL_DEFINITIONS) {
     assert.doesNotThrow(() => compileSchema(def.inputSchema), `${def.name}'s inputSchema failed to compile`);
   }

@@ -21,8 +21,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 describe('Tool definitions', () => {
-  it('has exactly 111 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2, + genesis_policy_get / genesis_policy_set, W3 Wolf 2026-09-09, + artifact_dedupe_by_sha / artifact_orphan_sweep, W2 T2.6/T2.7, + artifact_request_register_owner, W1 T1.4)', () => {
-    assert.strictEqual(TOOL_DEFINITIONS.length, 111, `Expected 111 tools, got ${TOOL_DEFINITIONS.length}`);
+  it('has exactly 113 definitions (71 + the 16 membership tools, W18 T18.6b, + membership_status, T18.7, + resume_agent_artifact_job + site_apply_brand_imagery, P3, + whoami, W7.2, + brand_imagery_propose, P5, + build_pdf_render_data, W2 T2.1, + verify_pdf_content, W2 T2.4, + render_article_pdf / validate_pdf_render_data / get_pdf_render_brand, W2 T2.3, + analytics_summary / analytics_top_content / analytics_object, R12.3 T21.20, + content_search, W-CS, + annotate_image / analyze_image_layout / preview_image_grid / check_image_text, T-IMG, + derive_render_data_schema, S2, + genesis_policy_get / genesis_policy_set, W3 Wolf 2026-09-09, + artifact_dedupe_by_sha / artifact_orphan_sweep, W2 T2.6/T2.7, + artifact_request_register_owner, W1 T1.4, + preview_pdf_template_fixture / document_render, A8 gap-1 close)', () => {
+    assert.strictEqual(TOOL_DEFINITIONS.length, 113, `Expected 113 tools, got ${TOOL_DEFINITIONS.length}`);
   });
 
   it('all definitions have unique names', () => {
@@ -514,7 +514,8 @@ describe('create_pdf_template teaches the template shape BEFORE the call', () =>
   const templateJsonDescription = (() => {
     const tool = TOOL_DEFINITIONS.find((definition) => definition.name === 'create_pdf_template');
     assert.ok(tool, 'create_pdf_template is defined');
-    const properties = (tool!.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
+    const properties =
+      (tool!.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
     return properties.template_json?.description ?? '';
   })();
 
