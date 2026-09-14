@@ -723,7 +723,17 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
   # command above runs ../../scripts/*.mjs directly and \`npm ci --prefix ../..\` off the root
   # lockfile, so a root-only change to either was being skipped here exactly like the
   # packages/core gap PR #501 fixed for the shared workspace.
-  ignore = "git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/${ids.clientSlug} packages/core scripts package.json package-lock.json"
+  #
+  # PRODUCTION IS PROMOTED, NOT PUSHED (cloud-cost N1). The guard in front of the
+  # diff skips any build of the production branch, so a merge to main no longer
+  # fans out into one charged production deploy per fleet site; deploy previews
+  # and branch deploys fall through to the path-scoped diff unchanged. Netlify
+  # does not run the ignore command at all for a build triggered by a BUILD HOOK
+  # (docs.netlify.com/build/configure-builds/ignore-builds), which is what keeps
+  # release_to_production and \`node scripts/fleet-promote.mjs\` working: those
+  # are the deliberate ways this site goes live. Both CONTEXT and BRANCH are
+  # tested because only BRANCH is documented as available to the ignore command.
+  ignore = 'if [ "$CONTEXT" = "production" ] || [ "$BRANCH" = "main" ]; then exit 0; fi; git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/${ids.clientSlug} packages/core scripts package.json package-lock.json'
 [build.environment]
   NODE_VERSION = "20"
   # Same omission the root netlify.toml carries (W15 S3 parity): the secrets

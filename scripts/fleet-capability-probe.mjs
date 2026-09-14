@@ -66,6 +66,10 @@ export const FLEET_SITES = [
   // Fleet tenant #4 (T12.12, minted 2026-08-14) — added here by W18 T18.7 (P1: the probe map
   // is part of what a tenant's existence must update).
   { slug: 'zilberman', endpoint: 'https://zilbermanfilmfoundation.netlify.app/.netlify/functions/mcp' },
+  // Fleet tenant #5 — added when the production build gate landed (cloud-cost N1): the
+  // promote script reads this same map, so a site missing here is a site that silently
+  // never gets promoted, which is a worse failure than a missing probe column.
+  { slug: 'genesis-lab-2', endpoint: 'https://kugel-genesis-lab-2.netlify.app/.netlify/functions/mcp' },
 ];
 
 // ── the ten families capability_status reports on. MUST stay in sync with

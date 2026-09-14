@@ -565,6 +565,26 @@ export const computeAdminParity = (target) => {
     fnProblems.length ? fnProblems.join('; ') : 'functions directory + keepalive schedule declared'
   );
 
+  // 5b. The production build gate (cloud-cost N1). A tenant whose netlify.toml has
+  // no gate rejoins the merge-to-main fan-out — one charged production deploy per
+  // site per shared-code commit — and nothing else in the fleet would report it.
+  // Checked on the ignore line itself rather than by byte equality, because the
+  // path-scoped tail legitimately names each site's own directory.
+  const ignoreLine = toml.split('\n').find((line) => /^\s*ignore\s*=/.test(line)) ?? '';
+  const gateProblems = [];
+  if (!toml) gateProblems.push(`missing ${path.relative(repoRoot, target.tomlPath)}`);
+  else if (!ignoreLine) gateProblems.push('no ignore command in the [build] block (every main push builds this site)');
+  else if (!/\$CONTEXT|\$BRANCH/.test(ignoreLine) || !/exit 0/.test(ignoreLine)) {
+    gateProblems.push('ignore command has no production gate (main pushes still trigger charged production deploys)');
+  }
+  add(
+    'production-build-gate',
+    'netlify.toml skips production builds from git; production is reached via build hook (release_to_production / fleet-promote)',
+    'scaffold (create-site) | migrate-site --admin-parity',
+    gateProblems.length ? 'GAP' : 'PASS',
+    gateProblems.length ? gateProblems.join('; ') : 'production gate present ahead of the path-scoped diff'
+  );
+
   // 6+7. Canonical infra redirects, incl. the S1 admin rewrite.
   const tomlRedirects = toml ? parseNetlifyTomlRedirects(toml) : [];
   const redirectProblems = [];

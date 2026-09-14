@@ -868,6 +868,31 @@ test('the emitted netlify.toml carries an ignore command covering both the site 
   }
 });
 
+test('the emitted netlify.toml skips production builds, leaving previews alone', () => {
+  // cloud-cost N1. A merge to main used to trigger one CHARGED production deploy on
+  // every fleet project at once, because packages/core is in every site's ignore
+  // list. Production is now reached deliberately — release_to_production's build
+  // hook for content, scripts/fleet-promote.mjs for code — and Netlify does not run
+  // the ignore command at all for a hook-triggered build, so neither path is
+  // affected by this guard. A site minted without it rejoins the fan-out silently,
+  // which is the whole reason this lives in the template and not in four files.
+  const plan = buildPlan({ name: 'acme' });
+  const toml = plan.files.find((f) => f.path === 'sites/acme/netlify.toml');
+  assert.ok(toml);
+
+  const ignoreLine = toml.content.split('\n').find((line) => /^\s*ignore\s*=/.test(line));
+  assert.ok(ignoreLine, 'expected an ignore = "..." line in the [build] block');
+  assert.match(ignoreLine, /\$CONTEXT/, 'production gate must test $CONTEXT');
+  assert.match(ignoreLine, /\$BRANCH/, 'production gate must test $BRANCH too — only BRANCH is documented as available here');
+  assert.match(ignoreLine, /exit 0/, 'the gate must SKIP (exit 0) on production, not build');
+
+  // The guard has to come BEFORE the path diff: behind it, a production build whose
+  // paths happened to change would still run, which is the case that costs the most.
+  const gateAt = ignoreLine.indexOf('$CONTEXT');
+  const diffAt = ignoreLine.indexOf('diff --quiet');
+  assert.ok(gateAt > -1 && diffAt > -1 && gateAt < diffAt, 'the production gate must precede the path-scoped diff');
+});
+
 test('re-running against an existing sites/<client>/ is a no-op plan-wise (the caller checks existence before writeFiles)', () => {
   // buildPlan itself is pure/idempotent — same input, same output — the
   // existence check that makes re-runs a no-op lives in main()'s CLI flow

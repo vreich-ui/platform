@@ -208,7 +208,11 @@ test('membership_status is callable over /mcp but never advertised in tools/list
 test('fleet-capability-probe: every FLEET_SITES tenant passes the repo-side membership checks (sweep declared, templates, committed policy override registered)', () => {
   assert.deepEqual(
     FLEET_SITES.map((s: { slug: string }) => s.slug),
-    ['drlurie', 'platform', 'fernwell', 'zilberman']
+    // The roster is asserted literally on purpose: FLEET_SITES is what --all iterates and
+    // what scripts/fleet-promote.mjs promotes, so a tenant added to the fleet without being
+    // added here is a tenant nothing sweeps and nothing ships. genesis-lab-2 joined when the
+    // production build gate landed (cloud-cost N1).
+    ['drlurie', 'platform', 'fernwell', 'zilberman', 'genesis-lab-2']
   );
   for (const { slug } of FLEET_SITES as Array<{ slug: string }>) {
     const checks = membershipRepoChecks(slug) as Record<string, string>;
