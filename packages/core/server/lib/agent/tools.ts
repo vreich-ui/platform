@@ -37,10 +37,12 @@ import type { RequestKind } from '../requests/store.js';
 import {
   needsDurableRegistration,
   operationRequestKind,
+  parseOperationExecuteResult,
   parseOperationGet,
   parseOperationList,
   parseOperationPreflight,
   requestKindForWorkflow,
+  type OperationEffect,
 } from './operation-catalog.js';
 
 /** W18 T18.6a: `membership` tools are `ask`-class by construction (autonomyFloor 'ask'; definitions in T18.6b). */
@@ -955,8 +957,30 @@ const preflightOperationTool: ChatTool = {
 // refusing on it would block every operation, including working ones.
 // #313: an operation id is NOT a workflow id — the workflow to dispatch, and
 // the input rename for it, come ONLY from pf.binding; see below.
+//
+// A4 (CMS-Agent #321): an operation is now implemented by EITHER a
+// registered workflow OR a registered executor — never both
+// (operationExecutorBindings.ts asserts this at import on the CMS-Agent
+// side). `dispatch` is a discriminated union, not a pair of optional fields,
+// specifically so the two kinds can never both be present (nothing to route
+// on two ids at once) and never both be silently absent on a resolved
+// success (every `ok: true` selection commits to exactly one `mode`, checked
+// by the compiler at every call site — see runWorkspaceWorkflow.execute()).
+type CatalogDispatch = { mode: 'workflow'; workflowId: string } | { mode: 'executor'; operationId: string };
+
 type CatalogOperationSelection =
-  | { ok: true; workflowId: string; kind: RequestKind; title?: string; input: Record<string, unknown> }
+  | {
+      ok: true;
+      dispatch: CatalogDispatch;
+      kind: RequestKind;
+      title?: string;
+      input: Record<string, unknown>;
+      // The descriptor's own declared effects, carried through so the
+      // executor dispatch path (runExecutorOperation, below) can honour
+      // needsDurableRegistration itself rather than assuming "executor ⇒
+      // always a pure read" — see that function's own comment.
+      effects?: OperationEffect[];
+    }
   | { ok: false; content: string };
 
 const resolveCatalogOperation = async (
@@ -1024,12 +1048,47 @@ const resolveCatalogOperation = async (
       }),
     };
   }
+  // A4: an operation carrying an EXECUTOR binding dispatches through
+  // operation.execute, never through workflow_start_dry_run — checked
+  // BEFORE the workflow branch below so an executor-bound operation (which
+  // may legitimately have no workflow binding.workflowId at all — the two
+  // are mutually exclusive on the CMS-Agent side) never falls into the
+  // workflow branch's "no implementing workflow bound yet" refusal. That
+  // refusal is scoped to the *workflow* kind only; it must never fire
+  // spuriously here.
+  if (pf.executorBinding) {
+    const mergedInput: Record<string, unknown> = { ...(pf.appliedDefaults ?? {}), ...modelInput };
+    // NO inputMapping on this path — deliberately, not an oversight. A
+    // workflow binding renames this operation's fields to a DIFFERENT
+    // node's vocabulary (that node speaks its own field names, e.g.
+    // `projectId`/`apply`); an executor has no second vocabulary to
+    // translate into — CMS-Agent writes it FOR this operation, and it
+    // consumes the operation's OWN input directly, under the SAME field
+    // names (operationExecutorBindings.ts's own header, CMS-Agent side).
+    // So there is nothing here to rename.
+    //
+    // tenantId is still cmsAgent.projectId, applied LAST, under the
+    // operation's own (unrenamed) `tenantId` key — the identical scope
+    // guarantee the workflow branch gives below, just with no rename step
+    // for a model-supplied value to hide behind.
+    mergedInput.tenantId = cmsAgent.projectId;
+    return {
+      ok: true,
+      dispatch: { mode: 'executor', operationId: descriptor.operationId },
+      kind: operationRequestKind(descriptor.operationId),
+      title: descriptor.title,
+      input: mergedInput,
+      effects: pf.effects,
+    };
+  }
+
   // #313: descriptor.operationId (e.g. `visual_identity_review_change`) is
   // NOT the workflow id CMS-Agent's workflowRegistry knows (e.g.
   // `visual_identity`) — dispatching it there is the defect CMS-Agent #317
   // now refuses loudly instead of mis-routing to publishing_conductor. Fail
   // safe like the checks above: cleared readiness but no binding.workflowId
-  // still refuses here, never a guessed fallback.
+  // still refuses here, never a guessed fallback. (An executor-bound
+  // operation never reaches this line — see the branch above.)
   const workflowId = pf.binding?.workflowId;
   if (!workflowId) {
     return {
@@ -1063,10 +1122,150 @@ const resolveCatalogOperation = async (
   mappedInput[tenantScopeKey] = cmsAgent.projectId;
   return {
     ok: true,
-    workflowId,
+    dispatch: { mode: 'workflow', workflowId },
     kind: operationRequestKind(descriptor.operationId),
     title: descriptor.title,
     input: mappedInput,
+    effects: pf.effects,
+  };
+};
+
+// A4 — dispatches an executor-bound operation through operation.execute: a
+// direct, in-process run with no workflow run and no node graph (see
+// resolveCatalogOperation's executor branch, above). Read-only operations —
+// needsDurableRegistration(selection.effects) === false, which in practice
+// is EVERY operation.execute success, since CMS-Agent's own read-only gate
+// on that entrypoint (checkOperationIsReadOnly, operationTools.ts) refuses
+// anything whose effects are not all riskLevel "read" before an executor
+// ever runs — answer INLINE: no requestId is minted, ctx.requests.register
+// is never called, and no req_… id appears anywhere in the response. There
+// is nothing "running" to track; the operation already finished by the time
+// this function returns. The write/publish branch below is fail-safe
+// plumbing for an invariant this function does not itself enforce (Platform
+// trusts CMS-Agent's gate rather than re-deriving it) — kept so a future
+// change to that gate is never silently mishandled here into a phantom
+// unregistered write.
+const runExecutorOperation = async (
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+  selection: Extract<CatalogOperationSelection, { ok: true }>
+): Promise<ToolResult> => {
+  if (selection.dispatch.mode !== 'executor') {
+    // Unreachable — the one caller (runWorkspaceWorkflow.execute) only
+    // invokes this function when dispatch.mode is 'executor'. Fails closed
+    // rather than mis-dispatching a workflow-bound selection through
+    // operation.execute.
+    return {
+      content: json({ error: 'Internal: runExecutorOperation called for a non-executor dispatch.', code: 'internal_error' }),
+      is_error: true,
+    };
+  }
+  const cmsAgent = ctx.cmsAgent as NonNullable<ToolContext['cmsAgent']>;
+  const executed = await cmsAgent.callTool<Record<string, unknown>>('operation_execute', {
+    operationId: selection.dispatch.operationId,
+    tenantId: cmsAgent.projectId,
+    input: selection.input,
+  });
+  if (!executed.ok) {
+    // NOT-YET-GRANTED, diagnosed rather than guessed. CMS-Agent's
+    // cms-agent-client.ts collapses EVERY 401/403 from its MCP endpoint into
+    // one opaque `cms_agent_auth_failed` BY DESIGN ("Wrong project and bad
+    // token are a byte-identical opaque 401 upstream... the client must not
+    // imply it can tell them apart" — that module's own comment) — and
+    // mcpEndpoint.ts's scoped-bearer check returns that SAME 401 for a tool
+    // simply missing from this bearer's toolAllowlist, or for a call whose
+    // arguments the endpoint's project-scope check cannot recognize at all
+    // (it reads only `projectId`/`project_id`; operation_execute's own input
+    // is scoped by `tenantId` — a cross-tenant pin gap tracked and fixed on
+    // the CMS-Agent side, not here). So THIS module cannot tell "bad
+    // credential" apart from "this bearer isn't granted operation_execute"
+    // from the wire alone, either.
+    //
+    // But it does not have to guess blind: `operation_get` and
+    // `operation_preflight`, moments earlier in THIS SAME
+    // resolveCatalogOperation call, already succeeded with this EXACT
+    // bearer for this EXACT tenant — proving the credential itself is valid
+    // and correctly scoped. An auth failure landing specifically on the
+    // THIRD call, operation_execute, with the same bearer that just worked
+    // twice, can only be that this bearer's EXECUTE surface for catalog
+    // operations is not (yet) usable — never a bad credential (already
+    // disproved this turn) and never something a retry of the identical
+    // call fixes (the next attempt hits the identical, unretryable 401
+    // until an operator acts). Name that plainly and point at the fix,
+    // rather than relaying the client's deliberately-vague generic message.
+    if (executed.code === 'cms_agent_auth_failed') {
+      return {
+        content: json({
+          error:
+            "This site's chat credential cannot run catalog operations yet — CMS-Agent refused operation_execute as unauthorized even though the SAME credential just succeeded, moments earlier in this same request, for the read-only preflight on this exact operation. That combination only happens when the execute surface itself is not yet granted to this tenant's credential, not when the credential is wrong. An operator needs to run the credential reconciler for this site to grant it; retrying this exact request will not help until that happens.",
+          code: 'operation_execute_not_granted',
+          evidence: { operationId: selection.dispatch.operationId },
+        }),
+        is_error: true,
+      };
+    }
+    return { content: json({ error: executed.message, code: executed.code }), is_error: true };
+  }
+  const parsed = parseOperationExecuteResult(executed.data);
+  if (!parsed) {
+    return {
+      content: json({
+        error: 'operation_execute returned an unreadable result.',
+        code: 'operation_execute_unreadable',
+      }),
+      is_error: true,
+    };
+  }
+  // Relay CMS-Agent's REAL refusal — code, message, evidence — rather than
+  // flattening every shape (not_read_only / unknown_operation / input_invalid
+  // / no_executor_binding / executor_failed) into one generic "it failed".
+  // `executed !== true` alone (with no `refusal`) still refuses, fail-safe,
+  // rather than being read as an empty success.
+  if (parsed.executed !== true || parsed.refusal) {
+    const refusal = parsed.refusal;
+    return {
+      content: json({
+        error: refusal?.message ?? 'The operation refused to execute.',
+        code: refusal?.code ?? 'operation_execute_refused',
+        ...(refusal?.evidence !== undefined ? { evidence: refusal.evidence } : {}),
+      }),
+      is_error: true,
+    };
+  }
+
+  if (needsDurableRegistration(selection.effects)) {
+    // See this function's own header — unreachable while CMS-Agent's
+    // read-only gate holds, kept as a fail-safe path rather than silently
+    // skipping registration for a write/publish result.
+    const requestId = (args.request_id as string | undefined) ?? (await mintWorkspaceRequestId(ctx, args));
+    const briefInput = (args.input ?? {}) as Record<string, unknown>;
+    await ctx.requests?.register({
+      request_id: requestId,
+      kind: selection.kind,
+      title: requestTitleFrom(briefInput, selection.title ?? requestId),
+    });
+    return {
+      content: json({
+        operation_id: parsed.operationId,
+        request_id: requestId,
+        result: parsed.result,
+        completion: parsed.completion ?? [],
+      }),
+      is_error: false,
+    };
+  }
+
+  // THE fix (item 3): a pure read answers inline and registers NOTHING — no
+  // req_… id is minted, ctx.requests.register is never invoked, and no
+  // phantom running entry appears in the requests list for an operation that
+  // already finished before this call returned.
+  return {
+    content: json({
+      operation_id: parsed.operationId,
+      result: parsed.result,
+      completion: parsed.completion ?? [],
+    }),
+    is_error: false,
   };
 };
 
@@ -1076,7 +1275,7 @@ const runWorkspaceWorkflow: ChatTool = {
   autonomyFloor: 'ask',
   discloseResult: true,
   description:
-    'THE way a new ARTICLE is written (ART-1) — omit operation_id for this. Starts a workspace publishing workflow run producing the sourcing/claim/compliance/score record an article needs plus the aggression-ceiling clamp. Use for a new article/post; object_create is refused for content_item in chat. Pass the brief VERBATIM as input.instructions, set trafficSource/awarenessStage, carry media needs in input.mediaRequest. FOR A NON-ARTICLE JOB (PDF family, document render, asset lookup+adopt, visual identity change, site inventory, image template revision) check list_operations/get_operation and pass operation_id instead — resolved from CMS-Agent’s own catalog, never guessed; preflight_operation previews refusals first. Also advances an existing run by run_id, or RESUMES a request by request_id alone (no input), never duplicating or re-asking. Poll with get_workspace_run, then check_workspace_run_readiness → publish_workspace_run → release_workspace_run. Publishing stays a separate human decision.',
+    'THE way a new ARTICLE is written (ART-1) — omit operation_id for this. Starts a workspace publishing workflow run producing the sourcing/claim/compliance/score record an article needs plus the aggression-ceiling clamp. Use for a new article/post; object_create is refused for content_item in chat. Pass the brief VERBATIM as input.instructions, set trafficSource/awarenessStage, carry media needs in input.mediaRequest. FOR A NON-ARTICLE JOB (PDF family, document render, asset lookup+adopt, visual identity change, site inventory, image template revision) check list_operations/get_operation and pass operation_id instead — resolved from CMS-Agent’s own catalog, never guessed; preflight_operation previews refusals first. A read-only catalog operation (e.g. site_inventory) runs and answers IMMEDIATELY, inline in this result — no run, no request_id, nothing to poll for. Also advances an existing run by run_id, or RESUMES a request by request_id alone (no input), never duplicating or re-asking. Poll with get_workspace_run, then check_workspace_run_readiness → publish_workspace_run → release_workspace_run. Publishing stays a separate human decision.',
   input_schema: {
     type: 'object',
     properties: {
@@ -1234,7 +1433,15 @@ const runWorkspaceWorkflow: ChatTool = {
         (args.input ?? {}) as Record<string, unknown>
       );
       if (!selection.ok) return { content: selection.content, is_error: true };
-      workflowId = selection.workflowId;
+      // A4: the two dispatch kinds are a discriminated union — an executor
+      // dispatch returns HERE, through operation.execute, never reaching
+      // workflow_start_dry_run/requestId-minting below (see
+      // runExecutorOperation's own header for why a read-only result never
+      // registers a request).
+      if (selection.dispatch.mode === 'executor') {
+        return runExecutorOperation(ctx, args, selection);
+      }
+      workflowId = selection.dispatch.workflowId;
       resolvedKind = selection.kind;
       operationTitle = selection.title;
       dispatchInput = selection.input;

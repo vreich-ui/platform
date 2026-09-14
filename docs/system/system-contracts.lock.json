@@ -25,6 +25,7 @@
       "learning_list_observations",
       "node_execute",
       "node_get_latest_output",
+      "operation_execute",
       "operation_get",
       "operation_list",
       "operation_preflight",
