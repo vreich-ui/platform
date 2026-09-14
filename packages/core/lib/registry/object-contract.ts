@@ -304,7 +304,12 @@ const COMMON_CONSTRAINTS: Constraint[] = [
   },
 ];
 
-const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 'allow' | 'lock'): Constraint[] => {
+/**
+ * Exported for tests only: `buildObjectContract` needs the site policy
+ * bindings loaded, which a pure logic test has no business doing just to
+ * assert that a type declares a rule at the severity it claims.
+ */
+export const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 'allow' | 'lock'): Constraint[] => {
   switch (objectType) {
     case 'page':
       return [
@@ -843,6 +848,30 @@ const perTypeConstraints = (objectType: ObjectType, brandImageryOverridePolicy: 
             'refuse until everything else was rebalanced by hand. Consumers normalize at read; a set far from 1 ' +
             'warns (strategy_angle_mix_sum / strategy_topic_weights_sum) and a duplicate topic or angle blocks, ' +
             'because a duplicate makes "the weight of X" ambiguous.',
+        },
+        {
+          id: 'strategy_commissioning_present',
+          severity: 'warns',
+          enforced_live: true,
+          description:
+            'commissioning is the AUTONOMY block: enabled, runsPerDay, dailyBudgetUsd, maxConcurrentRuns, ' +
+            'stopAfterConsecutiveFailures, readerStateMix, archetypes[], seeds[], exclusions[]. It is OPTIONAL and ' +
+            'absence NEVER blocks — a strategy without it simply describes a publication that only publishes what ' +
+            'somebody asks for, which is every tenant until an operator decides otherwise. Absent, or present with ' +
+            'enabled:false, warns so the state is visible; nothing is withheld at draft or at publish. The numbers ' +
+            'are CEILINGS the planner clamps itself to, never an allowance it is owed — the engine re-derives ' +
+            "today's spend and open runs from the run store before every commission.",
+        },
+        {
+          id: 'strategy_commissioning_shape',
+          severity: 'warns',
+          enforced_live: true,
+          description:
+            'A commissioning block with enabled:true but no archetypes and no seeds warns: the planner would have ' +
+            'nothing to fall back on when its model turn returns nothing usable, so the site would quietly publish ' +
+            'nothing. Structural nonsense inside a PRESENT block — a duplicate archetype id, or a seed naming an ' +
+            'archetype the strategy does not define — is refused at WRITE by the body schema instead of warned, ' +
+            'because an ambiguous or reader-less brief is unreviewable and a human is looking at write time.',
         },
         {
           id: 'strategy_funnel_shape',

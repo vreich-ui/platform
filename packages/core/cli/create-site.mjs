@@ -1483,6 +1483,22 @@ const strategySkeletonBody = (brandName, niche) => ({
   // bottom. Raised deliberately once the offer is real.
   funnel_aggression: { tofu: 0, mofu: 0.2, bofu: 0.4 },
   cadence: `${ONBOARDING_FILL_MARKER} — how often, and at what volume?`,
+  // AUTONOMY, SEEDED OFF. Genesis writes the block so every tenant has one
+  // address to read and one honest "needs to be set" warning — the same reason
+  // it writes the strategy at all — and switches it OFF so no site ever starts
+  // commissioning its own work because a mint happened. archetypes and seeds
+  // are left empty on purpose: genesis does not invent a client's readers.
+  commissioning: {
+    enabled: false,
+    runsPerDay: 1,
+    dailyBudgetUsd: 10,
+    maxConcurrentRuns: 1,
+    stopAfterConsecutiveFailures: 2,
+    readerStateMix: { recognition: 0.25, understanding: 0.25, investigation: 0.25, selection: 0.25 },
+    archetypes: [],
+    seeds: [],
+    exclusions: [],
+  },
   ...(niche ? { private: { notes: `Genesis was told this tenant publishes about: ${niche}.` } } : {}),
 });
 

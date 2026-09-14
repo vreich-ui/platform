@@ -80,6 +80,14 @@ const bridge = (): SweepBridge | undefined =>
         // compact run view does not carry — see `publication-outputs.ts` for
         // why those two reads beat a `detail: "full"` run record.
         callTool: (name, args) => cmsAgentClient.callTool(name, args),
+        // Track C: the runs list, read ONLY to adopt runs `editorial_planner`
+        // commissioned on the engine plane — those have no request row here,
+        // because no chat tool started them. See `adopt-commissioned.ts`.
+        listRuns: (limit) =>
+          cmsAgentClient.callTool<Record<string, unknown>>('workflow_list_runs', {
+            projectId: getSiteIdentity().cmsAgentProjectId,
+            limit,
+          }),
         projectId: getSiteIdentity().cmsAgentProjectId,
       }
     : undefined;
