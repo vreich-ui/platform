@@ -85,6 +85,8 @@ type FakeWorld = {
   effects: DocumentRenderEffects;
   createCalls: number;
   attachOps: ArticlePdfAttachOp[];
+  /** Every templateSchema `readSiteBrand` was handed — the parameter that makes brand classification possible. */
+  brandSchemasSeen: unknown[];
 };
 
 const makeEffects = (options: {
@@ -94,12 +96,17 @@ const makeEffects = (options: {
   createResult?: ArticlePdfJobView | { error: { message: string } };
   polls?: ArticlePdfJobView[];
   nodes?: ArticleNodeLike[];
+  /** What the site's brand resolves to for an OBJECT brand slot. Omit to leave readSiteBrand undefined entirely. */
+  siteBrand?: unknown;
+  /** Set to omit readSiteBrand from the effects, reproducing the pre-fix caller. */
+  noBrandEffect?: boolean;
 }): FakeWorld => {
   let clock = 0;
   let createCalls = 0;
   let pollIndex = 0;
   const attachOps: ArticlePdfAttachOp[] = [];
-  const world = { attachOps } as unknown as FakeWorld;
+  const brandSchemasSeen: unknown[] = [];
+  const world = { attachOps, brandSchemasSeen } as unknown as FakeWorld;
 
   const effects: DocumentRenderEffects = {
     readOwnerRecord: async () =>
@@ -108,6 +115,19 @@ const makeEffects = (options: {
         : { ok: true, value: CONTENT_ITEM },
     readSitePdfDefaults: async () => options.sitePdf,
     readTemplateRenderDataSchema: async () => options.templateSchema,
+    ...(options.noBrandEffect
+      ? {}
+      : {
+          readSiteBrand: async (templateSchema: unknown) => {
+            brandSchemasSeen.push(templateSchema);
+            // Mirrors the real implementation's SHAPE, not just its answer: a brand is resolved
+            // only for a schema that slots brand as an OBJECT. Reading the schema here is what
+            // makes the parameter load-bearing — hand this effect nothing, as the pre-fix caller
+            // did, and it correctly resolves nothing.
+            const properties = (templateSchema as { properties?: Record<string, { type?: string }> } | undefined)?.properties;
+            return properties?.brand?.type === 'object' ? options.siteBrand : undefined;
+          },
+        }),
     createJob: async () => {
       createCalls += 1;
       const result = options.createResult ?? { jobId: 'job_1', status: 'pending' as const };
@@ -258,4 +278,88 @@ test('documentKind defaults to "article" (resolvePdfJobKind, reused) when the ca
   assert.equal(outcome.outcome, 'rendered');
   if (outcome.outcome !== 'rendered') return;
   assert.equal(outcome.documentKind, 'article');
+});
+
+
+// ─── the brand the pre-flight validates with (2026-09-15) ───────────────────
+//
+// `readSiteBrand` used to be left undefined, so the pre-flight validated a payload with NO brand
+// against the template's own schema. For a template whose brand slot is an object — which is what
+// dr-lurie's only article template declares — that is not an occasional false "blocked", it is
+// every render: verified live on 2026-09-15 as `invalid_render_data`, "must have required property
+// 'brand'", on a document the real pipeline would have rendered correctly.
+
+/** A template contract shaped like `drlurie_article_v1`'s: brand is an OBJECT, and it is required. */
+const OBJECT_BRAND_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  required: ['brand', 'title'],
+  properties: {
+    brand: {
+      type: 'object',
+      required: ['colors', 'fonts'],
+      properties: { colors: { type: 'object' }, fonts: { type: 'object' } },
+    },
+    title: { type: 'string' },
+  },
+};
+
+const SITE_BRAND = { colors: { primary: '#1d2b53' }, fonts: { sans: 'NotoSans', serif: 'NotoSerif', heading: 'NotoSerif' } };
+
+test('readSiteBrand is handed the resolved template schema — the parameter that lets it classify the slot', async () => {
+  const world = makeEffects({
+    sitePdf: { defaultTemplateId: 'tpl_article' },
+    templateSchema: OBJECT_BRAND_SCHEMA,
+    siteBrand: SITE_BRAND,
+    polls: [{ jobId: 'job_1', status: 'complete', publicPath: '/pdf/a.pdf' }],
+  });
+  await runDocumentRender(baseParams(), world.effects);
+  assert.equal(world.brandSchemasSeen.length, 1, 'the brand effect runs once per render');
+  assert.deepEqual(world.brandSchemasSeen[0], OBJECT_BRAND_SCHEMA, 'it must see the template that will actually render, not nothing');
+});
+
+test('REGRESSION — a template whose brand slot is a required object no longer blocks a render the real pipeline would complete', async () => {
+  const world = makeEffects({
+    sitePdf: { defaultTemplateId: 'tpl_article' },
+    templateSchema: OBJECT_BRAND_SCHEMA,
+    siteBrand: SITE_BRAND,
+    polls: [{ jobId: 'job_1', status: 'complete', publicPath: '/pdf/a.pdf' }],
+  });
+  const outcome = await runDocumentRender(baseParams(), world.effects);
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.outcome, 'rendered', 'the pre-flight must validate the payload the render is actually given');
+  assert.equal(world.createCalls, 1);
+});
+
+test('a site with no resolvable brand still blocks honestly — a closed gate is wrong, a false "rendered" is worse', async () => {
+  const world = makeEffects({
+    sitePdf: { defaultTemplateId: 'tpl_article' },
+    templateSchema: OBJECT_BRAND_SCHEMA,
+    siteBrand: undefined,
+  });
+  const outcome = await runDocumentRender(baseParams(), world.effects);
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.outcome, 'blocked');
+  if (outcome.outcome !== 'blocked') return;
+  assert.equal(outcome.reason, 'invalid_render_data');
+  assert.ok(
+    (outcome.errors ?? []).some((error) => /brand/.test(error.message ?? '')),
+    'the refusal must still name brand as the missing property'
+  );
+  assert.equal(world.createCalls, 0, 'a blocked run creates no job');
+});
+
+test('a caller that supplies no brand effect at all is unchanged — undefined still means "pre-flight without a brand"', async () => {
+  const world = makeEffects({
+    sitePdf: { defaultTemplateId: 'tpl_article' },
+    templateSchema: OBJECT_BRAND_SCHEMA,
+    noBrandEffect: true,
+  });
+  const outcome = await runDocumentRender(baseParams(), world.effects);
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.outcome, 'blocked', 'the old behaviour is preserved for a caller with no brand to resolve');
+  assert.equal(world.brandSchemasSeen.length, 0);
 });

@@ -120,7 +120,17 @@ export type DocumentRenderEffects = RenderArticlePdfEffects & {
    *  path still validates against the generic article contract, exactly as
    *  `build_pdf_render_data` / `validate_pdf_render_data` already document). */
   readTemplateRenderDataSchema: (templateId: string) => Promise<unknown>;
-  readSiteBrand?: () => Promise<unknown>;
+  /**
+   * The brand block to pre-flight WITH, given the resolved template's own render-data schema.
+   *
+   * The schema parameter is the whole point. A template's brand slot is an OBJECT on one
+   * template and a plain site NAME on the next (pdf-render-brand.ts's `classifyRenderDataBrandSlot`
+   * is the authority), and an implementation cannot pick the right shape without seeing it —
+   * which is why this used to be left undefined, and why the pre-flight then validated a payload
+   * with no brand against a schema that required one. Undefined still means "pre-flight without a
+   * brand", which is correct for a caller that has none to resolve.
+   */
+  readSiteBrand?: (templateSchema: unknown) => Promise<unknown>;
 };
 
 export type DocumentRenderParams = {
@@ -187,7 +197,7 @@ export async function runDocumentRender(
   const templateId = templateResolution.templateId;
 
   const templateSchema = await effects.readTemplateRenderDataSchema(templateId);
-  const brand = effects.readSiteBrand ? await effects.readSiteBrand() : undefined;
+  const brand = effects.readSiteBrand ? await effects.readSiteBrand(templateSchema) : undefined;
 
   // ── build render data, through the kind-scoped mapper — never a forced article fallback ──
   const mapped = await resolvePdfJobRenderData({
