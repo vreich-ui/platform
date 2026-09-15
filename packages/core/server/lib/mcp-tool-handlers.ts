@@ -3750,19 +3750,19 @@ export const callPreviewPdfTemplateFixture = async (event: LambdaEvent, input: R
  * cosmetic (the attached node's alt text) rather than load-bearing, so omitting it costs
  * nothing but a nicer alt string on first attach.
  *
- * KNOWN LIMITATION, stated rather than papered over: `readSiteBrand` is left undefined. The
- * real render (once not blocked) still gets brand injected correctly — `createJob` below calls
- * `callCreateAgentArtifactJob` with `data` omitted, so THAT call's own D-2/D-3 pipeline (mapper
- * + brand-slot classification) runs exactly as it does for `render_article_pdf`. What this
- * costs is precision in the PRE-FLIGHT check only: for a template whose brand slot is an
- * object, the preflight's own mapped-data validation runs without brand and can occasionally
- * report `blocked: invalid_render_data` for a template that would in fact render fine.
- * Classifying the brand slot correctly needs the resolved template's schema cross-referenced
- * against `pdf-render-brand.ts`'s slot classifier, which `readSiteBrand`'s effect signature
- * (`() => Promise<unknown>`, no schema parameter) cannot express without changing
- * `document-render.ts`'s already-tested contract. A conservative false "blocked" is the safe
- * failure mode here — it never produces a false "rendered" — so this is left as a named,
- * reported gap rather than a silent guess.
+ * THE PRE-FLIGHT NOW VALIDATES WITH THE BRAND THE RENDER WILL ACTUALLY GET. This used to leave
+ * `readSiteBrand` undefined and say so: the real render was always brand-correct (`createJob`
+ * below omits `data`, so `callCreateAgentArtifactJob`'s own D-2/D-3 pipeline runs exactly as it
+ * does for `render_article_pdf`), but the PRE-FLIGHT validated a payload with no brand against a
+ * schema that required one. That was described as an occasional false "blocked". It was not
+ * occasional — it was EVERY render against a template whose brand slot is an object, which is
+ * what `drlurie_article_v1` declares, so `document_render` could not produce a PDF on dr-lurie at
+ * all (verified live 2026-09-15: `invalid_render_data`, "must have required property 'brand'").
+ * A conservative false "blocked" is the safer failure mode than a false "rendered", but a gate
+ * that refuses everything is not conservative, it is closed.
+ *
+ * `readSiteBrand` now takes the resolved template's schema and answers with the same two calls
+ * D-3 makes, so the classification is the same one the real job will use rather than a guess.
  */
 export const callDocumentRender = async (event: LambdaEvent, input: Record<string, unknown>) => {
   const siteId = toNonEmptyString(input.site_id);
@@ -3798,6 +3798,19 @@ export const callDocumentRender = async (event: LambdaEvent, input: Record<strin
   const documentKind = resolvePdfJobKind(toNonEmptyString(input.document_kind));
   const pollBudgetMs = resolveRenderArticlePdfPollBudgetMs(event.invocationDeadlineMs, Date.now(), process.env);
 
+  // ONE site read, shared by the two effects that need it. Both the PDF defaults (which
+  // template) and the brand (what it is rendered in) come off the same site body, and reading it
+  // twice for one render would be two object-store round trips for one answer.
+  let siteBodyPromise: Promise<Record<string, unknown> | undefined> | undefined;
+  const loadSiteBody = (): Promise<Record<string, unknown> | undefined> => {
+    siteBodyPromise ??= (async () => {
+      const siteLookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
+      const siteRecord = 'isError' in siteLookup ? undefined : getRecordValue(siteLookup.record);
+      return getRecordValue(siteRecord?.body);
+    })();
+    return siteBodyPromise;
+  };
+
   const effects: DocumentRenderEffects = {
     readOwnerRecord: async () => {
       const lookup = await invokeObjectStore(event, {
@@ -3826,11 +3839,17 @@ export const callDocumentRender = async (event: LambdaEvent, input: Record<strin
       }
       return { ok: true as const, value: record };
     },
-    readSitePdfDefaults: async () => {
-      const siteLookup = await invokeObjectStore(event, { action: 'get', object_type: 'site', object_id: siteId });
-      const siteRecord = 'isError' in siteLookup ? undefined : getRecordValue(siteLookup.record);
-      return readSitePdfDefaults(getRecordValue(siteRecord?.body));
-    },
+    readSitePdfDefaults: async () => readSitePdfDefaults(await loadSiteBody()),
+    // The pre-flight's brand, classified against the template that will actually render — the
+    // same two calls D-3 makes for `render_article_pdf` and `create_agent_artifact_job`, so the
+    // check now validates the payload the render will genuinely be given rather than a strictly
+    // poorer one. An OBJECT slot gets the resolved brand; a STRING slot and an absent slot get
+    // nothing from here, because for those the mapper has no brand to place and D-3 fills the
+    // slot downstream from the site name.
+    readSiteBrand: async (templateSchema) =>
+      classifyRenderDataBrandSlot(templateSchema) === 'object'
+        ? pdfRenderBrandFromSiteBody(await loadSiteBody())
+        : undefined,
     readTemplateRenderDataSchema: async (tId) => {
       const built = buildArtifactBridgeGrant();
       if (!built.ok) return undefined;
