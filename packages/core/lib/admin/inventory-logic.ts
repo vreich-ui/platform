@@ -14,7 +14,9 @@
  *
  * Verb matrix (BRIEF.md "Design (ruled)"):
  *   - Objects  (owner+admin): archive (retire), validate, open-in-workspace.
- *   - Artifacts(owner+admin): delete, add-tag, remove-tag, download.
+ *   - Artifacts(owner+admin): delete, add-tag, remove-tag, download on an
+ *     ACTIVE row; restore, download on a `deleted` one (see
+ *     `artifactActionsFor` — the row's verbs follow the row's true state).
  *   - System stores: read (owner+admin); delete-blob / wipe-store / wipe-all
  *     are OWNER ONLY (the last two are store-wide — see `STORE_WIDE_ACTIONS`
  *     — and are offered one at a time, never from a bulk toolbar), per the
@@ -181,6 +183,7 @@ export type ActionId =
   | 'validate'
   | 'open-in-workspace'
   | 'delete'
+  | 'restore'
   | 'add-tag'
   | 'remove-tag'
   | 'download'
@@ -191,7 +194,45 @@ export type ActionId =
   | 'send-to-chat';
 
 const OBJECT_ACTIONS: readonly ActionId[] = ['archive', 'validate', 'open-in-workspace', 'send-to-chat'];
-const ARTIFACT_ACTIONS: readonly ActionId[] = ['delete', 'add-tag', 'remove-tag', 'download', 'send-to-chat'];
+
+/**
+ * ARTIFACT VERBS ARE A FUNCTION OF THE ROW'S TRUE STATE.
+ *
+ * This table used to be one static list, so a row already under the `deleted`
+ * facet was offered Delete (soft) — a verb `admin-inventory`'s delete handler
+ * answers with a no-op it used to dress up as a success — and was never
+ * offered Restore, even though `restoreArtifactReference` has existed since
+ * W3. The rule now: never offer a verb the server would treat as a no-op, and
+ * never hide the verb that would actually change the state.
+ *
+ * `hit.status` for an artifact is derived from the record itself
+ * (`inventory-server-logic.ts`: `reference.deletedAtISO ? 'deleted' : 'active'`),
+ * so these two are the only states the normalizer can produce.
+ *
+ * Tags are dropped from the deleted set deliberately: tagging a row that is
+ * marked deleted is dead weight — the by-tag pointer it writes is one more
+ * thing to be wrong about a row nothing lists. Restore first, then tag.
+ */
+const ARTIFACT_ACTIVE_ACTIONS: readonly ActionId[] = ['delete', 'add-tag', 'remove-tag', 'download', 'send-to-chat'];
+const ARTIFACT_DELETED_ACTIONS: readonly ActionId[] = ['restore', 'download', 'send-to-chat'];
+
+/**
+ * A status the normalizer cannot currently produce — a future state, or a row
+ * that reached here from somewhere else. It gets the deleted-row set MINUS
+ * `restore`: read-only. There is deliberately NO fall-through to the active
+ * set, because the only way to be wrong in that direction is to offer a
+ * destructive verb for a state nothing has reasoned about.
+ */
+const ARTIFACT_UNKNOWN_STATUS_ACTIONS: readonly ActionId[] = ARTIFACT_DELETED_ACTIONS.filter(
+  (action) => action !== 'restore'
+);
+
+const artifactActionsFor = (status: string): readonly ActionId[] => {
+  if (status === 'active') return ARTIFACT_ACTIVE_ACTIONS;
+  if (status === 'deleted') return ARTIFACT_DELETED_ACTIONS;
+  return ARTIFACT_UNKNOWN_STATUS_ACTIONS;
+};
+
 const STORE_READ_ACTIONS: readonly ActionId[] = ['read', 'send-to-chat'];
 const STORE_OWNER_ACTIONS: readonly ActionId[] = ['delete-blob', 'wipe-store', 'wipe-all'];
 
@@ -212,7 +253,7 @@ export function allowedActions(hit: InventoryHit, roles: readonly Role[]): Actio
     case 'objects':
       return [...OBJECT_ACTIONS];
     case 'artifacts':
-      return [...ARTIFACT_ACTIONS];
+      return [...artifactActionsFor(hit.status)];
     case 'stores':
       return hasOwnerAccess(roles) ? [...STORE_READ_ACTIONS, ...STORE_OWNER_ACTIONS] : [...STORE_READ_ACTIONS];
   }
@@ -286,6 +327,94 @@ export function bulkActionsFor(selection: readonly InventoryHit[], roles: readon
   const [first, ...rest] = perHit;
   const restSets = rest.map((actions) => new Set(actions));
   return first.filter((action) => isBulkOfferableAction(action) && restSets.every((set) => set.has(action)));
+}
+
+/**
+ * One bulk-toolbar offer: the verb, whether it can run over THIS selection,
+ * and — when it cannot — the sentence that says why. Same shape as B1's row
+ * actions (`row-actions.test.ts`, "a disabled action stays visible, and says
+ * why"), for the same reason: a verb that silently disappears when the
+ * selection is mixed is indistinguishable from a verb the page does not have.
+ */
+export interface BulkActionOffer {
+  id: ActionId;
+  enabled: boolean;
+  /** Present iff `enabled` is false. */
+  reason?: string;
+}
+
+/** The two artifact verbs whose availability is decided by the rows' state, not by the collection. */
+const ARTIFACT_STATE_VERBS: ReadonlySet<ActionId> = new Set<ActionId>(['delete', 'restore']);
+
+/** "1 of 2 selected is not active." / "3 of 5 selected are already deleted." */
+const countPhrase = (count: number, total: number, tail: string) =>
+  `${count} of ${total} selected ${count === 1 ? 'is' : 'are'} ${tail}.`;
+
+/**
+ * The bulk toolbar's real answer: `bulkActionsFor`'s intersection, plus the
+ * two state verbs rendered as ENABLED-OR-EXPLAINED rather than dropped.
+ *
+ * WHY THIS EXISTS. Once `allowedActions` became status-aware, a selection of
+ * three active and two deleted artifacts intersected to neither `delete` nor
+ * `restore`, and the toolbar went quiet — the exact defect
+ * `describeInventorySelection` was added to fix for collections. Worse would
+ * have been the alternative: applying the verb to the subset that qualifies
+ * and reporting "succeeded", which is the same lie this wave exists to
+ * remove. So a mixed selection shows the verb, disabled, and names the split.
+ *
+ * The state verbs are offered only for an all-artifact selection: for anything
+ * else `delete` is not in the intersection for reasons that have nothing to do
+ * with status (a store row's destructive verb is `delete-blob`), and naming a
+ * row count would be answering a question nobody asked.
+ */
+export function bulkActionOffers(selection: readonly InventoryHit[], roles: readonly Role[]): BulkActionOffer[] {
+  const base = bulkActionsFor(selection, roles)
+    .filter((id) => !ARTIFACT_STATE_VERBS.has(id))
+    .map((id): BulkActionOffer => ({ id, enabled: true }));
+
+  if (selection.length === 0 || !hasAdminAccess(roles)) return base;
+  if (!selection.every((hit) => collectionKind(hit.collection) === 'artifacts')) return base;
+
+  const total = selection.length;
+  const active = selection.filter((hit) => hit.status === 'active').length;
+  const deleted = selection.filter((hit) => hit.status === 'deleted').length;
+
+  /**
+   * A state verb APPEARS when at least one selected row is in the state it
+   * acts on, and is ENABLED only when every selected row is. So an all-active
+   * selection shows Delete and no Restore (there is nothing to restore),
+   * an all-deleted one shows Restore and no Delete, and a mixed one shows
+   * both, disabled, each naming its own half. A permanently-disabled verb
+   * that can never apply would be noise, not an explanation.
+   */
+  const offers: BulkActionOffer[] = [];
+
+  if (active > 0) {
+    offers.push(
+      active === total
+        ? { id: 'delete', enabled: true }
+        : {
+            id: 'delete',
+            enabled: false,
+            reason:
+              deleted === total - active
+                ? countPhrase(deleted, total, 'already deleted')
+                : countPhrase(total - active, total, 'not active'),
+          }
+    );
+  }
+
+  if (deleted > 0) {
+    offers.push(
+      deleted === total
+        ? { id: 'restore', enabled: true }
+        : { id: 'restore', enabled: false, reason: countPhrase(total - deleted, total, 'not deleted') }
+    );
+  }
+
+  // Delete first, then restore, then everything else — the destructive verb
+  // keeps the position the toolbar has always put it in.
+  return [...offers, ...base];
 }
 
 // ─── preview summaries ───────────────────────────────────────────────────────

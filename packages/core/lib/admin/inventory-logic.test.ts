@@ -3,6 +3,7 @@ import assert from 'node:assert';
 
 import {
   allowedActions,
+  bulkActionOffers,
   bulkActionsFor,
   EMPTY_INVENTORY_FACETS,
   facetCounts,
@@ -201,7 +202,7 @@ describe('allowedActions — role matrix', () => {
     ]);
   });
 
-  it('admin gets the artifact verb set: delete, add-tag, remove-tag, download, send-to-chat', () => {
+  it('admin gets the ACTIVE artifact verb set: delete, add-tag, remove-tag, download, send-to-chat', () => {
     assert.deepStrictEqual(allowedActions(artifactHit, ROLES.admin), [
       'delete',
       'add-tag',
@@ -232,6 +233,150 @@ describe('allowedActions — role matrix', () => {
       'wipe-store',
       'wipe-all',
     ]);
+  });
+});
+
+/**
+ * The table this wave exists to enforce: a row's actions are a function of the
+ * row's TRUE state. Written out a second time, independently, and compared —
+ * the same shape as `row-actions.test.ts`'s matrix.
+ *
+ * | status    | offered                                              |
+ * |-----------|------------------------------------------------------|
+ * | active    | delete, add-tag, remove-tag, download, send-to-chat   |
+ * | deleted   | restore, download, send-to-chat                       |
+ * | anything  | download, send-to-chat (read-only; never `delete`)    |
+ */
+describe('allowedActions — artifact status table', () => {
+  const artifact = (status: string) => hit({ collection: 'artifacts', status });
+
+  const TABLE: ReadonlyArray<{ status: string; offered: readonly string[] }> = [
+    { status: 'active', offered: ['delete', 'add-tag', 'remove-tag', 'download', 'send-to-chat'] },
+    { status: 'deleted', offered: ['restore', 'download', 'send-to-chat'] },
+    // Not a status `normalizeArtifactHit` can produce today — the point is
+    // what happens if one ever arrives.
+    { status: 'quarantined', offered: ['download', 'send-to-chat'] },
+    { status: '', offered: ['download', 'send-to-chat'] },
+  ];
+
+  for (const row of TABLE) {
+    it(`status "${row.status}" offers exactly ${row.offered.join(', ')}`, () => {
+      assert.deepStrictEqual(allowedActions(artifact(row.status), ROLES.admin), [...row.offered]);
+      assert.deepStrictEqual(allowedActions(artifact(row.status), ROLES.owner), [...row.offered]);
+    });
+  }
+
+  it('NO status offers delete except active — the UI never offers a verb the server no-ops', () => {
+    for (const status of ['deleted', 'quarantined', '', 'unknown']) {
+      assert.ok(
+        !allowedActions(artifact(status), ROLES.owner).includes('delete'),
+        `status "${status}" still offers delete`
+      );
+    }
+  });
+
+  it('restore is offered ONLY on a deleted row, and never on objects or stores', () => {
+    assert.ok(allowedActions(artifact('deleted'), ROLES.admin).includes('restore'));
+    assert.ok(!allowedActions(artifact('active'), ROLES.admin).includes('restore'));
+    assert.ok(!allowedActions(artifact('quarantined'), ROLES.admin).includes('restore'));
+    assert.ok(!allowedActions(hit({ collection: 'objects' }), ROLES.owner).includes('restore'));
+    assert.ok(!allowedActions(hit({ collection: 'stores', kind: 'workflows' }), ROLES.owner).includes('restore'));
+  });
+
+  it('a deleted row is not offered tag verbs — tags on a dead row are dead weight', () => {
+    const actions = allowedActions(artifact('deleted'), ROLES.admin);
+    assert.ok(!actions.includes('add-tag'));
+    assert.ok(!actions.includes('remove-tag'));
+  });
+});
+
+/**
+ * The bulk matrix. `bulkActionsFor` still answers with the plain intersection;
+ * `bulkActionOffers` is what the toolbar renders, and it is the one that must
+ * never go quiet on a mixed selection.
+ */
+describe('bulkActionOffers — the state verbs, enabled or explained', () => {
+  const artifact = (id: string, status: string) => hit({ collection: 'artifacts', id, status });
+  const find = (offers: ReturnType<typeof bulkActionOffers>, id: string) => offers.find((offer) => offer.id === id);
+
+  it('an all-active selection: Delete enabled, Restore not offered at all', () => {
+    const offers = bulkActionOffers([artifact('a', 'active'), artifact('b', 'active')], ROLES.admin);
+    assert.deepStrictEqual(find(offers, 'delete'), { id: 'delete', enabled: true });
+    assert.equal(find(offers, 'restore'), undefined, 'there is nothing to restore, so nothing to explain');
+  });
+
+  it('an all-deleted selection: Restore enabled, Delete not offered at all', () => {
+    const offers = bulkActionOffers([artifact('a', 'deleted'), artifact('b', 'deleted')], ROLES.admin);
+    assert.deepStrictEqual(find(offers, 'restore'), { id: 'restore', enabled: true });
+    assert.equal(find(offers, 'delete'), undefined, 'every row is already deleted — Delete would be the no-op');
+  });
+
+  it('a mixed selection shows BOTH verbs disabled, each naming its own half', () => {
+    const selection = [
+      artifact('a', 'active'),
+      artifact('b', 'active'),
+      artifact('c', 'deleted'),
+      artifact('d', 'deleted'),
+      artifact('e', 'deleted'),
+    ];
+    const offers = bulkActionOffers(selection, ROLES.admin);
+    assert.deepStrictEqual(find(offers, 'delete'), {
+      id: 'delete',
+      enabled: false,
+      reason: '3 of 5 selected are already deleted.',
+    });
+    assert.deepStrictEqual(find(offers, 'restore'), {
+      id: 'restore',
+      enabled: false,
+      reason: '2 of 5 selected are not deleted.',
+    });
+  });
+
+  it('an unknown status disables delete with a reason that does not claim "already deleted"', () => {
+    const offers = bulkActionOffers([artifact('a', 'active'), artifact('b', 'quarantined')], ROLES.admin);
+    assert.deepStrictEqual(find(offers, 'delete'), {
+      id: 'delete',
+      enabled: false,
+      reason: '1 of 2 selected is not active.',
+    });
+    assert.equal(find(offers, 'restore'), undefined);
+  });
+
+  it('every disabled offer carries a reason, and no enabled one does (D3)', () => {
+    const selections = [
+      [artifact('a', 'active')],
+      [artifact('a', 'deleted')],
+      [artifact('a', 'active'), artifact('b', 'deleted')],
+      [artifact('a', 'active'), artifact('b', 'quarantined')],
+      [artifact('a', 'deleted'), artifact('b', 'quarantined')],
+    ];
+    for (const selection of selections) {
+      for (const offer of bulkActionOffers(selection, ROLES.owner)) {
+        if (offer.enabled) assert.equal(offer.reason, undefined, `${offer.id} is enabled but carries a reason`);
+        else assert.ok(offer.reason && offer.reason.length > 0, `${offer.id} is disabled with no reason`);
+      }
+    }
+  });
+
+  it('carries the non-state verbs through unchanged, and drops them on a mixed-collection selection', () => {
+    const uniform = bulkActionOffers([artifact('a', 'active'), artifact('b', 'active')], ROLES.admin);
+    assert.deepStrictEqual(
+      uniform.map((offer) => offer.id),
+      ['delete', 'add-tag', 'remove-tag', 'send-to-chat']
+    );
+
+    const mixed = bulkActionOffers([hit({ collection: 'objects', id: 'o' }), artifact('a', 'active')], ROLES.admin);
+    // A state verb is only meaningful for an all-artifact selection; the rest
+    // is `bulkActionsFor`'s intersection, unchanged.
+    assert.deepStrictEqual(
+      mixed.map((offer) => offer.id),
+      ['send-to-chat']
+    );
+  });
+
+  it('offers nothing to a caller without admin standing, and nothing for an empty selection', () => {
+    assert.deepStrictEqual(bulkActionOffers([artifact('a', 'deleted')], ROLES.editor), []);
+    assert.deepStrictEqual(bulkActionOffers([], ROLES.owner), []);
   });
 });
 
@@ -295,6 +440,19 @@ describe('bulkActionsFor', () => {
       'send-to-chat',
     ]);
     assert.ok(allowedActions(selection[0], ROLES.admin).includes('download'));
+  });
+
+  it('intersects to no state verb at all when the artifact selection is mixed-status', () => {
+    const selection = [
+      hit({ collection: 'artifacts', id: 'a', status: 'active' }),
+      hit({ collection: 'artifacts', id: 'b', status: 'deleted' }),
+    ];
+    // This is WHY `bulkActionOffers` exists: the plain intersection is right
+    // and also silent, and a toolbar built from it alone loses both verbs.
+    const actions = bulkActionsFor(selection, ROLES.admin);
+    assert.ok(!actions.includes('delete'));
+    assert.ok(!actions.includes('restore'));
+    assert.deepStrictEqual(actions, ['send-to-chat']);
   });
 
   it('is empty for an empty selection', () => {

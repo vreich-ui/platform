@@ -254,6 +254,13 @@ export const IconArchive = (p: IconProps) => (
     <path d="M10 13h4" />
   </IconBase>
 );
+/** A counter-clockwise arrow — "put it back". Used for Restore on Inventory. */
+export const IconRotate = (p: IconProps) => (
+  <IconBase {...p}>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 4v4h4" />
+  </IconBase>
+);
 export const IconTag = (p: IconProps) => (
   <IconBase {...p}>
     <path d="M12.5 4H6a2 2 0 0 0-2 2v6.5a1 1 0 0 0 .3.7l9 9a1 1 0 0 0 1.4 0l6.5-6.5a1 1 0 0 0 0-1.4l-9-9a1 1 0 0 0-.7-.3z" />

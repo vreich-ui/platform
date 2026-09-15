@@ -74,6 +74,7 @@ import {
   IconNote,
   IconPalette,
   IconRobot,
+  IconRotate,
   IconSettings,
   IconSparkles,
   IconTag,
@@ -103,6 +104,7 @@ import {
 import {
   deleteArtifact,
   previewInventoryHit,
+  restoreArtifact,
   retagArtifact,
   searchInventory,
   type PreviewResult,
@@ -116,6 +118,7 @@ import {
 } from '@core/lib/admin/inventory-server-logic';
 import {
   allowedActions,
+  bulkActionOffers,
   bulkActionsFor,
   EMPTY_INVENTORY_FACETS,
   facetCounts,
@@ -233,10 +236,18 @@ interface BulkReport {
   title: string;
   ok: BulkOk[];
   failed: BulkFailure[];
+  /**
+   * Rows the server answered with `changed: false` — it did what was asked and
+   * nothing moved, because the row was already in that state. They are NOT
+   * successes (nothing happened) and NOT failures (nothing went wrong), and
+   * the whole point of this wave is that the page stops filing them under
+   * "succeeded".
+   */
+  unchanged?: BulkOk[];
 }
 
 interface PendingConfirm {
-  action: Extract<ActionId, 'archive' | 'delete' | 'delete-blob'>;
+  action: Extract<ActionId, 'archive' | 'delete' | 'restore' | 'delete-blob'>;
   hits: InventoryHit[];
 }
 
@@ -262,15 +273,35 @@ interface PendingChatHandoff {
 type PendingWipe = { kind: 'store'; store: string } | { kind: 'all' };
 
 /** Typed-confirm phrase per destructive action (BRIEF: every destructive single OR bulk action). */
-const CONFIRM_PHRASE: Record<PendingConfirm['action'], string> = {
+const CONFIRM_PHRASE: Record<PendingConfirm['action'], string | undefined> = {
   archive: 'ARCHIVE',
   delete: 'DELETE',
+  // Restore is not destructive — it clears a mark and puts a row back. A typed
+  // phrase is the tax a surface charges for something it cannot undo, and
+  // charging it here would teach the operator to type through the ones that
+  // matter.
+  restore: undefined,
   'delete-blob': 'DELETE BLOB',
+};
+
+/** Restore is the one non-destructive member of this set, so it confirms in the accent tone. */
+const CONFIRM_TONE: Record<PendingConfirm['action'], 'accent' | 'danger'> = {
+  archive: 'danger',
+  delete: 'danger',
+  restore: 'accent',
+  'delete-blob': 'danger',
+};
+
+/** The toolbar's own label per bulk verb — so a disabled verb's reason can name it. */
+const BULK_VERB_LABEL: Partial<Record<ActionId, string>> = {
+  delete: 'Delete (soft)',
+  restore: 'Restore',
 };
 
 const CONFIRM_TITLE: Record<PendingConfirm['action'], string> = {
   archive: 'Archive',
   delete: 'Delete artifact',
+  restore: 'Restore',
   'delete-blob': 'Delete store blob',
 };
 
@@ -291,6 +322,14 @@ const CONFIRM_EFFECT: Record<PendingConfirm['action'], string> = {
   archive: 'Archiving retires the object; it stays readable and can be found under the archived status.',
   delete:
     'This is a SOFT delete: the artifact is marked deleted in the index and its bytes are kept, so the row stays listed with a "deleted" status and the file can be recovered. It is not erased from storage.',
+  // NOT "the bytes were never removed": a soft delete keeps them, but
+  // `soft_delete_artifact` run with `removeBytes` does not, and the reference
+  // it leaves behind is indistinguishable from one whose bytes are still
+  // there. Restore clears the mark either way — which is right, because it is
+  // also how a page whose hero vanished gets repaired — so the copy says what
+  // restore DOES and does not promise something this page cannot prove.
+  restore:
+    'Clears the soft-delete mark on the artifact index. The row returns to the active status and the artifact reappears in pickers and listings. A soft delete keeps the bytes; a delete that was run with byte removal does not, so check the artifact still previews afterwards.',
   'delete-blob': 'The blob is removed from its store. This is a raw store delete and cannot be undone.',
 };
 
@@ -739,6 +778,39 @@ function InventoryBody({ siteId }: { siteId: string }) {
 
   const facets = useMemo(() => facetCounts(hits), [hits]);
 
+  /**
+   * A FACET THAT NO ROW CAN SATISFY STOPS FILTERING.
+   *
+   * `FacetGroup` renders a chip only for a value present in the loaded rows,
+   * so the moment the last `deleted` row is restored the `deleted` chip is
+   * gone from the rail — while `facet.status` still says `deleted`. The table
+   * then shows nothing, and the chip the operator would click to clear it is
+   * no longer on screen. That is the guaranteed end state of restoring every
+   * row under the `deleted` facet, i.e. of the workflow this page just gained.
+   *
+   * Clearing is safe rather than clever: a selection whose value is absent
+   * from the counts matches no loaded row anyway, so the only thing dropped is
+   * an empty table. Guarded on `!searching`/non-empty hits so the blank moment
+   * between a query and its answer never counts as "no row has this".
+   */
+  useEffect(() => {
+    if (searching || hits.length === 0) return;
+    setFacet((current) => {
+      const cleared: InventoryFacetSelection = {
+        collection: current.collection !== null && !facets.collection[current.collection] ? null : current.collection,
+        kind: current.kind !== null && !facets.kind[current.kind] ? null : current.kind,
+        status: current.status !== null && !facets.status[current.status] ? null : current.status,
+        tag: current.tag !== null && !facets.tag[current.tag] ? null : current.tag,
+      };
+      return cleared.collection === current.collection &&
+        cleared.kind === current.kind &&
+        cleared.status === current.status &&
+        cleared.tag === current.tag
+        ? current
+        : cleared;
+    });
+  }, [facets, searching, hits.length]);
+
   const visibleHits = useMemo(() => filterHitsByFacets(hits, facet), [hits, facet]);
 
   const visibleIds = useMemo(() => visibleHits.map((hit) => hit.id), [visibleHits]);
@@ -753,6 +825,31 @@ function InventoryBody({ siteId }: { siteId: string }) {
   );
 
   const bulkActions = useMemo(() => bulkActionsFor(selectedHits, roles), [selectedHits, roles]);
+  /**
+   * What the toolbar actually renders. `bulkActions` (the plain intersection)
+   * still drives the "send-to-chat" chips and the "nothing applies" line;
+   * `bulkOffers` adds the two artifact state verbs, enabled or explained, so a
+   * mixed active+deleted selection does not silently lose both of them.
+   */
+  const bulkOffers = useMemo(() => bulkActionOffers(selectedHits, roles), [selectedHits, roles]);
+  /**
+   * The disabled offers' reasons, said OUT LOUD next to the toolbar — NOT as a
+   * `title` on the disabled button.
+   *
+   * A native `title` on a disabled `<button>` reaches nobody reliably:
+   * browsers suppress its pointer events, and it is out of the tab order.
+   * `tests/scripts/no-title-on-disabled-actions.test.mjs` is the repo-wide
+   * invariant that says so, and `menus.tsx` learned the same lesson for row
+   * actions (D3, FIX 7). Each reason names its own verb, because two disabled
+   * verbs produce two sentences and neither is worth much unaddressed.
+   */
+  const bulkDisabledReasons = useMemo(
+    () =>
+      bulkOffers
+        .filter((offer) => !offer.enabled && offer.reason)
+        .map((offer) => `${BULK_VERB_LABEL[offer.id] ?? offer.id}: ${offer.reason!}`),
+    [bulkOffers]
+  );
   /**
    * Why the toolbar looks the way it does. `bulkActionsFor` intersects
    * `allowedActions` across the selection — correct, and unchanged — but a
@@ -917,16 +1014,107 @@ function InventoryBody({ siteId }: { siteId: string }) {
     };
   }
 
+  /**
+   * THE SERVER SAYS WHETHER ANYTHING MOVED.
+   *
+   * `delete-artifact` and `restore-artifact` both answer with `changed` and
+   * with the row's post-mutation `status`. A `changed: false` row is not a
+   * success — the server did nothing because the row was already in that
+   * state — so it is split out here rather than counted in `ok`, and the
+   * returned states are applied to the table before the re-read.
+   */
+  function splitByChanged(
+    ids: readonly string[],
+    summary: { ok: string[]; failed: Array<{ id: string; reason?: string }> },
+    states: Map<string, { changed: boolean; status: string; updatedAt: string | null; note?: string }>,
+    fallbackReason: string
+  ) {
+    const changedIds = summary.ok.filter((id) => states.get(id)?.changed !== false);
+    const unchangedIds = summary.ok.filter((id) => states.get(id)?.changed === false);
+    return {
+      changedIds,
+      ok: changedIds.map((id) => ({ id })),
+      unchanged: unchangedIds.map((id) => ({ id, detail: states.get(id)?.note ?? 'Already in that state.' })),
+      failed: summary.failed.map((failure) => ({ id: failure.id, reason: failure.reason ?? fallbackReason })),
+      total: ids.length,
+    };
+  }
+
+  /**
+   * Applies the states the SERVER reported to the rows already on screen, so
+   * the status cell and the facet chips are right the instant the dialog
+   * opens — `facetCounts` is derived from these rows, so the "deleted N" chip
+   * moves without a page reload. `runAction` still re-reads afterwards; this
+   * is the page rendering the server's own answer rather than guessing at one.
+   */
+  function applyRowStates(states: Map<string, { status: string; updatedAt: string | null }>) {
+    if (states.size === 0) return;
+    setHits((previous) =>
+      previous.map((hit) => {
+        const next = states.get(hit.id);
+        // `updatedAt` is taken VERBATIM, `null` included: on an artifact row it
+        // carries `deletedAtISO`, so falling back to the row's old value would
+        // render an active row still stamped with the time it was deleted.
+        return next ? { ...hit, status: next.status, updatedAt: next.updatedAt } : hit;
+      })
+    );
+  }
+
   async function runDeleteArtifacts(targets: readonly InventoryHit[]): Promise<BulkReport> {
     const ids = targets.map((hit) => hit.id);
-    const summary = await bulkDeleteArtifacts(ids, (id) => deleteArtifact(getToken, id));
+    const states = new Map<string, { changed: boolean; status: string; updatedAt: string | null; note?: string }>();
+    const summary = await bulkDeleteArtifacts(ids, async (id) => {
+      const result = await deleteArtifact(getToken, id);
+      states.set(id, {
+        changed: result.changed !== false,
+        status: result.status ?? 'deleted',
+        updatedAt: result.deletedAtISO ?? null,
+        ...(result.message ? { note: result.message } : {}),
+      });
+      return result;
+    });
+    const split = splitByChanged(ids, summary, states, 'Delete failed.');
+    applyRowStates(states);
     return {
       // "marked deleted", not "deleted": the server soft-deletes (see
       // CONFIRM_EFFECT) and the bytes are still there. Reporting a hard
       // delete would be the page claiming a state it cannot prove.
-      title: `Delete artifacts — ${summary.ok.length} of ${ids.length} marked deleted (bytes retained)`,
-      ok: summary.ok.map((id) => ({ id })),
-      failed: summary.failed.map((failure) => ({ id: failure.id, reason: failure.reason ?? 'Delete failed.' })),
+      title: `Delete artifacts — ${split.changedIds.length} of ${ids.length} marked deleted (bytes retained)`,
+      ok: split.ok,
+      unchanged: split.unchanged,
+      failed: split.failed,
+    };
+  }
+
+  /**
+   * The verb that was missing from this page entirely. `bulkDeleteArtifacts`
+   * is id-generic (ids in, an injected per-id call, a bounded pool, a per-item
+   * `{ok, failed}` out), so restore reuses it for the same reason
+   * `runDeleteBlobs` does: one reporting contract, not a second untested
+   * fan-out.
+   */
+  async function runRestoreArtifacts(targets: readonly InventoryHit[]): Promise<BulkReport> {
+    const ids = targets.map((hit) => hit.id);
+    const states = new Map<string, { changed: boolean; status: string; updatedAt: string | null; note?: string }>();
+    const summary = await bulkDeleteArtifacts(ids, async (id) => {
+      const result = await restoreArtifact(getToken, id);
+      states.set(id, {
+        changed: result.changed !== false,
+        status: result.status ?? 'active',
+        // The delete stamp is gone, so `updatedAt` (which carried it) no
+        // longer has a value to show; the re-read restores `createdAtISO`.
+        updatedAt: null,
+        ...(result.message ? { note: result.message } : {}),
+      });
+      return result;
+    });
+    const split = splitByChanged(ids, summary, states, 'Restore failed.');
+    applyRowStates(states);
+    return {
+      title: `Restore artifacts — ${split.changedIds.length} of ${ids.length} restored`,
+      ok: split.ok,
+      unchanged: split.unchanged,
+      failed: split.failed,
     };
   }
 
@@ -995,6 +1183,9 @@ function InventoryBody({ siteId }: { siteId: string }) {
           break;
         case 'delete':
           result = await runDeleteArtifacts(targets);
+          break;
+        case 'restore':
+          result = await runRestoreArtifacts(targets);
           break;
         case 'delete-blob':
           result = await runDeleteBlobs(targets);
@@ -1245,6 +1436,17 @@ function InventoryBody({ siteId }: { siteId: string }) {
             onSelect: () => void downloadHit(hit, plan),
           });
           break;
+        case 'restore':
+          items.push({
+            id: action,
+            // Neutral, not danger: this puts a row BACK. The confirm still
+            // names what the server will do, in the house style.
+            label: 'Restore',
+            icon: <IconRotate size={14} />,
+            disabled: busy,
+            onSelect: () => setConfirming({ action: 'restore', hits: [hit] }),
+          });
+          break;
         case 'delete':
           items.push({
             id: action,
@@ -1292,10 +1494,20 @@ function InventoryBody({ siteId }: { siteId: string }) {
     return items;
   }
 
-  /** The bulk toolbar: only the verbs valid for EVERY selected row, and only the ones this page can execute. */
+  /**
+   * The bulk toolbar: the verbs valid for EVERY selected row, plus the two
+   * artifact state verbs rendered ENABLED-OR-EXPLAINED (`bulkActionOffers`).
+   *
+   * A mixed active+deleted selection is the case this exists for. The verb
+   * stays visible and disabled with its reason on `title`, because the
+   * alternative — applying Delete to the subset that qualifies and reporting
+   * "succeeded" — is the same lie this wave exists to remove.
+   */
   function bulkButtons() {
     const buttons: ReactNode[] = [];
-    for (const action of bulkActions) {
+    for (const offer of bulkOffers) {
+      const action = offer.id;
+      const disabled = busy || !offer.enabled;
       switch (action) {
         case 'validate':
           buttons.push(
@@ -1358,10 +1570,24 @@ function InventoryBody({ siteId }: { siteId: string }) {
               size="sm"
               variant="danger"
               leftIcon={<IconTrash size={14} />}
-              disabled={busy}
+              disabled={disabled}
               onClick={() => setConfirming({ action: 'delete', hits: selectedHits })}
             >
               Delete (soft)
+            </Button>
+          );
+          break;
+        case 'restore':
+          buttons.push(
+            <Button
+              key={action}
+              size="sm"
+              variant="secondary"
+              leftIcon={<IconRotate size={14} />}
+              disabled={disabled}
+              onClick={() => setConfirming({ action: 'restore', hits: selectedHits })}
+            >
+              Restore
             </Button>
           );
           break;
@@ -1670,9 +1896,18 @@ function InventoryBody({ siteId }: { siteId: string }) {
                         onSeedComposer={(prompt) => void seedInventoryComposer(prompt)}
                       />
                     ) : null}
-                    {bulkActions.length === 0 ? (
+                    {bulkOffers.length === 0 ? (
                       <span className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]">
                         No action applies to every selected item.
+                      </span>
+                    ) : null}
+                    {bulkDisabledReasons.length ? (
+                      <span
+                        role="status"
+                        aria-live="polite"
+                        className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
+                      >
+                        {bulkDisabledReasons.join(' ')}
                       </span>
                     ) : null}
                     <Button size="sm" variant="ghost" onClick={() => setSelection(clearSelection())}>
@@ -1989,7 +2224,7 @@ function InventoryBody({ siteId }: { siteId: string }) {
             : ''
         }
         confirmLabel={busy ? 'Working…' : CONFIRM_TITLE[confirming?.action ?? 'delete']}
-        tone="danger"
+        tone={CONFIRM_TONE[confirming?.action ?? 'delete']}
         requireTyped={CONFIRM_PHRASE[confirming?.action ?? 'delete']}
       />
 
@@ -2078,6 +2313,27 @@ function InventoryBody({ siteId }: { siteId: string }) {
               <p className="text-[var(--adm-text-muted)]">None.</p>
             )}
           </section>
+          {/* Not a success and not a failure: the server did what was asked
+              and nothing moved, because the row was already in that state.
+              Counting these under Succeeded is exactly the "succeeded" lie
+              this surface exists to stop telling. */}
+          {report?.unchanged?.length ? (
+            <section>
+              <h3 className="mb-1 font-semibold text-[var(--adm-text)]">
+                Already in that state ({report.unchanged.length})
+              </h3>
+              <ul className="flex flex-col gap-1">
+                {report.unchanged.map((entry) => (
+                  <li key={entry.id} className="[overflow-wrap:anywhere] font-mono text-[length:var(--adm-text-xs)]">
+                    {entry.id}
+                    {entry.detail ? (
+                      <span className="ml-2 font-sans text-[var(--adm-text-muted)]">{entry.detail}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           <section>
             <h3 className="mb-1 font-semibold text-[var(--adm-text)]">Failed ({report?.failed.length ?? 0})</h3>
             {report?.failed.length ? (
