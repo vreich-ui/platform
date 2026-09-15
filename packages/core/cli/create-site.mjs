@@ -2223,7 +2223,11 @@ export const buildPlan = (opts) => {
   assertGenesisArtifactsSupplied(opts);
   const ids = idsFor(clientSlug);
   const brandName = opts.brandName || titleCase(clientSlug);
-  const canonicalHost = opts.canonicalHost || `https://${clientSlug}.netlify.app`;
+  // 2026-09-15: the DEFAULT host follows the fleet's Netlify site name, not the bare slug. It used
+  // to be `https://<slug>.netlify.app`, which for every kugel- tenant named a subdomain the tenant
+  // does not own — so genesis-lab-2 was scaffolded with an explicit --canonical-host and the flag
+  // became the thing you had to remember. See fleetNetlifySiteName.
+  const canonicalHost = opts.canonicalHost || `https://${fleetNetlifySiteName(clientSlug)}.netlify.app`;
   const dir = `sites/${clientSlug}`;
 
   // T16.0: WHICH seed files a tenant is born with is the genesis manifest's
@@ -2499,6 +2503,29 @@ export const writeFiles = (plan) => {
  * partway through, and the only safe retry is one that reuses the site it
  * already made).
  */
+/**
+ * THE FLEET'S NETLIFY SITE NAME (2026-09-15) — one derivation, two defaults.
+ *
+ * `*.netlify.app` is a single global namespace, which is why `platform.netlify.app` was already
+ * taken (W14 T14.3) and why every tenant this repo mints is `kugel-<slug>`. That prefix lived
+ * nowhere in code: it was typed by hand into `--netlify-site-name` and `--canonical-host` on every
+ * mint, and the two places that needed it — the Netlify site create and the committed canonicalHost
+ * — both defaulted to the bare slug instead.
+ *
+ * It broke on the first unattended mint. CMS-Agent's genesis created a Netlify site literally named
+ * `genesis-lab-3` (2026-09-15) while the fleet's other lab tenant is `kugel-genesis-lab-2`, leaving
+ * an orphan site and two paths naming one tenant two ways. The matching fix on the CMS-Agent side is
+ * `genesisNetlifySiteName` in `src/agent/projects/genesisSiteName.ts`; this is its counterpart, and
+ * genesis now passes `--netlify-site-name` explicitly so the two can no longer disagree.
+ *
+ * IDEMPOTENT on the prefix, so a slug that already carries it is not double-prefixed. It is only a
+ * DEFAULT: `--netlify-site-name` and `--canonical-host` remain the escape hatch for the tenants that
+ * predate the convention (`drluriescience`, `zilbermanfilmfoundation`) and for a name already taken.
+ */
+export const FLEET_SITE_NAME_PREFIX = 'kugel-';
+export const fleetNetlifySiteName = (slug) =>
+  slug.startsWith(FLEET_SITE_NAME_PREFIX) ? slug : `${FLEET_SITE_NAME_PREFIX}${slug}`;
+
 export const findNetlifySite = async (fetchImpl, token, siteName) => {
   const response = await fetchImpl(`https://api.netlify.com/api/v1/sites?name=${encodeURIComponent(siteName)}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -2748,10 +2775,10 @@ export const executeNetlifyProvisioning = async (
   }
 ) => {
   // The Netlify subdomain is globally unique, so it cannot always equal the
-  // client slug (W14 T14.3: `platform.netlify.app` was taken). `siteName`
-  // overrides it; the in-repo slug — which every id, store, and path is derived
-  // from — stays the slug either way.
-  const site = await createNetlifySite(fetchImpl, token, siteName || plan.clientSlug);
+  // client slug (W14 T14.3: `platform.netlify.app` was taken) — which is exactly why the DEFAULT is
+  // now `fleetNetlifySiteName(slug)` rather than the bare slug. `siteName` still overrides it; the
+  // in-repo slug — which every id, store, and path is derived from — stays the slug either way.
+  const site = await createNetlifySite(fetchImpl, token, siteName || fleetNetlifySiteName(plan.clientSlug));
   const siteId = site.id || site.site_id;
   const accountId = site.account_id;
 

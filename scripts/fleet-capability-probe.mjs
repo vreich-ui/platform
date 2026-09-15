@@ -54,23 +54,76 @@ const findRepoRoot = (startDir) => {
 };
 const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
 
-// ── the small committed fleet endpoints map (T16.5 brief) — `--all` iterates
-//    this. Endpoint is each site's OWN `/mcp` front door (per-client
-//    connectors over one shared engine — see CLAUDE.md's W14 framing).
-//    Update this list in the same change that runs `create-site` for a new
-//    tenant; canonicalHost values mirror sites/<slug>/site.config.ts. ──
-export const FLEET_SITES = [
-  { slug: 'drlurie', endpoint: 'https://drluriescience.netlify.app/.netlify/functions/mcp' },
-  { slug: 'platform', endpoint: 'https://kugel-platform.netlify.app/.netlify/functions/mcp' },
-  { slug: 'fernwell', endpoint: 'https://kugel-fernwell.netlify.app/.netlify/functions/mcp' },
-  // Fleet tenant #4 (T12.12, minted 2026-08-14) — added here by W18 T18.7 (P1: the probe map
-  // is part of what a tenant's existence must update).
-  { slug: 'zilberman', endpoint: 'https://zilbermanfilmfoundation.netlify.app/.netlify/functions/mcp' },
-  // Fleet tenant #5 — added when the production build gate landed (cloud-cost N1): the
-  // promote script reads this same map, so a site missing here is a site that silently
-  // never gets promoted, which is a worse failure than a missing probe column.
-  { slug: 'genesis-lab-2', endpoint: 'https://kugel-genesis-lab-2.netlify.app/.netlify/functions/mcp' },
-];
+// ── THE FLEET, DERIVED FROM THE COMMITTED TENANTS (2026-09-15).
+//
+// This was a hand-maintained literal, and its own comment already named the hazard: "a site missing
+// here is a site that silently never gets promoted, which is a worse failure than a missing probe
+// column." It came true. `scripts/fleet-promote.mjs` imports this map and REFUSES an unknown slug,
+// so since the production build gate (cloud-cost N1) a freshly minted tenant could not ship at all
+// until a human remembered to add a line here — and `create-site.mjs` never did. genesis-lab-3 was
+// minted, provisioned and bound on 2026-09-15 and was unpromotable for exactly that reason.
+//
+// So the map is now DERIVED from what is actually committed: one entry per `sites/<slug>/`, with the
+// endpoint read off that tenant's own `config.yaml` (`site:` — the canonicalHost its build already
+// serves from). A tenant becomes promotable the moment its tree is committed, which is a step it
+// cannot skip anyway. Same mechanism `scripts/ci/discover-fleet-matrix.mjs` already uses to fan CI
+// out over `sites/*`: adding a client is zero workflow-file edits.
+//
+// Read off the config rather than derived from the slug on purpose: the Netlify host is NOT a
+// function of the slug across this fleet (`drlurie` → `drluriescience`, `zilberman` →
+// `zilbermanfilmfoundation`, and `kugel-<slug>` for the rest), so the committed canonicalHost is the
+// only honest source. It reproduces the previous five entries exactly.
+//
+// Sorted, so the printed matrix and `--all`'s promote order are stable run over run.
+// Exported because a TEST cannot compute it: `npm test` and `npm run test:opt-in` both run from a
+// COMPILED tree (.tmp/ci-test, .tmp/save-opt-in-test) that contains only the tenant files tsc pulled
+// in, so a test reading `../../sites` relative to itself sees a PARTIAL fleet and disagrees with this
+// module for reasons that have nothing to do with the code under test. `repoRoot` above is the
+// walk-up that already exists for exactly this reason.
+export const SITES_ROOT = path.join(repoRoot, 'sites');
+
+/** The canonicalHost a tenant's own config.yaml declares, or undefined when it declares none. */
+const tenantCanonicalHost = (sitesRoot, slug) => {
+  const configPath = path.join(sitesRoot, slug, 'config.yaml');
+  if (!fs.existsSync(configPath)) return undefined;
+  // Deliberately a line match rather than a YAML parse: this module has no yaml dependency, and the
+  // key is written by create-site.mjs's own template (`  site: '<host>'`). A shape it cannot read is
+  // reported by discoverFleetSites below rather than silently dropped.
+  const match = /^\s{2}site:\s*['"]?(https:\/\/[^\s'"]+)['"]?\s*$/m.exec(fs.readFileSync(configPath, 'utf8'));
+  return match?.[1];
+};
+
+/** Every committed tenant, with the endpoint its own config says it serves. */
+export const discoverFleetSites = (sitesRoot = SITES_ROOT) => {
+  if (!fs.existsSync(sitesRoot)) return { sites: [], skipped: [] };
+  const slugs = fs
+    .readdirSync(sitesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => entry.name)
+    .sort();
+  const sites = [];
+  const skipped = [];
+  for (const slug of slugs) {
+    const host = tenantCanonicalHost(sitesRoot, slug);
+    if (!host) {
+      // NAMED, never silent — a tenant whose config this cannot read is the failure mode the
+      // hand-maintained list had, and reporting it is the whole point of deriving.
+      skipped.push(slug);
+      continue;
+    }
+    sites.push({ slug, endpoint: `${host}/.netlify/functions/mcp` });
+  }
+  return { sites, skipped };
+};
+
+const discovered = discoverFleetSites();
+if (discovered.skipped.length) {
+  console.error(
+    `[fleet-capability-probe] no canonicalHost in sites/<slug>/config.yaml for: ${discovered.skipped.join(', ')} — ` +
+      'these tenants are NOT in the fleet map and cannot be promoted until their config declares one.'
+  );
+}
+export const FLEET_SITES = discovered.sites;
 
 // ── the ten families capability_status reports on. MUST stay in sync with
 //    CAPABILITY_FAMILIES in packages/core/server/lib/capability-status.ts —

@@ -1,0 +1,75 @@
+---
+import type { InferGetStaticPropsType, GetStaticPaths } from 'astro';
+import merge from 'lodash.merge';
+import type { ImageMetadata } from 'astro';
+
+import Layout from '~/layouts/PageLayout.astro';
+import SinglePost from '~/components/blog/SinglePost.astro';
+import ToBlogLink from '~/components/blog/ToBlogLink.astro';
+import RelatedPosts from '~/components/blog/RelatedPosts.astro';
+import ObjectSections from '~/components/cms/ObjectSections.astro';
+import { getCanonical, getPermalink } from '~/utils/permalinks';
+import { getStaticPathsBlogPost, blogPostRobots } from '~/utils/blog';
+import { findImage, isDocumentPath } from '~/utils/images';
+import { loadRoutePageObject } from '~/utils/route-page-object';
+import type { MetaData } from '~/types';
+
+export const prerender = true;
+
+// BLOCK BODY + blank-line separation, deliberately (W15 S2 finding, proven
+// on the fernwell zero-article build): the single-expression form
+// "(async () => await ...) satisfies GetStaticPaths" makes the Astro
+// compiler's hoist pass drag the adjacent "const { post } = Astro.props"
+// up to MODULE scope, which throws "Cannot destructure property 'post' of
+// 'Astro.props' as it is undefined" at import time and fails the whole
+// build. sites/platform's committed loaders use this exact proven shape.
+export const getStaticPaths = (async () => {
+  return await getStaticPathsBlogPost();
+}) satisfies GetStaticPaths;
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>;
+
+const { post } = Astro.props as Props;
+const url = getCanonical(getPermalink(post.permalink, 'post'));
+const image =
+  typeof post.image === 'string' && isDocumentPath(post.image)
+    ? undefined
+    : ((await findImage(post.image)) as ImageMetadata | string | undefined);
+const articleObject = await loadRoutePageObject('page_article');
+const objectProvidesRelated = (articleObject?.extraSections ?? []).some(
+  (section) =>
+    section.type === 'content_grid' &&
+    (section.data as { source?: { kind?: string } }).source?.kind === 'related' &&
+    section.visibility !== 'hidden'
+);
+const metadata = merge(
+  {
+    title: post.title,
+    description: post.excerpt,
+    robots: {
+      index: articleObject?.seo.robots?.index ?? blogPostRobots?.index,
+      follow: articleObject?.seo.robots?.follow ?? blogPostRobots?.follow,
+    },
+    openGraph: {
+      type: 'article',
+      ...(image
+        ? { images: [{ url: image, width: (image as ImageMetadata)?.width, height: (image as ImageMetadata)?.height }] }
+        : {}),
+    },
+  },
+  { ...(post?.metadata ? { ...post.metadata, canonical: post.metadata?.canonical || url } : {}) }
+) as MetaData;
+---
+
+<Layout metadata={metadata}>
+  <SinglePost post={{ ...post, image: image }} url={url}>
+    {post.Content ? <post.Content /> : <Fragment set:html={post.content || ''} />}
+  </SinglePost>
+  <ToBlogLink />
+  {!objectProvidesRelated && <RelatedPosts post={post} />}
+  <ObjectSections
+    objectId="page_article"
+    sections={articleObject?.extraSections ?? []}
+    context={{ relatedToPostId: post.id }}
+  />
+</Layout>

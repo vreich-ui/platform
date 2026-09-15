@@ -5,6 +5,7 @@
  */
 import '../../sites/drlurie/config/policy-bindings.js';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import { handler } from '../../netlify/functions/mcp.js';
@@ -19,7 +20,7 @@ import { getMembershipStatus } from '../../packages/core/server/lib/membership/s
 import { personIdForEmail, type MembershipStore } from '../../packages/core/server/lib/membership/store.js';
 import { getPolicy, newMember, saveMember, setPolicy } from '../../packages/core/server/lib/membership/write.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
-import { membershipRepoChecks, FLEET_SITES } from '../../scripts/fleet-capability-probe.mjs';
+import { membershipRepoChecks, FLEET_SITES, SITES_ROOT } from '../../scripts/fleet-capability-probe.mjs';
 
 const AT = '2026-08-17T10:00:00.000Z';
 
@@ -206,14 +207,35 @@ test('membership_status is callable over /mcp but never advertised in tools/list
 // ── 4. the probe’s repo-side membership checks, every tenant ─────────────
 
 test('fleet-capability-probe: every FLEET_SITES tenant passes the repo-side membership checks (sweep declared, templates, committed policy override registered)', () => {
+  // 2026-09-15: the roster is no longer asserted literally, because FLEET_SITES is no longer a
+  // literal — it is DERIVED from the committed `sites/*/` trees (see fleet-capability-probe.mjs).
+  // A hand-maintained roster in two places is what let genesis-lab-3 be minted, provisioned and
+  // bound while remaining unpromotable, since fleet-promote.mjs refuses a slug the list omits.
+  //
+  // What still matters is asserted instead, and more strongly than before: every committed tenant
+  // is in the map (so nothing is swept or shipped by nobody), and every one of them passes the
+  // repo-side checks below.
+  // SITES_ROOT comes from the probe module, not from a path relative to this file: this test also
+  // runs from the compiled trees (.tmp/ci-test, .tmp/save-opt-in-test), where only the tenant files
+  // tsc pulled in exist — a relative read there sees four of six tenants and fails for no reason.
+  const committedTenants = fs
+    .readdirSync(SITES_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
   assert.deepEqual(
     FLEET_SITES.map((s: { slug: string }) => s.slug),
-    // The roster is asserted literally on purpose: FLEET_SITES is what --all iterates and
-    // what scripts/fleet-promote.mjs promotes, so a tenant added to the fleet without being
-    // added here is a tenant nothing sweeps and nothing ships. genesis-lab-2 joined when the
-    // production build gate landed (cloud-cost N1).
-    ['drlurie', 'platform', 'fernwell', 'zilberman', 'genesis-lab-2']
+    committedTenants,
+    'every committed tenant must be in the fleet map, and only committed tenants'
   );
+  // The tenants that predate the derivation, pinned by name so a regression that empties the map
+  // cannot pass by agreeing with an empty directory read.
+  for (const slug of ['drlurie', 'platform', 'fernwell', 'zilberman', 'genesis-lab-2']) {
+    assert.ok(
+      FLEET_SITES.some((s: { slug: string }) => s.slug === slug),
+      `${slug} must stay in the fleet map`
+    );
+  }
   for (const { slug } of FLEET_SITES as Array<{ slug: string }>) {
     const checks = membershipRepoChecks(slug) as Record<string, string>;
     for (const [name, outcome] of Object.entries(checks)) {
