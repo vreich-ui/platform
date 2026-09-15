@@ -133,9 +133,16 @@ export type ArtifactDedupeResult = {
 export const dedupeArtifactsBySha = async (
   indexStore: ArtifactIndexStore,
   artifactStore: ArtifactByteStore,
-  options: { dryRun: boolean; artifactKind?: string; limit: number; cursor: number }
+  options: {
+    dryRun: boolean;
+    artifactKind?: string;
+    limit: number;
+    cursor: number;
+    /** Precomputed once per run by a paged caller — see sweepOrphanArtifacts. */
+    referenceKeys?: readonly string[];
+  }
 ): Promise<ArtifactDedupeResult> => {
-  const allKeys = await listArtifactIndexKeys(indexStore, 'request-artifacts/');
+  const allKeys = options.referenceKeys ?? (await listArtifactIndexKeys(indexStore, 'request-artifacts/'));
   const sorted = [...allKeys].sort((left, right) => {
     const shaCompare = shaFromReferenceKey(left).localeCompare(shaFromReferenceKey(right));
     return shaCompare !== 0 ? shaCompare : left.localeCompare(right);
@@ -297,11 +304,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * blocks, section props, slot blueprints, og images, portraits and template defaults,
  * and a field-by-field projection is exactly how a sweep starts deleting live media.
  */
+const addArtifactRefFromString = (value: string, into: Set<string>) => {
+  const trimmed = value.trim();
+  if (PUBLIC_ARTIFACT_PATH_RE.test(trimmed)) into.add(rawArtifactRefForPublicPath(trimmed));
+  else if (MAJOR_KEY_ARTIFACT_REF_RE.test(trimmed)) into.add(trimmed);
+};
+
 export const collectArtifactRefsFromValue = (value: unknown, into = new Set<string>()): Set<string> => {
   if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (PUBLIC_ARTIFACT_PATH_RE.test(trimmed)) into.add(rawArtifactRefForPublicPath(trimmed));
-    else if (MAJOR_KEY_ARTIFACT_REF_RE.test(trimmed)) into.add(trimmed);
+    addArtifactRefFromString(value, into);
     return into;
   }
 
@@ -312,6 +323,51 @@ export const collectArtifactRefsFromValue = (value: unknown, into = new Set<stri
 
   if (isRecord(value)) {
     for (const item of Object.values(value)) collectArtifactRefsFromValue(item, into);
+  }
+
+  return into;
+};
+
+/**
+ * W4 (2026-09-15): the record subtrees that say what an object USED to cite.
+ *
+ * `history` is the ledger — one entry per verb, never pruned — and every entry
+ * carries `details: { op, capture }`: the forward op AND the before-value the
+ * inverse needs (`applyPatchOps`, lib/object-patch-apply.ts). Replacing a hero
+ * image therefore writes BOTH srcs into `history` for ever, so a full walk of
+ * the raw record reported every artifact the object had EVER cited as live and
+ * the orphan pass could not retire a superseded capture on any object patched
+ * even once (page_home is at v212). The sweep looked correct and did nothing.
+ * The neighbours are snapshots of a past state, i.e. the same thing. Everything
+ * else is still walked in full — a field-by-field allowlist is how a sweep
+ * starts deleting live media.
+ */
+export const NON_LIVE_RECORD_KEYS: ReadonlySet<string> = new Set([
+  'history',
+  'previous',
+  'revisions',
+  'prior_versions',
+  'snapshot',
+  'snapshots',
+]);
+
+/** Artifact keys a record cites NOW: the full walk, minus the subtrees above. */
+export const collectArtifactRefsFromRecord = (value: unknown, into = new Set<string>()): Set<string> => {
+  if (typeof value === 'string') {
+    addArtifactRefFromString(value, into);
+    return into;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectArtifactRefsFromRecord(item, into);
+    return into;
+  }
+
+  if (isRecord(value)) {
+    for (const [key, item] of Object.entries(value)) {
+      if (NON_LIVE_RECORD_KEYS.has(key)) continue;
+      collectArtifactRefsFromRecord(item, into);
+    }
   }
 
   return into;
@@ -343,7 +399,7 @@ export const collectReferencedArtifactKeys = async (
       const record = await parseJson(objectsStore, `objects/${objectType}/by-id/${objectId}.json`);
       if (record === undefined) continue;
 
-      for (const blobKey of collectArtifactRefsFromValue(record)) {
+      for (const blobKey of collectArtifactRefsFromRecord(record)) {
         const sites = referenced.get(blobKey);
         if (sites) sites.push({ objectType, objectId });
         else referenced.set(blobKey, [{ objectType, objectId }]);
@@ -378,6 +434,25 @@ export const collectSlotPointerArtifactKeys = async (indexStore: ArtifactIndexSt
   }
 
   return referenced;
+};
+
+/** What one sweep run needs to know about who cites what — collected ONCE. */
+export type SweepReferences = {
+  byObjects: Map<string, ArtifactReferenceSite[]>;
+  slots: Set<string>;
+};
+
+/** Both reference sources in one pass — collected once per run. */
+export const collectSweepReferences = async (
+  indexStore: ArtifactIndexStore,
+  objectsStore: ArtifactSweepListStore
+): Promise<SweepReferences> => {
+  const [byObjects, slots] = await Promise.all([
+    collectReferencedArtifactKeys(objectsStore),
+    collectSlotPointerArtifactKeys(indexStore),
+  ]);
+
+  return { byObjects, slots };
 };
 
 export type OrphanCandidate = {
@@ -448,19 +523,27 @@ export const sweepOrphanArtifacts = async (
     deletedBy: string;
     limit: number;
     cursor: number;
+    /**
+     * PRECOMPUTED, ONCE PER RUN (W4, 2026-09-15). Both are whole-store walks
+     * and neither depends on WHICH page is being swept, so recomputing them
+     * inside the caller's paging loop made a run O(pages x store) — the one
+     * thing here that can spend a scheduled invocation's entire 30 s before the
+     * first write. A paged caller collects once and passes the result to every
+     * page; the admin verb passes nothing and gets the old behaviour.
+     */
+    references?: SweepReferences;
+    referenceKeys?: readonly string[];
   }
 ): Promise<ArtifactOrphanSweepResult> => {
-  const [referencedByObjects, slotReferenced] = await Promise.all([
-    collectReferencedArtifactKeys(objectsStore),
-    collectSlotPointerArtifactKeys(indexStore),
-  ]);
+  const { byObjects: referencedByObjects, slots: slotReferenced } =
+    options.references ?? (await collectSweepReferences(indexStore, objectsStore));
 
   const referenced = new Set<string>([...referencedByObjects.keys(), ...slotReferenced]);
 
-  const allKeys = await listArtifactIndexKeys(indexStore, 'request-artifacts/');
+  const allKeys = options.referenceKeys ?? (await listArtifactIndexKeys(indexStore, 'request-artifacts/'));
   const scoped = options.requestPrefix
     ? allKeys.filter((key) => requestIdFromReferenceKey(key).startsWith(options.requestPrefix as string))
-    : allKeys;
+    : [...allKeys];
 
   const pageKeys = scoped.slice(options.cursor, options.cursor + options.limit);
   const loaded = (await loadReferences(indexStore, pageKeys)).filter((entry) => !entry.reference.deletedAtISO);

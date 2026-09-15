@@ -13,6 +13,16 @@
  *      next Owner request that has a token (`drainIdentityDeleteQueue` in
  *      admin-users). This function only logs how many are waiting.
  *
+ * It also carries ONE fact that is not its own (W4, 2026-09-15): how long ago
+ * `media-compaction-sweep` last COMPLETED a cycle. Compaction shipped to the
+ * whole fleet on 2026-09-13 with a correct schedule, a correct shim and a
+ * correct deploy manifest, and then never ran once on any tenant — no log line,
+ * no error, nothing, for two days — while this function logged a clean run
+ * every morning from the very same deploys. This sweep is the fleet's one
+ * scheduled function with an unbroken run record, so it is the right place to
+ * say out loud that its 03:41 neighbour has gone quiet. Read-only, wrapped, and
+ * it can never fail the membership passes.
+ *
  * Idempotent: a second run the same day does nothing. Declared per site in
  * netlify.toml (`[functions."membership-sweep"] schedule = "17 3 * * *"`) — a
  * scheduled function only runs if its schedule is DECLARED (P1: every
@@ -20,9 +30,38 @@
  */
 import type { SiteBinding } from '../lib/site-binding.js';
 import { getMembershipStore } from '../lib/membership/store.js';
+import { getArtifactIndexBlobStore } from '../lib/blob-store.js';
+import type { ArtifactIndexStore } from '../lib/artifact-index.js';
+import {
+  MEDIA_COMPACTION_STALE_HOURS,
+  mediaCompactionAgeHours,
+  readMediaCompactionHeartbeat,
+} from '../lib/media-compaction-heartbeat.js';
 import { expireAll } from '../lib/membership/invitations.js';
 import { purgeExpiredMemberships } from '../lib/membership/offboarding.js';
 import { collectBlobListItems } from '../lib/blob-list.js';
+
+/**
+ * Hours since media compaction last finished a cycle, plus whether that is past
+ * the point where a DAILY job should have finished one. Never throws: a missing
+ * or unreadable receipt reports `null`, which reads as "no completed run on
+ * record" — which is itself the alarm on a tenant that has been deployed for
+ * more than a day.
+ */
+const mediaCompactionReport = async (event: unknown, now: string, binding?: SiteBinding) => {
+  try {
+    const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
+    const heartbeat = await readMediaCompactionHeartbeat(indexStore);
+    const ageHours = mediaCompactionAgeHours(heartbeat, now);
+    return {
+      media_compaction_age_hours: ageHours,
+      media_compaction_started_at: heartbeat?.startedAtISO ?? null,
+      media_compaction_stale: ageHours === null || ageHours > MEDIA_COMPACTION_STALE_HOURS,
+    };
+  } catch {
+    return { media_compaction_age_hours: null, media_compaction_started_at: null, media_compaction_stale: true };
+  }
+};
 
 export const runMembershipSweep = async (event: unknown, now = new Date().toISOString(), binding?: SiteBinding) => {
   const store = await getMembershipStore(event, binding);
@@ -41,7 +80,14 @@ export const runMembershipSweep = async (event: unknown, now = new Date().toISOS
   } catch {
     queued = 0;
   }
-  return { ok: true, at: now, expired_invitations: expired, purged_persons: purged, identity_deletes_queued: queued };
+  return {
+    ok: true,
+    at: now,
+    expired_invitations: expired,
+    purged_persons: purged,
+    identity_deletes_queued: queued,
+    ...(await mediaCompactionReport(event, now, binding)),
+  };
 };
 
 const buildHandlerImpl = (binding: SiteBinding) => async (event: unknown) => {

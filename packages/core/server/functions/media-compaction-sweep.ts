@@ -53,11 +53,18 @@ import {
 import type { ArtifactIndexStore } from '../lib/artifact-index.js';
 import type { ArtifactByteStore } from '../lib/artifact-soft-delete.js';
 import {
+  collectSweepReferences,
   dedupeArtifactsBySha,
   sweepOrphanArtifacts,
   type ArtifactSweepListStore,
   type DanglingReference,
 } from '../lib/artifact-dedupe-sweep.js';
+import { listArtifactIndexKeys } from '../lib/artifact-index.js';
+import {
+  readMediaCompactionHeartbeat,
+  writeMediaCompactionHeartbeat,
+  type MediaCompactionResume,
+} from '../lib/media-compaction-heartbeat.js';
 
 /** A reference younger than this is never an orphan — see GRACE WINDOW above. */
 export const ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -68,6 +75,19 @@ export const COMPACTION_ACTOR = 'media-compaction-sweep';
 /** Page size per library call, and the hard stop that keeps a run finite. */
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 500;
+
+/**
+ * How long a run may spend paging before it checkpoints and stops.
+ *
+ * Netlify kills a SCHEDULED function at 30 s (background functions are the
+ * 15-minute door, and a function cannot be both). A run that hits that wall is
+ * killed mid-page: nothing is reported, and — because the old code recomputed
+ * the whole reference set on EVERY page — a large tenant could burn the entire
+ * budget without ever reaching the dedupe pass, which is exactly the shape of
+ * "the store is untouched and the log is empty". So the run watches the clock
+ * itself, writes its cursors, and finishes the cycle on the next invocation.
+ */
+export const SWEEP_BUDGET_MS = 20_000;
 
 export type MediaCompactionSweepResult = {
   ok: true;
@@ -80,6 +100,10 @@ export type MediaCompactionSweepResult = {
   bytes_freed: number;
   skipped_recent: number;
   scanned: number;
+  /** True when the clock, not the store, ended the run — the rest resumes next run. */
+  stopped_early: boolean;
+  /** Where this run started paging (non-zero when it resumed a stopped cycle). */
+  resumed_from: MediaCompactionResume;
 };
 
 /**
@@ -91,19 +115,54 @@ export type MediaCompactionSweepResult = {
 export const runMediaCompactionSweep = async (
   event: unknown,
   now = new Date().toISOString(),
-  binding?: SiteBinding
+  binding?: SiteBinding,
+  options: { budgetMs?: number; remainingMs?: () => number } = {}
 ): Promise<MediaCompactionSweepResult> => {
   const indexStore = (await getArtifactIndexBlobStore(event, binding)) as unknown as ArtifactIndexStore;
   const objectsStore = (await getSiteObjectsBlobStore(event, binding)) as unknown as ArtifactSweepListStore;
   const artifactStore = (await getArtifactBlobStore(event, binding)) as unknown as ArtifactByteStore;
+
+  const startedMs = Date.now();
+  const budgetMs = options.budgetMs ?? SWEEP_BUDGET_MS;
+  // Stop on whichever comes first: our own budget, or 5 s before the platform
+  // would kill us (the platform kill leaves no receipt and no log line).
+  const outOfTime = () => {
+    if (Date.now() - startedMs >= budgetMs) return true;
+    const remaining = options.remainingMs?.();
+    return typeof remaining === 'number' && remaining < 5_000;
+  };
+
+  // Resume a cycle a previous run checkpointed; a finished cycle starts over.
+  const prior = await readMediaCompactionHeartbeat(indexStore);
+  const priorCycleDone = !prior || (prior.resume.orphanCursor === null && prior.resume.dedupeCursor === null);
+  const resumedFrom: MediaCompactionResume = priorCycleDone
+    ? { orphanCursor: 0, dedupeCursor: 0 }
+    : prior.resume;
+
+  await writeMediaCompactionHeartbeat(indexStore, {
+    schema: 'media_compaction_heartbeat.v1',
+    startedAtISO: now,
+    finishedAtISO: null,
+    ok: null,
+    error: null,
+    resume: resumedFrom,
+    totals: prior?.totals ?? null,
+  });
+
+  // ONCE PER RUN, not once per page: both of these walk the whole store and
+  // neither depends on which page is being swept.
+  const references = await collectSweepReferences(indexStore, objectsStore);
+  const referenceKeys = await listArtifactIndexKeys(indexStore, 'request-artifacts/');
 
   let orphansSoftDeleted = 0;
   let skippedRecent = 0;
   let scanned = 0;
   const dangling: DanglingReference[] = [];
 
+  let stoppedEarly = false;
+
   // 1. Orphan sweep — apply, with the grace window.
-  let cursor: number | null = 0;
+  let cursor: number | null = resumedFrom.orphanCursor;
   for (let page = 0; cursor !== null && page < MAX_PAGES; page += 1) {
     const result = await sweepOrphanArtifacts(indexStore, objectsStore, {
       dryRun: false,
@@ -112,6 +171,8 @@ export const runMediaCompactionSweep = async (
       deletedBy: COMPACTION_ACTOR,
       limit: PAGE_LIMIT,
       cursor,
+      references,
+      referenceKeys,
     });
 
     orphansSoftDeleted += result.softDeleted;
@@ -120,20 +181,29 @@ export const runMediaCompactionSweep = async (
     dangling.push(...result.dangling);
 
     cursor = result.checkpoint.nextCursor === null ? null : Number(result.checkpoint.nextCursor);
-    if (result.scanned === 0) break;
+    if (result.scanned === 0) cursor = null;
+    if (cursor !== null && outOfTime()) {
+      stoppedEarly = true;
+      break;
+    }
   }
+  const orphanResume = cursor;
 
   // 2. By-sha dedupe — apply, on the post-sweep set of LIVE references only.
   let dedupeGroups = 0;
   let blobsDeleted = 0;
   let bytesFreed = 0;
 
-  cursor = 0;
+  // Only once the orphan pass has finished its cycle: dedupe must see the
+  // post-sweep set, so a half-swept index is not a set it may act on.
+  cursor = orphanResume === null && !stoppedEarly ? resumedFrom.dedupeCursor : null;
+  const dedupeStarted = cursor;
   for (let page = 0; cursor !== null && page < MAX_PAGES; page += 1) {
     const result = await dedupeArtifactsBySha(indexStore, artifactStore, {
       dryRun: false,
       limit: PAGE_LIMIT,
       cursor,
+      referenceKeys,
     });
 
     dedupeGroups += result.details.filter((group) => !group.skippedReason).length;
@@ -141,10 +211,15 @@ export const runMediaCompactionSweep = async (
     bytesFreed += result.bytesFreed;
 
     cursor = result.checkpoint.nextCursor === null ? null : Number(result.checkpoint.nextCursor);
-    if (result.scanned === 0) break;
+    if (result.scanned === 0) cursor = null;
+    if (cursor !== null && outOfTime()) {
+      stoppedEarly = true;
+      break;
+    }
   }
+  const dedupeResume = dedupeStarted === null && orphanResume !== null ? resumedFrom.dedupeCursor : cursor;
 
-  return {
+  const result: MediaCompactionSweepResult = {
     ok: true,
     at: now,
     orphans_soft_deleted: orphansSoftDeleted,
@@ -155,12 +230,30 @@ export const runMediaCompactionSweep = async (
     bytes_freed: bytesFreed,
     skipped_recent: skippedRecent,
     scanned,
+    stopped_early: stoppedEarly,
+    resumed_from: resumedFrom,
   };
+
+  await writeMediaCompactionHeartbeat(indexStore, {
+    schema: 'media_compaction_heartbeat.v1',
+    startedAtISO: now,
+    finishedAtISO: new Date().toISOString(),
+    ok: true,
+    error: null,
+    resume: { orphanCursor: orphanResume, dedupeCursor: dedupeResume },
+    totals: { ...result },
+  });
+
+  return result;
 };
 
-const buildHandlerImpl = (binding: SiteBinding) => async (event: unknown) => {
+type LambdaContext = { getRemainingTimeInMillis?: () => number };
+
+const buildHandlerImpl = (binding: SiteBinding) => async (event: unknown, context?: LambdaContext) => {
   try {
-    const result = await runMediaCompactionSweep(event, undefined, binding);
+    const result = await runMediaCompactionSweep(event, undefined, binding, {
+      ...(context?.getRemainingTimeInMillis ? { remainingMs: () => context.getRemainingTimeInMillis!() } : {}),
+    });
     console.log(
       JSON.stringify({ ts: result.at, event: 'media_compaction_sweep', site: binding.siteId, ...result })
     );
