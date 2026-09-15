@@ -14,7 +14,7 @@ create-site plan for 'acme' (Acme)
   site id:        site_acme
   taxonomy id:    tax_acme
   theme id:       thm_acme_default
-  canonical host: https://acme.netlify.app
+  canonical host: https://kugel-acme.netlify.app
 
 Files to create under sites/acme/ (104):
   + sites/acme/config/site-identity.ts
