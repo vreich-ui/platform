@@ -19,6 +19,7 @@ import test from 'node:test';
 
 import { runMediaCompactionSweep, ORPHAN_GRACE_MS } from '../../packages/core/server/functions/media-compaction-sweep.js';
 import { requestArtifactReferenceKey } from '../../packages/core/server/lib/artifact-index.js';
+import { MEDIA_COMPACTION_HEARTBEAT_KEY } from '../../packages/core/server/lib/media-compaction-heartbeat.js';
 import { setNetlifyBlobsModuleForTesting } from '../../packages/core/server/lib/blob-store.js';
 import type { ArtifactReference } from '../../packages/core/server/lib/artifacts.js';
 
@@ -224,9 +225,16 @@ test('a second run the same day is a no-op', async () => {
   await withStores(async (stores) => {
     seed(stores);
 
+    // The run receipt (`maintenance/…`) is excluded on purpose: it is the one
+    // thing every run rewrites, and it is not an artifact reference.
+    const referenceState = () =>
+      JSON.stringify(
+        [...stores.indexValues.entries()].filter(([key]) => key !== MEDIA_COMPACTION_HEARTBEAT_KEY).sort()
+      );
+
     await runMediaCompactionSweep({}, NOW);
     const artifactsAfterFirst = [...stores.artifactValues.keys()].sort();
-    const indexAfterFirst = JSON.stringify([...stores.indexValues.entries()].sort());
+    const indexAfterFirst = referenceState();
 
     const again = await runMediaCompactionSweep({}, NOW);
 
@@ -235,6 +243,156 @@ test('a second run the same day is a no-op', async () => {
     assert.equal(again.bytes_freed, 0);
     assert.equal(again.dedupe_groups, 0, 'every remaining sha group is already deduped');
     assert.deepEqual([...stores.artifactValues.keys()].sort(), artifactsAfterFirst);
-    assert.equal(JSON.stringify([...stores.indexValues.entries()].sort()), indexAfterFirst);
+    assert.equal(referenceState(), indexAfterFirst);
+  });
+});
+
+test('an artifact cited ONLY by the history ledger is an orphan', async () => {
+  await withStores(async (stores) => {
+    // The exact shape `applyPatchOps` writes: one entry per verb, never pruned,
+    // carrying the forward op AND the before-capture the inverse needs. Both
+    // halves name an artifact — the one the page shows now, and the one it
+    // showed before. Walking them made every artifact a page had EVER cited
+    // immortal, so the orphan pass could not retire a superseded capture on any
+    // object that had been patched even once (page_home is at v212 on
+    // zilberman) and the whole sweep reported zeros while looking healthy.
+    const SHA_SUPERSEDED = 'e'.repeat(64);
+    const SHA_CURRENT = 'f'.repeat(64);
+
+    const superseded = reference('req_capture_zilberman_20260823_05', SHA_SUPERSEDED, LONG_AGO);
+    const current = reference('req_capture_zilberman_20260910_01', SHA_CURRENT, LONG_AGO);
+
+    for (const [requestId, ref] of [
+      ['req_capture_zilberman_20260823_05', superseded],
+      ['req_capture_zilberman_20260910_01', current],
+    ] as const) {
+      stores.indexValues.set(requestArtifactReferenceKey(requestId, ref.sha256), JSON.stringify(ref));
+      stores.artifactValues.set(ref.blobKey, Buffer.from('nine byte'));
+    }
+
+    stores.objectValues.set('objects/page/index/by-status/active/page_home', '');
+    stores.objectValues.set(
+      'objects/page/by-id/page_home.json',
+      JSON.stringify({
+        object_id: 'page_home',
+        version: 212,
+        body: [{ type: 'image', src: `/img/req_capture_zilberman_20260910_01/${SHA_CURRENT}.png` }],
+        history: [
+          {
+            at: '2026-09-10T10:00:00.000Z',
+            action: 'replace_block',
+            actor: { kind: 'agent' },
+            details: {
+              op: {
+                op: 'replace_block',
+                fields: { src: `/img/req_capture_zilberman_20260910_01/${SHA_CURRENT}.png` },
+              },
+              capture: {
+                kind: 'block',
+                before: { src: `/img/req_capture_zilberman_20260823_05/${SHA_SUPERSEDED}.png` },
+              },
+            },
+          },
+        ],
+      })
+    );
+
+    const result = await runMediaCompactionSweep({}, NOW);
+
+    assert.equal(result.orphans_soft_deleted, 1, 'the superseded capture is retired');
+    const supersededRef = JSON.parse(
+      stores.indexValues.get(requestArtifactReferenceKey('req_capture_zilberman_20260823_05', SHA_SUPERSEDED)) as string
+    );
+    assert.equal(supersededRef.deletedAtISO, NOW);
+    assert.equal(stores.artifactValues.has(superseded.blobKey), true, 'a soft delete keeps the bytes');
+
+    // The image the page actually shows is untouched — the ledger fix must not
+    // turn into "walk less and delete live media".
+    const currentRef = JSON.parse(
+      stores.indexValues.get(requestArtifactReferenceKey('req_capture_zilberman_20260910_01', SHA_CURRENT)) as string
+    );
+    assert.equal(currentRef.deletedAtISO, undefined);
+    assert.equal(result.dangling, 0);
+  });
+});
+
+test('the object store is walked ONCE per run, not once per page of references', async () => {
+  await withStores(async (stores) => {
+    seed(stores);
+
+    // 250 more references: three pages at PAGE_LIMIT = 100, where the old code
+    // re-walked every active object's full record on each page.
+    for (let index = 0; index < 250; index += 1) {
+      const sha = index.toString(16).padStart(64, '0');
+      const ref = reference('req_capture_zilberman_20260823_05', sha, LONG_AGO);
+      stores.indexValues.set(requestArtifactReferenceKey('req_capture_zilberman_20260823_05', sha), JSON.stringify(ref));
+      stores.artifactValues.set(ref.blobKey, Buffer.from('nine byte'));
+    }
+
+    let recordReads = 0;
+    const objects = stores.objectValues;
+    const originalGet = Map.prototype.get;
+    // Count only the full-projection record reads the reference walk makes.
+    const countingGet = function (this: Map<string, FakeValue>, key: string) {
+      if (this === objects && key === 'objects/page/by-id/page_home.json') recordReads += 1;
+      return originalGet.call(this, key) as FakeValue | undefined;
+    };
+    (Map.prototype as unknown as { get: unknown }).get = countingGet;
+
+    let result: Awaited<ReturnType<typeof runMediaCompactionSweep>>;
+    try {
+      result = await runMediaCompactionSweep({}, NOW);
+    } finally {
+      (Map.prototype as unknown as { get: unknown }).get = originalGet;
+    }
+
+    assert.ok(result.scanned > 200, 'the run really did page over the whole index');
+    assert.equal(recordReads, 1, 'one reference walk per run, however many pages it sweeps');
+  });
+});
+
+test('a run writes a receipt that says it started and that it finished', async () => {
+  await withStores(async (stores) => {
+    seed(stores);
+
+    const result = await runMediaCompactionSweep({}, NOW);
+
+    const receipt = JSON.parse(stores.indexValues.get(MEDIA_COMPACTION_HEARTBEAT_KEY) as string);
+    assert.equal(receipt.schema, 'media_compaction_heartbeat.v1');
+    assert.equal(receipt.startedAtISO, NOW);
+    assert.equal(typeof receipt.finishedAtISO, 'string', 'a finished run says so IN THE STORE, not only in a log');
+    assert.equal(receipt.ok, true);
+    assert.deepEqual(receipt.resume, { orphanCursor: null, dedupeCursor: null }, 'the cycle completed');
+    assert.equal(receipt.totals.orphans_soft_deleted, result.orphans_soft_deleted);
+    assert.equal(result.stopped_early, false);
+
+    // The receipt lives outside every prefix the sweep walks, so it can never
+    // be mistaken for a reference by the pass that writes it.
+    assert.equal(MEDIA_COMPACTION_HEARTBEAT_KEY.startsWith('maintenance/'), true);
+  });
+});
+
+test('a run that stops on the clock checkpoints, and the next run resumes there', async () => {
+  await withStores(async (stores) => {
+    seed(stores);
+    for (let index = 0; index < 250; index += 1) {
+      const sha = index.toString(16).padStart(64, '0');
+      const ref = reference('req_capture_zilberman_20260823_05', sha, LONG_AGO);
+      stores.indexValues.set(requestArtifactReferenceKey('req_capture_zilberman_20260823_05', sha), JSON.stringify(ref));
+      stores.artifactValues.set(ref.blobKey, Buffer.from('nine byte'));
+    }
+
+    // budgetMs 0: the clock is already out after the first page.
+    const first = await runMediaCompactionSweep({}, NOW, undefined, { budgetMs: 0 });
+    assert.equal(first.stopped_early, true);
+    assert.equal(first.dedupe_groups, 0, 'dedupe never runs on a half-swept index');
+
+    const checkpoint = JSON.parse(stores.indexValues.get(MEDIA_COMPACTION_HEARTBEAT_KEY) as string);
+    assert.equal(typeof checkpoint.resume.orphanCursor, 'number');
+    assert.ok(checkpoint.resume.orphanCursor > 0);
+
+    const second = await runMediaCompactionSweep({}, NOW, undefined, { budgetMs: 0 });
+    assert.deepEqual(second.resumed_from.orphanCursor, checkpoint.resume.orphanCursor, 'it picks up where it stopped');
+    assert.ok(second.scanned > 0);
   });
 });

@@ -292,7 +292,16 @@ const BUDGETS_KB: Record<string, number> = {
   'admin-requests': 500,
   'admin-users': 500,
   // Ratchet only; see the header note.
-  'admin-agent-chat': 3520,
+  //
+  // 3520 -> 3536 (W4 first-run fix, 2026-09-15). NOT a new import edge and not
+  // new server code on the diet: the tree had already crept from the measured
+  // 3494 KB to 3519 KB, and W4's fix to `artifact-dedupe-sweep.ts` — a module
+  // already in this graph — pushed it 3 KB over on COMMENTS explaining why the
+  // reference walk must skip the `history` ledger. Cutting that explanation to
+  // buy 3 KB would trade the reason a sweep silently retired nothing for a
+  // number. Re-measured: 3522 KB / 262 modules, so this is 14 KB of headroom,
+  // and the next wave that eats it should look for a real edge first.
+  'admin-agent-chat': 3536,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */
