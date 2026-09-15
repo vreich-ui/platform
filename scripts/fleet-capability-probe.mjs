@@ -82,6 +82,18 @@ const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
 // walk-up that already exists for exactly this reason.
 export const SITES_ROOT = path.join(repoRoot, 'sites');
 
+// `npm test` runs `node --test tests/scripts/*.test.mjs`, which executes test FILES
+// concurrently in separate processes against the repo's real `sites/` dir.
+// admin-parity.test.mjs scaffolds a real, transient tenant under `sites/parity-scratch-<slug>`
+// for the duration of one of its tests (see tests/scripts/scratch-sites.mjs for the full
+// history of this race). discoverFleetSites below enumerates `sites/*` and is imported by
+// fleet-site-name.test.mjs, which can observe that tenant mid-flight and disagree with a
+// second, later read of the same directory — nondeterministically, on whichever matrix entry
+// interleaves. Kept as a local literal (not imported from tests/scratch-sites.mjs) so this
+// production script has no dependency on test-only code; the prefix is test-pinned there and
+// must stay in sync with SCRATCH_SITE_PREFIX.
+const SCRATCH_SITE_PREFIX = 'parity-scratch-';
+
 /** The canonicalHost a tenant's own config.yaml declares, or undefined when it declares none. */
 const tenantCanonicalHost = (sitesRoot, slug) => {
   const configPath = path.join(sitesRoot, slug, 'config.yaml');
@@ -100,6 +112,7 @@ export const discoverFleetSites = (sitesRoot = SITES_ROOT) => {
     .readdirSync(sitesRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
     .map((entry) => entry.name)
+    .filter((name) => !name.startsWith(SCRATCH_SITE_PREFIX))
     .sort();
   const sites = [];
   const skipped = [];

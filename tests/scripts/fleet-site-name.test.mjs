@@ -6,6 +6,7 @@ import os from 'node:os';
 import { fleetNetlifySiteName, FLEET_SITE_NAME_PREFIX, buildPlan } from '../../packages/core/cli/create-site.mjs';
 import { discoverFleetSites, FLEET_SITES, SITES_ROOT } from '../../scripts/fleet-capability-probe.mjs';
 import { FLEET_SLUGS } from '../../scripts/fleet-promote.mjs';
+import { realTenantNames } from './scratch-sites.mjs';
 
 // 2026-09-15. Two halves of ONE defect: the Netlify site name `kugel-<slug>` lived in an operator's
 // habit rather than in code, and the fleet map that decides what can be promoted was a
@@ -46,12 +47,11 @@ test('the fleet map is derived from the committed tenants, and every one of them
   // ...plus every tenant committed since, with no edit to any list.
   assert.deepEqual(
     slugs,
-    fs
-      // SITES_ROOT, never cwd: this suite is also run from compiled trees where cwd differs.
-      .readdirSync(SITES_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort(),
+    // realTenantNames, never a raw readdirSync: admin-parity.test.mjs scaffolds a real,
+    // transient sites/parity-scratch-<slug> tenant concurrently (npm test runs test files
+    // in separate processes against this same real SITES_ROOT), and an unfiltered read here
+    // would race discoverFleetSites' own (already-filtered) snapshot — see scratch-sites.mjs.
+    realTenantNames(SITES_ROOT), // SITES_ROOT, never cwd: this suite is also run from compiled trees where cwd differs.
     'one entry per sites/<slug>/, sorted'
   );
   // The map fleet-promote refuses unknown slugs against IS this one.
