@@ -157,3 +157,51 @@ test('what the REAL mapper produces passes this check — the two agree', () => 
   assert.deepEqual(assets.missingAssetIds, []);
   assert.deepEqual(assets.unusedAssetIds, []);
 });
+
+// ─── annotation keywords are not unimplemented constraints (2026-09-15) ─────
+
+test('an `x-` annotation keyword neither invalidates the data nor costs the check its authority', () => {
+  // `x-slotKind` is pdf-tool's own slot classifier — it tells the renderer and the brand
+  // classifier that a string is an image reference. It asserts nothing about the value, so no
+  // value can fail it. Counting it as an unimplemented keyword made the check both
+  // non-authoritative and INVALID on every template carrying an image slot, which is what
+  // refused `document_render` on dr-lurie.
+  const schema = {
+    type: 'object',
+    required: ['coverImage'],
+    properties: {
+      coverImage: { type: 'string', 'x-slotKind': 'imageRef', description: 'the hero' },
+    },
+  };
+  const check = checkRenderDataAgainstSchema(schema, { coverImage: 'asset_hero' });
+  assert.equal(check.valid, true);
+  assert.deepEqual(check.errors, []);
+  assert.equal(check.authoritative, true, 'nothing constraining went unchecked, so the verdict is authoritative');
+});
+
+test('a genuinely unimplemented keyword is still collected — not knowing is worth saying', () => {
+  const schema = {
+    type: 'object',
+    properties: { count: { type: 'number', multipleOf: 3 } },
+  };
+  const check = checkRenderDataAgainstSchema(schema, { count: 4 });
+  assert.equal(check.authoritative, false);
+  assert.ok(
+    check.errors.some((error) => error.keyword === 'unsupportedKeyword' && /multipleOf/.test(error.message)),
+    'a keyword outside the `x-` annotation space might really constrain something'
+  );
+});
+
+test('an `x-` annotation does not suppress a REAL error sitting beside it', () => {
+  const schema = {
+    type: 'object',
+    required: ['coverImage', 'title'],
+    properties: {
+      coverImage: { type: 'string', 'x-slotKind': 'imageRef' },
+      title: { type: 'string' },
+    },
+  };
+  const check = checkRenderDataAgainstSchema(schema, { coverImage: 'asset_hero' });
+  assert.equal(check.valid, false);
+  assert.ok(check.errors.some((error) => /title/.test(error.message)));
+});

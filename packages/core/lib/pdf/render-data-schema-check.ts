@@ -118,7 +118,17 @@ const walk = (schemaIn: unknown, data: unknown, instancePath: string, schemaPath
   if (!isRecord(schemaIn)) return;
 
   for (const keyword of Object.keys(schemaIn)) {
-    if (!SUPPORTED_KEYWORDS.has(keyword)) ctx.unsupported.add(keyword);
+    // `x-` IS THE ANNOTATION PREFIX, NOT AN UNIMPLEMENTED CONSTRAINT. JSON Schema requires an
+    // unknown keyword to be ignored, and the `x-` convention marks a keyword that annotates rather
+    // than constrains — pdf-tool's `x-slotKind` classifies a slot as an image reference for the
+    // renderer and the brand classifier; no value can fail it, because it asserts nothing about
+    // values. Counting it as unimplemented made this check non-authoritative AND invalid on every
+    // template that carries one, which on this fleet is every template with an image slot:
+    // `document_render` on dr-lurie was refused for `x-slotKind` on `drlurie_article_v1.coverImage`
+    // (verified live 2026-09-15, after the brand fix removed the error that was masking it).
+    // A keyword outside the `x-` space that this walker does not implement is still collected —
+    // that one might really constrain something, and not knowing is worth saying.
+    if (!SUPPORTED_KEYWORDS.has(keyword) && !keyword.startsWith('x-')) ctx.unsupported.add(keyword);
   }
 
   let schema = schemaIn;
