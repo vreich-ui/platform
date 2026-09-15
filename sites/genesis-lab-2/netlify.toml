@@ -40,7 +40,29 @@
   # above runs ../../scripts/*.mjs directly and `npm ci --prefix ../..` off the root lockfile, so a
   # root-only change to either was being skipped here exactly like the packages/core gap PR #501
   # fixed for the shared workspace.
-  ignore = "git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/genesis-lab-2 packages/core scripts package.json package-lock.json"
+  # PRODUCTION IS PROMOTED, NOT PUSHED (cloud-cost N1).
+  #
+  # Every merge to main used to fan out into one charged production build on each
+  # of the five fleet projects — packages/core is in every site's ignore list, so
+  # a single shared-code commit built all of them — for ~1,005 production deploys
+  # a period against a budget that expects a fraction of that. Almost none of
+  # those deploys were wanted at the moment they ran: content publishes commit
+  # with [skip netlify] and go live through release_to_production's build hook,
+  # and code lands in batches that are promoted deliberately.
+  #
+  # So: exit 0 (skip) for anything building the production branch, and fall
+  # through to the path-scoped diff below for everything else, which keeps deploy
+  # previews and branch deploys behaving exactly as they did.
+  #
+  # WHAT STILL DEPLOYS. Netlify does not run the ignore command at all for a
+  # build triggered by a BUILD HOOK, "regardless of exit code"
+  # (docs.netlify.com/build/configure-builds/ignore-builds). That is the whole
+  # design: release_to_production and admin-release already fire
+  # NETLIFY_BUILD_HOOK_URL, so the content path is untouched, and
+  # `node scripts/fleet-promote.mjs` fires the same kind of hook per site to ship
+  # code. Both signals are tested because CONTEXT is not documented as available
+  # to the ignore command while BRANCH is; either one matching is enough.
+  ignore = 'if [ "$CONTEXT" = "production" ] || [ "$BRANCH" = "main" ]; then exit 0; fi; git -C ../.. diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- sites/genesis-lab-2 packages/core scripts package.json package-lock.json'
 [build.environment]
   NODE_VERSION = "20"
   # Same omission the root netlify.toml carries (W15 S3 parity): the secrets

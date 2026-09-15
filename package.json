@@ -40,7 +40,8 @@
     "site:genesis": "node scripts/site-genesis-drive.mjs",
     "site:verify": "node scripts/site-genesis-drive.mjs --verify",
     "fleet:parity": "node scripts/audit-site-admin-parity.mjs --all",
-    "fleet:capability": "node scripts/fleet-capability-probe.mjs --all"
+    "fleet:capability": "node scripts/fleet-capability-probe.mjs --all",
+    "fleet:promote": "node scripts/fleet-promote.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
