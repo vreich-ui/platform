@@ -41,6 +41,7 @@ import {
   type ArtifactIndexStore,
 } from '../lib/artifact-index.js';
 import type { ArtifactReference } from '../lib/artifacts.js';
+import { restoreArtifactReference, softDeleteArtifactReference } from '../lib/artifact-soft-delete.js';
 import { verifyArtifactRetag } from '../../lib/admin/artifact-retag-verification.js';
 import { getManagedBlobStore, listManagedBlobStores } from '../lib/blob-admin.js';
 import { collectBlobListItems, mapWithConcurrency, STORE_READ_CONCURRENCY } from '../lib/blob-list.js';
@@ -105,8 +106,8 @@ const jsonResponse = (statusCode: number, body: Record<string, unknown>) => ({
 
 /**
  * T2.3 — the two read actions on this action-dispatched POST (`search`,
- * `preview`); `delete-artifact`/`retag-artifact` mutate the artifact index
- * and keep the plain `no-store` response above.
+ * `preview`); `delete-artifact`/`restore-artifact`/`retag-artifact` mutate the
+ * artifact index and keep the plain `no-store` response above.
  *
  * Applied at the DISPATCH boundary rather than inside `handleSearch`/
  * `handlePreview` themselves: both have several early-return branches
@@ -532,20 +533,16 @@ const handlePreview: ActionHandler = async (params, context) => {
 // ─── artifact verbs ─────────────────────────────────────────────────────────
 
 /**
- * W3 T1: the reference write ALONE is no longer a complete soft delete.
- * `ArtifactPointer` now mirrors `deletedAtISO`, and a pointer left saying
- * "live" over a deleted record makes `admin-editorial-assets` pay a read to
- * discover that — so this writes the reference and its pointers together,
- * through the same helper `artifact_soft_delete` uses. Same reference key,
- * same reference metadata bag as the local writer it replaces.
+ * Both mutating verbs read the reference here (for the 404/422 split this
+ * endpoint answers with) and then hand the WRITE to the leaf primitive in
+ * `artifact-soft-delete.ts`, which re-reads it under its own store handle.
+ * Between those two reads a concurrent purge can remove the reference, and the
+ * primitive reports that as a plain error string — so it is mapped back to the
+ * 404 the first read would have given rather than dressed up as a 422.
  */
-const writeArtifactReferenceJson = async (
-  indexStore: ArtifactIndexStore,
-  requestId: string,
-  artifact: ArtifactReference
-) => {
-  await writeArtifactReferenceIndexes(indexStore, requestId, artifact);
-};
+const PRIMITIVE_NOT_FOUND = 'Artifact reference was not found.';
+const mutationFailureResponse = (error: string) =>
+  error === PRIMITIVE_NOT_FOUND ? jsonResponse(404, { error: 'Artifact metadata not found.' }) : jsonResponse(422, { error });
 
 const deleteIndexKey = async (
   indexStore: { delete?: (key: string) => Promise<void>; del?: (key: string) => Promise<void> },
@@ -617,29 +614,99 @@ const handleDeleteArtifact: ActionHandler = async (params, context) => {
     });
   }
 
-  if (read.reference.deletedAtISO) {
-    return jsonResponse(200, {
-      id: formatArtifactHitId(parsed.requestId, parsed.sha256),
-      artifact: read.reference,
-      deleted: true,
-      alreadyDeleted: true,
-    });
-  }
-
-  // Soft delete, the same shape `artifact_soft_delete` writes: the reference
-  // is marked and the bytes stay put, so a mistaken delete is recoverable.
-  const deletedArtifact: ArtifactReference = {
-    ...read.reference,
-    deletedAtISO: new Date().toISOString(),
-    deletedBy: context.actor,
-  };
-
-  await writeArtifactReferenceJson(indexStore, parsed.requestId, deletedArtifact);
+  /**
+   * The soft delete itself is `artifact-soft-delete.ts`'s, not this file's.
+   *
+   * It used to be inlined here — the same `{...reference, deletedAtISO,
+   * deletedBy}` spread the primitive writes — which meant the two doors onto
+   * the same mutation each had their own copy, and the covered one was not the
+   * one this page calls. Delegating leaves one implementation, so the
+   * primitive's tests (`tests/netlify/artifact-lifecycle-guards.test.ts`) are
+   * this handler's tests too, `changed` included. Bytes are kept: `removeBytes`
+   * is not passed, so a mistaken delete stays recoverable — which is what makes
+   * `restore-artifact` below meaningful.
+   *
+   * The 409 guards above are unchanged and still run FIRST.
+   */
+  const result = await softDeleteArtifactReference(
+    context.event,
+    {
+      requestId: parsed.requestId,
+      sha256: parsed.sha256,
+      deletedBy: context.actor,
+      deletedByFallback: context.actor || 'admin',
+    },
+    context.binding
+  );
+  if (!result.ok) return mutationFailureResponse(result.error);
 
   return jsonResponse(200, {
     id: formatArtifactHitId(parsed.requestId, parsed.sha256),
-    artifact: deletedArtifact,
+    artifact: result.artifact,
     deleted: true,
+    // `changed: false` means the reference was ALREADY marked deleted — the
+    // row's actions are a function of its true state, so the client must be
+    // able to file this under "already in that state" rather than Succeeded.
+    changed: result.changed,
+    ...(result.changed ? {} : { alreadyDeleted: true }),
+    // The row's POST-MUTATION state, read off what was written — the client
+    // renders this rather than guessing what a delete must have done.
+    status: 'deleted',
+    deletedAtISO: result.artifact.deletedAtISO ?? null,
+    ...(result.changed ? {} : { message: 'This artifact was already marked deleted; nothing changed.' }),
+  });
+};
+
+/**
+ * `restore-artifact` — the verb that was missing.
+ *
+ * The platform has had the primitive since W3 (`restoreArtifactReference`
+ * clears `deletedAtISO`/`deletedBy` and rewrites the reference AND its
+ * `by-kind`/`by-request`/`by-tag` pointers through the one helper that knows
+ * the ordering rule); nothing on `/admin/inventory` could reach it, so a
+ * soft-deleted row was offered Delete — a verb the server treats as a no-op —
+ * and never the verb that would actually change its state.
+ *
+ * NO REFERENCED-BY GUARD, deliberately. `handleDeleteArtifact` refuses when an
+ * active object still points at the artifact, because a delete there breaks a
+ * published page. Restoring can only ever make an artifact MORE visible, so
+ * the same check here would refuse the one operation that repairs the page.
+ *
+ * The 404/422 read happens here rather than inside the primitive because the
+ * primitive collapses "absent" and "unparseable" into one error string, and
+ * this endpoint answers those with different status codes (same shape as
+ * delete). The mutation itself stays in the leaf module — one copy of the
+ * business logic, as `artifact-soft-delete.ts`'s header requires.
+ */
+const handleRestoreArtifact: ActionHandler = async (params, context) => {
+  const parsed = parseArtifactHitId(params.id);
+  if (!parsed) return jsonResponse(400, { error: 'An artifact id of "<requestId>/<sha256>" is required.' });
+
+  const indexStore = await openArtifactIndexStore(context.event, context.binding);
+  const read = await readArtifactReferenceResult(indexStore, parsed.requestId, parsed.sha256);
+  if (read.status === 'absent') return jsonResponse(404, { error: 'Artifact metadata not found.' });
+  if (read.status === 'rejected') {
+    return jsonResponse(422, { error: `Artifact index entry is not usable: ${read.issue}` });
+  }
+
+  const result = await restoreArtifactReference(
+    context.event,
+    { requestId: parsed.requestId, sha256: parsed.sha256 },
+    context.binding
+  );
+  if (!result.ok) return mutationFailureResponse(result.error);
+
+  return jsonResponse(200, {
+    id: formatArtifactHitId(parsed.requestId, parsed.sha256),
+    artifact: result.artifact,
+    restored: true,
+    // `changed: false` means the artifact was already live. The primitive
+    // already reports it; surfacing it is what keeps the result dialog from
+    // counting a no-op as a success.
+    changed: result.changed,
+    status: 'active',
+    deletedAtISO: null,
+    ...(result.changed ? {} : { message: 'This artifact was not deleted; nothing changed.' }),
   });
 };
 
@@ -739,6 +806,7 @@ const actionHandlers: Record<string, ActionHandler> = {
   search: handleSearch,
   preview: handlePreview,
   'delete-artifact': handleDeleteArtifact,
+  'restore-artifact': handleRestoreArtifact,
   'retag-artifact': handleRetagArtifact,
 };
 

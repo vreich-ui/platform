@@ -224,6 +224,12 @@ export type ArtifactMutationResult =
  * Stamp `deletedAtISO`/`deletedBy` on one artifact reference. Idempotent: an
  * already-deleted reference keeps its original stamp and is rewritten as-is.
  *
+ * `changed` reports whether THIS call moved the artifact's liveness, mirroring
+ * `restoreArtifactReference`: false when the reference was already deleted, so
+ * a caller can say "already in that state" instead of reporting a no-op as a
+ * success. The write still happens either way — rewriting the reference and
+ * its pointers repairs a torn half-write — only the flag is honest about it.
+ *
  * AUTHORIZATION IS THE CALLER'S JOB. Both callers today authenticate an admin
  * BEFORE they get here (mcp-artifact-admin's `requireAdminToolAccess`;
  * admin-users' own `roles.includes('admin')` gate), and neither reaches this
@@ -259,6 +265,7 @@ export const softDeleteArtifactReference = async (
   const loaded = await loadArtifactReferenceForAdminMutation(store, requestId, sha256.sha256);
   if (!loaded.ok) return { ok: false, error: loaded.error };
 
+  const wasDeleted = Boolean(loaded.artifact.deletedAtISO);
   const deletedArtifact: ArtifactReference = {
     ...loaded.artifact,
     deletedAtISO: loaded.artifact.deletedAtISO ?? new Date().toISOString(),
@@ -267,14 +274,14 @@ export const softDeleteArtifactReference = async (
 
   await writeArtifactReferenceForAdminMutation(store, requestId, deletedArtifact);
 
-  if (input.removeBytes !== true) return { ok: true, artifact: deletedArtifact, changed: true };
+  if (input.removeBytes !== true) return { ok: true, artifact: deletedArtifact, changed: !wasDeleted };
 
   const artifactStore = (await getArtifactBlobStore(event, binding ?? getMcpBinding())) as unknown as ArtifactByteStore;
   const bytes = await removeArtifactBytesIfUnreferenced(store, artifactStore, deletedArtifact, {
     excludeRequestId: requestId,
   });
 
-  return { ok: true, artifact: deletedArtifact, changed: true, bytes };
+  return { ok: true, artifact: deletedArtifact, changed: !wasDeleted, bytes };
 };
 
 /** Clear `deletedAtISO`/`deletedBy`. `changed` is false when the reference was not deleted to begin with. */

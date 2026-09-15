@@ -972,6 +972,10 @@ export const softDeleteArtifact = async (event: LambdaEvent, input: Record<strin
   return toolResult({
     artifact: result.artifact,
     deleted: true,
+    // `changed: false` == the reference was already marked deleted. Same
+    // honesty the `/admin/inventory` door now reports, so the two doors onto
+    // this one primitive cannot disagree about whether anything happened.
+    changed: result.changed,
     ...(result.bytes ? { bytes: result.bytes } : {}),
   });
 };
@@ -1042,7 +1046,7 @@ export const restoreArtifact = async (event: LambdaEvent, input: Record<string, 
   );
   if (!result.ok) return toolError(result.error);
 
-  return toolResult({ artifact: result.artifact, restored: result.changed });
+  return toolResult({ artifact: result.artifact, restored: result.changed, changed: result.changed });
 };
 
 export const reconcileArtifactIndexes = async (event: LambdaEvent, input: Record<string, unknown>) => {

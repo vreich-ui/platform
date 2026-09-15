@@ -5,7 +5,8 @@
  * collections (governed objects via the `inventory` verb, artifacts via
  * `artifact-index`, and raw system stores); preview and the two per-artifact
  * mutations (`delete-artifact`, `retag-artifact`) round out the T1 action
- * set per BRIEF.md's task table.
+ * set per BRIEF.md's task table; `restore-artifact` is the fourth, added when
+ * the row menu became a function of the row's true state.
  *
  * `GetToken` is injected the same way `maintenance-client.ts` and
  * `verbs-client.ts` do it, so this module needs no auth wiring of its own.
@@ -109,6 +110,28 @@ export type PreviewResult = TextPreviewResult | ArtifactPreviewResult;
 export interface DeleteArtifactResult {
   id: string;
   deleted: boolean;
+  /**
+   * Did THIS call move the artifact's liveness? False when the reference was
+   * already soft-deleted — a no-op the server used to report as a plain
+   * success. `status`/`deletedAtISO` are the row's POST-mutation state as the
+   * server wrote it, so a surface renders truth instead of guessing.
+   */
+  changed?: boolean;
+  alreadyDeleted?: boolean;
+  status?: string;
+  deletedAtISO?: string | null;
+  message?: string;
+}
+
+/** The mirror of `DeleteArtifactResult` for `restore-artifact`. `status` is always `'active'`. */
+export interface RestoreArtifactResult {
+  id: string;
+  restored: boolean;
+  /** False when the artifact was not deleted to begin with — nothing changed. */
+  changed: boolean;
+  status: string;
+  deletedAtISO: null;
+  message?: string;
 }
 
 /**
@@ -187,6 +210,14 @@ export const previewInventoryHit = (
  */
 export const deleteArtifact = (getToken: GetToken, id: string) =>
   callInventory<DeleteArtifactResult>(getToken, 'delete-artifact', { id });
+
+/**
+ * Clears the soft-delete mark on one artifact. There is no referenced-by
+ * refusal to handle here — restoring can only make an artifact more visible —
+ * so the only failures are 404/422 from the server, thrown by `callInventory`.
+ */
+export const restoreArtifact = (getToken: GetToken, id: string) =>
+  callInventory<RestoreArtifactResult>(getToken, 'restore-artifact', { id });
 
 /** Adds/removes tags on one artifact in a single call; either array may be omitted/empty. */
 export const retagArtifact = (getToken: GetToken, id: string, add: string[] = [], remove: string[] = []) =>
