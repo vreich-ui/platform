@@ -453,6 +453,142 @@ test("JOIN A: the template's own renderDataSchema reaches the mapper, and the ar
 });
 
 // ---------------------------------------------------------------------------
+// Mapped data and mapped assets are ONE PAIR
+// ---------------------------------------------------------------------------
+//
+// The mapper allocates the asset ids its own data names. Applying the data
+// while losing the assets renders a PDF whose hero is a broken-image box, on a
+// job pdf-tool reports as COMPLETE — the engine only warns. That is what
+// happened to dr-lurie's azelaic-acid lead magnet
+// (job 9c7ca40e, 2026-09-15): `coverImage` named an asset the job never
+// carried. These two pin the pairing from both sides.
+
+const seedHeroImage = async () => {
+  const store = createLocalBlobStore('site-objects');
+  const existing = JSON.parse(
+    (await store.get(objectRecordKey('content_item', REQUEST_ID))) ?? '{}'
+  ) as Record<string, unknown>;
+  const heroSha = 'b'.repeat(64);
+  await store.setJSON(objectRecordKey('content_item', REQUEST_ID), {
+    ...existing,
+    body: {
+      ...(existing.body as Record<string, unknown>),
+      image: { src: `/img/${REQUEST_ID}/${heroSha}.webp`, alt: 'hero' },
+    },
+  });
+  return heroSha;
+};
+
+const assetSlotTemplateRoute = (body: Record<string, unknown>) => ({
+  body: {
+    projectId: body.projectId,
+    templateId: body.templateId,
+    renderer: 'chromium',
+    status: 'active',
+    version: 1,
+    renderDataSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['title', 'sections'],
+      properties: {
+        title: { type: 'string', maxLength: 200 },
+        coverImage: { $ref: '#/$defs/assetId' },
+        sections: { type: 'array', maxItems: 24, items: { type: 'object' } },
+      },
+      $defs: { assetId: { type: 'string', pattern: '^[a-zA-Z0-9._-]{1,128}$' } },
+    },
+  },
+});
+
+test("a caller's own assets are merged with the mapper's, never substituted for them", async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié' });
+  const heroSha = await seedHeroImage();
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: assetSlotTemplateRoute,
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const result = await callCreateAgentArtifactJob(
+      {},
+      {
+        site_id: SITE_ID,
+        request_id: REQUEST_ID,
+        artifact_kind: 'pdf',
+        template_id: 'tpl_assets',
+        wait: false,
+        // A brand logo the TEMPLATE references directly; the article never
+        // mentions it, so the mapper cannot know about it.
+        assets: { images: [{ assetId: 'logo', blobKey: 'brand/logo.png' }] },
+      }
+    );
+    assert.ok(!('isError' in result) || !result.isError, JSON.stringify(result));
+
+    const jobCall = calls.find((call) => call.tool === 'create_agent_artifact_job');
+    assert.ok(jobCall);
+    const data = jobCall!.body.data as Record<string, unknown>;
+    const assets = jobCall!.body.assets as { images: { assetId: string; blobKey: string }[] };
+
+    // The slot the mapper filled travels with the asset the mapper allocated…
+    const coverId = String(data.coverImage);
+    const cover = assets.images.find((entry) => entry.assetId === coverId);
+    assert.ok(cover, `the job must carry the asset its own data names (${coverId})`);
+    assert.equal(cover!.blobKey, `image/${REQUEST_ID}/${heroSha}.webp`);
+    // …and the caller's unrelated asset is still there.
+    assert.ok(assets.images.some((entry) => entry.assetId === 'logo'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('an `assets` argument in an unusable shape is REFUSED, not silently dropped', async () => {
+  await resetAndSeedRequest();
+  await seedSiteRecord({ name: 'Dr. Lurié' });
+  await seedHeroImage();
+
+  const originalFetch = globalThis.fetch;
+  const { calls, fetchImpl } = stubPdfToolMcp({
+    create_agent_artifact_job: pendingArtifactJobRoute,
+    get_pdf_template: assetSlotTemplateRoute,
+  });
+  globalThis.fetch = fetchImpl;
+
+  try {
+    const result = await callCreateAgentArtifactJob(
+      {},
+      {
+        site_id: SITE_ID,
+        request_id: REQUEST_ID,
+        artifact_kind: 'pdf',
+        template_id: 'tpl_assets',
+        wait: false,
+        // The shape that used to vanish: an ARRAY. It failed the
+        // `{images}` guard, and then blocked the mapper's assets as well, so
+        // the job went out with render data naming assets it did not carry.
+        assets: [{ assetId: 'logo', blobKey: 'brand/logo.png' }] as unknown as { images: unknown[] },
+      }
+    );
+
+    assert.ok('isError' in result && result.isError, 'a malformed assets argument must be refused');
+    const body = JSON.stringify(result);
+    assert.match(body, /pdf_assets_shape_invalid/);
+    assert.match(body, /\{images: \[\.\.\.\]\}/);
+    // And nothing was sent: a refusal that still created the job would be the
+    // same broken PDF with an error message attached.
+    assert.equal(
+      calls.some((call) => call.tool === 'create_agent_artifact_job'),
+      false
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ---------------------------------------------------------------------------
 // A site that was never configured must say so itself
 // ---------------------------------------------------------------------------
 
