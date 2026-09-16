@@ -50,6 +50,7 @@ import {
 } from '../../lib/pdf/artifact-job-descriptor.js';
 import { resolveArtifactJobEditFields } from '../../lib/pdf/artifact-job-edit-fields.js';
 import { buildRenderData } from '../../lib/pdf/render-data-mapper.js';
+import { mergeJobImageAssets } from '../../lib/pdf/job-image-assets.js';
 import { checkRenderDataAgainstSchema, checkRenderDataAssets } from '../../lib/pdf/render-data-schema-check.js';
 import {
   readArticlePdfJobView,
@@ -1839,10 +1840,17 @@ export const callCreateAgentArtifactJob = async (
   // response shape of this call. undefined when the mapper did not run (the
   // caller supplied `data`, or there is no template/content_item).
   let renderDataReport: { mapped: true; schemaSource: string; unfilled: string[] } | undefined;
-  let assetsOverride =
-    input.assets && typeof input.assets === 'object' && !Array.isArray(input.assets)
-      ? (input.assets as { images?: unknown[] })
-      : undefined;
+  // The caller's own assets, when they sent a usable `{images: [...]}` object.
+  // `assetsInputUnusable` is the case that used to vanish: an `assets` that IS
+  // present but is not that shape (an array, a string, null) fell to
+  // `undefined` here AND then blocked the mapper's assets below, so the job
+  // was created with render data naming assets that travelled with nothing.
+  // Remembered rather than discarded — see the refusal at the mapper hook.
+  const assetsInputPresent = input.assets !== undefined && input.assets !== null;
+  const assetsInputUsable =
+    input.assets && typeof input.assets === 'object' && !Array.isArray(input.assets);
+  const assetsInputUnusable = assetsInputPresent && !assetsInputUsable;
+  let assetsOverride = assetsInputUsable ? (input.assets as { images?: unknown[] }) : undefined;
 
   if (artifactKind === 'pdf') {
     const kindInput = resolvePdfJobKind(toNonEmptyString(input.kind));
@@ -1955,8 +1963,30 @@ export const callCreateAgentArtifactJob = async (
           getMapper: async () => deps.pdfRenderDataMapper ?? defaultPdfRenderDataMapper,
         });
         if (mapped.ok) {
+          // MAPPED DATA AND MAPPED ASSETS ARE ONE PAIR. The data the mapper
+          // returns names asset ids the mapper itself allocated
+          // (`assets.images[].assetId`, addressed from the template as
+          // `https://render.assets.invalid/<assetId>`); the two are produced
+          // by one pass over one article and are meaningless apart. Applying
+          // the data while dropping the assets renders a PDF whose hero is a
+          // broken-image box, reported by pdf-tool only as an engine warning
+          // on a job that otherwise SUCCEEDS.
+          //
+          // It used to be droppable two ways: a caller-supplied `assets` in an
+          // unusable shape (refused below), and a caller-supplied `assets` in
+          // a usable one, which silently replaced the mapper's set wholesale.
+          if (assetsInputUnusable) {
+            return toolError(
+              `The \`assets\` argument must be an object of the form {images: [...]}; it arrived in another shape and is refused rather than ignored. This job's render data was built by the article mapper, and that data names assets the mapper allocated — dropping them renders a PDF whose images are broken boxes on a job that otherwise reports success. Send {images: [...]}, or omit \`assets\` entirely to travel with the ones the mapper built.`,
+              { error_code: 'pdf_assets_shape_invalid', site_id: scoped.scope.siteId, request_id: scoped.scope.requestId }
+            );
+          }
           dataOverride = injectPdfRenderDataBrandForSlot(brandSlot, siteBody, mapped.data);
-          if (mapped.assets && input.assets === undefined) assetsOverride = mapped.assets;
+          // The mapper's entries WIN on a shared assetId — they are the ones
+          // its data names — and a caller's extra entries are kept, because a
+          // template can reference an asset the article never mentions (a
+          // brand logo is the live case).
+          if (mapped.assets) assetsOverride = mergeJobImageAssets(assetsOverride, mapped.assets);
           // `unfilled[]` is the mapper's FIRST-CLASS output and used to be
           // dropped here: a job created from an article that silently lost six
           // figures reported nothing at all. It rides every response shape of
