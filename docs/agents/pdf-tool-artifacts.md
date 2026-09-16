@@ -67,7 +67,7 @@ platform's own mapper, not cms-agent's workflow-plane one).
 
 4. Platform verifies pdf-tool's materialization response and returns a Dr. Lurie-native `ArtifactReference` plus `/img/...` or `/pdf/...` public path, with no grant or proof.
 5. The agent uses the existing Dr. Lurie MCP checkout, patch, and checkin tools to insert that `ArtifactReference` into the authoritative workflow JSON.
-6. A later trusted publisher reads the stored `ArtifactReference` from workflow state and resolves it through the existing publication path.
+6. A later trusted publisher reads the stored `ArtifactReference` from workflow state and resolves it through the current server-side publishing path.
 
 The bridge is deliberately narrow: create, poll, and lookup-by-slot. Object patch/validation remains on the ordinary governed object verbs.
 
@@ -179,3 +179,98 @@ pdf-tool's own error codes travel unchanged in `errorCode`, alongside this bridg
 named upstream refusal is never flattened into a generic platform failure. Note that OCR runs
 in pdf-tool's separately-deployed render service, so `check_image_text` can answer
 `OCR_UNAVAILABLE` while every other tool on this bridge works.
+
+## Example: captioning a hero image (T-IMG)
+
+Why this example exists: on 2026-09-03 the hero image for the "Azelaic acid for adult acne"
+article shipped with the words "12 WEEK RESULTS" baked into the model-generated photo — legible
+enough to notice, garbled enough to embarrass. A `check_image_text {mode: "expect_none"}` call
+on the base image would have caught it before publish. The sequence below is what that article's
+hero SHOULD have gone through.
+
+1. **Generate the base image as usual** (brandImagery / `create_agent_artifact_job`), no text in
+   the prompt beyond describing the scene — a hand applying a serum, morning light, no on-image
+   copy requested. Confirm it is clean before annotating:
+
+   ```json
+   {
+     "tool": "check_image_text",
+     "site_id": "site_drlurie",
+     "request_id": "req_2026_09_16_azelaic_acid",
+     "public_path": "/img/req_2026_09_16_azelaic_acid/a91f2c4e...d8.webp",
+     "mode": "expect_none"
+   }
+   ```
+
+   Returns `textCheck: { mode: "expect_none", detected: [], ok: true }`. Had the model baked in
+   its own attempt at "12 WEEK RESULTS", `detected` would list the garbled fragments and `ok`
+   would be `false` — still a successful call, but the signal to regenerate the base rather than
+   annotate over broken text.
+
+2. **Read the layout before choosing a placement:**
+
+   ```json
+   {
+     "tool": "analyze_image_layout",
+     "site_id": "site_drlurie",
+     "request_id": "req_2026_09_16_azelaic_acid",
+     "public_path": "/img/req_2026_09_16_azelaic_acid/a91f2c4e...d8.webp"
+   }
+   ```
+
+   `hints.safeZones` ranks the lower-right corner (`cell: "F6"`) as low-busyness, even-toned
+   background — clear of the hand and the serum bottle, the two elements the shot is built
+   around.
+
+3. **Draw the caption there:**
+
+   ```json
+   {
+     "tool": "annotate_image",
+     "site_id": "site_drlurie",
+     "request_id": "req_2026_09_16_azelaic_acid",
+     "public_path": "/img/req_2026_09_16_azelaic_acid/a91f2c4e...d8.webp",
+     "spec": {
+       "elements": [
+         {
+           "type": "scrim",
+           "at": "F6",
+           "style": { "opacity": 0.35 }
+         },
+         {
+           "type": "text",
+           "at": "F6",
+           "anchor": "bottom-right",
+           "content": "12-week trial results",
+           "style": { "size": "sm", "weight": "medium" }
+         }
+       ]
+     }
+   }
+   ```
+
+   Returns the new artifact at `public_path: "/img/req_2026_09_16_azelaic_acid/b70e9a1c...4f.webp"`
+   with `renderReport.warnings: []` — the scrim gave the caption enough contrast against the
+   background that `CONTRAST_LOW` never fired.
+
+4. **Confirm the caption actually rendered legibly:**
+
+   ```json
+   {
+     "tool": "check_image_text",
+     "site_id": "site_drlurie",
+     "request_id": "req_2026_09_16_azelaic_acid",
+     "public_path": "/img/req_2026_09_16_azelaic_acid/b70e9a1c...4f.webp",
+     "mode": "expect",
+     "expect": ["12-week trial results"]
+   }
+   ```
+
+   Returns `textCheck: { mode: "expect", detected: ["12-week trial results"], ok: true, matched: ["12-week trial results"], missing: [] }`.
+   Only now is `b70e9a1c...4f.webp` the artifact that goes into the hero slot — a caption that
+   came back with `missing: ["12-week trial results"]` (a font substitution silently dropping the
+   glyphs, say) means re-annotating rather than shipping an image that only looks captioned.
+
+`preview_image_grid` is worth a fifth call whenever a human — an editor, not the agent — needs
+to see the grid pdf-tool used to pick `F6`, rather than trusting the coordinates blind; it costs
+nothing extra and writes its own disposable artifact rather than touching the hero slot.
