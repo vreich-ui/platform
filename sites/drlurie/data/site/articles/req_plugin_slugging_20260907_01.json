@@ -1,16 +1,8 @@
 {
   "__generated": {
-    "at": "2026-09-07T07:51:15.868Z",
-    "attribution": "oauth",
+    "at": "2026-09-16T08:44:13.103Z",
     "from": "objects/content_item/by-id/req_plugin_slugging_20260907_01.json",
-    "producer": {
-      "model": "claude-opus-5",
-      "node_id": "plugin:claude",
-      "prompt_version": "dr-lurie-claude-20260903-f3506d7e",
-      "run_id": "plugin_claude_req_plugin_slugging_20260907_01"
-    },
-    "record_version": 10,
-    "surface": "plugin:claude"
+    "record_version": 15
   },
   "author": "Dr. Lurie",
   "deck": "Sealing your face under an ointment overnight is an old dermatology trick with a new name. It is genuinely useful for one kind of skin and genuinely counterproductive for another.",
@@ -822,7 +814,7 @@
                           "data": {},
                           "marks": [],
                           "nodeType": "text",
-                          "value": " Twice a week instead of nightly."
+                          "value": " Once or twice a week instead of two or three."
                         }
                       ],
                       "data": {},
