@@ -8,10 +8,10 @@ import { ConfirmDialog, useToast } from './overlays';
 import { ActionRow } from './approval';
 import { IconCheck, IconExternalLink, IconRocket } from './icons';
 import type { SiteIdentity } from '@core/lib/site-identity';
-import { fetchInventoryRows, invalidateInventoryCache } from '@core/lib/admin/library-client';
+import { fetchInventoryRowsViaShell, invalidateInventoryCache } from '@core/lib/admin/library-client';
 import { listChats, type ChatSummaryView } from '@core/lib/admin/chat-client';
 import {
-  fetchReleaseOverview,
+  fetchReleaseOverviewViaShell,
   invalidateReleaseOverview,
   triggerProductionRelease,
   type ReleaseDeployState,
@@ -23,6 +23,8 @@ import { chatWorkLabel, getWorkSummary } from '@core/lib/admin/work-summary';
 import type { LibraryRow } from '@core/lib/admin/library-logic';
 import {
   groupReleaseReviewItems,
+  releaseAsOfIsStale,
+  releaseAsOfLabel,
   releaseQueueSignature,
   releaseReviewSummary,
   shortDiagnosticCommit,
@@ -326,12 +328,20 @@ function ReleaseWorkspaceContent() {
    * or while polling a build in progress — goes through `refreshReleaseState`
    * below, which drops those module caches first so the TTL can never hide an
    * editor's own action from them.
+   *
+   * M2.2: both fetchers now ask this navigation's coalesced `admin-shell`
+   * boot first — the same boot the auth gate and the requests pills already
+   * read — and fall back to `fetchReleaseOverview` / `fetchInventoryRows`
+   * unchanged whenever the shell cannot answer (see those two files' own
+   * headers). `release:chats` is untouched: `listChats` is not one of the
+   * shell's five sections, so this panel still makes its own call — a real
+   * limitation, not a suppressed one (see this task's delivery notes).
    */
   const overviewResource = useCachedResource<ReleaseOverview>('release:overview', () =>
-    fetchReleaseOverview(getToken, { force: false })
+    fetchReleaseOverviewViaShell(getToken)
   );
   const inventoryResource = useCachedResource<LibraryRow[]>('release:inventory', () =>
-    fetchInventoryRows(getToken, { force: false })
+    fetchInventoryRowsViaShell(getToken)
   );
   const chatsResource = useCachedResource<ChatSummaryView[]>('release:chats', async (signal) => {
     const { chats: list } = await listChats(getToken, false, signal);
@@ -382,6 +392,8 @@ function ReleaseWorkspaceContent() {
   const queueSignature = useMemo(() => releaseQueueSignature(waiting), [waiting]);
   const reviewed = waiting.length > 0 && reviewedQueueSignature === queueSignature;
   const deploy = overview ? deployCopy[overview.deploy.state] : undefined;
+  const asOfLabel = releaseAsOfLabel(overview?.as_of);
+  const asOfStale = releaseAsOfIsStale(overview?.as_of, Date.now());
   // The acknowledgement set belongs to ONE batch — the moment the queue
   // changes it is stale, exactly like the "I reviewed this batch" switch.
   const acknowledgedCategories = acknowledged.signature === queueSignature ? acknowledged.categories : [];
@@ -507,6 +519,21 @@ function ReleaseWorkspaceContent() {
             <div>
               <div className="flex items-center gap-2">
                 <Badge tone={deploy.tone}>{deploy.label}</Badge>
+                {/* M1: the deploy header is read from `snapshots/release.json`,
+                    refreshed every two minutes and immediately on publish and
+                    release — so it is a fact with an age, and the age is said
+                    out loud rather than implied. `releaseAsOfLabel` answers
+                    undefined on a pre-M1 function deploy, which renders
+                    nothing. */}
+                {asOfLabel ? (
+                  <span
+                    className="text-[length:var(--adm-text-xs)] text-[var(--adm-text-muted)]"
+                    title={overview.as_of}
+                  >
+                    {asOfLabel}
+                    {asOfStale ? ' — the release snapshot has not refreshed recently' : ''}
+                  </span>
+                ) : null}
                 {overview.deploy.published?.production_url ? (
                   <a
                     href={overview.deploy.published.production_url}

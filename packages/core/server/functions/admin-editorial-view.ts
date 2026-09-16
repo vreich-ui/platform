@@ -43,11 +43,12 @@
  *
  * ## Cost
  *
- * With T5.1 R3's `objects/index.json` and the shared release-overview memo:
- * `T list() + 1 blob read` for the inventory (was `T list() + N get()`, twice
- * over), `1 list() + C get()` for the chats, memoized deploy and commit
- * ancestry. Three round trips become one, and the response body goes from
- * O(N) rows to a fixed handful.
+ * M1: the release overview is a READ — `snapshots/release.json` for the deploy
+ * facts plus M0.2's two-blob trusted inventory, in parallel, with no Netlify or
+ * GitHub call anywhere on this path. The chat scan rides alongside it. Three
+ * round trips became one, the response body went from O(N) rows to a fixed
+ * handful, and the remaining cost is four blob reads and one listing (the
+ * chats). `sec.snapshot` / `sec.inventory` break it down on the wire.
  *
  * `ETag` + `If-None-Match` -> `304` and `Cache-Control: private, no-cache`,
  * following `admin-analytics.ts`'s precedent.
@@ -215,6 +216,8 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
         content: countOf(['content_item', 'product']),
       },
       deploy: overview.deploy,
+      /** M1: the deploy header's age, so the map can say "as of hh:mm". */
+      as_of: overview.as_of,
     };
 
     const etag = etagFor(body);

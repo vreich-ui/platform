@@ -567,14 +567,23 @@ test('W3.3 BEFORE/AFTER: annotations no longer read a full record for an object 
   assert.equal(counts.list, 2);
   assert.equal(
     counts.get,
-    2 + fixture.publishedInWindow.length,
-    'two index probes + exactly the three records that can carry an in-window publish'
+    4 + fixture.publishedInWindow.length,
+    'two probes per swept type (index + drift alarm) + exactly the three records that can carry an in-window publish'
   );
   assert.equal(counts.set, 0, 'an unchanged store costs zero index writes');
+  // M0.2 moved this from 5 warm reads to 7, and the two extra are the
+  // `objects/version` drift alarm — one per swept type. This path deliberately
+  // does NOT get the two-blob trusted read: it sweeps ONE object type at a
+  // time, and a partial sweep cannot vouch for entries it never listed, so it
+  // refreshes content at the seq it found and leaves the alarm alone
+  // (`objects/index-store.ts`, "Why a PARTIAL sweep may never disarm the
+  // alarm"). The moment a FULL inventory read or the nightly
+  // `object-index-rebuild` runs, this store is trusted and these listings stop.
+  //
   // Measured on this fixture (N=58 objects, 3 in-window publishes):
   //   before  14 lists + 58 whole-record reads, every load
-  //   cold     2 lists + 59 reads + 2 index writes, once per changed library
-  //   warm     2 lists +  5 reads (2 index probes + the 3 real candidates)
+  //   cold     2 lists + 61 reads + 2 index writes, once per changed library
+  //   warm     2 lists +  7 reads (2 probes x 2 types + the 3 real candidates)
   assert.ok(
     counts.get < beforeReads / 5,
     `warm reads (${counts.get}) must be a fraction of the old ${beforeReads} — cold was ${coldReads}`

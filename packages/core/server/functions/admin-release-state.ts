@@ -8,9 +8,20 @@
  * seven client call sites, two of them on the SAME page load. T0.2 timed it as
  * the gate on `/admin`'s first paint.
  *
- * The work itself now lives in `server/lib/release-overview.ts`, behind a
- * warm-instance memo shared with `admin-editorial-view`, so whichever endpoint
- * runs first pays and the other is free. This file is the HTTP skin over it:
+ * M1 removed the compute entirely. `server/lib/release-overview.ts` is now a
+ * READ: the deploy facts come from `snapshots/release.json` (written by
+ * `object_publish`, by `release_to_production`, and by the
+ * `release-snapshot-refresh` schedule every two minutes) and the object facts
+ * from M0.2's trusted inventory index. Three blob reads in parallel, no
+ * external API call, no listing — `sec.snapshot` and `sec.inventory` on the
+ * `Server-Timing` header say which cost what, and `sec.snapshot_rebuild`
+ * appears only on the request that had to repair a missing or stale snapshot.
+ * The old warm-instance memo is gone: it never helped (Netlify runs many
+ * instances; `cold=1` showed on three of four calls), and a memo over a blob
+ * read would only add an unexplainable staleness window on top of the one
+ * `as_of` states honestly.
+ *
+ * This file is the HTTP skin over it:
  *
  *  - `ETag` + `If-None-Match` -> `304`, following `admin-analytics.ts`'s
  *    precedent (T0.2 found zero ETags anywhere in `server/functions/`);
@@ -73,6 +84,12 @@ const buildHandlerImpl = (binding: SiteBinding) => async (event: LambdaEvent, co
       objects: overview.objects,
       waiting_count: overview.waiting_count,
       pending_approval_count: overview.pending_approval_count,
+      /**
+       * When the DEPLOY facts were gathered. The object rows are live as of
+       * this request; the deploy header can be up to one refresh interval old,
+       * so the client renders "as of hh:mm" rather than implying otherwise.
+       */
+      as_of: overview.as_of,
     };
     const etag = etagFor(body);
     const ifNoneMatch = event.headers?.['if-none-match'] ?? event.headers?.['If-None-Match'];

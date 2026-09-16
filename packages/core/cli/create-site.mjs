@@ -807,6 +807,23 @@ const netlifyTomlTemplate = (ids) => `# Per-site Netlify config. The redirects h
 [functions."editorial-request-sweep"]
   schedule = "*/5 * * * *"
 
+# M0.2: nightly rebuild of the trusted object-inventory index. A warm
+# \`object_inventory\` read is two blob reads and no listing, which holds only
+# while every record write goes through \`objects/record-writer.ts\`; this runs
+# the same verified sweep an untrusted read takes, so a store that drifted by
+# any route the repo cannot police is repaired within a day. 04:23 is clear of
+# the 03:17 membership pass and the 03:41 media compaction pass.
+[functions."object-index-rebuild"]
+  schedule = "23 * * * *"
+
+# M1: the release snapshot — snapshots/release.json, refreshed every two
+# minutes. The admin reads deploy facts from that one blob instead of calling
+# the Netlify deploys API and GitHub /compare on every page view; only a
+# schedule sees a build finishing or a rollback. Without this block the tenant's
+# snapshot only ever moves when somebody publishes or releases.
+[functions."release-snapshot-refresh"]
+  schedule = "*/2 * * * *"
+
 [[redirects]]
   from = "/pdf/*"
   to = "/.netlify/functions/get-public-pdf?blobKey=pdf/:splat"

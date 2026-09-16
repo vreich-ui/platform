@@ -53,7 +53,7 @@ import {
 } from '@core/lib/admin/variant-winner';
 import {
   createVariant,
-  fetchVariantMembers,
+  fetchVariantMembersViaShell,
   previewVariant,
   type VariantPreview,
 } from '@core/lib/admin/variants-client';
@@ -460,7 +460,11 @@ function VariantsBody() {
     setLoading(true);
     setError(undefined);
     try {
-      setMembers(await fetchVariantMembers(getToken));
+      // M2.2: asks this navigation's coalesced `admin-shell` boot first
+      // (the same boot the auth gate and the requests pills already read)
+      // and falls back to the dedicated `admin-object{inventory}` call
+      // unchanged — see `variants-client.ts`'s own header.
+      setMembers(await fetchVariantMembersViaShell(getToken));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Article variants could not be loaded.');
     } finally {

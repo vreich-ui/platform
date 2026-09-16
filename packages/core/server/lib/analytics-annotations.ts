@@ -52,7 +52,7 @@ import { fetchRecentDeploys, netlifyDeployLookupMissingEnvVars } from './netlify
 import { mapWithConcurrency, STORE_READ_CONCURRENCY } from './blob-list.js';
 import { compareInventoryRows, type InventoryRow } from './object-inventory.js';
 import { objectRecordKey } from './object-store-keys.js';
-import { sweepInventoryRows } from './objects/index-store.js';
+import { readInventoryRows } from './objects/index-store.js';
 import type { ObjectVerbStore } from './object-verbs.js';
 import { listAnalyticsNotes, type AnalyticsViewsStore } from './analytics-views-store.js';
 import {
@@ -139,7 +139,7 @@ async function fetchPublishMarkers(
     // regenerable) but it would cost the next reader a rebuild for nothing.
     rows = [];
     for (const objectType of ANNOTATED_OBJECT_TYPES) {
-      const sweep = await sweepInventoryRows(store, { nowMs: Date.now(), objectType });
+      const sweep = await readInventoryRows(store, { nowMs: Date.now(), objectType });
       rows.push(...sweep.rows);
     }
   } catch (error) {

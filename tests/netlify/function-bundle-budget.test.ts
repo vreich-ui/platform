@@ -285,12 +285,84 @@ const firstPartyBundle = (fn: string) => {
 const BUDGETS_KB: Record<string, number> = {
   // The coalesced shell call — one navigation, one invocation. Capped first
   // because it is the one that now runs on every click.
+  //
+  // M2.1 (2026-09-16) added the `inventory` section and left the cap ALONE,
+  // measured 431 KB / 48 modules (was 380 / 40). The section's own edge —
+  // `lib/objects/index-store.ts`, M0's trusted read path — is +93 KB and
+  // lands at 473 KB on its own; two cuts paid most of it back and both are
+  // worth more than the section that forced them:
+  //   · `lib/object-lock-view.ts` takes the two pure lock predicates out of
+  //     `object-lock.ts`, a record-WRITE library, so `object-inventory.ts`
+  //     stops dragging `objects/record-writer.ts` into every function that
+  //     merely lists objects (-21 KB here, and `admin-users` pays 1 KB for
+  //     the new file);
+  //   · `lib/admin/request-list-order.ts` takes the request filter and sort
+  //     out of `lib/admin/request-logic.ts`, whose other 50 KB is the
+  //     request surface's UI vocabulary and `severity.ts` behind it (-51 KB
+  //     here, and -53 KB on `admin-requests`, now 329 KB).
+  //
+  // The section M2.1 did NOT add is the reason that headroom mattered: wiring
+  // `release` through `lib/release-overview.ts` measures 1605 KB, because that
+  // module statically imports `handleObjectVerb`.
+  //
+  // M2.1b (2026-09-16) lit the section up and again left the cap ALONE,
+  // measured 453 KB / 50 modules (was 431 / 48). The first spelling of the
+  // edge — `lib/release/snapshot-store.ts`, which is what M1 exposes — measured
+  // 489 KB / 52, because that module is the WRITER: `buildReleaseSnapshot`
+  // reaches `lib/netlify-deploys.ts` (10 KB), `lib/production-release.ts`
+  // (18 KB) and `lib/blob-list.ts`, none of which a boot can ever execute,
+  // because the boot never rebuilds. So the read half moved to the leaf
+  // `lib/release/snapshot-view.ts` (schema, the two pure derivations,
+  // `readReleaseSnapshot`, the freshness predicate) and `snapshot-store.ts`
+  // re-exports it whole, so no existing call site changed. 36 KB back, and
+  // `admin-agent-chat` pays 2.6 KB for the new file.
+  //
+  // Exactly ONE module joins this bundle on top of the split
+  // (`snapshot-view.ts` itself, 8.6 KB — `lib/admin/editorial-state.ts` came
+  // with it and is 6 KB); `objects/index-store.ts` and `object-inventory.ts`
+  // were already here for the `inventory` section, which is the whole reason
+  // the release section costs one blob read rather than three.
   'admin-shell': 500,
   // Shell trio — still live (other callers, and the client's per-section
   // fallback when `admin-shell` is absent or a section errors).
   'admin-auth-state': 500,
   'admin-requests': 500,
-  'admin-users': 500,
+  // M0.1 measured `admin-users` at 489 KB / 51 modules, up from 447 / 47. The
+  // new edge is real and load-bearing: `membership/offboarding.ts` forces a
+  // lock off an offboarded person, which is a RECORD write, and since M0.1
+  // every record write goes through `objects/record-writer.ts` — which owes
+  // the inventory a derived row. The first cut of that edge dragged the whole
+  // inventory SWEEP in and measured 641 KB; two cuts brought it back under the
+  // cap without raising it. `objects/index-doc.ts` split the two projection
+  // DOCUMENTS away from the listing-driven sweep, so a writer imports the
+  // documents and not the reader, and `lib/review-approval.ts` took the one
+  // twenty-line function an inventory row needs out of `review-state.ts`,
+  // whose discard path pulls ~100 KB of patch machinery an inventory row never
+  // reads. 11 KB of headroom is thin — the next wave to touch this function
+  // should expect to look for an edge, not a number.
+  //
+  // M2.1 measured it at 491 KB, +1 KB and +1 module: this function reaches
+  // `object-lock.ts` through `membership/offboarding.ts` AND
+  // `object-inventory.ts`, so splitting the read-only predicates into
+  // `lib/object-lock-view.ts` adds that file here without removing the writer
+  // it cut everywhere else. Paid deliberately — the same split is worth
+  // 21 KB on `admin-shell` and on every future read-only caller. Headroom is
+  // now 8 KB and the edge to look for remains the one named above.
+  //
+  // REVIEW (2026-09-16) 500 -> 520, measured 499 KB / 52 modules. No new
+  // module and no new edge: `objects/index-doc.ts`, which this function
+  // reaches through `membership/offboarding.ts` -> `record-writer.ts`, grew by
+  // the drift alarm's compare-and-swapped arm, the sticky `armed` flag and the
+  // note stating why `seq` alone could not carry the trusted index on a
+  // runtime whose reads are silently eventual. The raise is for HEADROOM, not
+  // for the measurement: the wave left 8 KB, the first correctness fix after
+  // it left 0.8 KB, and a cap a hair under the number is a tripwire for the
+  // next unrelated change rather than a budget. The real cut, when someone
+  // needs it, is `projectIndexEntry`'s edge from `index-doc.ts` to
+  // `object-inventory.ts` — a function that LISTS PEOPLE has no business
+  // carrying the inventory row projection, and it is there only because the
+  // record-write choke point owes the index a row.
+  'admin-users': 520,
   // Ratchet only; see the header note.
   //
   // 3520 -> 3536 (W4 first-run fix, 2026-09-15). NOT a new import edge and not
@@ -327,7 +399,72 @@ const BUDGETS_KB: Record<string, number> = {
   // not a new edge into the registry's zod trees. Measured after this
   // rebase: 3563.9 KB / 265 modules, so 4.1 KB of headroom — cap held at
   // PCL-P1's 3568, not raised.
-  'admin-agent-chat': 3568,
+  // 3536 -> 3580 (M0.1, 2026-09-16), and that IS the "look for a real edge
+  // first" pass, done. There is no new edge: this graph already reached
+  // `objects/index-store.ts` through `object-verbs.ts`, so what grew is
+  // first-party SOURCE inside a subtree it was already paying for — the
+  // record-write choke point (`objects/record-writer.ts`), the document layer
+  // split out beneath it (`objects/index-doc.ts`), the leaf
+  // `review-approval.ts`, and the header in `index-store.ts` that states why a
+  // read may now trust an index it did not verify. Measured 3565 KB / 267
+  // modules. The two cuts that saved `admin-users` (the doc/sweep split and
+  // the review-state extraction) were applied first and are worth ~25 KB here
+  // too; without them this would be asking for 3605.
+  //
+  // 3580 -> 3610 (M1, 2026-09-16), and the "look for a real edge first" pass
+  // again finds none. Module count went 267 -> 268: exactly ONE new first-party
+  // file, `lib/release/snapshot-store.ts`, and the three modules it reaches
+  // (`objects/index-store.ts`, `netlify-deploys.ts`, `production-release.ts`)
+  // were all already in this graph through `object-verbs.ts` and
+  // `mcp-tool-handlers.ts`. The edge is load-bearing and is the milestone
+  // itself: `object-publish.ts` refreshes `snapshots/release.json` as part of
+  // the publish stamp, so the surface that shows an editor their own publish
+  // does not have to compute it. Measured 3598 KB / 268 modules.
+  //
+  // What was NOT done, deliberately: the 24 KB file is mostly the comment that
+  // states which facts are stored and which are re-derived per read, which is
+  // the one decision the rest of M1 follows from. The W4 note above already
+  // refused that trade once — cutting an explanation to buy a few KB trades the
+  // reason a mechanism exists for a number.
+  //
+  // MEASURED ON THE INTEGRATED TREE (REVIEW pass, 2026-09-16): 3606 KB across
+  // 271 modules, not the 3598 / 268 the M1 note above recorded — that number
+  // was taken before M2.1/M2.1b/M2.2 met it on one branch, and this file's own
+  // law is that the integrated tree is what counts. The wave's module delta was
+  // VERIFIED against `main` (2e89567) by reproducing `firstPartyBundle()` on
+  // both sides and diffing the metafile's module SET: 263 -> 271, eight files
+  // ADDED and none removed, and every one of the eight is first-party source
+  // this wave wrote or newly reached —
+  //   objects/record-writer.ts · objects/index-doc.ts · review-approval.ts ·
+  //   object-lock-view.ts (M0.1's choke point and the three leaf cuts it
+  //   forced), release/snapshot-store.ts · release/snapshot-view.ts ·
+  //   lib/admin/editorial-state.ts (M1, reached through the snapshot's
+  //   derivations), lib/admin/request-list-order.ts (M2.1's request cut).
+  // The two raises' central claim holds: `netlify-deploys.ts` and
+  // `production-release.ts` are NOT in the added set — they were already in
+  // this graph through `mcp-tool-handlers.ts` — so no third-party edge and no
+  // new subtree was waved through.
+  //
+  // 3610 -> 3640 (REVIEW, 2026-09-16), measured 3614 KB / 271 modules. Module
+  // count UNCHANGED at 271, so there is no edge here either: the +9 KB is the
+  // drift-alarm fix inside `objects/index-doc.ts`, a file this graph already
+  // carried. Headroom was 4 KB after M1's raise, which is why a bug fix tripped
+  // it; 26 KB restores the margin this file's own note asks for after four
+  // consecutive raises on <=3 KB. The next wave here should still pay for the
+  // `agent/tools.ts` definitions-vs-executors cut this file has been naming
+  // since A4, not for another number.
+  //
+  // 3640 -> 3680 (REBASE onto live main @ #771, 2026-09-16). Measured 3650 KB
+  // across 274 modules. The +10 KB and +3 modules came from MAIN, not from this
+  // wave: 271 was measured against 2e89567, and PCL-P1/PCL-P4 landed
+  // `agent/pending-approval-lock.ts` and `lib/admin/starter-chips.ts` in the
+  // meantime, each with its own "no new edge" note above. This wave's own delta
+  // is unchanged and still verified module-set-for-module-set. The raise keeps
+  // the 26 KB of headroom the REVIEW note above asked for after four
+  // consecutive raises on <=3 KB, so the next change here is not forced into
+  // another number; the `agent/tools.ts` definitions-vs-executors cut this file
+  // has been naming since A4 is still the debt to pay.
+  'admin-agent-chat': 3680,
 };
 
 /** Every function the admin shell can reach on a navigation — the trio plus the call that coalesces them. */

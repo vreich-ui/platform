@@ -38,8 +38,8 @@ import {
   type RequestIndexRow,
   type RequestStatus,
 } from './store.js';
-import { emailModeFor, loadNotifyState, loadSeenLedger } from './notify-state.js';
-import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../../lib/admin/request-logic.js';
+import { emailModeFor, loadRequestInbox } from './notify-state.js';
+import { filterRequestRows, sortRequestRows, type RequestListFilters } from '../../../lib/admin/request-list-order.js';
 
 /** The minimal event shape the object probe needs — just enough for `getSiteObjectsBlobStore`. */
 type BlobEvent = { headers?: Record<string, string | undefined> };
@@ -439,10 +439,23 @@ export const siteObjectProbe = (event: BlobEvent, binding?: SiteBinding): Object
  * document — and the `ETag` is computed over exactly this object, so the hash
  * stays the hash of what the client receives either way.
  *
- * Read cost is unchanged from the original inline case: the index (one blob
- * GET, rebuilt once if absent), at most `OBJECT_BACKFILL_MAX` object reads,
- * the index re-read ONLY if the backfill wrote, then the notify state and the
- * seen ledger.
+ * ## Read cost (M2.1)
+ *
+ * The steady state is ONE PARALLEL STAGE of three blob reads — the request
+ * index, the caller's notify settings and their seen ledger — where it used to
+ * be three SERIAL ones (index, then notify, then seen: ~440 ms of round trips
+ * for ~150-250 ms of work). Nothing in the notify pair answers a question the
+ * index asked, or the other way round, so the only thing that ever made them
+ * sequential was the order they were written in.
+ *
+ * On top of that stage, unchanged and still conditional: at most
+ * `OBJECT_BACKFILL_MAX` object reads for finished rows missing their object,
+ * and the index re-read ONLY when that backfill actually wrote.
+ *
+ * `loadRequestInbox`'s own header records why the two notify reads are two
+ * reads and not one merged document — the M2.1 task asked for the merge and
+ * it was refused, because `store.ts` splits those keys by writer to kill a
+ * lost-mute race, and parallelism buys the same latency for nothing.
  */
 export interface RequestsListQuery {
   status?: RequestStatus[];
@@ -460,7 +473,10 @@ export const buildRequestsListBody = async (
   query: RequestsListQuery,
   exists: ObjectExistenceProbe
 ): Promise<Record<string, unknown>> => {
-  const { rows, seq, rebuilt } = await readIndex(store);
+  // M2.1: ONE stage, not three. The inbox pair does not depend on the index
+  // and the index does not depend on it; see the block above.
+  const [{ rows, seq, rebuilt }, inbox] = await Promise.all([readIndex(store), loadRequestInbox(store, callerEmail)]);
+  const { notify, seen } = inbox;
   const filters: RequestListFilters = {
     ...(query.status ? { status: query.status } : {}),
     ...(query.kind ? { kind: query.kind } : {}),
@@ -480,8 +496,6 @@ export const buildRequestsListBody = async (
   // `seq` is the index's write counter, so it is re-read on the one call
   // that actually wrote and left alone on every other.
   const seqNow = backfilled.wrote ? ((await loadIndex(store))?.seq ?? seq) : seq;
-  const notify = await loadNotifyState(store, callerEmail);
-  const seen = await loadSeenLedger(store, callerEmail, notify);
   return {
     requests: backfilled.rows,
     total: matched.length,

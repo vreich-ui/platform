@@ -265,11 +265,15 @@ const shellBody = (over: Record<string, unknown> = {}) => ({
     access: { status: 'ok', data: OWNER_ACCESS },
     requests: { status: 'ok', data: { requests: [], total: 0, seq: 1, muted: [], last_notified: {} } },
     me: { status: 'ok', data: { user: { email: 'boss@example.test' }, roles: ['owner'] } },
+    // M2.1 — the two sections the boot payload grew. No consumer takes them
+    // until M2.2; the client's job today is to install them.
+    inventory: { status: 'ok', data: { objects: [{ object_id: 'req_a' }], generated_at: 'now', index: {} } },
+    release: { status: 'skipped', code: 'release_source_unavailable' },
     ...over,
   },
 });
 
-describe('fetchAdminAccessStateViaShell — one call for three answers', () => {
+describe('fetchAdminAccessStateViaShell — one call for the whole opening answer', () => {
   beforeEach(() => resetAdminShellClientForTests());
   afterEach(() => resetAdminShellClientForTests());
 
@@ -317,6 +321,53 @@ describe('fetchAdminAccessStateViaShell — one call for three answers', () => {
     // must not keep asking through it, or every poll would re-read the users
     // store and re-resolve the tier for data nobody asked for.
     assert.equal(await takeAdminShellSection(token, 'requests'), null);
+  });
+
+  /**
+   * M2.1 — all FIVE sections are installed, on ONE request. This is the whole
+   * of what M2.1 owes M2.2 on the client: the names exist, they are handed out
+   * under the same one-shot rule, and a section that is not `ok` answers
+   * `null` (= ask your own endpoint) rather than throwing at the consumer.
+   */
+  it('installs all five boot sections off one request', async () => {
+    const token = tokenFor('user-1');
+    const mock = mockShellFetch(() => ({ status: 200, body: shellBody() }));
+    restoreFetch = mock.restore;
+
+    const [access, me, requests, inventory, release] = await Promise.all([
+      fetchAdminAccessStateViaShell(token),
+      takeAdminShellSection<{ roles: string[] }>(token, 'me'),
+      takeAdminShellSection<{ seq: number }>(token, 'requests'),
+      takeAdminShellSection<{ objects: { object_id: string }[] }>(token, 'inventory'),
+      takeAdminShellSection<Record<string, unknown>>(token, 'release'),
+    ]);
+    assert.equal(mock.urls.length, 1, `expected one request, got ${mock.urls.join(', ')}`);
+    assert.equal(access.isAdmin, true);
+    assert.deepEqual(me?.roles, ['owner']);
+    assert.equal(requests?.seq, 1);
+    assert.deepEqual(inventory?.objects, [{ object_id: 'req_a' }]);
+    // `skipped` is not `null` because it failed — it is `null` because the
+    // section was never offered, and the caller's answer to both is the same.
+    assert.equal(release, null);
+  });
+
+  /**
+   * A function older than this client — a tab held across a rollback, a stale
+   * edge cache — answers with three sections. That must not cost the three
+   * that ARE there: `isSections` deliberately checks the original three only.
+   */
+  it('still coalesces when the function is older than the client', async () => {
+    const token = tokenFor('user-1');
+    const legacy = shellBody();
+    delete (legacy.sections as Record<string, unknown>).inventory;
+    delete (legacy.sections as Record<string, unknown>).release;
+    const mock = mockShellFetch(() => ({ status: 200, body: legacy }));
+    restoreFetch = mock.restore;
+
+    assert.equal((await fetchAdminAccessStateViaShell(token)).isAdmin, true);
+    assert.equal(await takeAdminShellSection(token, 'inventory'), null);
+    assert.notEqual(await takeAdminShellSection(token, 'requests'), null);
+    assert.equal(mock.urls.length, 1, 'a missing section must not cost a second request');
   });
 });
 

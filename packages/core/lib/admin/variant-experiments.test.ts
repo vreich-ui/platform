@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+
+// Registers the site-identity config provider (drlurie) — `fetchVariantMembersViaShell`'s
+// shell-hit path primes `library-client.ts`'s cache, which needs it. Same
+// pattern `library-client.test.ts` uses.
+import '../../../../sites/drlurie/config/policy-bindings.js';
 
 import {
   buildVariantFamilies,
@@ -11,7 +16,9 @@ import {
   type VariantMember,
   type VariantScore,
 } from './variant-experiments.js';
-import { fetchVariantMembers } from './variants-client.js';
+import { fetchVariantMembers, fetchVariantMembersViaShell } from './variants-client.js';
+import { resetAdminShellClientForTests } from './admin-shell-client.js';
+import { beginNewPageGeneration, resetPageGenerationForTests } from './page-generation.js';
 
 const member = (overrides: Partial<VariantMember> & { object_id: string }): VariantMember => ({
   display_name: overrides.object_id,
@@ -490,5 +497,137 @@ describe('fetchVariantMembers (W4.1)', () => {
         updated_at: '2026-08-02T00:00:00.000Z',
       },
     ]);
+  });
+});
+
+// ─── M2.2: the same one call, off the boot payload ──────────────────────────
+const shellRow = (id: string, objectType = 'content_item') => ({
+  object_id: id,
+  object_type: objectType,
+  display_name: id,
+  status: 'active',
+  review_state: 'none',
+  published_time: null,
+  unpublished_changes: false,
+  updated_at: '2026-09-01T00:00:00.000Z',
+  content: {
+    slug: id,
+    parent_content_id: null,
+    scores: [
+      { scored_by: 'agent', at: '2026-09-01T00:00:00.000Z', framework: 'clarity', dimension: 'overall', score: 4 },
+    ],
+  },
+});
+
+const shellSectionsBody = (objects: unknown[]) => ({
+  ok: true,
+  status: 200,
+  sections: {
+    access: { status: 'ok', data: { authenticated: true, isAdmin: true } },
+    requests: { status: 'ok', data: { requests: [], total: 0, seq: 1, muted: [], last_notified: {} } },
+    me: { status: 'ok', data: { user: { email: 'owner@example.test' }, roles: ['owner'] } },
+    inventory: { status: 'ok', data: { objects, generated_at: '2026-09-16T00:00:00.000Z', index: {} } },
+    release: { status: 'skipped', code: 'release_source_unavailable' },
+  },
+});
+
+/** Answers every fetch as the coalesced `admin-shell` boot — distinguished from an `admin-object` call by the absence of an `action` field in the body. */
+const mockShellEndpoint = (objects: unknown[]) => {
+  const calls: Array<{ hadAction: boolean }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { action?: string };
+    calls.push({ hadAction: typeof body.action === 'string' });
+    return new Response(JSON.stringify(shellSectionsBody(objects)), { status: 200 });
+  }) as typeof fetch;
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+};
+
+describe('fetchVariantMembersViaShell (M2.2)', () => {
+  beforeEach(() => {
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+  });
+  afterEach(() => {
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+  });
+
+  it('a shell hit costs exactly ONE call — no dedicated admin-object round trip', async () => {
+    beginNewPageGeneration();
+    const endpoint = mockShellEndpoint([shellRow('req_shell_a'), shellRow('req_shell_b', 'page')]);
+    try {
+      const members = await fetchVariantMembersViaShell(async () => 'test-token');
+      assert.equal(endpoint.calls.length, 1, 'one call total — the coalesced boot, nothing else');
+      assert.deepEqual(endpoint.calls, [{ hadAction: false }]);
+      // The `page` row is filtered out, exactly as the dedicated path (`fetchVariantMembers`) does.
+      assert.deepEqual(
+        members.map((m) => m.object_id),
+        ['req_shell_a']
+      );
+    } finally {
+      endpoint.restore();
+    }
+  });
+
+  it('derives the SAME shape fetchVariantMembers would have, from the same row', async () => {
+    beginNewPageGeneration();
+    const shellEndpoint = mockShellEndpoint([shellRow('req_shell_c')]);
+    const [viaShell] = await fetchVariantMembersViaShell(async () => 'test-token');
+    shellEndpoint.restore();
+
+    resetAdminShellClientForTests();
+    resetPageGenerationForTests();
+    beginNewPageGeneration();
+    const directEndpoint = mockObjectEndpoint();
+    const [viaEndpoint] = await fetchVariantMembers(async () => 'test-token');
+    directEndpoint.restore();
+
+    // Different fixtures (ARTICLES vs this test's single row), so compare
+    // shape rather than values: both paths go through the same
+    // `mapInventoryRowsToVariantMembers`, so neither ever carries a field the
+    // other doesn't.
+    assert.deepEqual(Object.keys(viaShell).sort(), Object.keys(viaEndpoint).sort());
+  });
+
+  it('falls back to fetchVariantMembers, unchanged, when the shell has no inventory section', async () => {
+    beginNewPageGeneration();
+    const endpoint = mockObjectEndpoint();
+    try {
+      const members = await fetchVariantMembersViaShell(async () => 'test-token');
+      // The failed shell attempt (a body with no `sections`) plus the real fallback inventory call.
+      assert.equal(endpoint.actions.length, 2);
+      assert.equal(endpoint.actions[1], 'inventory');
+      assert.equal(members.length, ARTICLE_COUNT);
+    } finally {
+      endpoint.restore();
+    }
+  });
+
+  it('the one-shot rule still applies: a second consumer this generation gets no second boot call', async () => {
+    beginNewPageGeneration();
+    const endpoint = mockShellEndpoint([shellRow('req_shell_d')]);
+    try {
+      await fetchVariantMembersViaShell(async () => 'test-token');
+      assert.equal(endpoint.calls.length, 1);
+      // A second ask for the same section, same generation: `takeAdminShellSection`
+      // already handed it out, so this falls straight to the dedicated
+      // endpoint — which this mock still answers (with a shell-shaped body
+      // that has no `objects` key), so it resolves to zero rows rather than
+      // throwing. The point of this test is the CALL COUNT, not the result.
+      await fetchVariantMembersViaShell(async () => 'test-token');
+      assert.equal(
+        endpoint.calls.length,
+        2,
+        'the second ask still tries — one MORE call, never zero and never two boots'
+      );
+    } finally {
+      endpoint.restore();
+    }
   });
 });

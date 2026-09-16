@@ -104,10 +104,18 @@ test('checkout acquires the lock with article defaults: 900 s lease, token, hist
     details: { owner_id: 'identity-user-1', owner_label: 'editor@example.com', lease_seconds: 900 },
   });
 
-  // The locked record still satisfies the envelope schema, and only the
-  // parameterized key was written.
+  // The locked record still satisfies the envelope schema. M0.1: the write now
+  // goes through `objects/record-writer.ts`, so the record arrives with the
+  // drift alarm and its status marker — the record key is still the only one
+  // the LOCK decides, but it is no longer the only one the write leaves behind.
+  // (No `objects/index.json`: this fake reports no etag, so the compare-and-swap
+  // the index commit needs is unavailable and the alarm is deliberately left
+  // armed for the next verified sweep.)
   objectRecordSchema.parse(record);
-  assert.deepEqual([...store.blobs.keys()], [RECORD_KEY]);
+  assert.deepEqual(
+    [...store.blobs.keys()].sort(),
+    ['objects/page/index/by-status/active/page_home', 'objects/version', RECORD_KEY].sort()
+  );
 });
 
 test('checkout enforces the 3600 s max lease and positive-integer validation before touching the store', async () => {

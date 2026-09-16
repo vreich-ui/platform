@@ -38,6 +38,7 @@ import { objectTypes, type ObjectRecord } from '../../../schema/object-record-v1
 import { isObjectLockActive } from '../object-lock.js';
 import { collectBlobListItems, type BlobListItem, type BlobListResponse } from '../blob-list.js';
 import { objectRecordKey, objectStatusIndexPrefix } from '../object-store-keys.js';
+import { putObjectRecord, type ObjectRecordWriteStore } from '../objects/record-writer.js';
 import { subjectIndexEntrySchema, subjectIndexPrefix, type OAuthBlobStore } from '../oauth-store.js';
 import { getMembershipByEmail, listMembers, type Member } from './read.js';
 import { listInvitations, type FetchLike, type GoTrueIdentity } from './invitations.js';
@@ -108,16 +109,18 @@ export const revokeOAuthGrantsForSubject = async (
 
 // ── locks ───────────────────────────────────────────────────────────────────
 
-/** The object store surface the lock hand-off needs. */
-export interface ObjectLockSweepStore {
-  get(key: string): Promise<string | null>;
-  setJSON(key: string, value: unknown): Promise<unknown>;
+/**
+ * The object store surface the lock hand-off needs. M0.1: the write half is
+ * the record-write choke point's, because forcing a lock off an offboarded
+ * person edits a RECORD and therefore owes the inventory an index row.
+ */
+export type ObjectLockSweepStore = ObjectRecordWriteStore & {
   list(options: {
     prefix: string;
     directories?: boolean;
     paginate?: boolean;
   }): BlobListResponse | Promise<BlobListResponse>;
-}
+};
 
 const parseRecord = (raw: string | null): ObjectRecord | undefined => {
   if (!raw) return undefined;
@@ -200,7 +203,10 @@ export const releaseLocksHeldBy = async (
           },
         ],
       };
-      await store.setJSON(key, next);
+      // M0.1: through the choke point — a forced check-in changes `lock`, which
+      // is the one index field `index-store.ts` re-derives per read, so an
+      // un-indexed write here would show a lease that nobody holds.
+      await putObjectRecord(store, { record: next, nowMs });
       released.push({ object_id: record.object_id, object_type: record.object_type });
     }
   }

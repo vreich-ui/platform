@@ -150,7 +150,12 @@ const createStore = (events: PublishEvent[], options: { failSetTimes?: number } 
     get: async (key: string) => map.get(key) ?? null,
     setJSON: async (key: string, value: unknown) => {
       events.push({ kind: 'store_set', key });
-      if (failRemaining > 0) {
+      // M0.1: the publish stamp now goes through `objects/record-writer.ts`,
+      // which also writes the drift alarm and (on a store that can do CAS) the
+      // index row. The injected failure means "the STAMP could not be
+      // written", so it is aimed at the record key rather than at whichever
+      // write happens to be first.
+      if (/^objects\/[^/]+\/by-id\//.test(key) && failRemaining > 0) {
         failRemaining -= 1;
         throw new Error('blob store write failed (injected)');
       }

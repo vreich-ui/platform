@@ -33,6 +33,15 @@ const createStore = (records: ObjectRecord[]) => {
   return {
     data,
     get: async (key: string) => data.get(key) ?? null,
+    // M0.1: the sweep now hands its deletes to `objects/record-writer.ts`,
+    // which also arms the drift alarm and tries to amend the index. This fake
+    // reports no etag, so the index commit correctly declines and the alarm
+    // stays up for the next verified sweep — but the writes still have to land
+    // somewhere, so the fake grew a `setJSON`.
+    setJSON: async (key: string, value: unknown) => {
+      data.set(key, JSON.stringify(value));
+      return undefined;
+    },
     delete: async (key: string) => {
       data.delete(key);
       return undefined;

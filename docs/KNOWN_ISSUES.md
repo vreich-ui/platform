@@ -1285,6 +1285,119 @@ both directions. Fixing the three rows above needs separate decisions —
 `page_fieldtest` wants `object_retire`, not another hand-deletion. Until then this drift is caught
 only by someone reading git history.
 
+### 70. An unreachable object store and an empty library are the same answer on the inventory read path
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** M2.1 2026-09-16
+**Evidence:** `packages/core/server/lib/objects/index-store.ts` swallows store failures at three
+levels, each deliberately: `readObjectStoreVersion` catches and returns `undefined` ("nothing may
+be trusted"), `readObjectIndex` treats an unreadable blob as absent, and `sweepInventoryRows`
+catches per object type — "inventory: skipping unlistable object type" — so one broken type
+degrades to zero rows from that type rather than failing the whole sweep. Composed over a store
+that is entirely unreachable, those three produce a successful result carrying `rows: []` and
+`stats: { listed: 0, trusted: false, read: 0, wrote: false }`. Nothing throws, so every caller —
+`object_inventory` via `object-verbs.ts`, `admin-inventory.ts`, `release-overview.ts` and, since
+M2.1, `admin-shell`'s `inventory` section — reports a 200 with an empty library.
+**Impact:** a reader cannot tell "the library is empty" from "the object store did not answer".
+On a fresh tenant the first is correct and common, which is why the degradation was written this
+way; on an established tenant the second renders as a library that lost everything. The only
+signal on the wire is `stats.trusted: false` with `listed: 0`, which is also what a genuinely
+empty store reports. `tests/netlify/admin-auth-state.test.ts` pins the behaviour so it is at
+least not a surprise.
+**Widened by M2.1b/M2.2 (adversarial review, 2026-09-16), still low but no longer confined to one
+list:** `admin-shell`'s `release` section JOINS the deploy snapshot onto those same rows, so an
+unreachable store now also produces `status: 'ok'` with `objects: []`, `waiting_count: 0` and
+`pending_approval_count: 0` — "nothing is waiting to be released", asserted rather than refused.
+And `library-client.ts:fetchInventoryRowsViaShell` primes the shared inventory cache (memory AND
+`sessionStorage`) from the boot, so one such answer is read back by `ContentLibrary`, the Cmd-K
+palette, `ObjectBrowser` and `object-type-resolve.ts` for the rest of the session. The Direction
+below is unchanged and is still the right place to fix it; what changed is that the counter it
+feeds is now rendered as a decision prompt, not just as a list length.
+**Direction:** the fix belongs in `index-store.ts`, not in a caller: have the sweep count
+TYPE-LEVEL listing failures and report them (`stats.unlistable`), then let a caller decide —
+all types unlistable and nothing in the index is a failed read, not an empty library. That is a
+change to M0's contract and to the shape `object_inventory` returns, so it wants its own task
+rather than riding on a caller that noticed.
+
+### 71. A trusted `objects/index.json` can still omit a record the store already holds
+
+**Category:** ambiguous-canonical-source · **Severity:** medium · **Sources:** perf/admin-read-model adversarial review 2026-09-16
+**Evidence:** M0 made the inventory a TRUSTED read: two blob reads, no listing, gated on
+`objects/version.seq === objects/index.json.seq` (plus, since the review, `armed !== true` — see
+`packages/core/server/lib/objects/index-doc.ts`'s schema note). Both terms are decided from
+READS of those two blobs, and `packages/core/server/lib/blob-store.ts` records that on the Lambda
+name-lookup path every store's requested `'strong'` consistency has always been silently EVENTUAL
+fleet-wide, with read-after-write lagging tens of seconds. The review closed every case a
+compare-and-swap can close — the arm is now a CAS on `objects/version`, and any writer that
+cannot prove its index commit landed stamps a sticky `armed` flag — so a writer can no longer
+DISARM an alarm it did not raise. What no CAS reaches is the writer that crashed between its
+record write and its index commit: its alarm is up, and a later writer whose read of
+`objects/version` is stale-LOW re-arms at the same seq and commits, putting the pair back in step
+over an index that is missing the crashed writer's row.
+**Impact:** an object that exists in the store is absent from `/admin/content`, from the Cmd-K
+palette, from `/admin/variants` and from the release queue, with no error anywhere and
+`index.trusted: true` on the wire. The bound is `object-index-rebuild`, moved from nightly
+to HOURLY (`23 * * * *`) when this issue was filed, i.e. up to an hour. The window needs a crash mid-write AND a stale version read,
+so it is rare; the failure is silent, which is why it is filed at medium rather than low.
+**Direction:** two honest closes, in order of cost. (1) Give the tenant sites a blobs-scoped
+`NETLIFY_BLOBS_TOKEN` so `getApiStoreConfig`'s explicit-API path is taken and `consistency:
+'strong'` is real — `blob-store.ts`'s own note says that is what unlocks it, and it would repay
+more than this one mechanism. (2) Shortening the safety net — DONE in this wave:
+`object-index-rebuild` costs 13 listings per tenant per run, and moving it from `23 4 * * *` to
+`23 * * * *` turns "up to a day" into "up to an hour" for ~1,800 listings a day across six
+tenants. That bounds the damage; it does not remove it, so this stays open on (1). Do NOT close it by making the read verify
+the index against a listing — that is the whole cost M0 removed.
+
+### 72. `release-snapshot-refresh` runs 4,320 times a day across the fleet and nobody costed it
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** perf/admin-read-model adversarial review 2026-09-16
+**Evidence:** M1 declared `[functions."release-snapshot-refresh"] schedule = "*/2 * * * *"` in the
+root `netlify.toml` and in all five `sites/*/netlify.toml` (P1 parity is complete and every file
+parses). Six tenants x 720 passes a day = 4,320 scheduled invocations. Each pass is, per
+`functions/release-snapshot-refresh.ts`'s own cost note, three blob reads, ONE blob write and TWO
+Netlify API calls, plus up to `RELEASE_ANCESTRY_BUDGET_MS` (8 s) of GitHub `/compare` at
+concurrency four on a cold instance. That is ~8,600 Netlify API calls a day at steady state,
+before GitHub. For comparison the next-busiest schedules are `mcp-keepalive` and
+`editorial-request-sweep` at `*/5`, and the wave's PR does not state the number anywhere.
+**Impact:** none observed, and the design is right — only a clock can see a build finishing or a
+rollback. But it is a standing cost on six Netlify projects and a standing GitHub API draw, and
+the cadence was chosen against a 6-second dashboard poll rather than against a bill. A fleet that
+grows to twenty tenants makes it 14,400 invocations a day with no code change.
+**Direction:** state the number in the PR. If it needs reducing, the cheap lever is asymmetric
+cadence rather than a slower one: `*/2` is only wanted while a deploy is in flight, and
+`RELEASE_SNAPSHOT_MAX_AGE_MS` (10 minutes) already means a `*/5` schedule would not trip the
+read-path rebuild. Do not reach for the rebuild bound instead — a read-path repair on
+`admin-release-state` is the 14 s compute this wave exists to remove.
+
+### 73. The object-status pills now render release state of unbounded age, unlabelled
+
+**Category:** ambiguous-canonical-source · **Severity:** low · **Sources:** perf/admin-read-model adversarial review 2026-09-16
+**Evidence:** M1 gave the release overview an age (`as_of`) and two surfaces that SAY it —
+`ReleaseWorkspace` ("as of hh:mm", plus "the release snapshot has not refreshed recently" past
+`RELEASE_AS_OF_STALE_MS`) and `AdminHome`. M2.1b then decided, with its reasons written out in
+`packages/core/server/functions/admin-shell.ts` ("Why the boot never rebuilds"), that the boot
+serves a STALE `snapshots/release.json` with `stale: true` rather than repairing on a path that
+runs on every navigation. That decision is sound. What it did not account for is M2.2:
+`ObjectsPlane` switched from `fetchReleaseOverview` — which reaches `admin-release-state`, whose
+read path REBUILDS anything older than `RELEASE_SNAPSHOT_MAX_AGE_MS` — to
+`fetchReleaseOverviewViaShell`, which takes the boot's payload. Its `Live` / `Published` /
+`Approved` pills (`lib/admin/objects-plane-logic.ts:statusFor`) carry no age affordance at all.
+**Impact:** while `release-snapshot-refresh` is healthy the two are indistinguishable (the
+snapshot is at most two minutes old). While it is not, `/admin/content`'s pills are derived from
+deploy facts of unbounded age and nothing on that screen says so. The error is CONSERVATIVE in
+every case but one — a stale `live_commit` under-reports, so an object that has gone live since
+the snapshot reads `Published`, never the reverse — and the exception is a production ROLLBACK,
+after which an object can read `Live` when it is not until the next refresh lands. An explicit
+refresh, a review decision, a release, or the six-second build poll all fall back to
+`admin-release-state` and repair it, so this is bounded by "nobody touched the page".
+**Direction:** do NOT move the repair onto the boot — that is the 14 s page-load compute the wave
+removed. Either carry the section's existing `stale` flag through `release-client.ts` to the
+surfaces that render pills and show the same "as of" affordance `ReleaseWorkspace` already has, or
+have `fetchReleaseOverviewViaShell` decline a `stale: true` payload and fall back, which restores
+the pre-M2.2 freshness guarantee at the cost of one extra call per outage window (the fallback
+writes the rebuilt snapshot back, so it self-heals rather than repeating). The first is more
+honest; the second is smaller. Either wants the wave's own author, not a reviewer, because it
+reverses part of a decision that file argues for at length.
+
 ## Summary table
 
 Sorted by severity, then by id.
@@ -1336,6 +1449,7 @@ Sorted by severity, then by id.
 | 56 | medium | obsolete-docs | README + `package.json` still describe AstroWind and a retired flow | A#6, DE#5 |
 | 63 | medium | data-quality | Drill traffic tag `x-trk-test` dropped at the relay, unknown to the sink | correction pass |
 | 67 | medium | obsolete-docs | W21 tracking content is not audited by the architecture docs | correction pass (#694) |
+| 71 | medium | ambiguous-canonical-source | A trusted `objects/index.json` can still omit a record the store holds | perf review |
 | 20 | low | dead-code | `data-cms-buy-product` classified, never emitted | TR#7 |
 | 21 | low | security | `/stats` called with a write bearer it ignores | TR#13 |
 | 34 | low | build-deploy-mismatch | Root `postbuild` pushes drlurie's dims regardless of tenant | CA#17, TR#15, DE#6 |
@@ -1353,3 +1467,6 @@ Sorted by severity, then by id.
 | 66 | low | ambiguous-canonical-source | Examples job records live in the `artifact-index` store | correction pass |
 | 68 | low | dead-code | `site.chrome.announcement` is validated but never rendered | W0 T0.1 |
 | 69 | low | ambiguous-canonical-source | Committed exports and store records drift apart in both directions, undetected | B1 follow-up |
+| 70 | low | ambiguous-canonical-source | An unreachable object store and an empty library are the same inventory answer | M2.1 |
+| 72 | low | ambiguous-canonical-source | `release-snapshot-refresh` is 4,320 fleet invocations a day, uncosted | perf review |
+| 73 | low | ambiguous-canonical-source | Object-status pills render release state of unbounded age, unlabelled | perf review |
